@@ -7,8 +7,9 @@
 # CURRENT_PROJECT_VERSION) — and commits that to the dispatched branch, so the built app actually
 # REPORTS the new version. Then it publishes a fixed, non-prerelease `v<VERSION>` release with the
 # version-stamped artifacts. A new release remains a draft until every platform
-# artifact is attached; only then is it published as latest, so a failed build
-# cannot strand users on an empty/incomplete release. UpdateCheck finds the
+# artifact is attached and the AltStore source is verified on `main`; only then
+# is it published as latest, so a failed build cannot strand users on an
+# empty/incomplete release. UpdateCheck finds the
 # published release (isNewer strips the `-staging` suffix, so an installed
 # staging build compares clean).
 #
@@ -46,6 +47,12 @@ jobs:
       buildVersion: ${{ steps.b.outputs.buildVersion }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A workflow re-run keeps its original event SHA. Build from the
+          # latest requested branch instead, while retaining full history so
+          # the original SHA can determine the idempotent target version below.
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
       - id: b
         env:
           GH_TOKEN: ${{ github.token }}
@@ -55,21 +62,38 @@ jobs:
           set -euo pipefail
           GRADLE=android/app/build.gradle.kts
 
-          # Android versionName is the source of truth UpdateCheck compares against.
+          # Android versionName is the source of truth UpdateCheck compares
+          # against. Compute the requested version from the immutable dispatch
+          # SHA, not the latest checkout: GitHub's one-click re-run keeps that
+          # original SHA, so a retry targets the same version instead of
+          # accidentally incrementing twice.
           CUR=$(grep -m1 'versionName = "' "$GRADLE" | sed -E 's/.*"([^"]+)".*/\1/')
-          IFS=. read -r MA MI PA <<< "$CUR"; MA=${MA:-0}; MI=${MI:-0}; PA=${PA:-0}
+          BASE_GRADLE=$(git show "${GITHUB_SHA}:${GRADLE}") || {
+            echo "::error::Cannot read ${GRADLE} at dispatch SHA ${GITHUB_SHA}."
+            exit 1
+          }
+          BASE_CUR=$(grep -m1 'versionName = "' <<<"$BASE_GRADLE" | sed -E 's/.*"([^"]+)".*/\1/')
+          IFS=. read -r MA MI PA <<< "$BASE_CUR"; MA=${MA:-0}; MI=${MI:-0}; PA=${PA:-0}
           case "${BUMP:-patch}" in
             major) NEW="$((MA+1)).0.0" ;;
             minor) NEW="${MA}.$((MI+1)).0" ;;
             patch) NEW="${MA}.${MI}.$((PA+1))" ;;
-            none|"") NEW="$CUR" ;;
+            none|"") NEW="$BASE_CUR" ;;
             *) echo "Unknown bump: $BUMP" >&2; exit 1 ;;
           esac
           [ -n "${OVERRIDE:-}" ] && NEW="$OVERRIDE"
+          [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "::error::Invalid release version: ${NEW}"
+            exit 1
+          }
+          if [ "$CUR" != "$BASE_CUR" ] && [ "$CUR" != "$NEW" ]; then
+            echo "::error::This run targets ${NEW}, but ${GITHUB_REF_NAME} is already ${CUR}. Dispatch a fresh release run."
+            exit 1
+          fi
           TAG="v${NEW}"
           echo "ver=$NEW" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Version: $CUR -> $NEW  (tag $TAG)"
+          echo "Version: dispatch base $BASE_CUR; branch $CUR -> target $NEW (tag $TAG)"
 
           if [ "$NEW" != "$CUR" ]; then
             # Bump BOTH platforms' version + build number in source, then commit to the branch so the
@@ -103,12 +127,18 @@ jobs:
           echo "buildVersion=$(grep -m1 'CURRENT_PROJECT_VERSION:' project.yml | sed -E 's/.*\"([0-9]+)\".*/\1/')" >> "$GITHUB_OUTPUT"
 
           # Keep the immutable release as a DRAFT at the (possibly bumped)
-          # commit until all three platform artifacts upload successfully. A
-          # re-run returns an existing release to draft before refreshing assets,
-          # so users never see a partially replaced published release.
+          # commit until all three platform artifacts and the AltStore source
+          # are complete. A retry may refresh an existing draft, but it must
+          # never pull an already-published immutable release back into draft.
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG already exists — returning it to draft while assets refresh."
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft
+            IS_DRAFT=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')
+            if [ "$IS_DRAFT" != "true" ]; then
+              echo "::error::Release $TAG is already published and immutable; refusing to replace it."
+              exit 1
+            fi
+            echo "Release $TAG already exists as a draft — refreshing its target and assets."
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --draft --target "$(git rev-parse HEAD)"
           else
             # Release body = the required per-version changelog docs/releases/<TAG>.md, plus a
             # downloads footer. (CHANGELOG.md is the stale legacy file; docs/releases/ is the source
@@ -278,7 +308,7 @@ jobs:
           gh release upload "${{ needs.bump.outputs.tag }}" "NOOP-ios-unsigned-v${VER}.ipa" --repo "$GITHUB_REPOSITORY" --clobber
 
   publish:
-    needs: [bump, android, macos, ios]
+    needs: [bump, android, macos, ios, altstore]
     runs-on: ubuntu-latest
     steps:
       - name: Verify assets and publish as latest
@@ -304,15 +334,17 @@ jobs:
 
   # Prepend this release to the AltStore / SideStore source manifest — the one AltStore reads from
   # raw.githubusercontent.com/<repo>/main/altstore-source.json (docs/IOS.md) — so a sideload user is
-  # offered this version automatically. Replaces the manual per-release altstore-source.json PR (#19).
-  # Best-effort: a missing manifest / IPA asset / push conflict WARNS and skips, never failing the release.
+  # offered this version automatically. This is a required publication gate:
+  # the GitHub release remains a draft unless the manifest is updated and
+  # verified on main.
   altstore:
-    needs: [bump, publish]
+    needs: [bump, android, macos, ios]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main   # AltStore reads the manifest from main, so commit there regardless of the release branch.
+          fetch-depth: 0
       - name: Add this release to the AltStore source
         env:
           GH_TOKEN: ${{ github.token }}
@@ -322,14 +354,16 @@ jobs:
         run: |
           set -euo pipefail
           if [ ! -f altstore-source.json ]; then
-            echo "::warning::no altstore-source.json on main — skipping AltStore update."; exit 0
+            echo "::error::no altstore-source.json on main; refusing to publish without an installable source."
+            exit 1
           fi
           IPA="NOOP-ios-unsigned-v${VER}.ipa"
           # The freshly-uploaded IPA's byte size, straight off the release asset (the `ios` job just pushed it).
           SIZE=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
-            --jq '.assets[] | select(.name=="'"$IPA"'") | .size' || true)
+            --jq '.assets[] | select(.name=="'"$IPA"'") | .size')
           if [ -z "${SIZE:-}" ]; then
-            echo "::warning::IPA asset $IPA not found on release $TAG — skipping AltStore update."; exit 0
+            echo "::error::IPA asset $IPA not found on release $TAG."
+            exit 1
           fi
           [ -n "${BUILD:-}" ] || BUILD=$(grep -m1 'CURRENT_PROJECT_VERSION:' project.yml | sed -E 's/.*"([0-9]+)".*/\1/')
           DATE=$(date -u +%Y-%m-%d)
@@ -356,13 +390,43 @@ jobs:
             | .apps[0].size               = $size
             ' altstore-source.json > "$tmp" && mv "$tmp" altstore-source.json
 
+          jq -e \
+            --arg v "$VER" --arg b "$BUILD" --arg url "$URL" --argjson size "$SIZE" \
+            '
+              .apps[0].versions[0].version == $v
+              and .apps[0].versions[0].buildVersion == $b
+              and .apps[0].versions[0].downloadURL == $url
+              and .apps[0].versions[0].size == $size
+              and .apps[0].version == $v
+              and .apps[0].buildVersion == $b
+              and .apps[0].downloadURL == $url
+              and .apps[0].size == $size
+            ' altstore-source.json >/dev/null
+
           if git diff --quiet altstore-source.json; then
-            echo "altstore-source.json already current for ${VER}."; exit 0
+            echo "altstore-source.json already current for ${VER}."
+          else
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add altstore-source.json
+            git commit -m "Release ${VER}: add to AltStore source"
+            git push origin HEAD:main
           fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add altstore-source.json
-          git commit -m "Release ${VER}: add to AltStore source"
-          git push origin HEAD:main || {
-            echo "::warning::couldn't push altstore-source.json (main moved?); add the ${VER} entry manually."; exit 0
+
+          REMOTE_SHA=$(git ls-remote origin refs/heads/main | awk '{print $1}')
+          [ "$REMOTE_SHA" = "$(git rev-parse HEAD)" ] || {
+            echo "::error::main does not contain the AltStore manifest commit."
+            exit 1
           }
+          git show "${REMOTE_SHA}:altstore-source.json" | jq -e \
+            --arg v "$VER" --arg b "$BUILD" --arg url "$URL" --argjson size "$SIZE" \
+            '
+              .apps[0].versions[0].version == $v
+              and .apps[0].versions[0].buildVersion == $b
+              and .apps[0].versions[0].downloadURL == $url
+              and .apps[0].versions[0].size == $size
+              and .apps[0].version == $v
+              and .apps[0].buildVersion == $b
+              and .apps[0].downloadURL == $url
+              and .apps[0].size == $size
+            ' >/dev/null
