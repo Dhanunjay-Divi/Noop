@@ -20,6 +20,9 @@ on:
       - '.github/workflows/swift-packages.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: swift-packages-${{ github.ref }}
   cancel-in-progress: true
@@ -39,9 +42,12 @@ jobs:
           - StrandImport
           - StrandDesign
           - NoopLocalAccess
+          - NoopRemoteSync
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Build ${{ matrix.package }}
         run: swift build

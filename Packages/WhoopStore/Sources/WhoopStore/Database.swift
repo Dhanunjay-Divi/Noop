@@ -564,6 +564,39 @@ extension WhoopStore {
                 t.primaryKey(["deviceId", "ts"])
             }
         }
+        // v29: the WHOOP 5/MG step counter predates the decoded-stream outbox columns added in v5,
+        // so it never received a delivery flag. Add one now so a self-hosted sync drains steps with
+        // the same "mark only after 2xx" guarantee as HR/RR/battery/biometrics. Existing rows default
+        // to pending and are uploaded once; server natural keys make that catch-up idempotent.
+        migrator.registerMigration("v29-step-sync-outbox") { db in
+            try db.alter(table: "stepSample") { t in
+                t.add(column: "synced", .integer).notNull().defaults(to: 0)
+            }
+        }
+        // v30: make the durable remote-sync outbox scale with the pending tail, not total history.
+        // Once years of rows are marked `synced = 1`, the uploader's `WHERE deviceId = ? AND
+        // synced = 0 ORDER BY ts LIMIT ?` probes must not scan past all of them on every launch.
+        // Partial indexes contain only pending rows and disappear entry-by-entry as batches are
+        // acknowledged. The extra RR columns preserve its full natural ordering/identity.
+        migrator.registerMigration("v30-remote-sync-pending-indexes") { db in
+            let definitions: [(name: String, table: String, columns: String)] = [
+                ("idx_remoteSync_hr_pending", "hrSample", "deviceId, ts"),
+                ("idx_remoteSync_rr_pending", "rrInterval", "deviceId, ts, rrMs, seq"),
+                ("idx_remoteSync_event_pending", "event", "deviceId, ts, kind"),
+                ("idx_remoteSync_battery_pending", "battery", "deviceId, ts"),
+                ("idx_remoteSync_spo2_pending", "spo2Sample", "deviceId, ts"),
+                ("idx_remoteSync_skin_pending", "skinTempSample", "deviceId, ts"),
+                ("idx_remoteSync_resp_pending", "respSample", "deviceId, ts"),
+                ("idx_remoteSync_steps_pending", "stepSample", "deviceId, ts"),
+            ]
+            for definition in definitions {
+                try db.execute(sql: """
+                    CREATE INDEX \(definition.name)
+                    ON \(definition.table)(\(definition.columns))
+                    WHERE synced = 0
+                    """)
+            }
+        }
         return migrator
     }
 }

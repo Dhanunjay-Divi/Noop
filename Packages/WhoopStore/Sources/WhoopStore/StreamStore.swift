@@ -101,9 +101,9 @@ extension WhoopStore {
     /// Idempotent upsert of decoded streams by natural key. Returns the number of rows
     /// ACTUALLY inserted per stream (0 for rows that already existed).
     ///
-    /// NOTE: the `synced` column (added by migration v5 for a since-removed server-upload feature)
-    /// is intentionally NOT written here, it is unused and defaults to 0. The column is left in the
-    /// schema to avoid a DROP COLUMN migration over existing data; nothing reads it.
+    /// NOTE: the `synced` column defaults to 0 and is deliberately not named here. The optional
+    /// self-hosted remote-sync outbox reads that flag and flips it only after a successful upload.
+    /// `ON CONFLICT DO NOTHING` also preserves a row that is already marked delivered.
     @discardableResult
     public func insert(_ streams: Streams, deviceId: String) async throws
         -> (hr: Int, rr: Int, events: Int, battery: Int,

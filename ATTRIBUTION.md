@@ -6,6 +6,17 @@ identify the hardware the app interoperates with.
 
 NOOP builds on prior community reverse-engineering and interoperability work:
 
+## Project lineage and self-hosting inspiration
+- **[`ryanbr/noop`](https://github.com/ryanbr/noop)** — the active
+  cross-platform NOOP application this repository forks and extends. Its PolyForm
+  Noncommercial license, required notice, history, and contributor attribution
+  are preserved.
+- **[`tigercraft4/goose`](https://github.com/tigercraft4/goose)** — demonstrated
+  the local-first self-hosting direction for WHOOP-derived data and prompted this
+  fork's independently implemented FastAPI, TimescaleDB, Apple, and Android sync
+  stack. Its repository is now archived and points users to `ryanbr/noop`; no
+  source from it is copied or redistributed here.
+
 ## WHOOP 4.0 protocol + Swift packages
 - **`johnmiddleton12/my-whoop`** — the `WhoopProtocol` and `WhoopStore` Swift packages
   (vendored under `Packages/`), the WHOOP 4.0 BLE framing/command/decode work, and the
@@ -13,9 +24,11 @@ NOOP builds on prior community reverse-engineering and interoperability work:
   See `DISCLAIMER.md` (carried over from that project).
 
 ## WHOOP 5.0 / MG protocol
-- **`b-nnett/goose`** — the WHOOP 5.0 BLE reverse-engineering (service UUID family
-  `fd4b0001-…`, CRC16-Modbus header, CLIENT_HELLO, and the "puffin" packet types)
-  that NOOP's `DeviceFamily` Whoop-5 path and `whoop5_protocol.json` are ported from.
+- **[`b-nnett/goose`](https://github.com/b-nnett/goose)** — documented observed
+  WHOOP 5.0 BLE interoperability facts (service UUID family `fd4b0001-…`,
+  CRC16-Modbus header, CLIENT_HELLO, and the "puffin" packet types). That
+  repository has no explicit software license, so this fork treats it as
+  facts-only reference documentation and copies none of its source or assets.
 
 ## Xiaomi Smart Band (Mi Band) import
 - **`artyomxx/xiaomi-band-ios-export`** — documented the Mi Fitness iOS app's on-device

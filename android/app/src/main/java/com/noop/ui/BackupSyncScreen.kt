@@ -18,12 +18,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.LinkOff
+import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -37,8 +43,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import com.noop.NoopApplication
+import com.noop.ble.WhoopBleClient
 import com.noop.data.DataBackup
+import com.noop.sync.RemoteSyncPrefs
+import com.noop.sync.RemoteSyncService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -63,6 +76,7 @@ import kotlinx.coroutines.withContext
 fun BackupSyncScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    RemoteSyncService.initialize(context)
 
     var treeUri by remember { mutableStateOf(BackupSyncPrefs.treeUri(context)) }
     var auto by remember { mutableStateOf(BackupSyncPrefs.autoEnabled(context)) }
@@ -73,6 +87,18 @@ fun BackupSyncScreen() {
     var keepMenu by remember { mutableStateOf(false) }
     // Time-of-day the daily backup runs (minutes since midnight); default 01:00, user-adjustable.
     var backupMinute by remember { mutableStateOf(BackupSyncPrefs.backupMinute(context)) }
+
+    // Optional self-hosted destination. The key field intentionally starts blank even when one is
+    // saved; its Keystore-backed value is never read into Compose state or rendered on screen.
+    var serverUrl by remember { mutableStateOf(RemoteSyncPrefs.endpoint()) }
+    var serverApiKey by remember { mutableStateOf("") }
+    var serverHasKey by remember { mutableStateOf(RemoteSyncPrefs.apiKey() != null) }
+    var serverAuto by remember { mutableStateOf(RemoteSyncPrefs.automatic()) }
+    var serverStatus by remember { mutableStateOf(RemoteSyncPrefs.lastStatus()) }
+    var serverLastSuccess by remember { mutableStateOf(RemoteSyncPrefs.lastSuccessMs()) }
+    var serverBusy by remember { mutableStateOf(false) }
+    var confirmFullReplay by remember { mutableStateOf(false) }
+    var confirmServerDisconnect by remember { mutableStateOf(false) }
 
     // Restore-from-folder sheet state: the listed snapshots, and the one pending confirmation.
     var snapshots by remember { mutableStateOf<List<BackupSync.SnapshotDoc>>(emptyList()) }
@@ -141,8 +167,219 @@ fun BackupSyncScreen() {
 
     LazyScreenScaffold(
         title = uiString(R.string.l10n_backup_sync_screen_backup_sync_81758ffa),
-        subtitle = "Save a full backup to a folder you choose - point it at Google Drive / Dropbox for off-device sync.",
+        subtitle = "Keep local snapshots, or opt in to sending your data to a server you control.",
     ) {
+        // Optional self-hosted decoded-data upload. Distinct from immutable .noopbak snapshots below.
+        item {
+            NoopCard(
+                padding = 20.dp,
+                tint = if (serverAuto && RemoteSyncPrefs.isConfigured()) Palette.accent else null,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        uiString(R.string.remote_sync_self_hosted_server),
+                        style = NoopType.headline,
+                        color = Palette.textPrimary,
+                    )
+                    Text(
+                        uiString(R.string.remote_sync_description),
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                    OutlinedTextField(
+                        value = serverUrl,
+                        onValueChange = { serverUrl = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !serverBusy,
+                        singleLine = true,
+                        label = {
+                            Text(uiString(R.string.l10n_coach_screen_server_url_1d5d1eff))
+                        },
+                        placeholder = { Text("https://noop.example.com") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        textStyle = NoopType.body,
+                        colors = remoteSyncFieldColors(),
+                    )
+                    OutlinedTextField(
+                        value = serverApiKey,
+                        onValueChange = { serverApiKey = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !serverBusy,
+                        singleLine = true,
+                        label = { Text(uiString(R.string.remote_sync_api_key)) },
+                        placeholder = {
+                            Text(
+                                if (serverHasKey) {
+                                    uiString(R.string.remote_sync_saved_key_placeholder)
+                                } else {
+                                    uiString(R.string.remote_sync_bearer_token_placeholder)
+                                },
+                            )
+                        },
+                        visualTransformation = PasswordVisualTransformation(),
+                        textStyle = NoopType.body,
+                        colors = remoteSyncFieldColors(),
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                uiString(R.string.remote_sync_automatic_upload),
+                                style = NoopType.body,
+                                color = Palette.textPrimary,
+                            )
+                            Text(
+                                uiString(R.string.remote_sync_automatic_upload_description),
+                                style = NoopType.footnote,
+                                color = Palette.textTertiary,
+                            )
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Switch(
+                            checked = serverAuto,
+                            enabled = !serverBusy,
+                            onCheckedChange = { enabled ->
+                                serverAuto = enabled
+                                if (RemoteSyncPrefs.isConfigured()) {
+                                    RemoteSyncService.setAutomatic(context, enabled)
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Palette.surfaceBase,
+                                checkedTrackColor = Palette.accent,
+                                uncheckedThumbColor = Palette.textSecondary,
+                                uncheckedTrackColor = Palette.surfaceInset,
+                                uncheckedBorderColor = Palette.hairline,
+                            ),
+                        )
+                    }
+                    NoopButton(
+                        text = if (serverBusy) {
+                            uiString(R.string.l10n_settings_screen_working_13b7bfca)
+                        } else {
+                            uiString(R.string.remote_sync_save_and_test)
+                        },
+                        leadingIcon = Icons.Filled.CloudDone,
+                        fullWidth = true,
+                        enabled = !serverBusy && serverUrl.isNotBlank() &&
+                            (serverApiKey.isNotBlank() || serverHasKey),
+                        onClick = {
+                            serverBusy = true
+                            scope.launch {
+                                try {
+                                    val status = RemoteSyncService.testConnection(
+                                        context,
+                                        serverUrl,
+                                        serverApiKey,
+                                    )
+                                    serverUrl = RemoteSyncService.saveConfiguration(
+                                        context,
+                                        serverUrl,
+                                        serverApiKey,
+                                        serverAuto,
+                                    )
+                                    serverHasKey = true
+                                    serverApiKey = ""
+                                    serverStatus = "Connected — authenticated server status: ${status.status}."
+                                    Toast.makeText(
+                                        context,
+                                        "Connected to your self-hosted server.",
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                } catch (error: Throwable) {
+                                    serverStatus = "Connection failed: ${error.message ?: "Unknown error"}"
+                                    Toast.makeText(context, serverStatus, Toast.LENGTH_LONG).show()
+                                } finally {
+                                    serverBusy = false
+                                }
+                            }
+                        },
+                    )
+                    NoopButton(
+                        text = if (serverBusy) {
+                            uiString(R.string.l10n_settings_screen_working_13b7bfca)
+                        } else {
+                            uiString(R.string.remote_sync_sync_now)
+                        },
+                        leadingIcon = Icons.Filled.Sync,
+                        kind = NoopButtonKind.Secondary,
+                        fullWidth = true,
+                        enabled = !serverBusy && RemoteSyncPrefs.isConfigured(),
+                        onClick = {
+                            serverBusy = true
+                            scope.launch {
+                                try {
+                                    val app = context.applicationContext as? NoopApplication
+                                    val deviceId = runCatching { app?.deviceRegistry?.activeDeviceId() }
+                                        .getOrNull()
+                                        ?: app?.activeDeviceId
+                                        ?: WhoopBleClient.DEFAULT_DEVICE_ID
+                                    val result = RemoteSyncService.sync(context, deviceId)
+                                    serverStatus = RemoteSyncPrefs.lastStatus()
+                                    serverLastSuccess = RemoteSyncPrefs.lastSuccessMs()
+                                    Toast.makeText(
+                                        context,
+                                        "Uploaded ${result.uploadedRawRows} pending raw rows.",
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                } catch (error: Throwable) {
+                                    serverStatus = RemoteSyncPrefs.lastStatus()
+                                    Toast.makeText(
+                                        context,
+                                        error.message ?: "Sync failed.",
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                } finally {
+                                    serverBusy = false
+                                }
+                            }
+                        },
+                    )
+                    NoopButton(
+                        text = uiString(R.string.remote_sync_full_replay),
+                        leadingIcon = Icons.Filled.Replay,
+                        kind = NoopButtonKind.Tertiary,
+                        fullWidth = true,
+                        enabled = !serverBusy && RemoteSyncPrefs.isConfigured(),
+                        onClick = { confirmFullReplay = true },
+                    )
+                    NoopButton(
+                        text = uiString(R.string.remote_sync_disconnect_and_forget),
+                        leadingIcon = Icons.Filled.LinkOff,
+                        kind = NoopButtonKind.Destructive,
+                        fullWidth = true,
+                        enabled = !serverBusy && (serverHasKey || serverUrl.isNotBlank()),
+                        onClick = { confirmServerDisconnect = true },
+                    )
+                    Text(
+                        buildString {
+                            if (serverStatus.isNotBlank()) append(serverStatus)
+                            if (serverLastSuccess > 0L) {
+                                if (isNotEmpty()) append("\n")
+                                append("Last success: ")
+                                append(DateUtils.getRelativeTimeSpanString(serverLastSuccess))
+                            }
+                        }.ifBlank { "Not connected yet." },
+                        style = NoopType.caption,
+                        color = if (serverStatus.startsWith("Sync failed") ||
+                            serverStatus.startsWith("Connection failed")
+                        ) {
+                            Palette.statusCritical
+                        } else {
+                            Palette.textTertiary
+                        },
+                    )
+                    Text(
+                        uiString(R.string.remote_sync_privacy_notice),
+                        style = NoopType.caption,
+                        color = Palette.accent,
+                    )
+                }
+            }
+        }
+
         // 1 · Destination folder
         item {
             NoopCard(padding = 20.dp) {
@@ -349,6 +586,146 @@ fun BackupSyncScreen() {
         }
     }
 
+    if (confirmFullReplay) {
+        AlertDialog(
+            onDismissRequest = { confirmFullReplay = false },
+            containerColor = Palette.surfaceOverlay,
+            title = {
+                Text(
+                    uiString(R.string.remote_sync_replay_title),
+                    style = NoopType.title2,
+                    color = Palette.textPrimary,
+                )
+            },
+            text = {
+                Text(
+                    uiString(R.string.remote_sync_replay_message),
+                    style = NoopType.subhead,
+                    color = Palette.textSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmFullReplay = false
+                        serverBusy = true
+                        scope.launch {
+                            try {
+                                val app = context.applicationContext as? NoopApplication
+                                val deviceId = runCatching { app?.deviceRegistry?.activeDeviceId() }
+                                    .getOrNull()
+                                    ?: app?.activeDeviceId
+                                    ?: WhoopBleClient.DEFAULT_DEVICE_ID
+                                val result = RemoteSyncService.sync(
+                                    context,
+                                    deviceId,
+                                    fullReplay = true,
+                                )
+                                serverStatus = RemoteSyncPrefs.lastStatus()
+                                serverLastSuccess = RemoteSyncPrefs.lastSuccessMs()
+                                Toast.makeText(
+                                    context,
+                                    "Replay sent ${result.uploadedRawRows} raw rows; queued history will continue.",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            } catch (error: Throwable) {
+                                serverStatus = RemoteSyncPrefs.lastStatus()
+                                Toast.makeText(
+                                    context,
+                                    error.message ?: "Full replay failed.",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            } finally {
+                                serverBusy = false
+                            }
+                        }
+                    },
+                ) {
+                    Text(
+                        uiString(R.string.remote_sync_replay),
+                        style = NoopType.body,
+                        color = Palette.accent,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmFullReplay = false }) {
+                    Text(
+                        uiString(R.string.l10n_backup_sync_screen_cancel_77dfd213),
+                        style = NoopType.body,
+                        color = Palette.textSecondary,
+                    )
+                }
+            },
+        )
+    }
+
+    if (confirmServerDisconnect) {
+        AlertDialog(
+            onDismissRequest = { confirmServerDisconnect = false },
+            containerColor = Palette.surfaceOverlay,
+            title = {
+                Text(
+                    uiString(R.string.remote_sync_disconnect_title),
+                    style = NoopType.title2,
+                    color = Palette.textPrimary,
+                )
+            },
+            text = {
+                Text(
+                    uiString(R.string.remote_sync_disconnect_message),
+                    style = NoopType.subhead,
+                    color = Palette.textSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmServerDisconnect = false
+                        serverBusy = true
+                        scope.launch {
+                            try {
+                                RemoteSyncService.disconnect(context)
+                                serverUrl = ""
+                                serverApiKey = ""
+                                serverHasKey = false
+                                serverAuto = false
+                                serverStatus = "Disconnected — saved server credentials were removed."
+                                serverLastSuccess = 0L
+                                Toast.makeText(
+                                    context,
+                                    "Self-hosted server disconnected.",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            } catch (error: Throwable) {
+                                serverStatus =
+                                    "Disconnect failed: ${error.message ?: "Unknown error"}"
+                                Toast.makeText(context, serverStatus, Toast.LENGTH_LONG).show()
+                            } finally {
+                                serverBusy = false
+                            }
+                        }
+                    },
+                ) {
+                    Text(
+                        uiString(R.string.l10n_coach_screen_disconnect_ed28e068),
+                        style = NoopType.body,
+                        color = Palette.statusCritical,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmServerDisconnect = false }) {
+                    Text(
+                        uiString(R.string.l10n_backup_sync_screen_cancel_77dfd213),
+                        style = NoopType.body,
+                        color = Palette.textSecondary,
+                    )
+                }
+            },
+        )
+    }
+
     // Must-fix #1: the snapshot picker - the folder's backups, newest-first.
     if (showSnapshotPicker) {
         AlertDialog(
@@ -445,6 +822,21 @@ private val RESTORE_MIME_TYPES = arrayOf(
     "application/octet-stream",
     "application/zip",
     "application/x-sqlite3",
+)
+
+@Composable
+private fun remoteSyncFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = Palette.textPrimary,
+    unfocusedTextColor = Palette.textPrimary,
+    focusedBorderColor = Palette.accent,
+    unfocusedBorderColor = Palette.hairlineStrong,
+    focusedLabelColor = Palette.accent,
+    unfocusedLabelColor = Palette.textTertiary,
+    cursorColor = Palette.accent,
+    focusedContainerColor = Palette.surfaceInset,
+    unfocusedContainerColor = Palette.surfaceInset,
+    disabledContainerColor = Palette.surfaceInset,
+    disabledTextColor = Palette.textTertiary,
 )
 
 /** A short, human label for a SAF tree Uri (the part after the volume colon). */

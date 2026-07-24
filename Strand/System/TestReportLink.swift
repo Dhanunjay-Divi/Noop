@@ -93,7 +93,7 @@ enum TestReportLink {
         if let seed = whatHappensSeed, !seed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             query.append("what_happens=" + enc(seed))
         }
-        let base = "https://github.com/ryanbr/noop/issues/new?"
+        let base = "https://github.com/Dhanunjay-Divi/Noop/issues/new?"
         // Add the log block ONLY if the whole URL stays under the GitHub prefill ceiling. If it would
         // breach maxURLLength, drop `log` entirely (never truncate it into a broken <details>); the full
         // trace is in the attached .zip. The seed + id fields alone keep the body non-empty (#812).

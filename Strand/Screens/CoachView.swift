@@ -250,7 +250,7 @@ struct CoachView: View {
                                 .strokeBorder(StrandPalette.hairline, lineWidth: 1))
                             .disableAutocorrection(true)
                             .accessibilityLabel("Server URL")
-                        Text("Any OpenAI-compatible server: Ollama, LM Studio, llama.cpp, or your own gateway. Stays on your network; nothing leaves \(Platform.deviceNounPhrase).")
+                        Text("Any OpenAI-compatible server: Ollama, LM Studio, llama.cpp, or your own gateway. The request goes only to the endpoint you choose; use an on-device endpoint when it must stay on \(Platform.deviceNounPhrase).")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -578,8 +578,8 @@ struct CoachView: View {
     private var privacyFootnote: some View {
         Label {
             Text(coach.provider == .custom
-                 ? "Coach talks only to the server URL you set. Point it at a local model (Ollama, LM Studio, llama.cpp) to keep everything on your own machine. Nothing is sent until you ask."
-                 : "This is the only feature that leaves \(Platform.deviceNounPhrase). It sends a summary of your metrics to \(coach.provider.displayName) using your own key. Nothing is sent until you ask.")
+                 ? String(localized: "Coach talks only to the server URL you set. Point it at a local model (Ollama, LM Studio, llama.cpp) to keep everything on your own machine. Nothing is sent until you ask.")
+                 : String(localized: "When enabled, Coach sends a summary of your metrics to \(coach.provider.displayName) using your own key. Nothing is sent until you ask."))
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)

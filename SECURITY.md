@@ -2,23 +2,29 @@
 
 ## Scope
 
-NOOP is a fully offline, on-device app. It has no servers, no accounts, and no
-cloud sync, so the usual web attack surface does not apply. What remains is local:
+NOOP is local-first: strap collection, storage, and analysis work without a
+NOOP account or required cloud. Optional network features add deliberately
+bounded attack surfaces:
 
 - **Bluetooth Low Energy** — the link to your WHOOP strap.
 - **Local SQLite database** — every reading is stored on your own device.
 - **File imports** — WHOOP CSV exports and Apple Health ZIP files you choose to open.
-- **AI Coach (optional, off by default)** — the only feature that makes a network
-  request, and only with an API key you supply yourself, to the provider you choose.
+- **AI Coach (optional, off by default)** — sends a bounded text summary and the
+  user's question to the provider/endpoint they configure.
+- **Oura cloud import (optional build, user initiated)** — pulls the user's own
+  history from Oura under their OAuth grant.
+- **Self-hosted Sync (optional, off by default)** — sends the documented v1
+  subset to the endpoint and bearer token the user configures.
 
 A useful security report is one that lets data leave the device when it shouldn't,
 lets a malicious strap or crafted import file corrupt the database or run code, or
-otherwise breaks the offline, local-only guarantee the app makes.
+breaks the endpoint validation, authorization, namespace separation, provenance,
+or deletion controls of an enabled network feature.
 
 ## Reporting a vulnerability
 
-NOOP is maintained anonymously and has no security contact email. **Report
-security issues by opening a GitHub issue** on the repository.
+**Report security issues through the
+[`Dhanunjay-Divi/Noop` issue tracker](https://github.com/Dhanunjay-Divi/Noop/issues/new/choose).**
 
 If a public report would put users at immediate risk before a fix can ship,
 open an issue with a short, non-exploitable summary (what is affected and how
@@ -37,8 +43,9 @@ the next release.
 
 ## Supported versions
 
-Only the latest release receives fixes. NOOP ships from source; if you build your
-own copy, rebuild from the latest tag to pick up security fixes.
+Until this fork publishes its first binary release, security fixes land on the
+latest source revision. After releases begin, only the latest release is
+supported. Rebuild/update from the canonical repository to pick up fixes.
 
 ## Out of scope
 
@@ -46,5 +53,7 @@ own copy, rebuild from the latest tag to pick up security fixes.
 - Issues in third-party dependencies — please report those upstream (see
   [`NOTICE`](NOTICE) for the bundled libraries and their licences)
 - The WHOOP strap firmware itself, which NOOP does not ship or modify
-- The user's own API key being misused after they have entered it (the key is
-  stored in the platform keystore; protecting the device account is the user's job)
+- A provider/server legitimately processing data the user explicitly chose to
+  send under that provider's terms
+- A user's own API token being misused after the device/OS secure store itself
+  has been compromised

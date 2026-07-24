@@ -1,15 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive launcher foreground: the NOOP loop mark — open green recovery ring + white core,
-     centred within the adaptive safe zone (108dp viewport). -->
+<!-- Original NOOP mark: two open data loops joined by an angular pulse/N. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
     <path
-        android:pathData="M54,28 A26,26 0 1 1 29.3,46"
-        android:strokeColor="#03E095"
+        android:pathData="M54,68 L43,50 C37,40 23,43 23,56 C23,68 33,73 47,73 L39,61"
+        android:strokeColor="#20D8CB"
         android:strokeWidth="7"
-        android:strokeLineCap="round"
+        android:strokeLineCap="butt"
+        android:strokeLineJoin="miter"
         android:fillColor="#00000000"/>
     <path
-        android:pathData="M46,54 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0 z"
-        android:fillColor="#FFFFFF"/>
+        android:pathData="M55,68 L64,51 L75,68 C89,63 90,46 78,42 C70,39 62,43 58,51"
+        android:strokeColor="#19BFF4"
+        android:strokeWidth="7"
+        android:strokeLineCap="butt"
+        android:strokeLineJoin="miter"
+        android:fillColor="#00000000"/>
 </vector>

@@ -269,7 +269,7 @@ struct SettingsView: View {
         // confused SwiftUI's text-measurement pass — the blurb rendered with zero trailing margin and
         // clipped to the card edge instead of wrapping inside the card padding. The localization key is
         // unchanged (`…Stored only on %@…`), so the existing translations still apply.
-        let blurbText = String(localized: "Optional. Add a photo for the avatar in the top-left. Stored only on \(Platform.deviceNounPhrase). NOOP is offline, so it's never uploaded.")
+        let blurbText = String(localized: "Optional. Add a photo for the avatar in the top-left. Stored only on \(Platform.deviceNounPhrase); profile photos are never included in Self-hosted Sync.")
         return SettingsSection(
             icon: "person.crop.circle",
             title: "Profile photo",
@@ -2040,7 +2040,7 @@ struct SettingsView: View {
                 }
 
                 // Project home — NOOP's code, releases, issues and wiki live on GitHub.
-                Link(destination: URL(string: "https://github.com/ryanbr/noop")!) {
+                Link(destination: URL(string: "https://github.com/Dhanunjay-Divi/Noop")!) {
                     HStack(spacing: 10) {
                         Image(systemName: "chevron.left.forwardslash.chevron.right")
                             .foregroundStyle(StrandPalette.accent)
@@ -2064,7 +2064,7 @@ struct SettingsView: View {
                 }
                 .accessibilityLabel("Project home and source code on GitHub")
 
-                Text("A standalone companion for your WHOOP. Everything stays on this device: your history, your live stream, your numbers. Nothing is uploaded. NOOP is an independent, experimental project, not the WHOOP app.")
+                Text("A standalone companion for your WHOOP. Your history, live stream, and numbers stay on this device by default. Data leaves only through features you explicitly enable, such as your own self-hosted sync. NOOP is an independent, experimental project, not the WHOOP app.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

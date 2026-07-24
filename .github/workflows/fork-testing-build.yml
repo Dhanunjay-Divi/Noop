@@ -25,6 +25,8 @@ jobs:
       ver: ${{ steps.m.outputs.ver }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: m
         env:
           GH_TOKEN: ${{ github.token }}
@@ -57,6 +59,8 @@ jobs:
         working-directory: android
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -68,7 +72,9 @@ jobs:
       # release build falls back to the debug key when no keystore.properties is present. We do NOT
       # copy it to ~/.android/debug.keystore — the runner ignores that path (ANDROID_USER_HOME points off
       # $HOME) and would sign with a fresh random key, breaking sideloaded updates ("App not installed").
-      # -PstagingRelease gives the release APK a .staging app id so it installs beside the official app.
+      # The checked-in key/password are PUBLIC, so this identity is reproducible staging only: anyone can
+      # sign it, and it must never be treated as a production trust anchor. -PstagingRelease enforces the
+      # separate .staging app id so it installs beside the official app.
       - name: Build debug + staging-release APKs
         run: ./gradlew assembleFullDebug assembleFullRelease -PstagingRelease
       - name: Version the filenames + attach
@@ -88,6 +94,8 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project
@@ -133,6 +141,8 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project

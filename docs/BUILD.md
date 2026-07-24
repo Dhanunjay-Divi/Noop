@@ -1,10 +1,12 @@
 # Building NOOP
 
-NOOP is a standalone, fully **offline** companion app for WHOOP straps (4.0 and 5.0). It pairs
+NOOP is a standalone, **local-first** companion app for WHOOP straps (4.0 and 5.0). It pairs
 directly with the strap over Bluetooth Low Energy, stores everything on-device in SQLite, imports
 WHOOP CSV exports and Apple Health exports, and computes recovery / strain / HRV / sleep locally.
-There is no cloud, no account — the app talks only to **your own device** and
-works only with **your own data**.
+There is no NOOP account or required cloud—the app talks only to **your own
+device** and works only with **your own data**. AI Coach, Oura cloud import, and
+Self-hosted Sync are separate, off-by-default network features configured by the
+user.
 
 > **Not affiliated with WHOOP, and not a medical device.** "WHOOP" is used only to identify the
 > hardware this software interoperates with. NOOP contains no WHOOP code, firmware, or assets. All
@@ -43,7 +45,9 @@ Strand/
 │   ├── WhoopStore/             # GRDB/SQLite persistence (migrations, streams, caches)
 │   ├── StrandAnalytics/        # HRV / recovery / strain / sleep / correlation math
 │   ├── StrandImport/           # WHOOP CSV + Apple Health importers
+│   ├── NoopRemoteSync/         # authenticated client for the optional self-hosted v1 API
 │   └── StrandDesign/           # SwiftUI design system (palette, components, charts)
+├── server/                     # optional FastAPI + TimescaleDB service and dashboard
 ├── Tools/
 │   └── Backfill/               # `swift run backfill` — re-runs importers into the on-device DB
 └── Fixtures/                   # Sample data for tests
@@ -51,8 +55,9 @@ Strand/
 
 ### Packages and platforms
 
-Every package declares **both** `.iOS(.v16)` and `.macOS(.v13)`, so the protocol, storage,
-analytics, import, and design layers compile and run unmodified on iOS once an app target exists.
+All six packages declare `.macOS(.v13)`. The five inherited packages declare
+`.iOS(.v16)`, while `NoopRemoteSync` declares `.iOS(.v17)`, so every shared
+layer compiles for the app target's iOS 17 floor.
 Any framework-specific code is guarded with `#if canImport(AppKit) / #elseif canImport(UIKit)`
 (for example the color bridging in `Packages/StrandDesign/Sources/StrandDesign/Palette.swift`).
 
@@ -63,6 +68,7 @@ Any framework-specific code is guarded with `#if canImport(AppKit) / #elseif can
 | `StrandAnalytics`| macOS 13+, iOS 16+       | `WhoopProtocol`, `WhoopStore`             | HRV / recovery / strain / sleep / correlation math |
 | `StrandImport`   | macOS 13+, iOS 16+       | `WhoopProtocol`, `WhoopStore`, `ZIPFoundation` (≥ 0.9.0) | WHOOP CSV + Apple Health (`export.xml`, streaming) importers |
 | `StrandDesign`   | macOS 13+, iOS 16+       | none                                      | SwiftUI design system: palette, components, charts |
+| `NoopRemoteSync` | macOS 13+, iOS 17+       | `WhoopStore`                              | Optional authenticated v1 self-hosted upload client |
 
 All third-party dependencies are resolved through **Swift Package Manager**; nothing is vendored
 as a binary.
@@ -216,19 +222,20 @@ swift run backfill
 
 ---
 
-## iOS (build-from-source only)
+## iOS (source build or unsigned community IPA)
 
-iOS ships as a **build-from-source-only** target, folded into main in v1.94. There is **no App
-Store or TestFlight build** — both require a real Apple Developer identity, which is fundamentally
-at odds with NOOP staying anonymous, so the only way to run it is to build it yourself in Xcode.
+iOS has no App Store or TestFlight build. Build and sign it yourself in Xcode,
+or re-sign an unsigned community IPA from this fork's Releases page with
+AltStore, SideStore, Sideloadly, or your own signing identity.
 The iOS app is **newer and less battle-tested** than macOS and Android: live BLE on a real iPhone
 isn't yet fully validated. It shares the same analytics packages, so once data is in, results match
 macOS.
 
 The `NOOPiOS` app target (plus the `NOOPiOSWidgets` WidgetKit / Live Activity extension) already
-exists in `project.yml` — you don't need to add it. All five packages target `.iOS(.v16)`, so the
-protocol, storage, analytics, import, and design cores compile for iOS unmodified; the iOS app
-shell lives in `StrandiOS/` with shared iOS code in `StrandiOSShared/`.
+exists in `project.yml` — you don't need to add it. The five inherited packages
+target `.iOS(.v16)`; the sixth, `NoopRemoteSync`, and the app target require
+iOS 17. The iOS app shell lives in `StrandiOS/` with shared iOS code in
+`StrandiOSShared/`.
 
 ### Build & run
 
@@ -252,8 +259,9 @@ open Strand.xcodeproj
 
 Notes:
 
-- The `NOOPiOS` and `NOOPiOSWidgets` targets deploy to **iOS 17.0**. (The shared packages still
-  declare a floor of iOS 16 — `.iOS(.v16)` — but the app targets require iOS 17.)
+- The `NOOPiOS` and `NOOPiOSWidgets` targets deploy to **iOS 17.0**. Five
+  inherited packages retain an iOS 16 floor; `NoopRemoteSync` matches the app at
+  iOS 17.
 - Running on a physical iPhone needs a signing identity selected in Xcode (a free personal Apple ID
   works for on-device builds). Set `DEVELOPMENT_TEAM` in `Config/BundleIdSecrets.xcconfig` (see
   `Config/BundleIdSecrets.example.xcconfig`) to avoid re-selecting a team in Xcode after every
@@ -269,11 +277,13 @@ Notes:
 
 ## Android (shipped)
 
-Android ships as a **full, native client** — a separate Kotlin/Gradle module rather than a port of
-the Swift app. It lives under **`android/`** with its own `README`, and a pre-built APK
-(`NOOP-full.apk`) is published in [Releases](https://github.com/ryanbr/noop/releases). A sample-data **demo** flavour still
-exists for exploring every screen with no strap, but it's now **build-from-source only**
-(`./gradlew assembleDemoDebug`) — it is no longer published as a release asset.
+Android ships as a **full, native client**—a separate Kotlin/Gradle module rather
+than a port of the Swift app. It lives under **`android/`** with its own
+`README`. Build the full app (`./gradlew assembleFullDebug`) and sample-data
+demo (`./gradlew assembleDemoDebug`) from source, or use a clearly labeled
+staging artifact under this fork's Releases page. Older
+[`ryanbr/noop` releases](https://github.com/ryanbr/noop/releases) are upstream
+artifacts and do not contain this fork's self-hosted stack.
 
 Toolchain:
 
@@ -316,8 +326,9 @@ NOOP builds on prior community reverse-engineering and interoperability work:
 
 - **`johnmiddleton12/my-whoop`** — WHOOP 4.0 BLE protocol; the `WhoopProtocol` and `WhoopStore`
   packages are adapted from this work.
-- **`b-nnett/goose`** — WHOOP 5.0 / MG BLE protocol (service family `fd4b0001-…`, CRC16-Modbus
-  header) that the WHOOP-5 decode path is ported from.
+- **`b-nnett/goose`** — observed WHOOP 5.0 / MG protocol facts (service family
+  `fd4b0001-…`, CRC16-Modbus header). Its repository has no explicit software
+  license; this fork copies none of its source or assets.
 - **`groue/GRDB.swift`** — SQLite persistence.
 - **`weichsel/ZIPFoundation`** — zip handling for Apple Health exports.
 

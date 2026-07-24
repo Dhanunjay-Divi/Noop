@@ -1,0 +1,60 @@
+name: noop
+
+services:
+  db:
+    image: timescale/timescaledb:2.20.3-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: noop
+      POSTGRES_USER: noop
+      POSTGRES_PASSWORD: ${NOOP_DB_PASSWORD:?set NOOP_DB_PASSWORD in .env}
+    volumes:
+      - noop_timescale_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U noop -d noop"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    build:
+      context: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NOOP_API_TOKEN: ${NOOP_API_TOKEN:?set NOOP_API_TOKEN in .env}
+      NOOP_DATABASE_URL: postgresql://noop:${NOOP_DB_PASSWORD}@db:5432/noop
+      NOOP_MAX_REQUEST_BYTES: ${NOOP_MAX_REQUEST_BYTES:-10485760}
+      NOOP_DB_POOL_MIN_SIZE: ${NOOP_DB_POOL_MIN_SIZE:-1}
+      NOOP_DB_POOL_MAX_SIZE: ${NOOP_DB_POOL_MAX_SIZE:-8}
+      NOOP_RETENTION_DAYS: ${NOOP_RETENTION_DAYS:-0}
+      NOOP_DASHBOARD_ENABLED: ${NOOP_DASHBOARD_ENABLED:-true}
+    # Loopback-only by default. See README.md before exposing this to a LAN or
+    # the internet; public endpoints must sit behind TLS.
+    ports:
+      - "127.0.0.1:${NOOP_PORT:-8080}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  noop_timescale_data:

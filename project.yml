@@ -50,6 +50,8 @@ packages:
     path: Packages/WhoopProtocol
   WhoopStore:
     path: Packages/WhoopStore
+  NoopRemoteSync:
+    path: Packages/NoopRemoteSync
   StrandAnalytics:
     path: Packages/StrandAnalytics
   StrandImport:
@@ -98,7 +100,8 @@ targets:
         CFBundleVersion: "198"
         LSMinimumSystemVersion: "13.0"
         LSApplicationCategoryType: public.app-category.healthcare-fitness
-        NSBluetoothAlwaysUsageDescription: "NOOP connects directly to your WHOOP strap over Bluetooth to read heart rate, R-R intervals, battery, and sensor data locally on your Mac. Nothing leaves your device."
+        NSBluetoothAlwaysUsageDescription: "NOOP connects directly to your WHOOP strap to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server."
+        NSLocalNetworkUsageDescription: "NOOP connects to a self-hosted server on your local network only when you configure and enable that optional sync."
         NSLocationWhenInUseUsageDescription: "NOOP records your route during an outdoor workout to show distance, pace, and a map. The route stays on your device. Nothing leaves it."
         # The AI Coach's "Custom (OpenAI-compatible)" provider talks to a LOCAL LLM server over plain
         # HTTP on loopback (Ollama / LM Studio / llama.cpp at http://localhost:…). ATS blocks cleartext
@@ -121,7 +124,8 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.device.bluetooth: true
         com.apple.security.files.user-selected.read-write: true
-        # Outbound client access — used ONLY by the opt-in, consent-gated, BYOK AI Coach.
+        # Outbound client access — used only by explicit opt-ins: BYOK AI Coach, Oura import,
+        # and the user's own authenticated self-hosted Noop server.
         # The ad-hoc distributed build applies NO entitlements (unsigned build + ad-hoc
         # re-sign), so this matters only for a SIGNED/sandboxed build (where the sandbox
         # otherwise blocks the Coach's request — #128). Data path stays network-free.
@@ -142,6 +146,7 @@ targets:
     dependencies:
       - package: WhoopProtocol
       - package: WhoopStore
+      - package: NoopRemoteSync
       - package: StrandAnalytics
       - package: StrandImport
       - package: StrandDesign
@@ -163,6 +168,7 @@ targets:
       - target: Strand
       - package: WhoopProtocol
       - package: WhoopStore
+      - package: NoopRemoteSync
       - package: OuraProtocol
     settings:
       base:
@@ -175,7 +181,7 @@ targets:
 
   # ---------------------------------------------------------------------------
   # iOS app target (community build-from-source; never distributed via the App
-  # Store — NOOP stays anonymous). Reuses the five shared packages + most of the
+  # Store — NOOP stays anonymous). Reuses the six shared packages + most of the
   # macOS app's Strand/ sources; the macOS-only scene/menu-bar/notification files
   # are excluded, and the iOS app shell + HealthKit + widgets/intents live under
   # StrandiOS/. See docs/IOS.md.
@@ -260,11 +266,12 @@ targets:
         # way) and be registered at launch (StrandiOSApp.init), or iOS refuses to schedule/deliver it.
         BGTaskSchedulerPermittedIdentifiers:
           - $(PRODUCT_BUNDLE_IDENTIFIER).debugexport
-        NSBluetoothAlwaysUsageDescription: "NOOP connects directly to your WHOOP strap over Bluetooth to read heart rate, R-R intervals, battery, and sensor data locally on your iPhone. Nothing leaves your device."
+        NSBluetoothAlwaysUsageDescription: "NOOP connects directly to your WHOOP strap to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server."
+        NSLocalNetworkUsageDescription: "NOOP connects to a self-hosted server on your local network only when you configure and enable that optional sync."
         NSLocationWhenInUseUsageDescription: "NOOP records your route during an outdoor workout to show distance, pace, and a map, and keeps recording while the screen is off. The route stays on your device. Nothing leaves it."
-        NSHealthShareUsageDescription: "NOOP reads your own Apple Health data on-device to compute recovery, strain, and sleep. Nothing leaves your device."
+        NSHealthShareUsageDescription: "NOOP reads your Apple Health data to compute metrics locally. It uploads derived records only if you explicitly enable your own self-hosted server."
         NSHealthUpdateUsageDescription: "NOOP writes the metrics it computes from your strap back into Apple Health, on-device and only when you allow it."
-        NSMotionUsageDescription: "NOOP reads your iPhone's step count for a walking or running workout to show steps in the activity summary. It stays on your device. Nothing leaves it."
+        NSMotionUsageDescription: "NOOP reads your iPhone's step count for activity summaries. It uploads derived records only if you explicitly enable your own self-hosted server."
         # #187: the opt-in AI Coach's "Custom (OpenAI-compatible)" provider can point at a LOCAL LLM on
         # the LAN (Ollama / LM Studio at http://192.168.x.x:11434). ATS blocks cleartext by default;
         # NSAllowsLocalNetworking exempts loopback/.local/private-LAN hosts ONLY — public HTTPS endpoints
@@ -306,6 +313,7 @@ targets:
     dependencies:
       - package: WhoopProtocol
       - package: WhoopStore
+      - package: NoopRemoteSync
       - package: StrandAnalytics
       - package: StrandImport
       - package: StrandDesign

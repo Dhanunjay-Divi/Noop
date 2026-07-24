@@ -145,6 +145,39 @@ final class WhoopExportImporterTests: XCTestCase {
         XCTAssertEqual(rows[1].asleepDurationMin, 25)
     }
 
+    // MARK: - Optional Source provenance
+
+    func testSourceColumnIsParsedAndClassifiedWithoutPromotingUnknownProducers() {
+        let cycles = WhoopExportImporter().parseCycles(CSVTable(text: """
+        Cycle start time,Cycle timezone,Recovery score %,Source
+        2026-01-01 06:00:00,UTC+00:00,70,noop (APPROXIMATE)
+        2026-01-02 06:00:00,UTC+00:00,71,import
+        2026-01-03 06:00:00,UTC+00:00,72,other-app
+        2026-01-04 06:00:00,UTC+00:00,73,
+        """))
+        XCTAssertEqual(cycles.map(\.sourceLabel),
+                       ["noop (APPROXIMATE)", "import", "other-app", nil])
+        XCTAssertEqual(cycles.map { WhoopCSVRowProvenance.classify(sourceLabel: $0.sourceLabel) },
+                       [.noopApproximate, .officialReference, .unknown, .officialReference])
+
+        let sleeps = WhoopExportImporter().parseSleeps(CSVTable(text: """
+        Cycle start time,Sleep onset,Wake onset,Cycle timezone,Nap,Source
+        2026-01-01 00:00:00,2025-12-31 22:00:00,2026-01-01 06:00:00,UTC+00:00,false," NOOP (approximate) "
+        """))
+        XCTAssertEqual(sleeps.first?.sourceLabel, "NOOP (approximate)")
+        XCTAssertEqual(WhoopCSVRowProvenance.classify(sourceLabel: sleeps.first?.sourceLabel),
+                       .noopApproximate)
+
+        let workouts = WhoopExportImporter().parseWorkouts(CSVTable(text: """
+        Workout start time,Workout end time,Cycle timezone,Activity name,Source
+        2026-01-01 12:00:00,2026-01-01 13:00:00,UTC+00:00,Run,whoop
+        """))
+        XCTAssertEqual(workouts.first?.sourceLabel, "whoop")
+        XCTAssertEqual(WhoopCSVRowProvenance.classify(sourceLabel: workouts.first?.sourceLabel),
+                       .officialReference)
+        XCTAssertEqual(WhoopCSVRowProvenance.classify(sourceLabel: "manual"), .noopLocal)
+    }
+
     // MARK: - journal_entries.csv
 
     func testJournalPivot() throws {

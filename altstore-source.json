@@ -1,11 +1,11 @@
 {
   "name": "NOOP",
   "identifier": "com.noopapp.noop.altstore",
-  "sourceURL": "https://raw.githubusercontent.com/ryanbr/noop/main/altstore-source.json",
+  "sourceURL": "https://raw.githubusercontent.com/Dhanunjay-Divi/Noop/main/altstore-source.json",
   "subtitle": "A standalone WHOOP app — your strap, your device, fully offline.",
   "description": "An AltStore / SideStore source for NOOP, the independent open-source WHOOP companion. Add this source to get one-tap updates for the sideloaded iOS build.\n\nNOOP is not affiliated with WHOOP. It reads a strap you own, directly over Bluetooth, on your own device — no WHOOP app, no subscription, no cloud.",
-  "iconURL": "https://github.com/ryanbr/noop/raw/main/Strand/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png",
-  "website": "https://github.com/ryanbr/noop",
+  "iconURL": "https://github.com/Dhanunjay-Divi/Noop/raw/main/Strand/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png",
+  "website": "https://github.com/Dhanunjay-Divi/Noop",
   "tintColor": "44E2B0",
   "apps": [
     {
@@ -13,8 +13,8 @@
       "bundleIdentifier": "com.noopapp.noop",
       "developerName": "NoopApp",
       "subtitle": "Read your own WHOOP strap, fully offline.",
-      "localizedDescription": "NOOP talks to a WHOOP 4.0 / 5.0 / MG strap you own directly over Bluetooth — no WHOOP app, no subscription, no cloud. Live heart rate, history sync, and NOOP's own Charge / Effort / Rest scores, all computed on-device and stored only on your iPhone.\n\nIndependent and experimental; not affiliated with WHOOP. Source: https://github.com/ryanbr/noop",
-      "iconURL": "https://github.com/ryanbr/noop/raw/main/Strand/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png",
+      "localizedDescription": "NOOP talks to a WHOOP 4.0 / 5.0 / MG strap you own directly over Bluetooth — no WHOOP app or required cloud. Live heart rate, history sync, and NOOP's own Charge / Effort / Rest scores are computed on-device; an optional self-hosted server can archive selected data when you opt in.\n\nIndependent and experimental; not affiliated with WHOOP. Source: https://github.com/Dhanunjay-Divi/Noop",
+      "iconURL": "https://github.com/Dhanunjay-Divi/Noop/raw/main/Strand/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png",
       "tintColor": "44E2B0",
       "category": "healthcare-fitness",
       "screenshotURLs": [],
@@ -1309,12 +1309,17 @@
       ],
       "appPermissions": {
         "entitlements": [
-          "com.apple.developer.healthkit"
+          "com.apple.developer.healthkit",
+          "com.apple.developer.healthkit.access",
+          "com.apple.security.application-groups"
         ],
         "privacy": {
-          "NSBluetoothAlwaysUsageDescription": "NOOP connects directly to your WHOOP strap over Bluetooth to read heart rate, R-R intervals, battery, and sensor data locally on your iPhone. Nothing leaves your device.",
-          "NSHealthShareUsageDescription": "NOOP reads your own Apple Health data on-device to compute recovery, strain, and sleep. Nothing leaves your device.",
-          "NSHealthUpdateUsageDescription": "NOOP writes the metrics it computes from your strap back into Apple Health, on-device and only when you allow it."
+          "NSBluetoothAlwaysUsageDescription": "NOOP connects directly to your WHOOP strap to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server.",
+          "NSLocalNetworkUsageDescription": "NOOP connects to a self-hosted server on your local network only when you configure and enable that optional sync.",
+          "NSLocationWhenInUseUsageDescription": "NOOP records your route during an outdoor workout to show distance, pace, and a map, and keeps recording while the screen is off. The route stays on your device. Nothing leaves it.",
+          "NSHealthShareUsageDescription": "NOOP reads your Apple Health data to compute metrics locally. It uploads derived records only if you explicitly enable your own self-hosted server.",
+          "NSHealthUpdateUsageDescription": "NOOP writes the metrics it computes from your strap back into Apple Health, on-device and only when you allow it.",
+          "NSMotionUsageDescription": "NOOP reads your iPhone's step count for activity summaries. It uploads derived records only if you explicitly enable your own self-hosted server."
         }
       },
       "version": "9.1.0",

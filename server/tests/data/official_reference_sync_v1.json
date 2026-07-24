@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "batch_id": "f117a247-3fdd-4fc3-aaeb-59d5c0b11745",
+  "source": {
+    "device_id": "ios:11111111-1111-4111-8111-111111111111:whoop-official-reference",
+    "sent_at": "2026-07-24T18:30:00Z",
+    "app_version": "10.0",
+    "platform": "ios",
+    "device": {
+      "display_name": "WHOOP import reference"
+    },
+    "metadata": {
+      "installation_id": "11111111-1111-4111-8111-111111111111",
+      "logical_source_id": "whoop-official-reference",
+      "namespace": "official_reference",
+      "paired_device_id": "strap-abc",
+      "privacy": "explicit_opt_in",
+      "score_provenance": "user_imported_whoop_export"
+    }
+  },
+  "streams": {
+    "hr": [],
+    "rr": [],
+    "battery": [],
+    "spo2": [],
+    "skin_temp": [],
+    "respiration": [],
+    "steps": [],
+    "events": []
+  },
+  "daily_metrics": {
+    "2026-07-24": {
+      "efficiency": 0.91,
+      "recovery": 72,
+      "effort": 59.047619,
+      "whoop_strain": 12.4
+    }
+  },
+  "sleep_sessions": [
+    {
+      "session_id": "sleep-714a3138d41a7f20",
+      "start_ts": 1784870400,
+      "end_ts": 1784899200,
+      "efficiency": 0.91,
+      "resting_hr": 52,
+      "avg_hrv": 63.5,
+      "stages": {
+        "awake": 1800,
+        "light": 12600,
+        "deep": 6300,
+        "rem": 5100
+      }
+    }
+  ],
+  "workouts": [
+    {
+      "workout_id": "workout-071f8ab534477d49",
+      "start_ts": 1784900000,
+      "end_ts": 1784903600,
+      "sport": "Functional Fitness",
+      "source": "whoop",
+      "metrics": {
+        "effort": 43.809524,
+        "whoop_strain": 9.2,
+        "duration_s": 3600
+      }
+    }
+  ],
+  "journal": []
+}

@@ -5,7 +5,7 @@ import WhoopStore
 import StrandAnalytics
 import StrandImport
 
-// MARK: - AI Coach (the one networked feature, strictly opt-in, bring-your-own-key)
+// MARK: - AI Coach (strictly opt-in, bring-your-own-key)
 //
 // NOOP is offline by design. This file is the single exception: when the user pastes their OWN
 // API key for a provider they choose, NOOP can send a compact text summary of their metrics plus
@@ -532,6 +532,8 @@ final class AICoachEngine: ObservableObject {
     /// when the second consent is on). Used when the user has granted data access.
     func buildFullContext() async -> String {
         var ctx = buildContext()
+        let calibration = personalCalibrationBlock()
+        if !calibration.isEmpty { ctx += "\n\n" + calibration }
         ctx += "\n\n" + (await recentWorkoutsBlock())
         // Derived stress: a single Baevsky Stress Index summary line over today's R-R, computed the same
         // way StressView does. Gated here under `dataConsent` (the caller only reaches buildFullContext()
@@ -543,6 +545,34 @@ final class AICoachEngine: ObservableObject {
             if !block.isEmpty { ctx += "\n\n" + block }
         }
         return ctx
+    }
+
+    /// Presentation-only personal estimates persisted by Compare after chronological holdout validation.
+    /// These are always sent beside their untouched raw NOOP value and date, explicitly labeled as neither
+    /// an official WHOOP score nor a recovered proprietary formula. `buildFullContext` is already behind
+    /// the user's biometric-data consent, so this does not add a new egress path.
+    func personalCalibrationBlock() -> String {
+        let store = PersonalCalibrationModelStore()
+        let choices: [(String, WhoopComparableMetric, String)] = [
+            ("Charge", .recoveryScore, NoopScoreAlgorithmRevision.charge),
+            ("Effort", .effortScore, NoopScoreAlgorithmRevision.effort),
+            ("Rest", .restScore, NoopScoreAlgorithmRevision.rest),
+        ]
+        let rows = choices.compactMap { label, metric, revision -> String? in
+            guard let record = store.load(metric: metric, noopAlgorithmVersion: revision) else {
+                return nil
+            }
+            let estimate = record.latestEstimate
+            return "  \(label) \(estimate.day): personal calibrated estimate "
+                + "\(String(format: "%.1f", estimate.calibratedValue)) "
+                + "(raw NOOP \(String(format: "%.1f", estimate.rawNoopValue)))"
+        }
+        guard !rows.isEmpty else { return "" }
+        return """
+        PERSONAL CALIBRATED ESTIMATES (presentation-only; holdout-validated; not official WHOOP scores \
+        and not a recovered WHOOP formula):
+        \(rows.joined(separator: "\n"))
+        """
     }
 
     /// One derived stress line for the coach context: the Baevsky Stress Index over TODAY's R-R, read

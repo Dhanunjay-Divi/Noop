@@ -5,9 +5,10 @@ This document specifies the Bluetooth Low Energy (BLE) wire protocol that NOOP u
 frame envelope, checksums, packet/command/event enumerations, the bond handshake, and the
 historical-data offload state machine.
 
-NOOP is a standalone, fully offline companion. It pairs over BLE, decodes the strap's own
-streams on-device, and stores everything locally in SQLite. There is no cloud or account
-involved in any of the exchanges described here.
+NOOP is a standalone, local-first companion. It pairs over BLE, decodes the
+strap's own streams on-device, and stores everything locally in SQLite. No
+account or server participates in the BLE exchanges described here; optional
+self-hosted replication happens later from supported decoded rows.
 
 > **Interoperability & safety note.** This describes interoperation with the user's *own*
 > device and the data it already holds. NOOP is **not affiliated with, authorized by, or
@@ -25,7 +26,9 @@ CoreBluetooth-free for tests and CLI tools).
 This work builds on two community reverse-engineering efforts:
 
 - **`johnmiddleton12/my-whoop`** — WHOOP 4.0 protocol.
-- **`b-nnett/goose`** — WHOOP 5.0 fd4b ("puffin" packet framing) protocol.
+- **`b-nnett/goose`** — observed WHOOP 5.0 fd4b ("puffin" packet framing)
+  protocol facts. Its repository has no explicit software license; this fork
+  copies none of its source or assets.
 
 The canonical decode tables are bundled as a JSON resource:
 `Packages/WhoopProtocol/Sources/WhoopProtocol/Resources/whoop_protocol.json`, loaded by

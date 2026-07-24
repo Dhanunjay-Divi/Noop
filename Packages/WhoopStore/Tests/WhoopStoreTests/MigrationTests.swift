@@ -73,7 +73,25 @@ final class MigrationTests: XCTestCase {
             let cols = try await store.columnNamesForTest(table: table)
             XCTAssertTrue(cols.contains("synced"), "\(table) missing synced column")
         }
-        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 18)
+        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 30)
+    }
+
+    func testV30AddsPartialPendingIndexesForEveryRemoteStream() async throws {
+        let store = try await WhoopStore.inMemory()
+        let expected: [String: String] = [
+            "hrSample": "idx_remoteSync_hr_pending",
+            "rrInterval": "idx_remoteSync_rr_pending",
+            "event": "idx_remoteSync_event_pending",
+            "battery": "idx_remoteSync_battery_pending",
+            "spo2Sample": "idx_remoteSync_spo2_pending",
+            "skinTempSample": "idx_remoteSync_skin_pending",
+            "respSample": "idx_remoteSync_resp_pending",
+            "stepSample": "idx_remoteSync_steps_pending",
+        ]
+        for (table, index) in expected {
+            let names = try await store.indexNamesForTest(table: table)
+            XCTAssertTrue(names.contains(index), "\(table) missing pending outbox index")
+        }
     }
 
     /// v13 adds the `userEdited` flag to sleepSession (user-corrected wake times survive re-sync).

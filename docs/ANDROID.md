@@ -46,7 +46,7 @@ the same analytics so results match macOS.)
 - [Raw capture import (`capture.json`)](#raw-capture-import-capturejson)
 - [Analytics](#analytics)
 - [Compose UI](#compose-ui)
-- [Permissions and the no-internet posture](#permissions-and-the-no-internet-posture)
+- [Permissions and the local-first network posture](#permissions-and-the-local-first-network-posture)
 - [Verification checklist](#verification-checklist)
 - [Credits](#credits)
 
@@ -122,8 +122,9 @@ bump forces matching KSP and Compose-compiler bumps:
 | `sourceCompatibility` / `jvmTarget` | `17` | JDK 17 |
 | `applicationId` | `com.noop.whoop` | `.debug` suffix on debug builds |
 
-The app declares **no `INTERNET` permission** by design (see
-[Permissions](#permissions-and-the-no-internet-posture)) and sets `android:allowBackup="false"`.
+The app is local-first and sets `android:allowBackup="false"`. It declares
+`INTERNET` for explicit opt-ins such as the bring-your-own-key Coach and
+Self-hosted Sync; strap collection and local analysis do not require a network.
 
 ---
 
@@ -209,9 +210,11 @@ cd android
 ./gradlew installDebug
 adb shell am start -n com.noop.whoop.debug/com.noop.ui.MainActivity
 
-# Release builds — the two shipped flavours (R8 full mode + resource shrink are enabled).
-./gradlew assembleFullRelease    # → NOOP-full.apk
-./gradlew assembleDemoRelease    # → NOOP-demo.apk
+# Reproducible community staging release (separate app ID, public debug key).
+./gradlew -PstagingRelease assembleFullRelease
+
+# A non-staging release requires gitignored keystore.properties and a private key.
+./gradlew assembleFullRelease
 ```
 
 Open `android/` directly in Android Studio (**File ▸ Open ▸ android/**) and let Gradle sync; run
@@ -221,11 +224,16 @@ the `app` configuration on a physical device.
 
 ## Installing the APK (sideload & Play Protect)
 
-The released `NOOP-full.apk` is an **unsigned, source-available APK** — there
-is no Play Store listing, because the project is anonymous and has no paid Play identity to publish
-or sign under. That's deliberate, but it means Android treats NOOP as an "unknown app" and **Google
-Play Protect** may warn or block on install — most stubbornly on stock Pixel / recent Android.
-Nothing is wrong with the file; it's just missing a Play signature. To get it on:
+The repository's downloadable Android artifact is a **source-available staging
+APK**, not a Play Store build. It uses the separate
+`com.noop.whoop.staging` application ID and the checked-in
+`android/fork-debug.keystore`. That key is intentionally public so community
+builds can update each other; it is **not** a private production trust anchor,
+and anyone can produce an APK bearing that staging signature.
+
+Because the APK comes from outside Google Play, Play Protect may still warn or
+block on install — most stubbornly on stock Pixel / recent Android. Verify the
+release digest and source revision before installing:
 
 1. **Tap "Install anyway."** When the warning appears, choose **More details → Install anyway**.
 2. **If that button is missing** — it can vanish after a first install + uninstall — grant the source
@@ -234,9 +242,9 @@ Nothing is wrong with the file; it's just missing a Play signature. To get it on
 3. **If Play Protect still refuses**, it's your call for an unsigned app you trust: **Play Store →
    profile icon → Play Protect → ⚙ Settings → "Scan apps with Play Protect" off**, install NOOP,
    then switch it **back on**.
-4. **Reinstalling is safe.** The app sets `android:allowBackup="false"` and keeps everything in
-   private on-device storage, so uninstalling and reinstalling simply starts fresh — there's no cloud
-   copy to lose, and nothing leaves the device either way.
+4. **Uninstalling erases local app data.** The app sets
+   `android:allowBackup="false"`. Export a local backup first; a self-hosted
+   archival copy is separate and only exists if you explicitly enabled sync.
 
 A sample-data **demo** flavour still exists for exploring every screen with no strap, but it's
 **build-from-source only** (`./gradlew assembleDemoDebug`) and is no longer published as a release
@@ -603,24 +611,28 @@ UI, keep that parity.
 
 ---
 
-## Permissions and the no-internet posture
+## Permissions and the local-first network posture
 
-The manifest is deliberately minimal and **declares no `INTERNET` permission** — nothing leaves the
-device. Permissions, straight from `android/app/src/main/AndroidManifest.xml`:
+The manifest is deliberately minimal. It declares `INTERNET` for explicit network actions:
+the bring-your-own-key Coach, the user-configured self-hosted sync server, and the
+user-initiated release check. Collection, storage, and analysis do not use it on their own.
+Permissions, straight from `android/app/src/main/AndroidManifest.xml`:
 
 | Permission | API range | Why |
 | --- | --- | --- |
+| `INTERNET` | all | optional Coach/self-hosted sync and a manually triggered update check |
 | `BLUETOOTH_SCAN` (`neverForLocation`) | 31+ | scan for the strap; opt out of location coupling |
 | `BLUETOOTH_CONNECT` | 31+ | connect / bond / GATT I/O |
 | `BLUETOOTH`, `BLUETOOTH_ADMIN` | ≤30 | legacy install-time BLE perms |
-| `ACCESS_FINE_LOCATION` | ≤30 | required for BLE scans on API 26–30 only |
+| `ACCESS_FINE_LOCATION` | all | BLE scans on API 26–30; an explicitly started GPS workout on newer Android |
 | `FOREGROUND_SERVICE` | all | keep the link alive while backgrounded |
 | `FOREGROUND_SERVICE_CONNECTED_DEVICE` | 34+ | typed foreground service for the GATT connection |
 | `<uses-feature bluetooth_le required="true">` | — | BLE is mandatory hardware |
 
 On API 31+ you must **request `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` at runtime** before scanning
 or connecting. `android:allowBackup="false"` and the `data_extraction_rules.xml` keep the local DB
-out of cloud/device-transfer backups — consistent with "your data stays on your device."
+out of Android cloud/device-transfer backups. Self-hosted upload remains a separate,
+visible opt-in controlled inside NOOP.
 
 ---
 
@@ -639,8 +651,9 @@ should be re-verified against a real build, a real device, and a real strap befo
       `app/proguard-rules.pro`.
 - [x] `./gradlew :app:testDebugUnitTest` is green (analytics vectors).
 - [x] `./gradlew assembleDebug` produces `app-debug.apk`.
-- [x] `./gradlew assembleFullRelease` / `assembleDemoRelease` succeed with R8 full mode + resource shrinking.
-- [x] APK declares **no `INTERNET` permission** (`aapt dump permissions app-debug.apk`).
+- [x] `./gradlew -PstagingRelease assembleFullRelease` succeeds with the separate staging identity.
+- [x] A non-staging release refuses to build without gitignored private signing configuration.
+- [x] APK declares `INTERNET` only for explicit opt-in features; fresh-install Self-hosted Sync is disabled.
 
 **Protocol parity (JVM, no device)**
 

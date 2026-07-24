@@ -1,58 +1,53 @@
 # Homebrew Cask (macOS)
 
-macOS users install + auto-update NOOP with:
+This fork does **not** currently publish a Homebrew tap. Build the app from
+source, or use a macOS artifact attached to a release in
+[`Dhanunjay-Divi/Noop`](https://github.com/Dhanunjay-Divi/Noop/releases) once one
+exists.
+
+The historical `NoopApp/homebrew-noop` tap belongs to the upstream project. Its
+artifacts do not contain this fork's self-hosted sync and comparison work, so
+this repository never updates or publishes to that tap.
+
+## Publishing a fork-owned tap
+
+Release maintainers may create a separate public
+`Dhanunjay-Divi/homebrew-noop` repository. After it exists, users can install
+with:
 
 ```bash
-brew tap noopapp/noop
-brew trust noopapp/noop    # required since Homebrew 6.0.0 (see note below)
+brew tap dhanunjay-divi/noop
+brew trust dhanunjay-divi/noop
 brew install --cask noop
-brew upgrade --cask noop   # later updates
+brew upgrade --cask noop
 ```
 
-The cask lives in the **`NoopApp/homebrew-noop`** tap on GitHub and points at the macOS `.zip`
-attached to each release.
+Homebrew requires explicit trust for non-official taps. Inspect the short cask
+before trusting it. The macOS release is ad-hoc signed rather than notarized, so
+Gatekeeper may also require **System Settings → Privacy & Security → Open
+Anyway** on first launch.
 
-> **Why `brew trust`?** Since **Homebrew 6.0.0** (June 2026), non-official taps must be explicitly
-> trusted before Homebrew will load their code — otherwise you'll see
-> `Error: Refusing to load cask noopapp/noop/noop from untrusted tap`. Trust is a one-time,
-> per-machine decision (publishers can't pre-trust their own tap — only Homebrew's official taps are
-> trusted by default). Trust the whole tap with `brew trust noopapp/noop`, or just our cask with
-> `brew trust --cask noopapp/noop/noop`. It's the Homebrew equivalent of the Gatekeeper
-> right-click-Open below: you're vouching for code you can read — the cask is one short file in the
-> public tap, and the app's full source is in this repo.
-
-> **Unsigned-app note.** NOOP ships anonymously with no Apple Developer ID, so it isn't notarized.
-> Homebrew can't strip the quarantine flag for an un-notarized app, so on **first launch** Gatekeeper
-> blocks it. On **macOS 15 Sequoia and later**: try to open NOOP once, then **System Settings →
-> Privacy & Security**, scroll down, and click **"Open Anyway"** next to NOOP. (On macOS 14 and
-> earlier you can right-click NOOP in `/Applications` → **Open** → **Open**.) The cask's `caveats`
-> says this. Updates after that are just `brew upgrade`.
-
-## How it stays current
-
-The cask is refreshed **as part of cutting each macOS release** — the last step of the release process
-runs:
+The release helper refuses to guess a tap owner. To update a fork-owned tap,
+provide it explicitly:
 
 ```bash
-Tools/update-homebrew-cask.sh <version>     # e.g. Tools/update-homebrew-cask.sh 1.95
+NOOP_HOMEBREW_TAP_ORG=Dhanunjay-Divi \
+  Tools/update-homebrew-cask.sh 9.1.1 dist/NOOP-macos-v9.1.1.zip
 ```
 
-That script computes the release zip's SHA256, regenerates `Casks/noop.rb`, and pushes it to the tap.
-There is **no GitHub Actions workflow / repo secret** — releases are cut by hand, so the cask update
-rides along with them. Fewer secrets, nothing to fail, one less surface to keep anonymous.
+To opt the broader manual release helper into that step, also set
+`NOOP_RELEASE_HOMEBREW=1`.
 
-## Requirements
+The helper:
 
-- The tap repo **`NoopApp/homebrew-noop`** exists (public). ✅ done.
-- The NoopApp PAT at `~/.config/noop/gh_token` (the same one used to push releases) has
-  **Contents: Read and write** on `homebrew-noop`. The script reads the token from that file and
-  supplies it through a transient git credential helper, so **the token never appears on a command
-  line, in a remote URL, or in any output** (a clean remote URL is used for clone + push).
+- calculates the release ZIP's SHA-256 digest;
+- generates `Casks/noop.rb` with downloads and homepage pointing to
+  `Dhanunjay-Divi/Noop`;
+- reads the GitHub token from `~/.config/noop/gh_token`;
+- supplies credentials through a transient Git credential helper rather than a
+  command-line URL; and
+- never targets a Forge mirror unless `NOOP_HOMEBREW_FORGE=1` and all `FORGE_*`
+  coordinates are supplied explicitly.
 
-## Anonymity checklist
-
-- Tap repo + commits under the anonymous **NoopApp** identity (the script commits as
-  `NoopApp <thenoopapp@gmail.com>`).
-- Token read from the local file only; never echoed. Scope it to the repos it needs and no more.
-- The cask installs the **already-anonymized** release zip (scrubbed by `Tools/anonymize-macos-app.sh`
-  at build time) — no new surface.
+Scope the token to **Contents: read and write** on the fork-owned tap repository
+only. Do not reuse a token belonging to the upstream project.

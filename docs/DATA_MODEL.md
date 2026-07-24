@@ -1,10 +1,13 @@
 # NOOP — On-Device Data Model
 
-NOOP is a standalone, fully offline companion app for WHOOP straps (4.0 and 5.0). It talks to
-the user's own strap directly over Bluetooth Low Energy — no WHOOP cloud or account
-is involved, and stores everything it decodes locally in a single SQLite database.
-This document describes that on-device database: every table, its columns, natural keys, indexes,
-and the migration history that produced the current schema.
+NOOP is a standalone, local-first companion app for WHOOP straps (4.0 and 5.0). It talks to
+the user's own strap directly over Bluetooth Low Energy—no WHOOP cloud or account
+is involved—and stores everything it decodes locally in a SQLite database. The
+optional self-hosted service can receive a documented subset; it does not replace
+this on-device database or turn it into a two-way cloud store.
+This document describes the core on-device tables, their natural keys, and the
+full migration map. `Database.swift` remains authoritative for every column and
+index.
 
 > **Scope note.** Interacting with the strap here means interoperating with the user's *own*
 > device and the data it has already recorded. NOOP is **not affiliated with, endorsed by, or
@@ -48,7 +51,8 @@ On a typical macOS install that resolves to
 ### Connection configuration
 
 `WhoopStore.init(path:)` (`Packages/WhoopStore/Sources/WhoopStore/WhoopStore.swift`) opens a
-single `DatabaseQueue` and applies these PRAGMAs before any query runs:
+`DatabasePool` (a `DatabaseQueue` is used for in-memory tests) and applies these
+settings before any query runs:
 
 | PRAGMA | Value | Why |
 | --- | --- | --- |
@@ -59,29 +63,24 @@ single `DatabaseQueue` and applies these PRAGMAs before any query runs:
 | `temp_store` | `MEMORY` | In-memory temp tables. |
 | `busyMode` | `.timeout(5)` | 5-second busy timeout under write contention. |
 
-`WhoopStore` is an `actor`: all GRDB calls run on the actor's serial executor (off the main
-thread) through the `syncRead` / `syncWrite` helpers. `WhoopStoreInfo.schemaVersion` is a
-separate, manually-maintained constant (currently `18`) that has lagged the real migration
-history for a while and should not be read as the schema's true version. The migrator itself
-(`makeMigrator()`, below) is the source of truth for what tables/columns exist, and has run
-through **v25** (`v25-oura-raw` — the Oura raw-payload archive, the newest addition; see
-below).
+`WhoopStore` is an `actor`: GRDB calls enter through the actor, while the pool can
+serve committed WAL read snapshots alongside the single writer. The migrator
+(`makeMigrator()`, below) is the source of truth for what tables/columns exist and
+currently runs through **v30** (`v30-remote-sync-pending-indexes`).
 
 ---
 
 ## Schema at a glance
 
-The schema falls into five groups (this section predates, and undercounts, everything added
-after v9 — see the schema-version note above; the Oura raw archive below is the one
-post-v9 addition currently documented here):
+The schema falls into these groups:
 
 | Group | Tables | Origin |
 | --- | --- | --- |
-| **Device registry** | `device` | BLE pairing |
-| **Decoded streams** (durable) | `hrSample`, `rrInterval`, `event`, `battery`, `spo2Sample`, `skinTempSample`, `respSample`, `gravitySample` | Decoded from strap frames on-device |
+| **Device/source registry** | `device`, `pairedDevice`, `dayOwnership` | BLE pairing, source capabilities, active/day ownership |
+| **Decoded streams** (durable) | `hrSample`, `rrInterval`, `event`, `battery`, `spo2Sample`, `skinTempSample`, `respSample`, `gravitySample`, `stepSample`, `ppgHrSample`, `sleepStateSample`, `ppgWaveformSample`, `rawImuSample` | Decoded from strap frames on-device |
 | **Raw outbox** (transient) | `rawBatch` | Compressed raw BLE frames, prunable |
 | **Bookkeeping** | `cursors` | Highwater / read cursors |
-| **Metric caches** | `sleepSession`, `dailyMetric`, `journal`, `workout`, `appleDaily`, `metricSeries` | Derived metrics + CSV / Apple-Health imports |
+| **Metric and user-data stores** | `sleepSession`, `dailyMetric`, `journal`, `workout`, `appleDaily`, `metricSeries`, `labMarker`, `liveSession` | Derived metrics, imports, user-entered labs, coaching sessions |
 | **Oura raw archive** (durable, v25) | `ouraRaw` | Verbatim Oura API payloads behind the opt-in cloud import — see below |
 
 All timestamp columns named `ts`, `startTs`, `endTs`, `capturedAt`, etc. are **unix seconds**
@@ -101,19 +100,46 @@ Migrations are registered in `Packages/WhoopStore/Sources/WhoopStore/Database.sw
 | **v2** | `cursors` key/value table for highwater bookkeeping. |
 | **v3** | Type-47 biometric streams: `spo2Sample`, `skinTempSample`, `respSample`, `gravitySample`. |
 | **v4** | Local metric caches: `sleepSession` (one row per session) and `dailyMetric` (one row per calendar day). |
-| **v5** | Adds a `synced` integer column (default `0`) to all eight decoded-stream tables. **Vestigial** — see below. |
+| **v5** | Adds a `synced` integer delivery marker (default `0`) to the original eight decoded-stream tables. |
 | **v6** | Adds nullable `charging` boolean to `battery` for the dense BATTERY_LEVEL series. |
 | **v7** | Adds in-sleep signal aggregates to `dailyMetric`: `spo2Pct`, `skinTempDevC`, `respRateBpm` (all nullable). |
 | **v8** | Adds `journal`, `workout`, and `appleDaily` (Apple-Health daily aggregates). |
 | **v9** | Adds the generic long-format `metricSeries` table and its `(deviceId, key, day)` index. |
+| **v10** | Adds the cumulative `stepSample` stream. |
+| **v11** | Adds daily steps and estimated active calories. |
+| **v12** | Adds PPG-derived `ppgHrSample`, kept separate from measured HR. |
+| **v13–v14** | Add user-edited sleep-bound metadata without changing the detected natural key. |
+| **v15–v16** | Add the paired-device/day-ownership registry and stable BLE peripheral identity. |
+| **v17** | Adds user-entered `labMarker` records. |
+| **v18** | Adds per-session sleep motion/state JSON columns. |
+| **v19** | Adds the optional activity class to `stepSample`. |
+| **v20** | Adds numeric journal values. |
+| **v21** | Adds raw `sleepStateSample` rows. |
+| **v22** | Adds `liveSession` coaching records. |
+| **v23** | Adds daily raw optical red/IR aggregates. |
+| **v24** | Adds R-R `seq` and widens the natural key to preserve equal same-second beats. |
+| **v25** | Adds the opt-in Oura raw-payload archive. |
+| **v26** | Normalizes legacy sleep-efficiency values to the canonical fraction. |
+| **v27–v28** | Add packed PPG waveform and raw IMU sample stores. |
+| **v29** | Adds the durable self-host delivery marker to `stepSample`. |
+| **v30** | Adds partial indexes over pending self-hosted-sync rows. |
 
-### The vestigial `synced` column
+### Decoded-row remote-delivery markers
 
-Migration v5 added a per-row `synced` integer (`NOT NULL DEFAULT 0`) to each of the eight
-decoded-stream tables. It dates from a since-removed server-upload feature. **NOOP is fully
-offline: nothing writes or reads `synced`.** The insert path explicitly never sets it
-(`StreamStore.swift`), and no read query references it. The column is left in place only to avoid
-a `DROP COLUMN` migration over potentially millions of existing rows. Treat it as dead schema.
+Migration v5 added `synced INTEGER NOT NULL DEFAULT 0` to the original eight
+decoded streams, and v29 added it to `stepSample`. For the streams in the v1
+wire contract (HR, R-R, event, battery, raw optical, raw temperature, raw
+respiration, and steps), new rows start pending (`0`). The optional self-hosted
+uploader changes exactly the uploaded natural keys to `1` only after the server
+returns a matching accepted acknowledgement. A destination replay resets those
+supported rows to `0`. `gravitySample` retains its v5 column but is outside the
+current v1 upload contract.
+
+These flags are delivery bookkeeping, not evidence that the complete local
+database exists remotely. The v1 API omits several tables, including gravity,
+sleep-state, PPG waveform, raw IMU, `rawBatch`, Oura raw pages, arbitrary
+`metricSeries`, and lab/live-session records. Local deletion also does not send a
+server tombstone.
 
 ---
 
@@ -163,7 +189,7 @@ ASC LIMIT ?`.
 | `deviceId` | TEXT NOT NULL | Part of PK. |
 | `ts` | INTEGER NOT NULL | Wall-clock unix seconds. Part of PK. |
 | `bpm` | INTEGER NOT NULL | Beats per minute. |
-| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5, vestigial)* |
+| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5)* Self-hosted delivery marker: `0` pending, `1` accepted. |
 
 **Primary key:** `(deviceId, ts)`. HR is taken only from `REALTIME_DATA` (type 40) frames.
 `latestHRSampleTs(deviceId:)` returns `MAX(ts)` here — the biometric "data frontier" used by the
@@ -176,10 +202,12 @@ stuck-strap watchdog.
 | `deviceId` | TEXT NOT NULL | Part of PK. |
 | `ts` | INTEGER NOT NULL | Wall-clock unix seconds. Part of PK. |
 | `rrMs` | INTEGER NOT NULL | Beat-to-beat interval, milliseconds. Part of PK. |
-| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5, vestigial)* |
+| `seq` | INTEGER NOT NULL DEFAULT 0 | *(v24)* Disambiguates equal intervals in the same timestamp bucket. Part of PK. |
+| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5)* Self-hosted delivery marker: `0` pending, `1` accepted. |
 
-**Primary key:** `(deviceId, ts, rrMs)` — `rrMs` is in the key because multiple R-R intervals can
-share a single `REALTIME_DATA` timestamp. Reads order by `ts ASC, rrMs ASC`.
+**Primary key:** `(deviceId, ts, rrMs, seq)`. `seq` prevents a second equal R-R
+interval in the same `REALTIME_DATA` timestamp bucket from colliding with the
+first. Rows created before v24 were migrated with `seq = 0`.
 
 ### `event` *(v1)* — strap events
 
@@ -189,7 +217,7 @@ share a single `REALTIME_DATA` timestamp. Reads order by `ts ASC, rrMs ASC`.
 | `ts` | INTEGER NOT NULL | Real RTC unix seconds (never offset). Part of PK. |
 | `kind` | TEXT NOT NULL | Event name (e.g. `BATTERY_LEVEL(3)`). Part of PK. |
 | `payloadJSON` | TEXT NOT NULL | Decoded payload as JSON. |
-| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5, vestigial)* |
+| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5)* Self-hosted delivery marker: `0` pending, `1` accepted. |
 
 **Primary key:** `(deviceId, ts, kind)`. `payloadJSON` is serialized with `JSONEncoder`'s
 `.sortedKeys` so the same payload is byte-identical every time — important for the natural-key
@@ -204,7 +232,7 @@ dedupe. Reads decode it back into `[String: ParsedValue]` with a shared, reused 
 | `soc` | DOUBLE | State of charge (%), nullable. |
 | `mv` | INTEGER | Millivolts, nullable. |
 | `charging` | BOOLEAN | *(v6)* Nullable — only the dense BATTERY_LEVEL event series reports it; the command-response path leaves it `NULL`. |
-| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5, vestigial)* |
+| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5)* Self-hosted delivery marker: `0` pending, `1` accepted. |
 
 **Primary key:** `(deviceId, ts)`. (Note: `batterySamples(...)` reads back only `ts, soc, mv`.)
 
@@ -221,7 +249,7 @@ inserts, identical range-read shape).
 | `ts` | INTEGER NOT NULL | Unix seconds. Part of PK. |
 | `red` | INTEGER NOT NULL | Red LED raw ADC. |
 | `ir` | INTEGER NOT NULL | IR LED raw ADC. |
-| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5, vestigial)* |
+| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5)* Self-hosted delivery marker: `0` pending, `1` accepted. |
 
 **Primary key:** `(deviceId, ts)`.
 
@@ -232,7 +260,7 @@ inserts, identical range-read shape).
 | `deviceId` | TEXT NOT NULL | Part of PK. |
 | `ts` | INTEGER NOT NULL | Unix seconds. Part of PK. |
 | `raw` | INTEGER NOT NULL | Raw ADC reading. |
-| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5, vestigial)* |
+| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5)* Self-hosted delivery marker: `0` pending, `1` accepted. |
 
 **Primary key:** `(deviceId, ts)`.
 
@@ -243,7 +271,7 @@ inserts, identical range-read shape).
 | `deviceId` | TEXT NOT NULL | Part of PK. |
 | `ts` | INTEGER NOT NULL | Unix seconds. Part of PK. |
 | `raw` | INTEGER NOT NULL | Raw ADC reading. |
-| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5, vestigial)* |
+| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5)* Self-hosted delivery marker: `0` pending, `1` accepted. |
 
 **Primary key:** `(deviceId, ts)`.
 
@@ -256,7 +284,7 @@ inserts, identical range-read shape).
 | `x` | DOUBLE NOT NULL | Gravity vector X (g). |
 | `y` | DOUBLE NOT NULL | Gravity vector Y (g). |
 | `z` | DOUBLE NOT NULL | Gravity vector Z (g). |
-| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5, vestigial)* |
+| `synced` | INTEGER NOT NULL DEFAULT 0 | *(v5)* Legacy marker; gravity is not in the current v1 upload contract. |
 
 **Primary key:** `(deviceId, ts)`.
 
@@ -282,10 +310,14 @@ raw batches are **transient and prunable**. Implementation in `RawOutbox.swift`.
 | `frameCount` | INTEGER NOT NULL | Number of frames packed. |
 | `byteSize` | INTEGER NOT NULL | Size used for `storageStats()` totals. |
 | `framesBlob` | BLOB NOT NULL | zlib-compressed packed frames (length-prefixed). |
-| `syncedAt` | INTEGER | Unix seconds; `NULL` until marked. |
+| `syncedAt` | INTEGER | Legacy/pruning marker timestamp; `NULL` until explicitly marked. This is not a v1 self-host upload receipt. |
 
 **Primary key:** `batchId`. Frames are packed as `[count u32 LE]{[len u32 LE][bytes]}×count`,
 then zlib-compressed with a 4-byte uncompressed-length prefix.
+
+`rawBatch` is not part of the self-hosted v1 payload. Its historical
+`syncedAt` field is used by the local prune policy, while decoded sample tables
+use their integer `synced` flags for remote delivery.
 
 **Pruning policy** (`pruneRaw(now:keepWindowSeconds:maxUnsyncedBytes:)`): only batches with a
 non-null `syncedAt` older than `now - keepWindowSeconds` are deleted — safe because the decoded
@@ -450,8 +482,7 @@ those reads index-only. Accessors: `upsertMetricSeries(...)`, `metricSeries(...)
 
 ## Oura raw-payload archive
 
-This section documents the one table added after this document's v9 baseline (see the
-schema-version note above): the lossless backstop behind the opt-in Oura history import
+This section documents the lossless backstop behind the opt-in Oura history import
 (off by default; user-initiated OAuth backfill — `docs/PRIVACY_SECURITY.md` §1.1b). It is
 **not** a metric cache like the tables above — it stores verbatim API responses, not decoded
 values, so any field Oura returns can be re-derived later without re-fetching.
@@ -498,9 +529,11 @@ too, not left behind.
 | *(implicit PK)* | every table above | (its natural key) | Dedupe + primary lookup. |
 | `idx_metricSeries_device_key_day` | `metricSeries` | `deviceId, key, day` | Index-only per-metric range reads. |
 | `idx_ouraRaw_device_endpoint_day` | `ouraRaw` | `deviceId, endpoint, day` | Index-only per-endpoint range reads. |
+| `idx_remoteSync_*_pending` | supported decoded streams | Natural-key prefix, partial `WHERE synced = 0` | Keeps v1 outbox scans proportional to pending rows. |
 
-Every other table relies on its primary-key index; the decoded-stream and date-range reads are all
-served by the `(deviceId, ts)` / `(deviceId, day)` / `(deviceId, startTs)` primary keys.
+Most range reads start with the corresponding natural-key prefix. Additional
+registry, lab, live-session, and pending-delivery indexes are listed
+authoritatively in `Database.swift`.
 
 ---
 
@@ -516,5 +549,6 @@ The frame parsing, CRC, and command/event/packet decode that feed the decoded-st
 live in the `WhoopProtocol` package; persistence is `WhoopStore`; the local recovery / strain /
 HRV / sleep math is `StrandAnalytics`; and the CSV / Apple-Health importers are `StrandImport`.
 
-> **Reminder.** NOOP is not affiliated with WHOOP and is not a medical device. All stored data is
-> the user's own, kept entirely on the user's device.
+> **Reminder.** NOOP is not affiliated with WHOOP and is not a medical device. The
+> local database remains on the user's device. A user who explicitly enables
+> Self-hosted Sync sends the documented v1 subset to their configured server.

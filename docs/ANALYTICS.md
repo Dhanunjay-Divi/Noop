@@ -1,6 +1,6 @@
 # NOOP Analytics
 
-On-device analytics for **NOOP** — a standalone, fully offline companion app for WHOOP straps (4.0 and 5.0/MG). NOOP talks to *your own* strap over Bluetooth, stores everything locally in SQLite, and computes its three daily scores plus HRV and sleep staging on-device. There is no cloud and no account involved in any of the math described here.
+On-device analytics for **NOOP** — a standalone, local-first companion app for WHOOP straps (4.0 and 5.0/MG). NOOP talks to *your own* strap over Bluetooth, stores everything locally in SQLite, and computes its three daily scores plus HRV and sleep staging on-device. No cloud or account is involved in the math described here; an optional self-hosted sync can copy results to a server you control.
 
 ## NOOP's three daily scores — Charge / Effort / Rest
 

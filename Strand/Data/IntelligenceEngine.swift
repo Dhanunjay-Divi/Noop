@@ -27,6 +27,17 @@ final class IntelligenceEngine: ObservableObject {
     @Published var computing = false
     @Published var note: String?
 
+    /// Evidence returned only after a scoring pass reaches its persistence boundary.
+    ///
+    /// `whoopStrapDays` is deliberately narrower than `results`: it contains only days whose completed
+    /// pass read a dense raw-HR window from a registered WHOOP device (or the legacy `my-whoop` owner).
+    /// Import-only Apple/Health Connect/wearable folds never enter this set. Compare uses this receipt
+    /// instead of the dashboard's `DaySource`, because `.whoopImport` describes which row wins display
+    /// precedence and is not evidence that a local raw-stream computation happened.
+    struct ScoreRunReceipt: Equatable, Sendable {
+        let whoopStrapDays: Set<String>
+    }
+
     /// #899-A re-arm: a `force: true` recompute (a post-backfill rescore AppModel kicks off after a sync)
     /// that arrives while an idle-tick pass already holds the `computing` lock would otherwise be SILENTLY
     /// dropped, so a freshly-synced night intermittently never gets re-scored until the next cycle and Today
@@ -350,17 +361,21 @@ final class IntelligenceEngine: ObservableObject {
     /// Compute on-device scores for each of the last `maxDays` that actually has raw HR data.
     /// Personal baselines (HRV / resting HR) are folded from the imported history, so even the first
     /// live night can be scored against your norm.
-    func analyzeRecent(maxDays: Int = 21, force: Bool = true) async {
+    @discardableResult
+    func analyzeRecent(maxDays: Int = 21, force: Bool = true) async -> ScoreRunReceipt? {
         // #899-A: a concurrent pass already holds the lock. A NON-forced idle tick is safe to drop (the
         // in-flight pass already covers the same window). But a FORCED call is a real update path (a
         // post-backfill rescore after a sync) , dropping it would leave a freshly-synced night unscored
         // until the next cycle. Re-arm instead: flag it so the running pass's `defer` re-invokes once.
-        guard !computing else { if force { pendingForcedRescore = true }; return }
-        guard let store = await repo.storeHandle() else { note = String(localized: "No on-device store yet."); return }
+        guard !computing else { if force { pendingForcedRescore = true }; return nil }
+        guard let store = await repo.storeHandle() else {
+            note = String(localized: "No on-device store yet.")
+            return nil
+        }
         guard let hrvCfg = Baselines.metricCfg["hrv"],
               let rhrCfg = Baselines.metricCfg["resting_hr"],
               let respCfg = Baselines.metricCfg["resp"],
-              let skinCfg = Baselines.metricCfg["skin_temp"] else { return }
+              let skinCfg = Baselines.metricCfg["skin_temp"] else { return nil }
 
         // #836 (idle-tick gate): re-scoring a 21-day window re-reads ~21×54 h of raw HR and re-runs
         // analyzeDay over it. After a big Apple Health import (a reporter's: 2.1 M rows, ~190 k HR/day) that
@@ -376,7 +391,7 @@ final class IntelligenceEngine: ObservableObject {
             .map { "\($0.count):\($0.maxTs)" } ?? ""
         if !force, !wmKey.isEmpty,
            UserDefaults.standard.string(forKey: Self.analyzeWatermarkKey) == wmKey {
-            return
+            return nil
         }
 
         computing = true
@@ -419,6 +434,9 @@ final class IntelligenceEngine: ObservableObject {
         // imported HRV/RHR/resp fields from computed values). Using the merge contaminated this very
         // "imported-only" baseline with computed values and made the fold window depend on whichever
         // refresh last ran (4000 vs 120 days). This mirrors the Android port's `days(importedDeviceId)`.
+        // Source-separation invariant: only non-outcome physiology (HRV / resting HR / respiration below)
+        // and sleep timing (habitual midsleep) may seed local context. Imported Recovery, Strain and Sleep
+        // Performance are never read by the raw-score formulas and are reference outcomes only.
         let hist = ((try? await store.dailyMetrics(deviceId: deviceId, from: "0000-01-01", to: "9999-12-31")) ?? [])
             .sorted { $0.day < $1.day }
         // HRV baseline honours the manual "Recalibrate baseline" epoch (noop.hrvBaselineEpoch); the
@@ -888,6 +906,9 @@ final class IntelligenceEngine: ObservableObject {
         var dailies: [DailyMetric] = []
         var cachedSleep: [CachedSleepSession] = []
         var workoutRows: [WorkoutRow] = []
+        // Current-pass comparison evidence. This is populated only inside the raw-night fold below,
+        // before Apple/watch/wearable aggregate folds append their own `Computed` rows.
+        var freshlyScoredWhoopStrapDays = Set<String>()
         // #510: backfilled fields for a REAL (non-detected) row a dropped bout collided with, grouped by
         // the deviceId it must be upserted under (see the collision branch below) — never mixed into
         // `workoutRows`, which is always written under `computedId`.
@@ -977,6 +998,12 @@ final class IntelligenceEngine: ObservableObject {
                                 sleepMin: daily.totalSleepMin, hrv: daily.avgHrv,
                                 rhr: daily.restingHr, source: source, confidence: chargeConf,
                                 drivers: drivers, skinTempRel: skinRel))
+            if let owned = readOwnerByDay[daily.day],
+               owned.hrRows >= 200,
+               Self.isWhoopStrapOwner(
+                   owned.owner, devices: regDevices, fallbackDeviceId: ownerFallbackId) {
+                freshlyScoredWhoopStrapDays.insert(daily.day)
+            }
             // ── Per-day scoring diagnostic (Sleep overhaul §2.5) ─────────────────────────────────────
             // ONE concise, privacy-safe line per scored day into the shareable strap log: the day key, the
             // FINAL computed total-sleep minutes (after any edit substitution), how many sleep blocks the
@@ -1166,8 +1193,20 @@ final class IntelligenceEngine: ObservableObject {
         // Fitness Age gate can't be undercut by this pass's own scoring/eviction. Windowed to the range.
         let faPriorDaily = await repo.dailyMetrics(fromDay: oldestDay, toDay: newestDay)
 
-        // Upsert FIRST so the row count never transiently dips (#521).
-        if !dailies.isEmpty { _ = try? await store.upsertDailyMetrics(dailies, deviceId: computedId) }
+        // Upsert FIRST so the row count never transiently dips (#521). Comparison evidence is promoted
+        // only after this transaction succeeds: a freshly computed in-memory day paired with an old stored
+        // row after a failed write would otherwise mislabel that stale row as the current algorithm.
+        var persistedWhoopStrapDays = Set<String>()
+        if !dailies.isEmpty {
+            do {
+                _ = try await store.upsertDailyMetrics(dailies, deviceId: computedId)
+                persistedWhoopStrapDays = freshlyScoredWhoopStrapDays
+                    .intersection(dailies.lazy.map(\.day))
+            } catch {
+                diagnosticSink?(
+                    "score persist failed; official-reference comparison receipt withheld", nil)
+            }
+        }
 
         // Now evict only the STALE computed rows in the window , those a prior (e.g. UTC-keyed) run left
         // behind that the current local-keyed run no longer produces. Read the window, diff against the
@@ -1463,12 +1502,31 @@ final class IntelligenceEngine: ObservableObject {
         // short-circuit while it's unchanged. Written ONLY here at the end of a completed run (never on an
         // early guard-return), so an interrupted/failed run can't advance the watermark past unscored data.
         if !wmKey.isEmpty { UserDefaults.standard.set(wmKey, forKey: Self.analyzeWatermarkKey) }
+        return ScoreRunReceipt(whoopStrapDays: persistedWhoopStrapDays)
     }
 
     /// UserDefaults key for the #836 idle-tick gate: the `(count:maxTs)` HR fingerprint the last completed
     /// `analyzeRecent` scored against. A non-forced tick whose current fingerprint equals this skips the
     /// 21-day rescore; cleared implicitly by any HR insert/delete (the fingerprint moves), so it self-heals.
     private static let analyzeWatermarkKey = "noop.analyzeWatermark"
+
+    /// Whether a raw-stream owner is a WHOOP device eligible for official-reference comparison.
+    ///
+    /// Fail closed for every registered non-WHOOP or import-only source. The sole compatibility fallback
+    /// is the legacy canonical owner when no registry row can be read; that row was the only WHOOP owner
+    /// before the registry migration. A registered row always wins over the fallback string, so a corrupt
+    /// or repurposed `my-whoop` import row cannot be promoted merely by its id.
+    nonisolated static func isWhoopStrapOwner(
+        _ owner: String,
+        devices: [PairedDevice],
+        fallbackDeviceId: String
+    ) -> Bool {
+        if let device = devices.first(where: { $0.id == owner }) {
+            guard device.brand.caseInsensitiveCompare("WHOOP") == .orderedSame else { return false }
+            return device.sourceKind == .liveBLE || device.sourceKind == .historyBLE
+        }
+        return owner == fallbackDeviceId
+    }
 
     /// CAPTURE-B (#814/#799): build the universal `dayOwner …` self-diagnostic line VERBATIM (the Test
     /// Centre export parser depends on this exact shape). `readId` is the owner this day was read+scored

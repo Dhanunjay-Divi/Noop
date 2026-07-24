@@ -227,6 +227,9 @@ public struct WhoopCycleRow: Sendable, Equatable {
     public var sleepConsistencyPct: Double?
     public var sleepNeedMin: Double?
     public var sleepDebtMin: Double?
+    /// Optional trailing `Source` column. Genuine WHOOP exports omit it; NOOP's portable exporter uses
+    /// it to keep on-device estimates distinguishable from imported WHOOP reference values.
+    public var sourceLabel: String?
 
     public init() {
         self.cycleStart = nil
@@ -258,6 +261,8 @@ public struct WhoopSleepRow: Sendable, Equatable {
     public var sleepConsistencyPct: Double?
     public var sleepNeedMin: Double?
     public var sleepDebtMin: Double?
+    /// Optional trailing `Source` column; see `WhoopCSVRowProvenance`.
+    public var sourceLabel: String?
 
     public init() {
         self.cycleStart = nil
@@ -293,12 +298,44 @@ public struct WhoopWorkoutRow: Sendable, Equatable {
     public var distanceMeters: Double?
     public var altitudeGainMeters: Double?
     public var altitudeChangeMeters: Double?
+    /// Optional trailing `Source` column; see `WhoopCSVRowProvenance`.
+    public var sourceLabel: String?
 
     public init() {
         self.cycleStart = nil
         self.workoutStart = nil
         self.workoutEnd = nil
         self.tzOffsetMin = 0
+    }
+}
+
+// MARK: - WHOOP-shaped CSV row provenance
+
+/// Provenance carried by NOOP's optional trailing `Source` column.
+///
+/// A real WHOOP export has no such column, so an absent/blank value is an official reference. NOOP's
+/// own exporter writes `import` for rows originally imported from WHOOP, `noop (APPROXIMATE)` for
+/// local estimates, and `manual` for user-entered workouts. Any other non-empty value is intentionally
+/// quarantined: silently calling an unknown producer "official WHOOP" would make a later personal
+/// calibration circular or untrustworthy.
+public enum WhoopCSVRowProvenance: String, Sendable, Equatable {
+    case officialReference
+    case noopApproximate
+    case noopLocal
+    case unknown
+
+    public static let noopApproximateLabel = "noop (APPROXIMATE)"
+
+    public static func classify(sourceLabel: String?) -> Self {
+        guard let sourceLabel else { return .officialReference }
+        let normalized = sourceLabel
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalized.isEmpty else { return .officialReference }
+        if normalized == noopApproximateLabel.lowercased() { return .noopApproximate }
+        if normalized == "manual" { return .noopLocal }
+        if normalized == "import" || normalized == "whoop" { return .officialReference }
+        return .unknown
     }
 }
 

@@ -44,6 +44,9 @@ final class WhoopCsvExporterTests: XCTestCase {
         XCTAssertEqual(r.sleepConsistencyPct, 88)
         XCTAssertEqual(r.sleepNeedMin, 480)
         XCTAssertEqual(r.sleepDebtMin, 60)
+        XCTAssertEqual(r.sourceLabel, "import")
+        XCTAssertEqual(WhoopCSVRowProvenance.classify(sourceLabel: r.sourceLabel),
+                       .officialReference)
         // Day attribution survives: cycleStart parsed at UTC+00:00 maps back to 2026-06-01 00:00Z.
         XCTAssertEqual(r.tzOffsetMin, 0)
         XCTAssertEqual(r.cycleStart, Date(timeIntervalSince1970: 1_780_272_000))
@@ -70,6 +73,7 @@ final class WhoopCsvExporterTests: XCTestCase {
         XCTAssertEqual(back[0].distanceMeters, 8000)
         XCTAssertEqual(back[0].workoutStart, Date(timeIntervalSince1970: 1_750_000_000))
         XCTAssertEqual(back[0].workoutEnd, Date(timeIntervalSince1970: 1_750_003_600))
+        XCTAssertEqual(back[0].sourceLabel, "import")
     }
 
     func testSleepsRoundTripAllStageShapes() {
@@ -153,7 +157,7 @@ final class WhoopCsvExporterTests: XCTestCase {
             ("sleeps.csv", Data(WhoopCsvExporter.sleepsCSV([], cycleStart: { _ in "" }).utf8)),
             ("workouts.csv", Data(WhoopCsvExporter.workoutsCSV([]).utf8)),
             ("journal_entries.csv", Data(WhoopCsvExporter.journalCSV([]).utf8)),
-            // Sidecar + Source column must be ignored by the importer (it reads only the 4 CSVs).
+            // The JSON sidecar is ignored; the optional Source column is parsed only for provenance routing.
             ("noop_metric_series.json", Data("[]".utf8)),
         ]
         try WhoopCsvExporter.writeArchive(entries: entries, to: zipURL)

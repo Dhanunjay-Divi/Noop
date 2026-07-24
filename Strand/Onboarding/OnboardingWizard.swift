@@ -319,8 +319,8 @@ private struct WhatItDoesStep: View {
               body: String(localized: "Connect a WHOOP, a heart-rate strap or a gym machine and watch each beat in real time: heart rate, variability and zones as they happen. Already have history elsewhere? Import it from WHOOP, Apple Health, Oura, Fitbit or Garmin.")),
         .init(icon: "lock.shield",
               tint: StrandPalette.statusPositive,
-              title: String(localized: "Own your data, offline"),
-              body: String(localized: "Everything lives on \(Platform.deviceNounPhrase). No account, no sync, no cloud. Your thread is yours alone.")),
+              title: String(localized: "Private by default"),
+              body: String(localized: "Everything starts on \(Platform.deviceNounPhrase). No account or cloud is required. Data leaves only when you explicitly share it, use Coach, or enable your own self-hosted sync.")),
     ]
 
     var body: some View {
@@ -471,8 +471,8 @@ private struct BluetoothStep: View {
                 InfoCard(
                     icon: "lock.fill",
                     tint: StrandPalette.statusPositive,
-                    title: String(localized: "Nothing leaves your \(Platform.deviceNoun)"),
-                    message: String(localized: "NOOP talks to your strap directly over Bluetooth Low Energy. There's no server in the middle. The connection is local, and so is every reading it pulls in.")
+                    title: String(localized: "Direct, local Bluetooth"),
+                    message: String(localized: "NOOP talks straight to your strap over Bluetooth Low Energy, with no project server in the middle. Readings stay on this device unless you later enable an optional destination such as your own self-hosted server.")
                 )
 
                 Text("When the system prompt appears, choose Allow so NOOP can find your strap.")
@@ -975,7 +975,7 @@ private struct NotificationsStep: View {
 
                 VStack(spacing: 12) {
                     Checkline(text: String(localized: "Strain nudges and your smart alarm tap your wrist the moment they fire."))
-                    Checkline(text: String(localized: "It all stays on your strap and \(Platform.deviceNounPhrase): no account, no cloud."))
+                    Checkline(text: String(localized: "Collection and analysis stay on your strap and \(Platform.deviceNounPhrase). Network features are off until you explicitly configure one."))
                 }
                 .frame(maxWidth: 460)
                 #else

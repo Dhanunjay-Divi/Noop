@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Monochrome (themed-icon) layer: the NOOP ring + core as a single-colour silhouette. -->
+<!-- Monochrome/themed version of the original two-loop NOOP mark. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108"
     android:tint="#FFFFFF">
-    <path android:strokeWidth="9" android:strokeLineCap="round" android:strokeColor="#FFFFFF" android:fillColor="#00000000"
-        android:pathData="M76.1,69.5 A27,27 0 1 1 76.1,38.5"/>
-    <path android:fillColor="#FFFFFF" android:pathData="M54,46.5 a7.5,7.5 0 1 0 0,15 a7.5,7.5 0 1 0 0,-15 z"/>
+    <path android:strokeWidth="7" android:strokeLineCap="butt" android:strokeLineJoin="miter"
+        android:strokeColor="#FFFFFF" android:fillColor="#00000000"
+        android:pathData="M54,68 L43,50 C37,40 23,43 23,56 C23,68 33,73 47,73 L39,61"/>
+    <path android:strokeWidth="7" android:strokeLineCap="butt" android:strokeLineJoin="miter"
+        android:strokeColor="#FFFFFF" android:fillColor="#00000000"
+        android:pathData="M55,68 L64,51 L75,68 C89,63 90,46 78,42 C70,39 62,43 58,51"/>
 </vector>

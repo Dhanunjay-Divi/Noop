@@ -1,40 +1,107 @@
 NOOP — third-party notices
 ===========================
 
-NOOP's own source code and documentation are licensed under the PolyForm
-Noncommercial License 1.0.0 (see LICENSE). That license covers NOOP's original
-work only. The components and prior work below keep their own terms.
+NOOP's original source code and documentation are offered under the PolyForm
+Noncommercial License 1.0.0 (see LICENSE). Third-party code, inherited work,
+package-manager dependencies, container images, and protocol facts are not
+relicensed by that file.
 
-Bundled dependencies
---------------------
+This notice covers the direct runtime dependency families declared by the
+checked-in manifests. Exact resolved versions are authoritative in
+`Package.resolved`, `android/app/gradle.lockfile`,
+`android/gradle/verification-metadata.xml`, and `server/requirements.txt`.
+Transitive dependencies retain their own notices and licenses.
+
+Apple / Swift dependencies
+--------------------------
 
 GRDB.swift — https://github.com/groue/GRDB.swift
   License: MIT
-  Used for: SQLite persistence (the on-device store).
+  Used for: SQLite persistence and migrations.
 
 ZIPFoundation — https://github.com/weichsel/ZIPFoundation
   License: MIT
-  Used for: reading WHOOP / Apple Health export archives during import.
+  Used for: backup and user-selected export archives.
 
-The MIT license is permissive: these components may be used, modified, and
-redistributed (including commercially) on their own terms. When they are used as
-part of NOOP's combined work, the combined work as a whole is governed by NOOP's
-PolyForm Noncommercial license.
+swift-markdown-ui — https://github.com/gonzalezreal/swift-markdown-ui
+  License: MIT
+  Used for: rendering AI Coach Markdown.
 
-Prior reverse-engineering research
-----------------------------------
+NetworkImage — https://github.com/gonzalezreal/NetworkImage
+  License: MIT
+  Used transitively by swift-markdown-ui.
 
-NOOP builds on two community reverse-engineering efforts. Neither states a
-license; NOOP does not redistribute their code. NOOP uses only the uncopyrightable
-factual protocol information they document (BLE service/characteristic identifiers,
-frame layouts, CRC parameters, command/event/packet numbers, byte offsets) and
-re-implements those facts as original code — it does not copy their source.
+swift-cmark — https://github.com/swiftlang/swift-cmark
+  License: BSD-style terms in the upstream `COPYING` file, with separately
+           noticed bundled components.
+  Used transitively by swift-markdown-ui for CommonMark parsing.
 
-  johnmiddleton12/my-whoop — https://github.com/johnmiddleton12/my-whoop
-    WHOOP 4.0 BLE protocol facts.
+Android dependencies
+--------------------
 
-  b-nnett/goose — https://github.com/b-nnett/goose
-    WHOOP 5.0 / MG ("puffin") BLE protocol facts.
+AndroidX / Jetpack — https://github.com/androidx/androidx
+  License: Apache License 2.0
+  Families used: Compose and Material, Activity, Lifecycle, Navigation, Room,
+                 WorkManager, Security Crypto, Health Connect, and Glance.
 
-See ATTRIBUTION.md for fuller credit and DISCLAIMER.md for the interoperability and
-fair-use rationale.
+Kotlin and kotlinx.coroutines
+  https://github.com/JetBrains/kotlin
+  https://github.com/Kotlin/kotlinx.coroutines
+  License: Apache License 2.0
+  Used for: the Android runtime, coroutines, and structured background work.
+
+OkHttp / Okio — https://github.com/square/okhttp
+  License: Apache License 2.0
+  Used for: authenticated Android self-hosted sync.
+
+Test-only Android/JVM libraries such as JUnit, AndroidX Test, Espresso, JSON-java,
+and kXML are not shipped as application runtime code; they retain the licenses
+declared by their respective packages.
+
+Self-hosted server dependencies
+-------------------------------
+
+FastAPI — https://github.com/fastapi/fastapi
+  License: MIT
+
+Pydantic — https://github.com/pydantic/pydantic
+  License: MIT
+
+Starlette — https://github.com/encode/starlette
+  License: BSD 3-Clause
+
+Uvicorn — https://github.com/encode/uvicorn
+  License: BSD 3-Clause
+
+asyncpg — https://github.com/MagicStack/asyncpg
+  License: Apache License 2.0
+
+The optional Compose deployment pulls, rather than vendors, the official
+TimescaleDB image. TimescaleDB's repository contains components under Apache
+License 2.0, Apache-compatible licenses, and the Timescale License; PostgreSQL
+and base-image components retain their own terms. Review the exact image's
+notices before redistributing that container image.
+
+Project lineage and interoperability research
+---------------------------------------------
+
+ryanbr/noop — https://github.com/ryanbr/noop
+  This repository forks that active PolyForm Noncommercial codebase. Its Git
+  history, license, Required Notice (`Copyright 2026 NoopApp`), and contributor
+  attribution are preserved.
+
+johnmiddleton12/my-whoop — https://github.com/johnmiddleton12/my-whoop
+  The active base describes the WHOOP 4.0 Swift protocol/store packages and
+  collection layers as adapted from this work. No separate software license file
+  is present in that repository; this notice does not claim or create one.
+
+b-nnett/goose — https://github.com/b-nnett/goose
+  Consulted for observed WHOOP 5.0 / MG wire-protocol facts. No software license
+  file is present, so this fork copies no source or assets from it.
+
+tigercraft4/goose — https://github.com/tigercraft4/goose
+  Self-hosting inspiration only. This fork's server and sync clients are
+  independently implemented; no source or assets are copied from it.
+
+Additional research credits, clean-room boundaries, trademark disclaimers, and
+component-specific links are maintained in ATTRIBUTION.md and DISCLAIMER.md.

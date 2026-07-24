@@ -14,7 +14,8 @@ be checked.
 > are approximations and are not clinically validated. Self-tracking features such
 > as the Mind / mood check-in and nutrition import are **informational only** and are
 > **not** a diagnosis, treatment, or dietary/medical advice. Use at your own risk;
-> your data stays on your device. See `DISCLAIMER.md`, `TERMS.md`, and
+> your data stays on your device unless you explicitly enable a destination you
+> control. See `DISCLAIMER.md`, `TERMS.md`, and
 > `ATTRIBUTION.md` at the repo root.
 
 ---
@@ -26,37 +27,39 @@ local SQLite — has no network layer at all: no phone-home, no analytics, no ac
 no login, no cloud sync, and no telemetry. Everything NOOP computes about you lives in a
 single SQLite file on your own device.
 
-There are exactly **two** opt-in exceptions: the **AI Coach** (§1.1a) and the **Oura history
-import** (§1.1b). The AI Coach is off until you turn it on with your own API key; when you
+There are exactly **three data-bearing** opt-in network features: the **AI Coach** (§1.1a),
+the **Oura history import** (§1.1b), and **Self-hosted Sync** (§1.1c). The AI Coach is off until you turn it on with your own API key; when you
 ask it a question it sends a short text summary of your recent metrics to the provider you
 choose. The Oura history import is **not even compiled into a default build** — the code
 only exists in your binary if you build from source with your own Oura developer app's
 credentials (§1.1b); instead of sending data out, it pulls your own Oura data **in** over
-OAuth, once, and never sends any of your existing NOOP data out. Nothing else in the app
-ever touches the network, and your raw biometric streams never leave the device through
-either exception.
+OAuth, once, and never sends any existing NOOP data out. Self-hosted Sync is also off by
+default; after you enter your own endpoint/token and enable it, decoded streams and selected
+local records are replicated to that server. A fourth, non-data-bearing path runs only when
+you tap **Check for updates**: it reads public release metadata from GitHub and sends no
+biometric content or app identifier.
 
-Data enters NOOP three ways, and leaves it (other than the optional AI Coach) only when **you**
-deliberately export it to another store on the **same device**:
+Data enters NOOP three ways. It leaves only when **you** deliberately configure or initiate
+one of the explicit outputs:
 
 | Path | Transport | Direction |
 |------|-----------|-----------|
 | Live collection | Bluetooth LE, strap → device | Read-only from the strap |
 | File import (Apple Health, WHOOP CSV, nutrition CSV) | User-selected files on disk | Read-only from disk |
 | Oura history import (opt-in build flag, §1.1b) | HTTPS OAuth + REST, `api.ouraring.com` → device | Read-only from your own Oura account |
+| Self-hosted Sync (§1.1c) | HTTPS, or HTTP only on loopback/private LAN | Decoded streams/derived rows → the server you configure |
+| Check for updates | HTTPS GET to GitHub's public releases API, only when tapped | Public version metadata → device; no biometric payload |
 | Apple Health export, incl. iOS "Export for Shortcuts" | On-device, user-initiated | NOOP → your Apple Health, on your device only (§1.3) |
 
-The only **network** paths are the opt-in AI Coach and the compile-time-optional Oura
-history import; the
-biometric pipeline produces no network traffic of any kind. The Apple Health export above is
-an **on-device** hand-off, not a network upload — see §1.3.
+The only **data-bearing network** paths are those three opt-ins. The collection/analysis pipeline itself
+produces no network traffic. Apple Health export is an **on-device** hand-off — see §1.3.
 
-### 1.1 Network code: only the two optional exceptions
+### 1.1 Network code: only explicit optional destinations
 
-The biometric pipeline and all five Swift packages
+The biometric pipeline and core decode/analytics packages
 (`WhoopProtocol`, `WhoopStore`, `StrandAnalytics`, `StrandImport`, `StrandDesign`)
-contain **no** use of `URLSession`, `URLRequest`, `NWConnection`, `dataTask`, or any
-other networking API — still true after the Oura history import (§1.1b) landed: its OAuth
+contain **no runtime network transport**. The isolated `NoopRemoteSync` package contains the
+authenticated client for the self-host feature; the Oura lane's OAuth
 and REST calls live entirely in the app target, `Strand/Oura/`, and `StrandImport`
 gained only pure, network-free parsers for Oura's payload shapes. These Swift packages
 are **shared by the macOS and iOS apps** (iOS is build-from-source only — no App Store /
@@ -64,9 +67,8 @@ TestFlight — and was folded into the main tree in v1.94), so the Swift-side pr
 behaviour described here applies equally to both. Android is a separate codebase using
 Room for storage and Kotlin for the BLE / import / Coach paths; its own Oura support is
 the local BLE ring-pairing lane, not a network API, so it has no equivalent to §1.1b. The
-**only** networking anywhere in the app is the AI Coach (`Strand/AI/AICoach.swift` on the
-Swift side — macOS and iOS — `com.noop.ai.AiCoach` on Android), described in §1.1a, and
-the Oura history import (`Strand/Oura/`, Swift-only — macOS and iOS), described in §1.1b.
+networking is `Strand/Oura/`, and Coach transport lives under `Strand/AI/` / `com.noop.ai`.
+Self-host transport lives in `Packages/NoopRemoteSync` and the Android remote-sync client.
 The package manifests reference dependency *download* URLs that Swift Package Manager
 resolves at build time, never at runtime:
 
@@ -81,8 +83,7 @@ importers. Neither opens a socket.
 ### 1.1a The AI Coach (optional, off by default, bring your own key)
 
 The AI Coach lets you ask questions about your data in plain language. It is one of the
-two features that use the network (the other is the Oura history import, §1.1b), and only
-on your terms:
+three opt-in data-bearing network features, and runs only on your terms:
 
 - **Off until you enable it.** You enter your own API key for the provider you choose
   (Anthropic, OpenAI, or a local / self-hosted OpenAI-compatible LLM such as Ollama or
@@ -99,9 +100,9 @@ on your terms:
   provider you picked, under your own account. NOOP runs no server in between and keeps
   no copy.
 
-If you never enable the AI Coach and never build the Oura import in (§1.1b), NOOP makes
-zero network connections — and in a default build, the Oura code isn't in the binary to
-begin with.
+If you never enable the AI Coach or Self-hosted Sync, never build the Oura import in
+(§1.1b), and never tap **Check for updates**, NOOP makes zero network connections — and
+in a default build, the Oura code isn't in the binary to begin with.
 
 ### 1.1b The Oura history import (compiled out by default, bring your own OAuth app)
 
@@ -144,7 +145,57 @@ API — a one-time, foreground backfill you trigger yourself, not an ongoing bac
 
 If you never build the lane in, your binary cannot call `ouraring.com` — the code is not there.
 
-### 1.2 The macOS sandbox (and what it means for the AI Coach and the Oura import)
+### 1.1c Self-hosted Sync (optional, off by default)
+
+Self-hosted Sync is a replication path to a server the user operates:
+
+- **No endpoint, no upload.** Automatic sync defaults off. The app makes no self-host
+  request until the user saves a URL and API token and enables or manually starts sync.
+- **What is sent.** Decoded HR/RR/battery and supported raw sensor channels, protocol
+  events, daily metrics, sleep sessions, workouts, and journal answers. Source metadata
+  keeps measured strap, imported official-reference, and Noop-computed namespaces distinct.
+  The wire `device_id` is scoped by client platform and app installation to prevent two
+  clients from overwriting one another. Metadata carries the readable `logical_source_id`,
+  unsuffixed `paired_device_id`, namespace, score provenance, and the Noop algorithm
+  revision where applicable. The server requires `installation_id`,
+  `logical_source_id`, `namespace`, `paired_device_id`, `privacy=explicit_opt_in`,
+  and `score_provenance` on every source. It validates provenance against the
+  role (`strap_measured`, `user_imported_whoop_export`,
+  `noop_transparent_algorithm`, the relevant `user_imported_*` label, or
+  `user_entered_noop_journal`) and rejects mixed raw/derived/journal envelopes.
+- **What v1 does not send.** Gravity vectors, band sleep-state samples, PPG waveform
+  blobs/derived PPG-HR storage, raw IMU blobs, compressed `rawBatch` frames, Oura raw API
+  pages, arbitrary `metricSeries` rows, labs, nutrition, hydration, mood, and per-epoch
+  sleep motion/state JSON remain local. Self-hosted Sync v1 is a supported-subset archive,
+  not a byte-for-byte database backup.
+- **Credentials.** Apple stores the Bearer token in this-device-only Keychain storage;
+  Android uses encrypted preferences. The token is never stored in UserDefaults, Room,
+  SQLite, logs, or server status text.
+- **Transport.** Public endpoints require HTTPS. Cleartext is accepted only for validated
+  loopback, `.local`, RFC1918, IPv4 link-local, or private/link-local IPv6 destinations.
+  Endpoint credentials, queries, fragments, and
+  cross-origin redirects are rejected.
+- **Delivery.** Supported decoded rows are a durable outbox. They are marked delivered only
+  after the response matches the batch id and explicitly reports `status = "accepted"`.
+  Derived rows are traversed in resumable pages and idempotently upserted. A destination
+  change requeues raw rows and replays up to ten years of the supported derived subset;
+  this is not a promise to copy data outside the v1 boundary.
+- **Scheduling.** On macOS/iOS, automatic upload is a launch/foreground catch-up plus a
+  manual **Run now** action; it is not registered as a guaranteed iOS background-processing
+  task. Android additionally schedules best-effort WorkManager jobs, which the OS may defer.
+- **Deletion semantics.** Upload is archival and upsert-only. Deleting a row in the app
+  does not send a tombstone, and disconnecting only stops future uploads. Use the
+  authenticated server dashboard/API to delete server data. Keep a local
+  `.noopbak`/database backup for complete local restore.
+- **Operator responsibility.** The bundled FastAPI/TimescaleDB stack is not a Noop cloud.
+  Whoever deploys it controls access, TLS, storage encryption, backups, retention, export,
+  deletion, patching, and legal compliance.
+
+Raw ADC fields remain labeled raw/unvalidated throughout ingestion and display. Noop does
+not silently turn optical or thermistor register values into clinical SpO₂, temperature,
+or respiration.
+
+### 1.2 The macOS sandbox (and what it means for optional network features)
 
 On macOS the App Sandbox is the backstop. The app ships with a minimal entitlement set
 (`Strand/Resources/Strand.entitlements`):
@@ -162,18 +213,18 @@ That is the entire entitlement file. Four keys:
 - **`device.bluetooth`** — permits BLE access to talk to the strap. The matching
   `NSBluetoothAlwaysUsageDescription` string (declared in `project.yml`) states
   plainly: *"NOOP connects directly to your WHOOP strap over Bluetooth to read heart
-  rate, R-R intervals, battery, and sensor data locally on your Mac. Nothing leaves
-  your device."*
+  rate, R-R intervals, battery, and sensor data locally. Data leaves only if you
+  explicitly enable your own self-hosted server."*
 - **`files.user-selected.read-write`** — lets the app read import files the user
   explicitly picks (and write the database in its own container).
-- **`network.client`** — outbound socket access. Added for the AI Coach on a
+- **`network.client`** — outbound socket access. Used by the explicit AI Coach, Oura,
+  and Self-hosted Sync opt-ins on a
   signed/sandboxed build, where the sandbox otherwise refuses any socket the app tries
   to open (#128); the Oura history import (§1.1b) now relies on the same entitlement. The
   ad-hoc distributed build applies **no** entitlements at all (unsigned build + ad-hoc
   re-sign), so this key only matters for a signed/sandboxed build. The entitlement only
   permits the socket the sandbox would otherwise refuse — it doesn't make either feature
-  call out on its own; both stay off until you deliberately turn the Coach on or tap
-  Connect Oura.
+  call out on its own; every destination remains gated by its own user action.
 
 Notably **absent**:
 
@@ -182,8 +233,9 @@ Notably **absent**:
   the app cannot wander the disk; it sees only what the user hands it through the
   open panel, plus its own sandbox container.
 
-This is the structural guarantee behind "offline by design" on macOS: the sandbox
-permits exactly the two deliberate, opt-in exceptions above and nothing else — no
+This is the structural guarantee behind "local by default" on macOS: the sandbox
+permits outbound access required by the deliberate opt-ins above, while app logic gates
+each request — no
 undeclared entitlement could smuggle out a connection the user didn't ask for. The
 property is enforced by the OS, not merely by convention.
 
@@ -232,7 +284,8 @@ is a Room/SQLite database in the app's private storage; the rest of this section
 describes the GRDB/SQLite store shared by the macOS and iOS apps.)
 
 The schema is defined by a versioned `DatabaseMigrator` in
-`Packages/WhoopStore/Sources/WhoopStore/Database.swift` (currently schema version 9).
+`Packages/WhoopStore/Sources/WhoopStore/Database.swift` (currently through migration
+`v30-remote-sync-pending-indexes`).
 It holds exactly the kinds of data you would expect from the features:
 
 - **Decoded biometric streams** (durable): `hrSample`, `rrInterval`, `spo2Sample`,
@@ -240,9 +293,10 @@ It holds exactly the kinds of data you would expect from the features:
 - **Derived/cached metrics**: `sleepSession`, `dailyMetric`, `workout`, `journal`,
   `appleDaily`, and the generic long-format `metricSeries`.
 - **Your own entries and imports**: daily **mood check-ins** (the Mind feature) and imported
-  **nutrition** figures (from a Cronometer / MacroFactor CSV) are stored the same way — locally, in
-  this database, never transmitted. They are self-tracking notes, not clinical records (see
-  `DISCLAIMER.md` §5).
+  **nutrition** figures (from a Cronometer / MacroFactor CSV) are stored locally in this
+  database. Those `metricSeries` sources are outside the v1 self-hosted-sync subset. Native
+  journal answers are a separate table and are uploaded when Self-hosted Sync is enabled.
+  They are self-tracking notes, not clinical records (see `DISCLAIMER.md` §5).
 - **A transient raw outbox** (`rawBatch`): compressed raw BLE frames, **prunable**.
 - **Device records** (`device`): strap id, MAC, name, first/last-seen timestamps.
 
@@ -285,10 +339,9 @@ record — the decoded streams are durable, the raw frames are a compressed,
 DELETE FROM rawBatch WHERE syncedAt IS NOT NULL AND syncedAt < ?
 ```
 
-So raw captures do not accumulate forever. (The `syncedAt`/upload-related columns are
-schema scaffolding inherited from the upstream collection library; in NOOP's offline
-configuration nothing uploads, and the raw buffer is purely a local replay/recovery
-aid.)
+So raw captures do not accumulate forever. The compressed `rawBatch` frames themselves
+are never sent by Self-hosted Sync; only supported decoded rows use the separate durable
+delivery flags. The raw buffer remains a local replay/recovery aid.
 
 ### 2.4 Diagnostics: the strap connection log
 
@@ -503,10 +556,8 @@ dedicated source id `nutrition-csv`, alongside your other metrics and entirely o
   OAuth — NOOP never sees your Oura password, only the resulting tokens, kept in the
   Keychain.
 - **No telemetry / analytics / crash reporting.** No third-party SDKs of that kind.
-- **No cloud, no sync, no remote backup of NOOP's own data.** Your NOOP data never
-  leaves the machine via NOOP. The Oura history import (§1.1b) is the one path that
-  reaches a cloud service, and it is **inbound only** — it pulls your own Oura data in;
-  it does not sync or back up any NOOP data out.
+- **No Noop-operated cloud.** Self-hosted Sync (§1.1c) can replicate your data only to
+  the endpoint you configure; it is off by default. Oura history import is inbound-only.
 - **No advertising identifiers, no tracking.**
 - **No WHOOP account or API credentials.** NOOP talks only to the strap over local
   BLE; it does not authenticate against, or pull from, any WHOOP server. (Oura is the
@@ -518,7 +569,8 @@ dedicated source id `nutrition-csv`, alongside your other metrics and entirely o
 
 | Surface | Risk | Mitigation | Where |
 |---------|------|------------|-------|
-| Process | Data exfiltration / network egress | Only two opt-in features network: the AI Coach (your key, to your chosen provider, a text summary — §1.1a) and the Oura history import (your own OAuth app, to `api.ouraring.com`, inbound-only — §1.1b). Nothing else makes a network call, and nothing is sent until you ask. Both work on Android/iOS where shipped (Android's Oura support is local-BLE only, no cloud lane); on macOS both cross the sandbox on the same `network.client` entitlement, present since #128 (§1.2) | `Strand/AI/AICoach.swift`, `Strand/Oura/`, `android/.../ai/AiCoach.kt` |
+| Process | Data exfiltration / network egress | Three explicit opt-ins: AI Coach (your provider/key and text summary — §1.1a), Oura import (your OAuth app, inbound-only — §1.1b), and Self-hosted Sync (your endpoint/token and selected local records — §1.1c). No telemetry or project-operated cloud. | `Strand/AI/`, `Strand/Oura/`, `Packages/NoopRemoteSync`, `Strand/Data/RemoteSyncService.swift`, Android remote-sync client |
+| Self-hosted sync | Token leak, cleartext egress, redirect exfiltration, lost backfill | Token in Keychain/encrypted preferences; HTTPS required except validated local/private literals; URL credentials/query/fragment rejected; redirects cannot cross origin or downgrade transport; error reflection redacted; per-row acknowledgement only after a matching accepted response; resumable, bounded replay on destination change. Local deletions require a separate authenticated server delete. | `Packages/NoopRemoteSync`, `Packages/WhoopStore/.../RemoteSyncStore.swift`, `server/` |
 | Oura history import | OAuth token / scope leakage, cross-account data mixing | Compiled out by default (`OURA_CLOUD_IMPORT`, §1.1b); tokens Keychain-only (`kSecAttrAccessibleAfterFirstUnlock`, never UserDefaults/plist); fixed OAuth scopes set at build time; raw + normalized rows partitioned under `deviceId = "oura-api"`; Oura's own scores kept reference-only (`ref_*`/`oura_*` metricSeries keys, never NOOP's Charge/Effort/Rest); `.cloudImport` is structurally priority-2 so it never seizes a WHOOP day; Forget Oura access purges tokens + every `oura-api` row incl. the raw archive | `Strand/Oura/OuraTokenStore.swift`, `Strand/Oura/OuraConnectModel.swift`, `Packages/WhoopStore/Sources/WhoopStore/OuraRawStore.swift` |
 | Filesystem | Broad disk access | Only `files.user-selected.read-write`; data stays in the sandbox container | `Strand.entitlements`, `Strand/Collect/StorePaths.swift` |
 | BLE frames | Malformed / adversarial packets | CRC8 + CRC32 (+ CRC16 for v5) gating; reject on failure | `WhoopProtocol/Framing.swift`, `Strand/BLE/FrameRouter.swift` |
@@ -553,9 +605,10 @@ hardware the user owns, used for interoperability:
 - **`johnmiddleton12/my-whoop`** — the WHOOP 4.0 BLE framing/command/decode work and
   the collection logic the `WhoopProtocol` / `WhoopStore` packages and the app's
   collection layer are adapted from.
-- **`b-nnett/goose`** — the WHOOP 5.0 protocol (the `fd4b0001-…` service family, the
-  CRC16-Modbus header, and the "puffin" packet types) the v5 decode path is ported
-  from.
+- **`b-nnett/goose`** — published observed WHOOP 5.0 protocol facts (the
+  `fd4b0001-…` service family, the CRC16-Modbus header, and the "puffin" packet
+  types). Its repository has no explicit software license; this fork copies none
+  of its source or assets.
 - **`groue/GRDB.swift`** — the SQLite persistence layer.
 - **`weichsel/ZIPFoundation`** — the archive reader used by the importers.
 
