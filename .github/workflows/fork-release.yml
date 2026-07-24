@@ -102,12 +102,13 @@ jobs:
           # for the AltStore manifest's buildVersion.
           echo "buildVersion=$(grep -m1 'CURRENT_PROJECT_VERSION:' project.yml | sed -E 's/.*\"([0-9]+)\".*/\1/')" >> "$GITHUB_OUTPUT"
 
-          # Create the immutable release as a DRAFT at the (possibly bumped)
-          # commit. The publish job makes it non-prerelease/latest only after all
-          # three platform artifacts upload successfully. A re-run refreshes
-          # assets rather than clobbering the release/notes.
+          # Keep the immutable release as a DRAFT at the (possibly bumped)
+          # commit until all three platform artifacts upload successfully. A
+          # re-run returns an existing release to draft before refreshing assets,
+          # so users never see a partially replaced published release.
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG already exists — re-run: platform jobs will refresh its assets."
+            echo "Release $TAG already exists — returning it to draft while assets refresh."
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft
           else
             # Release body = the required per-version changelog docs/releases/<TAG>.md, plus a
             # downloads footer. (CHANGELOG.md is the stale legacy file; docs/releases/ is the source

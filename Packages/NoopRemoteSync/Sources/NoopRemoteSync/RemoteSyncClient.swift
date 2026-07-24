@@ -189,6 +189,18 @@ public actor RemoteSyncClient: RemoteSyncUploading {
     }
 
     public func upload(_ envelope: RemoteSyncEnvelope) async throws -> RemoteSyncResponse {
+        let request = try makeUploadRequest(envelope)
+        let data = try await perform(request)
+        do {
+            return try decoder.decode(RemoteSyncResponse.self, from: data)
+        } catch {
+            throw RemoteSyncError.decoding(error.localizedDescription)
+        }
+    }
+
+    /// Kept internal so tests can inspect the exact request before URLSession
+    /// canonicalizes its body into an implementation-specific stream.
+    func makeUploadRequest(_ envelope: RemoteSyncEnvelope) throws -> URLRequest {
         var request = request(path: "v1/sync", method: "POST", authenticated: true)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(envelope.batchId.uuidString.lowercased(), forHTTPHeaderField: "Idempotency-Key")
@@ -197,12 +209,7 @@ public actor RemoteSyncClient: RemoteSyncUploading {
         } catch {
             throw RemoteSyncError.encoding(error.localizedDescription)
         }
-        let data = try await perform(request)
-        do {
-            return try decoder.decode(RemoteSyncResponse.self, from: data)
-        } catch {
-            throw RemoteSyncError.decoding(error.localizedDescription)
-        }
+        return request
     }
 
     private func request(path: String, method: String, authenticated: Bool) -> URLRequest {

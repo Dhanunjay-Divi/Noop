@@ -4,8 +4,9 @@
 # Run from your Mac at release time, after the anonymized binaries are built.
 #
 #   release/forgejo-release.sh <version> <asset> [<asset> ...] [-- "release notes"]
-#   e.g. release/forgejo-release.sh 4.7.0 \
-#          dist/NOOP-v4.7.0-macos.zip dist/NOOP-v4.7.0-ios.ipa dist/NOOP-v4.7.0-android.apk
+#   e.g. Tools/forgejo-release.sh 4.7.0 \
+#          dist/NOOP-macos-v4.7.0.zip dist/NOOP-ios-unsigned-v4.7.0.ipa \
+#          dist/NOOP-android-v4.7.0.apk
 #
 # Creates tag v<version> (server-side, from the current default branch) + a draft,
 # uploads and verifies every asset, then publishes. Token from

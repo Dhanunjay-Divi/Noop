@@ -110,6 +110,24 @@ final class RemoteSyncClientTests: XCTestCase {
             streams: RemoteStreams(hr: [RemoteSample(recordedAt: 1_700_000_000, value: 72)])
         )
 
+        // Inspect the request before URLSession canonicalizes `httpBody` into a
+        // platform-specific stream for URLProtocol.
+        let uploadRequest = try client.makeUploadRequest(envelope)
+        XCTAssertEqual(uploadRequest.url?.path, "/v1/sync")
+        XCTAssertEqual(
+            uploadRequest.value(forHTTPHeaderField: "Authorization"),
+            "Bearer top-secret"
+        )
+        XCTAssertEqual(
+            uploadRequest.value(forHTTPHeaderField: "Idempotency-Key"),
+            batchId.uuidString.lowercased()
+        )
+        let body = try XCTUnwrap(uploadRequest.httpBody)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(object["schema_version"] as? Int, 1)
+        let source = try XCTUnwrap(object["source"] as? [String: Any])
+        XCTAssertEqual(source["device_id"] as? String, "strap-1")
+
         URLProtocolStub.handler = { request in
             XCTAssertEqual(request.url?.path, "/v1/sync")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer top-secret")
@@ -117,11 +135,6 @@ final class RemoteSyncClientTests: XCTestCase {
                 request.value(forHTTPHeaderField: "Idempotency-Key"),
                 batchId.uuidString.lowercased()
             )
-            let body = try XCTUnwrap(request.httpBody)
-            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-            XCTAssertEqual(object["schema_version"] as? Int, 1)
-            let source = try XCTUnwrap(object["source"] as? [String: Any])
-            XCTAssertEqual(source["device_id"] as? String, "strap-1")
             return (
                 HTTPURLResponse(
                     url: request.url!,

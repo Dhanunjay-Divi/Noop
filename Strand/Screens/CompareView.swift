@@ -419,17 +419,10 @@ struct CompareView: View {
                     } else {
                         let paired = referenceReport?.audit.pairedDays ?? 0
                         let unstamped = referenceReport?.audit.unverifiedStoredOfficialDays ?? 0
-                        let referenceSummary: String
-                        if unstamped == 1 {
-                            referenceSummary = String(localized: "1 older reference row lacks the provenance stamp. Re-import your official WHOOP CSV once with this version to verify it safely.")
-                        } else if unstamped > 1 {
-                            referenceSummary = String(localized: "\(unstamped) older reference rows lack the provenance stamp. Re-import your official WHOOP CSV once with this version to verify them safely.")
-                        } else if paired == 0 {
-                            referenceSummary = String(localized: "No paired days yet. Import your official WHOOP CSV in Data Sources, then let Noop compute the same days locally.")
-                        } else {
-                            referenceSummary = String(localized: "Only \(paired) paired days are available. Comparison starts immediately; personal calibration needs at least 28, including 7 untouched validation days.")
-                        }
-                        Text(referenceSummary)
+                        Text(referenceAvailabilitySummary(
+                            paired: paired,
+                            unstamped: unstamped
+                        ))
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -442,6 +435,22 @@ struct CompareView: View {
                 }
             }
         }
+    }
+
+    private func referenceAvailabilitySummary(
+        paired: Int,
+        unstamped: Int
+    ) -> String {
+        if unstamped == 1 {
+            return String(localized: "1 older reference row lacks the provenance stamp. Re-import your official WHOOP CSV once with this version to verify it safely.")
+        }
+        if unstamped > 1 {
+            return String(localized: "\(unstamped) older reference rows lack the provenance stamp. Re-import your official WHOOP CSV once with this version to verify them safely.")
+        }
+        if paired == 0 {
+            return String(localized: "No paired days yet. Import your official WHOOP CSV in Data Sources, then let Noop compute the same days locally.")
+        }
+        return String(localized: "Only \(paired) paired days are available. Comparison starts immediately; personal calibration needs at least 28, including 7 untouched validation days.")
     }
 
     @ViewBuilder
