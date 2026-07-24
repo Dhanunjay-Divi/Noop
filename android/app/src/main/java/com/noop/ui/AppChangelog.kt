@@ -26,7 +26,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "9.0.2"
+    const val CURRENT_VERSION = "9.1.1"
 
     data class Release(
         val version: String,
@@ -37,6 +37,18 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "9.1.1",
+            title = uiString(R.string.l10n_app_changelog_self_hosted_sync_honest_whoop_comparison_new_noop_identity_016ed2b1),
+            date = "July 2026",
+            items = listOf(
+                "**Your own biometric server.** Opt-in sync now archives selected raw readings, daily scores, sleep, workouts, and journal data to your own FastAPI + TimescaleDB stack.",
+                "**Reliable replay and provenance.** Durable cursors resume interrupted multi-year uploads without silently skipping a source, while every row records where it came from and which sync batch wrote it.",
+                "**Compare without pretending.** Import an official WHOOP export beside Noop's independent scores, inspect bias and error, and optionally calibrate presentation on a held-out validation window; official and computed values always stay separate.",
+                "**Private and explicit by default.** Sync starts off, bearer tokens live in platform secure storage, public endpoints require HTTPS, and deletion/retention behavior is documented.",
+                "**A new open-loop N.** Noop now has its own cyan-and-teal loop mark across the apps, documentation, and launcher artwork.",
+            ),
+        ),
         Release(
             version = "9.0.2",
             title = uiString(R.string.l10n_app_changelog_optimal_strain_alerts_faster_history_sync_6488a27a),

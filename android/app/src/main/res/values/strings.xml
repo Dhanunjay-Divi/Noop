@@ -1734,4 +1734,5 @@
     <string name="remote_sync_disconnect_title">Disconnect self-hosted server?</string>
     <string name="remote_sync_disconnect_message">This removes the saved URL, Keystore-protected API key, queued sync cursors and automatic upload schedule. It does not delete local data or data already on your server.</string>
     <string name="settings_support_open_url">Open this support URL: %1$s</string>
+    <string name="l10n_app_changelog_self_hosted_sync_honest_whoop_comparison_new_noop_identity_016ed2b1">Self-hosted sync, honest WHOOP comparison, and a new Noop identity</string>
 </resources>

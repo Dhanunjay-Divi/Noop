@@ -1710,4 +1710,5 @@
     <string name="remote_sync_disconnect_title">Déconnecter le serveur auto-hébergé ?</string>
     <string name="remote_sync_disconnect_message">Cette action supprime l’URL enregistrée, la clé API protégée par Keystore, les curseurs de synchronisation en attente et le programme de téléversement automatique. Elle ne supprime ni les données locales ni celles déjà stockées sur votre serveur.</string>
     <string name="settings_support_open_url">Ouvrez cette URL d’assistance : %1$s</string>
+    <string name="l10n_app_changelog_self_hosted_sync_honest_whoop_comparison_new_noop_identity_016ed2b1">Synchronisation auto-hébergée, comparaison transparente avec WHOOP et nouvelle identité pour Noop</string>
 </resources>

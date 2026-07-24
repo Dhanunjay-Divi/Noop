@@ -1725,4 +1725,5 @@
     <string name="remote_sync_disconnect_title">Verbindung zum selbst gehosteten Server trennen?</string>
     <string name="remote_sync_disconnect_message">Dadurch werden die gespeicherte URL, der durch Keystore geschützte API-Schlüssel, die Synchronisierungszeiger und der Zeitplan für automatische Uploads entfernt. Lokale Daten oder bereits auf deinem Server gespeicherte Daten werden nicht gelöscht.</string>
     <string name="settings_support_open_url">Öffne diese Support-URL: %1$s</string>
+    <string name="l10n_app_changelog_self_hosted_sync_honest_whoop_comparison_new_noop_identity_016ed2b1">Selbst gehostete Synchronisierung, transparenter WHOOP-Vergleich und eine neue Noop-Identität</string>
 </resources>

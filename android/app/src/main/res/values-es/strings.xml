@@ -1710,4 +1710,5 @@
     <string name="remote_sync_disconnect_title">¿Desconectar el servidor autohospedado?</string>
     <string name="remote_sync_disconnect_message">Esto elimina la URL guardada, la clave de API protegida por Keystore, los cursores de sincronización en cola y la programación de cargas automáticas. No elimina los datos locales ni los que ya están almacenados en tu servidor.</string>
     <string name="settings_support_open_url">Abre esta URL de soporte: %1$s</string>
+    <string name="l10n_app_changelog_self_hosted_sync_honest_whoop_comparison_new_noop_identity_016ed2b1">Sincronización autohospedada, comparación transparente con WHOOP y una nueva identidad para Noop</string>
 </resources>
