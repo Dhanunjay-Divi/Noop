@@ -29,6 +29,7 @@ import com.noop.NoopApplication
 import com.noop.ble.WhoopModel
 import com.noop.data.DemoSeeder
 import com.noop.data.WhoopRepository
+import com.noop.sync.RemoteSyncScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -86,6 +87,12 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             runCatching { BackupSync.catchUpIfDue(applicationContext) }
         }
+
+        // Optional self-hosted delivery: repair the periodic WorkManager schedule and enqueue a
+        // deferred catch-up when due. Both calls are cheap no-ops until the user explicitly saves a
+        // destination and enables automatic upload (default OFF).
+        runCatching { RemoteSyncScheduler.reschedule(applicationContext) }
+        runCatching { RemoteSyncScheduler.enqueueCatchUpIfDue(applicationContext) }
 
         // Load the Light/Dark/System + chart-colour preferences before first composition so the theme
         // and chart ramps are correct from the very first frame (no flash).

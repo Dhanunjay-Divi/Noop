@@ -55,8 +55,8 @@ public enum RhythmConsent {
          String(localized: "Beat-to-beat timing varies for many ordinary reasons: breathing, movement, an imperfect optical reading, or the occasional extra or skipped beat that most healthy people have.")),
         (String(localized: "It is not a substitute for a professional"),
          String(localized: "If you feel unwell or are worried about your heart, contact a qualified professional; in an emergency, your local emergency service. Do not rely on NOOP.")),
-        (String(localized: "Everything stays on your device"),
-         String(localized: "All of this is computed on your own device from data you already have. No heartbeat data leaves it.")),
+        (String(localized: "Computed on your device"),
+         String(localized: "This view is computed locally from data you already have. Beat-to-beat data is uploaded only if you explicitly enable your own self-hosted sync.")),
     ]
 }
 

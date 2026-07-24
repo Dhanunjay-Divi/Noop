@@ -1,10 +1,11 @@
 # NOOP — System Architecture
 
-NOOP is a standalone, fully **offline** companion app for WHOOP straps (4.0 and 5.0). It talks
+NOOP is a standalone, **local-first** companion app for WHOOP straps (4.0 and 5.0). It talks
 directly to the strap over Bluetooth Low Energy, stores everything on-device in SQLite (GRDB on Mac/iOS, Room on Android), and computes
 recovery, strain, HRV, and sleep locally. There is no WHOOP cloud, no account —
 the app interoperates with **your own device and your own data**. It can also import data you already
-own: WHOOP CSV exports and Apple Health exports.
+own: WHOOP CSV exports and Apple Health exports. An explicit opt-in can replicate
+the supported v1 subset to a user-operated server.
 
 > **Not affiliated with WHOOP.** NOOP is an independent, interoperability project built on
 > community reverse-engineering of the strap's Bluetooth protocol. It is **not a medical device**
@@ -15,10 +16,12 @@ own: WHOOP CSV exports and Apple Health exports.
 
 ## 1. The big picture
 
-The system is a one-directional pipeline. Bytes arrive from the strap (or from an import file), get
+The local system is a one-directional pipeline. Bytes arrive from the strap (or from an import file), get
 decoded into typed rows, land durably in SQLite, are read back through a thin repository, are turned
-into daily metrics by pure analytics functions, and finally render in SwiftUI. Nothing is ever sent
-off-device.
+into daily metrics by pure analytics functions, and finally render in SwiftUI.
+When Self-hosted Sync is enabled, a separate authenticated branch reads supported
+rows from SQLite and sends them to the configured FastAPI/TimescaleDB service;
+it does not participate in collection or scoring.
 
 ```
                           ┌─────────────────────────────────────────────────────────┐
@@ -92,20 +95,22 @@ Strand/                         macOS SwiftUI app target (the reference implemen
 ├── MenuBar/                    glanceable menu-bar extra
 └── System/                     macOS integrations (lock screen, Shortcuts)
 
-Packages/                       Cross-platform Swift packages (iOS 16+ / macOS 13+)
+Packages/                       Cross-platform Swift packages (iOS 16+/17+ / macOS 13+)
 ├── WhoopProtocol/              BLE frame parsing, CRC, command/event/packet decode
 ├── WhoopStore/                 GRDB/SQLite persistence (actor)
 ├── StrandAnalytics/            HRV/recovery/strain/sleep/correlation math
 ├── StrandImport/               WHOOP CSV + Apple Health importers
-└── StrandDesign/               SwiftUI design system (palette, components, charts)
+├── StrandDesign/               SwiftUI design system (palette, components, charts)
+└── NoopRemoteSync/             Native client for the optional self-hosted API
 
 Tools/Backfill/                 CLI offload/replay tool
 ```
 
-The app target (`Strand/`) is the **macOS reference implementation**. The same five packages back the
+The app target (`Strand/`) is the **macOS reference implementation**. The same six packages back the
 **iOS** app (`StrandiOS/`, `StrandiOSShared/`, `StrandiOSWidgets/` — **build-from-source only**, no
 App Store/TestFlight; see [`IOS.md`](./IOS.md)) and the **Android** app (`android/`, Room/Kotlin). The
-packages already declare `.iOS(.v16)` and `.macOS(.v13)` and keep all UI-framework code behind
+inherited five packages declare `.iOS(.v16)`, remote sync requires `.iOS(.v17)`,
+and all six declare `.macOS(.v13)`. UI-framework code stays behind
 `#if canImport(UIKit)` / `#if canImport(AppKit)` guards so the cores port unchanged.
 
 ---
@@ -286,11 +291,13 @@ shell doesn't re-render on every beat.
 
 ## 7. Storage model (WhoopStore / SQLite)
 
-GRDB drives a migrator (`WhoopStoreInfo.schemaVersion`, currently `11`). The schema groups into four
+GRDB drives a migrator currently through `v30-remote-sync-pending-indexes`.
+The schema groups into these
 concerns:
 
-**Durable decoded streams** — natural key `(deviceId, ts)`, one row per sample:
-`hrSample`, `rrInterval`, `event`, `battery`, plus the type-47 biometrics `spo2Sample`,
+**Durable decoded streams** — natural key usually `(deviceId, ts)`, one row per
+sample (`rrInterval` instead uses `(deviceId, ts, rrMs, seq)` to preserve equal
+same-second beats): `hrSample`, `rrInterval`, `event`, `battery`, plus the type-47 biometrics `spo2Sample`,
 `skinTempSample`, `respSample`, `gravitySample`.
 
 **Metric caches** — the rolled-up shapes the screens read:
@@ -393,7 +400,8 @@ computed locally.
 NOOP's BLE protocol work builds on community reverse-engineering of the WHOOP straps:
 
 - **johnmiddleton12/my-whoop** — WHOOP 4.0 protocol.
-- **b-nnett/goose** — WHOOP 5.0 protocol.
+- **b-nnett/goose** — observed WHOOP 5.0 protocol facts; no source or assets
+  from its unlicensed repository are copied by this fork.
 
 See [`ATTRIBUTION.md`](../ATTRIBUTION.md) for full credits and [`DISCLAIMER.md`](../DISCLAIMER.md) for
 the non-affiliation and not-a-medical-device notice.

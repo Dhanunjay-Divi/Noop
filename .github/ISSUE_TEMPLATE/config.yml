@@ -13,7 +13,7 @@ contact_links:
     url: https://github.com/ryanbr/noop/wiki/Troubleshooting
     about: '"History syncs but no data", pairing/bond failures, generic heart-rate straps, "no recovery/sleep" — most connection issues are solved here first.'
   - name: 💡 Feature ideas & questions — Discussions
-    url: https://github.com/ryanbr/noop/discussions
+    url: https://github.com/Dhanunjay-Divi/Noop/discussions
     about: "Got an idea, or not sure if something's a bug? Open a Discussion. Issues are for confirmed bugs with a strap log."
   - name: 👽 Community, tips & release news — r/NoopBand
     url: https://www.reddit.com/r/NoopBand/

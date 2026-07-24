@@ -1,41 +1,65 @@
 #!/usr/bin/env bash
 #
-# update-homebrew-cask.sh <version> [zip] — refresh the Homebrew cask after a macOS release.
-# The cask download URL points at the GitHub release asset; the tap repo lives on GitHub
-# (github.com/NoopApp/homebrew-noop, Homebrew's default tap host) and is also mirrored to the
-# forge (noop.fans/NoopApp/homebrew-noop). This script pushes the updated cask to BOTH.
+# update-homebrew-cask.sh <version> [zip] — refresh a fork-owned Homebrew cask
+# after a macOS release. The tap owner must be supplied explicitly with
+# NOOP_HOMEBREW_TAP_ORG; this checkout deliberately has no upstream default.
+# The generated cask downloads from Dhanunjay-Divi/Noop unless the release owner
+# and repository are deliberately overridden with NOOP_RELEASE_GITHUB_*.
 #
 # Users install/update with:
-#     brew tap noopapp/noop
+#     brew tap <tap-owner>/noop
 #     brew install --cask noop   /   brew upgrade --cask noop
 #
-# Anonymity-safe: commits as NoopApp; tokens read from ~/.config/noop/ and supplied
-# via a transient git credential helper — never on a command line, URL, or in output.
+# Tokens are read from ~/.config/noop/ and supplied via a transient git credential
+# helper — never on a command line, URL, or in output.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-[ -f "$HERE/../deploy.env" ] && source "$HERE/../deploy.env"
-DOMAIN="${FORGE_DOMAIN:-${NOOP_DOMAIN:-noop.fans}}"
-ORG="${FORGE_ORG:-NoopApp}"; REPO="${FORGE_REPO:-noop}"
+TAP_ORG="${NOOP_HOMEBREW_TAP_ORG:-}"
+APP_ORG="${NOOP_RELEASE_GITHUB_OWNER:-Dhanunjay-Divi}"
+APP_REPO="${NOOP_RELEASE_GITHUB_NAME:-Noop}"
+AUTHOR_NAME="${NOOP_RELEASE_GIT_NAME:-Dhanunjay-Divi}"
+AUTHOR_EMAIL="${NOOP_RELEASE_GIT_EMAIL:-Dhanunjay-Divi@users.noreply.github.com}"
+[ -n "$TAP_ORG" ] || {
+  echo "set NOOP_HOMEBREW_TAP_ORG to a fork-owned GitHub organization/user" >&2
+  exit 1
+}
 
 VER="${1:?usage: $0 <version e.g. 4.7.0> [zip path]}"
-ZIP="${2:-$HOME/Downloads/NOOP-v${VER}-macos.zip}"
+ZIP="${2:-$HOME/Downloads/NOOP-macos-v${VER}.zip}"
 GH_TOKEN_FILE="$HOME/.config/noop/gh_token"        # canonical tap host (github.com)
-FORGE_TOKEN_FILE="$HOME/.config/noop/forge_token"  # mirror tap host (forge)
 [ -f "$ZIP" ]             || { echo "missing release zip: $ZIP" >&2; exit 1; }
 [ -f "$GH_TOKEN_FILE" ]   || { echo "missing GitHub token: $GH_TOKEN_FILE" >&2; exit 1; }
 
-export GH_TOKEN; GH_TOKEN="$(cat "$GH_TOKEN_FILE")"
-# Forge token is optional — the mirror push is best-effort, not a release blocker.
-export FORGE_TOKEN; FORGE_TOKEN="$([ -f "$FORGE_TOKEN_FILE" ] && cat "$FORGE_TOKEN_FILE" || true)"
+export GH_TOKEN TAP_ORG
+GH_TOKEN="$(cat "$GH_TOKEN_FILE")"
 SHA="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
-GH_TAP_URL="https://github.com/$ORG/homebrew-noop.git"   # canonical
-FORGE_TAP_URL="https://$DOMAIN/$ORG/homebrew-noop.git"    # mirror
+GH_TAP_URL="https://github.com/$TAP_ORG/homebrew-noop.git"
+
+# A Forge mirror is a separate, explicit opt-in. Require every coordinate so no
+# stale local deployment file can redirect a release.
+FORGE_TAP_URL=""
+FORGE_TOKEN=""
+if [ "${NOOP_HOMEBREW_FORGE:-0}" = "1" ]; then
+  DOMAIN="${FORGE_DOMAIN:-}"
+  FORGE_ORG="${FORGE_ORG:-}"
+  FORGE_TOKEN_FILE="$HOME/.config/noop/forge_token"
+  [ -n "$DOMAIN" ] && [ -n "$FORGE_ORG" ] || {
+    echo "set FORGE_DOMAIN and FORGE_ORG when NOOP_HOMEBREW_FORGE=1" >&2
+    exit 1
+  }
+  [ -f "$FORGE_TOKEN_FILE" ] || {
+    echo "missing Forge token: $FORGE_TOKEN_FILE" >&2
+    exit 1
+  }
+  FORGE_TOKEN="$(cat "$FORGE_TOKEN_FILE")"
+  FORGE_TAP_URL="https://$DOMAIN/$FORGE_ORG/homebrew-noop.git"
+fi
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-# Clone from the canonical GitHub tap; fall back to the forge mirror, then a fresh repo.
+# Clone from the canonical GitHub tap, or initialise it when publishing the tap
+# for the first time.
 git clone --quiet "$GH_TAP_URL" "$TMP/tap" 2>/dev/null \
-  || git clone --quiet "$FORGE_TAP_URL" "$TMP/tap" 2>/dev/null \
   || { mkdir -p "$TMP/tap"; git -C "$TMP/tap" init -q; }
 
 mkdir -p "$TMP/tap/Casks"
@@ -44,10 +68,10 @@ cask "noop" do
   version "${VER}"
   sha256 "${SHA}"
 
-  url "https://github.com/${ORG}/${REPO}/releases/download/v#{version}/NOOP-v#{version}-macos.zip"
+  url "https://github.com/${APP_ORG}/${APP_REPO}/releases/download/v#{version}/NOOP-macos-v#{version}.zip"
   name "NOOP"
-  desc "Standalone, fully offline companion app for WHOOP straps"
-  homepage "https://github.com/${ORG}/${REPO}"
+  desc "Local-first companion app for WHOOP straps with optional self-hosted sync"
+  homepage "https://github.com/${APP_ORG}/${APP_REPO}"
 
   app "NOOP.app"
 
@@ -56,24 +80,25 @@ end
 EOF
 
 cd "$TMP/tap"
-git -c user.name=NoopApp -c user.email=thenoopapp@gmail.com add Casks/noop.rb
+git -c user.name="$AUTHOR_NAME" -c user.email="$AUTHOR_EMAIL" add Casks/noop.rb
 if git rev-parse HEAD >/dev/null 2>&1 && git diff --cached --quiet; then
   echo "Homebrew cask already current for ${VER} — nothing to push."; exit 0
 fi
-git -c user.name=NoopApp -c user.email=thenoopapp@gmail.com commit --quiet -m "noop ${VER}"
+git -c user.name="$AUTHOR_NAME" -c user.email="$AUTHOR_EMAIL" commit --quiet -m "noop ${VER}"
 
-# Push to the canonical GitHub tap (required) and the forge mirror (best-effort).
-git -c credential.helper='!f() { echo username=NoopApp; echo "password=$GH_TOKEN"; }; f' \
+# Push to the explicitly configured GitHub tap (required).
+git -c credential.helper='!f() { echo "username=$TAP_ORG"; echo "password=$GH_TOKEN"; }; f' \
     push --quiet "$GH_TAP_URL" HEAD:main
 echo "✓ Homebrew cask updated to ${VER} on GitHub (sha256 ${SHA:0:12}…)"
 
-if [ -n "$FORGE_TOKEN" ]; then
-  if git -c credential.helper='!f() { echo username=NoopApp; echo "password=$FORGE_TOKEN"; }; f' \
+if [ -n "$FORGE_TAP_URL" ]; then
+  export FORGE_TOKEN FORGE_ORG
+  if git -c credential.helper='!f() { echo "username=$FORGE_ORG"; echo "password=$FORGE_TOKEN"; }; f' \
        push --quiet "$FORGE_TAP_URL" HEAD:main; then
-    echo "✓ Mirrored cask to forge ($DOMAIN)."
+    echo "✓ Mirrored cask to the configured Forge host."
   else
-    echo "⚠ Mirror push to forge ($DOMAIN) failed — GitHub tap is current; mirror is stale." >&2
+    echo "⚠ Forge mirror push failed — GitHub tap is current." >&2
   fi
 else
-  echo "⚠ No forge token — skipped mirror push to $DOMAIN." >&2
+  echo "Forge mirror disabled (set NOOP_HOMEBREW_FORGE=1 plus FORGE_* to enable)."
 fi

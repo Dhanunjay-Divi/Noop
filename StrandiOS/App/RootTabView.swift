@@ -119,6 +119,10 @@ struct RootTabView: View {
             Task.detached(priority: .utility) {
                 await FolderBackup.catchUpIfDue(checkpoint: { await backupRepo.checkpointForBackup() })
             }
+            await RemoteSyncService.catchUpIfDue(repo: repo)
+        }
+        .onChange(of: repo.refreshSeq) { _, _ in
+            Task { await RemoteSyncService.catchUpIfDue(repo: repo) }
         }
         // Quick-action sheet presents with the calm easing (~0.42s) per the README sheet spec —
         // the easing is applied where `quickAction` is set (see `presentQuickAction`), keeping the

@@ -3,10 +3,10 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!--
-      NOOP is an OFFLINE WHOOP companion. It talks to the strap over BLE and stores
-      everything locally (Room). The ONLY outbound network is the opt-in AI Coach
-      (bring-your-own OpenAI/Anthropic key) — nothing is sent unless the user adds a
-      key and asks a question. Hence the single INTERNET permission below.
+      NOOP is local-first: it talks to the strap over BLE and stores everything in
+      Room. Outbound features are explicit opt-ins only: the bring-your-own-key AI
+      Coach and the user's own self-hosted sync server. Both are off until configured.
+      Hence the single INTERNET permission below.
     -->
     <uses-permission android:name="android.permission.INTERNET" />
 

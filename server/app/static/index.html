@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Noop · Your data, on your server</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+  <header class="shell topbar">
+    <a class="brand" href="/" aria-label="Noop dashboard">
+      <svg class="brand-mark" viewBox="0 0 108 108" aria-hidden="true">
+        <path d="M54 68 43 50C37 40 23 43 23 56c0 12 10 17 24 17l-8-12"/>
+        <path d="m55 68 9-17 11 17c14-5 15-22 3-26-8-3-16 1-20 9"/>
+      </svg>
+      <span>NOOP</span>
+    </a>
+    <div class="connection" id="connectionState">
+      <span class="status-dot"></span>
+      <span>Not connected</span>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">SELF-HOSTED BIOMETRIC VAULT</p>
+        <h1>Your body. Your server.<br><span>No black box.</span></h1>
+        <p class="lede">Measured streams, transparent Noop calculations, and your imported WHOOP reference data remain separate and traceable.</p>
+      </div>
+      <form class="connect-card" id="connectForm">
+        <label for="token">Server API token</label>
+        <div class="token-row">
+          <input id="token" name="token" type="password" autocomplete="current-password" placeholder="Paste NOOP_API_TOKEN" required>
+          <button type="submit">Connect</button>
+        </div>
+        <p>The token stays in this browser tab only and is never placed in the URL.</p>
+      </form>
+    </section>
+
+    <section id="workspace" class="workspace hidden" aria-live="polite">
+      <div class="notice">
+        <strong>Informational, not medical.</strong>
+        Raw ADC values are uncalibrated sensor counts—not SpO₂ %, temperature, or respiration readings. Noop never converts them by label alone.
+      </div>
+
+      <div class="toolbar">
+        <div>
+          <label for="deviceSelect">Data namespace</label>
+          <select id="deviceSelect"></select>
+        </div>
+        <div class="toolbar-actions">
+          <button class="secondary" id="refreshButton" type="button">Refresh</button>
+          <button class="secondary" id="exportButton" type="button">Export JSON</button>
+        </div>
+      </div>
+
+      <section class="summary-grid" id="summaryGrid"></section>
+
+      <section class="panel split-panel">
+        <div>
+          <p class="eyebrow">PROVENANCE</p>
+          <h2 id="namespaceTitle">Source details</h2>
+          <dl class="provenance-list" id="provenanceList"></dl>
+        </div>
+        <div class="sync-stats" id="syncStats"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">LAST 30 DAYS</p>
+            <h2>Readiness &amp; load</h2>
+          </div>
+          <span class="legend"><i class="recovery-key"></i>Charge / Recovery <i class="strain-key"></i>Effort / Strain</span>
+        </div>
+        <div class="chart" id="dailyChart">
+          <p class="empty">No daily metrics uploaded yet.</p>
+        </div>
+        <p class="fine-print">Scores are shown with their source namespace. “Noop computed” is an independent transparent estimate; “WHOOP import reference” is user-imported subscription data. They are not interchangeable.</p>
+      </section>
+
+      <details class="panel danger-panel">
+        <summary>Data controls</summary>
+        <div class="danger-content">
+          <div>
+            <h3>Retention</h3>
+            <p id="retentionDescription">Server retention is loading.</p>
+            <button class="secondary" id="retentionButton" type="button">Run configured retention</button>
+          </div>
+          <div>
+            <h3>Erase this namespace</h3>
+            <p>Permanently deletes its samples, sessions, journal entries, and sync receipts. Export first.</p>
+            <button class="danger" id="eraseButton" type="button">Erase selected data</button>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <p class="error-message hidden" id="errorMessage" role="alert"></p>
+  </main>
+
+  <footer class="shell">
+    <span>Noop self-hosted</span>
+    <span>Direct, opt-in, independently computed</span>
+  </footer>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

@@ -1401,7 +1401,7 @@
     <string name="l10n_settings_screen_check_for_updates_736b9062">Nach Updates suchen</string>
     <string name="l10n_settings_screen_checking_820d6004">Wird geprüft…</string>
     <string name="l10n_settings_screen_checks_github_for_the_latest_version_c10a81e2">Prüft GitHub auf die neueste Version, wenn Sie tippen. Nichts anderes wird verschickt.</string>
-    <string name="l10n_settings_screen_contact_support_at_support_email_f0c4adce">Kontakt-Support bei %1$s</string>
+    <string name="l10n_settings_screen_contact_support_at_support_email_f0c4adce">Support und Problemverfolgung auf GitHub öffnen</string>
     <string name="l10n_settings_screen_continuous_hrv_capture_1f0805d8">Kontinuierliche HRV-Erfassung</string>
     <string name="l10n_settings_screen_couldn_t_check_try_again_b3c885d9">Prüfung fehlgeschlagen. Versuch es erneut.</string>
     <string name="l10n_settings_screen_counter_ticks_per_step_leave_at_3ce8c1d5">Zählerticks pro Schritt. Lass es auf 1,0, außer deine Schritte fallen zu hoch aus. Auf einem WHOOP 5/MG können sie sehr hoch ausfallen (10× oder mehr), daher geht das hier bis 30. Geh bekannte 1.000 Schritte und teile NOOPs Zählung durch die echte Zahl, um deinen Wert zu erhalten.</string>
@@ -1453,7 +1453,7 @@
     <string name="l10n_settings_screen_profile_photo_33f385bb">Profilfoto</string>
     <string name="l10n_settings_screen_project_home_and_source_on_github_a067ed35">Projekthaus und Quelle auf GitHub</string>
     <string name="l10n_settings_screen_project_home_source_994627c1">Projekt-Zuhause &amp; Quellcode</string>
-    <string name="l10n_settings_screen_questions_feedback_bugs_support_email_ed10662a">Fragen, Feedback, Bugs: %1$s</string>
+    <string name="l10n_settings_screen_questions_feedback_bugs_support_email_ed10662a">Fragen, Feedback und Fehler: GitHub-Issues</string>
     <string name="l10n_settings_screen_recalibrate_aaa989ea">Neu kalibrieren</string>
     <string name="l10n_settings_screen_recalibrate_charge_baseline_52a05a26">Ladungs-Basislinie neu kalibrieren</string>
     <string name="l10n_settings_screen_recalibrate_your_charge_baseline_018e3846">Deine Ladungs-Basislinie neu kalibrieren?</string>
@@ -1707,4 +1707,22 @@
     <string name="l10n_data_sources_screen_last_shared_6bf8389c">"Zuletzt geteilt "</string>
     <string name="l10n_data_sources_screen_sharing_paused_health_connect_permission_was_e8950315">Teilen pausiert – die Health-Connect-Berechtigung wurde entzogen. Zum erneuten Erteilen tippen.</string>
     <string name="l10n_data_sources_screen_last_share_didn_t_finish_noop_0d6c27f0">Letztes Teilen unvollständig – NOOP versucht es automatisch erneut.</string>
+    <string name="remote_sync_self_hosted_server">Selbst gehosteter Server</string>
+    <string name="remote_sync_description">Sende gemessene Datenströme, von Noop abgeleitete Messwerte, Schlaf, Workouts und Journaleinträge an deinen eigenen Noop-Server. Importierte offizielle WHOOP-Messwerte verwenden einen getrennten Referenz-Namensraum. So lassen sie sich vergleichen, ohne vorzugeben, Noop bilde die proprietäre Bewertungsformel von WHOOP nach.</string>
+    <string name="remote_sync_api_key">API-Schlüssel</string>
+    <string name="remote_sync_saved_key_placeholder">Sicher gespeichert — leer lassen, um ihn beizubehalten</string>
+    <string name="remote_sync_bearer_token_placeholder">Bearer-Token von deinem Server</string>
+    <string name="remote_sync_automatic_upload">Automatischer Upload</string>
+    <string name="remote_sync_automatic_upload_description">Standardmäßig aus. Wenn aktiviert, holt WorkManager die Daten in begrenzten Stapeln nach.</string>
+    <string name="remote_sync_save_and_test">Verbindung speichern und testen</string>
+    <string name="remote_sync_sync_now">Jetzt synchronisieren</string>
+    <string name="remote_sync_full_replay">Vollständige Neuübertragung</string>
+    <string name="remote_sync_disconnect_and_forget">Verbindung trennen und Schlüssel vergessen</string>
+    <string name="remote_sync_privacy_notice">Datenschutz: Uploads gehen erst nach deiner Zustimmung und nur an die obige URL. Der Bearer-Schlüssel wird mit Android Keystore verschlüsselt. Öffentliche Server benötigen HTTPS; HTTP ist nur für localhost oder ein privates LAN zulässig. Eine vollständige Neuübertragung ist idempotent, kann jedoch eine umfangreiche Historie übertragen. Die Synchronisierung archiviert nur bzw. aktualisiert vorhandene Daten: Wenn du ein lokal abgeleitetes Element löschst, wird seine frühere Serverkopie nicht gelöscht.</string>
+    <string name="remote_sync_replay_title">Gesamten lokalen Verlauf erneut übertragen?</string>
+    <string name="remote_sync_replay_message">Es werden keine lokalen Daten gelöscht. Jede decodierte Rohdatenzeile wird als ausstehend markiert und erneut gesendet, während der abgeleitete Verlauf anhand stabiler Schlüssel erneut übertragen wird. Verwende dies nach einem Serverwechsel oder der Reparatur einer Serverdatenbank; es kann mehrere Hintergrundstapel dauern.</string>
+    <string name="remote_sync_replay">Erneut übertragen</string>
+    <string name="remote_sync_disconnect_title">Verbindung zum selbst gehosteten Server trennen?</string>
+    <string name="remote_sync_disconnect_message">Dadurch werden die gespeicherte URL, der durch Keystore geschützte API-Schlüssel, die Synchronisierungszeiger und der Zeitplan für automatische Uploads entfernt. Lokale Daten oder bereits auf deinem Server gespeicherte Daten werden nicht gelöscht.</string>
+    <string name="settings_support_open_url">Öffne diese Support-URL: %1$s</string>
 </resources>

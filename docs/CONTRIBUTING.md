@@ -39,9 +39,10 @@ non-negotiable (especially on the Bluetooth path).
 
 A few principles run through the whole codebase. Internalize them before opening a PR.
 
-1. **Offline by design.** There is no server, no telemetry, no account, no network call. A change
-   that phones home — for any reason — does not belong here. Strap data, imports, and computed
-   metrics live in a local SQLite database and never leave the device.
+1. **Private by default.** There is no project-operated cloud, telemetry, or required account.
+   Strap data, imports, and computed metrics live in local SQLite. Network features must be
+   explicit opt-ins with a user-chosen destination (for example Coach, Oura import, or the
+   self-hosted sync server), narrow disclosure, visible state, and a working disconnect path.
 2. **Interoperability, not impersonation.** NOOP talks to a strap the user already owns. It does not
    log into a WHOOP account, bypass a paywall, or ship WHOOP's proprietary code/firmware/assets/logos.
    Keep contributions on the right side of that line, and keep all WHOOP references *nominative*
@@ -113,9 +114,9 @@ strap, or CoreBluetooth.
 
 ### Cross-platform discipline
 
-Every package declares **both** `.iOS(.v16)` and `.macOS(.v13)` so the protocol, storage, analytics,
-import, and design layers compile and run unmodified on iOS once an app target exists. Any
-framework-specific code must be guarded:
+All six app-facing packages declare `.macOS(.v13)`. The five inherited
+packages declare `.iOS(.v16)` and `NoopRemoteSync` declares `.iOS(.v17)`, which
+matches the app target. Any framework-specific code must be guarded:
 
 ```swift
 #if canImport(AppKit)
@@ -230,7 +231,7 @@ anonymous, offline, sideloaded project — not a gap to fill with more gates.
 - **On demand:** `app-build.yml` also runs the `StrandTests` macOS integration suite; dispatch it when
   you change app-target Swift that no package test covers.
 - **Absent on purpose:** dependency/vuln scanning and Android instrumentation/connected tests. The
-  dependency set is small and pinned, there is no server or telemetry, and BLE/offload behavior is
+  dependency set is small and pinned, there is no telemetry or project-operated cloud, and BLE/offload behavior is
   validated **on a real strap** — compile-success proves nothing about connection behavior.
 
 ---
@@ -465,12 +466,13 @@ Only after re-reading [The BLE safety contract](#the-ble-safety-contract-read-th
 ### Add a database column or table
 
 Schema lives in `Packages/WhoopStore/Sources/WhoopStore/Database.swift` as a **versioned GRDB
-`DatabaseMigrator`** (currently through `v9`).
+`DatabaseMigrator`** (currently through `v30-remote-sync-pending-indexes`).
 
 - **Never edit an existing migration.** They've already run on users' on-device databases. Add a
   **new** `migrator.registerMigration("vN") { db in … }` block.
 - The early migrations create the durable decoded-stream tables (`hrSample`, `rrInterval`,
-  `spo2Sample`, `skinTempSample`, `respSample`, the raw outbox) keyed by `(deviceId, ts)`; later ones
+  `spo2Sample`, `skinTempSample`, `respSample`, the raw outbox) mostly keyed by
+  `(deviceId, ts)`; R-R uses `(deviceId, ts, rrMs, seq)`. Later migrations
   add metric caches (`sleepSession`, `dailyMetric`, `metricSeries`), cursors, and more. Follow the
   same shape and naming.
 - Add a `MigrationTests` case proving the migration applies cleanly on top of the prior version.
@@ -542,8 +544,10 @@ Contributions toward these are welcome — open an issue to coordinate first.
   the shared packages' behavior.
 - **Android (shipped).** A full, native Kotlin/Gradle client lives under `android/`, re-implementing
   the same wire protocol against Android's BLE stack — it pairs, offloads, persists and scores
-  on-device, and imports WHOOP / Apple Health / Health Connect. Pre-built APKs are in
-  [Releases](https://github.com/ryanbr/noop/releases). Continued real-hardware testing across more devices is always welcome
+  on-device, and imports WHOOP / Apple Health / Health Connect. This fork is
+  currently build-from-source; its future artifacts will be published under
+  [`Dhanunjay-Divi/Noop` Releases](https://github.com/Dhanunjay-Divi/Noop/releases).
+  Continued real-hardware testing across more devices is always welcome
   (an emulator can't reach a physical strap).
 - **iOS (build-from-source target on `main`).** iOS was folded into `main` in v1.94 as a first-class
   build-from-source target — the `NOOPiOS` and `NOOPiOSWidgets` schemes (app target plus widgets, a

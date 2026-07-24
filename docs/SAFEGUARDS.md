@@ -2,7 +2,13 @@
 
 NOOP's account was once auto-suspended by GitHub (later **reinstated on appeal** — the review found no violation). The most likely trigger was **automated pattern-matching**, not anything we actually did wrong: an anonymous account that, in a short window, cut a rapid burst of releases *and* posted many comments repeating the same donation address. To a spam filter that looks bot-like, even though it was one developer shipping fast and answering everyone.
 
-NOOP's purpose is legitimate — it reads a device **you own** over Bluetooth, fully offline, with no account, no cloud, and no proprietary code. None of that breaks GitHub's terms or any law. These safeguards exist so our **behaviour never again *looks* like abuse** to an automated filter. They're grounded in [GitHub's Acceptable Use Policies](https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable-use-policies) and [Terms of Service](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service).
+NOOP's purpose is legitimate—it reads a device **you own** over Bluetooth,
+stores/analyzes locally without a required account or cloud, and optionally
+replicates a documented subset to a server the user operates. It ships no WHOOP
+proprietary code. These safeguards exist so our **behaviour never again *looks*
+like abuse** to an automated filter. They're grounded in [GitHub's Acceptable Use
+Policies](https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable-use-policies)
+and [Terms of Service](https://docs.github.com/en/site-policy/github-terms/github-terms-of-service).
 
 ## The relevant policy lines
 
@@ -26,8 +32,16 @@ When replying across many issues/PRs (e.g. a board sweep), vary the wording and/
 **4. Throttle automated API activity.**
 Batch API operations; don't burst-create commits, issues, or comments. Stats badges (`refresh-stats-badges.py`) write to the working tree and ride the normal commit — they no longer push a burst of API commits.
 
-**5. GitHub Actions stays OFF.**
-We build and verify **centrally/locally**, so we don't need CI runners. Actions is disabled on the repo (`gh api -X PUT repos/ryanbr/noop/actions/permissions -F enabled=false`). This removes the "unusual Actions volume" flag vector and the supply-chain exposure of third-party actions. Re-enable only deliberately, and SHA-pin every `uses:` if you do.
+**5. Keep GitHub Actions bounded and reviewable.**
+This fork uses CI for Swift, Android, server, and localization checks. Workflows
+should run only on relevant branches/paths, use least-privilege permissions,
+cancel superseded work where practical, and avoid automation that mass-creates
+issues, comments, releases, or commits. Review every third-party action/version
+change as a supply-chain change.
 
 ## If it happens again
-Don't evade or create replacement accounts (that makes a suspension permanent and violates the rules). Appeal at support.github.com with the facts: NOOP reads a device the user owns, offline, no account/cloud/credentials, no proprietary code — there is nothing to violate. The appeal worked once; the facts haven't changed.
+Don't evade or create replacement accounts (that makes a suspension permanent
+and violates the rules). Appeal at support.github.com with the facts: NOOP reads
+a device the user owns, has no required account or project-operated biometric
+cloud, and ships no WHOOP proprietary code. Its optional server is user-operated
+and explicit opt-in. The appeal worked once; the core facts have not changed.

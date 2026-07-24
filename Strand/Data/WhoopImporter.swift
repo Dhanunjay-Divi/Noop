@@ -8,19 +8,49 @@ enum WhoopImporter {
 
     /// The WHOOP CSV mapping revision, stamped into the Import test-mode parser line. Bump when this
     /// importer's column->store mapping changes so a shared report's parser version is unambiguous.
-    static let importerVersion = 1
+    static let importerVersion = 2
+    /// Shared provenance stamp for comparison/calibration. Keep this derived from `importerVersion`
+    /// so UI call sites cannot drift from the importer that actually wrote the reference rows.
+    static var schemaRevision: String { "whoop-csv-import-v\(importerVersion)" }
 
     @discardableResult
     static func importExport(url: URL, into store: WhoopStore, deviceId: String,
                              trace: (@Sendable ([String]) -> Void)? = nil) async throws -> ImportSummary {
         let result = try ImportCoordinator().importWhoopExport(from: url)
+        let computedDeviceId = deviceId.hasSuffix("-noop") ? deviceId : deviceId + "-noop"
+
+        // Genuine WHOOP CSVs have no Source column. NOOP exports add one so their local estimates can
+        // round-trip without ever entering the official-reference namespace. Unknown non-empty producers
+        // are quarantined rather than silently promoted to official WHOOP data.
+        let officialCycles = result.cycles.filter {
+            WhoopCSVRowProvenance.classify(sourceLabel: $0.sourceLabel) == .officialReference
+        }
+        let approximateCycles = result.cycles.filter {
+            let provenance = WhoopCSVRowProvenance.classify(sourceLabel: $0.sourceLabel)
+            return provenance == .noopApproximate || provenance == .noopLocal
+        }
+        let officialSleeps = result.sleeps.filter {
+            WhoopCSVRowProvenance.classify(sourceLabel: $0.sourceLabel) == .officialReference
+        }
+        let approximateSleeps = result.sleeps.filter {
+            let provenance = WhoopCSVRowProvenance.classify(sourceLabel: $0.sourceLabel)
+            return provenance == .noopApproximate || provenance == .noopLocal
+        }
+        let officialWorkouts = result.workouts.filter {
+            WhoopCSVRowProvenance.classify(sourceLabel: $0.sourceLabel) == .officialReference
+        }
+        let approximateWorkouts = result.workouts.filter {
+            let provenance = WhoopCSVRowProvenance.classify(sourceLabel: $0.sourceLabel)
+            return provenance == .noopApproximate || provenance == .noopLocal
+        }
 
         // physiological_cycles → DailyMetric (one row per sleep-to-sleep day)
         var metrics: [DailyMetric] = []
-        for c in result.cycles {
+        var approximateMetrics: [DailyMetric] = []
+        func appendMetric(_ c: WhoopCycleRow, to target: inout [DailyMetric]) {
             guard let day = cycleDay(wake: c.wakeOnset, end: c.cycleEnd, start: c.cycleStart,
-                                     tzOffsetMin: c.tzOffsetMin) else { continue }
-            metrics.append(DailyMetric(
+                                     tzOffsetMin: c.tzOffsetMin) else { return }
+            target.append(DailyMetric(
                 day: day,
                 totalSleepMin: c.asleepDurationMin,
                 // CSV "Sleep efficiency %" (0–100) → the store's native 0–1 fraction at the boundary.
@@ -39,11 +69,14 @@ enum WhoopImporter {
                 skinTempDevC: c.skinTempCelsius,   // NOTE: Whoop export gives absolute °C, not a baseline deviation
                 respRateBpm: c.respiratoryRate))
         }
+        for c in officialCycles { appendMetric(c, to: &metrics) }
+        for c in approximateCycles { appendMetric(c, to: &approximateMetrics) }
 
         // sleeps → CachedSleepSession (stage durations encoded as JSON; export has no per-epoch timeline)
         var sessions: [CachedSleepSession] = []
-        for s in result.sleeps where !s.isNap {
-            guard let onset = s.sleepOnset, let wake = s.wakeOnset else { continue }
+        var approximateSessions: [CachedSleepSession] = []
+        func appendSession(_ s: WhoopSleepRow, to target: inout [CachedSleepSession]) {
+            guard !s.isNap, let onset = s.sleepOnset, let wake = s.wakeOnset else { return }
             let stages: [String: Double] = [
                 "light": s.lightSleepDurationMin ?? 0,
                 "deep": s.deepSleepDurationMin ?? 0,
@@ -52,48 +85,77 @@ enum WhoopImporter {
             ]
             let json = (try? JSONSerialization.data(withJSONObject: stages))
                 .flatMap { String(data: $0, encoding: .utf8) }
-            sessions.append(CachedSleepSession(
+            target.append(CachedSleepSession(
                 startTs: Int(onset.timeIntervalSince1970),
                 endTs: Int(wake.timeIntervalSince1970),
                 efficiency: WhoopExportImporter.fractionFromImportedEfficiencyPct(s.sleepEfficiencyPct),
                 restingHr: nil, avgHrv: nil, stagesJSON: json))
         }
+        for s in officialSleeps { appendSession(s, to: &sessions) }
+        for s in approximateSleeps { appendSession(s, to: &approximateSessions) }
 
         // Capture the rows the store ACTUALLY wrote (summed SQLite changes) so the Import test mode can
         // report mapped-vs-persisted per stage. Capturing the existing return value changes nothing about
         // what is saved; the calls, their order and their effect are identical with the trace on or off.
         let metricsWritten = try await store.upsertDailyMetrics(metrics, deviceId: deviceId)
         let sessionsWritten = try await store.upsertSleepSessions(sessions, deviceId: deviceId)
+        let approximateMetricsWritten = try await store.upsertDailyMetrics(
+            approximateMetrics, deviceId: computedDeviceId)
+        let approximateSessionsWritten = try await store.upsertSleepSessions(
+            approximateSessions, deviceId: computedDeviceId)
 
         // Generic metric series — every cycle field, keyed, for the explorer + correlations.
         var points: [MetricPoint] = []
-        func add(_ day: String, _ key: String, _ v: Double?) {
-            if let v { points.append(MetricPoint(day: day, key: key, value: v)) }
+        var approximatePoints: [MetricPoint] = []
+        func add(_ day: String, _ key: String, _ v: Double?, approximate: Bool) {
+            guard let v else { return }
+            let point = MetricPoint(day: day, key: key, value: v)
+            if approximate {
+                approximatePoints.append(point)
+            } else {
+                points.append(point)
+            }
         }
-        for c in result.cycles {
-            guard let day = cycleDay(wake: c.wakeOnset, end: c.cycleEnd, start: c.cycleStart,
-                                     tzOffsetMin: c.tzOffsetMin) else { continue }
-            add(day, "recovery", c.recoveryScore);        add(day, "strain", WhoopExportImporter.effortFromImportedDayStrain(c.dayStrain))
-            add(day, "rhr", c.restingHeartRate);          add(day, "hrv", c.hrvMs)
-            add(day, "spo2", c.bloodOxygenPct);           add(day, "skin_temp", c.skinTempCelsius)
-            add(day, "resp_rate", c.respiratoryRate);     add(day, "energy_kcal", c.energyKcal)
-            add(day, "avg_hr", c.avgHeartRate);           add(day, "max_hr", c.maxHeartRate)
-            add(day, "sleep_total_min", c.asleepDurationMin); add(day, "in_bed_min", c.inBedDurationMin)
-            add(day, "sleep_deep_min", c.deepSleepDurationMin); add(day, "sleep_rem_min", c.remDurationMin)
-            add(day, "sleep_light_min", c.lightSleepDurationMin); add(day, "awake_min", c.awakeDurationMin)
-            add(day, "sleep_efficiency", c.sleepEfficiencyPct); add(day, "sleep_performance", c.sleepPerformancePct)
-            add(day, "sleep_consistency", c.sleepConsistencyPct); add(day, "sleep_need_min", c.sleepNeedMin)
-            add(day, "sleep_debt_min", c.sleepDebtMin)
-            if let deep = c.deepSleepDurationMin, let rem = c.remDurationMin {
-                add(day, "restorative_min", deep + rem)
-                if let asleep = c.asleepDurationMin, asleep > 0 {
-                    add(day, "restorative_pct", (deep + rem) / asleep * 100)
+        func appendCyclePoints(_ cycles: [WhoopCycleRow], approximate: Bool) {
+            for c in cycles {
+                guard let day = cycleDay(wake: c.wakeOnset, end: c.cycleEnd, start: c.cycleStart,
+                                         tzOffsetMin: c.tzOffsetMin) else { continue }
+                add(day, "recovery", c.recoveryScore, approximate: approximate)
+                add(day, "strain", WhoopExportImporter.effortFromImportedDayStrain(c.dayStrain),
+                    approximate: approximate)
+                add(day, "rhr", c.restingHeartRate, approximate: approximate)
+                add(day, "hrv", c.hrvMs, approximate: approximate)
+                add(day, "spo2", c.bloodOxygenPct, approximate: approximate)
+                add(day, "skin_temp", c.skinTempCelsius, approximate: approximate)
+                add(day, "resp_rate", c.respiratoryRate, approximate: approximate)
+                add(day, "energy_kcal", c.energyKcal, approximate: approximate)
+                add(day, "avg_hr", c.avgHeartRate, approximate: approximate)
+                add(day, "max_hr", c.maxHeartRate, approximate: approximate)
+                add(day, "sleep_total_min", c.asleepDurationMin, approximate: approximate)
+                add(day, "in_bed_min", c.inBedDurationMin, approximate: approximate)
+                add(day, "sleep_deep_min", c.deepSleepDurationMin, approximate: approximate)
+                add(day, "sleep_rem_min", c.remDurationMin, approximate: approximate)
+                add(day, "sleep_light_min", c.lightSleepDurationMin, approximate: approximate)
+                add(day, "awake_min", c.awakeDurationMin, approximate: approximate)
+                add(day, "sleep_efficiency", c.sleepEfficiencyPct, approximate: approximate)
+                add(day, "sleep_performance", c.sleepPerformancePct, approximate: approximate)
+                add(day, "sleep_consistency", c.sleepConsistencyPct, approximate: approximate)
+                add(day, "sleep_need_min", c.sleepNeedMin, approximate: approximate)
+                add(day, "sleep_debt_min", c.sleepDebtMin, approximate: approximate)
+                if let deep = c.deepSleepDurationMin, let rem = c.remDurationMin {
+                    add(day, "restorative_min", deep + rem, approximate: approximate)
+                    if let asleep = c.asleepDurationMin, asleep > 0 {
+                        add(day, "restorative_pct", (deep + rem) / asleep * 100,
+                            approximate: approximate)
+                    }
+                }
+                if let asleep = c.asleepDurationMin, let need = c.sleepNeedMin, need > 0 {
+                    add(day, "hours_vs_needed_pct", asleep / need * 100, approximate: approximate)
                 }
             }
-            if let asleep = c.asleepDurationMin, let need = c.sleepNeedMin, need > 0 {
-                add(day, "hours_vs_needed_pct", asleep / need * 100)
-            }
         }
+        appendCyclePoints(officialCycles, approximate: false)
+        appendCyclePoints(approximateCycles, approximate: true)
         // Derived: a daily stress proxy from RHR (up) + HRV (down) vs the personal baseline.
         func meanStd(_ a: [Double]) -> (Double, Double) {
             guard !a.isEmpty else { return (0, 1) }
@@ -101,38 +163,53 @@ enum WhoopImporter {
             let v = a.map { ($0 - m) * ($0 - m) }.reduce(0, +) / Double(a.count)
             return (m, max(v.squareRoot(), 0.0001))
         }
-        let (rm, rs) = meanStd(result.cycles.compactMap(\.restingHeartRate))
-        let (hm, hs) = meanStd(result.cycles.compactMap(\.hrvMs))
-        for c in result.cycles {
-            guard let rhr = c.restingHeartRate, let hrv = c.hrvMs,
-                  let day = cycleDay(wake: c.wakeOnset, end: c.cycleEnd, start: c.cycleStart,
-                                     tzOffsetMin: c.tzOffsetMin) else { continue }
-            let z = 0.6 * ((rhr - rm) / rs) - 0.6 * ((hrv - hm) / hs)
-            add(day, "stress", max(0, min(3, 1.5 + z)))
-        }
-        // Derived: daily HR-zone minutes + strength-activity time from workouts.
-        var zoneByDay: [String: [Double]] = [:]
-        var strengthByDay: [String: Double] = [:]
-        for w in result.workouts {
-            guard let s = w.workoutStart, let e = w.workoutEnd else { continue }
-            let day = dayString(s, tzOffsetMin: w.tzOffsetMin)
-            let dur = e.timeIntervalSince(s) / 60.0
-            let zp = [w.hrZone1Pct, w.hrZone2Pct, w.hrZone3Pct, w.hrZone4Pct, w.hrZone5Pct]
-            var arr = zoneByDay[day] ?? [0, 0, 0, 0, 0]
-            for i in 0..<5 { if let p = zp[i] { arr[i] += dur * p / 100.0 } }
-            zoneByDay[day] = arr
-            if let n = w.activityName?.lowercased(), n.contains("strength") || n.contains("weight") {
-                strengthByDay[day, default: 0] += dur
+        func appendStress(_ cycles: [WhoopCycleRow], approximate: Bool) {
+            let (rm, rs) = meanStd(cycles.compactMap(\.restingHeartRate))
+            let (hm, hs) = meanStd(cycles.compactMap(\.hrvMs))
+            for c in cycles {
+                guard let rhr = c.restingHeartRate, let hrv = c.hrvMs,
+                      let day = cycleDay(wake: c.wakeOnset, end: c.cycleEnd, start: c.cycleStart,
+                                         tzOffsetMin: c.tzOffsetMin) else { continue }
+                let z = 0.6 * ((rhr - rm) / rs) - 0.6 * ((hrv - hm) / hs)
+                add(day, "stress", max(0, min(3, 1.5 + z)), approximate: approximate)
             }
         }
-        for (day, a) in zoneByDay {
-            add(day, "hr_zone1_min", a[0]); add(day, "hr_zone2_min", a[1]); add(day, "hr_zone3_min", a[2])
-            add(day, "hr_zone4_min", a[3]); add(day, "hr_zone5_min", a[4])
-            add(day, "hr_zones13_min", a[0] + a[1] + a[2]); add(day, "hr_zones45_min", a[3] + a[4])
-            add(day, "hr_zones_all_min", a.reduce(0, +))
+        appendStress(officialCycles, approximate: false)
+        appendStress(approximateCycles, approximate: true)
+        // Derived: daily HR-zone minutes + strength-activity time from workouts.
+        func appendWorkoutPoints(_ sourceRows: [WhoopWorkoutRow], approximate: Bool) {
+            var zoneByDay: [String: [Double]] = [:]
+            var strengthByDay: [String: Double] = [:]
+            for w in sourceRows {
+                guard let s = w.workoutStart, let e = w.workoutEnd else { continue }
+                let day = dayString(s, tzOffsetMin: w.tzOffsetMin)
+                let dur = e.timeIntervalSince(s) / 60.0
+                let zp = [w.hrZone1Pct, w.hrZone2Pct, w.hrZone3Pct, w.hrZone4Pct, w.hrZone5Pct]
+                var arr = zoneByDay[day] ?? [0, 0, 0, 0, 0]
+                for i in 0..<5 { if let p = zp[i] { arr[i] += dur * p / 100.0 } }
+                zoneByDay[day] = arr
+                if let n = w.activityName?.lowercased(), n.contains("strength") || n.contains("weight") {
+                    strengthByDay[day, default: 0] += dur
+                }
+            }
+            for (day, a) in zoneByDay {
+                add(day, "hr_zone1_min", a[0], approximate: approximate)
+                add(day, "hr_zone2_min", a[1], approximate: approximate)
+                add(day, "hr_zone3_min", a[2], approximate: approximate)
+                add(day, "hr_zone4_min", a[3], approximate: approximate)
+                add(day, "hr_zone5_min", a[4], approximate: approximate)
+                add(day, "hr_zones13_min", a[0] + a[1] + a[2], approximate: approximate)
+                add(day, "hr_zones45_min", a[3] + a[4], approximate: approximate)
+                add(day, "hr_zones_all_min", a.reduce(0, +), approximate: approximate)
+            }
+            for (day, m) in strengthByDay {
+                add(day, "strength_min", m, approximate: approximate)
+            }
         }
-        for (day, m) in strengthByDay { add(day, "strength_min", m) }
+        appendWorkoutPoints(officialWorkouts, approximate: false)
+        appendWorkoutPoints(approximateWorkouts, approximate: true)
         try await store.upsertMetricSeries(points, deviceId: deviceId)
+        try await store.upsertMetricSeries(approximatePoints, deviceId: computedDeviceId)
 
         // Journal behaviours → correlation insights.
         // #136: journal_entries.csv keys only by cycle_start (the onset evening). Map each cycle's onset to
@@ -140,7 +217,7 @@ enum WhoopImporter {
         // day parseCycles and the native journal use. Keying off the onset put every entry one day early,
         // so it never matched its outcome and all historic days collapsed into "Without" (issue #136).
         var wakeDayByStart: [Int: String] = [:]
-        for c in result.cycles {
+        for c in officialCycles + approximateCycles {
             guard let start = c.cycleStart,
                   let wake = cycleDay(wake: c.wakeOnset, end: c.cycleEnd, start: c.cycleStart,
                                       tzOffsetMin: c.tzOffsetMin) else { continue }
@@ -166,21 +243,43 @@ enum WhoopImporter {
         }
 
         // Workouts.
-        let workouts: [WorkoutRow] = result.workouts.compactMap { w in
-            guard let s = w.workoutStart, let e = w.workoutEnd else { return nil }
-            let zones = ["z1": w.hrZone1Pct, "z2": w.hrZone2Pct, "z3": w.hrZone3Pct,
-                         "z4": w.hrZone4Pct, "z5": w.hrZone5Pct].compactMapValues { $0 }
-            let zjson = (try? JSONSerialization.data(withJSONObject: zones))
-                .flatMap { String(data: $0, encoding: .utf8) }
-            return WorkoutRow(startTs: Int(s.timeIntervalSince1970), endTs: Int(e.timeIntervalSince1970),
-                              sport: w.activityName ?? "Workout", source: "whoop",
-                              durationS: e.timeIntervalSince(s), energyKcal: w.energyKcal,
-                              avgHr: w.avgHeartRate.map { Int($0.rounded()) },
-                              maxHr: w.maxHeartRate.map { Int($0.rounded()) },
-                              strain: WhoopExportImporter.effortFromImportedDayStrain(w.activityStrain), distanceM: w.distanceMeters,
-                              zonesJSON: zjson, notes: nil)
+        func mappedWorkouts(_ sourceRows: [WhoopWorkoutRow], approximate: Bool) -> [WorkoutRow] {
+            sourceRows.compactMap { w in
+                guard let s = w.workoutStart, let e = w.workoutEnd else { return nil }
+                let zones = ["z1": w.hrZone1Pct, "z2": w.hrZone2Pct, "z3": w.hrZone3Pct,
+                             "z4": w.hrZone4Pct, "z5": w.hrZone5Pct].compactMapValues { $0 }
+                let zjson = (try? JSONSerialization.data(withJSONObject: zones))
+                    .flatMap { String(data: $0, encoding: .utf8) }
+                return WorkoutRow(
+                    startTs: Int(s.timeIntervalSince1970),
+                    endTs: Int(e.timeIntervalSince1970),
+                    sport: w.activityName ?? "Workout",
+                    source: approximate
+                        ? (WhoopCSVRowProvenance.classify(sourceLabel: w.sourceLabel) == .noopLocal
+                           ? "manual" : computedDeviceId)
+                        : "whoop",
+                    durationS: e.timeIntervalSince(s),
+                    energyKcal: w.energyKcal,
+                    avgHr: w.avgHeartRate.map { Int($0.rounded()) },
+                    maxHr: w.maxHeartRate.map { Int($0.rounded()) },
+                    strain: WhoopExportImporter.effortFromImportedDayStrain(w.activityStrain),
+                    distanceM: w.distanceMeters,
+                    zonesJSON: zjson,
+                    notes: nil)
+            }
         }
+        let workouts = mappedWorkouts(officialWorkouts, approximate: false)
+        let approximateMappedWorkouts = mappedWorkouts(approximateWorkouts, approximate: true)
         let workoutsWritten = try await store.upsertWorkouts(workouts, deviceId: deviceId)
+        let approximateWorkoutsWritten = try await store.upsertWorkouts(
+            approximateMappedWorkouts, deviceId: computedDeviceId)
+
+        // Stamp only rows that actually traversed the provenance-aware official path. Legacy rows already
+        // in the namespace remain untouched but unverified, so Compare cannot silently relabel them.
+        WhoopReferenceImportManifest().recordOfficialMetrics(
+            points.map { (day: $0.day, metricKey: $0.key) },
+            deviceId: deviceId,
+            schemaRevision: schemaRevision)
 
         // Import & Data Ingest test mode (Test Centre): emit the per-stage / reject / day-delta trace iff
         // the mode is on. The caller passes a non-nil `trace` ONLY when TestCentre.active(.dataImport), so
@@ -193,22 +292,32 @@ enum WhoopImporter {
             // rowsOut < rowsIn isolates the STORE-write delta - the day-owner-collision / "didn't save" tell
             // (#601 / #749) - rather than conflating it with the parser/map drop, which the reject line owns.
             // dailyMetric is keyed by (deviceId, day), so metrics.count == the mapped distinct days.
-            let daysMapped = Set(metrics.map { $0.day }).count
+            let daysMapped = Set((metrics + approximateMetrics).map { $0.day }).count
             // Rows the PARSER produced but the app map then dropped (a cycle with no cycleStart, a non-nap
             // sleep with no onset/wake, a workout with no start/end): the genuine ingest reject count.
             let parsedCycles = c["cycles"] ?? 0
             let parsedSleeps = c["sleeps"] ?? 0
             let parsedWorkouts = c["workouts"] ?? 0
-            let droppedInMap = max(0, parsedCycles - metrics.count)
-                + max(0, parsedSleeps - sessions.count)
-                + max(0, parsedWorkouts - workouts.count)
+            let acceptedMetricCount = metrics.count + approximateMetrics.count
+            let acceptedSessionCount = sessions.count + approximateSessions.count
+            let acceptedWorkoutCount = workouts.count + approximateMappedWorkouts.count
+            let droppedInMap = max(0, parsedCycles - acceptedMetricCount)
+                + max(0, parsedSleeps - acceptedSessionCount)
+                + max(0, parsedWorkouts - acceptedWorkoutCount)
+            let totalMetricsWritten = metricsWritten + approximateMetricsWritten
+            let totalSessionsWritten = sessionsWritten + approximateSessionsWritten
+            let totalWorkoutsWritten = workoutsWritten + approximateWorkoutsWritten
             let lines: [String] = [
                 ImportTrace.parserVersionLine(sourceKind: .whoopExport, importerVersion: importerVersion),
-                ImportTrace.stageLine(category: "cycles", rowsIn: metrics.count, rowsOut: metricsWritten),
-                ImportTrace.stageLine(category: "sleeps", rowsIn: sessions.count, rowsOut: sessionsWritten),
-                ImportTrace.stageLine(category: "workouts", rowsIn: workouts.count, rowsOut: workoutsWritten),
+                ImportTrace.stageLine(category: "cycles", rowsIn: acceptedMetricCount,
+                                      rowsOut: totalMetricsWritten),
+                ImportTrace.stageLine(category: "sleeps", rowsIn: acceptedSessionCount,
+                                      rowsOut: totalSessionsWritten),
+                ImportTrace.stageLine(category: "workouts", rowsIn: acceptedWorkoutCount,
+                                      rowsOut: totalWorkoutsWritten),
                 ImportTrace.rejectLine(droppedRows: droppedInMap, skippedSpans: result.summary.skippedSpans),
-                ImportTrace.dayDeltaLine(category: "cycles", daysMapped: daysMapped, daysPersisted: metricsWritten),
+                ImportTrace.dayDeltaLine(category: "cycles", daysMapped: daysMapped,
+                                         daysPersisted: totalMetricsWritten),
             ]
             trace(lines)
         }

@@ -6,8 +6,11 @@
 # android/app/build.gradle.kts (versionName + versionCode) and project.yml (MARKETING_VERSION +
 # CURRENT_PROJECT_VERSION) — and commits that to the dispatched branch, so the built app actually
 # REPORTS the new version. Then it publishes a fixed, non-prerelease `v<VERSION>` release with the
-# version-stamped artifacts. releases/latest returns it, so UpdateCheck finds it (isNewer strips the
-# `-staging` suffix, so an installed staging build compares clean).
+# version-stamped artifacts. A new release remains a draft until every platform
+# artifact is attached; only then is it published as latest, so a failed build
+# cannot strand users on an empty/incomplete release. UpdateCheck finds the
+# published release (isNewer strips the `-staging` suffix, so an installed
+# staging build compares clean).
 #
 # Contrast with fork-testing-build.yml: THAT publishes the rolling `testing-latest` PRERELEASE (a
 # snapshot), which releases/latest deliberately ignores. THIS never touches testing-latest.
@@ -79,16 +82,18 @@ jobs:
             sed -i -E "s/CURRENT_PROJECT_VERSION: \"[0-9]+\"/CURRENT_PROJECT_VERSION: \"$((ICODE+1))\"/" project.yml
             # In-app "What's New": generate the AppChangelog entry (both platforms) + bump its constant
             # from docs/releases/<TAG>.md's whatsnew: front-matter, so the in-app card ships in sync with
-            # this version. Warn (don't fail) if the notes file / its front-matter is missing.
-            if [ -f "docs/releases/${TAG}.md" ]; then
-              python3 -m pip install --quiet pyyaml >/dev/null 2>&1 || true
-              python3 Tools/appchangelog-gen.py "docs/releases/${TAG}.md" \
-                || echo "::warning::appchangelog-gen failed for ${TAG} — in-app 'What's New' not updated."
-            else
-              echo "::warning::No docs/releases/${TAG}.md — GitHub notes + in-app 'What's New' will use placeholders."
+            # this version. Release notes and localization are mandatory: stop before committing/pushing
+            # if either gate fails, rather than publishing an app whose visible version and changelog differ.
+            NOTES_MD="docs/releases/${TAG}.md"
+            if [ ! -f "$NOTES_MD" ]; then
+              echo "::error::Missing ${NOTES_MD}; prepare and localize the release entry before dispatching."
+              exit 1
             fi
-            git config user.name 'ryanbr'
-            git config user.email 'mp3geek@gmail.com'
+            python3 -m pip install --quiet pyyaml
+            python3 Tools/appchangelog-gen.py "$NOTES_MD"
+            python3 Tools/i18n_audit.py --ci HEAD
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git commit -am "Release ${NEW}: bump version (${BUMP}) + build numbers + What's New"
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
@@ -97,14 +102,16 @@ jobs:
           # for the AltStore manifest's buildVersion.
           echo "buildVersion=$(grep -m1 'CURRENT_PROJECT_VERSION:' project.yml | sed -E 's/.*\"([0-9]+)\".*/\1/')" >> "$GITHUB_OUTPUT"
 
-          # Immutable, NON-prerelease release at the (possibly bumped) commit so releases/latest returns it.
-          # Create only if missing (a re-run refreshes assets rather than clobbering the release/notes).
+          # Create the immutable release as a DRAFT at the (possibly bumped)
+          # commit. The publish job makes it non-prerelease/latest only after all
+          # three platform artifacts upload successfully. A re-run refreshes
+          # assets rather than clobbering the release/notes.
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $TAG already exists — re-run: platform jobs will refresh its assets."
           else
-            # Release body = the maintained per-version changelog docs/releases/<TAG>.md, plus a
-            # downloads footer. Warn (don't fail) if that file is missing so you notice a forgotten
-            # changelog. (CHANGELOG.md is the stale legacy file; docs/releases/ is the source of truth.)
+            # Release body = the required per-version changelog docs/releases/<TAG>.md, plus a
+            # downloads footer. (CHANGELOG.md is the stale legacy file; docs/releases/ is the source
+            # of truth, and the pre-push gate above rejects a missing/malformed file.)
             BODY=$(mktemp)
             NOTES_MD="docs/releases/${TAG}.md"
             if [ -f "$NOTES_MD" ]; then
@@ -112,8 +119,8 @@ jobs:
               # never leaks into the GitHub release body; files without front-matter pass through unchanged.
               awk 'NR==1 && $0=="---"{fm=1; next} fm && $0=="---"{fm=0; next} !fm{print}' "$NOTES_MD" > "$BODY"
             else
-              echo "::warning::No ${NOTES_MD} — write the release notes there first. Using a placeholder."
-              printf 'NOOP **%s** — release build.\n' "$NEW" > "$BODY"
+              echo "::error::Missing ${NOTES_MD}; refusing to create a placeholder release."
+              exit 1
             fi
             # Auto "What's Changed" breakdown: GitHub's generate-notes API lists every merged PR since the
             # previous RELEASE (non-prerelease, so testing-latest snapshots are ignored), + contributors +
@@ -141,7 +148,8 @@ jobs:
               printf -- '- **macOS** — `NOOP-macos-v%s.zip` (unzip, then right-click → Open)\n' "$NEW"
               printf -- '- **iOS** — `NOOP-ios-unsigned-v%s.ipa` (AltStore / Sideloadly)\n' "$NEW"
             } >> "$BODY"
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$(git rev-parse HEAD)" \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
+              --target "$(git rev-parse HEAD)" \
               --title "NOOP ${NEW}" --notes-file "$BODY"
           fi
 
@@ -155,6 +163,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.bump.outputs.sha }}   # build the bumped commit
+          persist-credentials: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -162,8 +171,9 @@ jobs:
       - uses: gradle/actions/wrapper-validation@v4
       - uses: gradle/actions/setup-gradle@v4
       # Release-only (no debug APK). Signed with the committed fork-debug.keystore via the debug
-      # signingConfig storeFile (release falls back to it when no keystore.properties is present);
-      # -PstagingRelease gives it the .staging app id so it installs beside the official app.
+      # signingConfig storeFile (release falls back to it when no keystore.properties is present).
+      # That key and password are PUBLIC: anyone can sign this identity. It is therefore staging-only,
+      # never a production trust anchor. -PstagingRelease enforces the separate .staging app id.
       - name: Build staging-release APK
         run: ./gradlew assembleFullRelease -PstagingRelease
       - name: Version the filename + attach
@@ -183,6 +193,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.bump.outputs.sha }}
+          persist-credentials: false
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project
@@ -233,6 +244,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.bump.outputs.sha }}
+          persist-credentials: false
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project
@@ -264,12 +276,37 @@ jobs:
           zip -qr "NOOP-ios-unsigned-v${VER}.ipa" Payload
           gh release upload "${{ needs.bump.outputs.tag }}" "NOOP-ios-unsigned-v${VER}.ipa" --repo "$GITHUB_REPOSITORY" --clobber
 
+  publish:
+    needs: [bump, android, macos, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify assets and publish as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.bump.outputs.tag }}
+          VER: ${{ needs.bump.outputs.ver }}
+        run: |
+          set -euo pipefail
+          ASSETS=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          for expected in \
+            "NOOP-android-v${VER}.apk" \
+            "NOOP-macos-v${VER}.zip" \
+            "NOOP-ios-unsigned-v${VER}.ipa"
+          do
+            if ! grep -Fxq "$expected" <<<"$ASSETS"; then
+              echo "::error::release $TAG is missing $expected"
+              exit 1
+            fi
+          done
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --draft=false --prerelease=false --latest
+
   # Prepend this release to the AltStore / SideStore source manifest — the one AltStore reads from
   # raw.githubusercontent.com/<repo>/main/altstore-source.json (docs/IOS.md) — so a sideload user is
   # offered this version automatically. Replaces the manual per-release altstore-source.json PR (#19).
   # Best-effort: a missing manifest / IPA asset / push conflict WARNS and skips, never failing the release.
   altstore:
-    needs: [bump, ios]
+    needs: [bump, publish]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -321,8 +358,8 @@ jobs:
           if git diff --quiet altstore-source.json; then
             echo "altstore-source.json already current for ${VER}."; exit 0
           fi
-          git config user.name 'ryanbr'
-          git config user.email 'mp3geek@gmail.com'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add altstore-source.json
           git commit -m "Release ${VER}: add to AltStore source"
           git push origin HEAD:main || {

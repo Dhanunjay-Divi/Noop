@@ -11,6 +11,6 @@ let package = Package(
     ],
     targets: [
         .target(name: "StrandAnalytics", dependencies: ["WhoopProtocol", "WhoopStore"]),
-        .testTarget(name: "StrandAnalyticsTests", dependencies: ["StrandAnalytics"]),
+        .testTarget(name: "StrandAnalyticsTests", dependencies: ["StrandAnalytics", "WhoopStore"]),
     ]
 )

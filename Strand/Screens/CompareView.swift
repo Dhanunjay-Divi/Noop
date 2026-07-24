@@ -117,6 +117,7 @@ private struct CompareSeries: Identifiable {
 
 struct CompareView: View {
     @EnvironmentObject var repo: Repository
+    @EnvironmentObject var intelligence: IntelligenceEngine
 
     // Effort display scale (#268) — routes the Effort metric's min/max + hover read-outs onto WHOOP's
     // 0–21 axis; display-only, the normalized overlay shape is untouched. Every other metric is
@@ -165,6 +166,17 @@ struct CompareView: View {
     /// when the windowed series content actually changes (see `correlationKey`).
     @State private var pairCache: [PairResult] = []
     @State private var pairCacheKey: String = ""
+    @State private var referenceMetric: ReferenceMetricChoice = .charge
+    @State private var referenceReport: WhoopReferenceComparisonReport?
+    @State private var referenceEstimate: CalibratedMetricEstimate?
+    @State private var referenceError: String?
+    /// nil means this Compare visit has not completed a proof-producing score pass yet. An empty set is a
+    /// valid completed receipt (no qualifying WHOOP raw nights), and must not trigger another 120-day pass
+    /// every time the selected reference metric changes.
+    @State private var verifiedCurrentNoopDays: Set<String>?
+    @State private var referenceIsRescoring = false
+    private let referenceRescoreDays = 120
+    private let personalCalibrationStore = PersonalCalibrationModelStore()
 
     private let maxSelection = 4
     private let minSelection = 2
@@ -182,6 +194,7 @@ struct CompareView: View {
                        topBackground: liquidScaffoldSky()) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 metricSection
+                officialReferenceSection
 
                 if selected.count < minSelection {
                     ComingSoon(what: "Compare needs at least two metrics with history. Import your WHOOP export in Data Sources first.")
@@ -207,6 +220,250 @@ struct CompareView: View {
         .onChangeCompat(of: correlationKey(activeSeries)) { _ in
             refreshPairCache(activeSeries)
         }
+        .task(id: "\(referenceMetric.rawValue)|\(WhoopImporter.importerVersion)") {
+            await loadOfficialReference()
+        }
+    }
+
+    private enum ReferenceMetricChoice: String, CaseIterable, Identifiable {
+        case charge, effort, rest
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .charge: return String(localized: "Charge")
+            case .effort: return String(localized: "Effort")
+            case .rest: return String(localized: "Rest")
+            }
+        }
+        var metric: WhoopComparableMetric {
+            switch self {
+            case .charge: return .recoveryScore
+            case .effort: return .effortScore
+            case .rest: return .restScore
+            }
+        }
+        var algorithmVersion: String {
+            switch self {
+            case .charge: return NoopScoreAlgorithmRevision.charge
+            case .effort: return NoopScoreAlgorithmRevision.effort
+            case .rest: return NoopScoreAlgorithmRevision.rest
+            }
+        }
+    }
+
+    private func loadOfficialReference() async {
+        referenceError = nil
+        referenceReport = nil
+        referenceEstimate = nil
+        guard let store = await repo.storeHandle() else {
+            referenceReport = nil
+            referenceError = String(localized: "The local data store is unavailable.")
+            return
+        }
+
+        // Historical computed rows predate per-row algorithm stamps. Rescore a bounded current window
+        // once per Compare visit and carry the exact completed result-day set into the calibration loader.
+        // If another score pass is active, wait briefly rather than accepting its not-yet-proven old cache.
+        if verifiedCurrentNoopDays == nil {
+            referenceIsRescoring = true
+            defer { referenceIsRescoring = false }
+            for _ in 0..<120 where intelligence.computing {
+                if Task.isCancelled { return }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+            guard !intelligence.computing else {
+                referenceReport = nil
+                referenceError = String(localized: "Current on-device scoring is still running. Reopen Compare when it finishes.")
+                return
+            }
+            guard let receipt = await intelligence.analyzeRecent(
+                maxDays: referenceRescoreDays, force: true)
+            else {
+                referenceReport = nil
+                referenceError = String(localized: "No completed on-device score pass was available. Reopen Compare after scoring finishes.")
+                return
+            }
+            guard !Task.isCancelled else { return }
+            // The completed score run—not the dashboard's display winner—proves which rows came from a
+            // dense WHOOP raw-HR window. Import-only folds can share the computed namespace but never enter
+            // this receipt. The calibration loader intersects these days with the metric-specific official
+            // importer manifest, so only independently tracked same-day pairs remain.
+            verifiedCurrentNoopDays = receipt.whoopStrapDays
+        }
+
+        let now = Date()
+        let earliest = Calendar.current.date(
+            byAdding: .day, value: -(referenceRescoreDays - 1), to: now) ?? now
+        let fromDay = Repository.localDayKey(earliest)
+        let toDay = Repository.localDayKey(now)
+        do {
+            let report = try await WhoopReferenceCalibration.report(
+                store: store,
+                metric: referenceMetric.metric,
+                importedDeviceId: Repository.whoopSource,
+                computedDeviceId: Repository.whoopSource + "-noop",
+                from: fromDay,
+                to: toDay,
+                noopAlgorithmVersion: referenceMetric.algorithmVersion,
+                verifiedOfficialReferenceDays: WhoopReferenceImportManifest().verifiedDays(
+                    deviceId: Repository.whoopSource,
+                    schemaRevision: WhoopImporter.schemaRevision,
+                    metricKey: referenceMetric.metric.seriesKey),
+                verifiedCurrentNoopDays: verifiedCurrentNoopDays ?? [],
+                whoopImportSchemaRevision: WhoopImporter.schemaRevision
+            )
+            _ = personalCalibrationStore.saveValidated(report: report)
+            referenceEstimate = personalCalibrationStore.load(
+                metric: referenceMetric.metric,
+                noopAlgorithmVersion: referenceMetric.algorithmVersion)?.latestEstimate
+            referenceReport = report
+        } catch {
+            referenceReport = nil
+            referenceEstimate = nil
+            referenceError = error.localizedDescription
+        }
+    }
+
+    private var officialReferenceSection: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader("Official reference", overline: "Your WHOOP export vs Noop")
+            NoopCard {
+                VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                    Picker("Reference metric", selection: $referenceMetric) {
+                        ForEach(ReferenceMetricChoice.allCases) { choice in
+                            Text(choice.label).tag(choice)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text("Noop keeps official outcomes and local scores in separate namespaces, then pairs only days freshly recomputed from your WHOOP strap streams. WHOOP Recovery, Strain, and Sleep Performance never enter the raw Noop formulas; imported physiology or sleep timing can seed personal baseline context.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if referenceIsRescoring {
+                        Label("Verifying current Noop score revision…", systemImage: "arrow.triangle.2.circlepath")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+
+                    if let stats = referenceReport?.statistics {
+                        LazyVGrid(
+                            columns: [
+                                GridItem(.flexible()), GridItem(.flexible()),
+                                GridItem(.flexible()), GridItem(.flexible()),
+                            ],
+                            spacing: 12
+                        ) {
+                            referenceStat("Paired", "\(stats.sampleCount)")
+                            referenceStat("Bias", signed(stats.bias))
+                            referenceStat("MAE", decimal(stats.meanAbsoluteError))
+                            referenceStat(
+                                "Correlation",
+                                stats.correlation.map { decimal($0) } ?? "—"
+                            )
+                        }
+                        Text("\(stats.firstDay) to \(stats.lastDay) · error is Noop minus official · RMSE \(decimal(stats.rootMeanSquaredError))")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+
+                        if let calibration = referenceReport?.calibration {
+                            Divider().overlay(StrandPalette.hairline)
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(calibration.decision == .validated
+                                         ? String(localized: "Personal calibration validated")
+                                         : String(localized: "Personal calibration not applied"))
+                                        .font(StrandFont.body)
+                                        .foregroundStyle(StrandPalette.textPrimary)
+                                    Text(calibration.reason)
+                                        .font(StrandFont.caption)
+                                        .foregroundStyle(StrandPalette.textTertiary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: 8)
+                                if calibration.decision == .validated {
+                                    Text(calibration.confidence.rawValue.uppercased())
+                                        .font(StrandFont.caption)
+                                        .foregroundStyle(StrandPalette.accent)
+                                }
+                            }
+                            if let validation = calibration.validation {
+                                Text("Chronological holdout: \(validation.trainingCount) training + \(validation.holdoutCount) untouched days · MAE improvement \(Int((validation.relativeMAEImprovement * 100).rounded()))%")
+                                    .font(StrandFont.caption)
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                            if let estimate = referenceEstimate {
+                                HStack(spacing: 24) {
+                                    referenceStat("Raw Noop", decimal(estimate.rawNoopValue))
+                                    referenceStat(
+                                        "Personal calibrated estimate",
+                                        decimal(estimate.calibratedValue))
+                                }
+                                Text("\(estimate.day) · saved presentation estimate · official and raw values remain unchanged")
+                                    .font(StrandFont.caption)
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                        }
+                        let excludedOfficial =
+                            referenceReport?.audit.unverifiedStoredOfficialDays ?? 0
+                        let excludedNoop = referenceReport?.audit.unverifiedStoredNoopDays ?? 0
+                        Text("Official values require importer stamp \(WhoopImporter.schemaRevision); Noop revision \(referenceMetric.algorithmVersion) is accepted only with a completed WHOOP raw-stream score receipt in this \(referenceRescoreDays)-day window. Excluded: \(excludedOfficial) unstamped official, \(excludedNoop) old, imported-only, or unverified Noop.")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if let referenceError {
+                        Text(referenceError)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.statusWarning)
+                    } else {
+                        let paired = referenceReport?.audit.pairedDays ?? 0
+                        let unstamped = referenceReport?.audit.unverifiedStoredOfficialDays ?? 0
+                        let referenceSummary: String
+                        if unstamped == 1 {
+                            referenceSummary = String(localized: "1 older reference row lacks the provenance stamp. Re-import your official WHOOP CSV once with this version to verify it safely.")
+                        } else if unstamped > 1 {
+                            referenceSummary = String(localized: "\(unstamped) older reference rows lack the provenance stamp. Re-import your official WHOOP CSV once with this version to verify them safely.")
+                        } else if paired == 0 {
+                            referenceSummary = String(localized: "No paired days yet. Import your official WHOOP CSV in Data Sources, then let Noop compute the same days locally.")
+                        } else {
+                            referenceSummary = String(localized: "Only \(paired) paired days are available. Comparison starts immediately; personal calibration needs at least 28, including 7 untouched validation days.")
+                        }
+                        Text(referenceSummary)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Text("A validated calibration is only a per-user presentation transform. It does not recover or claim to reproduce WHOOP's proprietary model.")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func referenceStat(_ label: LocalizedStringKey, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+            Text(value)
+                .font(StrandFont.body)
+                .foregroundStyle(StrandPalette.textPrimary)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func decimal(_ value: Double) -> String {
+        String(format: "%.2f", value)
+    }
+
+    private func signed(_ value: Double) -> String {
+        String(format: "%+.2f", value)
     }
 
     // MARK: - Selection key (re-loads when the set of metrics changes)
@@ -1150,6 +1407,8 @@ private func comparePreviewRepo() -> Repository {
 #Preview("Compare") {
     CompareView()
         .environmentObject(comparePreviewRepo())
+        .environmentObject(IntelligenceEngine(
+            repo: comparePreviewRepo(), profile: ProfileStore(), deviceId: "preview"))
         .frame(width: 920, height: 860)
         .preferredColorScheme(.dark)
 }

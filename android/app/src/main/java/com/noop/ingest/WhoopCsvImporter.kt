@@ -30,7 +30,8 @@ import kotlin.math.roundToInt
  *
  * Differences are only in the SINK: the Swift importer returns normalized model arrays;
  * here we map those same rows onto the verified Room entities (com.noop.data) and upsert
- * through [WhoopRepository]. All WHOOP rows are written under deviceId "my-whoop".
+ * through [WhoopRepository]. Official/blank-source rows are written under "my-whoop"; rows marked
+ * as NOOP-local are routed to "my-whoop-noop", and unknown producer labels are quarantined.
  *
  * Recognised filenames (case-insensitive, matched anywhere in a zip tree, exactly as Swift):
  *   physiological_cycles.csv  -> DailyMetric  (master daily summary)
@@ -49,6 +50,36 @@ object WhoopCsvImporter {
     private const val SLEEPS_NAME = "sleeps.csv"
     private const val WORKOUTS_NAME = "workouts.csv"
     private const val JOURNAL_NAME = "journal_entries.csv"
+
+    /**
+     * A genuine WHOOP export has no Source column. NOOP exports append one so a round-trip can keep
+     * local approximations out of the official-reference namespace. Unknown producers are dropped
+     * rather than silently treated as WHOOP ground truth.
+     */
+    internal enum class RowProvenance {
+        OfficialReference,
+        NoopApproximate,
+        NoopLocal,
+        Unknown,
+    }
+
+    internal fun classifySourceLabel(sourceLabel: String?): RowProvenance {
+        val normalized = sourceLabel?.trim()?.lowercase().orEmpty()
+        if (normalized.isEmpty() || normalized == "import" || normalized == "whoop") {
+            return RowProvenance.OfficialReference
+        }
+        if (normalized == "noop (approximate)") return RowProvenance.NoopApproximate
+        if (normalized == "manual") return RowProvenance.NoopLocal
+        return RowProvenance.Unknown
+    }
+
+    internal fun rowsForProvenance(
+        table: CsvTable,
+        vararg accepted: RowProvenance,
+    ): CsvTable {
+        val allowed = accepted.toSet()
+        return table.filterRows { row -> classifySourceLabel(row.cell("source")) in allowed }
+    }
 
     /** Per-CSV uncompressed ceiling (zip-bomb guard). Mirrors Swift maxEntryBytes = 256 MB. */
     private const val MAX_ENTRY_BYTES = 256L shl 20
@@ -84,7 +115,8 @@ object WhoopCsvImporter {
      * Accepts either a `.zip` containing the WHOOP CSVs, or a single `.csv` (routed by
      * its filename, falling back to header sniffing when the name is unrecognised).
      * Reads the SAF [uri] via the content resolver. Upserts everything via [repo] under
-     * [deviceId] (defaults to "my-whoop"), then returns an [ImportSummary] keyed by table.
+     * [deviceId] (defaults to "my-whoop"), provenance-routes any NOOP-local rows to its `-noop`
+     * sibling, then returns an [ImportSummary] keyed by table.
      */
     suspend fun importZip(
         context: Context,
@@ -105,30 +137,90 @@ object WhoopCsvImporter {
             )
         }
 
-        val cycles = csvData[CYCLES_NAME]?.let { parseCycles(CsvTable.fromData(it), deviceId) } ?: emptyList()
-        val cycleSeries = csvData[CYCLES_NAME]?.let { parseCycleSeries(CsvTable.fromData(it), deviceId) } ?: emptyList()
-        val sleepParse = csvData[SLEEPS_NAME]?.let { parseSleeps(CsvTable.fromData(it), deviceId) }
-        val sleepSessions = sleepParse?.sessions ?: emptyList()
-        val sleepDaily = sleepParse?.daily ?: emptyList()
-        val workouts = csvData[WORKOUTS_NAME]?.let { parseWorkouts(CsvTable.fromData(it), deviceId) } ?: emptyList()
+        val computedDeviceId = if (deviceId.endsWith("-noop")) deviceId else "$deviceId-noop"
+        val cyclesTable = csvData[CYCLES_NAME]?.let { CsvTable.fromData(it) }
+        val sleepsTable = csvData[SLEEPS_NAME]?.let { CsvTable.fromData(it) }
+        val workoutsTable = csvData[WORKOUTS_NAME]?.let { CsvTable.fromData(it) }
+
+        val officialCyclesTable = cyclesTable?.let {
+            rowsForProvenance(it, RowProvenance.OfficialReference)
+        }
+        val localCyclesTable = cyclesTable?.let {
+            rowsForProvenance(it, RowProvenance.NoopApproximate, RowProvenance.NoopLocal)
+        }
+        val officialSleepsTable = sleepsTable?.let {
+            rowsForProvenance(it, RowProvenance.OfficialReference)
+        }
+        val localSleepsTable = sleepsTable?.let {
+            rowsForProvenance(it, RowProvenance.NoopApproximate, RowProvenance.NoopLocal)
+        }
+        val officialWorkoutsTable = workoutsTable?.let {
+            rowsForProvenance(it, RowProvenance.OfficialReference)
+        }
+        val localWorkoutsTable = workoutsTable?.let {
+            rowsForProvenance(it, RowProvenance.NoopApproximate, RowProvenance.NoopLocal)
+        }
+
+        val cycles = officialCyclesTable?.let { parseCycles(it, deviceId) }.orEmpty()
+        val localCycles = localCyclesTable?.let { parseCycles(it, computedDeviceId) }.orEmpty()
+        val cycleSeries = officialCyclesTable
+            ?.let { parseCycleSeries(it, deviceId) }
+            .orEmpty()
+        val localCycleSeries = localCyclesTable
+            ?.let { parseCycleSeries(it, computedDeviceId) }
+            .orEmpty()
+        val sleepParse = officialSleepsTable?.let { parseSleeps(it, deviceId) }
+        val localSleepParse = localSleepsTable?.let { parseSleeps(it, computedDeviceId) }
+        val sleepSessions = sleepParse?.sessions.orEmpty()
+        val localSleepSessions = localSleepParse?.sessions.orEmpty()
+        val sleepDaily = sleepParse?.daily.orEmpty()
+        val localSleepDaily = localSleepParse?.daily.orEmpty()
+        val workouts = officialWorkoutsTable?.let { parseWorkouts(it, deviceId) }.orEmpty()
+        val localWorkouts = localWorkoutsTable
+            ?.let { parseWorkouts(it, computedDeviceId) }
+            .orEmpty()
         // #136: journal rows key only by cycle_start; map that to the cycle's wake day so entries land on
         // the same day as their recovery/sleep outcome (else they read one day early and never correlate).
-        val journalWake = csvData[CYCLES_NAME]?.let { journalWakeDayMap(CsvTable.fromData(it)) } ?: emptyMap()
+        val acceptedCyclesTable = cyclesTable?.let {
+            rowsForProvenance(
+                it,
+                RowProvenance.OfficialReference,
+                RowProvenance.NoopApproximate,
+                RowProvenance.NoopLocal,
+            )
+        }
+        val journalWake = acceptedCyclesTable?.let(::journalWakeDayMap).orEmpty()
         val journal = csvData[JOURNAL_NAME]?.let { parseJournal(CsvTable.fromData(it), deviceId, journalWake) } ?: emptyList()
 
         // Merge cycle-derived and sleep-derived daily rows on (deviceId, day): cycle fields
         // (recovery / strain / RHR / HRV / SpO2 / skin-temp / resp) win where present, sleep
         // fields fill the architecture columns. One DailyMetric per day, matching the PK.
         val daily = mergeDaily(cycles, sleepDaily)
+        val localDaily = mergeDaily(localCycles, localSleepDaily)
 
-        if (daily.isEmpty() && sleepSessions.isEmpty() && workouts.isEmpty() && journal.isEmpty()) {
+        if (daily.isEmpty() && localDaily.isEmpty() &&
+            sleepSessions.isEmpty() && localSleepSessions.isEmpty() &&
+            workouts.isEmpty() && localWorkouts.isEmpty() && journal.isEmpty()
+        ) {
             return ImportSummary.failure(SOURCE_LABEL, "Export contained no usable WHOOP rows.")
         }
 
-        repo.upsertDevice(deviceId, name = "WHOOP")
+        if (daily.isNotEmpty() || sleepSessions.isNotEmpty() || workouts.isNotEmpty() ||
+            journal.isNotEmpty() || cycleSeries.isNotEmpty()
+        ) {
+            repo.upsertDevice(deviceId, name = "WHOOP")
+        }
+        if (localDaily.isNotEmpty() || localSleepSessions.isNotEmpty() ||
+            localWorkouts.isNotEmpty() || localCycleSeries.isNotEmpty()
+        ) {
+            repo.upsertDevice(computedDeviceId, name = "NOOP (Approximate)")
+        }
         if (daily.isNotEmpty()) repo.upsertDailyMetrics(daily)
+        if (localDaily.isNotEmpty()) repo.upsertDailyMetrics(localDaily)
         if (sleepSessions.isNotEmpty()) repo.upsertSleepSessions(sleepSessions)
+        if (localSleepSessions.isNotEmpty()) repo.upsertSleepSessions(localSleepSessions)
         if (workouts.isNotEmpty()) repo.upsertWorkouts(workouts)
+        if (localWorkouts.isNotEmpty()) repo.upsertWorkouts(localWorkouts)
         if (journal.isNotEmpty()) {
             // #136: the wake-day fix moves an entry's day, so a naive re-import would leave the pre-fix
             // onset-keyed rows behind as duplicates. Atomically clear + re-write EXACTLY the day span we
@@ -139,20 +231,32 @@ object WhoopCsvImporter {
             repo.replaceJournalRange(deviceId, jDays.min(), jDays.max(), journal)
         }
         if (cycleSeries.isNotEmpty()) repo.upsertMetricSeries(cycleSeries)
+        if (localCycleSeries.isNotEmpty()) repo.upsertMetricSeries(localCycleSeries)
 
         val counts = LinkedHashMap<String, Int>()
-        if (daily.isNotEmpty()) counts["dailyMetric"] = daily.size
-        if (sleepSessions.isNotEmpty()) counts["sleepSession"] = sleepSessions.size
-        if (workouts.isNotEmpty()) counts["workout"] = workouts.size
+        if (daily.isNotEmpty() || localDaily.isNotEmpty()) {
+            counts["dailyMetric"] = daily.size + localDaily.size
+        }
+        if (sleepSessions.isNotEmpty() || localSleepSessions.isNotEmpty()) {
+            counts["sleepSession"] = sleepSessions.size + localSleepSessions.size
+        }
+        if (workouts.isNotEmpty() || localWorkouts.isNotEmpty()) {
+            counts["workout"] = workouts.size + localWorkouts.size
+        }
         if (journal.isNotEmpty()) counts["journal"] = journal.size
-        if (cycleSeries.isNotEmpty()) counts["metricSeries"] = cycleSeries.size
+        if (cycleSeries.isNotEmpty() || localCycleSeries.isNotEmpty()) {
+            counts["metricSeries"] = cycleSeries.size + localCycleSeries.size
+        }
 
         // Date span across everything we wrote.
         val days = ArrayList<String>()
         days.addAll(daily.map { it.day })
+        days.addAll(localDaily.map { it.day })
         days.addAll(journal.map { it.day })
         days.addAll(sleepSessions.map { epochSecondsToDay(it.startTs) })
+        days.addAll(localSleepSessions.map { epochSecondsToDay(it.startTs) })
         days.addAll(workouts.map { epochSecondsToDay(it.startTs) })
+        days.addAll(localWorkouts.map { epochSecondsToDay(it.startTs) })
         val firstDay = days.minOrNull()
         val lastDay = days.maxOrNull()
 
@@ -327,6 +431,7 @@ object WhoopCsvImporter {
     internal fun parseCycles(table: CsvTable, deviceId: String): List<DailyMetric> {
         val out = ArrayList<DailyMetric>(table.rows.size)
         for (row in table.rows) {
+            if (classifySourceLabel(row.cell("source")) == RowProvenance.Unknown) continue
             val tz = WhoopTime.tzOffsetMinutes(row["cycle_timezone"])
             val cycleStart = WhoopTime.parseEpochSeconds(row.cell("cycle_start_time"), tz)
             val cycleEnd = WhoopTime.parseEpochSeconds(row.cell("cycle_end_time"), tz)
@@ -394,6 +499,7 @@ object WhoopCsvImporter {
     internal fun parseCycleSeries(table: CsvTable, deviceId: String): List<MetricSeriesRow> {
         val out = ArrayList<MetricSeriesRow>()
         for (row in table.rows) {
+            if (classifySourceLabel(row.cell("source")) == RowProvenance.Unknown) continue
             val tz = WhoopTime.tzOffsetMinutes(row["cycle_timezone"])
             val cycleStart = WhoopTime.parseEpochSeconds(row.cell("cycle_start_time"), tz)
             val cycleEnd = WhoopTime.parseEpochSeconds(row.cell("cycle_end_time"), tz)
@@ -421,6 +527,7 @@ object WhoopCsvImporter {
         val sessions = ArrayList<SleepSession>(table.rows.size)
         val daily = ArrayList<DailyMetric>()
         for (row in table.rows) {
+            if (classifySourceLabel(row.cell("source")) == RowProvenance.Unknown) continue
             val tz = WhoopTime.tzOffsetMinutes(row["cycle_timezone"])
             val cycleStart = WhoopTime.parseEpochSeconds(row.cell("cycle_start_time"), tz)
             val sleepOnset = WhoopTime.parseEpochSeconds(row.cell("sleep_onset"), tz)
@@ -498,9 +605,11 @@ object WhoopCsvImporter {
 
     // MARK: - workouts.csv -> WorkoutRow
 
-    private fun parseWorkouts(table: CsvTable, deviceId: String): List<WorkoutRow> {
+    internal fun parseWorkouts(table: CsvTable, deviceId: String): List<WorkoutRow> {
         val out = ArrayList<WorkoutRow>(table.rows.size)
         for (row in table.rows) {
+            val provenance = classifySourceLabel(row.cell("source"))
+            if (provenance == RowProvenance.Unknown) continue
             val tz = WhoopTime.tzOffsetMinutes(row["cycle_timezone"])
             val cycleStart = WhoopTime.parseEpochSeconds(row.cell("cycle_start_time"), tz)
             val workoutStart = WhoopTime.parseEpochSeconds(row.cell("workout_start_time"), tz)
@@ -541,7 +650,12 @@ object WhoopCsvImporter {
                     startTs = startTs,
                     endTs = if (endTs >= startTs) endTs else startTs,
                     sport = sport,
-                    source = WHOOP_DEVICE, // required by the task: source = "my-whoop"
+                    source = when (provenance) {
+                        RowProvenance.NoopLocal -> "manual"
+                        RowProvenance.NoopApproximate -> deviceId
+                        RowProvenance.OfficialReference -> WHOOP_DEVICE
+                        RowProvenance.Unknown -> error("Unknown provenance was filtered above")
+                    },
                     durationS = durationS,
                     energyKcal = energyKcal,
                     avgHr = avgHr?.roundToInt(),

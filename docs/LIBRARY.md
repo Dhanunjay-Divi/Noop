@@ -1,10 +1,12 @@
 # NOOP — Cross-Platform Swift Library Reference
 
-NOOP is a standalone, fully **offline** companion app for WHOOP straps (4.0 and
+NOOP is a standalone, **local-first** companion app for WHOOP straps (4.0 and
 5.0). It pairs directly with the user's own strap over Bluetooth — **no WHOOP
 cloud or account** — stores everything on-device in SQLite, can
 import WHOOP CSV and Apple Health exports, and computes recovery, strain, HRV,
-and sleep locally.
+and sleep locally. The optional `NoopRemoteSync` package is the explicit
+exception: an app can use it to send the supported v1 subset to a server the
+user configures.
 
 This document is the reference for the **reusable, cross-platform Swift
 packages** that make that possible. They are designed to be vendored and reused
@@ -24,9 +26,10 @@ interoperability work:
 
 - **`johnmiddleton12/my-whoop`** — the WHOOP 4.0 BLE framing, command/decode,
   and collection logic that `WhoopProtocol` and `WhoopStore` are adapted from.
-- **`b-nnett/goose`** — the WHOOP 5.0 / MG protocol work (the `fd4b0001-…`
-  service family, CRC16-Modbus header, `CLIENT_HELLO`, and the "puffin" packet
-  types) that the WHOOP 5.0 paths are ported from.
+- **`b-nnett/goose`** — observed WHOOP 5.0 / MG protocol facts (the
+  `fd4b0001-…` service family, CRC16-Modbus header, `CLIENT_HELLO`, and the
+  "puffin" packet types). Its repository has no explicit software license; this
+  fork copies none of its source or assets.
 - **`groue/GRDB.swift`** — SQLite persistence used by `WhoopStore`.
 
 ---
@@ -40,9 +43,11 @@ interoperability work:
 | **StrandAnalytics** | HRV / recovery / strain / sleep / correlation math | ✅ Pure, deterministic | none | (WhoopProtocol, WhoopStore types) |
 | **StrandImport** | WHOOP CSV + Apple Health (`export.xml`, streaming) importers | ✅ Pure Foundation/XML | none | ZIPFoundation |
 | **StrandDesign** | SwiftUI design system (palette, components, charts) | SwiftUI only | SwiftUI | none |
+| **NoopRemoteSync** | Optional authenticated self-hosted v1 upload client | Explicit network I/O | none | WhoopStore |
 
-All five packages declare the same platforms — **iOS 16+ and macOS 13+** — and
-build with **swift-tools-version 5.9**. The first four are platform-pure: they
+All six listed packages declare **macOS 13+**. The five inherited packages
+declare **iOS 16+**; `NoopRemoteSync` declares **iOS 17+**. The first four are
+platform-pure: they
 never import `CoreBluetooth`, `UIKit`, or `AppKit`, so they run unchanged in CLI
 tools, tests, and on any platform. `StrandDesign` is the only SwiftUI package;
 it builds on both iOS and macOS, bridging through `UIColor`/`NSColor` only where
@@ -230,16 +235,18 @@ targets: [
 
 ### Schema
 
-The migrator (`WhoopStore.makeMigrator()`) runs `v1`…`v9`
-(`WhoopStoreInfo.schemaVersion == 9`). On open, the store enables WAL journal
+The migrator (`WhoopStore.makeMigrator()`) runs through
+`v30-remote-sync-pending-indexes`. On open, the store enables WAL journal
 mode, `synchronous = NORMAL`, a 16 MB page cache, 256 MB mmap, and a 5-second
 busy timeout so two handles to the same file don't deadlock.
 
 | Table | Purpose | Natural key |
 |---|---|---|
 | `device` | known straps | `id` |
-| `hrSample`, `rrInterval`, `event`, `battery` | decoded live streams | `(deviceId, ts[, …])` |
+| `hrSample`, `event`, `battery` | decoded live streams | `(deviceId, ts[, …])` |
+| `rrInterval` | R-R beats, including equal same-second values | `(deviceId, ts, rrMs, seq)` |
 | `spo2Sample`, `skinTempSample`, `respSample`, `gravitySample` | type-47 biometric streams | `(deviceId, ts)` |
+| `stepSample`, `ppgHrSample`, `sleepStateSample`, `ppgWaveformSample`, `rawImuSample` | later decoded/packed streams | `(deviceId, ts)` |
 | `rawBatch` | zlib-compressed raw-frame outbox | `batchId` |
 | `cursors` | named highwater/read cursors | `name` |
 | `sleepSession`, `dailyMetric` | cached derived metrics | `(deviceId, startTs)` / `(deviceId, day)` |

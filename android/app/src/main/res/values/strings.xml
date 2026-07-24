@@ -1410,7 +1410,7 @@
     <string name="l10n_settings_screen_check_for_updates_736b9062">Check for updates</string>
     <string name="l10n_settings_screen_checking_820d6004">Checking…</string>
     <string name="l10n_settings_screen_checks_github_for_the_latest_version_c10a81e2">Checks GitHub for the latest version when you tap. Nothing else is sent.</string>
-    <string name="l10n_settings_screen_contact_support_at_support_email_f0c4adce">Contact support at %1$s</string>
+    <string name="l10n_settings_screen_contact_support_at_support_email_f0c4adce">Open support and issue tracker on GitHub</string>
     <string name="l10n_settings_screen_continuous_hrv_capture_1f0805d8">Continuous HRV capture</string>
     <string name="l10n_settings_screen_couldn_t_check_try_again_b3c885d9">Couldn\'t check. Try again.</string>
     <string name="l10n_settings_screen_counter_ticks_per_step_leave_at_3ce8c1d5">Counter ticks per step. Leave at 1.0 unless your steps run high. On a WHOOP 5/MG they can run very high (10× or more), so this goes up to 30. Walk a known 1,000 steps and divide NOOP\'s count by the real count to get your value.</string>
@@ -1462,7 +1462,7 @@
     <string name="l10n_settings_screen_profile_photo_33f385bb">Profile photo</string>
     <string name="l10n_settings_screen_project_home_and_source_on_github_a067ed35">Project home and source on GitHub</string>
     <string name="l10n_settings_screen_project_home_source_994627c1">Project home &amp; source</string>
-    <string name="l10n_settings_screen_questions_feedback_bugs_support_email_ed10662a">Questions, feedback, bugs: %1$s</string>
+    <string name="l10n_settings_screen_questions_feedback_bugs_support_email_ed10662a">Questions, feedback and bugs: GitHub issues</string>
     <string name="l10n_settings_screen_recalibrate_aaa989ea">Recalibrate</string>
     <string name="l10n_settings_screen_recalibrate_charge_baseline_52a05a26">Recalibrate Charge baseline</string>
     <string name="l10n_settings_screen_recalibrate_your_charge_baseline_018e3846">Recalibrate your Charge baseline?</string>
@@ -1716,4 +1716,22 @@
     <string name="l10n_data_sources_screen_last_shared_6bf8389c">"Last shared "</string>
     <string name="l10n_data_sources_screen_sharing_paused_health_connect_permission_was_e8950315">Sharing paused — Health Connect permission was revoked. Tap to re-grant.</string>
     <string name="l10n_data_sources_screen_last_share_didn_t_finish_noop_0d6c27f0">Last share didn’t finish — NOOP will retry automatically.</string>
+    <string name="remote_sync_self_hosted_server">Self-hosted server</string>
+    <string name="remote_sync_description">Send measured streams, Noop-derived metrics, sleep, workouts and journal entries to your own Noop server. Imported official WHOOP metrics use a separate reference namespace so they can be compared without pretending Noop reproduces WHOOP\'s proprietary score formula.</string>
+    <string name="remote_sync_api_key">API key</string>
+    <string name="remote_sync_saved_key_placeholder">Saved securely — leave blank to keep it</string>
+    <string name="remote_sync_bearer_token_placeholder">Bearer token from your server</string>
+    <string name="remote_sync_automatic_upload">Automatic upload</string>
+    <string name="remote_sync_automatic_upload_description">Off by default. When enabled, WorkManager catches up in bounded batches.</string>
+    <string name="remote_sync_save_and_test">Save &amp; test connection</string>
+    <string name="remote_sync_sync_now">Sync now</string>
+    <string name="remote_sync_full_replay">Full replay</string>
+    <string name="remote_sync_disconnect_and_forget">Disconnect &amp; forget key</string>
+    <string name="remote_sync_privacy_notice">Privacy: uploads go only to the URL above after you opt in. The Bearer key is encrypted with Android Keystore. Public servers require HTTPS; HTTP is allowed only for localhost or a private LAN. A full replay is idempotent but can transfer substantial history. Sync is archival/upsert-only: deleting a local derived item does not delete its prior server copy.</string>
+    <string name="remote_sync_replay_title">Replay all local history?</string>
+    <string name="remote_sync_replay_message">No local data is deleted. Every decoded raw row is made pending and resent, while derived history is replayed by stable keys. Use this after changing servers or repairing a server database; it may take several background batches.</string>
+    <string name="remote_sync_replay">Replay</string>
+    <string name="remote_sync_disconnect_title">Disconnect self-hosted server?</string>
+    <string name="remote_sync_disconnect_message">This removes the saved URL, Keystore-protected API key, queued sync cursors and automatic upload schedule. It does not delete local data or data already on your server.</string>
+    <string name="settings_support_open_url">Open this support URL: %1$s</string>
 </resources>

@@ -1382,7 +1382,7 @@
     <string name="l10n_settings_screen_check_for_updates_736b9062">Verifique se existem atualizações</string>
     <string name="l10n_settings_screen_checking_820d6004">Verificando…</string>
     <string name="l10n_settings_screen_checks_github_for_the_latest_version_c10a81e2">Verifica o GitHub para obter a versão mais recente quando toca. Nada mais é enviado.</string>
-    <string name="l10n_settings_screen_contact_support_at_support_email_f0c4adce">Contacte o suporte em %1$s</string>
+    <string name="l10n_settings_screen_contact_support_at_support_email_f0c4adce">Abrir o suporte e o acompanhamento de problemas no GitHub</string>
     <string name="l10n_settings_screen_continuous_hrv_capture_1f0805d8">Captura contínua de HRV</string>
     <string name="l10n_settings_screen_couldn_t_check_try_again_b3c885d9">Não foi possível verificar. Tente novamente.</string>
     <string name="l10n_settings_screen_counter_ticks_per_step_leave_at_3ce8c1d5">Contador de ticks por etapa. Deixe em 1,0, a menos que os teus passos sejam altos. Num WHOOP 5/MG podem correr muito alto (10× ou mais), por isso isto vai até 30. Caminhe 1.000 passos conhecidos e divida a contagem do NOOP pela contagem real para obter o teu valor.</string>
@@ -1434,7 +1434,7 @@
     <string name="l10n_settings_screen_profile_photo_33f385bb">Foto de perfil</string>
     <string name="l10n_settings_screen_project_home_and_source_on_github_a067ed35">Página inicial e fonte do projeto no GitHub</string>
     <string name="l10n_settings_screen_project_home_source_994627c1">Início e fonte do projeto</string>
-    <string name="l10n_settings_screen_questions_feedback_bugs_support_email_ed10662a">Perguntas, comentários, erros: %1$s</string>
+    <string name="l10n_settings_screen_questions_feedback_bugs_support_email_ed10662a">Perguntas, comentários e erros: problemas no GitHub</string>
     <string name="l10n_settings_screen_recalibrate_aaa989ea">Recalibrar</string>
     <string name="l10n_settings_screen_recalibrate_charge_baseline_52a05a26">Recalibrar linha de base de carga</string>
     <string name="l10n_settings_screen_recalibrate_your_charge_baseline_018e3846">Recalibrar a tua linha de base de faturação?</string>
@@ -1686,4 +1686,22 @@
     <string name="l10n_data_sources_screen_last_shared_6bf8389c">"Última partilha "</string>
     <string name="l10n_data_sources_screen_sharing_paused_health_connect_permission_was_e8950315">Partilha pausada: a permissão do Health Connect foi revogada. Toca para conceder novamente.</string>
     <string name="l10n_data_sources_screen_last_share_didn_t_finish_noop_0d6c27f0">A última partilha não foi concluída – o NOOP tentará novamente automaticamente.</string>
+    <string name="remote_sync_self_hosted_server">Servidor autoalojado</string>
+    <string name="remote_sync_description">Envia fluxos medidos, métricas calculadas pelo Noop, sono, treinos e entradas do diário para o teu próprio servidor Noop. As métricas oficiais da WHOOP importadas usam um espaço de nomes de referência separado, para poderem ser comparadas sem afirmar que o Noop reproduz a fórmula de pontuação proprietária da WHOOP.</string>
+    <string name="remote_sync_api_key">Chave de API</string>
+    <string name="remote_sync_saved_key_placeholder">Guardada em segurança — deixa em branco para a manter</string>
+    <string name="remote_sync_bearer_token_placeholder">Token Bearer do teu servidor</string>
+    <string name="remote_sync_automatic_upload">Carregamento automático</string>
+    <string name="remote_sync_automatic_upload_description">Desativado por predefinição. Quando ativado, o WorkManager atualiza em lotes limitados.</string>
+    <string name="remote_sync_save_and_test">Guardar e testar a ligação</string>
+    <string name="remote_sync_sync_now">Sincronizar agora</string>
+    <string name="remote_sync_full_replay">Reenvio completo</string>
+    <string name="remote_sync_disconnect_and_forget">Desligar e esquecer a chave</string>
+    <string name="remote_sync_privacy_notice">Privacidade: os carregamentos vão apenas para o URL acima depois de ativares esta opção. A chave Bearer é encriptada com o Android Keystore. Os servidores públicos requerem HTTPS; o HTTP só é permitido para localhost ou uma LAN privada. Um reenvio completo é idempotente, mas pode transferir um histórico considerável. A sincronização apenas arquiva ou atualiza: eliminar um item calculado localmente não elimina a respetiva cópia anterior no servidor.</string>
+    <string name="remote_sync_replay_title">Reenviar todo o histórico local?</string>
+    <string name="remote_sync_replay_message">Não são eliminados dados locais. Cada linha de dados brutos descodificada é marcada como pendente e reenviada, enquanto o histórico calculado é reenviado através de chaves estáveis. Usa esta opção depois de mudares de servidor ou reparares uma base de dados do servidor; pode demorar vários lotes em segundo plano.</string>
+    <string name="remote_sync_replay">Reenviar</string>
+    <string name="remote_sync_disconnect_title">Desligar o servidor autoalojado?</string>
+    <string name="remote_sync_disconnect_message">Isto remove o URL guardado, a chave de API protegida pelo Keystore, os cursores de sincronização em fila e o agendamento do carregamento automático. Não elimina dados locais nem dados que já estejam guardados no teu servidor.</string>
+    <string name="settings_support_open_url">Abre este URL de suporte: %1$s</string>
 </resources>

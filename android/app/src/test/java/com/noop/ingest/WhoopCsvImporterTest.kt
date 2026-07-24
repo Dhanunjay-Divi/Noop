@@ -2,6 +2,7 @@ package com.noop.ingest
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -25,6 +26,89 @@ class WhoopCsvImporterTest {
 
     private fun cycles(csv: String) =
         WhoopCsvImporter.parseCycles(CsvTable.fromData(csv.trimIndent().toByteArray()), device)
+
+    @Test
+    fun sourceColumnRoutesNoopRowsAndQuarantinesUnknownProducers() {
+        assertEquals(
+            WhoopCsvImporter.RowProvenance.OfficialReference,
+            WhoopCsvImporter.classifySourceLabel(null),
+        )
+        assertEquals(
+            WhoopCsvImporter.RowProvenance.OfficialReference,
+            WhoopCsvImporter.classifySourceLabel(" import "),
+        )
+        assertEquals(
+            WhoopCsvImporter.RowProvenance.NoopApproximate,
+            WhoopCsvImporter.classifySourceLabel(" NOOP (approximate) "),
+        )
+        assertEquals(
+            WhoopCsvImporter.RowProvenance.NoopLocal,
+            WhoopCsvImporter.classifySourceLabel("manual"),
+        )
+        assertEquals(
+            WhoopCsvImporter.RowProvenance.Unknown,
+            WhoopCsvImporter.classifySourceLabel("other-app"),
+        )
+
+        val table = CsvTable.fromData(
+            """
+            Cycle start time,Cycle end time,Cycle timezone,Recovery score %,Source
+            2026-01-01 00:00:00,2026-01-01 23:00:00,UTC+00:00,60,noop (APPROXIMATE)
+            2026-01-02 00:00:00,2026-01-02 23:00:00,UTC+00:00,70,import
+            2026-01-03 00:00:00,2026-01-03 23:00:00,UTC+00:00,99,other-app
+            2026-01-04 00:00:00,2026-01-04 23:00:00,UTC+00:00,80,
+            """.trimIndent().toByteArray(),
+        )
+        val official = WhoopCsvImporter.parseCycles(
+            WhoopCsvImporter.rowsForProvenance(
+                table,
+                WhoopCsvImporter.RowProvenance.OfficialReference,
+            ),
+            device,
+        )
+        val local = WhoopCsvImporter.parseCycles(
+            WhoopCsvImporter.rowsForProvenance(
+                table,
+                WhoopCsvImporter.RowProvenance.NoopApproximate,
+                WhoopCsvImporter.RowProvenance.NoopLocal,
+            ),
+            "$device-noop",
+        )
+
+        assertEquals(listOf("2026-01-02", "2026-01-04"), official.map { it.day })
+        assertEquals(listOf("2026-01-01"), local.map { it.day })
+        assertTrue((official + local).none { it.day == "2026-01-03" })
+        assertTrue(official.all { it.deviceId == device })
+        assertTrue(local.all { it.deviceId == "$device-noop" })
+
+        val workoutTable = CsvTable.fromData(
+            """
+            Workout start time,Workout end time,Cycle timezone,Activity name,Source
+            2026-01-01 12:00:00,2026-01-01 13:00:00,UTC+00:00,Ride,noop (APPROXIMATE)
+            2026-01-02 12:00:00,2026-01-02 13:00:00,UTC+00:00,Lift,manual
+            2026-01-03 12:00:00,2026-01-03 13:00:00,UTC+00:00,Run,whoop
+            2026-01-04 12:00:00,2026-01-04 13:00:00,UTC+00:00,Fake,other-app
+            """.trimIndent().toByteArray(),
+        )
+        val officialWorkouts = WhoopCsvImporter.parseWorkouts(
+            WhoopCsvImporter.rowsForProvenance(
+                workoutTable,
+                WhoopCsvImporter.RowProvenance.OfficialReference,
+            ),
+            device,
+        )
+        val localWorkouts = WhoopCsvImporter.parseWorkouts(
+            WhoopCsvImporter.rowsForProvenance(
+                workoutTable,
+                WhoopCsvImporter.RowProvenance.NoopApproximate,
+                WhoopCsvImporter.RowProvenance.NoopLocal,
+            ),
+            "$device-noop",
+        )
+        assertEquals(listOf("my-whoop"), officialWorkouts.map { it.source })
+        assertEquals(listOf("$device-noop", "manual"), localWorkouts.map { it.source })
+        assertTrue((officialWorkouts + localWorkouts).none { it.sport == "Fake" })
+    }
 
     /**
      * A main sleep that begins 2024-01-01 23:15 and ends 2024-01-02 06:30 at UTC+01:00 must fold

@@ -290,6 +290,7 @@ public struct WhoopExportImporter {
             r.sleepConsistencyPct   = row.double("sleep_consistency_pct")
             r.sleepNeedMin          = row.double("sleep_need_min")
             r.sleepDebtMin          = row.double("sleep_debt_min")
+            r.sourceLabel           = row.cell("source")
 
             out.append(r)
         }
@@ -326,6 +327,7 @@ public struct WhoopExportImporter {
             r.sleepConsistencyPct   = row.double("sleep_consistency_pct")
             r.sleepNeedMin          = row.double("sleep_need_min")
             r.sleepDebtMin          = row.double("sleep_debt_min")
+            r.sourceLabel           = row.cell("source")
 
             out.append(r)
         }
@@ -366,6 +368,7 @@ public struct WhoopExportImporter {
             r.distanceMeters       = row.double("distance_meters", "distance_meter")
             r.altitudeGainMeters   = row.double("altitude_gain_meters", "altitude_gain_meter")
             r.altitudeChangeMeters = row.double("altitude_change_meters", "altitude_change_meter")
+            r.sourceLabel          = row.cell("source")
 
             out.append(r)
         }

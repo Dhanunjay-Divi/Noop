@@ -24,7 +24,7 @@ import kotlin.math.roundToInt
 /**
  * The AI Coach.
  *
- * Privacy posture: this is the ONE networked feature in the app. Nothing leaves the device
+ * Privacy posture: this is an explicit opt-in network feature. Nothing is sent
  * until the user has saved their own API key (see [AiKeyStore]) and asked a question. Only a
  * compact plain-text summary of their metrics plus their question is sent to the provider the
  * user picked. No raw samples, no identifiers.

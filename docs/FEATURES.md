@@ -1,16 +1,15 @@
 # NOOP — Feature Guide
 
-NOOP is a standalone, fully **offline** companion app for WHOOP straps (4.0 and 5.0). It pairs
-directly with the strap over Bluetooth Low Energy — **no WHOOP account, no
-cloud** — stores everything on-device in SQLite, imports your WHOOP and Apple Health exports,
+NOOP is a standalone, **local-first** companion app for WHOOP straps (4.0 and 5.0). It pairs
+directly with the strap over Bluetooth Low Energy—**no WHOOP account or required
+cloud**—stores everything on-device in SQLite, imports your WHOOP and Apple Health exports,
 and computes its own daily scores locally — **Charge** (recovery), **Effort** (strain) and **Rest**
 (sleep), an energy economy you wake with, spend, and rebuild — alongside HRV and the raw signals.
 These are honest approximations from published methods, **not WHOOP's scores**. The macOS app (in `Strand/`) is the
-reference implementation (installable via the Homebrew cask); Android (in `android/`) is a full,
-shipped app (sideload the `.apk`); and iOS ships as an **unsigned `.ipa` you sideload** with
-AltStore/SideStore — signed on your own iPhone with your own free Apple ID, so there's no App
-Store or developer account and NOOP stays anonymous (see [docs/IOS.md](IOS.md); you can still
-build it yourself in Xcode). It shares NOOP's analysis code, so its results match
+reference implementation; Android (in `android/`) is a full native app; and iOS
+ships as the `NOOPiOS` target. This fork is currently build-from-source on all
+three platforms (see [build instructions](BUILD.md) and [iOS notes](IOS.md)).
+iOS shares NOOP's analysis code, so its results match
 macOS; it is newer and less battle-tested, with live BLE on a physical iPhone not yet fully
 validated.
 
@@ -25,7 +24,7 @@ NOOP is built on community interoperability and protocol-documentation work, wit
 | Project | Contribution |
 | --- | --- |
 | [`johnmiddleton12/my-whoop`](https://github.com/johnmiddleton12/my-whoop) | WHOOP 4.0 BLE protocol — framing, commands, decoding |
-| [`b-nnett/goose`](https://github.com/b-nnett/goose) | WHOOP 5.0 / MG BLE protocol |
+| [`b-nnett/goose`](https://github.com/b-nnett/goose) | Observed WHOOP 5.0 / MG BLE protocol facts; no source/assets copied |
 | [`groue/GRDB.swift`](https://github.com/groue/GRDB.swift) | On-device SQLite persistence |
 
 ---
@@ -72,9 +71,9 @@ The onboarding wizard (`OnboardingWizard.swift`) appears on first launch and run
 "thread" along the bottom and a Back button always available:
 
 1. **Welcome** — "all your data, none of the cloud".
-2. **What NOOP does** — three value slides: the Charge ring, live heart, offline ownership.
-3. **Bluetooth priming** — explains *before* the macOS Bluetooth prompt that nothing leaves
-   your Mac; the connection is local BLE with no server in the middle.
+2. **What NOOP does** — three value slides: the Charge ring, live heart, private-by-default ownership.
+3. **Bluetooth priming** — explains *before* the macOS Bluetooth prompt that the strap
+   connection is direct local BLE, with optional user-enabled destinations disclosed separately.
 4. **Wear & wake** — put the strap on (snug, sensor on skin), charge it, keep it within ~1 m.
 5. **Scan** — a radar sweep; tapping **Scan** calls the BLE engine. If it hasn't bonded after
    ~12 seconds, a reassurance card appears explaining the strap won't show in System Settings,
@@ -525,8 +524,10 @@ feed, refresh battery, scan/reconnect, or disconnect.
 
 ## Privacy & data ownership
 
-- **Offline by design.** NOOP talks to your strap directly over Bluetooth Low Energy — there is
-  no server in the middle. No account, no sync, no cloud.
+- **Private by default.** NOOP talks to your strap directly over Bluetooth Low Energy and has
+  no required account or project-operated cloud. Coach, Oura import, sharing, and self-hosted
+  sync are explicit opt-ins.
 - **On-device storage.** All history (imported and live-captured) is stored locally in SQLite
   via GRDB.
-- **Your data is yours.** Imports happen once and stay on this Mac; nothing is uploaded.
+- **Your data is yours.** Imports and captures stay local unless you deliberately enable a
+  destination such as your own self-hosted server.

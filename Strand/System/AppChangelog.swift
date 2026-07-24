@@ -2313,7 +2313,7 @@ enum AppChangelog {
             body: String(localized: "Live heart rate is instant. Recovery, strain and sleep sharpen as NOOP learns your baseline over your first nights of wear. Want your history now? Import your WHOOP export in Data Sources and it backfills in about a minute.")),
         Expectation(
             icon: "lock.shield",
-            title: String(localized: "Everything stays on your device"),
-            body: String(localized: "No account, no cloud, no sync. NOOP talks only to your strap and keeps everything local. Your data is yours alone.")),
+            title: String(localized: "Private by default"),
+            body: String(localized: "No account or project cloud is required. NOOP keeps data local unless you explicitly share it, use an external Coach provider, connect Oura, or enable your own self-hosted sync.")),
     ]
 }

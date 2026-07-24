@@ -1,0 +1,76 @@
+# Validate the optional self-hosted API against both memory and TimescaleDB storage.
+name: Self-hosted Server CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/server.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/server.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      timescaledb:
+        image: timescale/timescaledb:2.20.3-pg16
+        env:
+          POSTGRES_DB: noop
+          POSTGRES_USER: noop
+          POSTGRES_PASSWORD: noop-ci-database-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U noop -d noop"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      NOOP_TEST_DATABASE_URL: postgresql://noop:noop-ci-database-password@127.0.0.1:5432/noop
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: server/requirements-dev.txt
+
+      - name: Install test dependencies
+        run: python -m pip install --requirement requirements-dev.txt
+
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Audit Python dependencies
+        run: |
+          pip-audit --requirement requirements.txt
+          pip-audit --requirement requirements-dev.txt
+
+      - name: Test API and wire contract
+        run: pytest
+
+      - name: Build production container
+        run: docker build --tag noop-server-ci .

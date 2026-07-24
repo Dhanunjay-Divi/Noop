@@ -2427,11 +2427,18 @@ fun SettingsScreen(
                             interactionSource = projectHomeInteraction,
                             indication = null,
                         ) {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ryanbr/noop"))
+                            val intent = Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse("https://github.com/Dhanunjay-Divi/Noop"),
+                            )
                             try {
                                 context.startActivity(intent)
                             } catch (_: ActivityNotFoundException) {
-                                Toast.makeText(context, "github.com/ryanbr/noop", Toast.LENGTH_LONG).show()
+                                Toast.makeText(
+                                    context,
+                                    "github.com/Dhanunjay-Divi/Noop",
+                                    Toast.LENGTH_LONG,
+                                ).show()
                             }
                         }
                         .padding(horizontal = 14.dp, vertical = 12.dp)
@@ -2706,8 +2713,8 @@ fun SettingsScreen(
 
                 RowDivider()
 
-                // Support link — opens the project's contact email (same address the
-                // Support screen lists). NOOP is anonymous, so email is the support channel.
+                // Support link — the project issue tracker keeps reports and follow-up attached to
+                // the canonical repository instead of routing users to an upstream maintainer.
                 val supportInteraction = remember { MutableInteractionSource() }
                 Box(
                     modifier = Modifier
@@ -2720,18 +2727,23 @@ fun SettingsScreen(
                             interactionSource = supportInteraction,
                             indication = null,
                         ) {
-                            val intent = Intent(Intent.ACTION_SENDTO).apply {
-                                data = Uri.parse("mailto:$SUPPORT_EMAIL")
-                                putExtra(Intent.EXTRA_SUBJECT, "NOOP support")
-                            }
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(SUPPORT_URL))
                             try {
                                 context.startActivity(intent)
                             } catch (_: ActivityNotFoundException) {
-                                Toast.makeText(context, "Email us at $SUPPORT_EMAIL", Toast.LENGTH_LONG).show()
+                                Toast.makeText(
+                                    context,
+                                    uiString(R.string.settings_support_open_url, SUPPORT_URL),
+                                    Toast.LENGTH_LONG,
+                                ).show()
                             }
                         }
                         .padding(horizontal = 14.dp, vertical = 12.dp)
-                        .semantics { contentDescription = uiString(R.string.l10n_settings_screen_contact_support_at_support_email_f0c4adce, SUPPORT_EMAIL) },
+                        .semantics {
+                            contentDescription = uiString(
+                                R.string.l10n_settings_screen_contact_support_at_support_email_f0c4adce,
+                            )
+                        },
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -2740,7 +2752,7 @@ fun SettingsScreen(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(uiString(R.string.l10n_settings_screen_support_contact_f4c31b01), style = NoopType.headline, color = Palette.textPrimary)
                             Text(
-                                uiString(R.string.l10n_settings_screen_questions_feedback_bugs_support_email_ed10662a, SUPPORT_EMAIL),
+                                uiString(R.string.l10n_settings_screen_questions_feedback_bugs_support_email_ed10662a),
                                 style = NoopType.footnote,
                                 color = Palette.textSecondary,
                             )
@@ -2821,7 +2833,7 @@ fun SettingsScreen(
     }
 }
 
-private const val SUPPORT_EMAIL = "thenoopapp@gmail.com"
+private const val SUPPORT_URL = "https://github.com/Dhanunjay-Divi/Noop/issues"
 
 // MARK: - App icon swap (v3 "Titanium & Gold")
 

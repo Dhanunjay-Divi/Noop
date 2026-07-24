@@ -11,7 +11,7 @@ Scope and notices:
   They are not claimed as anyone's property and may be reused freely. See
   DISCLAIMER.md and ATTRIBUTION.md.
 - Third-party components keep their own licenses and are not relicensed by this
-  file. See NOTICE for the full list (GRDB.swift and ZIPFoundation are MIT).
+  file. See NOTICE for the declared direct dependency families and their terms.
 - Required Notice: Copyright 2026 NoopApp
 
 In short: NOOP is source-available and free for personal and other non-commercial

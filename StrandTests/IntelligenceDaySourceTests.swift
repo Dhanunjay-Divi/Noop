@@ -1,4 +1,5 @@
 import XCTest
+import WhoopStore
 @testable import Strand
 
 /// Pins the By-Day honesty fix (Sleep overhaul §2.6) + the per-day diagnostic source token (§2.5):
@@ -55,6 +56,55 @@ final class IntelligenceDaySourceTests: XCTestCase {
                                           appleHealthDays: []), .computed)
         XCTAssertEqual(DaySource.classify(day: "2026-06-10", importedWhoopDays: imported,
                                           appleHealthDays: []), .whoopImport)
+    }
+
+    // MARK: - official-reference raw-input proof
+
+    private func device(
+        id: String,
+        brand: String,
+        sourceKind: SourceKind
+    ) -> PairedDevice {
+        PairedDevice(
+            id: id, brand: brand, model: brand, sourceKind: sourceKind,
+            capabilities: [.hr], status: .active, addedAt: 0, lastSeenAt: 0)
+    }
+
+    func testOfficialDashboardWinnerIsNotRawComputationEvidence() {
+        // `.whoopImport` proves only that an official row wins the dashboard merge. With no raw-run
+        // receipt there are zero verified comparison days; Compare must never derive this set from
+        // `DaySource` again.
+        let displaySource = DaySource.classify(
+            day: "2026-06-12",
+            importedWhoopDays: ["2026-06-12"],
+            appleHealthDays: [])
+        let receipt = IntelligenceEngine.ScoreRunReceipt(whoopStrapDays: [])
+
+        XCTAssertEqual(displaySource, .whoopImport)
+        XCTAssertTrue(receipt.whoopStrapDays.isEmpty)
+    }
+
+    func testWhoopRawOwnerProofAcceptsLiveAndLegacyWhoopOnly() {
+        let liveWhoop = device(id: "whoop-5", brand: "WHOOP", sourceKind: .liveBLE)
+        let historyWhoop = device(id: "whoop-history", brand: "whoop", sourceKind: .historyBLE)
+        let polar = device(id: "polar", brand: "Polar", sourceKind: .liveBLE)
+        let devices = [liveWhoop, historyWhoop, polar]
+
+        XCTAssertTrue(IntelligenceEngine.isWhoopStrapOwner(
+            liveWhoop.id, devices: devices, fallbackDeviceId: "my-whoop"))
+        XCTAssertTrue(IntelligenceEngine.isWhoopStrapOwner(
+            historyWhoop.id, devices: devices, fallbackDeviceId: "my-whoop"))
+        XCTAssertFalse(IntelligenceEngine.isWhoopStrapOwner(
+            polar.id, devices: devices, fallbackDeviceId: "my-whoop"))
+        XCTAssertTrue(IntelligenceEngine.isWhoopStrapOwner(
+            "my-whoop", devices: devices, fallbackDeviceId: "my-whoop"))
+    }
+
+    func testRegisteredImportCannotMasqueradeAsLegacyWhoopStrap() {
+        let imported = device(id: "my-whoop", brand: "WHOOP", sourceKind: .fileImport)
+
+        XCTAssertFalse(IntelligenceEngine.isWhoopStrapOwner(
+            imported.id, devices: [imported], fallbackDeviceId: "my-whoop"))
     }
 
     // MARK: - diagnostic line shape (the strap-log proof the next report ships)

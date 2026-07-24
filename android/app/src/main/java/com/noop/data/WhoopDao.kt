@@ -91,6 +91,121 @@ interface WhoopDao : DeviceRegistryDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertRawImu(rows: List<RawImuSampleEntity>): List<Long>
 
+    // MARK: - Optional self-hosted sync outbox
+
+    /**
+     * Oldest raw rows not yet acknowledged by the user's self-hosted server. A separate limit per
+     * stream keeps dense HR from starving sparse battery/events while bounding one request. These
+     * queries intentionally exclude PPG-derived HR and the raw optical/IMU blobs: the v1 API carries
+     * decoded scalar streams, and measured HR remains distinguishable from an estimate.
+     */
+    @Query(
+        "SELECT * FROM hrSample WHERE deviceId = :deviceId AND synced = 0 " +
+            "ORDER BY ts ASC LIMIT :limit"
+    )
+    suspend fun pendingRemoteHr(deviceId: String, limit: Int): List<HrSample>
+
+    @Query(
+        "SELECT * FROM rrInterval WHERE deviceId = :deviceId AND synced = 0 " +
+            "ORDER BY ts ASC, rrMs ASC, seq ASC LIMIT :limit"
+    )
+    suspend fun pendingRemoteRr(deviceId: String, limit: Int): List<RrInterval>
+
+    @Query(
+        "SELECT * FROM event WHERE deviceId = :deviceId AND synced = 0 " +
+            "ORDER BY ts ASC, kind ASC LIMIT :limit"
+    )
+    suspend fun pendingRemoteEvents(deviceId: String, limit: Int): List<EventRow>
+
+    @Query(
+        "SELECT * FROM battery WHERE deviceId = :deviceId AND synced = 0 " +
+            "ORDER BY ts ASC LIMIT :limit"
+    )
+    suspend fun pendingRemoteBattery(deviceId: String, limit: Int): List<BatterySample>
+
+    @Query(
+        "SELECT * FROM spo2Sample WHERE deviceId = :deviceId AND synced = 0 " +
+            "ORDER BY ts ASC LIMIT :limit"
+    )
+    suspend fun pendingRemoteSpo2(deviceId: String, limit: Int): List<Spo2Sample>
+
+    @Query(
+        "SELECT * FROM skinTempSample WHERE deviceId = :deviceId AND synced = 0 " +
+            "ORDER BY ts ASC LIMIT :limit"
+    )
+    suspend fun pendingRemoteSkinTemp(deviceId: String, limit: Int): List<SkinTempSample>
+
+    @Query(
+        "SELECT * FROM respSample WHERE deviceId = :deviceId AND synced = 0 " +
+            "ORDER BY ts ASC LIMIT :limit"
+    )
+    suspend fun pendingRemoteResp(deviceId: String, limit: Int): List<RespSample>
+
+    @Query(
+        "SELECT * FROM stepSample WHERE deviceId = :deviceId AND synced = 0 " +
+            "ORDER BY ts ASC LIMIT :limit"
+    )
+    suspend fun pendingRemoteSteps(deviceId: String, limit: Int): List<StepSample>
+
+    /** Exact natural-key acknowledgements. Call only inside the store's transaction after a 2xx. */
+    @Query("UPDATE hrSample SET synced = 1 WHERE deviceId = :deviceId AND ts = :ts")
+    suspend fun acknowledgeRemoteHr(deviceId: String, ts: Long): Int
+
+    @Query(
+        "UPDATE rrInterval SET synced = 1 WHERE deviceId = :deviceId AND ts = :ts " +
+            "AND rrMs = :rrMs AND seq = :seq"
+    )
+    suspend fun acknowledgeRemoteRr(deviceId: String, ts: Long, rrMs: Int, seq: Int): Int
+
+    @Query(
+        "UPDATE event SET synced = 1 WHERE deviceId = :deviceId AND ts = :ts AND kind = :kind"
+    )
+    suspend fun acknowledgeRemoteEvent(deviceId: String, ts: Long, kind: String): Int
+
+    @Query("UPDATE battery SET synced = 1 WHERE deviceId = :deviceId AND ts = :ts")
+    suspend fun acknowledgeRemoteBattery(deviceId: String, ts: Long): Int
+
+    @Query("UPDATE spo2Sample SET synced = 1 WHERE deviceId = :deviceId AND ts = :ts")
+    suspend fun acknowledgeRemoteSpo2(deviceId: String, ts: Long): Int
+
+    @Query("UPDATE skinTempSample SET synced = 1 WHERE deviceId = :deviceId AND ts = :ts")
+    suspend fun acknowledgeRemoteSkinTemp(deviceId: String, ts: Long): Int
+
+    @Query("UPDATE respSample SET synced = 1 WHERE deviceId = :deviceId AND ts = :ts")
+    suspend fun acknowledgeRemoteResp(deviceId: String, ts: Long): Int
+
+    @Query("UPDATE stepSample SET synced = 1 WHERE deviceId = :deviceId AND ts = :ts")
+    suspend fun acknowledgeRemoteStep(deviceId: String, ts: Long): Int
+
+    /**
+     * A destination change/full replay makes every decoded scalar row pending again. These are kept
+     * as table-specific statements so Room validates every table/column at compile time; the store
+     * invokes them in one transaction.
+     */
+    @Query("UPDATE hrSample SET synced = 0 WHERE deviceId = :deviceId")
+    suspend fun resetRemoteHr(deviceId: String): Int
+
+    @Query("UPDATE rrInterval SET synced = 0 WHERE deviceId = :deviceId")
+    suspend fun resetRemoteRr(deviceId: String): Int
+
+    @Query("UPDATE event SET synced = 0 WHERE deviceId = :deviceId")
+    suspend fun resetRemoteEvents(deviceId: String): Int
+
+    @Query("UPDATE battery SET synced = 0 WHERE deviceId = :deviceId")
+    suspend fun resetRemoteBattery(deviceId: String): Int
+
+    @Query("UPDATE spo2Sample SET synced = 0 WHERE deviceId = :deviceId")
+    suspend fun resetRemoteSpo2(deviceId: String): Int
+
+    @Query("UPDATE skinTempSample SET synced = 0 WHERE deviceId = :deviceId")
+    suspend fun resetRemoteSkinTemp(deviceId: String): Int
+
+    @Query("UPDATE respSample SET synced = 0 WHERE deviceId = :deviceId")
+    suspend fun resetRemoteResp(deviceId: String): Int
+
+    @Query("UPDATE stepSample SET synced = 0 WHERE deviceId = :deviceId")
+    suspend fun resetRemoteSteps(deviceId: String): Int
+
     /** Bound the raw-IMU table to the newest [keep] rows for [deviceId] (rolling retention, #423). */
     @Query(
         "DELETE FROM rawImuSample WHERE deviceId = :deviceId AND ts < " +
@@ -414,6 +529,20 @@ interface WhoopDao : DeviceRegistryDao {
     )
     suspend fun sleepSessions(deviceId: String, from: Long, to: Long, limit: Int): List<SleepSession>
 
+    /** Keyset-paged twin used by optional self-hosted export so local deletes cannot shift an OFFSET. */
+    @Query(
+        "SELECT * FROM sleepSession WHERE deviceId = :deviceId AND startTs >= :from AND startTs <= :to " +
+            "AND (:afterStartTs IS NULL OR startTs > :afterStartTs) " +
+            "ORDER BY startTs ASC LIMIT :limit"
+    )
+    suspend fun remoteSleepSessions(
+        deviceId: String,
+        from: Long,
+        to: Long,
+        afterStartTs: Long?,
+        limit: Int,
+    ): List<SleepSession>
+
     /** Hand-edited sessions for a device (userEdited = 1), oldest first. Backs the H5 edit-merge (#509):
      *  the repository maps each to its LOCAL wake-day so [WhoopRepository.mergeDaily] lets the computed
      *  sleep fields win on those days over a re-imported night. */
@@ -575,6 +704,22 @@ interface WhoopDao : DeviceRegistryDao {
     )
     suspend fun journal(deviceId: String, from: String, to: String): List<JournalEntry>
 
+    /** Natural-key paged twin for the bounded self-hosted sync request. */
+    @Query(
+        "SELECT * FROM journal WHERE deviceId = :deviceId AND day >= :from AND day <= :to " +
+            "AND (:afterDay IS NULL OR day > :afterDay OR " +
+            "(day = :afterDay AND question > COALESCE(:afterQuestion, ''))) " +
+            "ORDER BY day ASC, question ASC LIMIT :limit"
+    )
+    suspend fun remoteJournal(
+        deviceId: String,
+        from: String,
+        to: String,
+        afterDay: String?,
+        afterQuestion: String?,
+        limit: Int,
+    ): List<JournalEntry>
+
     /**
      * Delete one journal answer by natural key (the native logging card's "clear"). Source-scoped
      * by deviceId, so clearing a native ("noop-journal") answer never removes an identical imported
@@ -611,6 +756,22 @@ interface WhoopDao : DeviceRegistryDao {
             "ORDER BY startTs ASC LIMIT :limit"
     )
     suspend fun workouts(deviceId: String, from: Long, to: Long, limit: Int): List<WorkoutRow>
+
+    /** Natural-key paged twin for the bounded self-hosted sync request. */
+    @Query(
+        "SELECT * FROM workout WHERE deviceId = :deviceId AND startTs >= :from AND startTs <= :to " +
+            "AND (:afterStartTs IS NULL OR startTs > :afterStartTs OR " +
+            "(startTs = :afterStartTs AND sport > COALESCE(:afterSport, ''))) " +
+            "ORDER BY startTs ASC, sport ASC LIMIT :limit"
+    )
+    suspend fun remoteWorkouts(
+        deviceId: String,
+        from: Long,
+        to: Long,
+        afterStartTs: Long?,
+        afterSport: String?,
+        limit: Int,
+    ): List<WorkoutRow>
 
     /** Scalar COUNT twin of [workouts] (no row limit — a count badge wants the exact total), for
      *  badges that were materializing the row list for `.size`. */

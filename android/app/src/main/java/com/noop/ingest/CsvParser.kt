@@ -249,6 +249,10 @@ internal class CsvTable private constructor(
     val normalizedHeaders: List<String>,
     val rows: List<Map<String, String>>,
 ) {
+    /** Preserve the parsed header contract while selecting provenance-safe rows. */
+    fun filterRows(predicate: (Map<String, String>) -> Boolean): CsvTable =
+        CsvTable(headers, normalizedHeaders, rows.filter(predicate))
+
     companion object {
         /** Parse from raw bytes: strip UTF-8 BOM, decode UTF-8 then Latin-1 fallback. */
         fun fromData(data: ByteArray): CsvTable {

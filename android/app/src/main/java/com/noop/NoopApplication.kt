@@ -11,14 +11,15 @@ import com.noop.ble.WhoopModel
 import com.noop.data.DeviceRegistry
 import com.noop.data.WhoopDatabase
 import com.noop.data.WhoopRepository
+import com.noop.sync.RemoteSyncService
 import com.noop.ui.NoopPrefs
 import kotlinx.coroutines.runBlocking
 
 /**
  * Application entry point.
  *
- * NOOP is a fully on-device WHOOP companion: it connects to the strap over BLE and persists
- * everything locally via Room. There is no network layer (the opt-in AI Coach aside).
+ * NOOP is local-first: it connects to the strap over BLE and persists everything in Room. Network
+ * features are explicit opt-ins only (AI Coach and the user's own self-hosted sync destination).
  *
  * The data layer ([WhoopRepository]) and the BLE client ([WhoopBleClient]) are owned **here**, at the
  * process level, rather than by the Activity-scoped AppViewModel. That is what lets a connection keep
@@ -40,6 +41,9 @@ class NoopApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Preference initialization only; no network work occurs here. Self-hosted upload remains
+        // opt-in and is scheduled later from the activity after the user saves a destination.
+        RemoteSyncService.initialize(this)
         // Record any uncaught crash to a file so it rides along in the shareable strap log — a
         // device-specific crash (e.g. Insights #224/#267) is otherwise lost to an unreachable logcat.
         CrashCapture.install(this)

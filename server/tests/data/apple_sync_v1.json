@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "batch_id": "ab629ba8-3250-47ae-abd9-8436312e12dc",
+  "source": {
+    "device_id": "ios:11111111-1111-4111-8111-111111111111:strap-abc-strap",
+    "sent_at": "2026-07-24T18:30:00Z",
+    "app_version": "10.0",
+    "platform": "ios",
+    "device": {
+      "display_name": "My strap",
+      "model": "WHOOP 5.0"
+    },
+    "metadata": {
+      "installation_id": "11111111-1111-4111-8111-111111111111",
+      "logical_source_id": "strap-abc-strap",
+      "namespace": "strap_measured",
+      "paired_device_id": "strap-abc",
+      "privacy": "explicit_opt_in",
+      "score_provenance": "strap_measured"
+    }
+  },
+  "streams": {
+    "hr": [],
+    "rr": [
+      {
+        "recorded_at": 1784917770,
+        "value": 810,
+        "metadata": {
+          "unit": "ms",
+          "seq": "0"
+        }
+      },
+      {
+        "recorded_at": 1784917770,
+        "value": 825,
+        "metadata": {
+          "unit": "ms",
+          "seq": "0"
+        }
+      },
+      {
+        "recorded_at": 1784917770,
+        "value": 810,
+        "metadata": {
+          "unit": "ms",
+          "seq": "1"
+        }
+      }
+    ],
+    "battery": [
+      {
+        "recorded_at": 1784917771,
+        "value": 4100,
+        "metadata": {
+          "unit": "millivolts"
+        }
+      }
+    ],
+    "spo2": [
+      {
+        "recorded_at": 1784917772,
+        "value": 18000,
+        "metadata": {
+          "unit": "raw_adc",
+          "infrared": "17000",
+          "uncalibrated": "true",
+          "provenance": "strap_raw_optical"
+        }
+      }
+    ],
+    "skin_temp": [],
+    "respiration": [],
+    "steps": [],
+    "events": [
+      {
+        "event_id": "event-615baef5f7cc97e7",
+        "recorded_at": 1784917773,
+        "kind": "RTC_LOST(13)",
+        "metadata": {
+          "provenance": "strap_event"
+        }
+      }
+    ]
+  },
+  "daily_metrics": {},
+  "sleep_sessions": [],
+  "workouts": [],
+  "journal": []
+}

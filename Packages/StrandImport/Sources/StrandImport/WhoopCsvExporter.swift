@@ -12,8 +12,9 @@ import WhoopStore
 /// `recovery_score_pct` etc., so they must match exactly). Everything is emitted in UTC with a
 /// literal "UTC+00:00" timezone column: NOOP stores epoch seconds and tz-less day strings, so UTC
 /// is the only encoding that round-trips a timestamp to the same instant. A trailing "Source"
-/// column (which both parsers provably ignore — they key off named columns, never position) marks
-/// on-device computed rows as "noop (APPROXIMATE)" per the house rules. A noop_metric_series.json
+/// column marks on-device computed rows as "noop (APPROXIMATE)" per the house rules; importers read
+/// this provenance solely to keep those rows out of the official WHOOP reference namespace. A
+/// noop_metric_series.json
 /// sidecar carries the full metricSeries for fidelity and is deliberately NOT re-imported — the
 /// .sqlite backup remains the lossless restore path; this zip is the portable, WHOOP-shaped one.
 public enum WhoopCsvExporter {

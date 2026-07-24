@@ -13,6 +13,13 @@ struct BackupSyncView: View {
     @State private var lastMs = FolderBackup.lastBackupMs
     @State private var keep = FolderBackup.keepCount
     @State private var busy = false
+    @State private var serverURL = RemoteSyncPreferences.endpoint
+    @State private var serverKey = ""
+    @State private var serverAuto = RemoteSyncPreferences.automatic
+    @State private var serverBusy = false
+    @State private var serverStatus = RemoteSyncPreferences.lastStatus
+    @State private var confirmServerReplay = false
+    @State private var confirmServerDisconnect = false
 
     // Result alert (backup outcome / restore outcome).
     @State private var alertTitle = ""
@@ -32,6 +39,7 @@ struct BackupSyncView: View {
             subtitle: "Save a full backup to a folder you choose - point it at Google Drive, iCloud or Dropbox for off-device sync."
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                serverCard
                 folderCard
                 autoCard
                 restoreCard
@@ -59,9 +67,135 @@ struct BackupSyncView: View {
                 ? "Replace all current data with the backup from \(absoluteTime(snap.timeMs))? This cannot be undone."
                 : "Replace all current data with the backup \(snap.name)? This cannot be undone.")
         }
+        .alert("Re-upload all local data?", isPresented: $confirmServerReplay) {
+            Button("Re-upload", role: .destructive) { syncServer(fullReplay: true) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Noop will replay every locally stored decoded row to this server. Existing server rows are updated idempotently, but this may transfer a large history.")
+        }
+        .alert("Disconnect self-hosted sync?", isPresented: $confirmServerDisconnect) {
+            Button("Disconnect", role: .destructive) { disconnectServer() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the server address and API key from this device and stops automatic uploads. It does not delete local data or data already stored on your server.")
+        }
     }
 
     // MARK: - Cards
+
+    private var serverCard: some View {
+        StrandCard(
+            padding: 20,
+            tint: serverAuto && RemoteSyncKeyStore.hasKey ? StrandPalette.accent : nil
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: "server.rack")
+                        .foregroundStyle(StrandPalette.accent)
+                    Text("Your self-hosted Noop server")
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                }
+                Text("Optional and off by default. When enabled, decoded sensor streams, sleep, workouts, daily metrics, and journal answers go only to the server you choose. The API key stays in Keychain.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                TextField("https://noop.example.com", text: $serverURL)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(serverBusy)
+                    .accessibilityLabel("Noop server URL")
+                SecureField(
+                    RemoteSyncKeyStore.hasKey ? "API key saved — leave blank to keep it" : "Server API key",
+                    text: $serverKey
+                )
+                .textFieldStyle(.roundedBorder)
+                .disabled(serverBusy)
+                .accessibilityLabel("Noop server API key")
+
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Automatic upload")
+                            .font(StrandFont.body)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text("Catches up on launch and after local data refreshes. Failed rows remain pending.")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                    Toggle("Automatic upload", isOn: $serverAuto)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(StrandPalette.accent)
+                        .disabled(
+                            serverBusy || RemoteSyncPreferences.endpoint.isEmpty
+                                || !RemoteSyncKeyStore.hasKey
+                        )
+                        .onChangeCompat(of: serverAuto) { enabled in
+                            // OFF takes effect immediately; navigating away can never leave a hidden
+                            // uploader running. ON is available only after a validated configuration
+                            // has been saved, so it is also safe to persist immediately.
+                            RemoteSyncPreferences.automatic = enabled
+                            if !enabled {
+                                serverStatus = "Automatic upload is off."
+                                RemoteSyncPreferences.lastStatus = serverStatus
+                            }
+                        }
+                }
+
+                if !serverStatus.isEmpty {
+                    Text(serverStatus)
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(RemoteSyncPreferences.lastSuccessMs > 0
+                         ? String(localized: "Last server sync: \(relativeTime(RemoteSyncPreferences.lastSuccessMs))")
+                         : String(localized: "No server sync yet."))
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+
+                NoopButton(
+                    serverBusy ? "Checking…" : "Save & test connection",
+                    systemImage: "checkmark.shield",
+                    kind: .secondary,
+                    fullWidth: true
+                ) { saveAndTestServer() }
+                .disabled(serverBusy || serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                NoopButton(
+                    serverBusy ? "Syncing…" : "Sync now",
+                    systemImage: "arrow.triangle.2.circlepath",
+                    kind: .primary,
+                    fullWidth: true
+                ) { syncServer(fullReplay: false) }
+                .disabled(serverBusy || serverURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                Button("Re-upload all local history…") { confirmServerReplay = true }
+                    .buttonStyle(.plain)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.accent)
+                    .disabled(serverBusy || !RemoteSyncKeyStore.hasKey)
+
+                if RemoteSyncKeyStore.hasKey || !RemoteSyncPreferences.endpoint.isEmpty {
+                    Button("Disconnect and forget credentials…") {
+                        confirmServerDisconnect = true
+                    }
+                    .buttonStyle(.plain)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(.red)
+                    .disabled(serverBusy)
+                }
+
+                Text("Public servers require HTTPS. Plain HTTP is accepted only for localhost or a private LAN. Noop never sends data to a project-operated cloud.")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
 
     private var folderCard: some View {
         StrandCard(padding: 20) {
@@ -151,6 +285,62 @@ struct BackupSyncView: View {
     }
 
     // MARK: - Actions
+
+    private func persistServerConfiguration() throws {
+        try RemoteSyncService.saveConfiguration(
+            endpoint: serverURL,
+            newAPIKey: serverKey,
+            automatic: serverAuto
+        )
+        serverURL = RemoteSyncPreferences.endpoint
+        serverKey = ""
+    }
+
+    private func saveAndTestServer() {
+        serverBusy = true
+        Task {
+            do {
+                try persistServerConfiguration()
+                let status = try await RemoteSyncService.testConnection(
+                    endpoint: serverURL,
+                    apiKeyInput: ""
+                )
+                serverStatus = "Connected and authenticated (\(status))."
+                RemoteSyncPreferences.lastStatus = serverStatus
+            } catch {
+                serverStatus = error.localizedDescription
+            }
+            serverBusy = false
+        }
+    }
+
+    private func syncServer(fullReplay: Bool) {
+        serverBusy = true
+        Task {
+            do {
+                try persistServerConfiguration()
+                let result = try await RemoteSyncService.sync(
+                    repo: model.repo,
+                    fullReplay: fullReplay
+                )
+                serverStatus = RemoteSyncPreferences.lastStatus
+                if result.uploadedBatches == 0 && result.uploadedRawRows == 0 {
+                    serverStatus = "Already up to date."
+                }
+            } catch {
+                serverStatus = error.localizedDescription
+            }
+            serverBusy = false
+        }
+    }
+
+    private func disconnectServer() {
+        RemoteSyncService.disconnect()
+        serverURL = ""
+        serverKey = ""
+        serverAuto = false
+        serverStatus = RemoteSyncPreferences.lastStatus
+    }
 
     private func chooseFolder() {
         #if os(macOS)

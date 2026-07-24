@@ -1,32 +1,37 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# release.sh — cut a NOOP release on BOTH forges.
+# release.sh — cut a NOOP release on the canonical GitHub repository.
 # Run from your Mac at release time, after the anonymized binaries are built.
 #
 #   Tools/release.sh <version> <asset> [<asset> ...] [-- "release notes"]
 #   e.g. Tools/release.sh 4.7.0 \
-#          dist/NOOP-v4.7.0-macos.zip dist/NOOP-v4.7.0.ipa dist/NOOP-v4.7.0.apk \
+#          dist/NOOP-macos-v4.7.0.zip dist/NOOP-ios-unsigned-v4.7.0.ipa \
+#          dist/NOOP-android-v4.7.0.apk \
 #          -- "Bug fixes and the new Lab Book."
 #
-# GitHub is CANONICAL — the release is created there FIRST (ryanbr/noop, marked
-# --latest). The self-hosted Forgejo is published SECOND as a mirror by handing
-# the same args straight to forgejo-release.sh. A Forgejo failure is tolerated:
-# it warns but does NOT abort or fail the run, because the GitHub release already
-# succeeded.
+# GitHub is CANONICAL — the release is created there FIRST
+# (Dhanunjay-Divi/Noop) as a draft, assets are uploaded and verified, and only
+# then is it published as latest. A Forgejo mirror is attempted only when the
+# operator explicitly sets NOOP_RELEASE_FORGE=1 and supplies that script's
+# FORGE_DOMAIN/FORGE_ORG/FORGE_REPO variables. This prevents a fork checkout
+# from accidentally publishing into historical upstream infrastructure.
 #
 # Same args as forgejo-release.sh: <version> <asset...> [-- notes].
 # Idempotent: re-running clobbers the release's assets (and edits the title/notes)
 # rather than erroring on an existing tag.
 #
-# GitHub token from ~/.config/noop/gh_token. Forge token handled by forgejo-release.sh.
+# GitHub token from ~/.config/noop/gh_token. An explicitly enabled Forge mirror
+# uses the separate token handled by forgejo-release.sh.
 # No secret ever appears on a command line.
 # ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
-# canonical GitHub mirror coordinates (override via env if ever needed)
-GH_REPO="${GH_REPO:-ryanbr/noop}"
+# Canonical GitHub coordinates. A deliberate alternate target must use this
+# task-specific variable; a generic inherited GH_REPO cannot silently redirect a
+# release.
+GH_REPO="${NOOP_RELEASE_GITHUB_REPO:-Dhanunjay-Divi/Noop}"
 
 VER="${1:?usage: release.sh <version> <asset...> [-- notes]}"; shift
 TAG="v$VER"
@@ -39,20 +44,23 @@ while [ $# -gt 0 ]; do
 done
 
 # ── iOS asset: ONE canonical name ────────────────────────────────────────────
-# The iOS .ipa ships under a SINGLE name: NOOP-v<V>-ios.ipa, which every doc
-# (README, docs/IOS.md, the wiki) and the AltStore source point at. We used to
-# upload BOTH NOOP-v<V>.ipa and a -ios alias for backward-compat with a v5.2.5
-# cached-source 404, but that transition is long done, and two byte-identical iOS
-# files only confused users about which to install. So: rename any plain
-# NOOP-v*.ipa to its -ios name and ship exactly one iOS file.
+# Match the fork workflows and public docs: NOOP-ios-unsigned-v<V>.ipa.
+# Normalize any locally supplied IPA to that name so the uploaded asset and the
+# AltStore URL cannot drift apart.
 NEW_ASSETS=()
 for f in ${ASSETS[@]+"${ASSETS[@]}"}; do
   case "$f" in
-    *NOOP-v*.ipa)
-      if [ -f "$f" ] && [ "${f%-ios.ipa}" = "$f" ]; then   # a plain .ipa -> ship ONLY as -ios
-        ios_f="${f%.ipa}-ios.ipa"
-        cp -f "$f" "$ios_f" 2>/dev/null && NEW_ASSETS+=("$ios_f") \
-          && echo "  iOS asset: $(basename "$ios_f")"
+    *.ipa)
+      if [ -f "$f" ]; then
+        ios_f="$(dirname "$f")/NOOP-ios-unsigned-v${VER}.ipa"
+        if [ "$f" != "$ios_f" ]; then
+          cp -f "$f" "$ios_f" 2>/dev/null || {
+            echo "  ✗ could not normalize iOS asset: $f" >&2
+            exit 1
+          }
+          echo "  iOS asset: $(basename "$ios_f")"
+        fi
+        NEW_ASSETS+=("$ios_f")
       else
         NEW_ASSETS+=("$f")
       fi ;;
@@ -105,49 +113,88 @@ else:
   fi
 fi
 
-# collect the assets that actually exist on disk (warn, don't die, on a miss).
+# Validate every requested asset before creating or modifying a remote release.
+# A missing file must never produce a published, incomplete release.
 # ${ARR[@]+"${ARR[@]}"} guards against the empty-array "unbound variable" trap
 # in macOS's stock bash 3.2 under `set -u`.
 GH_ASSETS=()
+MISSING_ASSETS=0
 for f in ${ASSETS[@]+"${ASSETS[@]}"}; do
-  if [ -f "$f" ]; then GH_ASSETS+=("$f"); else echo "  ⚠ missing asset: $f" >&2; fi
+  if [ -f "$f" ]; then
+    GH_ASSETS+=("$f")
+  else
+    echo "  ✗ missing asset: $f" >&2
+    MISSING_ASSETS=1
+  fi
 done
+[ "$MISSING_ASSETS" = 0 ] || exit 1
+[ "${#GH_ASSETS[@]}" -gt 0 ] || {
+  echo "  ✗ at least one release asset is required" >&2
+  exit 1
+}
 
 echo "→ release $TAG on GitHub $GH_REPO (canonical)"
 GH_OK=1
 if GH_TOKEN="$(cat "$GH_TOKEN_FILE")" \
    gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
-  # idempotent: release already exists → refresh notes + clobber assets
-  echo "  release exists — refreshing notes + clobbering assets"
+  # Fail closed on a rerun too: temporarily return an existing release to draft
+  # while its notes and assets are refreshed.
+  echo "  release exists — returning it to draft while assets refresh"
   GH_TOKEN="$(cat "$GH_TOKEN_FILE")" \
     gh release edit "$TAG" --repo "$GH_REPO" \
-      --title "NOOP $TAG" --notes "$NOTES" --latest >/dev/null \
+      --title "NOOP $TAG" --notes "$NOTES" --draft >/dev/null \
     || { echo "  ⚠ gh release edit failed" >&2; GH_OK=0; }
-  if [ "${#GH_ASSETS[@]}" -gt 0 ]; then
-    GH_TOKEN="$(cat "$GH_TOKEN_FILE")" \
-      gh release upload "$TAG" "${GH_ASSETS[@]}" --repo "$GH_REPO" --clobber \
-      || { echo "  ⚠ gh release upload failed" >&2; GH_OK=0; }
-  fi
 else
   GH_TOKEN="$(cat "$GH_TOKEN_FILE")" \
-    gh release create "$TAG" ${GH_ASSETS[@]+"${GH_ASSETS[@]}"} --repo "$GH_REPO" \
-      --title "NOOP $TAG" --notes "$NOTES" --latest \
+    gh release create "$TAG" --repo "$GH_REPO" \
+      --title "NOOP $TAG" --notes "$NOTES" --draft \
     || { echo "  ⚠ gh release create failed" >&2; GH_OK=0; }
 fi
+
+if [ "$GH_OK" = 1 ]; then
+  GH_TOKEN="$(cat "$GH_TOKEN_FILE")" \
+    gh release upload "$TAG" "${GH_ASSETS[@]}" --repo "$GH_REPO" --clobber \
+    || { echo "  ⚠ gh release upload failed; release remains draft" >&2; GH_OK=0; }
+fi
+
+if [ "$GH_OK" = 1 ]; then
+  REMOTE_ASSETS="$(GH_TOKEN="$(cat "$GH_TOKEN_FILE")" \
+    gh release view "$TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name')" \
+    || { echo "  ⚠ could not inspect uploaded assets; release remains draft" >&2; GH_OK=0; }
+fi
+if [ "$GH_OK" = 1 ]; then
+  for f in "${GH_ASSETS[@]}"; do
+    expected="$(basename "$f")"
+    if ! grep -Fxq "$expected" <<<"$REMOTE_ASSETS"; then
+      echo "  ⚠ uploaded release is missing $expected; release remains draft" >&2
+      GH_OK=0
+    fi
+  done
+fi
+
+if [ "$GH_OK" = 1 ]; then
+  GH_TOKEN="$(cat "$GH_TOKEN_FILE")" \
+    gh release edit "$TAG" --repo "$GH_REPO" \
+      --draft=false --prerelease=false --latest >/dev/null \
+    || { echo "  ⚠ final publish failed; inspect the draft" >&2; GH_OK=0; }
+fi
+
 [ "$GH_OK" = 1 ] \
   && echo "✓ $TAG on GitHub: https://github.com/$GH_REPO/releases/tag/$TAG" \
   || echo "✗ GitHub release for $TAG had errors (see above)" >&2
 
-# ── 2. Forgejo mirror (best-effort; never aborts) ────────────────────────────
-echo "→ mirroring $TAG to Forgejo"
-if [ -x "$HERE/forgejo-release.sh" ]; then
+# ── 2. Optional Forgejo mirror (explicit opt-in; never aborts) ────────────────
+if [ "${NOOP_RELEASE_FORGE:-0}" = "1" ] && [ -x "$HERE/forgejo-release.sh" ]; then
+  echo "→ mirroring $TAG to the explicitly configured Forgejo repository"
   if "$HERE/forgejo-release.sh" "$VER" ${FORGE_ARGS[@]+"${FORGE_ARGS[@]}"}; then
     :  # forgejo-release.sh prints its own success line
   else
     echo "  ⚠ Forgejo mirror failed (non-fatal — GitHub is canonical)" >&2
   fi
-else
+elif [ "${NOOP_RELEASE_FORGE:-0}" = "1" ]; then
   echo "  ⚠ $HERE/forgejo-release.sh not found/executable — skipping mirror" >&2
+else
+  echo "→ Forgejo mirror disabled (set NOOP_RELEASE_FORGE=1 plus FORGE_* to enable)"
 fi
 
 # ── 3. Distribution manifests (AltStore source + Homebrew cask) ───────────────
@@ -162,8 +209,8 @@ if [ "$GH_OK" = 1 ]; then
   IPA_ASSET=""; ZIP_ASSET=""
   for f in ${ASSETS[@]+"${ASSETS[@]}"}; do
     case "$f" in
-      *NOOP-v*-ios.ipa|*NOOP-v*.ipa) [ -z "$IPA_ASSET" ] && [ -f "$f" ] && IPA_ASSET="$f" ;;
-      *NOOP-v*-macos.zip|*NOOP-v*macos*.zip) [ -f "$f" ] && ZIP_ASSET="$f" ;;
+      *NOOP-ios-unsigned-v*.ipa) [ -z "$IPA_ASSET" ] && [ -f "$f" ] && IPA_ASSET="$f" ;;
+      *NOOP-macos-v*.zip|*NOOP-v*-macos.zip|*NOOP-v*macos*.zip) [ -f "$f" ] && ZIP_ASSET="$f" ;;
     esac
   done
   if [ -n "$IPA_ASSET" ] && [ -x "$HERE/update-altstore-source.sh" ]; then
@@ -172,10 +219,13 @@ if [ "$GH_OK" = 1 ]; then
       || echo "  ⚠ AltStore source update failed — run Tools/update-altstore-source.sh by hand" >&2
     echo "  ↳ remember to commit + push altstore-source.json"
   fi
-  if [ -n "$ZIP_ASSET" ] && [ -x "$HERE/update-homebrew-cask.sh" ]; then
+  if [ -n "$ZIP_ASSET" ] && [ "${NOOP_RELEASE_HOMEBREW:-0}" = "1" ] \
+     && [ -x "$HERE/update-homebrew-cask.sh" ]; then
     echo "→ refreshing Homebrew cask for $VER"
     "$HERE/update-homebrew-cask.sh" "$VER" "$ZIP_ASSET" \
       || echo "  ⚠ Homebrew cask update failed — run Tools/update-homebrew-cask.sh by hand" >&2
+  elif [ -n "$ZIP_ASSET" ]; then
+    echo "→ Homebrew tap update disabled (set NOOP_RELEASE_HOMEBREW=1 after configuring a fork-owned tap)"
   fi
 fi
 

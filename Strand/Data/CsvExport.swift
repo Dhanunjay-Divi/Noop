@@ -12,8 +12,9 @@ import StrandImport
 /// per day — exactly what the dashboards show; Apple Health rows are deliberately EXCLUDED so a
 /// re-import can't mis-attribute them as WHOOP data) into WHOOP's 4-CSV zip via
 /// StrandImport.WhoopCsvExporter. The zip re-imports into NOOP on Mac (Data Sources → WHOOP Export)
-/// and on Android. On-device computed rows are marked "noop (APPROXIMATE)" in the Source column both
-/// importers ignore; the .sqlite backup remains the lossless restore path.
+/// and on Android. On-device computed rows are marked "noop (APPROXIMATE)" in the Source column so both
+/// importers route them to a computed namespace, never the official WHOOP-reference namespace; the
+/// .sqlite backup remains the full-fidelity restore path.
 ///
 /// #458 (the Android twin's bug, mirror-image here): every read goes through the repository's
 /// active∪canonical union ids (`importedReadIds`/`computedReadIds`, #814) — reading the ACTIVE id
@@ -221,7 +222,7 @@ enum CsvExport {
         }
     }
 
-    /// Classify a workout row for the parser-ignored Source column. The strings match how each row
+    /// Classify a workout row for the provenance-aware Source column. The strings match how each row
     /// is written on this Mac: WhoopImporter uses source "whoop"; AppModel manual logging uses
     /// "manual"; IntelligenceEngine's on-device detected workouts use the computed source id with
     /// sport "detected". #458: a detected row's source may be EITHER computed union id (active-noop

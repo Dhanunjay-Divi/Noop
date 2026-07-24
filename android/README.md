@@ -1,9 +1,10 @@
 # NOOP — Android
 
-An **offline WHOOP companion** for Android. NOOP connects directly to a WHOOP 4.0
+A **local-first WHOOP companion** for Android. NOOP connects directly to a WHOOP 4.0
 (and WHOOP 5.0) strap over Bluetooth Low Energy, reads heart rate, R-R intervals,
 battery, and sensor data, and stores everything **locally** on the device. There is
-no account, no server, and no `INTERNET` permission — nothing leaves the phone.
+no required account or cloud. Internet access exists only for explicit opt-ins such
+as the bring-your-own-key Coach and upload to a server the user configures.
 
 This is a Kotlin / Jetpack Compose port of the hardware-verified macOS reference app
 (`/path/to/NOOP`, Swift). The protocol, framing, and BLE handshake are
@@ -13,11 +14,10 @@ translated from that verified implementation; they are not invented here.
 
 ## Status — read this first
 
-> **This project has NOT been compiled or run on a device.** It was authored without a
-> JDK or Android SDK available, against a written contract, so the modules fit together
-> by construction rather than by a green build. Treat the first `./gradlew assembleDebug`
-> as the real compile check, and treat the first on-strap session as the real protocol
-> check.
+The checked-in project is compiled and covered by the Android JVM suite in CI.
+WHOOP 4.0 is the established hardware path; WHOOP 5.0/MG live heart rate works,
+while deeper 5/MG history and biometric decoding remain experimental. A green
+emulator/JVM build still cannot prove a real BLE bond or strap firmware behavior.
 
 In particular, **the BLE layer must be validated on real hardware** — a phone with
 Bluetooth and an actual WHOOP strap. The bond trick (one confirmed write to the command
@@ -113,6 +113,18 @@ The debug APK lands at `app/build/outputs/apk/debug/app-debug.apk`.
 > checked in. The properties pin the Gradle distribution checksum, while CI validates the wrapper
 > JAR. Do not regenerate only one part of the wrapper or substitute an unreviewed binary.
 
+### Release and staging signing
+
+A normal release build refuses to run without a gitignored
+`android/keystore.properties` pointing at a private signing key you control.
+
+Repository release workflows deliberately use `-PstagingRelease` instead. That
+variant has the separate `com.noop.whoop.staging` application ID and is signed
+with the checked-in `fork-debug.keystore` so community builds can update one
+another. The keystore and its password are public: **this is a reproducible
+staging identity, not a private production trust anchor, and anyone can sign an
+APK with it.** Never use that key for a production application ID.
+
 ---
 
 ## Project layout
@@ -147,15 +159,19 @@ Root package: `com.noop` · application id: `com.noop.whoop` (debug builds appen
 
 ## Permissions & why
 
-NOOP requests only what BLE needs, and deliberately omits `INTERNET`:
+NOOP requests the platform capabilities used by its visible features:
+
+- **`INTERNET`** — enables only user-initiated/opt-in network features, including
+  the bring-your-own-key Coach and Self-hosted Sync. Strap collection, local
+  analysis, and file import do not require a network.
 
 - **`BLUETOOTH_SCAN`** (`neverForLocation`) + **`BLUETOOTH_CONNECT`** — Android 12+ (API 31+)
   runtime permissions. `neverForLocation` lets us skip the location grant on modern Android
   because we never derive physical location from scan results.
 - **`BLUETOOTH` / `BLUETOOTH_ADMIN`** (`maxSdkVersion=30`) — the legacy install-time perms for
   Android 8–11.
-- **`ACCESS_FINE_LOCATION`** (`maxSdkVersion=30`) — required to run a BLE scan on Android 6–11
-  only; not requested on API 31+.
+- **`ACCESS_FINE_LOCATION`** — required for BLE scanning on Android 8–11 and for
+  an explicitly started GPS-tracked workout on newer Android versions.
 - **`FOREGROUND_SERVICE`** (+ `FOREGROUND_SERVICE_CONNECTED_DEVICE` on API 34) — to keep the
   link alive while collecting/offloading in the background.
 
@@ -215,8 +231,11 @@ phone **and** a WHOOP strap.
 
 **Privacy sanity check:**
 
-- [ ] Confirm the merged manifest contains **no `INTERNET` permission**
-      (`app/build/intermediates/merged_manifests/…`) — the app must stay fully offline.
+- [ ] Confirm Self-hosted Sync is disabled on a fresh install and no request is
+      sent until a user saves an endpoint/token and opts in.
+- [ ] Confirm public sync endpoints require HTTPS, while literal private,
+      loopback, and link-local addresses may use HTTP for a user's own LAN.
+- [ ] Confirm failed or partially acknowledged uploads remain pending.
 
 ---
 

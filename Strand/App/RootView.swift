@@ -301,6 +301,12 @@ struct RootView: View {
             Task.detached(priority: .utility) {
                 await FolderBackup.catchUpIfDue(checkpoint: { await backupRepo.checkpointForBackup() })
             }
+            // Self-hosted server sync is a separate, explicit opt-in. The service enforces a
+            // five-minute throttle, durable per-row acknowledgements, and HTTPS/private-LAN policy.
+            await RemoteSyncService.catchUpIfDue(repo: repo)
+        }
+        .onChangeCompat(of: repo.refreshSeq) { _ in
+            Task { await RemoteSyncService.catchUpIfDue(repo: repo) }
         }
         // Honour a cross-screen request to open a top-level destination (e.g. Live's "Manage devices"),
         // then clear it so the same tap can fire again later. Devices maps to the `.devices` sidebar item.

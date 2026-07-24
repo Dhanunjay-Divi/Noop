@@ -927,7 +927,7 @@ public final class BLEManager: NSObject, ObservableObject {
                                 // UNIVERSAL clock-drift: bank the strap's historical layout so the export's
                                 // universal clock-drift line is firmware-aware on every export. Unconditional.
                                 firmwareLayout: { [weak self] v in self?.state.setStrapFirmwareLayout(v) })
-        // Strand: no server uploader/sync — all data stays on-device.
+        // Collection remains local-first; optional self-hosted delivery is orchestrated above this BLE layer.
 
         // Retro-decode: when the decoder gains a historical layout (e.g. WHOOP 4.0 v25), re-run every
         // archived undecodable frame through it and insert whatever now decodes — the only path by

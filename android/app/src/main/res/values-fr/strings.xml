@@ -1241,7 +1241,7 @@
     <string name="l10n_settings_screen_check_for_updates_736b9062">Rechercher des mises à jour</string>
     <string name="l10n_settings_screen_checking_820d6004">Vérification…</string>
     <string name="l10n_settings_screen_checks_github_for_the_latest_version_c10a81e2">Vérifie GitHub pour la dernière version lorsque vous appuyez sur. Rien d\'autre n\'est envoyé.</string>
-    <string name="l10n_settings_screen_contact_support_at_support_email_f0c4adce">Assistance pour contacter %1$s</string>
+    <string name="l10n_settings_screen_contact_support_at_support_email_f0c4adce">Ouvrir l’assistance et le suivi des problèmes sur GitHub</string>
     <string name="l10n_settings_screen_continuous_hrv_capture_1f0805d8">Capture continue de la VFC</string>
     <string name="l10n_settings_screen_couldn_t_check_try_again_b3c885d9">Impossible de vérifier. Réessayez.</string>
     <string name="l10n_settings_screen_counter_ticks_per_step_leave_at_3ce8c1d5">Impulsions du compteur par pas. Laissez à 1,0 sauf si vos pas sont très élevés. Sur un WHOOP 5/MG, ils peuvent être très élevés (10× ou plus), donc ceci va jusqu\'à 30. Marchez un nombre connu de 1 000 pas et divisez le comptage de NOOP par le comptage réel pour obtenir votre valeur.</string>
@@ -1293,7 +1293,7 @@
     <string name="l10n_settings_screen_profile_photo_33f385bb">Photo de profil</string>
     <string name="l10n_settings_screen_project_home_and_source_on_github_a067ed35">Accueil et source du projet sur GitHub</string>
     <string name="l10n_settings_screen_project_home_source_994627c1">Page du projet et code source</string>
-    <string name="l10n_settings_screen_questions_feedback_bugs_support_email_ed10662a">Questions, commentaires, bugs : %1$s</string>
+    <string name="l10n_settings_screen_questions_feedback_bugs_support_email_ed10662a">Questions, commentaires et bugs : tickets GitHub</string>
     <string name="l10n_settings_screen_recalibrate_aaa989ea">Recalibrer</string>
     <string name="l10n_settings_screen_recalibrate_charge_baseline_52a05a26">Recalibrer la ligne de base de la Charge</string>
     <string name="l10n_settings_screen_recalibrate_your_charge_baseline_018e3846">Recalibrer votre ligne de base de Charge ?</string>
@@ -1692,4 +1692,22 @@
     <string name="l10n_data_sources_screen_last_shared_6bf8389c">"Dernier partage "</string>
     <string name="l10n_data_sources_screen_sharing_paused_health_connect_permission_was_e8950315">Partage en pause — l’autorisation Health Connect a été révoquée. Touchez pour l’accorder à nouveau.</string>
     <string name="l10n_data_sources_screen_last_share_didn_t_finish_noop_0d6c27f0">Le dernier partage n’a pas abouti — NOOP réessaiera automatiquement.</string>
+    <string name="remote_sync_self_hosted_server">Serveur auto-hébergé</string>
+    <string name="remote_sync_description">Envoyez les flux mesurés, les métriques calculées par Noop, le sommeil, les entraînements et les entrées du journal à votre propre serveur Noop. Les métriques WHOOP officielles importées utilisent un espace de noms de référence distinct afin de pouvoir les comparer sans prétendre que Noop reproduit la formule de score propriétaire de WHOOP.</string>
+    <string name="remote_sync_api_key">Clé API</string>
+    <string name="remote_sync_saved_key_placeholder">Enregistrée de façon sécurisée — laissez vide pour la conserver</string>
+    <string name="remote_sync_bearer_token_placeholder">Jeton Bearer de votre serveur</string>
+    <string name="remote_sync_automatic_upload">Téléversement automatique</string>
+    <string name="remote_sync_automatic_upload_description">Désactivé par défaut. Lorsqu’il est activé, WorkManager rattrape le retard par lots limités.</string>
+    <string name="remote_sync_save_and_test">Enregistrer et tester la connexion</string>
+    <string name="remote_sync_sync_now">Synchroniser maintenant</string>
+    <string name="remote_sync_full_replay">Réenvoi complet</string>
+    <string name="remote_sync_disconnect_and_forget">Se déconnecter et oublier la clé</string>
+    <string name="remote_sync_privacy_notice">Confidentialité : les téléversements vont uniquement vers l’URL ci-dessus après votre accord. La clé Bearer est chiffrée avec Android Keystore. Les serveurs publics nécessitent HTTPS ; HTTP est autorisé uniquement pour localhost ou un réseau local privé. Un réenvoi complet est idempotent, mais peut transférer un historique important. La synchronisation sert uniquement à archiver ou mettre à jour : supprimer un élément calculé localement ne supprime pas sa copie précédente du serveur.</string>
+    <string name="remote_sync_replay_title">Renvoyer tout l’historique local ?</string>
+    <string name="remote_sync_replay_message">Aucune donnée locale n’est supprimée. Chaque ligne de données brutes décodée est marquée comme en attente et renvoyée, tandis que l’historique calculé est renvoyé à l’aide de clés stables. Utilisez cette option après avoir changé de serveur ou réparé sa base de données ; plusieurs lots en arrière-plan peuvent être nécessaires.</string>
+    <string name="remote_sync_replay">Renvoyer</string>
+    <string name="remote_sync_disconnect_title">Déconnecter le serveur auto-hébergé ?</string>
+    <string name="remote_sync_disconnect_message">Cette action supprime l’URL enregistrée, la clé API protégée par Keystore, les curseurs de synchronisation en attente et le programme de téléversement automatique. Elle ne supprime ni les données locales ni celles déjà stockées sur votre serveur.</string>
+    <string name="settings_support_open_url">Ouvrez cette URL d’assistance : %1$s</string>
 </resources>
