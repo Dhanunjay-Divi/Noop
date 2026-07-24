@@ -20,6 +20,15 @@
       "screenshotURLs": [],
       "versions": [
         {
+          "version": "9.1.1",
+          "buildVersion": "208",
+          "date": "2026-07-24",
+          "localizedDescription": "NOOP 9.1.1. See the release notes for what changed.",
+          "downloadURL": "https://github.com/Dhanunjay-Divi/Noop/releases/download/v9.1.1/NOOP-ios-unsigned-v9.1.1.ipa",
+          "size": 19294531,
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "9.1.0",
           "buildVersion": "207",
           "date": "2026-07-22",
@@ -1322,12 +1331,12 @@
           "NSMotionUsageDescription": "NOOP reads your iPhone's step count for activity summaries. It uploads derived records only if you explicitly enable your own self-hosted server."
         }
       },
-      "version": "9.1.0",
-      "buildVersion": "207",
-      "versionDate": "2026-07-22",
-      "versionDescription": "NOOP 9.1.0. See the release notes for what changed.",
-      "downloadURL": "https://github.com/ryanbr/noop/releases/download/v9.1.0/NOOP-ios-unsigned-v9.1.0.ipa",
-      "size": 15009519,
+      "version": "9.1.1",
+      "buildVersion": "208",
+      "versionDate": "2026-07-24",
+      "versionDescription": "NOOP 9.1.1. See the release notes for what changed.",
+      "downloadURL": "https://github.com/Dhanunjay-Divi/Noop/releases/download/v9.1.1/NOOP-ios-unsigned-v9.1.1.ipa",
+      "size": 19294531,
       "minOSVersion": "17.0"
     }
   ],
