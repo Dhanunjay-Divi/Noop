@@ -112,7 +112,7 @@ final class RemoteSyncClientTests: XCTestCase {
 
         // Inspect the request before URLSession canonicalizes `httpBody` into a
         // platform-specific stream for URLProtocol.
-        let uploadRequest = try client.makeUploadRequest(envelope)
+        let uploadRequest = try await client.makeUploadRequest(envelope)
         XCTAssertEqual(uploadRequest.url?.path, "/v1/sync")
         XCTAssertEqual(
             uploadRequest.value(forHTTPHeaderField: "Authorization"),
