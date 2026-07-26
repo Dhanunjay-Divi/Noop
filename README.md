@@ -57,6 +57,13 @@ Verify that an artifact URL belongs to that repository; older `ryanbr/noop`
 artifacts are upstream builds and do not contain this fork's self-hosted sync
 and comparison work.
 
+Want to test a downloadable build against WHOOP or another wearable? Read the
+[public beta testing guide](docs/BETA_TESTING.md), then submit aggregate,
+same-day results with the
+[metric difference form](https://github.com/Dhanunjay-Divi/Noop/issues/new?template=metric_difference.yml).
+Never upload a raw health export, account credential, database, or another
+person's data.
+
 | Platform | Build | Notes |
 |---|---|---|
 | **macOS** | Generate the project and run the `Strand` scheme | macOS 13+, Xcode, and XcodeGen. |

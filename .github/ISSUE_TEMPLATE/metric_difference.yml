@@ -1,0 +1,193 @@
+name: 📊 Metric difference
+description: Compare NOOP with WHOOP or another wearable using the same dates
+title: "[comparison] "
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a measured difference between NOOP and a reference source.
+
+        Please report aggregate values only. **Do not post exact dates, daily pairs, personal mean values, a raw health export, database, backup, account email, password, token, or another person's data.** A difference does not by itself prove that either source is wrong; definitions, sampling windows, baselines, and day boundaries can differ. Correlation describes co-movement, not agreement.
+
+        Read the [public beta testing guide](https://github.com/Dhanunjay-Divi/Noop/blob/main/docs/BETA_TESTING.md) before submitting.
+
+  - type: input
+    id: version
+    attributes:
+      label: NOOP version
+      description: Settings → What's New, or the release tag and short commit shown in the release notes.
+      placeholder: "9.1.1 or testing-latest / abc1234"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: NOOP platform
+      options:
+        - iOS
+        - Android
+        - macOS
+    validations:
+      required: true
+
+  - type: input
+    id: os_version
+    attributes:
+      label: OS and version
+      placeholder: "iOS 26.0 on iPhone 17 Pro"
+    validations:
+      required: true
+
+  - type: input
+    id: noop_source
+    attributes:
+      label: NOOP data source
+      description: Include wearable model, firmware if known, import/integration path, and wear location.
+      placeholder: "WHOOP MG over direct BLE, firmware …, left wrist"
+    validations:
+      required: true
+
+  - type: input
+    id: reference_source
+    attributes:
+      label: Reference source
+      description: App/export/device and version. Do not include an account email or identifier.
+      placeholder: "Official WHOOP export, app version … / Apple Health from Apple Watch …"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: comparison_kind
+    attributes:
+      label: Comparison kind
+      options:
+        - Apple Official reference — independently tracked same-day scores
+        - Export feature exploration — not independently tracked
+        - Cross-device comparison — definitions may differ
+        - Missing or unavailable metric
+    validations:
+      required: true
+
+  - type: dropdown
+    id: metric
+    attributes:
+      label: Metric compared
+      options:
+        - Apple official reference — Charge / WHOOP Recovery
+        - Apple official reference — Effort / WHOOP Strain
+        - Apple official reference — Rest / WHOOP Sleep Performance
+        - Heart rate
+        - Resting heart rate
+        - HRV (same method and window)
+        - Respiratory rate
+        - SpO₂
+        - Sleep duration or stages
+        - Steps or activity
+        - Definition or unsupported-metric question
+    validations:
+      required: true
+
+  - type: input
+    id: units
+    attributes:
+      label: Units and definition
+      description: State both displayed units or any known difference in definitions.
+      placeholder: "NOOP Charge 0–100 vs WHOOP Recovery 0–100"
+    validations:
+      required: true
+
+  - type: input
+    id: comparison_window
+    attributes:
+      label: Comparison-window length and paired-day count
+      description: Use only exact same-day pairs, but do not post the exact dates. Seven pairs is preliminary; 28 or more is preferred.
+      placeholder: "31-day window · 29 paired days"
+    validations:
+      required: true
+
+  - type: input
+    id: score_revision
+    attributes:
+      label: NOOP score revision
+      description: Copy the algorithm revision shown by the Apple Official reference card. Otherwise enter “not shown.”
+      placeholder: "NOOP …"
+    validations:
+      required: true
+
+  - type: input
+    id: importer_revision
+    attributes:
+      label: WHOOP importer revision
+      description: Copy the importer revision shown by the Apple Official reference card. Otherwise enter “not shown.”
+      placeholder: "Importer …"
+    validations:
+      required: true
+
+  - type: textarea
+    id: compare_stats
+    attributes:
+      label: Aggregate comparison
+      description: Copy only these aggregate values from the Apple app's Compare → Official reference card. Correlation is co-movement, not agreement. Use “not shown” rather than inventing a value.
+      value: |
+        Bias (NOOP minus reference):
+        MAE:
+        RMSE:
+        Correlation:
+    validations:
+      required: true
+
+  - type: dropdown
+    id: result_class
+    attributes:
+      label: Overall result
+      options:
+        - Roughly aligned
+        - NOOP consistently higher
+        - NOOP consistently lower
+        - Intermittent or condition-dependent difference
+        - Metric missing or unavailable
+        - Not enough paired data yet
+    validations:
+      required: true
+
+  - type: textarea
+    id: observation
+    attributes:
+      label: What difference did you observe?
+      description: Describe the pattern, not a diagnosis. Mention whether it is consistent, occasional, or tied to missing data.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Collection context
+      description: Note source changes, travel, illness, device fit, off-wrist time, missing nights, time-zone changes, or other measurement context. “None known” is acceptable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Optional cropped screenshots
+      description: Drag cropped screenshots here only after removing names, notifications, and unrelated health details. Do not attach exports, databases, backups, or unreviewed logs.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Privacy and comparison checks
+      options:
+        - label: I compared exact same-day values and stated the paired-day count.
+          required: true
+        - label: I identified the data source, device, units, and known definition differences.
+          required: true
+        - label: I own this data or am authorized to share these aggregate results.
+          required: true
+        - label: I reviewed the text above and understand this public GitHub issue exposes the aggregate health statistics I chose to include.
+          required: true
+        - label: I did not include exact dates, daily pairs, personal means, raw health exports, credentials, tokens, databases, backups, or another person's data.
+          required: true
+        - label: I understand that NOOP is not a medical device and this report is not asking for a diagnosis.
+          required: true
