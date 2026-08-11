@@ -1,7 +1,10 @@
 package com.noop.ui
 
+import com.noop.analytics.RouteMath
 import com.noop.data.HrSample
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -53,6 +56,42 @@ class ActiveWorkoutPersistenceTest {
         assertEquals(original.peakHr, decoded.peakHr)
         assertEquals(original.liveStrain, decoded.liveStrain, 1e-9)
         assertEquals(original.samples, decoded.samples)
+    }
+
+    @Test
+    fun endedGpsSnapshot_roundTripsFrozenBoundaryAndFinalRoute() {
+        val route = listOf(
+            RouteMath.LatLng(40.7128, -74.0060),
+            RouteMath.LatLng(40.7134, -74.0048),
+            RouteMath.LatLng(40.7140, -74.0032),
+        )
+        val encodedRoute = RouteMath.encode(route)
+        val original = snapshot().copy(
+            endMs = 1_700_003_600_000L,
+            gpsEnabled = true,
+            distanceM = RouteMath.totalMeters(route),
+            paceSecPerKm = 360.0,
+            routePolyline = encodedRoute,
+        )
+
+        val decoded = ActiveWorkoutPersistence.decode(ActiveWorkoutPersistence.encode(original))
+        assertNotNull(decoded)
+        assertEquals(original.endMs, decoded!!.endMs)
+        assertTrue(decoded.gpsEnabled)
+        assertEquals(original.distanceM, decoded.distanceM, 1e-9)
+        assertEquals(360.0, decoded.paceSecPerKm!!, 1e-9)
+        assertEquals(route, RouteMath.decode(decoded.routePolyline!!))
+    }
+
+    @Test
+    fun legacyV1Snapshot_stillRehydratesAsActiveNonGps() {
+        val legacy = header() + "${rs}1700000001,120"
+        val decoded = ActiveWorkoutPersistence.decode(legacy)
+        assertNotNull(decoded)
+        assertNull(decoded!!.endMs)
+        assertFalse(decoded.gpsEnabled)
+        assertNull(decoded.routePolyline)
+        assertEquals(1, decoded.samples.size)
     }
 
     @Test
@@ -142,5 +181,67 @@ class ActiveWorkoutPersistenceTest {
         assertEquals(0, decoded!!.avgHr)
         assertEquals(0, decoded.peakHr)
         assertEquals(0.0, decoded.liveStrain, 1e-9)
+    }
+
+    @Test
+    fun decode_rejectsEndBeforeStartAndMalformedRoute() {
+        val badEnd = snapshot().copy(endMs = 1_699_999_999_999L)
+        assertNull(ActiveWorkoutPersistence.decode(ActiveWorkoutPersistence.encode(badEnd)))
+
+        val badRoute = snapshot().copy(
+            endMs = 1_700_000_100_000L,
+            gpsEnabled = true,
+            routePolyline = "not-a-polyline",
+        )
+        assertNull(ActiveWorkoutPersistence.decode(ActiveWorkoutPersistence.encode(badRoute)))
+    }
+
+    @Test
+    fun saveThenClear_failureKeepsRecoverySnapshotForRetry() = runTest {
+        var cleared = false
+        val failed = ActiveWorkoutPersistence.saveThenClear(
+            save = { error("room unavailable") },
+            clear = { cleared = true; true },
+        )
+        assertTrue(failed is ActiveWorkoutPersistence.SaveResult.Failed)
+        assertFalse(cleared)
+
+        val saved = ActiveWorkoutPersistence.saveThenClear(
+            save = {},
+            clear = { cleared = true; true },
+        )
+        assertEquals(ActiveWorkoutPersistence.SaveResult.Saved, saved)
+        assertTrue(cleared)
+    }
+
+    @Test
+    fun workoutCursor_requiresNewPacketAndStoresRawBpmOncePerSecond() {
+        val cursor = WorkoutHeartRateCursor(consumedSequence = 7L)
+        assertNull(cursor.consume(sequence = 7L, bpm = 145, receivedAtSec = 100L, deviceId = "strap-a"))
+
+        val first = cursor.consume(sequence = 8L, bpm = 151, receivedAtSec = 101L, deviceId = "strap-a")
+        assertEquals(151, first?.bpm)
+        assertEquals("strap-a", first?.deviceId)
+
+        // A new packet in the same database second is genuine but cannot fabricate a second timestamp.
+        assertNull(cursor.consume(sequence = 9L, bpm = 177, receivedAtSec = 101L, deviceId = "strap-a"))
+        val next = cursor.consume(sequence = 10L, bpm = 149, receivedAtSec = 102L, deviceId = "strap-a")
+        assertEquals(149, next?.bpm)
+        assertEquals(listOf(101L, 102L), listOfNotNull(first?.ts, next?.ts))
+    }
+
+    @Test
+    fun checkpointPolicy_boundsFullSnapshotWritesButAlwaysAllowsForcedBoundaries() {
+        assertTrue(ActiveWorkoutCheckpointPolicy.shouldCheckpoint(null, sampleSec = 100L))
+        assertFalse(ActiveWorkoutCheckpointPolicy.shouldCheckpoint(100L, sampleSec = 129L))
+        assertTrue(ActiveWorkoutCheckpointPolicy.shouldCheckpoint(100L, sampleSec = 130L))
+        assertTrue(
+            ActiveWorkoutCheckpointPolicy.shouldCheckpoint(
+                lastCheckpointSec = 130L,
+                sampleSec = 131L,
+                force = true,
+            ),
+        )
+        assertEquals(30L, ActiveWorkoutCheckpointPolicy.intervalSec)
     }
 }

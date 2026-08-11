@@ -126,8 +126,9 @@ enum PuffinExperiment {
     /// existing user's explicit choice is never silently changed by the richer mode picker below.
     static let autoDetectWorkoutsKey = "noopAutoDetectWorkouts"
 
-    /// Three-way automatic-activity preference. Fresh installs use confidence-gated auto-save; an upgrade
-    /// with the old Boolean set to true stays in the old ask-before-saving behavior, and false stays off.
+    /// Three-way automatic-activity preference. Fresh installs use Ask until NOOP's classifier has
+    /// population-level field validation; an upgrade keeps the user's explicit richer-mode choice, while
+    /// the old Boolean true/false continues to migrate to Ask/Off.
     /// Mirrors Android `NoopPrefs.KEY_AUTO_WORKOUT_MODE`.
     static let autoWorkoutModeKey = "noopAutoWorkoutMode"
 
@@ -151,7 +152,7 @@ enum PuffinExperiment {
     static func resolvedAutoWorkoutMode(storedRaw: String?, legacyEnabled: Bool?) -> AutoWorkoutMode {
         if let storedRaw, let stored = AutoWorkoutMode(rawValue: storedRaw) { return stored }
         if let legacyEnabled { return legacyEnabled ? .ask : .off }
-        return .autoSave
+        return .ask
     }
 
     static var autoWorkoutMode: AutoWorkoutMode {

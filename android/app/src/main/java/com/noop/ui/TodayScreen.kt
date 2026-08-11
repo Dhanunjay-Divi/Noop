@@ -1573,9 +1573,9 @@ fun TodayScreen(
                 }
             }
         }
-        // Auto-detect workouts (MVP, opt-in, default OFF), a NON-DESTRUCTIVE "looks like a workout?"
-        // card that suggests logging a detected sustained-elevated-HR bout. Renders nothing when the
-        // toggle is off or there's nothing to suggest. Save → a manual "Workout" row; × → dismissed forever.
+        // Auto-detect workouts (MVP, fresh installs default to approval-first Ask), a NON-DESTRUCTIVE
+        // "looks like a workout?" card for sustained-elevated-HR bouts. Renders nothing in Off mode or
+        // when there is no suggestion. Save → a manual "Workout" row; × → dismissed forever.
         if (selectedDayOffset == 0) {
             item { AutoWorkoutNudgeCard(viewModel = viewModel, days = days) }
         }
@@ -1737,7 +1737,9 @@ private fun WorkoutInProgressCard(
             kotlinx.coroutines.delay(1000)
         }
     }
-    val elapsedS = ((nowMs - workout.startMs) / 1000).coerceAtLeast(0)
+    // A failed Room commit leaves the exact ended workout visible for Retry. Freeze its clock at End;
+    // never make a retained save error look as though recording silently continued.
+    val elapsedS = (((workout.endMs ?: nowMs) - workout.startMs) / 1000).coerceAtLeast(0)
     val elapsed = elapsedClock(elapsedS)
     val sportLabel = workout.sport.name
 

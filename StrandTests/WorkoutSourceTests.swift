@@ -19,9 +19,9 @@ final class WorkoutSourceTests: XCTestCase {
         XCTAssertEqual(Repository.acceptedAutoDetectSport(nil), "Workout")
     }
 
-    func testAutomaticActivityModeMigrationPreservesExistingChoiceAndDefaultsFreshToAutoSave() {
+    func testAutomaticActivityModeMigrationPreservesExistingChoiceAndDefaultsFreshToAsk() {
         XCTAssertEqual(PuffinExperiment.resolvedAutoWorkoutMode(storedRaw: nil, legacyEnabled: nil),
-                       .autoSave)
+                       .ask)
         XCTAssertEqual(PuffinExperiment.resolvedAutoWorkoutMode(storedRaw: nil, legacyEnabled: true),
                        .ask)
         XCTAssertEqual(PuffinExperiment.resolvedAutoWorkoutMode(storedRaw: nil, legacyEnabled: false),

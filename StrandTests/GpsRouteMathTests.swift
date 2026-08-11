@@ -129,6 +129,91 @@ final class GpsRouteMathTests: XCTestCase {
         XCTAssertNil(TrackFilter().accept(fix(0, 200, acc: 5, t: 0)))      // lon > 180
     }
 
+    func testRestoredFilterAnchorStillRejectsTeleport() {
+        let seed = fix(51.5000, -0.1200, acc: 0, t: 1_700_000_000_000)
+        let f = TrackFilter(restoredLast: seed)
+        XCTAssertNil(f.accept(fix(51.5007, -0.1246, acc: 5, t: 1_700_000_001_000)),
+                     "A process restart must not disable the speed gate for the first resumed fix.")
+        XCTAssertNotNil(f.accept(fix(51.5007, -0.1246, acc: 5, t: 1_700_000_060_000)))
+    }
+
+    // MARK: - Active route checkpoint / process-death recovery
+
+    func testCheckpointRejectsCountMismatchInsteadOfUsingPartialPolyline() {
+        let checkpoint = WorkoutRouteCheckpoint(polyline: RouteMath.encode([a]),
+                                                pointCount: 2,
+                                                lastFixMs: 1_700_000_001_000)
+        XCTAssertNil(checkpoint.decodedPoints())
+        XCTAssertNil(checkpoint.workoutRoute())
+    }
+
+    func testCheckpointRejectsTrailingTruncatedDataEvenWhenPointCountMatchesPrefix() {
+        let checkpoint = WorkoutRouteCheckpoint(polyline: RouteMath.encode([a]) + "~",
+                                                pointCount: 1,
+                                                lastFixMs: 1_700_000_001_000)
+        XCTAssertEqual(RouteMath.decode(checkpoint.polyline), [a],
+                       "The diagnostic decoder intentionally exposes its complete prefix.")
+        XCTAssertNil(checkpoint.decodedPoints(),
+                     "Recovery must reject the whole noncanonical blob, not revive its prefix.")
+    }
+
+    func testSinglePointCheckpointRestoresAnchorButHasNoInventedDistanceRoute() {
+        let checkpoint = WorkoutRouteCheckpoint(polyline: RouteMath.encode([a]),
+                                                pointCount: 1,
+                                                lastFixMs: 1_700_000_001_000)
+        XCTAssertEqual(checkpoint.decodedPoints(), [a])
+        XCTAssertNil(checkpoint.workoutRoute())
+    }
+
+    @MainActor
+    func testRecorderCheckpointsBoundedCadenceAndRestoresExactRoute() {
+        let base = Int64(1_700_000_000_000)
+        let recorder = GpsWorkoutRecorder()
+        recorder.resume(startMs: base, checkpoint: nil, beginLocationUpdates: false)
+        var emitted: [WorkoutRouteCheckpoint] = []
+        recorder.checkpointSink = { emitted.append($0) }
+
+        let fixes = (0..<5).map { i in
+            fix(51.5000 + Double(i) * 0.00003, -0.1200,
+                acc: 5, t: base + Int64(i + 1) * 1_000)
+        }
+        recorder.ingest([fixes[0]])
+        XCTAssertEqual(emitted.map(\.pointCount), [1], "The first accepted fix is immediately durable.")
+        recorder.ingest(Array(fixes[1..<4]))
+        XCTAssertEqual(emitted.map(\.pointCount), [1], "Sub-stride fixes do not rewrite the full blob.")
+        recorder.ingest([fixes[4]])
+        XCTAssertEqual(emitted.map(\.pointCount), [1],
+                       "Sub-cadence points do not rewrite the growing route blob.")
+        let forced = recorder.checkpoint(force: true, notify: true)
+        XCTAssertEqual(emitted.map(\.pointCount), [1, 5])
+        XCTAssertEqual(forced?.pointCount, 5)
+
+        let restored = GpsWorkoutRecorder()
+        restored.resume(startMs: base, checkpoint: forced, beginLocationUpdates: false)
+        XCTAssertTrue(restored.isRecording)
+        XCTAssertEqual(restored.pointCount, recorder.pointCount)
+        XCTAssertEqual(restored.distanceM, forced?.workoutRoute()?.distanceM ?? -1, accuracy: 1e-9)
+        XCTAssertEqual(restored.capturedRoute(), forced?.workoutRoute(),
+                       "Rehydration uses the exact persisted precision-5 route, not guessed distance.")
+        restored.stop()
+        recorder.stop()
+    }
+
+    @MainActor
+    func testRecorderStrideCheckpointFiresAfterThirtyAdditionalPoints() {
+        let base = Int64(1_700_000_000_000)
+        let recorder = GpsWorkoutRecorder()
+        recorder.resume(startMs: base, checkpoint: nil, beginLocationUpdates: false)
+        var emitted: [Int] = []
+        recorder.checkpointSink = { emitted.append($0.pointCount) }
+        for i in 0..<31 {
+            recorder.ingest([fix(51.5000 + Double(i) * 0.000005, -0.1200,
+                                 acc: 5, t: base + Int64(i + 1) * 500)])
+        }
+        XCTAssertEqual(emitted, [1, 31])
+        recorder.stop()
+    }
+
     // MARK: - RouteStore (on-device side-store round-trip)
 
     private func freshDefaults() -> UserDefaults {

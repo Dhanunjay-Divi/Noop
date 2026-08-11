@@ -8,8 +8,8 @@ import WhoopStore
 //
 // The transport half of Live Sessions (silent guardian): the pure `LiveSessionEngine` decides WHAT
 // should happen; this object is the only place that touches a clock, the live HR stream, the strap
-// buzz and the store. One 1 Hz timer feeds the engine `LiveState.heartRate` (or nil, so the engine
-// can detect a quiet stream itself — no liveness guessing here), publishes each `Output` for the
+// buzz and the store. One 1 Hz timer feeds the engine each NEW LiveState HR sample (or nil when its
+// sequence did not advance, so the engine can detect a quiet stream itself), publishes each `Output` for the
 // session screen, walks a cue's pulse list out through the EXISTING hardware buzz, and books the
 // session into the `liveSession` table (once at start with endTs nil, once at end with the totals).
 //
@@ -27,6 +27,23 @@ enum LiveSessionPrefs {
     /// Master switch for the whole entry. Default ON — the feature is BETA-labelled in-UI instead of
     /// hidden; turning it off removes the Start-session control from the Liquid Today entirely.
     static let betaKey = "noop.liveSessionsBeta"
+}
+
+/// Consumes each live-HR packet identity at most once. The timer and sample-arrival callback both pass
+/// through this cursor, so neither can replay the same cached BPM after transport stops. Seeded from the
+/// pre-session sequence, which also prevents an old reading from masquerading as the session's first beat.
+struct LiveSessionHeartRateCursor: Equatable {
+    private(set) var consumedSequence: UInt64
+
+    init(consumedSequence: UInt64) {
+        self.consumedSequence = consumedSequence
+    }
+
+    mutating func consume(_ sample: LiveState.HeartRateSample?) -> Int? {
+        guard let sample, sample.sequence != consumedSequence else { return nil }
+        consumedSequence = sample.sequence
+        return sample.bpm
+    }
 }
 
 @MainActor
@@ -74,6 +91,8 @@ final class LiveSessionRunner: ObservableObject {
     private var lastTickTs = 0
     /// When the engine first reported .stale in the current quiet stretch (nil while readings flow).
     private var staleSinceTs: Int?
+    /// Fresh-event cursor shared by timer and sample-arrival ticks. Initialized again at session start.
+    private var heartRateCursor = LiveSessionHeartRateCursor(consumedSequence: 0)
     /// The wall-clock moment the in-flight pulse walk finishes. A cue arriving before then is skipped
     /// outright (drop-tolerant): the pulses are already scheduled fire-and-forget, so overlapping walks
     /// would land on the wrist as one unreadable mush.
@@ -110,6 +129,9 @@ final class LiveSessionRunner: ObservableObject {
         startTs = now
         lastTickTs = now
         engine = LiveSessionEngine(config: config, startTs: now)
+        heartRateCursor = LiveSessionHeartRateCursor(
+            consumedSequence: model.live.heartRateSampleSequence
+        )
 
         // Arm the live feed for the session (a WHOOP 5/MG only streams HR while armed, #681).
         model.startRealtimeHR()
@@ -123,11 +145,11 @@ final class LiveSessionRunner: ObservableObject {
 
         // Pocket-the-phone survival: a suspended app stops firing Timers, but CoreBluetooth keeps
         // delivering HR notifies in the background (the same path that feeds the Live Activity), and each
-        // one updates `live.heartRate`. Ticking on sample arrival too means coaching keeps pace with the
+        // one advances `live.heartRateSampleSequence`. Ticking on sample arrival too means coaching keeps pace with the
         // stream when only BLE callbacks are waking us; in the foreground the extra tick is a harmless
         // same-second engine update. Staleness still needs the Timer (no samples = no sink fires), which
         // resumes the moment the app does — the engine then reads the gap honestly as stale.
-        hrSink = model.live.$heartRate.sink { [weak self] _ in
+        hrSink = model.live.heartRateSamplePublisher.sink { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
     }
@@ -164,9 +186,10 @@ final class LiveSessionRunner: ObservableObject {
     private func tick() {
         guard timer != nil else { return }
         let now = Int(Date().timeIntervalSince1970)
-        // The engine takes the live reading if one is current, or nil as a plain time tick — staleness
-        // is ITS call (never-fabricate: no reading is forwarded as exactly that, not held or guessed).
-        guard let out = engine?.update(now: now, bpm: model?.live.heartRate) else { return }
+        // A cached BPM is not a sample. The cursor returns it exactly once when the packet sequence advances;
+        // timer/sample ticks over the same sequence pass nil so the engine's own stale guard remains honest.
+        let freshBpm = model.map { heartRateCursor.consume($0.live.heartRateSample) } ?? nil
+        guard let out = engine?.update(now: now, bpm: freshBpm) else { return }
 
         // Mirror the engine's clamped accrual for the two out-of-band buckets (it only accrues in-band
         // itself). Same rules: dt clamped to maxAccrualDtSec, nothing accrues on a stale tick.

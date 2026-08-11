@@ -20,14 +20,15 @@ import StrandAnalytics   // WorkoutsTrace + TestCentre: the GPS-fix line for the
 //   • `TrackFilter` — pure, stateful fix gate: drops low-accuracy fixes and physically-impossible jumps,
 //                     mirroring Android `TrackFilter` (50 m accuracy gate, ~12 m/s speed gate). Bounds the
 //                     UNTRUSTED stream of OS location fixes before any of it reaches the stored route.
-//   • `RouteStore`  — a tiny on-device side-store (UserDefaults) keyed by a workout's natural key
+//   • `RouteStore`  — a tiny on-device side-store (UserDefaults) keyed by a finished workout's natural key
 //                     (startTs + sport), holding the encoded polyline + distance for that session. The
 //                     shared `WhoopStore.WorkoutRow` carries no route column on Apple, so the route lives
 //                     here and is read back by WorkoutDetailView — exactly how `moments` / `sleepMarks` /
 //                     the durable active-workout snapshot already persist on Apple. On-device only; never
 //                     leaves the phone.
 //   • `GpsWorkoutRecorder` — the thin CoreLocation wrapper. Requests When-In-Use, streams fixes through
-//                     `TrackFilter` into an accumulating route, and exposes live distance/pace. FAILS
+//                     `TrackFilter` into an accumulating, crash-checkpointed route, and exposes live
+//                     distance/pace. FAILS
 //                     SAFE everywhere: on a Mac with no location hardware, or when permission is denied /
 //                     restricted, it simply records nothing rather than crashing, so the workout still
 //                     banks HR + Effort without a route (parity with Android #101).
@@ -157,9 +158,10 @@ final class TrackFilter {
     private let maxSpeedMps: Double   // ~43 km/h; well above running, below GPS teleports
     private var last: RawFix?
 
-    init(maxAccuracyM: Double = 50, maxSpeedMps: Double = 12) {
+    init(maxAccuracyM: Double = 50, maxSpeedMps: Double = 12, restoredLast: RawFix? = nil) {
         self.maxAccuracyM = maxAccuracyM
         self.maxSpeedMps = maxSpeedMps
+        self.last = restoredLast
     }
 
     /// Accept a fix or reject it (nil). Rejects: an invalid / too-coarse accuracy, an out-of-range
@@ -191,6 +193,46 @@ struct WorkoutRoute: Equatable, Codable {
     var polyline: String
     /// Total GPS distance in metres (`RouteMath.totalMeters` of the captured points).
     var distanceM: Double
+}
+
+/// Compact crash-recovery checkpoint for an in-flight GPS workout. The final route already uses a
+/// precision-5 encoded polyline, so persisting that same representation restores exactly what NOOP would
+/// later draw/save without retaining an unbounded array of Codable objects. `lastFixMs` restores the
+/// TrackFilter's speed-gate anchor; without it, the first post-relaunch fix could bridge a teleport.
+struct WorkoutRouteCheckpoint: Equatable, Codable {
+    var polyline: String
+    var pointCount: Int
+    var lastFixMs: Int64
+
+    static let maxPoints = 50_000
+    static let maxPolylineBytes = 1_000_000
+
+    /// Validate a value read from disk and recover its exact precision-5 points. A malformed/truncated,
+    /// oversized, empty, or count-mismatched checkpoint is rejected wholesale—partial decode must never
+    /// fabricate a shorter route or distance.
+    func decodedPoints() -> [RouteMath.LatLng]? {
+        guard pointCount > 0, pointCount <= Self.maxPoints,
+              lastFixMs > 0,
+              !polyline.isEmpty,
+              polyline.utf8.count <= Self.maxPolylineBytes else { return nil }
+        let points = RouteMath.decode(polyline)
+        // The permissive low-level decoder intentionally returns complete prefix points for diagnostics.
+        // A persisted checkpoint must be stricter: require the canonical re-encoding to match byte for
+        // byte so trailing garbage or a truncated final coordinate can never masquerade as a valid route.
+        guard points.count == pointCount, RouteMath.encode(points) == polyline else { return nil }
+        return points
+    }
+
+    func validated() -> WorkoutRouteCheckpoint? {
+        decodedPoints() == nil ? nil : self
+    }
+
+    /// A single accepted point is a useful resume anchor but not a drawable/distance route. Only two or
+    /// more validated points produce a final WorkoutRoute; distance is always recomputed from coordinates.
+    func workoutRoute() -> WorkoutRoute? {
+        guard let points = decodedPoints(), points.count >= 2 else { return nil }
+        return WorkoutRoute(polyline: polyline, distanceM: RouteMath.totalMeters(points))
+    }
 }
 
 /// On-device persistence for finished GPS routes, keyed by a workout's natural key (startTs + sport) so a
@@ -246,9 +288,10 @@ enum RouteStore {
 
     /// Persist `route` for a workout, evicting the oldest entries if the cap is exceeded. A no-op when the
     /// route has no usable polyline (so we never store an empty placeholder — honest "no route").
+    @discardableResult
     static func store(_ route: WorkoutRoute, startTs: Int, sport: String,
-                      into defaults: UserDefaults = .standard) {
-        guard !route.polyline.isEmpty else { return }
+                      into defaults: UserDefaults = .standard) -> Bool {
+        guard !route.polyline.isEmpty, route.distanceM.isFinite, route.distanceM >= 0 else { return false }
         var map = loadMap(from: defaults)
         map[key(startTs: startTs, sport: sport)] = route
         if map.count > maxRoutes {
@@ -259,8 +302,9 @@ enum RouteStore {
             }
             for k in ordered.prefix(map.count - maxRoutes) { map.removeValue(forKey: k) }
         }
-        guard let data = encodeMap(map) else { return }
+        guard let data = encodeMap(map) else { return false }
         defaults.set(data, forKey: defaultsKey)
+        return load(startTs: startTs, sport: sport, from: defaults) == route
     }
 
     /// Remove a workout's route (used when a session is deleted; keeps the side-store from leaking).
@@ -307,6 +351,17 @@ final class GpsWorkoutRecorder: NSObject, ObservableObject {
     private var filter = TrackFilter()
     private var track: [RouteMath.LatLng] = []
     private var startMs: Int64 = 0
+    private var lastAcceptedFix: RawFix?
+    private var checkpointedPointCount = 0
+    private var checkpointedFixMs: Int64 = 0
+
+    /// AppModel persists these compact checkpoints inside ActiveWorkoutPersistence. First point is
+    /// checkpointed immediately; thereafter writes are bounded to every 30 points or 30 seconds. A hard
+    /// kill can lose only the uncheckpointed tail (at most 29 accepted points or just under 30 seconds);
+    /// End always forces the exact final accepted route before saving.
+    var checkpointSink: ((WorkoutRouteCheckpoint) -> Void)?
+    static let checkpointPointStride = 30
+    static let checkpointIntervalMs: Int64 = 30_000
 
     /// Workouts & GPS test mode (Test Centre): the tagged sink for the `.workouts` GPS-fix lines, wired by
     /// AppModel to `live.append(log:domain:)`. Default nil (inert). We ALWAYS check `TestCentre.active(.workouts)`
@@ -340,22 +395,52 @@ final class GpsWorkoutRecorder: NSObject, ObservableObject {
         track.removeAll()
         filter = TrackFilter()
         self.startMs = startMs
+        lastAcceptedFix = nil
+        checkpointedPointCount = 0
+        checkpointedFixMs = 0
         distanceM = 0
         paceSecPerKm = nil
         pointCount = 0
         rawFixCount = 0
         isRecording = true
 
+        // Denied / restricted stays armed but captures nothing. We do not re-prompt; Settings owns the
+        // user's choice to reverse. The workout still banks HR + Effort with honest no-route output.
+        armLocationUpdates()
+    }
+
+    /// Restore the exact validated checkpoint after process death and continue the same GPS workout.
+    /// Invalid/nil recovery data resumes with an empty route (honest, never partial). Production callers
+    /// leave `beginLocationUpdates` true; tests set it false to exercise state without touching hardware.
+    func resume(startMs: Int64, checkpoint: WorkoutRouteCheckpoint?, beginLocationUpdates: Bool = true) {
+        let points = checkpoint?.decodedPoints() ?? []
+        let restoredFix: RawFix? = {
+            guard let checkpoint, points.count == checkpoint.pointCount, let last = points.last else { return nil }
+            return RawFix(lat: last.lat, lon: last.lon, accuracyM: 0, tMs: checkpoint.lastFixMs)
+        }()
+        track = points
+        filter = TrackFilter(restoredLast: restoredFix)
+        self.startMs = startMs
+        lastAcceptedFix = restoredFix
+        pointCount = points.count
+        distanceM = RouteMath.totalMeters(points)
+        let elapsed = max(0, Double(Int64(Date().timeIntervalSince1970 * 1000) - startMs) / 1000.0)
+        paceSecPerKm = RouteMath.paceSecPerKm(meters: distanceM, seconds: elapsed)
+        rawFixCount = points.count
+        checkpointedPointCount = points.count
+        checkpointedFixMs = checkpoint?.lastFixMs ?? 0
+        isRecording = true
+        guard beginLocationUpdates else { return }
+        armLocationUpdates()
+    }
+
+    private func armLocationUpdates() {
         switch manager.authorizationStatus {
         case .notDetermined:
-            // Ask now; updates begin in `locationManagerDidChangeAuthorization` once the user answers.
             manager.requestWhenInUseAuthorization()
         case .authorizedWhenInUse, .authorizedAlways:
             beginUpdates()
         default:
-            // Denied / restricted: stay armed but capture nothing. The workout still banks HR + Effort,
-            // and the saved row carries no route (honest "—"), exactly like Android when permission is
-            // refused (#101). We do NOT re-prompt — that's the user's Settings choice to reverse.
             break
         }
     }
@@ -379,6 +464,25 @@ final class GpsWorkoutRecorder: NSObject, ObservableObject {
                             distanceM: RouteMath.totalMeters(track))
     }
 
+    /// Return the latest exact accepted route checkpoint. `force` also advances the throttle cursor and
+    /// optionally notifies AppModel; End uses force+no-notify and snapshots once with endedAt atomically.
+    @discardableResult
+    func checkpoint(force: Bool = false, notify: Bool = true) -> WorkoutRouteCheckpoint? {
+        guard let lastAcceptedFix, !track.isEmpty else { return nil }
+        let due = checkpointedPointCount == 0
+            || pointCount - checkpointedPointCount >= Self.checkpointPointStride
+            || lastAcceptedFix.tMs - checkpointedFixMs >= Self.checkpointIntervalMs
+        guard force || due else { return nil }
+        let candidate = WorkoutRouteCheckpoint(polyline: RouteMath.encode(track),
+                                               pointCount: track.count,
+                                               lastFixMs: lastAcceptedFix.tMs)
+        guard candidate.validated() != nil else { return nil }
+        checkpointedPointCount = pointCount
+        checkpointedFixMs = lastAcceptedFix.tMs
+        if notify { checkpointSink?(candidate) }
+        return candidate
+    }
+
     // MARK: Updates
 
     fileprivate func beginUpdates() {
@@ -390,13 +494,18 @@ final class GpsWorkoutRecorder: NSObject, ObservableObject {
 
     /// Fold a batch of (already bound-checked at the source) fixes into the route, updating live
     /// distance/pace. No-op when not recording.
-    fileprivate func ingest(_ fixes: [RawFix]) {
+    func ingest(_ fixes: [RawFix]) {
         guard isRecording else { return }
         rawFixCount += fixes.count
         var changed = false
         for fix in fixes {
+            // Bound both memory and the recovery blob. At the 5 m location filter this still permits a
+            // ~250 km track; beyond the explicit cap extra fixes are not accepted and cannot inflate the
+            // route or silently make it non-restorable.
+            guard track.count < WorkoutRouteCheckpoint.maxPoints else { continue }
             if let pt = filter.accept(fix) {
                 track.append(pt)
+                lastAcceptedFix = fix
                 changed = true
             }
         }
@@ -405,6 +514,7 @@ final class GpsWorkoutRecorder: NSObject, ObservableObject {
         distanceM = RouteMath.totalMeters(track)
         let elapsed = Double(Int64(Date().timeIntervalSince1970 * 1000) - startMs) / 1000.0
         paceSecPerKm = RouteMath.paceSecPerKm(meters: distanceM, seconds: elapsed)
+        checkpoint()
         // Workouts & GPS test mode: one GPS-fix-progress line tagged `.workouts` per batch that added a point,
         // showing raw fixes seen, how many the accuracy/speed filter accepted, and the running distance, so a
         // route that under-records (weak signal / denied permission) is visible. Zero-cost when off (the gate

@@ -13,6 +13,7 @@ import com.noop.data.WhoopDatabase
 import com.noop.data.WhoopRepository
 import com.noop.sync.RemoteSyncService
 import com.noop.ui.NoopPrefs
+import com.noop.location.GpsSession
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -41,6 +42,9 @@ class NoopApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Restore any process-killed, actively-recording GPS workout before the foreground service or
+        // ViewModel reads GpsSession. The checkpoint is local-only and expires after 24 hours.
+        GpsSession.initialize(this)
         com.noop.ui.NoopPrefs.migrateContinuousHrvOvernightDefault(this)
         // Preference initialization only; no network work occurs here. Self-hosted upload remains
         // opt-in and is scheduled later from the activity after the user saves a destination.

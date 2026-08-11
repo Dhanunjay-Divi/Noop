@@ -12,13 +12,18 @@ final class ActiveWorkoutPersistenceTests: XCTestCase {
 
     private func snapshot(
         startSec: Int = 1_700_000_000,
+        endSec: Int? = nil,
+        gpsEnabled: Bool = false,
+        routeCheckpoint: WorkoutRouteCheckpoint? = nil,
         sport: String = "Tennis",
         samples: [HRSample] = [HRSample(ts: 1_700_000_001, bpm: 120), HRSample(ts: 1_700_000_061, bpm: 145)],
         avgHr: Int = 133,
         peakHr: Int = 145,
         liveStrain: Double = 8.4
     ) -> ActiveWorkoutPersistence.Snapshot {
-        ActiveWorkoutPersistence.Snapshot(startSec: startSec, sport: sport, samples: samples,
+        ActiveWorkoutPersistence.Snapshot(startSec: startSec, endSec: endSec,
+                                          gpsEnabled: gpsEnabled, routeCheckpoint: routeCheckpoint,
+                                          sport: sport, samples: samples,
                                           avgHr: avgHr, peakHr: peakHr, liveStrain: liveStrain)
     }
 
@@ -55,6 +60,72 @@ final class ActiveWorkoutPersistenceTests: XCTestCase {
         XCTAssertEqual(decoded!.sport, "Traditional Strength Training")
     }
 
+    func testFinishedAtRoundTripsForRetryWithoutExtendingWorkout() {
+        let decoded = ActiveWorkoutPersistence.decode(
+            ActiveWorkoutPersistence.encode(snapshot(endSec: 1_700_000_900)))
+        XCTAssertEqual(decoded?.endSec, 1_700_000_900)
+    }
+
+    func testDecodeRejectsFinishBeforeStartRatherThanResumingCorruptWorkout() {
+        let decoded = ActiveWorkoutPersistence.decode(
+            ActiveWorkoutPersistence.encode(snapshot(endSec: 1_699_999_999)))
+        XCTAssertNil(decoded)
+    }
+
+    func testGpsIntentAndExactRouteCheckpointRoundTrip() {
+        let points = [RouteMath.LatLng(51.5033, -0.1196), RouteMath.LatLng(51.5007, -0.1246)]
+        let checkpoint = WorkoutRouteCheckpoint(polyline: RouteMath.encode(points),
+                                                pointCount: points.count,
+                                                lastFixMs: 1_700_000_061_000)
+        let decoded = ActiveWorkoutPersistence.decode(
+            ActiveWorkoutPersistence.encode(snapshot(gpsEnabled: true, routeCheckpoint: checkpoint,
+                                                      sport: "Running")))
+        XCTAssertEqual(decoded?.gpsEnabled, true)
+        XCTAssertEqual(decoded?.routeCheckpoint, checkpoint)
+        XCTAssertEqual(decoded?.routeCheckpoint?.decodedPoints(), points)
+        XCTAssertEqual(decoded?.shouldResumeGps, true)
+    }
+
+    func testEndedGpsSnapshotNeverResumesLocation() {
+        let checkpoint = WorkoutRouteCheckpoint(
+            polyline: RouteMath.encode([RouteMath.LatLng(1, 1)]),
+            pointCount: 1,
+            lastFixMs: 1_700_000_100_000)
+        let decoded = ActiveWorkoutPersistence.decode(
+            ActiveWorkoutPersistence.encode(snapshot(endSec: 1_700_000_900,
+                                                      gpsEnabled: true,
+                                                      routeCheckpoint: checkpoint,
+                                                      sport: "Running")))
+        XCTAssertEqual(decoded?.routeCheckpoint, checkpoint)
+        XCTAssertEqual(decoded?.shouldResumeGps, false,
+                       "A failed-save retry stays frozen even though its route is retained.")
+    }
+
+    func testLegacySnapshotWithoutGpsKeysStillDecodesAsNonGps() {
+        let json = """
+        {"startSec":1700000000,"sport":"Tennis","samples":[],"avgHr":0,"peakHr":0,"liveStrain":0}
+        """
+        let decoded = ActiveWorkoutPersistence.decode(Data(json.utf8))
+        XCTAssertNotNil(decoded)
+        XCTAssertEqual(decoded?.gpsEnabled, false)
+        XCTAssertNil(decoded?.routeCheckpoint)
+        XCTAssertEqual(decoded?.shouldResumeGps, false)
+    }
+
+    func testCorruptRouteCheckpointIsDroppedWithoutInventingPartialRoute() {
+        let corrupt = WorkoutRouteCheckpoint(polyline: RouteMath.encode([RouteMath.LatLng(1, 1)]),
+                                             pointCount: 2,
+                                             lastFixMs: 1_700_000_100_000)
+        let decoded = ActiveWorkoutPersistence.decode(
+            ActiveWorkoutPersistence.encode(snapshot(gpsEnabled: true,
+                                                      routeCheckpoint: corrupt,
+                                                      sport: "Running")))
+        XCTAssertEqual(decoded?.gpsEnabled, true)
+        XCTAssertNil(decoded?.routeCheckpoint)
+        XCTAssertEqual(decoded?.shouldResumeGps, true,
+                       "GPS may resume fresh, but a mismatched persisted route must not be used.")
+    }
+
     // MARK: - UserDefaults store / load / clear
 
     func testStoreLoadClearRoundTrip() {
@@ -77,6 +148,48 @@ final class ActiveWorkoutPersistenceTests: XCTestCase {
                              avgHr: 135, peakHr: 150, liveStrain: 9.1)
         ActiveWorkoutPersistence.store(later, into: defaults)
         XCTAssertEqual(ActiveWorkoutPersistence.load(from: defaults), later)
+    }
+
+    func testFailedDatabaseSaveRetainsRecoverySnapshotForRetry() async {
+        enum ExpectedFailure: Error { case unavailable }
+        let defaults = freshDefaults()
+        let checkpoint = WorkoutRouteCheckpoint(
+            polyline: RouteMath.encode([RouteMath.LatLng(1, 1), RouteMath.LatLng(1.001, 1.001)]),
+            pointCount: 2,
+            lastFixMs: 1_700_000_800_000)
+        let snap = snapshot(endSec: 1_700_000_900, gpsEnabled: true,
+                            routeCheckpoint: checkpoint, sport: "Running")
+        ActiveWorkoutPersistence.store(snap, into: defaults)
+        let originalBytes = defaults.data(forKey: ActiveWorkoutPersistence.defaultsKey)
+
+        let result = await ActiveWorkoutPersistence.saveThenClear(from: defaults) {
+            throw ExpectedFailure.unavailable
+        }
+
+        guard case .failed = result else { return XCTFail("Expected a failed commit") }
+        XCTAssertEqual(defaults.data(forKey: ActiveWorkoutPersistence.defaultsKey), originalBytes)
+        XCTAssertEqual(ActiveWorkoutPersistence.load(from: defaults), snap)
+    }
+
+    func testSuccessfulDatabaseSaveClearsRecoverySnapshotAfterCommit() async {
+        let defaults = freshDefaults()
+        let checkpoint = WorkoutRouteCheckpoint(
+            polyline: RouteMath.encode([RouteMath.LatLng(1, 1), RouteMath.LatLng(1.001, 1.001)]),
+            pointCount: 2,
+            lastFixMs: 1_700_000_800_000)
+        ActiveWorkoutPersistence.store(
+            snapshot(endSec: 1_700_000_900, gpsEnabled: true,
+                     routeCheckpoint: checkpoint, sport: "Running"),
+            into: defaults)
+        var didSave = false
+
+        let result = await ActiveWorkoutPersistence.saveThenClear(from: defaults) {
+            didSave = true
+        }
+
+        XCTAssertEqual(result, .saved)
+        XCTAssertTrue(didSave)
+        XCTAssertNil(ActiveWorkoutPersistence.load(from: defaults))
     }
 
     // MARK: - honest failure (no revived bogus card)
@@ -117,5 +230,73 @@ final class ActiveWorkoutPersistenceTests: XCTestCase {
         XCTAssertEqual(decoded!.avgHr, 0)
         XCTAssertEqual(decoded!.peakHr, 0)
         XCTAssertEqual(decoded!.liveStrain, 0, accuracy: 1e-9)
+    }
+
+    // MARK: - bounded growing-snapshot cadence
+
+    func testRecoveryCadenceBoundsFullSnapshotWritesAndForcedLifecycleCanResetIt() {
+        var cadence = WorkoutRecoveryCadence(persistedSampleCount: 0, persistedAtSec: 1_000)
+        XCTAssertFalse(cadence.isDue(sampleCount: 1, nowSec: 1_001))
+        XCTAssertFalse(cadence.isDue(sampleCount: 29, nowSec: 1_029))
+        XCTAssertTrue(cadence.isDue(sampleCount: 30, nowSec: 1_029),
+                      "Thirty fresh packets bound the unpersisted sample tail.")
+
+        cadence.didPersist(sampleCount: 30, atSec: 1_029)
+        XCTAssertFalse(cadence.isDue(sampleCount: 31, nowSec: 1_058))
+        XCTAssertTrue(cadence.isDue(sampleCount: 31, nowSec: 1_059),
+                      "Sparse HR still checkpoints by elapsed time.")
+
+        cadence.didPersist(sampleCount: 31, atSec: 1_059) // forced GPS/lifecycle checkpoint
+        XCTAssertFalse(cadence.isDue(sampleCount: 31, nowSec: 2_000),
+                       "No new sample means there is no HR tail to persist.")
+    }
+
+
+    // MARK: - genuine HR-event cursor
+
+    func testWorkoutCursorRejectsCachedAndRepeatedSequence() {
+        var cursor = WorkoutHeartRateCursor(consumedSequence: 7)
+        let time = Date(timeIntervalSince1970: 1_700_000_100)
+
+        XCTAssertNil(cursor.consume(sequence: 7, bpm: 140, receivedAt: time),
+                     "A pre-workout cached value is not a workout sample.")
+        XCTAssertEqual(cursor.consume(sequence: 8, bpm: 140, receivedAt: time),
+                       sample(1_700_000_100, 140))
+        XCTAssertNil(cursor.consume(sequence: 8, bpm: 140,
+                                    receivedAt: time.addingTimeInterval(1)),
+                     "The same accepted packet may only be consumed once.")
+    }
+
+    func testWorkoutCursorKeepsSameBpmWhenItIsANewTimestampedPacket() {
+        var cursor = WorkoutHeartRateCursor(consumedSequence: 0)
+        XCTAssertEqual(cursor.consume(sequence: 1, bpm: 82,
+                                      receivedAt: Date(timeIntervalSince1970: 1_700_000_100)),
+                       sample(1_700_000_100, 82))
+        XCTAssertEqual(cursor.consume(sequence: 2, bpm: 82,
+                                      receivedAt: Date(timeIntervalSince1970: 1_700_000_101)),
+                       sample(1_700_000_101, 82),
+                       "Unchanged BPM is still real data when a new packet arrives one second later.")
+    }
+
+    func testWorkoutCursorDeduplicatesStorageSecondWithoutInventingTime() {
+        var cursor = WorkoutHeartRateCursor(consumedSequence: 0)
+        XCTAssertNotNil(cursor.consume(sequence: 1, bpm: 100,
+                                       receivedAt: Date(timeIntervalSince1970: 1_700_000_100.1)))
+        XCTAssertNil(cursor.consume(sequence: 2, bpm: 101,
+                                    receivedAt: Date(timeIntervalSince1970: 1_700_000_100.9)))
+        XCTAssertNil(cursor.consume(sequence: 3, bpm: 99,
+                                    receivedAt: Date(timeIntervalSince1970: 1_700_000_099.9)),
+                     "An out-of-order clock value must not make the workout timeline run backward.")
+        XCTAssertEqual(cursor.consume(sequence: 4, bpm: 102,
+                                      receivedAt: Date(timeIntervalSince1970: 1_700_000_101.1)),
+                       sample(1_700_000_101, 102))
+    }
+
+    func testWorkoutCursorConsumesButRejectsImplausiblePacket() {
+        var cursor = WorkoutHeartRateCursor(consumedSequence: 4)
+        let time = Date(timeIntervalSince1970: 1_700_000_100)
+        XCTAssertNil(cursor.consume(sequence: 5, bpm: 0, receivedAt: time))
+        XCTAssertNil(cursor.consume(sequence: 5, bpm: 80, receivedAt: time),
+                     "Changing cached fields cannot rehabilitate an already-consumed packet identity.")
     }
 }

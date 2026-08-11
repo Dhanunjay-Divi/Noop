@@ -6,8 +6,8 @@ import WhoopProtocol
 /// android/.../AutoWorkoutDetectorTest.kt case-for-case so the two platforms stay byte-parity on
 /// the detection logic.
 ///
-/// Cases: elevated span detected; brief dip tolerated; short/low spans rejected; near windows
-/// merged; window overlapping a saved workout excluded.
+/// Cases: elevated span detected; brief dip tolerated; short/low spans rejected; only short-gap
+/// windows merged; window overlapping a saved workout excluded.
 final class AutoWorkoutDetectorTests: XCTestCase {
 
     /// A flat 1 Hz HR block [start, start+durS) at `bpm`.
@@ -63,7 +63,7 @@ final class AutoWorkoutDetectorTests: XCTestCase {
     }
 
     func testNearWindowsAreMerged() {
-        // Two 16 min bouts at 120 separated by a 3 min true rest at 65 (< 60 min merge gap, but the rest
+        // Two 16 min bouts at 120 separated by a 3 min true rest at 65 (< 5 min merge gap, but the rest
         // is > 90 s so it CLOSES each span). The two closed spans are then MERGED into one (gap < 5 min).
         let start = 5_000_000
         let a = block(start, 16 * 60, 120)
@@ -77,7 +77,7 @@ final class AutoWorkoutDetectorTests: XCTestCase {
     }
 
     func testFarWindowsStaySeparate() {
-        // Two 16 min bouts at 120 separated by a 70 min rest (>= 60 min merge gap) → two workouts.
+        // Two 16 min bouts at 120 separated by a 70 min rest (> 5 min merge gap) → two workouts.
         let start = 6_000_000
         let a = block(start, 16 * 60, 120)
         let gap = block(start + 960, 70 * 60, 65)
@@ -87,7 +87,7 @@ final class AutoWorkoutDetectorTests: XCTestCase {
         XCTAssertEqual(out.count, 2)
     }
 
-    func testFragmentsExactlySixtyMinutesApartAreMerged() {
+    func testSeparateWorkoutsAnHourApartAreNotMerged() {
         let start = 6_500_000
         let first = block(start, 20 * 60, 120)
         // First end is start+1199; second starts exactly 3600 seconds after that endpoint.
@@ -96,7 +96,7 @@ final class AutoWorkoutDetectorTests: XCTestCase {
         let second = block(secondStart, 20 * 60, 120)
         let hr = block(start - 300, 300, 65) + first + rest + second
             + block(secondStart + 20 * 60, 300, 65)
-        XCTAssertEqual(AutoWorkoutDetector.detect(hr: hr, restingBpm: 60).count, 1)
+        XCTAssertEqual(AutoWorkoutDetector.detect(hr: hr, restingBpm: 60).count, 2)
     }
 
     func testWindowOverlappingSavedWorkoutIsExcluded() {
@@ -162,9 +162,9 @@ final class AutoWorkoutDetectorTests: XCTestCase {
         XCTAssertTrue(AutoWorkoutDetector.detect(hr: hr, restingBpm: nil).isEmpty)
     }
 
-    func testThresholdAndFragmentMergeAreWhoop2026Aligned() {
+    func testThresholdAndConservativeFragmentMergeContract() {
         XCTAssertEqual(AutoWorkoutDetector.minSustainedMin, 10.0)
-        XCTAssertEqual(AutoWorkoutDetector.mergeGapS, 60 * 60)
+        XCTAssertEqual(AutoWorkoutDetector.mergeGapS, 5 * 60)
         let start = 12_000_000
         let nineMinutes = block(start, 9 * 60, 120) + block(start + 9 * 60, 300, 65)
         XCTAssertTrue(AutoWorkoutDetector.detect(hr: nineMinutes, restingBpm: 60).isEmpty)

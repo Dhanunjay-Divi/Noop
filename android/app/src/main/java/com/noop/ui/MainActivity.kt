@@ -697,13 +697,13 @@ object NoopPrefs {
     /** Legacy Boolean retained so upgrades and older rollback builds preserve the user's prior choice. */
     const val KEY_AUTO_DETECT_WORKOUTS = "noop.autoDetectWorkouts"
 
-    /** Three-way mode. Fresh → Auto-save; legacy true → Ask; legacy false → Off. */
+    /** Three-way mode. Fresh → Ask; legacy true → Ask; legacy false → Off. */
     const val KEY_AUTO_WORKOUT_MODE = "noop.autoWorkoutMode"
 
     internal fun resolveAutoWorkoutMode(storedRaw: String?, legacyEnabled: Boolean?): AutoWorkoutMode =
         AutoWorkoutMode.fromStored(storedRaw)
             ?: legacyEnabled?.let { if (it) AutoWorkoutMode.ASK else AutoWorkoutMode.OFF }
-            ?: AutoWorkoutMode.AUTO_SAVE
+            ?: AutoWorkoutMode.ASK
 
     fun autoWorkoutMode(context: Context): AutoWorkoutMode {
         val prefs = of(context)

@@ -1528,7 +1528,7 @@ private struct HealthHubLinksSection: View {
     let live = LiveState()
     live.connected = true
     live.bonded = true
-    live.heartRate = 132
+    live.setHeartRate(132)
     live.rr = [455, 460, 448, 470, 452, 461, 449, 458, 463, 451]
 
     return HealthView()

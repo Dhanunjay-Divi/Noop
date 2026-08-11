@@ -151,11 +151,11 @@ ksp {
     arg("room.schemaLocation", roomSchemaDir.get().asFile.absolutePath)
 }
 
-fun isMainSourceSetKspTask(name: String) =
-    name.startsWith("ksp") && name.endsWith("Kotlin") &&
-        !name.contains("UnitTest") && !name.contains("AndroidTest")
-
-tasks.matching { isMainSourceSetKspTask(it.name) }.configureEach {
+// The schema oracle is intentionally produced by one canonical variant. Declaring the same directory as
+// an output of every flavor's KSP task makes Gradle treat those tasks as competing producers; a focused
+// demo test then fails validation even though it correctly depends on the full-debug oracle. Room's
+// entity schema is flavor-independent, so keep one explicit producer and snapshot that output below.
+tasks.matching { it.name == "kspFullDebugKotlin" }.configureEach {
     outputs.dir(roomSchemaDir).withPropertyName("roomSchemaExport")
     outputs.upToDateWhen {
         roomSchemaDir.get().asFile.walkTopDown().any { it.isFile && it.extension == "json" }

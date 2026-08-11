@@ -364,6 +364,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _bpm = MutableStateFlow<Int?>(null)
     /** Spike-filtered, smoothed heart rate for the hero number. Null until data arrives. */
     val bpm: StateFlow<Int?> = _bpm.asStateFlow()
+    /** Manual-workout capture has its own packet-identity cursor. It stores raw sensor BPM and never
+     *  mistakes a battery/connection StateFlow republish for another heart-rate observation. */
+    private var workoutHeartRateCursor = WorkoutHeartRateCursor(
+        consumedSequence = ble.state.value.heartRateSampleSequence,
+    )
 
     // MARK: - Illness watch banner
 
@@ -605,8 +610,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // a disabled alarm doesn't disarm on every reconnect.
         viewModelScope.launch {
             var lastBonded = false
+            // StateFlow republishes for battery, wear, sync, logs, etc. Only an advancing packet sequence
+            // is a real HR observation; seed at the current sequence so constructor replay is display context.
+            var lastHeartRateSequence = ble.state.value.heartRateSampleSequence
             ble.state.collect { state ->
-                state.heartRate?.let { ingestHr(it) }
+                if (state.heartRateSampleSequence != lastHeartRateSequence) {
+                    lastHeartRateSequence = state.heartRateSampleSequence
+                    state.heartRate?.let { raw ->
+                        ingestHr(raw)
+                        captureWorkoutSample(
+                            sequence = state.heartRateSampleSequence,
+                            rawBpm = raw,
+                            receivedAtSec = System.currentTimeMillis() / 1_000L,
+                        )
+                    }
+                }
                 // #39 parity with iOS: clear the smoothed median on a true disconnect (no HR AND no R-R) so the
                 // Health hero falls to "—" rather than freezing on the last value; a transient gap with R-R
                 // still flowing keeps the median (matches AppModel.ingestHR's disconnect guard).
@@ -1078,7 +1096,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         while (hrWindow.size > hrWindowSize) hrWindow.removeFirst()
         val sorted = hrWindow.sorted()
         _bpm.value = sorted[sorted.size / 2]
-        captureWorkoutSample(_bpm.value!!)
     }
 
     // MARK: - Manual workout tracking
@@ -1089,12 +1106,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // strain already counts this HR (same live stream the store persists), so it's a per-session
     // annotation, not a double-count. Mirrors macOS AppModel.
 
-    /** A manual workout in progress. [samples] accumulate from the smoothed live bpm; [liveStrain] is
-     *  recomputed as the window grows so the active card shows strain building in real time. */
+    /** A manual workout in progress. [samples] admit genuine sequence-identified raw HR packets (the
+     *  smoothed BPM is display-only); [liveStrain] is recomputed as the window grows. */
     data class ActiveWorkout(
         val startMs: Long,
         val sport: Sport,
         val gpsEnabled: Boolean,
+        /** Pin attribution at Start; switching the active device mid-workout cannot move its row/samples. */
+        val deviceId: String = WhoopBleClient.DEFAULT_DEVICE_ID,
         val samples: List<HrSample> = emptyList(),
         val track: List<RouteMath.LatLng> = emptyList(),
         val distanceM: Double = 0.0,
@@ -1102,12 +1121,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val liveStrain: Double = 0.0,
         val avgHr: Int = 0,
         val peakHr: Int = 0,
+        /** Frozen once End is tapped. Non-null means sampling/GPS stopped and this exact snapshot is
+         *  saving or waiting for Retry; duration must never continue growing behind an error. */
+        val endMs: Long? = null,
     )
 
     private val _activeWorkout = MutableStateFlow<ActiveWorkout?>(null)
     val activeWorkout: StateFlow<ActiveWorkout?> = _activeWorkout.asStateFlow()
     private val _lastWorkout = MutableStateFlow<WorkoutRow?>(null)
     val lastWorkout: StateFlow<WorkoutRow?> = _lastWorkout.asStateFlow()
+    private val _workoutSaveInProgress = MutableStateFlow(false)
+    val workoutSaveInProgress: StateFlow<Boolean> = _workoutSaveInProgress.asStateFlow()
+    private val _workoutSaveError = MutableStateFlow<String?>(null)
+    val workoutSaveError: StateFlow<String?> = _workoutSaveError.asStateFlow()
+    /** Last full active-workout snapshot boundary. The growing HR list is checkpointed at a bounded cadence,
+     *  not re-encoded on every packet; End still performs a forced durable write of the complete window. */
+    private var lastActiveWorkoutCheckpointSec: Long? = null
 
     /** Ref-count + Activity-lifecycle gate for battery-intensive realtime requests. Declared before the
      *  workout-rehydrate init blocks so a restored explicit workout can safely reclaim its lease. */
@@ -1134,10 +1163,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return _activeWorkout.value != null
     }
 
-    /** Durable store for an in-flight NON-GPS workout (#529). The GPS path is already process-durable via
-     *  [GpsSession] + the foreground service; a non-GPS session lived only in [_activeWorkout], so an OS
-     *  kill mid-session lost it. We snapshot non-GPS sessions to SharedPreferences on start + each sample
-     *  and rehydrate on launch so an interrupted session can still be ended and saved. */
+    /** Durable companion snapshot for every manual workout. GPS route points are append-checkpointed by
+     *  [GpsSession] while live; this store keeps source/HR state and owns the final route after End until
+     *  Room commits, giving both GPS and non-GPS workouts the same retry semantics. */
     private val activeWorkoutStore = ActiveWorkoutStore.from(appContext)
 
     /** Mirrors the process-level [GpsSession] route into [_activeWorkout] for live display. The route
@@ -1160,8 +1188,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun startWorkout(sport: Sport = WorkoutSport.default, gpsEnabled: Boolean = false) {
         if (_activeWorkout.value != null) return
         _lastWorkout.value = null
+        _workoutSaveError.value = null
+        _workoutSaveInProgress.value = false
         val startMs = System.currentTimeMillis()
-        _activeWorkout.value = ActiveWorkout(startMs = startMs, sport = sport, gpsEnabled = gpsEnabled)
+        _activeWorkout.value = ActiveWorkout(
+            startMs = startMs,
+            sport = sport,
+            gpsEnabled = gpsEnabled,
+            deviceId = deviceId,
+        )
+        workoutHeartRateCursor = WorkoutHeartRateCursor(
+            consumedSequence = ble.state.value.heartRateSampleSequence,
+        )
+        lastActiveWorkoutCheckpointSec = null
         holdActiveWorkoutRealtimeLease()
         buzz(1)
         // Workouts & GPS test mode (Test Centre): one session-start line tagged .workouts. Zero-cost when off.
@@ -1177,80 +1216,158 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             GpsSession.start(startMs, sport.name)
             WhoopConnectionService.start(appContext)
             observeGpsSession()
-        } else {
-            // A non-GPS session has no process-level GpsSession backing it, so make it durable: snapshot
-            // it now (and on every captured sample) so an OS kill mid-session can be rehydrated + ended
-            // on relaunch (#529). GPS sessions are already covered by GpsSession's process durability.
-            persistNonGpsWorkout(_activeWorkout.value)
         }
+        // Snapshot EVERY manual workout. GPS points remain in GpsSession's O(1) append journal while live;
+        // this companion snapshot preserves source identity + raw HR and later owns the frozen final route.
+        persistActiveWorkout(
+            _activeWorkout.value,
+            checkpointSec = startMs / 1_000L,
+            force = true,
+            durable = true,
+        )
     }
 
-    /** Snapshot the in-flight NON-GPS workout to durable storage (#529). No-op for a GPS session (the
-     *  process-level [GpsSession] already makes that durable) or when nothing is running. */
-    private fun persistNonGpsWorkout(w: ActiveWorkout?) {
-        if (w == null || w.gpsEnabled) return
-        runCatching {
-            activeWorkoutStore.save(
-                ActiveWorkoutPersistence.Snapshot(
-                    startMs = w.startMs,
-                    sportName = w.sport.name,
-                    deviceId = deviceId,
-                    samples = w.samples,
-                    avgHr = w.avgHr,
-                    peakHr = w.peakHr,
-                    liveStrain = w.liveStrain,
-                ),
+    /** Map the in-memory session to its recovery record. A live GPS route stays in GpsSession; an ended
+     *  one carries its exact final polyline here so a database failure/relaunch can retry without loss. */
+    private fun activeWorkoutSnapshot(w: ActiveWorkout): ActiveWorkoutPersistence.Snapshot =
+        ActiveWorkoutPersistence.Snapshot(
+            startMs = w.startMs,
+            sportName = w.sport.name,
+            deviceId = w.deviceId,
+            samples = w.samples,
+            avgHr = w.avgHr,
+            peakHr = w.peakHr,
+            liveStrain = w.liveStrain,
+            endMs = w.endMs,
+            gpsEnabled = w.gpsEnabled,
+            distanceM = w.distanceM,
+            paceSecPerKm = w.paceSecPerKm,
+            routePolyline = if (w.endMs != null && w.track.size >= 2) RouteMath.encode(w.track) else null,
+        )
+
+    private fun persistActiveWorkout(
+        w: ActiveWorkout?,
+        checkpointSec: Long = System.currentTimeMillis() / 1_000L,
+        force: Boolean = false,
+        durable: Boolean = false,
+    ) {
+        if (w == null) return
+        if (!ActiveWorkoutCheckpointPolicy.shouldCheckpoint(
+                lastCheckpointSec = lastActiveWorkoutCheckpointSec,
+                sampleSec = checkpointSec,
+                force = force,
             )
-        }
+        ) return
+        runCatching {
+            val snapshot = activeWorkoutSnapshot(w)
+            if (durable) activeWorkoutStore.saveDurably(snapshot) else {
+                activeWorkoutStore.save(snapshot)
+                true
+            }
+        }.onSuccess { saved -> if (saved) lastActiveWorkoutCheckpointSec = checkpointSec }
     }
 
-    /** Mirror the process-level [GpsSession] route into [_activeWorkout] while the ViewModel is alive.
-     *  Re-attachable: also used by [rehydrateActiveGpsWorkout] after a VM/process restart. */
+    /** Mirror constant-size GPS totals into [_activeWorkout] while the ViewModel is alive. The full route
+     *  remains in GpsSession's O(1) accumulator and is copied exactly once at End. */
     private fun observeGpsSession() {
         gpsJob?.cancel()
         gpsJob = viewModelScope.launch {
             GpsSession.state.collect { s ->
                 val w = _activeWorkout.value ?: return@collect
-                _activeWorkout.value = w.copy(track = s.track, distanceM = s.distanceM, paceSecPerKm = s.paceSecPerKm)
+                if (!w.gpsEnabled || w.endMs != null) return@collect
+                // The exact route stays in GpsSession's private append accumulator (copying it here for every
+                // fix was O(n²)). The live card only needs constant-size distance/pace; End snapshots once.
+                _activeWorkout.value = w.copy(distanceM = s.distanceM, paceSecPerKm = s.paceSecPerKm)
             }
         }
     }
 
-    /**
-     * If a GPS workout is still tracking in the background (process kept alive by the foreground
-     * service) but this ViewModel was recreated, rebuild the active-workout card from [GpsSession] so
-     * reopening the app doesn't hide an in-flight ride. HR samples that elapsed while the UI was gone
-     * aren't recoverable here (they stream live), but the route — the thing #215 was about — is intact.
-     */
-    private fun rehydrateActiveGpsWorkout() {
-        val s = GpsSession.state.value
-        if (!s.active || _activeWorkout.value != null) return
-        val sport = WorkoutSport.all.firstOrNull { it.name == s.sportName } ?: WorkoutSport.default
-        _activeWorkout.value = ActiveWorkout(
-            startMs = s.startMs, sport = sport, gpsEnabled = true,
-            track = s.track, distanceM = s.distanceM, paceSecPerKm = s.paceSecPerKm,
-        )
-        holdActiveWorkoutRealtimeLease()
-        observeGpsSession()
-    }
-
-    /**
-     * If a NON-GPS manual workout was in flight when the OS killed the process, rebuild its active-workout
-     * card from the durable snapshot so reopening the app doesn't lose it — the session can still be ended
-     * and saved (#529). The non-GPS analogue of [rehydrateActiveGpsWorkout], lighter: there's no route /
-     * foreground service to reattach, just the persisted HR window + running stats. A GPS session takes
-     * the GPS rehydrate path instead and is never persisted here, so the two never collide. No-op if a
-     * workout is already live (a live session wins over a stale snapshot) or nothing is stored.
-     */
-    private fun rehydrateActiveNonGpsWorkout() {
+    /** Rebuild either a recording workout or an exact ended-but-unsaved retry snapshot after process death. */
+    private fun rehydrateActiveWorkout() {
         if (_activeWorkout.value != null) return
-        val snap = activeWorkoutStore.load() ?: return
-        val sport = WorkoutSport.all.firstOrNull { it.name == snap.sportName } ?: WorkoutSport.default
-        _activeWorkout.value = ActiveWorkout(
-            startMs = snap.startMs, sport = sport, gpsEnabled = false,
-            samples = snap.samples, avgHr = snap.avgHr, peakHr = snap.peakHr, liveStrain = snap.liveStrain,
-        )
-        holdActiveWorkoutRealtimeLease()
+        val snap = activeWorkoutStore.load()
+        val gps = GpsSession.state.value
+
+        if (snap != null) {
+            val sport = WorkoutSport.all.firstOrNull { it.name == snap.sportName } ?: WorkoutSport.default
+            val frozenTrack = snap.routePolyline?.let { encoded ->
+                runCatching { RouteMath.decode(encoded) }.getOrNull()
+            }.orEmpty()
+            val matchingLiveGps = snap.gpsEnabled && gps.active &&
+                gps.startMs == snap.startMs && gps.sportName == snap.sportName
+            val track = when {
+                frozenTrack.isNotEmpty() -> frozenTrack
+                matchingLiveGps -> GpsSession.snapshotTrack()
+                else -> emptyList()
+            }
+            val distance = when {
+                frozenTrack.isNotEmpty() -> snap.distanceM
+                matchingLiveGps -> gps.distanceM
+                else -> snap.distanceM
+            }
+            val w = ActiveWorkout(
+                startMs = snap.startMs,
+                sport = sport,
+                gpsEnabled = snap.gpsEnabled,
+                deviceId = snap.deviceId,
+                samples = snap.samples,
+                track = track,
+                distanceM = distance,
+                paceSecPerKm = if (matchingLiveGps) gps.paceSecPerKm else snap.paceSecPerKm,
+                liveStrain = snap.liveStrain,
+                avgHr = snap.avgHr,
+                peakHr = snap.peakHr,
+                endMs = snap.endMs,
+            )
+            _activeWorkout.value = w
+            workoutHeartRateCursor = WorkoutHeartRateCursor(
+                consumedSequence = ble.state.value.heartRateSampleSequence,
+                lastTimestampSec = snap.samples.maxOfOrNull { it.ts },
+            )
+            lastActiveWorkoutCheckpointSec = snap.samples.maxOfOrNull { it.ts } ?: (snap.startMs / 1_000L)
+
+            if (w.endMs != null) {
+                // A prior commit failed or the process died during it. The final route is already in this
+                // snapshot, so stop any stale live GPS checkpoint and present Retry without resuming capture.
+                if (gps.active) {
+                    GpsSession.stop()
+                    reconcileServiceAfterGpsWorkout()
+                }
+                _workoutSaveError.value = "This finished workout still needs to be saved."
+            } else {
+                holdActiveWorkoutRealtimeLease()
+                if (w.gpsEnabled) {
+                    if (!matchingLiveGps) GpsSession.start(w.startMs, w.sport.name)
+                    WhoopConnectionService.start(appContext)
+                    observeGpsSession()
+                }
+            }
+            return
+        }
+
+        // Compatibility fallback for an older in-progress GPS checkpoint that predates the companion
+        // active-workout snapshot. Preserve its route rather than hiding it after the upgrade.
+        if (gps.active) {
+            val sport = WorkoutSport.all.firstOrNull { it.name == gps.sportName } ?: WorkoutSport.default
+            _activeWorkout.value = ActiveWorkout(
+                startMs = gps.startMs,
+                sport = sport,
+                gpsEnabled = true,
+                deviceId = deviceId,
+                track = GpsSession.snapshotTrack(),
+                distanceM = gps.distanceM,
+                paceSecPerKm = gps.paceSecPerKm,
+            )
+            persistActiveWorkout(
+                _activeWorkout.value,
+                checkpointSec = gps.startMs / 1_000L,
+                force = true,
+                durable = true,
+            )
+            WhoopConnectionService.start(appContext)
+            holdActiveWorkoutRealtimeLease()
+            observeGpsSession()
+        }
     }
 
     /** A manually-started workout owns one logical high-rate lease until End, even if its overlay is
@@ -1267,42 +1384,79 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         releaseRealtimeHr()
     }
 
-    /** Finish the active workout: score the captured HR window + finalize the GPS route, save a
-     *  WorkoutRow, and (opt-in) write it to Health Connect. A session with no HR AND no track is
-     *  discarded quietly. Double-buzz confirms the save. */
-    fun endWorkout() {
-        val w = _activeWorkout.value ?: return
-        _activeWorkout.value = null
-        releaseActiveWorkoutRealtimeLease()
-        gpsJob?.cancel(); gpsJob = null
-        // Drop the durable non-GPS snapshot the instant the session ends — whether it saves below or is
-        // discarded as too-short — so a relaunch never rehydrates an already-finished session (#529).
-        activeWorkoutStore.clear()
-        // The process-level session is authoritative for the route: it kept accumulating even if this
-        // ViewModel was cleared mid-ride (screen off), so [w.track] may be stale. Stop it and take its
-        // final track. A non-GPS workout has nothing in the session, so fall back to the local track. (#215)
-        val track = if (w.gpsEnabled) GpsSession.stop() else w.track
-        val distanceM = if (w.gpsEnabled) RouteMath.totalMeters(track) else w.distanceM
-        // If we promoted the foreground service ONLY to keep GPS tracking alive (the user hasn't opted
-        // into the background connection), drop it now the route is finished — otherwise a lingering
-        // "Connected" notification would outlive the workout. With background-connection on, leave it
-        // up. Done here (before the discard early-return) so an empty GPS session tears down too. (#215)
-        if (w.gpsEnabled && !NoopPrefs.backgroundConnection(appContext)) {
+    /** A GPS-started service returned START_STICKY. Re-enter it once after GPS ends so a background-BLE
+     *  preference leaves the service running but NOT_STICKY; otherwise stop the GPS-only service entirely. */
+    private fun reconcileServiceAfterGpsWorkout() {
+        if (NoopPrefs.backgroundConnection(appContext)) {
+            WhoopConnectionService.start(appContext)
+        } else {
             WhoopConnectionService.stop(appContext)
         }
-        val samples = w.samples
-        if (samples.size < 2 && track.size < 2) {
-            // Workouts & GPS test mode: record WHY a session vanished (too short / no track), tagged .workouts.
-            emitWorkoutsTrace {
-                com.noop.analytics.WorkoutsTrace.sessionLine(
-                    event = "discarded", sportKey = WorkoutEditing.traceSportKey(w.sport.name),
-                    hrSamples = samples.size, gpsPoints = if (w.gpsEnabled) track.size else null,
-                )
+    }
+
+    /**
+     * Freeze and save the active workout as a small transaction. End first commits an exact recovery
+     * snapshot (bounded end, raw HR window, final GPS route), then stops capture, then writes Room. UI and
+     * snapshot remain present on failure so Retry is idempotent; only a successful Room+HR commit clears.
+     */
+    fun endWorkout() {
+        if (_workoutSaveInProgress.value) return
+        var w = _activeWorkout.value ?: return
+
+        if (w.endMs == null) {
+            val finalTrack = if (w.gpsEnabled) GpsSession.snapshotTrack() else w.track
+            val finalDistance = if (w.gpsEnabled) RouteMath.totalMeters(finalTrack) else w.distanceM
+            val frozenEndMs = System.currentTimeMillis()
+            val ended = w.copy(
+                endMs = frozenEndMs,
+                track = finalTrack,
+                distanceM = finalDistance,
+                paceSecPerKm = if (w.gpsEnabled)
+                    RouteMath.paceSecPerKm(finalDistance, (frozenEndMs - w.startMs) / 1_000.0)
+                else w.paceSecPerKm,
+            )
+
+            if (ended.samples.size < 2 && finalTrack.size < 2) {
+                // Nothing truthful to save. This is the same deliberate empty-session discard as before.
+                if (w.gpsEnabled) GpsSession.stop()
+                gpsJob?.cancel(); gpsJob = null
+                releaseActiveWorkoutRealtimeLease()
+                activeWorkoutStore.clear()
+                _activeWorkout.value = null
+                lastActiveWorkoutCheckpointSec = null
+                _workoutSaveError.value = null
+                // Workouts & GPS test mode: record WHY a session vanished (too short / no track), tagged .workouts.
+                emitWorkoutsTrace {
+                    com.noop.analytics.WorkoutsTrace.sessionLine(
+                        event = "discarded", sportKey = WorkoutEditing.traceSportKey(w.sport.name),
+                        hrSamples = w.samples.size, gpsPoints = if (w.gpsEnabled) finalTrack.size else null,
+                    )
+                }
+                _lastWorkout.value = null
+                if (w.gpsEnabled) reconcileServiceAfterGpsWorkout()
+                return
             }
-            _lastWorkout.value = null
-            return
+
+            // The one synchronous barrier in this lifecycle: do not stop GPS/sampling until the exact
+            // final route and end time are known to be on disk. A failure leaves the original workout live.
+            if (!activeWorkoutStore.saveDurably(activeWorkoutSnapshot(ended))) {
+                _workoutSaveError.value = "Couldn't secure this workout for saving. It is still recording; try End again."
+                return
+            }
+            w = ended
+            _activeWorkout.value = ended
+            releaseActiveWorkoutRealtimeLease()
+            gpsJob?.cancel(); gpsJob = null
+            if (w.gpsEnabled) {
+                GpsSession.stop() // safe now: the final route is durably present in ActiveWorkoutStore
+                reconcileServiceAfterGpsWorkout()
+            }
         }
-        val endMs = System.currentTimeMillis()
+
+        val endMs = w.endMs ?: return
+        val samples = w.samples
+        val track = w.track
+        val distanceM = w.distanceM
         val avg = if (samples.isNotEmpty()) samples.sumOf { it.bpm } / samples.size else null
         val peak = if (samples.isNotEmpty()) samples.maxOf { it.bpm } else null
         val strain = if (samples.size >= 2)
@@ -1314,44 +1468,74 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 .first.takeIf { it > 0 }
         else null
         val row = WorkoutRow(
-            deviceId = deviceId, startTs = w.startMs / 1000, endTs = endMs / 1000,
+            deviceId = w.deviceId, startTs = w.startMs / 1000, endTs = endMs / 1000,
             sport = w.sport.name, source = "manual", durationS = (endMs - w.startMs) / 1000.0,
             energyKcal = energyKcal,
             avgHr = avg, maxHr = peak, strain = strain,
             distanceM = distanceM.takeIf { it > 0 },
             routePolyline = if (track.size >= 2) RouteMath.encode(track) else null,
         )
-        _lastWorkout.value = row
-        // Workouts & GPS test mode: one session-end summary tagged .workouts (the lastSessionSummary readout
-        // source) carrying the captured HR window size, the duration, and the accepted GPS point count (the
-        // final track), so the lifecycle of a saved session is visible end to end. Zero-cost when off.
-        emitWorkoutsTrace {
-            com.noop.analytics.WorkoutsTrace.sessionLine(
-                event = "end", sportKey = WorkoutEditing.traceSportKey(w.sport.name), hrSamples = samples.size,
-                durationSec = ((endMs - w.startMs) / 1000L).toInt(),
-                gpsPoints = if (w.gpsEnabled) track.size else null,
-            )
-        }
-        buzz(2)
+        _workoutSaveInProgress.value = true
+        _workoutSaveError.value = null
         viewModelScope.launch {
-            runCatching { repository.upsertWorkouts(listOf(row)) }
-            // #528: persist the live 1 Hz workout HR into hrSample so it can export to Health Connect
-            // at full resolution NOW (the HR export keeps workout-window samples un-decimated), instead
-            // of only after the next strap offload sync. IGNORE-on-conflict makes a later sync of the
-            // same seconds a no-op.
-            runCatching { if (samples.isNotEmpty()) repository.insertHr(samples) }
-            if (_hcWriteback.value) {
-                runCatching { HealthConnectWriter.writeExercise(appContext, row, w.sport.exerciseType) }
-                // #528: export the just-captured HR series now (workout row already upserted above, so
-                // the export's window logic keeps these samples at full 1 Hz rather than ~1/30 s).
-                writebackHealthConnectNow()
+            val result = ActiveWorkoutPersistence.saveThenClear(
+                save = {
+                    repository.upsertWorkouts(listOf(row))
+                    // Keep the snapshot until HR rows commit too. Retry is safe: workout upsert is idempotent
+                    // and hrSample uses IGNORE-on-conflict for the same device+second.
+                    if (samples.isNotEmpty()) repository.insertHr(samples)
+                },
+                clear = { activeWorkoutStore.clear() },
+            )
+            _workoutSaveInProgress.value = false
+            when (result) {
+                ActiveWorkoutPersistence.SaveResult.Saved -> {
+                    _activeWorkout.value = null
+                    lastActiveWorkoutCheckpointSec = null
+                    _workoutSaveError.value = null
+                    _lastWorkout.value = row
+                    emitWorkoutsTrace {
+                        com.noop.analytics.WorkoutsTrace.sessionLine(
+                            event = "end", sportKey = WorkoutEditing.traceSportKey(w.sport.name),
+                            hrSamples = samples.size,
+                            durationSec = ((endMs - w.startMs) / 1000L).toInt(),
+                            gpsPoints = if (w.gpsEnabled) track.size else null,
+                        )
+                    }
+                    buzz(2)
+                    if (_hcWriteback.value) {
+                        runCatching { HealthConnectWriter.writeExercise(appContext, row, w.sport.exerciseType) }
+                        writebackHealthConnectNow()
+                    }
+                }
+                is ActiveWorkoutPersistence.SaveResult.Failed -> {
+                    _workoutSaveError.value =
+                        "Couldn't save this workout. It is still kept on this device. Retry when ready. (${result.detail})"
+                }
             }
         }
     }
 
-    /** Append the current smoothed bpm to the active workout and recompute its running strain. Called
-     *  from ingestHr on every fresh sample; a no-op when no workout is running. */
-    private fun captureWorkoutSample(bpm: Int) {
+    /** Explicitly abandon a recording or retained failed-save workout. UI must confirm this action. */
+    fun discardActiveWorkout() {
+        if (_workoutSaveInProgress.value) return
+        val w = _activeWorkout.value ?: return
+        if (w.gpsEnabled) {
+            GpsSession.stop()
+            gpsJob?.cancel(); gpsJob = null
+            reconcileServiceAfterGpsWorkout()
+        }
+        releaseActiveWorkoutRealtimeLease()
+        activeWorkoutStore.clear()
+        _activeWorkout.value = null
+        lastActiveWorkoutCheckpointSec = null
+        _lastWorkout.value = null
+        _workoutSaveError.value = null
+    }
+
+    /** Append one genuine RAW HR packet and recompute running stats. Smoothed display state, timers and
+     *  unrelated LiveState emissions cannot enter this path. */
+    private fun captureWorkoutSample(sequence: Long, rawBpm: Int, receivedAtSec: Long) {
         // `_activeWorkout` (declared further down) can still be null HERE: the HR collector in the first
         // init block can fire ingestHr -> captureWorkoutSample INLINE during construction (a StateFlow
         // replays its current value to a new collector), before this field's initializer has run — the
@@ -1359,14 +1543,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // never null. (Fixes the NPE in @maddognik's ADB: captureWorkoutSample -> getValue on null.)
         @Suppress("UNNECESSARY_SAFE_CALL")
         val w = _activeWorkout?.value ?: return
-        val s = w.samples + HrSample(deviceId = deviceId, ts = System.currentTimeMillis() / 1000, bpm = bpm)
+        if (w.endMs != null) return
+        val fresh = workoutHeartRateCursor.consume(
+            sequence = sequence,
+            bpm = rawBpm,
+            receivedAtSec = receivedAtSec,
+            deviceId = w.deviceId,
+        ) ?: return
+        val s = w.samples + fresh
         val strain = StrainScorer.strain(s, maxHR = profileStore.hrMax.toDouble(), sex = profileStore.sex) ?: 0.0
         val updated = w.copy(
             samples = s, avgHr = s.sumOf { it.bpm } / s.size, peakHr = s.maxOf { it.bpm }, liveStrain = strain,
         )
         _activeWorkout.value = updated
-        // Re-snapshot the durable non-GPS session so a process kill keeps the latest accumulated HR (#529).
-        persistNonGpsWorkout(updated)
+        persistActiveWorkout(updated, checkpointSec = fresh.ts)
     }
 
     // MARK: - Workouts screen (load + manual edit · relabel · dismiss · delete) (#107)
@@ -1968,15 +2158,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // best-effort periodic worker when the dedicated background-health permission is granted.
         syncHealthConnectIfStale()
 
-        // If a GPS workout is still tracking in the background (the screen was off and this VM was
-        // recreated on reopen), rebuild its active-workout card from the process-level session. Placed
-        // in THIS init — not the first one above — because it reads _activeWorkout, which is declared
-        // below the first init block and would still be null there (JVM field init order). (#215)
-        rehydrateActiveGpsWorkout()
-        // Then, if no GPS session claimed the card, rehydrate a NON-GPS manual workout from its durable
-        // snapshot so an OS kill mid-session can still be ended + saved (#529). Order matters: a live GPS
-        // session wins; the non-GPS path only fills in when [_activeWorkout] is still null.
-        rehydrateActiveNonGpsWorkout()
+        // Rebuild either a recording manual workout or an ended save-retry snapshot. Placed in THIS init —
+        // not the first one above — because it reads _activeWorkout, which is declared below that first init
+        // block and would still be null there (JVM field-init order).
+        rehydrateActiveWorkout()
     }
 
     /** Flip auto-sync. Enabling kicks an immediate import, retains foreground catch-up everywhere,

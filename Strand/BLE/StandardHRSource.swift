@@ -435,7 +435,7 @@ extension StandardHRSource: @preconcurrency CBPeripheralDelegate {
             loggedFirstHR = true
             log("HR-strap: receiving data — first sample \(parsed.hr) bpm (rr beats: \(parsed.rr.count))")
         }
-        live.heartRate = parsed.hr
+        live.setHeartRate(parsed.hr)
         live.setRRIntervals(parsed.rr)
         live.connected = true
         enqueue(hr: parsed.hr, rr: parsed.rr)

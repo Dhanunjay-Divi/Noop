@@ -16,7 +16,8 @@ import kotlin.math.sqrt
  * policy decides whether a candidate is ignored, shown for approval, or persisted as a Detected row.
  *
  * The thresholds here are intentionally CONSERVATIVE (low sensitivity): a sustained ≥10-min
- * elevation of HR ≥ resting+30 bpm, brief (≤90 s) dips tolerated, near windows merged. A window
+ * elevation of HR ≥ resting+30 bpm, brief (≤90 s) dips tolerated, and only short workout
+ * fragments (≤5 min apart) merged. A window
  * is offered only after the stream contains >90 s of post-session quiet; an elevated span at the
  * end of the available data is still in progress and is never suggested. This
  * is tuned to avoid false positives from stress / caffeine / a brief flight of stairs, at the
@@ -35,14 +36,21 @@ object AutoWorkoutDetector {
     /** Elevated gate: bpm must be at least restingHR + this margin to count as "working". */
     const val elevatedMarginBPM: Int = 30
 
-    /** WHOOP's Jan 2026 baseline: hold the elevated gate for at least 10 minutes. */
+    /**
+     * Local candidate floor. Current WHOOP support pages describe 10- and 12-minute minimums in
+     * different troubleshooting contexts, so NOOP documents its own fixed ten-minute rule explicitly.
+     */
     const val minSustainedMin: Double = 10.0
 
     /** A dip below the gate no longer than this does NOT break the span (a red light, a sip of water). */
     const val maxDipS: Long = 90L
 
-    /** WHOOP's June 2026 fragment rule: nearby detected fragments within an hour form one activity. */
-    const val mergeGapS: Long = 60L * 60L
+    /**
+     * Conservative local fragment rule. Five minutes can join a short interval/rest break, while the
+     * previous one-hour value could combine genuinely separate workouts and had no documented WHOOP
+     * provenance.
+     */
+    const val mergeGapS: Long = 5L * 60L
 
     /**
      * When an OPTIONAL continuous motion series is supplied, a window must ALSO show elevated motion

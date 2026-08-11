@@ -364,12 +364,11 @@ class WhoopConnectionService : Service() {
                 }
         }
 
-        // START_NOT_STICKY: the FGS's job is to keep this process *alive* (which it does while
-        // running, making OS kills unlikely). We deliberately do NOT resurrect after a kill, because
-        // a fresh process has no strap/model context to reconnect with — the user reopening the app
-        // re-establishes it. Resurrecting would only show a "Reconnecting…" notification that never
-        // resolves.
-        return START_NOT_STICKY
+        // A normal BLE-only service remains NOT_STICKY: a fresh process lacks enough strap context to
+        // promise a reconnect. An explicitly-started GPS workout is different: GpsSession is durably
+        // checkpointed and initialized before this service, so START_STICKY lets Android resume route
+        // collection after a process kill instead of silently losing the rest of the track.
+        return if (GpsSession.state.value.active) START_STICKY else START_NOT_STICKY
     }
 
     /** Promote to the foreground. Returns false (rather than throwing) if the platform refuses. When

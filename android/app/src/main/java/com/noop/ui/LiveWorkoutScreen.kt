@@ -65,6 +65,8 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
     val effortScale = UnitPrefs.effortScale(context)
     val bpm by vm.bpm.collectAsStateWithLifecycle()
     val activeWorkout by vm.activeWorkout.collectAsStateWithLifecycle()
+    val saveInProgress by vm.workoutSaveInProgress.collectAsStateWithLifecycle()
+    val saveError by vm.workoutSaveError.collectAsStateWithLifecycle()
     // Additive: instantaneous speed/cadence/power from a connected standard fitness sensor (RSC/CSC/CPS),
     // read ALONGSIDE HR by the SourceCoordinator's isolated StandardHrSource. Empty (all-null) when no such
     // sensor is feeding, so the readout below hides entirely — a plain HR-only workout looks unchanged. HR
@@ -85,7 +87,8 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
     }
 
     val w = activeWorkout
-    // If the workout ended elsewhere (e.g. process restart cleared it), close out.
+    // Close only after the durable save succeeds (or the user explicitly discards). A failed save keeps
+    // the exact ended workout on this screen for Retry.
     LaunchedEffect(w == null) { if (w == null) onClose() }
     if (w == null) return
 
@@ -95,12 +98,13 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
     // Guards the destructive End action behind a confirm (#517) — a stray tap on the full-width
     // button used to end the workout instantly with no way back.
     var showEndConfirm by remember { mutableStateOf(false) }
+    var showDiscardConfirm by remember { mutableStateOf(false) }
 
     var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(w.startMs) {
         while (true) { nowMs = System.currentTimeMillis(); delay(1000) }
     }
-    val elapsedS = ((nowMs - w.startMs) / 1000).coerceAtLeast(0)
+    val elapsedS = (((w.endMs ?: nowMs) - w.startMs) / 1000).coerceAtLeast(0)
 
     // A scenic Effort-tinted backdrop behind the whole in-exercise screen — the live workout reads as
     // an Effort-world hero, not a flat panel.
@@ -124,7 +128,10 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
             // Header — sport + elapsed clock.
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Overline("Recording workout", color = Palette.effortColor)
+                    Overline(
+                        if (w.endMs == null) "Recording workout" else "Workout ended",
+                        color = Palette.effortColor,
+                    )
                     Text(w.sport.name, style = NoopType.title1, color = Palette.textPrimary)
                 }
                 Text(
@@ -156,6 +163,21 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
             // Additive sensor readout — only renders when a connected standard fitness sensor is feeding.
             SensorRow(sensor)
 
+            if (saveError != null) {
+                NoopCard(tint = Palette.statusWarning) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Overline("Save needs attention", color = Palette.statusWarning)
+                        Text(saveError.orEmpty(), style = NoopType.subhead, color = Palette.textSecondary)
+                        TextButton(
+                            onClick = { showDiscardConfirm = true },
+                            enabled = !saveInProgress,
+                        ) {
+                            Text("Discard workout", color = Palette.statusCritical)
+                        }
+                    }
+                }
+            }
+
             // #845: a fixed gap before End instead of a weighted Spacer. A weight needs a bounded height to
             // share out, but the column is now scrollable (unbounded), so a weighted Spacer can't size and
             // the End button would no longer be separated from the stats. A constant gap keeps the spacing
@@ -163,13 +185,25 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
             Spacer(Modifier.height(12.dp))
 
             Button(
-                onClick = { showEndConfirm = true },
+                onClick = {
+                    if (w.endMs == null) showEndConfirm = true else vm.endWorkout()
+                },
+                enabled = !saveInProgress,
                 modifier = Modifier.fillMaxWidth(),
                 contentPadding = PaddingValues(vertical = 14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Palette.statusCritical, contentColor = Palette.surfaceBase,
                 ),
-            ) { Text(uiString(R.string.l10n_live_workout_screen_end_workout_3e8d6238), style = NoopType.headline) }
+            ) {
+                Text(
+                    when {
+                        saveInProgress -> "Saving…"
+                        w.endMs != null -> "Retry save"
+                        else -> uiString(R.string.l10n_live_workout_screen_end_workout_3e8d6238)
+                    },
+                    style = NoopType.headline,
+                )
+            }
         }
     }
 
@@ -192,7 +226,7 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
                 )
             },
             confirmButton = {
-                TextButton(onClick = { showEndConfirm = false; vm.endWorkout(); onClose() }) {
+                TextButton(onClick = { showEndConfirm = false; vm.endWorkout() }) {
                     Text(
                         uiString(R.string.l10n_live_workout_screen_end_workout_3e8d6238),
                         style = NoopType.body, color = Palette.statusCritical,
@@ -205,6 +239,31 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
                         uiString(R.string.l10n_live_workout_screen_cancel_77dfd213),
                         style = NoopType.body, color = Palette.textSecondary,
                     )
+                }
+            },
+        )
+    }
+
+    if (showDiscardConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDiscardConfirm = false },
+            containerColor = Palette.surfaceOverlay,
+            title = { Text("Discard this workout?", style = NoopType.title2, color = Palette.textPrimary) },
+            text = {
+                Text(
+                    "This permanently removes the on-device recovery copy. This cannot be undone.",
+                    style = NoopType.subhead,
+                    color = Palette.textSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showDiscardConfirm = false; vm.discardActiveWorkout() }) {
+                    Text("Discard", style = NoopType.body, color = Palette.statusCritical)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardConfirm = false }) {
+                    Text("Keep workout", style = NoopType.body, color = Palette.textSecondary)
                 }
             },
         )

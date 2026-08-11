@@ -111,7 +111,10 @@ fun startOrResumeLiveSession(vm: AppViewModel, context: Context): LiveSessionRun
         ),
         deviceId = vm.activeStrapId,
         scope = vm.viewModelScope,
-        readBpm = { vm.live.value.heartRate },
+        readHeartRate = {
+            val live = vm.live.value
+            LiveSessionRunner.HeartRateSample(live.heartRate, live.heartRateSampleSequence)
+        },
         buzz = { loops -> vm.ble.buzz(loops) },
         persist = { row -> vm.repo.upsertLiveSession(row) },
         realtimeHr = { arm -> if (arm) vm.requestRealtimeHr() else vm.releaseRealtimeHr() },

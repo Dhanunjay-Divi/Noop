@@ -118,6 +118,11 @@ data class LiveState(
      *  branch and false at every teardown. Twin of macOS LiveState.streamingLiveHR (#903). */
     val streamingLiveHR: Boolean = false,
     val heartRate: Int? = null,
+    /** Monotonic in-process identity of the last accepted HR packet. A repeated BPM is still a new
+     *  sample and increments this value; merely reading the cached [heartRate] does not. Consumers that
+     *  tick on a clock (notably Live Session) use this to distinguish a genuinely fresh sensor event
+     *  from the same cached number after realtime transport has stopped or the app backgrounds. */
+    val heartRateSampleSequence: Long = 0L,
     val rr: List<Int> = emptyList(),
     /** Rolling UI buffer of recent R-R intervals (capped, oldest dropped first). The standard BLE HR
      *  notification usually carries only one or two intervals per packet, so the Live console needs a
@@ -221,6 +226,12 @@ data class LiveState(
         val capped = if (merged.size > recentLimit) merged.takeLast(recentLimit) else merged
         return copy(rr = intervals, rrRecent = capped)
     }
+
+    /** Publish one accepted HR packet and advance its event identity, even when the BPM is unchanged. */
+    fun withHeartRate(bpm: Int): LiveState = copy(
+        heartRate = bpm,
+        heartRateSampleSequence = heartRateSampleSequence + 1L,
+    )
 
     /** Blank all live biometric readouts (HR + R-R + the rolling buffer) so a stale heart rate or R-R
      *  strip can't outlive the link. Applied on disconnect alongside the charging/bond clears. Twin of
@@ -1473,7 +1484,7 @@ class WhoopBleClient(
             // paused, so it never sets the flag for a WHOOP. `bonded` stays false (no encrypted bond), so
             // the buzz/alarm/HRV feature gates keep keying off the WHOOP bond. Twin of iOS OuraLiveSource
             // → LiveState.streamingLiveHR (PR #56).
-            _state.update { it.copy(heartRate = hr, connected = true, streamingLiveHR = true) }
+            _state.update { it.withHeartRate(hr).copy(connected = true, streamingLiveHR = true) }
         }
     }
 
@@ -4593,7 +4604,7 @@ class WhoopBleClient(
             "REALTIME_DATA" -> {
                 // Reject 0 / out-of-range spikes; only accept physiologically plausible HR.
                 (parsed.parsed["heart_rate"] as? Int)?.let { hr ->
-                    if (hr in 30..220) _state.update { it.copy(heartRate = hr) }
+                    if (hr in 30..220) _state.update { it.withHeartRate(hr) }
                 }
                 // The realtime stream usually reports rr_count=0; only update R-R when this frame
                 // actually carries intervals, so we don't wipe R-R sourced from the 0x2A37 profile.
@@ -4857,7 +4868,7 @@ class WhoopBleClient(
         if (rr.isNotEmpty()) _state.update { it.withRRIntervals(rr) }
         // HR: accept only physiologically plausible values; reject 0/garbage (off-wrist).
         if (hr in 30..220) {
-            _state.update { it.copy(heartRate = hr) }
+            _state.update { it.withHeartRate(hr) }
             // EXPERIMENTAL WHOOP 5.0/MG: there is no confirmed-write bond for a 5/MG strap, so once
             // live HR actually streams over the standard profile we treat the link as established —
             // otherwise the UI sits on "Connecting…" forever even though data is flowing (issue #8).

@@ -44,7 +44,28 @@ public final class LiveState: ObservableObject {
     /// source sets it true in its streaming branch and false at every teardown (stop / needs-pairing /
     /// radio-off / connect-fail / disconnect). Twin of the Android LiveState.streamingLiveHR.
     @Published public var streamingLiveHR: Bool = false
-    @Published public var heartRate: Int? = nil
+    @Published public private(set) var heartRate: Int? = nil
+    /// Monotonic in-process identity of the latest accepted HR packet. It advances even when the BPM is
+    /// unchanged, while merely reading the cached `heartRate` does not. Clock-driven consumers use the
+    /// pair to distinguish a genuinely fresh sensor event from a held value after transport goes quiet.
+    public private(set) var heartRateSampleSequence: UInt64 = 0
+    public struct HeartRateSample: Equatable, Sendable {
+        public let bpm: Int
+        public let sequence: UInt64
+        /// Wall-clock instant at which NOOP accepted this notification from the live transport.
+        /// Consumers must use this event timestamp rather than stamping a later UI/timer callback.
+        public let receivedAt: Date
+    }
+    private var latestHeartRateSample: HeartRateSample?
+    private let heartRateSampleSubject = PassthroughSubject<HeartRateSample, Never>()
+    /// Event-only publisher: unlike `@Published heartRate`, this fires for every accepted packet without
+    /// forcing all SwiftUI observers of LiveState to re-render when the numeric BPM did not change.
+    public var heartRateSamplePublisher: AnyPublisher<HeartRateSample, Never> {
+        heartRateSampleSubject.eraseToAnyPublisher()
+    }
+    /// The latest genuine packet, or nil before the first packet / after biometric teardown. Its
+    /// sequence remains available separately so a consumer can seed a freshness cursor at session start.
+    public var heartRateSample: HeartRateSample? { latestHeartRateSample }
     /// Whether the heavy R10/R11 realtime burst is currently armed (the "live feed"). Tracks the
     /// realtime INTENT (startRealtime/stopRealtime), NOT `heartRate` — the lightweight 0x2A37 profile
     /// keeps setting heartRate while bonded, so a heartRate-driven toggle could never read "off". The
@@ -494,11 +515,30 @@ public final class LiveState: ObservableObject {
         }
     }
 
+    /// Single funnel for one accepted HR packet. `publishEvenIfUnchanged` preserves each source's existing
+    /// UI behavior: sources that historically published every 1 Hz reading still do, while WHOOP's raw-frame
+    /// flood keeps its change-only SwiftUI update. Freshness identity advances in both cases.
+    @discardableResult
+    public func setHeartRate(_ bpm: Int,
+                             receivedAt: Date = Date(),
+                             publishEvenIfUnchanged: Bool = true) -> Bool {
+        let published = publishEvenIfUnchanged || heartRate != bpm
+        if published { heartRate = bpm }
+        heartRateSampleSequence &+= 1
+        let sample = HeartRateSample(bpm: bpm,
+                                     sequence: heartRateSampleSequence,
+                                     receivedAt: receivedAt)
+        latestHeartRateSample = sample
+        heartRateSampleSubject.send(sample)
+        return published
+    }
+
     /// Blank all live biometric readouts (HR + R-R + the rolling buffer) so a stale heart rate or
     /// R-R strip can't outlive the link. Called on CoreBluetooth disconnect (BLEManager), the twin of
     /// the `charging = nil` / `encryptedBond = false` clears on the same path.
     public func clearBiometrics() {
         heartRate = nil
+        latestHeartRateSample = nil
         rr.removeAll()
         rrRecent.removeAll()
         clearBatterySamples()   // a stale runtime estimate must not outlive the link either (#713)

@@ -12,7 +12,7 @@ struct AutoWorkoutCard: View {
 
     @EnvironmentObject var repo: Repository
 
-    /// Empty invokes the legacy-safe resolver (old true → Ask, old false → Off, fresh → Auto-save).
+    /// Empty invokes the legacy-safe resolver (old true → Ask, old false → Off, fresh → Ask).
     @AppStorage(PuffinExperiment.autoWorkoutModeKey) private var storedModeRaw = ""
 
     /// The current suggestion, loaded in `.task`. nil → nothing to show.

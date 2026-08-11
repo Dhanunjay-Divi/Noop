@@ -67,13 +67,13 @@ public final class FrameRouter {
             // Reject 0 / out-of-range spikes from realtime streams; AppModel medians the rest.
             // Some firmware exposes live BPM only on the R10/R11 raw stream after acknowledging
             // BLE_REALTIME_HR_ON, so the UI can consume it even though persistence still ignores raw43.
-            // live perf: skip the publish when HR is unchanged — the raw flood carries the same HR
-            // byte across many frames, so an unguarded write re-renders the whole console for nothing.
-            if let hr = parsed.parsed["heart_rate"]?.intValue, hr >= 30, hr <= 220, state.heartRate != hr {
-                state.heartRate = hr
+            // live perf: skip the SwiftUI publish when HR is unchanged — but still advance the sample
+            // sequence so a steady BPM remains genuinely live and a stopped stream can go stale honestly.
+            if let hr = parsed.parsed["heart_rate"]?.intValue, hr >= 30, hr <= 220 {
+                let published = state.setHeartRate(hr, publishEvenIfUnchanged: false)
                 // Sleep & Rest test mode (Group E): bank the live HR sample for the readout's HR-density
                 // figure. Gated on the zero-cost active() Bool, so this is a no-op when the mode is off.
-                if TestCentre.active(.sleep) {
+                if published, TestCentre.active(.sleep) {
                     state.recordSleepLiveHr(ts: Int(Date().timeIntervalSince1970), bpm: hr)
                 }
             }

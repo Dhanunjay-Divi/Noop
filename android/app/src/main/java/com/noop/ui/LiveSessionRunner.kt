@@ -37,8 +37,9 @@ class LiveSessionRunner(
     val config: LiveSessionEngine.Config,
     val deviceId: String,
     private val scope: CoroutineScope,
-    /** Most-recent live bpm, or null when none is current — [com.noop.ble.LiveState.heartRate]. */
-    private val readBpm: () -> Int?,
+    /** Most-recent live HR packet. [HeartRateSample.sequence] changes only for a genuine sensor event,
+     *  so the 1 Hz runner cannot mistake a cached BPM for a fresh sample after transport goes quiet. */
+    private val readHeartRate: () -> HeartRateSample,
     /** Fire one hardware buzz with the given stacked-loop count — [com.noop.ble.WhoopBleClient.buzz]. */
     private val buzz: (Int) -> Unit,
     /** Upsert the session row (start + end) — [com.noop.data.WhoopRepository.upsertLiveSession]. */
@@ -50,6 +51,9 @@ class LiveSessionRunner(
     /** Injectable clock (epoch seconds) so the tick/accrual/auto-end logic is testable. */
     private val nowEpochSec: () -> Long = { System.currentTimeMillis() / 1000L },
 ) {
+
+    /** Atomic snapshot of the latest accepted HR packet exposed by the BLE live state. */
+    data class HeartRateSample(val bpm: Int?, val sequence: Long)
 
     /** Everything the session screen renders, published once per tick (and once on end). */
     data class Snapshot(
@@ -85,6 +89,9 @@ class LiveSessionRunner(
     private var endTs: Long? = null
     private var ended = false
     private var endedAutomatically = false
+    /** Sequence consumed by the engine most recently. Seeded at Start so a pre-session cached BPM is
+     *  never presented as if it arrived after the user began the session. */
+    private var lastHeartRateSequence: Long? = null
 
     // Out-of-band accrual (the engine only accrues IN-BAND time itself). dt is clamped to the engine's
     // own maxAccrualDtSec so a stalled tick (doze, background throttling) can't inflate the totals —
@@ -101,6 +108,7 @@ class LiveSessionRunner(
     /** Begin the session: arm the realtime HR stream, bank the start row (endTs null), start the tick. */
     fun start() {
         if (tickJob != null || ended) return
+        lastHeartRateSequence = readHeartRate().sequence
         realtimeHr(true)
         scope.launch { runCatching { persist(openRow()) } }
         tickJob = scope.launch {
@@ -135,7 +143,14 @@ class LiveSessionRunner(
         val dt = (now - lastTickTs).coerceAtLeast(0L).toInt()
         lastTickTs = now
 
-        val out = engine.update(now.toInt(), readBpm())
+        val sample = readHeartRate()
+        val freshBpm = if (sample.sequence != lastHeartRateSequence) {
+            lastHeartRateSequence = sample.sequence
+            sample.bpm
+        } else {
+            null
+        }
+        val out = engine.update(now.toInt(), freshBpm)
 
         if (out.status == LiveSessionEngine.Status.STALE) {
             // Never fabricate: a stale stream accrues nothing and coaches nothing (the engine already

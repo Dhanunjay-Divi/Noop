@@ -73,7 +73,7 @@ NOOP's detector is local, retrospective, and controlled by **Off / Ask / Auto-sa
    A privacy-safe notification opens a durable Today card where the user can Keep or mark it Not a
    workout; the full row remains editable/relabelable/dismissible in Workouts. **Off** performs no scan.
    Existing explicit Boolean choices migrate true → Ask and false → Off; a genuinely fresh install
-   defaults to Auto-save.
+   defaults to Ask until real-world classifier validation is complete.
 7. The broad type hint (walk/run/strength/cycle/ski) is explicitly experimental. It is shown only when
    decoded activity-class ticks cover the detected window and the advisory classifier clears its score
    and confidence gates. Otherwise the label remains `Workout`. The saved label is always editable.

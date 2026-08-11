@@ -292,7 +292,7 @@ The biggest NOOP release yet.
 
 - **A complete redesign.** Every screen rebuilt around a clean Apple-Fitness-meets-WHOOP look: flat colour rings for Charge/Effort/Rest, a living day-cycle scene behind Today, SF Pro + rounded numbers, borderless cards, pip bars in place of gauges, a green brand mark (gold dropped), a customisable Today, and a softly-glowing header while recording. Same on iPhone, Mac and Android, light or dark.
 - **Hydration tracking (new, opt-in).** A local water log with a daily goal that adapts to your sex and the day's Effort. Tap Sip/Cup/Bottle. Settings → Features. (#685)
-- **Automatic workout detection (new, opt-in).** Spots a probable workout from sustained elevated heart rate after a sync and offers a non-destructive "save it?" card; it never auto-creates a session. Settings → Features. (#683)
+- **Automatic workout detection (new, opt-in).** Spots a probable workout from sustained elevated heart rate after a sync. Fresh installs use approval-first **Ask** mode; an explicit **Auto-save** choice applies a stricter 15-minute gate and keeps review/edit controls. Settings → Features. (#683)
 - **Experimental sleep staging V2 (opt-in).** A new cardiorespiratory recipe that recovers Deep and REM better, especially on nights the default stager flattened to "light." Settings → Experimental (Android: Diagnostics). Thanks @sunny-noop (#600).
 - **Sleep marks.** Log your own bedtime/wake boundaries from the Sleep screen or a strap double-tap; logging only, never moves the detected night. (#461)
 - **Sleep + recovery tune-ups** reimplemented and verified from @ryanbr's PRs: steadier resting-HR floor (#686), motion-weighted step calibration (#682), a 0%-REM-night diagnostic (#688), and side-by-side resting-HR logging (#691).

@@ -437,7 +437,7 @@ enum AppChangelog {
             items: [
                 "**A whole new look.** NOOP has been redesigned from the ground up - flat, clean colour rings, a day-cycle scene that moves with your day, and a Today screen you can customise to show what matters to you. The same fresh look lands on iPhone, Mac and Android together.",
                 "**New: Hydration tracking.** Opt in and log your water through the day with a simple tap, set a daily target, and see how you're doing at a glance. Off by default - turn it on in Settings.",
-                "**New: Automatic workout detection.** Opt in and NOOP spots a likely workout from your heart rate and motion and offers it for a one-tap add, so a session you forgot to start doesn't go unrecorded. Nothing is logged without you confirming it. Off by default.",
+                "**New: Automatic workout detection.** NOOP spots a likely workout from your heart rate and motion. Fresh installs use approval-first Ask mode; an explicit stricter Auto-save mode is available in Settings.",
                 "**Experimental: Sleep Staging V2.** A new on-device sleep stager you can switch on to try a sharper deep/REM/light breakdown. Clearly labelled experimental while we prove it against real nights.",
                 "**Sleep marks.** Tap to mark when you turned in and when you woke, so you keep your own record of bedtime and wake alongside what the strap worked out.",
                 "**Plus a batch of fixes** across sync, scoring and the screens you use every day.",

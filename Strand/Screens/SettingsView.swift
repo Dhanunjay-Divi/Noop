@@ -113,7 +113,7 @@ struct SettingsView: View {
     @AppStorage(HydrationStore.enabledKey) private var hydrationEnabled = false
 
     /// Empty means the richer mode has never been selected, so `PuffinExperiment.autoWorkoutMode`
-    /// applies its legacy-safe migration (old true → Ask, old false → Off, fresh install → Auto-save).
+    /// applies its legacy-safe migration (old true → Ask, old false → Off, fresh install → Ask).
     @AppStorage(PuffinExperiment.autoWorkoutModeKey) private var autoWorkoutModeRaw = ""
 
     /// "Journal reminder" (#627, default ON). When ON, Today shows the persistent journal widget

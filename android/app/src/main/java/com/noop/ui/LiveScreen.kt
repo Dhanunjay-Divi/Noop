@@ -69,6 +69,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
 import com.noop.analytics.HrZones
 import com.noop.analytics.SpotHrvReading
 import com.noop.analytics.Sport
@@ -111,6 +112,8 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
     val activeDeviceName by viewModel.activeDeviceName.collectAsStateWithLifecycle()
     val activeWorkout by viewModel.activeWorkout.collectAsStateWithLifecycle()
     val lastWorkout by viewModel.lastWorkout.collectAsStateWithLifecycle()
+    val workoutSaveInProgress by viewModel.workoutSaveInProgress.collectAsStateWithLifecycle()
+    val workoutSaveError by viewModel.workoutSaveError.collectAsStateWithLifecycle()
 
     // Session-scoped by design: leaving Live clears the explicit opt-in. An Activity background/return
     // keeps this composition/state, while AppViewModel's foreground gate disarms/re-arms the physical
@@ -144,7 +147,11 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
         if (live.bonded) viewModel.getBattery()
     }
 
+    // Keep WHOOP's encrypted/bonded command channel separate from a valid non-WHOOP HR stream. Generic
+    // BLE straps and Oura can power live HR + workout recording without pretending they support WHOOP
+    // battery, buzz, history-offload, or firmware controls.
     val activeConnection = live.connected && live.bonded
+    val liveHrConnection = hasLiveHrConnection(live)
 
     // Live HR zone for the focal readout's colour world (presentation only — same shared HrZones model
     // the live-workout screen uses). 0 = below Zone 1 / no HR yet.
@@ -166,6 +173,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
     // the live readout); see the report note.
     var showSportPicker by remember { mutableStateOf(false) }
     var showHrvSnapshot by remember { mutableStateOf(false) }
+    var showDiscardWorkoutConfirm by remember { mutableStateOf(false) }
     // Live workout mode (#238): the full-screen in-exercise overlay. Normally opened at workout START
     // (StartWorkoutSheet); this lets the Today "workout in progress" indicator re-open it for a session
     // already in flight by consuming the ViewModel's one-shot on appear (iOS parity:
@@ -203,6 +211,23 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
                 onClose = { showHrvSnapshot = false },
             )
         }
+    }
+
+    if (showDiscardWorkoutConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDiscardWorkoutConfirm = false },
+            title = { Text("Discard this workout?") },
+            text = { Text("This permanently removes the on-device recovery copy. This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDiscardWorkoutConfirm = false
+                    viewModel.discardActiveWorkout()
+                }) { Text("Discard", color = Palette.statusCritical) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardWorkoutConfirm = false }) { Text("Keep workout") }
+            },
+        )
     }
 
     // The full-screen live-workout overlay (#238). A plain full-screen Dialog so it floats over Live, the
@@ -246,7 +271,8 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
 
         item {
         LiveTrackingControl(
-            enabled = activeConnection,
+            // A disconnected stream can always be stopped; only the initial Start needs a live source.
+            enabled = liveHrConnection || liveTrackingOptedIn,
             tracking = liveTrackingOptedIn,
             onToggle = { liveTrackingOptedIn = !liveTrackingOptedIn },
         )
@@ -355,7 +381,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
         if (liveTrackingOptedIn) {
             // Body console — focal live HR VESSEL + live physiology (R-R thread, rolling RMSSD, frame/event).
             item {
-            BodyConsole(live = live, bpm = bpm, activeConnection = activeConnection, zone = liveZone, hrMax = profile.hrMax)
+            BodyConsole(live = live, bpm = bpm, activeConnection = liveHrConnection, zone = liveZone, hrMax = profile.hrMax)
             }
 
             // Signal Trust rail — one tile per signal that has to be current for the console to be trusted.
@@ -392,7 +418,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
             LaunchedEffect(w.startMs) {
                 while (true) { nowMs = System.currentTimeMillis(); delay(1000) }
             }
-            val elapsedS = ((nowMs - w.startMs) / 1000).coerceAtLeast(0)
+            val elapsedS = (((w.endMs ?: nowMs) - w.startMs) / 1000).coerceAtLeast(0)
             NoopCard(tint = Palette.effortColor) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -421,12 +447,33 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
                     }
                     Button(
                         onClick = { viewModel.endWorkout() },
+                        enabled = !workoutSaveInProgress,
                         modifier = Modifier.fillMaxWidth(),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Palette.statusCritical, contentColor = Palette.surfaceBase,
                         ),
-                    ) { Text(uiString(R.string.l10n_live_screen_end_workout_3e8d6238), style = NoopType.captionNumber) }
+                    ) {
+                        Text(
+                            when {
+                                workoutSaveInProgress -> "Saving…"
+                                w.endMs != null -> "Retry save"
+                                else -> uiString(R.string.l10n_live_screen_end_workout_3e8d6238)
+                            },
+                            style = NoopType.captionNumber,
+                        )
+                    }
+                    if (workoutSaveError != null) {
+                        Text(
+                            workoutSaveError.orEmpty(),
+                            style = NoopType.footnote,
+                            color = Palette.statusWarning,
+                        )
+                        TextButton(
+                            onClick = { showDiscardWorkoutConfirm = true },
+                            enabled = !workoutSaveInProgress,
+                        ) { Text("Discard workout", color = Palette.statusCritical) }
+                    }
                 }
             }
         } else {
@@ -436,7 +483,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
                 Button(
                     onClick = { showSportPicker = true },
                     modifier = Modifier.weight(1f),
-                    enabled = activeConnection,
+                    enabled = liveHrConnection,
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Palette.accent, contentColor = Palette.surfaceBase,
@@ -946,11 +993,14 @@ private fun OfflineConnectCallout(scanning: Boolean, onConnect: () -> Unit) {
 
 /** #56: a non-WHOOP live source (the Oura ring, and on Android any external HR source that drives
  *  [LiveState.streamingLiveHR]) that is connected and actively streaming live HR. It streams without a
- *  WHOOP encrypted bond, so `bonded`/`activeConnection` never trip — which left the console reading
- *  "stream not yet trusted" for a perfectly good stream. The status copy treats this as a trusted stream;
- *  the bond-only feature gates (buzz, alarm, HRV snapshot) keep keying off `activeConnection`. Twin of the
- *  iOS LiveView.ringStreaming. */
+ *  WHOOP encrypted bond. Live HR and workout recording treat it as a valid stream, while bond-only
+ *  feature gates (battery refresh, buzz, alarm, history sync, HRV snapshot) remain keyed to the separate
+ *  WHOOP connection Boolean. Twin of iOS LiveView.ringStreaming. */
 private fun ringStreaming(live: LiveState): Boolean = live.connected && live.streamingLiveHR
+
+/** Any source that can honestly drive the live HR surface. WHOOP command controls remain bond-gated. */
+internal fun hasLiveHrConnection(live: LiveState): Boolean =
+    live.connected && (live.bonded || live.streamingLiveHR)
 
 /** The "Worn" stat text. An Oura ring reports a precise live wear/charge state (live-HR presence + charger
  *  STATE + a removal watchdog), so prefer it — it flips to not-worn the moment the ring is off the finger

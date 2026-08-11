@@ -37,6 +37,9 @@ struct LiveWorkoutView: View {
     /// Guards the destructive End action behind a confirm (#517) — a stray tap on the full-width button
     /// used to end the workout instantly with no way back.
     @State private var showEndConfirm = false
+    /// A failed durable save keeps the recovery snapshot. Discard is available, but requires its own
+    /// explicit confirmation so a transient database error can never turn into accidental data loss.
+    @State private var showDiscardConfirm = false
 
     private var zoneSet: HRZoneSet { HRZones.zones(maxHR: Double(model.profile.hrMax)) }
     private var zone: Int { model.bpm.map { zoneSet.zoneNumber(forBPM: Double($0)) } ?? 0 }
@@ -58,6 +61,7 @@ struct LiveWorkoutView: View {
                 // standard fitness sensor is feeding metrics, refreshing on its own packets without
                 // re-rendering the HR hero / effort gauge above (scroll-stutter isolation).
                 SensorRowIfPresent()
+                saveStatus
                 Spacer(minLength: NoopMetrics.space3)
                 endButton
             }
@@ -92,10 +96,17 @@ struct LiveWorkoutView: View {
             Button("Cancel", role: .cancel) { }
             Button("End workout", role: .destructive) {
                 model.endWorkout()
-                onClose()
             }
         } message: {
             Text("This stops recording and saves what's captured so far. It can't be resumed.")
+        }
+        .confirmationDialog("Discard this workout?",
+                            isPresented: $showDiscardConfirm,
+                            titleVisibility: .visible) {
+            Button("Discard recording", role: .destructive) { model.discardActiveWorkout() }
+            Button("Keep it", role: .cancel) { }
+        } message: {
+            Text("Only discard removes the retained recovery copy. Retry keeps the workout intact.")
         }
     }
 
@@ -116,7 +127,7 @@ struct LiveWorkoutView: View {
                 isActive: true
             )
             VStack(alignment: .leading, spacing: 2) {
-                Text("RECORDING WORKOUT")
+                Text(model.activeWorkout?.endedAt == nil ? "RECORDING WORKOUT" : "WORKOUT KEPT")
                     .font(StrandFont.overline).tracking(StrandFont.overlineTracking)
                     .foregroundStyle(StrandPalette.metricRose)
                 Text(sport)
@@ -140,7 +151,7 @@ struct LiveWorkoutView: View {
     private func elapsedClock(font: Font) -> some View {
         if let start = model.activeWorkout?.start {
             TimelineView(.periodic(from: .now, by: 1)) { _ in
-                Text(Self.elapsed(since: start))
+                Text(Self.elapsed(since: start, until: model.activeWorkout?.endedAt))
                     .font(font)
                     .monospacedDigit()
                     .foregroundStyle(StrandPalette.textPrimary)
@@ -259,15 +270,58 @@ struct LiveWorkoutView: View {
     }
 
     private var endButton: some View {
-        NoopButton("End workout", systemImage: "stop.fill", kind: .destructive, fullWidth: true) {
-            showEndConfirm = true
+        Group {
+            if model.workoutSaveInProgress {
+                NoopButton("Saving workout…", systemImage: "arrow.triangle.2.circlepath",
+                           kind: .secondary, fullWidth: true) { }
+                    .disabled(true)
+            } else if model.activeWorkout?.endedAt != nil {
+                NoopButton("Retry save", systemImage: "arrow.clockwise",
+                           kind: .primary, fullWidth: true) {
+                    model.endWorkout()
+                }
+            } else {
+                NoopButton("End workout", systemImage: "stop.fill", kind: .destructive, fullWidth: true) {
+                    showEndConfirm = true
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var saveStatus: some View {
+        if model.workoutSaveInProgress {
+            NoopCard(padding: 16, tint: StrandPalette.effortColor) {
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text("Saving this workout on your iPhone…")
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                }
+            }
+        } else if let message = model.workoutSaveError {
+            NoopCard(padding: 16, tint: StrandPalette.metricRose) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("WORKOUT KEPT")
+                        .font(StrandFont.overline)
+                        .tracking(StrandFont.overlineTracking)
+                        .foregroundStyle(StrandPalette.metricRose)
+                    Text(message)
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    NoopButton("Discard recording", systemImage: "trash",
+                               kind: .destructive, fullWidth: true) {
+                        showDiscardConfirm = true
+                    }
+                }
+            }
         }
     }
 
     // MARK: - Helpers
 
-    private static func elapsed(since start: Date) -> String {
-        let s = max(0, Int(Date().timeIntervalSince(start)))
+    private static func elapsed(since start: Date, until end: Date? = nil) -> String {
+        let s = max(0, Int((end ?? Date()).timeIntervalSince(start)))
         return String(format: "%d:%02d", s / 60, s % 60)
     }
 

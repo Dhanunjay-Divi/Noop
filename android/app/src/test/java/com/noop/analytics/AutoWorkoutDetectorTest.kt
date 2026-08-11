@@ -11,8 +11,8 @@ import org.junit.Test
  * StrandAnalytics/AutoWorkoutDetectorTests.swift case-for-case so the two platforms stay
  * byte-parity on the detection logic.
  *
- * Cases: elevated span detected; brief dip tolerated; short/low spans rejected; near windows
- * merged; window overlapping a saved workout excluded.
+ * Cases: elevated span detected; brief dip tolerated; short/low spans rejected; only short-gap
+ * windows merged; window overlapping a saved workout excluded.
  */
 class AutoWorkoutDetectorTest {
 
@@ -73,7 +73,7 @@ class AutoWorkoutDetectorTest {
     }
 
     @Test fun nearWindowsAreMerged() {
-        // Two 16 min bouts at 120 separated by a 3 min true rest at 65 (< 60 min merge gap, but the rest
+        // Two 16 min bouts at 120 separated by a 3 min true rest at 65 (< 5 min merge gap, but the rest
         // is > 90 s so it CLOSES each span). The two closed spans are then MERGED into one (gap < 5 min).
         val rest = 60
         val start = 5_000_000L
@@ -88,7 +88,7 @@ class AutoWorkoutDetectorTest {
     }
 
     @Test fun farWindowsStaySeparate() {
-        // Two 16 min bouts at 120 separated by a 70 min rest (>= 60 min merge gap) → two workouts.
+        // Two 16 min bouts at 120 separated by a 70 min rest (> 5 min merge gap) → two workouts.
         val rest = 60
         val start = 6_000_000L
         val a = block(start, 16 * 60, 120)
@@ -99,7 +99,7 @@ class AutoWorkoutDetectorTest {
         assertEquals(2, out.size)
     }
 
-    @Test fun fragmentsExactlySixtyMinutesApartAreMerged() {
+    @Test fun separateWorkoutsAnHourApartAreNotMerged() {
         val start = 6_500_000L
         val first = block(start, 20 * 60, 120)
         // First end is start+1199; second starts exactly 3600 seconds after that endpoint.
@@ -108,7 +108,7 @@ class AutoWorkoutDetectorTest {
         val second = block(secondStart, 20 * 60, 120)
         val hr = block(start - 300, 300, 65) + first + rest + second +
             block(secondStart + 20 * 60, 300, 65)
-        assertEquals(1, AutoWorkoutDetector.detect(hr, restingHR = 60).size)
+        assertEquals(2, AutoWorkoutDetector.detect(hr, restingHR = 60).size)
     }
 
     @Test fun windowOverlappingSavedWorkoutIsExcluded() {
@@ -174,9 +174,9 @@ class AutoWorkoutDetectorTest {
     }
 
 
-    @Test fun thresholdAndFragmentMergeAreWhoop2026Aligned() {
+    @Test fun thresholdAndConservativeFragmentMergeContract() {
         assertEquals(10.0, AutoWorkoutDetector.minSustainedMin, 0.0)
-        assertEquals(60L * 60L, AutoWorkoutDetector.mergeGapS)
+        assertEquals(5L * 60L, AutoWorkoutDetector.mergeGapS)
         val start = 12_000_000L
         val nineMinutes = block(start, 9 * 60, 120) + block(start + 9 * 60, 300, 65)
         assertTrue(AutoWorkoutDetector.detect(nineMinutes, restingHR = 60).isEmpty())

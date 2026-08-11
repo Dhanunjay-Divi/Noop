@@ -377,7 +377,7 @@ private func previewEnv(
     let live = model.live
     live.connected = connected
     live.bonded = bonded
-    live.heartRate = hr
+    if let hr { live.setHeartRate(hr) }
     live.batteryPct = battery
     return (repo, live, model)
 }

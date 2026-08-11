@@ -7,8 +7,8 @@ import org.junit.Test
 
 class AutoWorkoutSuggestionPolicyTest {
     @Test
-    fun modeMigration_preservesLegacyChoiceAndDefaultsFreshInstallToAutoSave() {
-        assertEquals(AutoWorkoutMode.AUTO_SAVE, NoopPrefs.resolveAutoWorkoutMode(null, null))
+    fun modeMigration_preservesLegacyChoiceAndDefaultsFreshInstallToAsk() {
+        assertEquals(AutoWorkoutMode.ASK, NoopPrefs.resolveAutoWorkoutMode(null, null))
         assertEquals(AutoWorkoutMode.ASK, NoopPrefs.resolveAutoWorkoutMode(null, true))
         assertEquals(AutoWorkoutMode.OFF, NoopPrefs.resolveAutoWorkoutMode(null, false))
         assertEquals(AutoWorkoutMode.OFF, NoopPrefs.resolveAutoWorkoutMode("off", true))

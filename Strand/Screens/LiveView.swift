@@ -53,12 +53,14 @@ struct LiveView: View {
 
     private var activeConnection: Bool { live.connected && live.bonded }
 
-    /// A non-WHOOP live source (the Oura ring) that is connected and actively streaming live HR. It
-    /// authenticates and streams but never reaches a WHOOP encrypted bond, so `bonded` stays false and
-    /// `activeConnection` never trips — which left the console reading "stream not yet trusted" for a
-    /// perfectly good ring stream. The status copy below treats this as a trusted live stream; the
-    /// bond-only feature gates (buzz, alarm, HRV snapshot) keep keying off `activeConnection`. (#69 twin.)
+    /// Oura authenticates and streams but never reaches a WHOOP encrypted bond.
     private var ringStreaming: Bool { live.connected && live.streamingLiveHR }
+    /// Standard HR, FTMS, and Huami transports do not expose Oura's streaming flag. Their first accepted
+    /// packet is the honest proof of a live stream; `connected` prevents cached HR from surviving a drop.
+    private var genericHRStreaming: Bool { live.connected && !live.bonded && live.heartRate != nil }
+    /// Any source that can honestly drive foreground live HR and manual workout capture. WHOOP-only
+    /// commands remain gated by `activeConnection` so a generic strap never exposes unsupported controls.
+    private var liveHRConnection: Bool { activeConnection || ringStreaming || genericHRStreaming }
 
     /// The display name of the active device from the registry ("WHOOP", a strap's nickname, …) — what
     /// the user is connected to, or would connect to. Falls back to "WHOOP" before the registry opens or
@@ -221,7 +223,8 @@ struct LiveView: View {
                            fullWidth: true) {
                     liveTrackingOptedIn ? stopLiveTracking() : startLiveTracking()
                 }
-                .disabled(!activeConnection)
+                // A disconnected in-progress lease can always be stopped; only Start needs a live source.
+                .disabled(!liveHRConnection && !liveTrackingOptedIn)
                 .help(liveTrackingOptedIn
                       ? "Stop the high-rate foreground stream. Connection and history sync continue."
                       : "Start high-rate tracking for this foreground Live session.")
@@ -396,7 +399,7 @@ struct LiveView: View {
             Text("Ready for a marked effort.")
                 .font(StrandFont.headline)
                 .foregroundStyle(StrandPalette.textPrimary)
-            Text(activeConnection
+            Text(liveHRConnection
                  ? "Start a workout when the stream matters. NOOP records the interval, HR, peak, average and effort from the same live feed."
                  : "Connect the strap first, then mark a workout from the live stream.")
                 .font(StrandFont.subhead)
@@ -412,7 +415,7 @@ struct LiveView: View {
             NoopButton("Start workout", systemImage: "figure.run", kind: .primary) {
                 showStartSport = true
             }
-            .disabled(!activeConnection)
+            .disabled(!liveHRConnection)
             .help("Track a workout manually. Records heart rate and effort until you end it.")
 
             NoopButton("Refresh", systemImage: "arrow.clockwise", kind: .secondary) {
@@ -438,28 +441,37 @@ struct LiveView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
                     Circle().fill(StrandPalette.metricRose).frame(width: 8, height: 8)
-                    Text("RECORDING WORKOUT").font(StrandFont.overline)
+                    Text(w.endedAt == nil ? "RECORDING WORKOUT" : "WORKOUT KEPT").font(StrandFont.overline)
                         .tracking(StrandFont.overlineTracking).foregroundStyle(StrandPalette.metricRose)
                     Spacer()
                     // Re-render once a second so the elapsed clock ticks without a manual Timer.
                     TimelineView(.periodic(from: .now, by: 1)) { _ in
-                        Text(Self.elapsed(since: w.start)).font(StrandFont.number(17)).monospacedDigit()
+                        Text(Self.elapsed(since: w.start, until: w.endedAt))
+                            .font(StrandFont.number(17)).monospacedDigit()
                             .foregroundStyle(StrandPalette.textPrimary)
                     }
                 }
                 // Live HR / avg / peak / effort — the leaf owns LiveState + the active workout so the
                 // 1 Hz stat refresh re-renders only these tiles, plus a liquid effort tube under them.
                 ActiveWorkoutLive(workout: w, effortScale: effortScale)
+                if let error = model.workoutSaveError {
+                    Text(error)
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.metricRose)
+                }
                 HStack(spacing: NoopMetrics.rowSpacing) {
                     // Re-open the full live workout screen (#238) after it's been dismissed.
                     NoopButton("Open live view", systemImage: "rectangle.expand.vertical",
                                kind: .secondary, fullWidth: true) {
                         showLiveWorkout = true
                     }
-                    NoopButton("End workout", systemImage: "stop.circle.fill",
-                               kind: .destructive, fullWidth: true) {
+                    NoopButton(model.workoutSaveInProgress ? "Saving…"
+                               : (w.endedAt == nil ? "End workout" : "Retry save"),
+                               systemImage: w.endedAt == nil ? "stop.circle.fill" : "arrow.clockwise",
+                               kind: w.endedAt == nil ? .destructive : .primary, fullWidth: true) {
                         model.endWorkout()
                     }
+                    .disabled(model.workoutSaveInProgress)
                 }
             }
         }
@@ -478,8 +490,8 @@ struct LiveView: View {
         .padding(.horizontal, 4)
     }
 
-    private static func elapsed(since start: Date) -> String {
-        let s = max(0, Int(Date().timeIntervalSince(start)))
+    private static func elapsed(since start: Date, until end: Date? = nil) -> String {
+        let s = max(0, Int((end ?? Date()).timeIntervalSince(start)))
         return String(format: "%d:%02d", s / 60, s % 60)
     }
 
@@ -915,7 +927,7 @@ struct LiveView: View {
     }
 
     private func startLiveTracking() {
-        guard activeConnection, !liveTrackingOptedIn else { return }
+        guard liveHRConnection, !liveTrackingOptedIn else { return }
         liveTrackingOptedIn = true
         model.startRealtimeHR()
     }
