@@ -1,6 +1,270 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%lld out of 100": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "%lld von 100" } },
+        "es": { "stringUnit": { "state": "translated", "value": "%lld de 100" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "%lld sur 100" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "%lld em 100" } }
+      }
+    },
+    "Capacity looks strong": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Deine Kapazität wirkt stark" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Tu capacidad parece alta" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Votre capacité semble élevée" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "A tua capacidade parece forte" } }
+      }
+    },
+    "Charge, Effort, Rest, sleep, heart signals, and device status in one honest glance.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Ladung, Anstrengung, Ruhe, Schlaf, Herzsignale und Gerätestatus auf einen Blick." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Carga, Esfuerzo, Descanso, sueño, señales cardíacas y estado del dispositivo de un vistazo." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Charge, Effort, Repos, sommeil, signaux cardiaques et état de l’appareil en un coup d’œil." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Carga, Esforço, Descanso, sono, sinais cardíacos e estado do dispositivo num só olhar." } }
+      }
+    },
+    "Daily Signal": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Tagessignal" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Señal diaria" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Signal quotidien" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Sinal diário" } }
+      }
+    },
+    "Device battery": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Geräteakku" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Batería del dispositivo" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Batterie de l’appareil" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Bateria do dispositivo" } }
+      }
+    },
+    "HR %@ · HRV %@ · RHR %@": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "HF %@ · HRV %@ · RHR %@" } },
+        "es": { "stringUnit": { "state": "translated", "value": "FC %@ · VFC %@ · FCR %@" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "FC %@ · VFC %@ · FCR %@" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "FC %@ · VFC %@ · FCR %@" } }
+      }
+    },
+    "HRV %@": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "HRV %@" } },
+        "es": { "stringUnit": { "state": "translated", "value": "VFC %@" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "VFC %@" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "VFC %@" } }
+      }
+    },
+    "Keep today balanced": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Halte den Tag ausgewogen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Mantén el día equilibrado" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Gardez une journée équilibrée" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Mantém o dia equilibrado" } }
+      }
+    },
+    "Last heart rate": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Letzte Herzfrequenz" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Última frecuencia cardíaca" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Dernière fréquence cardiaque" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Última frequência cardíaca" } }
+      }
+    },
+    "Last reading": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Letzte Messung" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Última lectura" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Dernière mesure" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Última leitura" } }
+      }
+    },
+    "Live now": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Jetzt live" } },
+        "es": { "stringUnit": { "state": "translated", "value": "En vivo ahora" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "En direct" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Em direto agora" } }
+      }
+    },
+    "Live or last heart rate, HRV, resting heart rate, connection, and wearable battery.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Live- oder letzte Herzfrequenz, HRV, Ruhepuls, Verbindung und Wearable-Akku." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Frecuencia cardíaca en vivo o última, VFC, frecuencia en reposo, conexión y batería del wearable." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Fréquence cardiaque en direct ou dernière mesure, VFC, fréquence au repos, connexion et batterie du wearable." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Frequência cardíaca em direto ou última, VFC, frequência em repouso, ligação e bateria do wearable." } }
+      }
+    },
+    "Local data": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Lokale Daten" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Datos locales" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Données locales" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Dados locais" } }
+      }
+    },
+    "NOOP Daily Signal": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "NOOP Tagessignal" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Señal diaria de NOOP" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Signal quotidien NOOP" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Sinal diário NOOP" } }
+      }
+    },
+    "NOOP Sleep": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "NOOP Schlaf" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Sueño de NOOP" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Sommeil NOOP" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Sono NOOP" } }
+      }
+    },
+    "NOOP Vitals": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "NOOP Vitalwerte" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Constantes de NOOP" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Constantes NOOP" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Sinais vitais NOOP" } }
+      }
+    },
+    "NOOP · Open for your Daily Signal": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "NOOP · Für dein Tagessignal öffnen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "NOOP · Abre para ver tu señal diaria" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "NOOP · Ouvrez pour voir votre signal quotidien" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "NOOP · Abre para ver o teu sinal diário" } }
+      }
+    },
+    "No device": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Kein Gerät" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Sin dispositivo" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Aucun appareil" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Sem dispositivo" } }
+      }
+    },
+    "Open NOOP": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "NOOP öffnen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Abrir NOOP" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Ouvrir NOOP" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Abrir o NOOP" } }
+      }
+    },
+    "Open NOOP for context, trends, and confidence.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Öffne NOOP für Kontext, Trends und Einordnung." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Abre NOOP para ver contexto, tendencias y confianza." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Ouvrez NOOP pour le contexte, les tendances et le niveau de confiance." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Abre o NOOP para veres contexto, tendências e confiança." } }
+      }
+    },
+    "Prioritize recovery": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Erholung priorisieren" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Prioriza la recuperación" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Priorisez la récupération" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Dá prioridade à recuperação" } }
+      }
+    },
+    "RHR %@": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "RHR %@" } },
+        "es": { "stringUnit": { "state": "translated", "value": "FCR %@" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "FCR %@" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "FCR %@" } }
+      }
+    },
+    "Rest %@": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Ruhe %@" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Descanso %@" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Repos %@" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Descanso %@" } }
+      }
+    },
+    "Rest %@ · %@": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Ruhe %@ · %@" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Descanso %@ · %@" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Repos %@ · %@" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Descanso %@ · %@" } }
+      }
+    },
+    "Rest score, sleep duration, HRV, and resting heart rate from your latest sleep.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Ruhewert, Schlafdauer, HRV und Ruhepuls deines letzten Schlafs." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Puntuación de descanso, duración del sueño, VFC y frecuencia en reposo de tu último sueño." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Score de repos, durée du sommeil, VFC et fréquence au repos de votre dernier sommeil." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Pontuação de descanso, duração do sono, VFC e frequência em repouso do teu último sono." } }
+      }
+    },
+    "Scores · %@": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Werte · %@" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Puntuaciones · %@" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Scores · %@" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Pontuações · %@" } }
+      }
+    },
+    "Sleep %@ · HRV %@": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Schlaf %@ · HRV %@" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Sueño %@ · VFC %@" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Sommeil %@ · VFC %@" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Sono %@ · VFC %@" } }
+      }
+    },
+    "Sleep duration": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Schlafdauer" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Duración del sueño" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Durée du sommeil" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Duração do sono" } }
+      }
+    },
+    "Unavailable": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Nicht verfügbar" } },
+        "es": { "stringUnit": { "state": "translated", "value": "No disponible" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Indisponible" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Indisponível" } }
+      }
+    },
+    "Updated now": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Gerade aktualisiert" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Actualizado ahora" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Mis à jour" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Atualizado agora" } }
+      }
+    },
+    "Vitals": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Vitalwerte" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Constantes" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Constantes" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Sinais vitais" } }
+      }
+    },
+    "Waiting for daily data": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Warten auf Tagesdaten" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Esperando datos diarios" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "En attente des données du jour" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "A aguardar dados diários" } }
+      }
+    },
+    "Wear your device consistently to unlock scores.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Trage dein Gerät regelmäßig, um Werte zu erhalten." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Usa el dispositivo de forma constante para obtener puntuaciones." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Portez régulièrement votre appareil pour obtenir vos scores." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Usa o dispositivo de forma consistente para obter pontuações." } }
+      }
+    },
     "Add body composition": {
       "localizations": {
         "de": { "stringUnit": { "state": "translated", "value": "Körperzusammensetzung hinzufügen" } },
