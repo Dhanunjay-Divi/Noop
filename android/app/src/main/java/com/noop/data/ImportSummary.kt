@@ -16,12 +16,14 @@ data class ImportSummary(
     val lastDay: String? = null,
     /** One-line human summary for a Toast / status line. */
     val message: String,
+    /** Distinguishes a valid zero-row import from a read/save failure. */
+    val succeeded: Boolean = true,
 ) {
     val totalRows: Int get() = counts.values.sum()
 
     companion object {
-        /** A failed/empty import carrying a reason. */
+        /** A failed import carrying a reason. */
         fun failure(source: String, reason: String) =
-            ImportSummary(source = source, counts = emptyMap(), message = reason)
+            ImportSummary(source = source, counts = emptyMap(), message = reason, succeeded = false)
     }
 }

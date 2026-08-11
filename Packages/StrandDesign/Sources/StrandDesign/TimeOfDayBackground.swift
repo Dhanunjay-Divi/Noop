@@ -52,6 +52,7 @@ public struct TimeOfDayBackground: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject private var motion = NoopMotionState.shared
 
     public init(dayPart: DayPart, animated: Bool = true) {
         self.dayPart = dayPart
@@ -59,7 +60,7 @@ public struct TimeOfDayBackground: View {
     }
 
     /// Whether drifting elements should actually move (caller opted in AND Reduce Motion is off).
-    private var drift: Bool { animated && !reduceMotion }
+    private var drift: Bool { animated && !motion.poseStill(reduceMotion) }
 
     public var body: some View {
         GeometryReader { geo in

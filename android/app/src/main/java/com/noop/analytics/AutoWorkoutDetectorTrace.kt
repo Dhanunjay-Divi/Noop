@@ -37,19 +37,24 @@ object AutoWorkoutDetectorTrace {
         val results = AutoWorkoutDetector.detect(hr, restingHR, gravity, savedWorkouts)
 
         val lines = ArrayList<String>()
-        val floor = (restingHR ?: AutoWorkoutDetector.defaultRestingHR) + AutoWorkoutDetector.elevatedMarginBPM
+        val effectiveResting = AutoWorkoutDetector.effectiveRestingBPM(restingHR, hr)
+        val floor = effectiveResting + AutoWorkoutDetector.elevatedMarginBPM
         val hasMotion = gravity.isNotEmpty()
+        val restingLabel = restingHR?.toString() ?: "observedLowerDecile($effectiveResting)"
 
         lines.add(
             "autoDetect path=$path hrSamples=${hr.size} " +
-                "restingBpm=${restingHR?.toString() ?: "default(${AutoWorkoutDetector.defaultRestingHR})"} " +
+                "restingBpm=$restingLabel " +
                 "elevatedFloor=${floor}bpm motion=${if (hasMotion) "supplied" else "hrOnly"} " +
                 "savedSpans=${savedWorkouts.size}",
         )
         lines.add(
             "autoDetect thresholds elevatedMargin=${AutoWorkoutDetector.elevatedMarginBPM}bpm " +
                 "minSustainedMin=${AutoWorkoutDetector.minSustainedMin} maxDipS=${AutoWorkoutDetector.maxDipS} " +
-                "mergeGapS=${AutoWorkoutDetector.mergeGapS} motionConfirmMean=${AutoWorkoutDetector.motionConfirmMean}",
+                "finalizationQuietS=>${AutoWorkoutDetector.maxDipS} " +
+                "mergeGapS=${AutoWorkoutDetector.mergeGapS} motionConfirmMean=${AutoWorkoutDetector.motionConfirmMean} " +
+                "maxHrGapS=${AutoWorkoutDetector.maxHRSampleGapS} " +
+                "maxSecondsPerHrSample=${AutoWorkoutDetector.maxSecondsPerHRSample}",
         )
 
         // Rebuild the SAME merged windows the detector forms (steps 1-4), to name each verdict (steps 5-6).
@@ -79,12 +84,14 @@ object AutoWorkoutDetectorTrace {
                 if ((sample.ts - d) > AutoWorkoutDetector.maxDipS) closeSpan()
             }
         }
-        closeSpan()
+        // Match detect(...): an open EOF span is still in progress, not a finalized candidate.
 
         if (spans.isEmpty()) {
+            val reason = if (spanStart == null) "noSustainedSpan" else "awaitingQuietTail"
             lines.add(
-                "autoDetect why=noSustainedSpan " +
-                    "(no contiguous run held >=${AutoWorkoutDetector.minSustainedMin}min above ${floor}bpm)",
+                "autoDetect why=$reason " +
+                    "(requires >=${AutoWorkoutDetector.minSustainedMin}min above ${floor}bpm " +
+                    "then >${AutoWorkoutDetector.maxDipS}s below it)",
             )
             lines.add("autoDetect result windows=0")
             return results to lines
@@ -95,7 +102,7 @@ object AutoWorkoutDetectorTrace {
         var curEnd = spans[0].second
         for (k in 1 until spans.size) {
             val next = spans[k]
-            if ((next.first - curEnd) < AutoWorkoutDetector.mergeGapS) {
+            if ((next.first - curEnd) <= AutoWorkoutDetector.mergeGapS) {
                 curEnd = maxOf(curEnd, next.second)
             } else {
                 merged.add(curStart to curEnd)
@@ -114,15 +121,23 @@ object AutoWorkoutDetectorTrace {
                 lines.add("autoDetect window durMin=$durMin verdict=dropped why=overlapsSavedWorkout")
                 continue
             }
+            val window = seg.filter { it.ts in start..end }
+            if (!AutoWorkoutDetector.hasSufficientHRCoverage(window, start, end)) {
+                lines.add("autoDetect window durMin=$durMin verdict=dropped why=insufficientHrCoverage")
+                continue
+            }
             if (motion.isNotEmpty()) {
-                val inWin = motion.entries.filter { it.key in start..end }.map { it.value }
-                val meanMotion = if (inWin.isEmpty()) 0.0 else inWin.sum() / inWin.size.toDouble()
-                if (meanMotion < AutoWorkoutDetector.motionConfirmMean) {
-                    lines.add(
-                        "autoDetect window durMin=$durMin verdict=dropped why=motionNotConfirmed " +
-                            "(mean=${Math.round(meanMotion * 1000.0) / 1000.0} < ${AutoWorkoutDetector.motionConfirmMean})",
-                    )
-                    continue
+                when (val verdict = AutoWorkoutDetector.motionConfirmation(motion, start, end)) {
+                    is AutoWorkoutDetector.MotionConfirmation.Rejected -> {
+                        lines.add(
+                            "autoDetect window durMin=$durMin verdict=dropped why=motionNotConfirmed " +
+                                "(mean=${Math.round(verdict.mean * 1000.0) / 1000.0} < ${AutoWorkoutDetector.motionConfirmMean})",
+                        )
+                        continue
+                    }
+                    AutoWorkoutDetector.MotionConfirmation.Unavailable ->
+                        lines.add("autoDetect window durMin=$durMin motion=unavailable (sparse; HR-only fallback)")
+                    is AutoWorkoutDetector.MotionConfirmation.Confirmed -> Unit
                 }
             }
             lines.add("autoDetect window durMin=$durMin verdict=offered")

@@ -166,6 +166,10 @@ public enum WorkoutTypeClassifier {
     /// The winner must beat the runner-up by at least this much (both 0...1 scores) or the call is
     /// too close and reports `.other` instead of an arbitrary tie-break.
     public static let minMargin: Double = 0.05
+    /// Product surfaces may show a type hint only above this floor AND when decoded activity-class
+    /// ticks cover the window. This classifier is synthetic-fixture validated, so absent gait/posture
+    /// evidence must remain the generic "Workout" rather than becoming a confident-looking guess.
+    public static let minAdvisoryConfidence: Double = 0.35
 
     // MARK: Public API
 

@@ -1,5 +1,97 @@
 import SwiftUI
 
+// MARK: - Obsidian Flow — the product background
+
+/// NOOP's restrained dimensional canvas.
+///
+/// The bundled image is an original satin-obsidian render with ample negative
+/// space. It is intentionally static: perceived depth comes from grazing light and
+/// material, not from a constantly moving dashboard. Light mode reuses the same
+/// geometry as an extremely faint pearl relief so both appearances retain one
+/// identity. The base token is always painted first, so a missing asset degrades to
+/// a perfectly usable monochrome screen.
+public struct ObsidianFlowBackground: View {
+    public var compact: Bool
+    public var intensity: Double
+
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    public init(compact: Bool = false, intensity: Double = 1) {
+        self.compact = compact
+        self.intensity = min(max(intensity, 0), 1)
+    }
+
+    public var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                StrandPalette.surfaceBase
+
+                if scheme == .dark {
+                    flowImage(size: geo.size)
+                        .saturation(0.42)
+                        .contrast(1.05)
+                        .opacity((contrast == .increased ? 0.52 : 0.72) * intensity)
+
+                    // Keep the centre quiet for white text and let the generated
+                    // material dissolve into the canonical canvas near the bottom.
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black.opacity(0.04), location: 0),
+                            .init(color: .clear, location: 0.30),
+                            .init(color: StrandPalette.surfaceBase.opacity(compact ? 0.94 : 0.52),
+                                  location: compact ? 1 : 0.76),
+                            .init(color: StrandPalette.surfaceBase, location: 1),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                } else {
+                    flowImage(size: geo.size)
+                        .colorInvert()
+                        .grayscale(1)
+                        .blendMode(.multiply)
+                        .opacity(0.08 * intensity)
+
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.30),
+                            .clear,
+                            StrandPalette.surfaceBase.opacity(compact ? 0.96 : 0.68),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+
+                // A neutral top-light keeps headers readable without a coloured sky.
+                RadialGradient(
+                    colors: [
+                        StrandPalette.atmosphereLift.opacity(
+                            scheme == .dark ? 0.17 * intensity : 0.10 * intensity
+                        ),
+                        .clear,
+                    ],
+                    center: UnitPoint(x: 0.72, y: 0.02),
+                    startRadius: 0,
+                    endRadius: max(geo.size.width, geo.size.height) * 0.72
+                )
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func flowImage(size: CGSize) -> some View {
+        Image("obsidian-flow")
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+            .frame(width: size.width, height: size.height, alignment: .top)
+            .clipped()
+    }
+}
+
 // MARK: - Scene Hero Background — the day-cycle illustration behind the hero rings
 //
 // A premium atmospheric wash that fades from the top down behind the top hero cards, picked from

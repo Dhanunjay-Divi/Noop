@@ -345,8 +345,32 @@ enum WorkoutSource: Equatable {
         if let k = energyKcal, k < 0 || k > 20_000 { return nil }
         let s = Int(start.timeIntervalSince1970)
         guard s > 0 else { return nil }
-        return WorkoutRow(startTs: s, endTs: s + durationMin * 60, sport: trimmed, source: "manual",
-                          durationS: Double(durationMin) * 60, energyKcal: energyKcal,
+        let durationSeconds = durationMin * 60
+        guard durationSeconds <= Int.max - s else { return nil }
+        let end = s + durationSeconds
+        // A past start is insufficient: reject a duration that makes the workout end in the future.
+        guard end <= Int(now.timeIntervalSince1970) else { return nil }
+        return WorkoutRow(startTs: s, endTs: end, sport: trimmed, source: "manual",
+                          durationS: Double(durationSeconds), energyKcal: energyKcal,
+                          avgHr: avgHr, maxHr: nil, strain: nil, distanceM: nil,
+                          zonesJSON: nil, notes: nil)
+    }
+
+    /// Build the explicit-accept row for a finalized detector suggestion without rounding its measured
+    /// endpoint to whole minutes. The card may display whole minutes, but persistence must retain the exact
+    /// interval used to calculate its HR summary.
+    static func buildDetectedSuggestionRow(startSec: Int, endSec: Int, sport: String,
+                                           avgHr: Int?, source: String = "manual",
+                                           now: Date = Date()) -> WorkoutRow? {
+        let durationSec = endSec - startSec
+        guard startSec > 0, durationSec > 0, durationSec <= 24 * 60 * 60 else { return nil }
+        let trimmed = sport.trimmingCharacters(in: .whitespaces)
+        let trimmedSource = source.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !trimmedSource.isEmpty,
+              Date(timeIntervalSince1970: TimeInterval(startSec)) <= now else { return nil }
+        if let hr = avgHr, !(25...250).contains(hr) { return nil }
+        return WorkoutRow(startTs: startSec, endTs: endSec, sport: trimmed, source: trimmedSource,
+                          durationS: Double(durationSec), energyKcal: nil,
                           avgHr: avgHr, maxHr: nil, strain: nil, distanceM: nil,
                           zonesJSON: nil, notes: nil)
     }

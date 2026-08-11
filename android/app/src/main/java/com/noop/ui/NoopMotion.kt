@@ -1,6 +1,11 @@
 package com.noop.ui
 
 import com.noop.R
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
@@ -25,6 +30,7 @@ import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
 
 // MARK: - NoopMotion — the "Design Reset" motion set (WHOOP design language, 2026-06-22)
@@ -67,6 +73,50 @@ fun rememberReduceMotion(): Boolean {
         scale == 0f
     }
 }
+
+/** Process-wide, live battery-saver state shared by every continuously animated surface. */
+private object PowerSaveMonitor {
+    val isSaving = mutableStateOf(false)
+    private var registered = false
+
+    /** Idempotent; all calls originate from composition on the main thread. */
+    fun ensureStarted(context: Context) {
+        if (registered) return
+        val app = context.applicationContext
+        val power = app.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+        isSaving.value = power.isPowerSaveMode
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(unused: Context?, intent: Intent?) {
+                isSaving.value = power.isPowerSaveMode
+            }
+        }
+        val registeredSuccessfully = runCatching {
+            ContextCompat.registerReceiver(
+                app,
+                receiver,
+                IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED),
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+        }.isSuccess
+        if (registeredSuccessfully) registered = true
+    }
+}
+
+/** Live Android battery-saver signal. Previews stay animated for design inspection. */
+@Composable
+fun rememberPowerSaveMode(): Boolean {
+    if (LocalInspectionMode.current) return false
+    val context = LocalContext.current
+    remember(context) { PowerSaveMonitor.ensureStarted(context) }
+    return PowerSaveMonitor.isSaving.value
+}
+
+/**
+ * Gate for frame loops and infinite transitions: system Remove Animations OR battery saver.
+ * One-shot interaction animations continue to use `rememberReduceMotion()` because they settle.
+ */
+@Composable
+fun rememberPoseStill(): Boolean = rememberReduceMotion() || rememberPowerSaveMode()
 
 // MARK: - NoopMotion springs / tokens
 

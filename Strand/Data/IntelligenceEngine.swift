@@ -231,17 +231,18 @@ final class IntelligenceEngine: ObservableObject {
     /// Age" button so the two can never drift. Profile passed as primitives (no cross-actor object read).
     /// Mirrors the Android `IntelligenceEngine.fitnessAgeRows`.
     static func fitnessAgeRows(
-        gateDays: [DailyMetric], age: Int, sex: String, waistCm: Double, heightCm: Double, weightKg: Double,
-        computedId: String, satKey: String,
+        gateDays: [DailyMetric], age: Int, sex: String, waistCm: Double,
+        computedId: String, satKey: String, ageConfirmed: Bool = true, sexConfirmed: Bool = true,
     ) -> [MetricPoint] {
         let rhrs = gateDays.compactMap { $0.restingHr }.map(Double.init)
         let strains = gateDays.compactMap { $0.strain }.filter { $0 >= 30 }
         let meanStrain = strains.isEmpty ? 0 : strains.reduce(0, +) / Double(strains.count)
         let waist: Double? = waistCm > 0 ? waistCm : nil
         let ready = FitnessAgeEngine.assessReadiness(
-            hasAge: age > 0, hasSex: !sex.isEmpty,
+            hasAge: ageConfirmed && FitnessAgeEngine.supports(age: Double(age)),
+            hasSex: sexConfirmed && FitnessAgeEngine.supports(sex: sex),
             rhrDays: rhrs.count, activityDays: gateDays.compactMap { $0.strain }.count,
-            hasHeightWeight: heightCm > 0 && weightKg > 0, hasWaist: waist != nil)
+            hasWaist: waist != nil)
         guard ready.canCompute,
               let res = FitnessAgeEngine.compute(
                 age: Double(age), sex: sex,
@@ -252,6 +253,31 @@ final class IntelligenceEngine: ObservableObject {
         var rows = [MetricPoint(day: satKey, key: "fitness_age", value: res.fitnessAge)]
         if let v = res.vo2max { rows.append(MetricPoint(day: satKey, key: "vo2max_est", value: v)) }
         return rows
+    }
+
+    /// Latest provenance marker across the same active∪canonical computed-source union every age-metric
+    /// read uses. A shared newest day keeps the active source (the first id), matching Repository's union.
+    private func latestComputedProfileToken(store: WhoopStore, key: String) async -> Double? {
+        var best: MetricPoint?
+        for id in repo.computedReadIds {
+            let rows = (try? await store.metricSeries(
+                deviceId: id, key: key, from: "0000-01-01", to: "9999-12-31")) ?? []
+            guard let row = rows.last else { continue }
+            if best == nil || row.day > best!.day { best = row }
+        }
+        return best?.value
+    }
+
+    /// Purge every computed-union copy, not just the current write id. This matters after a strap is
+    /// removed/re-added: an old canonical row can otherwise win a later union read after the active copy
+    /// is deleted.
+    private func purgeComputedMetricKeys(store: WhoopStore, keys: [String]) async {
+        var ids = repo.computedReadIds
+        let writeId = deviceId + "-noop"
+        if !ids.contains(writeId) { ids.append(writeId) }
+        for id in ids {
+            for key in keys { _ = try? await store.deleteMetricSeries(deviceId: id, key: key) }
+        }
     }
 
     /// Manual "refresh Fitness Age" (the button on the not-ready card): recompute the weekly Fitness Age NOW
@@ -269,12 +295,48 @@ final class IntelligenceEngine: ObservableObject {
         let oldestDay = AnalyticsEngine.dayString(nowLocalMidnight - (maxDays - 1) * 86_400, offsetSec: tzOffset)
         let gate7 = Array((await repo.dailyMetrics(fromDay: oldestDay, toDay: newestDay))
             .sorted { $0.day < $1.day }.suffix(7))
-        let rows = Self.fitnessAgeRows(
+        let storedFitnessToken = await latestComputedProfileToken(
+            store: store, key: AgeMetricProfile.fitnessAgeKey)
+        let storedVO2Token = await latestComputedProfileToken(
+            store: store, key: AgeMetricProfile.vo2maxEstimateKey)
+        if !profile.acceptsFitnessAge(provenance: storedFitnessToken) {
+            await purgeComputedMetricKeys(
+                store: store, keys: ["fitness_age", AgeMetricProfile.fitnessAgeKey])
+        }
+        if !profile.acceptsVO2maxEstimate(provenance: storedVO2Token) {
+            await purgeComputedMetricKeys(
+                store: store, keys: ["vo2max_est", AgeMetricProfile.vo2maxEstimateKey])
+        }
+
+        var rows = Self.fitnessAgeRows(
             gateDays: gate7, age: profile.age, sex: profile.sex, waistCm: profile.waistCm,
-            heightCm: profile.heightCm, weightKg: profile.weightKg, computedId: computedId,
-            satKey: Self.saturdayKey(onOrBefore: newestDay))
+            computedId: computedId,
+            satKey: Self.saturdayKey(onOrBefore: newestDay),
+            ageConfirmed: profile.ageInputConfirmed, sexConfirmed: profile.sexInputConfirmed)
+        if rows.contains(where: { $0.key == "fitness_age" }), let token = profile.fitnessAgeProfileToken {
+            rows.append(MetricPoint(day: Self.saturdayKey(onOrBefore: newestDay),
+                                    key: AgeMetricProfile.fitnessAgeKey, value: token))
+        }
+        if rows.contains(where: { $0.key == "vo2max_est" }), let token = profile.vo2maxProfileToken {
+            rows.append(MetricPoint(day: Self.saturdayKey(onOrBefore: newestDay),
+                                    key: AgeMetricProfile.vo2maxEstimateKey, value: token))
+        } else {
+            // Upsert does not remove an omitted optional row. Clearing/invalidating waist must remove
+            // the previous estimate immediately while leaving a measured `vo2max` import untouched.
+            await purgeComputedMetricKeys(
+                store: store, keys: ["vo2max_est", AgeMetricProfile.vo2maxEstimateKey])
+        }
         if !rows.isEmpty { _ = try? await store.upsertMetricSeries(rows, deviceId: computedId) }
-        return !rows.isEmpty
+        if !profile.fitnessInputsConfirmed
+            || !FitnessAgeEngine.supports(age: Double(profile.age))
+            || !FitnessAgeEngine.supports(sex: profile.sex) {
+            // Never let a score computed from an old/seed profile survive as the current headline.
+            await purgeComputedMetricKeys(store: store, keys: [
+                "fitness_age", "vo2max_est", AgeMetricProfile.fitnessAgeKey,
+                AgeMetricProfile.vo2maxEstimateKey,
+            ])
+        }
+        return rows.contains { $0.key == "fitness_age" }
     }
 
     /// UserDefaults flag guarding the one-shot #313 full-history Effort rescore (below). Set once the
@@ -362,7 +424,8 @@ final class IntelligenceEngine: ObservableObject {
     /// Personal baselines (HRV / resting HR) are folded from the imported history, so even the first
     /// live night can be scored against your norm.
     @discardableResult
-    func analyzeRecent(maxDays: Int = 21, force: Bool = true) async -> ScoreRunReceipt? {
+    func analyzeRecent(maxDays: Int = 21, force: Bool = true,
+                       skipIfUnchanged: Bool = false) async -> ScoreRunReceipt? {
         // #899-A: a concurrent pass already holds the lock. A NON-forced idle tick is safe to drop (the
         // in-flight pass already covers the same window). But a FORCED call is a real update path (a
         // post-backfill rescore after a sync) , dropping it would leave a freshly-synced night unscored
@@ -391,6 +454,16 @@ final class IntelligenceEngine: ObservableObject {
             .map { "\($0.count):\($0.maxTs)" } ?? ""
         if !force, !wmKey.isEmpty,
            UserDefaults.standard.string(forKey: Self.analyzeWatermarkKey) == wmKey {
+            return nil
+        }
+        // #1196/#1146: the post-offload caller may opt into the same fingerprint gate even though it is
+        // otherwise a forced refresh. Empty/duplicate offloads do not change raw HR, so replaying the
+        // whole scoring window is pure churn and can expose a transient sparse/empty window to reactive
+        // readers. Other forced paths (edits, imports, settings and recalibration) keep the default false
+        // because they can legitimately change scores without changing the HR fingerprint.
+        if force, skipIfUnchanged, !wmKey.isEmpty,
+           UserDefaults.standard.string(forKey: Self.analyzeWatermarkKey) == wmKey {
+            diagnosticSink?("re-score: trigger=post-offload newData=no — skipped (nothing changed since last run)", nil)
             return nil
         }
 
@@ -736,7 +809,6 @@ final class IntelligenceEngine: ObservableObject {
                 // its count with rmssd=nil). A SEPARATE analyzer pass over the in-sleep R-R — does NOT touch the
                 // shipped windowed avgHrv. Built here (loop 1) where `rr` is in scope, but EMITTED in the
                 // main-actor replay loop below (diagnosticSink is main-actor isolated), carried on `hrvDiag`.
-                // Byte-identical to the Kotlin line.
                 let sleepRrRows = rr.filter { r in res.cachedSleep.contains { r.ts >= $0.startTs && r.ts < $0.endTs } }
                 let sleepRr = sleepRrRows.map { Double($0.rrMs) }
                 let hrvDiag: String?
@@ -750,13 +822,22 @@ final class IntelligenceEngine: ObservableObject {
                     // R-R) + exact-duplicate beat count, so a "reads ~2x too high" report is self-diagnosing
                     // from the always-on log instead of hand-computing beat density.
                     let ts = sleepRrRows.map { $0.ts }
-                    let cov = String(format: "%.2f", HRVAnalyzer.rrCoverage(tsSec: ts, rrMs: sleepRr))
+                    let covVal = HRVAnalyzer.rrCoverage(tsSec: ts, rrMs: sleepRr)
+                    let cov = String(format: "%.2f", covVal)
                     // #550: collapsedCov previews a same-second R-R de-dup — well below `coverage` ⇒ the
                     // over-count is same-second (a dedup fix would work); still high ⇒ cross-second overlap.
-                    let colCov = String(format: "%.2f", HRVAnalyzer.collapsedCoverage(tsSec: ts, rrMs: sleepRr))
+                    let colCovVal = HRVAnalyzer.collapsedCoverage(tsSec: ts, rrMs: sleepRr)
+                    let colCov = String(format: "%.2f", colCovVal)
                     let dup = HRVAnalyzer.duplicateBeatCount(tsSec: ts, rrMs: sleepRr)
-                    hrvDiag = "hrv diag day=\(res.daily.day) rmssd=\(ms(h.rmssd))ms sdnn=\(ms(h.sdnn))ms "
+                    let verdict = HRVAnalyzer.classifyCoverage(coverage: covVal, collapsed: colCovVal)
+                    let accVal = HRVAnalyzer.beatAccurateFraction(tsSec: ts, rrMs: sleepRr)
+                    let acc = String(format: "%.2f", accVal)
+                    let sdnnField = HRVAnalyzer.beatSpreadIsTrustworthy(verdict)
+                        && HRVAnalyzer.beatValuesAreTrustworthy(beatAccurateFraction: accVal)
+                        ? "\(ms(h.sdnn))ms" : "withheld"
+                    hrvDiag = "hrv diag day=\(res.daily.day) rmssd=\(ms(h.rmssd))ms sdnn=\(sdnnField) "
                         + "meanNN=\(ms(h.meanNN))ms rr=\(h.nInput)/\(h.nClean) rejected=\(rej)% coverage=\(cov) collapsedCov=\(colCov) dupBeats=\(dup)"
+                        + " beatAccurate=\(acc) rrIntegrity=\(verdict.rawValue)"
                 }
                 // ── Steps test mode: 5/MG raw-counter trace ──────────────────────────────────────────────
                 // Only built when the Steps mode is on (the gate was read once before the loop). Recomputes
@@ -886,18 +967,7 @@ final class IntelligenceEngine: ObservableObject {
             resp: respFold.usable ? respFold : nil,
             skinTemp: skinFold.usable ? skinFold : nil)
 
-        // Real (non-detected) workouts in the scored window, used to de-duplicate detected bouts so a
-        // user who BOTH has real sessions AND wears the strap doesn't see the same session twice (the
-        // per-day merge precedence does not cover the workout table). This covers BOTH directions of
-        // the cross-source duplicate (#107): the strap source carries imported WHOOP rows AND manual /
-        // re-labelled rows (both written under `deviceId`), and apple-health carries Health imports ,
-        // a detected bout overlapping ANY of them is skipped below. Port of the Android dedup block.
-        // (`computedId` is bound once above, before the off-actor scan loop.)
         let windowStart = now - maxDays * 86_400 - 30 * 3_600
-        var realWorkouts = (try? await store.workouts(deviceId: deviceId, from: windowStart,
-                                                       to: now, limit: 100_000)) ?? []
-        realWorkouts += (try? await store.workouts(deviceId: "apple-health", from: windowStart,
-                                                    to: now, limit: 100_000)) ?? []
 
         // ── Pass 2: re-score ONLY recovery against the now-seeded baseline (cheap, baseline-dependent);
         // every other field was computed once in pass 1. Recovery stays nil until the HRV baseline is
@@ -905,14 +975,9 @@ final class IntelligenceEngine: ObservableObject {
         var out: [Computed] = []
         var dailies: [DailyMetric] = []
         var cachedSleep: [CachedSleepSession] = []
-        var workoutRows: [WorkoutRow] = []
         // Current-pass comparison evidence. This is populated only inside the raw-night fold below,
         // before Apple/watch/wearable aggregate folds append their own `Computed` rows.
         var freshlyScoredWhoopStrapDays = Set<String>()
-        // #510: backfilled fields for a REAL (non-detected) row a dropped bout collided with, grouped by
-        // the deviceId it must be upserted under (see the collision branch below) — never mixed into
-        // `workoutRows`, which is always written under `computedId`.
-        var backfilledByDevice: [String: [WorkoutRow]] = [:]
         // Rest composite (0–100) per computed night, persisted as the `sleep_performance` metric
         // series so the dashboard's Rest score reflects the new composite, not raw efficiency.
         var restPoints: [MetricPoint] = []
@@ -1055,51 +1120,16 @@ final class IntelligenceEngine: ObservableObject {
                 restPoints.append(MetricPoint(day: daily.day, key: "sleep_performance", value: rest))
             }
             cachedSleep.append(contentsOf: night.cachedSleep)
-            // Persist the detected workouts the pipeline already computes (previously discarded).
-            // Skip any bout overlapping a real imported/manual workout so import+wear users don't
-            // double-count. sport = "detected"; energyKcal is the APPROXIMATE Keytel/BMR total.
-            for s in night.workouts {
-                let durMin = max(0, (s.end - s.start) / 60)
-                let avgBpm = Int(s.avgHR)
-                // The overlap test is bare time overlap (any source), so a detected bout collapses against a
-                // manual session even though their SPORTS differ ("detected" vs the user's sport) , the
-                // #975 "two workouts, one vanished" seam. Find the collider so the trace can name its source.
-                if let hit = realWorkouts.first(where: { s.start < $0.endTs && $0.startTs < s.end }) {
-                    // #510: the detected bout's own avgHR/calories/maxHR/strain come from the SAME
-                    // motion+HR trace the detector used to find this activity's actual boundaries —
-                    // often a tighter match than the colliding row's own [startTs,endTs] (e.g. a manual
-                    // entry typed in afterward, whose guessed boundaries can clip most of the real
-                    // HR-rich period and leave the display-time strap-HR fill's raw window read too
-                    // thin, silently showing no HR/calories). Same natural key (deviceId, startTs,
-                    // sport), so the upsert below updates the existing row in place rather than
-                    // duplicating it.
-                    let backfilled = WorkoutDetector.backfillWorkout(
-                        hit, avgBpm: avgBpm, peakHR: s.peakHR, caloriesKcal: s.caloriesKcal, strain: s.strain)
-                    let didBackfill = backfilled != hit
-                    if didBackfill {
-                        // realWorkouts merges TWO device groups (see above): the strap's own `deviceId`
-                        // (imported WHOOP rows AND manual/re-labelled ones) and "apple-health" — the
-                        // Swift WorkoutRow carries no deviceId of its own, so route by that same split.
-                        let hitDeviceId = hit.source == "apple-health" ? "apple-health" : deviceId
-                        backfilledByDevice[hitDeviceId, default: []].append(backfilled)
-                    }
-                    if workoutsTraceActive {
-                        diagnosticSink?(WorkoutsTrace.detectedBoutLine(
-                            verdict: didBackfill ? "droppedOverlapBackfilled" : "droppedOverlap",
-                            durMin: durMin, avgBpm: avgBpm,
-                            overlapSource: WorkoutSource.sourceLabel(hit)), .workouts)
-                    }
-                    continue
-                }
-                workoutRows.append(WorkoutRow(startTs: s.start, endTs: s.end,
-                                              sport: "detected", source: computedId,
-                                              durationS: s.durationS, energyKcal: s.caloriesKcal,
-                                              avgHr: avgBpm, maxHr: s.peakHR,
-                                              strain: s.strain, distanceM: nil,
-                                              zonesJSON: nil, notes: nil))
-                if workoutsTraceActive {
+            // `AnalyticsEngine` still derives candidate bouts for diagnostics, but this recompute pass
+            // must never mutate workout history from an inference. The one canonical user-facing path is
+            // `Repository.autoDetectCandidate`: it de-duplicates all saved sources and persists only after
+            // an explicit Save tap. This also prevents a detected bout from silently backfilling an
+            // imported/manual row. Legacy computed rows are physically removed below.
+            if workoutsTraceActive {
+                for s in night.workouts {
                     diagnosticSink?(WorkoutsTrace.detectedBoutLine(
-                        verdict: "persisted", durMin: durMin, avgBpm: avgBpm), .workouts)
+                        verdict: "suggestionOnly", durMin: max(0, (s.end - s.start) / 60),
+                        avgBpm: Int(s.avgHR)), .workouts)
                 }
             }
         }
@@ -1213,10 +1243,17 @@ final class IntelligenceEngine: ObservableObject {
         // keys we just upserted, and delete each leftover day individually (from == to == key). This
         // removes #277's UTC/local duplicates WITHOUT the wide delete-then-reinsert dip. No-op in steady
         // state (the new keys cover the window), so it adds nothing once the migration has settled.
-        let freshKeys = Set(dailies.map { $0.day })
-        let existingWindow = (try? await store.dailyMetrics(deviceId: computedId, from: oldestDay, to: newestDay)) ?? []
-        for stale in existingWindow where !freshKeys.contains(stale.day) {
-            _ = try? await store.deleteDailyMetrics(deviceId: computedId, from: stale.day, to: stale.day)
+        // #1196: an empty pass is not evidence that every persisted day became stale. It can happen while
+        // a reconnect/offload is still incomplete or while the active source is momentarily unresolved.
+        // Never turn that transient read into a destructive whole-window eviction.
+        if !dailies.isEmpty {
+            let freshKeys = Set(dailies.map { $0.day })
+            let existingWindow = (try? await store.dailyMetrics(
+                deviceId: computedId, from: oldestDay, to: newestDay)) ?? []
+            for stale in existingWindow where !freshKeys.contains(stale.day) {
+                _ = try? await store.deleteDailyMetrics(
+                    deviceId: computedId, from: stale.day, to: stale.day)
+            }
         }
         if !restPoints.isEmpty { _ = try? await store.upsertMetricSeries(restPoints, deviceId: computedId) }
 
@@ -1225,15 +1262,12 @@ final class IntelligenceEngine: ObservableObject {
         // optional VO₂max when a waist is set) under the same "-noop" source. Idempotent on the Saturday
         // key, so the number refines through the week and finalises on Saturday. Engine = FitnessAgeEngine
         // (StrandAnalytics), fully unit-tested; the body term cancels so the headline needs no body metric.
-        let fa7 = dailies.sorted { $0.day < $1.day }.suffix(7)
-        let faRHRs = fa7.compactMap { $0.restingHr }.map(Double.init)
         // The Fitness Age gate + compute read the PERSISTED/MERGED last-7 days , the SAME history the
         // readiness card + dashboard show , NOT this pass's freshly scored `dailies`. A recompute only
         // re-scores nights whose raw HR still lives in the store, so a nightly wearer whose card reads
         // "7 of 7 nights" could still leave the engine seeing <4 RHR nights on `dailies`, and Fitness Age
-        // never computed (Vitality did , it needs only 3 of ANY input, which is why Body Age showed but
-        // Fitness Age did not). Kept SEPARATE from `fa7` so Vitality (below), which already computes, is
-        // untouched. Gate on the UNION of the pre-rewrite persisted history and THIS pass's fresh scores
+        // never computed. The merged gate below is also reused by the long-window wellness model. Gate on
+        // the UNION of the pre-rewrite persisted history and THIS pass's fresh scores
         // (by day, fresh wins), so an RHR night counts whether it survives in the store, was just scored,
         // or came from an import. The gate + compute live in `fitnessAgeRows`, shared with the manual
         // "refresh Fitness Age" button so the two can never drift.
@@ -1241,33 +1275,85 @@ final class IntelligenceEngine: ObservableObject {
         for d in faPriorDaily { faGateByDay[d.day] = d }
         for d in dailies { faGateByDay[d.day] = d }
         let faGate7 = Array(faGateByDay.values.sorted { $0.day < $1.day }.suffix(7))
-        let faPts = Self.fitnessAgeRows(
+        let storedFitnessToken = await latestComputedProfileToken(
+            store: store, key: AgeMetricProfile.fitnessAgeKey)
+        let storedVO2Token = await latestComputedProfileToken(
+            store: store, key: AgeMetricProfile.vo2maxEstimateKey)
+        if !profile.acceptsFitnessAge(provenance: storedFitnessToken) {
+            await purgeComputedMetricKeys(
+                store: store, keys: ["fitness_age", AgeMetricProfile.fitnessAgeKey])
+        }
+        if !profile.acceptsVO2maxEstimate(provenance: storedVO2Token) {
+            await purgeComputedMetricKeys(
+                store: store, keys: ["vo2max_est", AgeMetricProfile.vo2maxEstimateKey])
+        }
+
+        let faSatKey = IntelligenceEngine.saturdayKey(onOrBefore: newestDay)
+        var faPts = Self.fitnessAgeRows(
             gateDays: faGate7, age: profile.age, sex: profile.sex, waistCm: profile.waistCm,
-            heightCm: profile.heightCm, weightKg: profile.weightKg, computedId: computedId,
-            satKey: IntelligenceEngine.saturdayKey(onOrBefore: newestDay))
+            computedId: computedId,
+            satKey: faSatKey,
+            ageConfirmed: profile.ageInputConfirmed, sexConfirmed: profile.sexInputConfirmed)
+        if faPts.contains(where: { $0.key == "fitness_age" }), let token = profile.fitnessAgeProfileToken {
+            faPts.append(MetricPoint(day: faSatKey, key: AgeMetricProfile.fitnessAgeKey, value: token))
+        }
+        if faPts.contains(where: { $0.key == "vo2max_est" }), let token = profile.vo2maxProfileToken {
+            faPts.append(MetricPoint(day: faSatKey, key: AgeMetricProfile.vo2maxEstimateKey, value: token))
+        } else {
+            await purgeComputedMetricKeys(
+                store: store, keys: ["vo2max_est", AgeMetricProfile.vo2maxEstimateKey])
+        }
         if !faPts.isEmpty { _ = try? await store.upsertMetricSeries(faPts, deviceId: computedId) }
 
-        // ── Vitality / Body Age (Phase 7) , weekly, keyed to the week's Saturday ────────────────────
-        // Roll the last 7 days' wearable signals into the mortality-hazard model and upsert a weekly
-        // Vitality (0–100) + Body Age. VitalityEngine gates on ≥3 inputs, so a sparse week writes nothing.
-        // (VO₂max is omitted here , fitness is already its own Fitness Age headline; Vitality leans on
-        // resting HR, sleep duration + regularity, HRV-vs-age-norm, and steps.)
-        let vNights = fa7.compactMap { $0.totalSleepMin }.map { Double($0) / 60.0 }.filter { $0 > 0 }
-        let vHRVs = fa7.compactMap { $0.avgHrv }
-        let vSteps = fa7.compactMap { $0.steps }.map(Double.init)
+        let fitnessInputsUsable = profile.fitnessInputsConfirmed
+            && FitnessAgeEngine.supports(age: Double(profile.age))
+            && FitnessAgeEngine.supports(sex: profile.sex)
+        if !fitnessInputsUsable {
+            // Fitness Age uses the published binary-sex equation. Purge a stale headline after a
+            // reset/unsupported profile instead of showing an earlier value as if it still applied.
+            // Measured `vo2max` imports remain a separate, untouched series.
+            await purgeComputedMetricKeys(store: store, keys: [
+                "fitness_age", "vo2max_est", AgeMetricProfile.fitnessAgeKey,
+                AgeMetricProfile.vo2maxEstimateKey,
+            ])
+        }
+
+        // Wellness Age does not use sex, but it still must never treat the seeded age-30 editor value
+        // as user-provided. Its own experimental model is defined only over ages 20...80.
+        let wellnessInputsUsable = profile.ageInputConfirmed && (20...80).contains(profile.age)
+        let storedVitalityToken = await latestComputedProfileToken(
+            store: store, key: AgeMetricProfile.vitalityKey)
+        if !wellnessInputsUsable || !profile.acceptsVitality(provenance: storedVitalityToken) {
+            await purgeComputedMetricKeys(
+                store: store, keys: ["vitality", "body_age", AgeMetricProfile.vitalityKey])
+        }
+
+        // ── Vitality / Wellness Age (Phase 7) , weekly, trailing 21 days ───────────────────────────
+        // This is an experimental lifestyle-risk composite, not WHOOP Age or biological age. Require
+        // 14 observed days for each factor before letting that factor enter, and require three independent
+        // domains inside VitalityEngine. Missing values remain unavailable rather than being imputed.
+        let v21 = Array(faGateByDay.values.sorted { $0.day < $1.day }.suffix(21))
+        let vMinCoverage = 14
+        let vRHRs = v21.compactMap { $0.restingHr }.map(Double.init)
+        let vNights = v21.compactMap { $0.totalSleepMin }.map { Double($0) / 60.0 }.filter { $0 > 0 }
+        let vHRVs = v21.compactMap { $0.avgHrv }
+        let vSteps = v21.compactMap { $0.steps }.map(Double.init)
         let vInputs = VitalityEngine.Inputs(
             chronoAge: Double(profile.age),
-            restingHR: faRHRs.isEmpty ? nil : IntelligenceEngine.medianOf(faRHRs),
-            sleepHours: vNights.isEmpty ? nil : vNights.reduce(0, +) / Double(vNights.count),
-            sleepConsistency: VitalityEngine.sleepConsistency(nightlyHours: vNights),
-            rmssd: vHRVs.isEmpty ? nil : IntelligenceEngine.medianOf(vHRVs),
+            restingHR: vRHRs.count >= vMinCoverage ? IntelligenceEngine.medianOf(vRHRs) : nil,
+            sleepHours: vNights.count >= vMinCoverage ? vNights.reduce(0, +) / Double(vNights.count) : nil,
+            sleepConsistency: vNights.count >= vMinCoverage
+                ? VitalityEngine.sleepConsistency(nightlyHours: vNights) : nil,
+            rmssd: vHRVs.count >= vMinCoverage ? IntelligenceEngine.medianOf(vHRVs) : nil,
             rmssdNorm: VitalityEngine.rmssdNorm(forAge: Double(profile.age)),
-            steps: vSteps.isEmpty ? nil : vSteps.reduce(0, +) / Double(vSteps.count))
-        if let vRes = VitalityEngine.compute(vInputs) {
+            steps: vSteps.count >= vMinCoverage ? vSteps.reduce(0, +) / Double(vSteps.count) : nil)
+        if wellnessInputsUsable, let vRes = VitalityEngine.compute(vInputs) {
             let satKey = IntelligenceEngine.saturdayKey(onOrBefore: newestDay)
             _ = try? await store.upsertMetricSeries([
                 MetricPoint(day: satKey, key: "vitality", value: vRes.vitality),
                 MetricPoint(day: satKey, key: "body_age", value: vRes.bodyAge),
+                MetricPoint(day: satKey, key: AgeMetricProfile.vitalityKey,
+                            value: profile.vitalityProfileToken),
             ], deviceId: computedId)
         }
 
@@ -1470,18 +1556,11 @@ final class IntelligenceEngine: ObservableObject {
         } else {
             healRearmedThisCycle = false
         }
-        // Make re-detection idempotent across runs: clear the prior computed detected workouts in the
-        // scored window (a bout's startTs can drift as more HR arrives, which would otherwise orphan
-        // stale rows under the (deviceId,startTs,sport) key), then re-insert.
+        // Migration/repair: older builds silently persisted inferred rows despite the UI's suggestion-only
+        // contract. Remove those computed rows and do not re-insert them. Confirmed manual/imported workouts
+        // live under different sources and are untouched.
         _ = try? await store.deleteWorkouts(deviceId: computedId, sport: "detected",
                                             from: windowStart, to: now)
-        if !workoutRows.isEmpty { _ = try? await store.upsertWorkouts(workoutRows, deviceId: computedId) }
-        // #510: write back any real (manual/imported) rows a dropped detected bout backfilled, one
-        // upsert per owning deviceId (see the collision branch above for why these can't share the
-        // `computedId` batch above).
-        for (devId, rows) in backfilledByDevice {
-            _ = try? await store.upsertWorkouts(rows, deviceId: devId)
-        }
 
         // #137: a manually-started workout is scored from sparse live HR at save time , near-zero
         // calories/strain on a 5/MG. Now that offloaded HR may cover the window, re-score the

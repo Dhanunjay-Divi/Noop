@@ -491,9 +491,9 @@ internal enum class InsightsOutcome(
     val pick: (DailyMetric) -> Double?,
     val format: (Double) -> String,
 ) {
-    Recovery("Charge", "Charge", "recovery", true, DomainTheme.Charge, { it.recovery }, { "${it.roundToInt()}%" }),
+    Recovery("Recovery", "Recovery", "recovery", true, DomainTheme.Charge, { it.recovery }, { "${it.roundToInt()}%" }),
     Hrv("HRV", "HRV", "hrv", true, DomainTheme.Rest, { it.avgHrv }, { "${it.roundToInt()} ms" }),
-    Sleep("Rest", "Rest", "sleep_performance", true, DomainTheme.Rest, { it.efficiency }, { "${it.roundToInt()}%" }),
+    Sleep("Sleep Score", "Sleep Score", "sleep_performance", true, DomainTheme.Rest, { it.efficiency }, { "${it.roundToInt()}%" }),
     Rhr("RHR", "Resting HR", "rhr", false, DomainTheme.Stress, { it.restingHr?.toDouble() }, { "${it.roundToInt()} bpm" }),
 }
 
@@ -505,7 +505,12 @@ internal data class DoseCardData(
     val latestOutcome: Double?,
 ) {
     val id: String get() = behavior.raw
-    val outcomeName: String get() = response.outcome
+    val outcomeName: String
+        get() = when (response.outcome) {
+            "Charge" -> "Recovery"
+            "Rest" -> "Sleep Score"
+            else -> response.outcome
+        }
     val title: String get() = if (behavior == DosedBehavior.ALCOHOL) "Alcohol" else "Caffeine"
     val icon get() = if (behavior == DosedBehavior.ALCOHOL) Icons.Filled.LocalBar else Icons.Filled.Coffee
     val unitNoun: String get() = if (behavior == DosedBehavior.ALCOHOL) "drink" else "later step"
@@ -568,9 +573,9 @@ internal class InsightsHubViewModel {
         }
 
         fun outcomeKeyFor(engineName: String): String = when (engineName) {
-            "Charge" -> "recovery"
+            "Charge", "Recovery" -> "recovery"
             "HRV" -> "hrv"
-            "Rest" -> "sleep_performance"
+            "Rest", "Sleep Score" -> "sleep_performance"
             "Resting HR" -> "rhr"
             else -> "recovery"
         }

@@ -150,7 +150,7 @@ function renderChart(days) {
     row.metrics?.whoop_strain != null
   ).slice(-30);
   if (!values.length) {
-    chart.append(textElement("p", "empty", "No Charge/Recovery or Effort/WHOOP Strain values uploaded for this namespace."));
+    chart.append(textElement("p", "empty", "No Recovery or Effort/WHOOP Strain values uploaded for this namespace."));
     return;
   }
   for (const row of values) {
@@ -160,7 +160,7 @@ function renderChart(days) {
     const load = row.metrics.whoop_strain ?? row.metrics.effort;
     const loadName = row.metrics.whoop_strain != null ? "WHOOP Strain" : "Noop Effort";
     const loadMax = row.metrics.whoop_strain != null ? 21 : 100;
-    column.title = `${row.day}: Charge/Recovery ${recovery ?? "—"}, ${loadName} ${load ?? "—"}`;
+    column.title = `${row.day}: Recovery ${recovery ?? "—"}, ${loadName} ${load ?? "—"}`;
     if (recovery != null) {
       const bar = document.createElement("i");
       bar.className = "bar recovery";

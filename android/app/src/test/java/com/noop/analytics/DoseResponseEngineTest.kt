@@ -31,7 +31,9 @@ class DoseResponseEngineTest {
         assertTrue(r.priorDominated)
         assertFalse(r.contradictsPrior)
         assertEquals(ScoreConfidence.CALIBRATING, r.confidence)
-        assertEquals("Charge", r.outcome)
+        assertEquals("Recovery", r.outcome)
+        assertTrue(r.sentence().contains("Recovery"))
+        assertFalse(r.sentence().contains("Charge"))
     }
 
     // shrinkage weight w = n/(n+k) is exact at the boundary n = k
@@ -166,6 +168,16 @@ class DoseResponseEngineTest {
         assertNull(
             DoseResponseEngine.estimate(DosedBehavior.ALCOHOL, "RHR", emptyMap(), emptyMap()),
         )
+    }
+
+    @Test
+    fun legacyChargeLookupCanonicalizesRenderedOutcomeToRecovery() {
+        val r = DoseResponseEngine.estimate(
+            DosedBehavior.ALCOHOL, "Charge", emptyMap(), emptyMap(),
+        )
+        assertEquals("Recovery", r?.outcome)
+        assertTrue(r?.sentence()?.contains("Recovery") == true)
+        assertFalse(r?.sentence()?.contains("Charge") == true)
     }
 
     // caffeine default outcome is HRV with its own prior

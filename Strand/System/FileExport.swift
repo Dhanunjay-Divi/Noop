@@ -95,13 +95,16 @@ enum FileExport {
     /// single-entry bundle (just the text) so the tap is never a dead end.
     @MainActor
     static func exportPair(file src: URL, fileSuggestedName: String,
-                           text: String, textSuggestedName: String) {
-        var entries: [BundleEntry] = [BundleEntry(name: textSuggestedName, data: Data(text.utf8))]
-        if FileManager.default.fileExists(atPath: src.path), let fileData = try? Data(contentsOf: src) {
-            entries.insert(BundleEntry(name: fileSuggestedName, data: fileData), at: 0)
-        }
+                           text: String, textSuggestedName: String) async {
+        let entries = await Task.detached(priority: .userInitiated) { () -> [BundleEntry] in
+            var entries = [BundleEntry(name: textSuggestedName, data: Data(text.utf8))]
+            if FileManager.default.fileExists(atPath: src.path), let fileData = try? Data(contentsOf: src) {
+                entries.insert(BundleEntry(name: fileSuggestedName, data: fileData), at: 0)
+            }
+            return entries
+        }.value
         let zipName = timestampedName("noop-export", ext: "zip")
-        _ = exportBundle(entries: entries, suggestedName: zipName)
+        _ = await exportBundle(entries: entries, suggestedName: zipName)
     }
 
     #if os(iOS)
@@ -177,9 +180,11 @@ enum FileExport {
     /// assembler's job before it calls here. Returns the staged / saved zip URL, nil on cancel or failure.
     @MainActor @discardableResult
     static func exportBundle(entries: [BundleEntry], suggestedName: String,
-                             completion: (() -> Void)? = nil) -> URL? {
+                             completion: (() -> Void)? = nil) async -> URL? {
         let base = suggestedName.hasSuffix(".zip") ? String(suggestedName.dropLast(4)) : suggestedName
-        guard let staged = zipData(entries: entries, baseName: base) else { completion?(); return nil }
+        guard let staged = await Task.detached(priority: .userInitiated, operation: {
+            zipData(entries: entries, baseName: base)
+        }).value else { completion?(); return nil }
         #if os(macOS)
         let panel = NSSavePanel()
         panel.nameFieldStringValue = suggestedName

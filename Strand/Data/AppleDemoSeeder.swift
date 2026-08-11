@@ -203,7 +203,7 @@ enum AppleDemoSeeder {
         var fitnessAge = 42.0
         var vo2 = 44.0
         var vitality = 55.0      // weekly Vitality (0–100) trending up as the demo habits improve
-        var bodyAgeDemo = 40.0   // Body Age (years) trending down (younger)
+        var bodyAgeDemo = 40.0   // persisted body_age key; displayed as Wellness Age
         for i in 0..<DAYS {
             let date = cal.date(byAdding: .day, value: i, to: startDay)!
             guard cal.component(.weekday, from: date) == 7 else { continue }  // 7 = Saturday

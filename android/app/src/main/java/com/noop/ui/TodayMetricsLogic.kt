@@ -85,11 +85,15 @@ internal fun stepsForDay(apple: List<AppleDaily>, healthConnect: List<AppleDaily
 /**
  * Resolve the Weight tile text: prefer the latest Apple/Health-Connect weight, else fall back to the
  * SI profile weight with a "from profile" caption so the source stays honest. Both are formatted
- * through the shared [UnitFormatter] so the Imperial/Metric toggle reaches this tile too. (#107)
+ * through the shared [UnitFormatter] so the independent weight-unit toggle reaches this tile too. (#107)
  */
-internal fun weightTile(latestWeightKg: Double?, profileWeightKg: Double, system: UnitSystem): WeightTileText =
+internal fun weightTile(latestWeightKg: Double?, profileWeightKg: Double, unit: MassUnit): WeightTileText =
     if (latestWeightKg != null) {
-        WeightTileText(UnitFormatter.massFromKilograms(latestWeightKg, system), "latest")
+        WeightTileText(UnitFormatter.massFromKilograms(latestWeightKg, unit), "latest")
     } else {
-        WeightTileText(UnitFormatter.massFromKilograms(profileWeightKg, system), "from profile")
+        WeightTileText(UnitFormatter.massFromKilograms(profileWeightKg, unit), "from profile")
     }
+
+/** Source-compatible bridge for older tests/callers; resolves exactly like the pre-split preference. */
+internal fun weightTile(latestWeightKg: Double?, profileWeightKg: Double, system: UnitSystem): WeightTileText =
+    weightTile(latestWeightKg, profileWeightKg, UnitPrefs.resolveMass(system, null))

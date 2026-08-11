@@ -64,7 +64,7 @@ class DeviceBrandCatalogTest {
         assertEquals("garmin", spec("Garmin").idPrefix)
         assertEquals("strap", spec("Polar").idPrefix)
 
-        assertFalse(spec("Oura").canStreamLiveHR)
+        assertTrue(spec("Oura").canStreamLiveHR)
         assertTrue(spec("Amazfit").canStreamLiveHR)
         assertTrue(spec("Garmin").canStreamLiveHR)
         assertTrue(spec("Polar").canStreamLiveHR)

@@ -597,6 +597,80 @@ extension WhoopStore {
                     """)
             }
         }
+        // v31: quarantine R-R beats whose timestamp is in the future. Older Oura ingest accepted any
+        // converted sample inside the broad anchor window, so a corrupt ring timestamp could store real
+        // beats years ahead of the night that produced them. Preserve those rows for later recovery, but
+        // mark them so scoring reads cannot consume them. New samples are guarded in OuraDriver.
+        migrator.registerMigration("v31-rr-future-quarantine") { db in
+            try db.alter(table: "rrInterval") { t in
+                t.add(column: "tsSuspect", .integer)
+            }
+            try db.execute(sql: """
+                UPDATE rrInterval SET tsSuspect = 1
+                WHERE ts > CAST(strftime('%s','now') AS INTEGER)
+                """)
+        }
+        // Record each beat's emission position within its whole-second timestamp. Sorting by rrMs
+        // makes successive intervals artificially similar and biases RMSSD downward; legacy rows stay
+        // NULL because their true order was never recorded.
+        migrator.registerMigration("v32-rr-ord") { db in
+            try db.alter(table: "rrInterval") { t in
+                t.add(column: "ord", .integer)
+            }
+        }
+        // Label Oura's independent optical R-R channels. Both remain stored, while the scoring read
+        // excludes the demonstrated duplicate SpO2 IBI channel. WHOOP and legacy rows remain NULL.
+        migrator.registerMigration("v33-rr-src-channel") { db in
+            try db.alter(table: "rrInterval") { t in
+                t.add(column: "srcChannel", .integer)
+            }
+        }
+        // v34: timestamped body-weight measurements captured from an external device such as a
+        // Bluetooth SIG Weight Scale Service collector. Additive only: a new device-scoped table, so
+        // existing biometric history is untouched. `userId = -1` means the characteristic omitted the
+        // optional user field; 255 is preserved separately because the WSS standard defines it as
+        // "unknown user". The natural key makes a repeated indication idempotent while still allowing
+        // two user slots to report at the same second.
+        migrator.registerMigration("v34-body-measurement") { db in
+            try db.create(table: "bodyMeasurement") { t in
+                t.column("deviceId", .text).notNull()
+                t.column("measuredAt", .integer).notNull()
+                t.column("receivedAt", .integer).notNull()
+                t.column("weightKg", .double).notNull()
+                t.column("bmi", .double)
+                t.column("heightCm", .double)
+                t.column("userId", .integer).notNull().defaults(to: -1)
+                t.column("unit", .text).notNull()
+                t.column("source", .text).notNull()
+                t.primaryKey(["deviceId", "measuredAt", "userId"])
+            }
+            try db.create(index: "idx_bodyMeasurement_device_measuredAt",
+                          on: "bodyMeasurement", columns: ["deviceId", "measuredAt"])
+        }
+        // Persist activity-file steps on their individual workout sessions. The daily total can then
+        // be re-summed across all files for a day without overwrite or re-import double-counting.
+        migrator.registerMigration("v35-workout-steps") { db in
+            try db.alter(table: "workout") { t in
+                t.add(column: "steps", .integer)
+            }
+        }
+        // Repair stale registry rows that advertised calibrated SpO2 even though live WHOOP decode
+        // exposes only raw optical ADC. Data-only; imported SpO2 values remain untouched.
+        migrator.registerMigration("v36-whoop-caps-no-spo2") { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT id, capabilities FROM pairedDevice
+                WHERE lower(brand) = 'whoop' OR id = 'my-whoop' OR id LIKE 'whoop-%'
+                """)
+            for row in rows {
+                let id: String = row["id"]
+                let encoded: String = row["capabilities"]
+                let stripped = WhoopLiveCapabilities.stripSpo2Token(fromEncoded: encoded)
+                if stripped != encoded {
+                    try db.execute(sql: "UPDATE pairedDevice SET capabilities = ? WHERE id = ?",
+                                   arguments: [stripped, id])
+                }
+            }
+        }
         return migrator
     }
 }

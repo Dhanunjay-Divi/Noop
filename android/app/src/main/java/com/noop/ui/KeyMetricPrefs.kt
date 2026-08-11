@@ -19,9 +19,9 @@ import android.content.Context
  * byte-identical to the macOS `KeyMetric` enum so a backup/restore reads the same layout on either OS.
  */
 enum class KeyMetric(val raw: String, val title: String) {
-    CHARGE("charge", "Charge"),
+    CHARGE("charge", "Recovery"),
     EFFORT("effort", "Effort"),
-    REST("rest", "Rest"),
+    REST("rest", "Sleep"),
     HRV("hrv", "HRV"),
     RESTING_HR("restingHr", "Resting HR"),
     BLOOD_OXYGEN("bloodOxygen", "Blood Oxygen"),

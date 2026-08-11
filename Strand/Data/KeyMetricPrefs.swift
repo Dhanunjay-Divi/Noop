@@ -32,9 +32,9 @@ enum KeyMetric: String, CaseIterable, Identifiable {
     /// The tile's display label — matches the `StatTile(label:)` text rendered on the grid.
     var title: String {
         switch self {
-        case .charge:      return String(localized: "Charge")
+        case .charge:      return String(localized: "Recovery")
         case .effort:      return String(localized: "Effort")
-        case .rest:        return String(localized: "Rest")
+        case .rest:        return String(localized: "Sleep")
         case .hrv:         return "HRV"
         case .restingHr:   return String(localized: "Resting HR")
         case .bloodOxygen: return String(localized: "Blood Oxygen")
@@ -42,6 +42,23 @@ enum KeyMetric: String, CaseIterable, Identifiable {
         case .steps:       return String(localized: "Steps")
         case .weight:      return String(localized: "Weight")
         case .calories:    return String(localized: "Calories")
+        }
+    }
+
+    /// Canonical semantic glyph for this metric. Keeping it beside the name mapping prevents the
+    /// Liquid and classic dashboards from drifting into different icon languages.
+    var icon: String {
+        switch self {
+        case .charge:      return "bolt.heart.fill"
+        case .effort:      return "flame.fill"
+        case .rest:        return "moon.stars.fill"
+        case .hrv:         return "waveform.path.ecg"
+        case .restingHr:   return "heart.fill"
+        case .bloodOxygen: return "drop.fill"
+        case .respiratory: return "lungs.fill"
+        case .steps:       return "figure.walk"
+        case .weight:      return "scalemass.fill"
+        case .calories:    return "flame.circle.fill"
         }
     }
 

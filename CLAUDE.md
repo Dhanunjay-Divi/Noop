@@ -7,14 +7,20 @@ and [`docs/IOS.md`](docs/IOS.md) covers the iOS target. Read this first; follow 
 
 ## What NOOP is (and the hard scope limits)
 
-NOOP is a **fully offline, on-device** companion app for WHOOP 4.0 and 5.0/MG straps (with
+NOOP is a **local-first, on-device** companion app for WHOOP 4.0 and 5.0/MG straps (with
 **experimental** Oura support in the tree — gated behind `ExperimentalBrand`, not a shipped supported
 strap). It pairs over Bluetooth, stores everything in on-device SQLite, and computes recovery / strain
-/ HRV / sleep locally. There is **no server, no account, no cloud sync, no telemetry**, and the project stays
-**anonymous** (iOS/Android ship build-from-source / sideload, not via the App Store).
+/ HRV / sleep locally. There is **no required account, Noop-operated cloud, or telemetry**, and the
+project stays **anonymous** (iOS/Android ship build-from-source / sideload, not via the App Store).
+Optional network features are explicit opt-ins: bring-your-own-provider Coach, Oura import, and
+replication/private friend sharing through a server the user operates. The core BLE, storage, and
+analytics path must remain fully useful offline.
 
 These are hard constraints, not preferences. A PR is out of scope if it:
-- adds a server, account, cloud sync, or sends any data off-device;
+- adds a Noop-operated account/cloud, enables network transfer by default, or sends data anywhere
+  other than the exact destination the user explicitly configured;
+- weakens self-hosted sharing boundaries: member credentials must be scoped, secrets stored securely,
+  invites short-lived, and every shared metric revocable server-side;
 - adds analytics/telemetry/crash-reporting that phones home;
 - adds WHOOP firmware, decompiled app code, logos/assets, or any DRM circumvention. NOOP is
   **clean-room interoperability** with hardware the user owns — keep it that way.

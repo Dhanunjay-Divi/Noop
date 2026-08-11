@@ -67,6 +67,7 @@ struct TrendsView: View {
     // Trend chart style (line vs bar) — display-only; flips every trend card between the gradient line
     // and value-ramp bars. Read here at the screen root so a Settings change re-renders on return.
     @AppStorage(UnitPrefs.trendChartStyleKey) private var trendChartStyleRaw = TrendChartStyle.line.rawValue
+    @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
     private var effortScale: EffortScale { UnitPrefs.resolveEffortScale(effortScaleRaw) }
 
     // yyyy-MM-dd → Date (en_US_POSIX, UTC), per task spec.
@@ -366,7 +367,11 @@ struct TrendsView: View {
                 Image(systemName: "chevron.left").font(StrandFont.headline.weight(.semibold))
             }
             .buttonStyle(.plain)
-            .foregroundStyle(atOldest ? StrandPalette.textTertiary : StrandPalette.accent)
+            .foregroundStyle(
+                atOldest
+                    ? (showDayCycleBackground ? StrandPalette.onDarkTertiary : StrandPalette.textTertiary)
+                    : (showDayCycleBackground ? StrandPalette.onDarkPrimary : StrandPalette.accent)
+            )
             .disabled(atOldest)
             .accessibilityLabel("Previous week")
 
@@ -374,9 +379,16 @@ struct TrendsView: View {
             VStack(spacing: 2) {
                 Text(weekOffset == 0 ? String(localized: "This week") : weekOffsetLabel)
                     .font(StrandFont.headline)
-                    .foregroundStyle(StrandPalette.textPrimary)
+                    .foregroundStyle(showDayCycleBackground
+                                     ? StrandPalette.onDarkPrimary
+                                     : StrandPalette.textPrimary)
                 Text("Week in review")
-                    .strandOverline()
+                    .font(StrandFont.overline)
+                    .tracking(StrandFont.overlineTracking)
+                    .textCase(.uppercase)
+                    .foregroundStyle(showDayCycleBackground
+                                     ? StrandPalette.onDarkSecondary
+                                     : StrandPalette.textSecondary)
             }
             Spacer()
 
@@ -384,7 +396,11 @@ struct TrendsView: View {
                 Image(systemName: "chevron.right").font(StrandFont.headline.weight(.semibold))
             }
             .buttonStyle(.plain)
-            .foregroundStyle(atNewest ? StrandPalette.textTertiary : StrandPalette.accent)
+            .foregroundStyle(
+                atNewest
+                    ? (showDayCycleBackground ? StrandPalette.onDarkTertiary : StrandPalette.textTertiary)
+                    : (showDayCycleBackground ? StrandPalette.onDarkPrimary : StrandPalette.accent)
+            )
             .disabled(atNewest)
             .accessibilityLabel("Next week")
         }
@@ -414,9 +430,9 @@ struct TrendsView: View {
         if chargeAvg != nil || effortAvg != nil || restAvg != nil {
             NoopCard(tint: StrandPalette.chargeColor) {
                 VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
-                    SectionHeader("Week in review", overline: "Charge · Effort · Rest")
+                    SectionHeader("Week in review", overline: "Recovery · Effort · Sleep")
                     if let v = chargeAvg {
-                        pipScoreRow(label: "Charge", value: v, range: 0...100,
+                        pipScoreRow(label: "Recovery", value: v, range: 0...100,
                                     tint: StrandPalette.chargeColor, frac: v / 100,
                                     format: { "\(Int($0.rounded()))" })
                     }
@@ -436,7 +452,7 @@ struct TrendsView: View {
                                     format: { oneDecimal ? String(format: "%.1f", $0) : "\(Int($0.rounded()))" })
                     }
                     if let v = restAvg {
-                        pipScoreRow(label: "Rest", value: v, range: 0...100,
+                        pipScoreRow(label: "Sleep", value: v, range: 0...100,
                                     tint: StrandPalette.restColor, frac: v / 100,
                                     format: { "\(Int($0.rounded()))" })
                     }
@@ -534,7 +550,7 @@ struct TrendsView: View {
         // Charge world — the WHOOP recovery value scale (red→yellow→green) drawn as a crisp flat line
         // with a bright "now" cap. No glow.
         let card = ChartCard(
-            title: "Charge",
+            title: "Recovery",
             // The range bar above already prints the authoritative reading-count caption;
             // the hero only names its window so the count isn't doubled in one card height.
             subtitle: rangeSubtitle,
@@ -550,7 +566,7 @@ struct TrendsView: View {
                               valueRange: 0...106,
                               tip: StrandPalette.chargeBright,
                               valueFormat: { "\(Int($0.rounded()))" },
-                              accessibilityLabel: String(localized: "Charge trend"))
+                              accessibilityLabel: String(localized: "Recovery trend"))
                 } else {
                     sparsePlaceholder
                 }
@@ -575,7 +591,7 @@ struct TrendsView: View {
         // with a hint that a tap opens the detail.
         NavigationLink(value: TabRoute.metric("recovery")) { card }
             .buttonStyle(LiquidPressStyle())
-            .accessibilityHint(Text(String(localized: "Opens the full Charge metric.")))
+            .accessibilityHint(Text(String(localized: "Opens the full Recovery metric.")))
     }
 
     // MARK: Small multiples — HRV / Resting HR / Day Strain
@@ -698,7 +714,7 @@ struct TrendsView: View {
             guard let dt = date(d.day) else { return nil }
             return RecoveryDay(date: dt, score: d.recovery)
         }
-        let title = (range == .all && repo.days.count > 365) ? String(localized: "Charge (all history)") : String(localized: "Charge (past year)")
+        let title = (range == .all && repo.days.count > 365) ? String(localized: "Recovery (all history)") : String(localized: "Recovery (past year)")
         return NoopCard(tint: StrandPalette.chargeColor) {
             VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
                 SectionHeader("\(title)", overline: "Calendar", trailing: String(localized: "\(recoveryDays.filter { $0.score != nil }.count) days"))

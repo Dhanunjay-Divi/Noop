@@ -314,6 +314,45 @@ class WorkoutEditingTest {
         assertNull(WorkoutEditing.buildManualRow("my-whoop", start, 30, "Run", null, 99_999.0, now))
     }
 
+    @Test
+    fun buildManualRow_acceptsEndExactlyAtNow_rejectsOneSecondFuture() {
+        val now = 1_700_003_600L
+        val endingNow = WorkoutEditing.buildManualRow(
+            "my-whoop", startSeconds = now - 60, durationMin = 1, sport = "Run",
+            avgHr = null, energyKcal = null, nowSeconds = now,
+        )
+        requireNotNull(endingNow)
+        assertEquals(now, endingNow.endTs)
+
+        assertNull(WorkoutEditing.buildManualRow(
+            "my-whoop", startSeconds = now - 59, durationMin = 1, sport = "Run",
+            avgHr = null, energyKcal = null, nowSeconds = now,
+        ))
+    }
+
+    @Test
+    fun buildManualRow_rejectsEndTimestampOverflow() {
+        assertNull(WorkoutEditing.buildManualRow(
+            "my-whoop", startSeconds = Long.MAX_VALUE - 30, durationMin = 1, sport = "Run",
+            avgHr = null, energyKcal = null, nowSeconds = Long.MAX_VALUE,
+        ))
+    }
+
+    @Test
+    fun buildDetectedSuggestionRow_preservesExactEndpoint() {
+        val start = 1_700_000_000L
+        val end = start + 1_237L
+        val row = WorkoutEditing.buildDetectedSuggestionRow(
+            deviceId = "my-whoop", startSeconds = start, endSeconds = end,
+            sport = "  Running ", avgHr = 151, nowSeconds = end + 60,
+        )
+        requireNotNull(row)
+        assertEquals(start, row.startTs)
+        assertEquals(end, row.endTs)
+        assertEquals(1_237.0, row.durationS!!, 0.0)
+        assertEquals("Running", row.sport)
+    }
+
     // MARK: - preservingCaptured
 
     @Test

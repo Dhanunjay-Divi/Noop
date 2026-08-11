@@ -12,11 +12,25 @@ on:
     branches: [main]
     paths:
       - 'Packages/**'
+      - 'Tools/StudyHarness/**'
+      - 'Tools/check-private-data.py'
+      - '**/*.zip'
+      - '**/*.csv'
+      - '**/*.noopbak'
+      - '**/*.sqlite'
+      - '**/*.db'
       - '.github/workflows/swift-packages.yml'
   push:
     branches: [main]
     paths:
       - 'Packages/**'
+      - 'Tools/StudyHarness/**'
+      - 'Tools/check-private-data.py'
+      - '**/*.zip'
+      - '**/*.csv'
+      - '**/*.noopbak'
+      - '**/*.sqlite'
+      - '**/*.db'
       - '.github/workflows/swift-packages.yml'
   workflow_dispatch:
 
@@ -56,3 +70,22 @@ jobs:
       - name: Test ${{ matrix.package }}
         run: swift test
         working-directory: Packages/${{ matrix.package }}
+
+  study-harness:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Reject tracked personal-data artifacts
+        run: python3 Tools/check-private-data.py
+
+      - name: Build private study harness
+        run: swift build
+        working-directory: Tools/StudyHarness
+
+      - name: Test private study harness
+        run: swift test
+        working-directory: Tools/StudyHarness

@@ -84,6 +84,8 @@ struct HRVSnapshotView: View {
             tick()
         }
         .onDisappear {
+            if phase == .capturing { model.stopRealtimeHR() }
+            phase = .idle
             ScreenIdle.keepAwake(false)
         }
     }
@@ -384,6 +386,7 @@ struct HRVSnapshotView: View {
 
     private func start() {
         guard bonded else { return }
+        model.startRealtimeHR()
         phase = .capturing
         captureBuffer.removeAll()
         secondsRemaining = Self.captureSeconds
@@ -394,6 +397,8 @@ struct HRVSnapshotView: View {
     }
 
     private func cancel() {
+        guard phase == .capturing else { return }
+        model.stopRealtimeHR()
         phase = .idle
         secondsRemaining = Self.captureSeconds
         runningRMSSD = nil
@@ -410,6 +415,8 @@ struct HRVSnapshotView: View {
 
     /// End the capture and run the full cleaning analysis over everything collected.
     private func finish() {
+        guard phase == .capturing else { return }
+        model.stopRealtimeHR()
         ScreenIdle.keepAwake(false)
         let raw = captureBuffer.map(Double.init)
         // HRV & Autonomic test mode (Group G): when the mode is on, emit the cleaning trace (nInput /

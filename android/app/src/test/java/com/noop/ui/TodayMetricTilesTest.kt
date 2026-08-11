@@ -64,14 +64,14 @@ class TodayMetricTilesTest {
 
     @Test
     fun weightTile_usesLatestReading_metric() {
-        val t = weightTile(latestWeightKg = 74.5, profileWeightKg = 90.0, system = UnitSystem.METRIC)
+        val t = weightTile(latestWeightKg = 74.5, profileWeightKg = 90.0, unit = MassUnit.KILOGRAMS)
         assertEquals("74.5 kg", t.value)
         assertEquals("latest", t.caption)
     }
 
     @Test
     fun weightTile_usesLatestReading_imperial() {
-        val t = weightTile(latestWeightKg = 100.0, profileWeightKg = 90.0, system = UnitSystem.IMPERIAL)
+        val t = weightTile(latestWeightKg = 100.0, profileWeightKg = 90.0, unit = MassUnit.POUNDS)
         // 100 kg * 2.20462 = 220.462 lb
         assertEquals("220.5 lb", t.value)
         assertEquals("latest", t.caption)
@@ -79,14 +79,14 @@ class TodayMetricTilesTest {
 
     @Test
     fun weightTile_fallsBackToProfile_withHonestCaption() {
-        val t = weightTile(latestWeightKg = null, profileWeightKg = 75.0, system = UnitSystem.METRIC)
+        val t = weightTile(latestWeightKg = null, profileWeightKg = 75.0, unit = MassUnit.KILOGRAMS)
         assertEquals("75.0 kg", t.value)
         assertEquals("from profile", t.caption)
     }
 
     @Test
     fun weightTile_profileFallbackRespectsImperial() {
-        val t = weightTile(latestWeightKg = null, profileWeightKg = 75.0, system = UnitSystem.IMPERIAL)
+        val t = weightTile(latestWeightKg = null, profileWeightKg = 75.0, unit = MassUnit.POUNDS)
         // 75 kg * 2.20462 = 165.3465 lb
         assertEquals("165.3 lb", t.value)
         assertEquals("from profile", t.caption)

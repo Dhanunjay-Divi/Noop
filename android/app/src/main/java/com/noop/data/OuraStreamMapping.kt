@@ -1,6 +1,8 @@
 package com.noop.data
 
 import com.noop.oura.OuraEvent
+import com.noop.oura.OuraIbiChannel
+import com.noop.protocol.RrSourceChannel
 import com.noop.protocol.SkinTempSample
 import com.noop.protocol.Spo2Sample
 import com.noop.protocol.Streams
@@ -18,9 +20,8 @@ import com.noop.protocol.WhoopEvent
  * own Charge/Rest downstream:
  *   - the IBI stream becomes [Streams.rr], from which RecoveryScorer reconstructs NOOP's OWN RMSSD;
  *   - the HR stream feeds resting-HR + strain;
- *   - the ring's open 0x5D HRV tag is recorded as an `OURA_HRV` diagnostic event carrying ITS RAW
- *     decoded fields (time_ms/b1/b2) ONLY, never a fabricated rmssd_ms (the int8 b1/b2 byte->ms
- *     scale is not Tier-A; NOOP's scoring RMSSD comes from `rr`, not this tag);
+ *   - the ring's open 0x5D HRV tag is recorded as `OURA_HRV` events carrying its validated
+ *     pair_index/hr_bpm/rmssd_ms fields; NOOP's scoring RMSSD still comes from `rr`;
  *   - the open sleep-phase tags become `OURA_SLEEP_PHASE` events folded into a sleep session.
  *
  * Each event carries a ring-clock `ringTimestamp` (not wall-clock). To stay pure and avoid baking a
@@ -55,21 +56,27 @@ object OuraStreamMapping {
 
                 is OuraEvent.Ibi -> {
                     val ts = anchor(ev.value.ringTimestamp) ?: continue
-                    out.rr.add(com.noop.protocol.RrInterval(ts, ev.value.ibiMs))
+                    out.rr.add(
+                        com.noop.protocol.RrInterval(
+                            ts,
+                            ev.value.ibiMs,
+                            rrChannel(ev.value.channel),
+                        ),
+                    )
                 }
 
                 is OuraEvent.Hrv -> {
-                    // The ring's OWN open HRV tag, recorded raw for diagnostics/parity. NOT Oura's
-                    // readiness score, and NOT used as NOOP's RMSSD (that comes from `rr`).
-                    val ts = anchor(ev.value.ringTimestamp) ?: continue
+                    // The first pair is the record's oldest bucket; the record time marks the span's end.
+                    val base = anchor(ev.value.ringTimestamp) ?: continue
+                    val ts = base - (ev.value.count - ev.value.index) * 300
                     out.events.add(
                         WhoopEvent(
                             ts = ts,
                             kind = EVENT_HRV,
                             payload = linkedMapOf(
-                                "time_ms" to ev.value.timeMs,
-                                "b1" to ev.value.b1,
-                                "b2" to ev.value.b2,
+                                "pair_index" to ev.value.index,
+                                "hr_bpm" to ev.value.hrBpm,
+                                "rmssd_ms" to ev.value.rmssdMs,
                             ),
                         ),
                     )
@@ -80,7 +87,8 @@ object OuraStreamMapping {
                     // raw value goes in `red`; `ir` stays 0 (an unread channel, never a fabricated
                     // second reading). `unit` carries the decoder's own scale tag so downstream never
                     // assumes a percentage, mirroring the Swift twin's SpO2Sample(unit:).
-                    val ts = anchor(ev.value.ringTimestamp) ?: continue
+                    val base = anchor(ev.value.ringTimestamp) ?: continue
+                    val ts = base - maxOf(0, ev.value.count - 1 - ev.value.index)
                     out.spo2.add(Spo2Sample(ts = ts, red = ev.value.value, ir = 0, unit = ev.value.unit))
                 }
 
@@ -129,5 +137,20 @@ object OuraStreamMapping {
             }
         }
         return out
+    }
+
+    /** Group stamped events by second while retaining first-timestamp and event arrival order. */
+    fun batched(stamped: List<Pair<OuraEvent, Int>>): List<Pair<Int, List<OuraEvent>>> {
+        val byTs = LinkedHashMap<Int, MutableList<OuraEvent>>()
+        for ((event, ts) in stamped) byTs.getOrPut(ts) { mutableListOf() }.add(event)
+        return byTs.map { (ts, events) -> ts to events.toList() }
+    }
+
+    internal fun rrChannel(channel: OuraIbiChannel?): RrSourceChannel? = when (channel) {
+        OuraIbiChannel.GREEN_QUALITY -> RrSourceChannel.GREEN_QUALITY
+        OuraIbiChannel.SPO2_IBI -> RrSourceChannel.SPO2_IBI
+        OuraIbiChannel.IBI_AMPLITUDE -> RrSourceChannel.IBI_AMPLITUDE
+        OuraIbiChannel.IBI_BARE -> RrSourceChannel.IBI_BARE
+        null -> null
     }
 }

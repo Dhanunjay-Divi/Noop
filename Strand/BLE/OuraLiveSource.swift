@@ -710,9 +710,10 @@ public final class OuraLiveSource: NSObject, ObservableObject {
     private func drainPendingAnchorEvents() {
         guard !pendingAnchorEvents.isEmpty, let driver else { return }
         let now = Int(Date().timeIntervalSince1970)
+        var stamped: [(event: OuraEvent, ts: Int)] = []
         for pending in pendingAnchorEvents {
             if let ts = driver.unixSeconds(forRingTimestamp: pending.ringTimestamp) {
-                enqueue([pending.event], ts: ts)
+                stamped.append((event: pending.event, ts: ts))
                 // A parked IBI can be a LIVE beat that arrived before the anchor (see .ibi in ingest());
                 // it must never advance the resume cursor either, or a live push could skip un-drained
                 // backlog on a force-stopped drain. Only the history-only siblings drive the cursor.
@@ -720,8 +721,11 @@ public final class OuraLiveSource: NSObject, ObservableObject {
                     noteStoredHistoryRingTime(pending.ringTimestamp)   // parked history sample placed → advance resume cursor
                 }
             } else {
-                enqueue([pending.event], ts: now)   // honest wall-clock fallback; NEVER advances the cursor
+                stamped.append((event: pending.event, ts: now))
             }
+        }
+        for batch in OuraStreamMapping.batched(stamped) {
+            enqueue(batch.events, ts: batch.ts)
         }
         pendingAnchorEvents.removeAll()
     }
@@ -740,6 +744,16 @@ public final class OuraLiveSource: NSObject, ObservableObject {
     private func ingest(_ events: [OuraEvent]) {
         guard !events.isEmpty, let driver else { return }
         let now = Int(Date().timeIntervalSince1970)
+        // A record's beats must reach StreamStore in one batch; otherwise its batch-local emission-order
+        // counter restarts at zero for every beat and RMSSD is computed from value-sorted rows.
+        let anchoredBeats: [(event: OuraEvent, ts: Int)] = events.compactMap { event in
+            guard case .ibi(let ibi) = event,
+                  let ts = driver.unixSeconds(forRingTimestamp: ibi.ringTimestamp) else { return nil }
+            return (event: event, ts: ts)
+        }
+        for batch in OuraStreamMapping.batched(anchoredBeats) {
+            enqueue(batch.events, ts: batch.ts)
+        }
         for e in events {
             switch e {
             case .hr(let hr):
@@ -773,16 +787,9 @@ public final class OuraLiveSource: NSObject, ObservableObject {
                 // banked streams (.hrv/.temp/.spo2/.sleepPhase) below — never the drain-arrival `now`.
                 // Stamping it at `now` (52b6e88d) misfiled every overnight beat to the daytime sync moment,
                 // so the sleep window ended up with zero R-R -> no restingHr/avgHrv for the night.
-                if let ts = driver.unixSeconds(forRingTimestamp: ibi.ringTimestamp) {
-                    enqueue([e], ts: ts)
-                    // NOTE: unlike the history-only siblings, do NOT noteStoredHistoryRingTime here — IBI is
-                    // the one stream that arrives both LIVE (ring-time ~now) and banked, indistinguishable
-                    // at this call site except by ring-time. Letting a live beat advance the resume cursor
-                    // could leap `maxStoredRingTime` to ~now during a force-stopped drain (300s/stall guard,
-                    // bytes_left > 0) and permanently skip the un-drained backlog. The resume cursor is still
-                    // driven correctly by the history-only siblings (hrv/temp/spo2/sleepPhase) that share the
-                    // same night window; this also matches Kotlin, which notes no stream's ring-time.
-                } else {
+                // Anchored beats were already enqueued above as one record-sized batch. Only unanchored
+                // beats remain for this arm to park until the time anchor arrives.
+                if driver.unixSeconds(forRingTimestamp: ibi.ringTimestamp) == nil {
                     pendingAnchorEvents.append((e, ibi.ringTimestamp))
                 }
 

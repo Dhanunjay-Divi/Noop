@@ -3,7 +3,7 @@ import SwiftUI
 
 // MARK: - Reorderable Today sections (#today-layout)
 //
-// The liquid Today's sections — the Charge/Effort/Rest hero, the Start-session entry, Synthesis, Key
+// The liquid Today's sections — the Recovery/Effort/Sleep hero, the Start-session entry, Synthesis, Key
 // Metrics, Workouts, Heart Rate, Recovery Vitals, Your Cards — rendered in one fixed order. This lets the
 // user REORDER them, with the default being the original order so nothing changes for anyone who never
 // rearranges. Display-only — no metric is computed or stored differently; this only decides the SEQUENCE
@@ -34,7 +34,7 @@ enum TodaySection: String, CaseIterable, Identifiable {
     /// The section's display label in the Arrange sheet — matches the Android `TodaySection.title`.
     var title: String {
         switch self {
-        case .hero:           return String(localized: "Charge / Effort / Rest")
+        case .hero:           return String(localized: "Recovery / Effort / Sleep")
         case .liveSession:    return String(localized: "Start session")
         case .synthesis:      return String(localized: "Synthesis")
         case .keyMetrics:     return String(localized: "Key Metrics")

@@ -67,7 +67,8 @@ public enum OuraDecoders {
     /// byte-scatter layout, cross-checked against the same capture, yields a coherent ~60 bpm train
     /// (10% jump rate) that tracks the night's sleep stages and its day/night dip. Validated against
     /// the `open_oura` decompiled `parse_api_ibi_and_amplitude_event`.
-    public static func decodeIBIAmplitude(_ rec: OuraRecord) -> [OuraIBI]? {
+    public static func decodeIBIAmplitude(_ rec: OuraRecord,
+                                          channel: OuraIBIChannel = .ibiAmplitude) -> [OuraIBI]? {
         let b = rec.payload
         guard b.count >= 14 else { return nil }   // fixed 14-byte packet (body bytes 6..19)
         let b12 = Int(b[12]), b13 = Int(b[13])
@@ -85,7 +86,8 @@ public enum OuraDecoders {
         for k in 0..<6 {
             guard ibi[k] > 0 else { continue }                 // drop a zero IBI, never invent one
             let amp = (Int(b[6 + k]) >> 1) << shift            // 7-bit mantissa << exponent
-            out.append(OuraIBI(ringTimestamp: rec.ringTimestamp, ibiMs: ibi[k], amplitude: amp))
+            out.append(OuraIBI(ringTimestamp: rec.ringTimestamp, ibiMs: ibi[k], amplitude: amp,
+                               channel: channel))
         }
         return out.isEmpty ? nil : out
     }
@@ -113,7 +115,8 @@ public enum OuraDecoders {
             let ibi = (Int(b[i + 1]) & 0x07) | (Int(b[i]) << 3)   // high byte first
             let quality = (Int(b[i + 1]) >> 3) & 0x03
             if quality == 1 && ibi >= 300 && ibi <= 2000 {
-                out.append(OuraIBI(ringTimestamp: rec.ringTimestamp, ibiMs: ibi))
+                out.append(OuraIBI(ringTimestamp: rec.ringTimestamp, ibiMs: ibi,
+                                   channel: .greenQuality))
             }
             i += 2
             sampleCount += 1
@@ -140,7 +143,8 @@ public enum OuraDecoders {
         while idx >= 1 {
             let ibi = Int(b[idx]) * 8                  // 8-bit count x8 -> ms
             if ibi > 0 {
-                out.append(OuraIBI(ringTimestamp: rec.ringTimestamp, ibiMs: ibi))
+                out.append(OuraIBI(ringTimestamp: rec.ringTimestamp, ibiMs: ibi,
+                                   channel: .spo2Ibi))
             }
             idx -= 1
         }
@@ -149,20 +153,23 @@ public enum OuraDecoders {
 
     // MARK: - HRV / RMSSD (0x5D; s6.9)
 
-    /// Decode the 0x5D hrv_event: samples each carrying a time_ms field + two int8 fields (b1, b2).
-    /// Per OURA_PROTOCOL.md s6.9 the per-sample stride is time(2 LE) + b1(1) + b2(1) = 4 bytes.
-    /// Returns nil on a short body. NOOP consumes this as the ring's OWN RMSSD-derived HRV tag.
+    /// Decode the 0x5D body as `(u8 avg HR bpm, u8 avg RMSSD ms)` pairs, one per five-minute
+    /// bucket. `00 00` is tail padding and is omitted, but remains counted for timestamp placement.
     public static func decodeHRV(_ rec: OuraRecord) -> [OuraHRV]? {
         let b = rec.payload
-        guard b.count >= 4 else { return nil }
+        guard b.count >= 2, b.count % 2 == 0 else { return nil }
+        let pairCount = b.count / 2
         var out: [OuraHRV] = []
         var i = 0
-        while i + 4 <= b.count {
-            let timeMs = u16le(b, i)
-            let v1 = Int(Int8(bitPattern: b[i + 2]))
-            let v2 = Int(Int8(bitPattern: b[i + 3]))
-            out.append(OuraHRV(ringTimestamp: rec.ringTimestamp, timeMs: timeMs, b1: v1, b2: v2))
-            i += 4
+        var index = 0
+        while i + 2 <= b.count {
+            let hr = Int(b[i]), rmssd = Int(b[i + 1])
+            if !(hr == 0 && rmssd == 0) {
+                out.append(OuraHRV(ringTimestamp: rec.ringTimestamp, index: index,
+                                   hrBpm: hr, rmssdMs: rmssd, count: pairCount))
+            }
+            i += 2
+            index += 1
         }
         return out.isEmpty ? nil : out
     }
@@ -183,10 +190,18 @@ public enum OuraDecoders {
         while i < b.count {
             let raw = Int(b[i])
             if raw == 0xFF { break }                  // terminator
-            out.append(OuraSpO2(ringTimestamp: rec.ringTimestamp, value: raw))
+            out.append(OuraSpO2(ringTimestamp: rec.ringTimestamp, value: raw, index: out.count))
             i += 1
         }
-        return out.isEmpty ? nil : out
+        return out.isEmpty ? nil : stampSampleCount(out)
+    }
+
+    private static func stampSampleCount(_ samples: [OuraSpO2]) -> [OuraSpO2] {
+        let n = samples.count
+        return samples.map {
+            OuraSpO2(ringTimestamp: $0.ringTimestamp, value: $0.value, unit: $0.unit,
+                     index: $0.index, count: n)
+        }
     }
 
     // MARK: - SpO2 stable, BIG-endian (0x7B; s6.6)
@@ -220,16 +235,18 @@ public enum OuraDecoders {
         }
         var out: [OuraSpO2] = []
         if hasBase {
-            out.append(OuraSpO2(ringTimestamp: rec.ringTimestamp, value: acc, unit: "dc_raw"))
+            out.append(OuraSpO2(ringTimestamp: rec.ringTimestamp, value: acc,
+                                unit: "dc_raw", index: 0))
         }
         while i < b.count {
             let v = Int(Int8(bitPattern: b[i]))
             let mag = abs(v) << scale
             acc += (v < 0) ? -mag : mag
-            out.append(OuraSpO2(ringTimestamp: rec.ringTimestamp, value: acc, unit: "dc_raw"))
+            out.append(OuraSpO2(ringTimestamp: rec.ringTimestamp, value: acc,
+                                unit: "dc_raw", index: out.count))
             i += 1
         }
-        return out.isEmpty ? nil : out
+        return out.isEmpty ? nil : stampSampleCount(out)
     }
 
     // MARK: - Temperature (0x46 / 0x69 / 0x75; s6.8)

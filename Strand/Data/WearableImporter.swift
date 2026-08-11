@@ -1,4 +1,5 @@
 import Foundation
+import StrandAnalytics
 import WhoopStore
 import StrandImport
 
@@ -29,7 +30,8 @@ enum WearableImporter {
             metrics.append(DailyMetric(
                 day: d.day,
                 totalSleepMin: d.totalSleepMin,
-                efficiency: d.efficiencyPct ?? sleepEfficiency(total: d.totalSleepMin, awake: d.awakeMin),
+                efficiency: storedEfficiency(d.efficiencyPct)
+                    ?? sleepEfficiency(total: d.totalSleepMin, awake: d.awakeMin),
                 deepMin: d.deepMin,
                 remMin: d.remMin,
                 lightMin: d.lightMin,
@@ -63,7 +65,8 @@ enum WearableImporter {
             sessions.append(CachedSleepSession(
                 startTs: startTs,
                 endTs: endTs,
-                efficiency: s.efficiencyPct ?? efficiency(segs: segs, start: startTs, end: endTs),
+                efficiency: storedEfficiency(s.efficiencyPct)
+                    ?? efficiency(segs: segs, start: startTs, end: endTs),
                 restingHr: s.lowestHr ?? s.avgHr,   // sleeping-min HR ≈ resting; falls back to avg
                 avgHrv: s.avgHrvMs,
                 stagesJSON: json))
@@ -117,23 +120,31 @@ enum WearableImporter {
         return result
     }
 
+    /// Normalize parser output at the storage boundary. Older JSON/CSV parsers expose native 0–100
+    /// percentages while the Oura API parser already returns NOOP's 0–1 fraction; both safely converge here.
+    static func storedEfficiency(_ raw: Double?) -> Double? {
+        guard let raw, raw.isFinite, raw >= 0 else { return nil }
+        let fraction = raw > 1.5 ? raw / 100 : raw
+        return min(1, max(0, fraction))
+    }
+
     /// Asleep fraction of in-bed time, from the daily stage minutes (when the export gave no efficiency).
-    private static func sleepEfficiency(total: Double?, awake: Double?) -> Double? {
+    static func sleepEfficiency(total: Double?, awake: Double?) -> Double? {
         guard let total, total > 0 else { return nil }
         let awake = awake ?? 0
         let inBed = total + awake
-        return inBed > 0 ? min(100, total / inBed * 100) : nil
+        return inBed > 0 ? min(1, max(0, total / inBed)) : nil
     }
 
     /// Asleep fraction from the hypnogram segments (non-wake ÷ in-bed span).
-    private static func efficiency(segs: [[String: Any]], start: Int, end: Int) -> Double? {
+    static func efficiency(segs: [[String: Any]], start: Int, end: Int) -> Double? {
         guard end > start, !segs.isEmpty else { return nil }
         var asleep = 0
         for seg in segs {
             guard let s = seg["start"] as? Int, let e = seg["end"] as? Int,
-                  let stage = seg["stage"] as? String, stage != "wake" else { continue }
+                  let stage = seg["stage"] as? String, !SleepStageVocabulary.isWake(stage) else { continue }
             asleep += max(0, e - s)
         }
-        return min(100, Double(asleep) / Double(end - start) * 100)
+        return min(1, max(0, Double(asleep) / Double(end - start)))
     }
 }

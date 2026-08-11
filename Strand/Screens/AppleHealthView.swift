@@ -8,7 +8,7 @@ import Foundation
 // Vitaltrends-style, instrument-grade, uniform. ONE range control at the top
 // (SegmentedPillControl), a LazyVGrid of fixed-height StatTiles (every metric the
 // same 104pt tall), then ChartCard sections — Heart & Vitals, Activity & Energy,
-// Body Composition, Sleep — each chart the same height with an avg/min/max footer.
+// Body Composition, Temperature, Sleep — each chart the same height with an avg/min/max footer.
 //
 // Everything reads from the "apple-health" source. ALL history is loaded once; the
 // range control simply windows it client-side, RELATIVE TO THE LATEST data point
@@ -51,9 +51,18 @@ struct AppleHealthView: View {
     // Imperial/Metric display preference (D#103). Weight and lean mass (stored kg) re-label to lb here;
     // every other Apple Health metric is unit-agnostic. Display-only.
     @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    @AppStorage(UnitPrefs.massKey) private var massUnitRaw = ""
+    @AppStorage(UnitPrefs.temperatureKey) private var temperatureUnitRaw = ""
     private var unitSystem: UnitSystem { UnitSystem(rawValue: unitSystemRaw) ?? .metric }
+    private var massUnit: MassUnit { UnitPrefs.resolveMass(system: unitSystem, override: massUnitRaw) }
+    private var temperatureUnit: TemperatureUnit {
+        UnitPrefs.resolveTemperature(system: unitSystem, override: temperatureUnitRaw)
+    }
     /// kg value → the active mass unit, full string with label (e.g. "74.5 kg" / "164.2 lb").
-    private func massLabel(_ kg: Double) -> String { UnitFormatter.massFromKilograms(kg, system: unitSystem) }
+    private func massLabel(_ kg: Double) -> String { UnitFormatter.massFromKilograms(kg, unit: massUnit) }
+    private func temperatureLabel(_ celsius: Double) -> String {
+        UnitFormatter.temperatureFromCelsius(celsius, unit: temperatureUnit, decimals: 1)
+    }
 
     /// Optional pre-seeded data for previews; when set, the async store load is
     /// skipped (store-backed reads can't be seeded in a preview). Production leaves
@@ -99,7 +108,7 @@ struct AppleHealthView: View {
     private static let seriesKeys = [
         "steps", "active_kcal", "vo2max",
         "resting_hr", "hrv", "spo2", "resp_rate", "asleep_min",
-        "weight", "body_fat", "lean_mass", "bmi"
+        "weight", "body_fat", "lean_mass", "bmi", "body_temp", "wrist_temp"
     ]
 
     // yyyy-MM-dd → Date (en_US_POSIX / UTC), per the project's date contract.
@@ -322,7 +331,7 @@ struct AppleHealthView: View {
         let rows = loaded ? windowedRows : appleRows
         guard let first = rows.first?.day, let last = rows.last?.day,
               let lo = date(first), let hi = date(last) else {
-            return String(localized: "Steps, heart, sleep, body composition and VO₂ max, read locally on \(Platform.deviceNounPhrase).")
+            return String(localized: "Steps, heart, temperature, sleep, body composition and VO₂ max, read locally on \(Platform.deviceNounPhrase).")
         }
         let loS = Self.spanFormatter.string(from: lo)
         let hiS = Self.spanFormatter.string(from: hi)
@@ -359,7 +368,7 @@ struct AppleHealthView: View {
         }
     }
 
-    // MARK: - Live Apple Health (iOS only)
+    // MARK: - Automatic Apple Health sync (iOS only)
     //
     // The opt-in entry point for the two-way HealthKitBridge. macOS has no HealthKit, so this whole
     // card — and every `health.*` reference — is `#if os(iOS)`-gated. Tapping "Enable Apple Health"
@@ -378,12 +387,18 @@ struct AppleHealthView: View {
                         .frame(width: 30, height: 30)
                         .background(StrandPalette.metricCyan.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                         .accessibilityHidden(true)
-                    Text("Apple Health (Live)")
+                    // HealthKit observer delivery is system-scheduled and may be coalesced, so avoid
+                    // presenting this as a realtime stream. The dedicated Live page owns foreground,
+                    // high-rate wearable tracking; this card is the automatic Health store sync.
+                    Text("Apple Health Sync")
                         .font(StrandFont.headline)
                         .foregroundStyle(StrandPalette.textPrimary)
                     Spacer()
                     if health.auth == .authorized {
-                        StatePill(health.syncing ? "Syncing" : "Connected",
+                        // HealthKit intentionally does not reveal read authorization status. This
+                        // means "Connected"/"Enabled" would overstate what NOOP can know after the
+                        // system sheet; "Configured" records only that the explicit request occurred.
+                        StatePill(health.syncing ? "Syncing" : "Configured",
                                   tone: .positive, pulsing: health.syncing)
                     }
                 }
@@ -411,7 +426,7 @@ struct AppleHealthView: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                 case .unknown, .denied:
-                    Text("Read your heart rate, HRV, blood oxygen, respiratory rate, sleep, steps and energy straight from Apple Health, and write NOOP's strap data back: sleep with full stages, continuous heart rate, workouts, and nightly vitals. Everything stays on \(Platform.deviceNounPhrase).")
+                    Text("Read heart rate, HRV, blood oxygen, body and wrist temperature, respiratory rate, sleep, workouts, activity and body composition from Apple Health, and write supported NOOP strap data back. Everything stays on \(Platform.deviceNounPhrase).")
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -439,7 +454,9 @@ struct AppleHealthView: View {
                             .font(StrandFont.subhead)
                             .foregroundStyle(StrandPalette.textSecondary)
                     } else {
-                        Text("Connected. Reading on launch and when you return to NOOP.")
+                        Text(health.backgroundDeliveryAvailable
+                             ? "Access requested. Apple may deliver Health updates in the background on its schedule; NOOP also catches up when you open the app."
+                             : "Access requested. This signed build does not include Apple's background-delivery entitlement, so NOOP catches up when you open the app.")
                             .font(StrandFont.subhead)
                             .foregroundStyle(StrandPalette.textSecondary)
                     }
@@ -453,6 +470,18 @@ struct AppleHealthView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(StrandPalette.metricCyan)
+                    .disabled(health.syncing)
+                    Button {
+                        Task {
+                            await health.requestAuthorization()
+                            await health.sync()
+                            await load()
+                        }
+                    } label: {
+                        Label("Review Health access", systemImage: "checklist")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(StrandPalette.textSecondary)
                     .disabled(health.syncing)
                 }
 
@@ -495,6 +524,12 @@ struct AppleHealthView: View {
             statTile(key: "lean_mass", label: "Lean Mass",
                      accent: StrandPalette.accent,
                      fmt: { massLabel($0) })
+            statTile(key: "body_temp", label: "Body Temperature",
+                     accent: StrandPalette.metricRose,
+                     fmt: { temperatureLabel($0) })
+            statTile(key: "wrist_temp", label: "Wrist Temperature",
+                     accent: StrandPalette.metricCyan,
+                     fmt: { temperatureLabel($0) })
             statTile(key: "asleep_min", label: "Asleep avg",
                      accent: StrandPalette.metricPurple,
                      aggregate: .mean, fmt: { durationString($0) })
@@ -569,6 +604,12 @@ struct AppleHealthView: View {
             chartCard(title: "Respiratory rate", key: "resp_rate",
                       gradient: accentGradient, fallback: 10...22,
                       fmt: { String(format: "%.1f rpm", $0) })
+            chartCard(title: "Body temperature", key: "body_temp",
+                      gradient: roseGradient, fallback: 35...40,
+                      fmt: { temperatureLabel($0) })
+            chartCard(title: "Sleeping wrist temperature", key: "wrist_temp",
+                      gradient: cyanGradient, fallback: 28...38,
+                      fmt: { temperatureLabel($0) })
         }
     }
 
@@ -606,7 +647,7 @@ struct AppleHealthView: View {
 
     private var sleepSection: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Sleep", overline: "Rest",
+            SectionHeader("Sleep", overline: "Sleep Score",
                           trailing: range.caption)
             chartCard(title: "Asleep", key: "asleep_min",
                       gradient: purpleGradient, fallback: 240...600,
@@ -822,7 +863,8 @@ private func appleHealthPreviewData() -> AppleHealthView.PreviewData {
     var series: [String: [(day: String, value: Double)]] = [
         "steps": [], "active_kcal": [], "vo2max": [],
         "resting_hr": [], "hrv": [], "spo2": [], "resp_rate": [], "asleep_min": [],
-        "weight": [], "body_fat": [], "lean_mass": [], "bmi": []
+        "weight": [], "body_fat": [], "lean_mass": [], "bmi": [],
+        "body_temp": [], "wrist_temp": []
     ]
 
     // Seed ~2 years so the range control has real depth to window into.
@@ -843,6 +885,8 @@ private func appleHealthPreviewData() -> AppleHealthView.PreviewData {
         let bodyFat = 18.0 - 3.0 * sin(phase / 240.0) + 0.4 * sin(phase / 11.0)
         let lean   = weight * (1.0 - bodyFat / 100.0)
         let bmi    = weight / (1.78 * 1.78)
+        let bodyTemp = 36.7 + 0.18 * sin(phase / 17.0)
+        let wristTemp = 34.1 + 0.35 * sin(phase / 13.0)
 
         rows.append(AppleDaily(
             day: day,
@@ -863,6 +907,8 @@ private func appleHealthPreviewData() -> AppleHealthView.PreviewData {
         series["spo2"]?.append((day, min(100, spo2)))
         series["resp_rate"]?.append((day, resp))
         series["asleep_min"]?.append((day, max(180, asleep)))
+        if Int(phase) % 30 == 0 { series["body_temp"]?.append((day, bodyTemp)) }
+        if Int(phase) % 2 == 0 { series["wrist_temp"]?.append((day, wristTemp)) }
         // Body composition is logged once a week → deliberately sparse, to exercise
         // the trailing-window → ALL fallback (a W/M view would otherwise be empty).
         if Int(phase) % 7 == 0 {

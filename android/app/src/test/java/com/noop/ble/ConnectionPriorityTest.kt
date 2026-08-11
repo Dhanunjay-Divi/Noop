@@ -148,4 +148,19 @@ class ConnectionPriorityTest {
         // threshold 0 → normal cadence always
         assertEquals(base, WhoopBleClient.offloadIntervalMsFor(base, low, batteryPct = 3, charging = false, thresholdPct = 0))
     }
+
+    @Test fun whoop5EmptyHistoryStretchesToLowFloor() {
+        assertEquals(low, WhoopBleClient.whoop5EmptyHistoryBackfillIntervalMs(base, low, historyEmpty = true))
+    }
+
+    @Test fun whoop5NonEmptyHistoryStaysAtBase() {
+        assertEquals(base, WhoopBleClient.whoop5EmptyHistoryBackfillIntervalMs(base, low, historyEmpty = false))
+    }
+
+    @Test fun whoop5EmptyHistoryNeverShortensCadence() {
+        assertEquals(
+            base,
+            WhoopBleClient.whoop5EmptyHistoryBackfillIntervalMs(base, 300_000L, historyEmpty = true),
+        )
+    }
 }

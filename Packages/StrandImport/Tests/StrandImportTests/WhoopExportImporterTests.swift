@@ -94,6 +94,28 @@ final class WhoopExportImporterTests: XCTestCase {
         XCTAssertEqual(r1.recoveryScore, 55)
     }
 
+    func testCycleSkinTemperatureFahrenheitIsNormalizedToCelsius() throws {
+        let csv = """
+        Cycle start time,Cycle timezone,Skin temp (F)
+        2026-01-01 06:00:00,UTC+00:00,95
+        """
+        let row = try XCTUnwrap(
+            WhoopExportImporter().parseCycles(CSVTable(text: csv)).first
+        )
+        XCTAssertEqual(try XCTUnwrap(row.skinTempCelsius), 35, accuracy: 1e-9)
+    }
+
+    func testCycleSkinTemperaturePrefersExplicitCelsiusWhenBothUnitsExist() throws {
+        let csv = """
+        Cycle start time,Cycle timezone,Skin temp (celsius),Skin temp (F)
+        2026-01-01 06:00:00,UTC+00:00,34.2,95
+        """
+        let row = try XCTUnwrap(
+            WhoopExportImporter().parseCycles(CSVTable(text: csv)).first
+        )
+        XCTAssertEqual(try XCTUnwrap(row.skinTempCelsius), 34.2, accuracy: 1e-9)
+    }
+
     // MARK: - workouts.csv WITHOUT GPS columns
 
     func testWorkoutsWithoutGPSColumnsStillParse() throws {

@@ -83,12 +83,18 @@ public final class OuraDriver {
     /// injected one (so re-auth after a key install uses the new key). Per OURA_PROTOCOL.md s3.2.
     private var effectiveKey: [UInt8]? { installedKey ?? authKey }
 
+    /// Wall-clock "now" in unix milliseconds. This is injectable so the future-sample guard is
+    /// deterministic in tests without making callers thread a clock through every ingest operation.
+    private let nowMsProvider: () -> Int64
+
     public init(ringGen: OuraRingGen, authKey: [UInt8]?, allowTierB: Bool = false,
-                allowKeyInstall: Bool = false) {
+                allowKeyInstall: Bool = false,
+                nowMsProvider: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }) {
         self.ringGen = ringGen
         self.authKey = authKey
         self.allowTierB = allowTierB
         self.allowKeyInstall = allowKeyInstall
+        self.nowMsProvider = nowMsProvider
     }
 
     // MARK: - Command flow
@@ -219,12 +225,14 @@ public final class OuraDriver {
         guard let anchorUtcMs, let anchorRingTime else { return nil }
         let deltaTicks = Int64(rt) - Int64(anchorRingTime)
         let ms = anchorUtcMs + deltaTicks * 100   // default 100 ms/tick (s5.5); bounded input, no overflow
-        // #968: a corrupt/misaligned ring timestamp (seen on a full cursor=0 history dump) can convert to
-        // an implausible epoch. Gate the RESULT to the same 2020-2035 plausible window used for anchoring
-        // (was a weak `ms > 0`), so the caller honestly falls back to arrival time instead of banking a
-        // 1970 or far-future sample.
+        // A banked sample must not land materially in the future. Anchor adoption deliberately keeps its
+        // broad 2020-2035 plausibility window, but using that window for samples allowed corrupt ring time
+        // to file real beats years ahead of the night that produced them. Return nil so the caller uses its
+        // explicit fallback timestamp instead of poisoning future scoring windows.
         let seconds = ms / 1000
-        guard seconds >= Self.minPlausibleEpochSeconds, seconds <= Self.maxPlausibleEpochSeconds else { return nil }
+        let nowSeconds = nowMsProvider() / 1000
+        guard seconds >= Self.minPlausibleEpochSeconds,
+              seconds <= nowSeconds + Self.sampleFutureToleranceSeconds else { return nil }
         return Int(seconds)
     }
 
@@ -235,6 +243,10 @@ public final class OuraDriver {
     /// Int64 (a naive multiply on a near-Int64.max raw value traps).
     private static let minPlausibleEpochSeconds: Int64 = 1_577_836_800
     private static let maxPlausibleEpochSeconds: Int64 = 2_051_222_400
+
+    /// Allows normal clock skew and anchor rounding without accepting samples banked days or years ahead.
+    /// This applies only to converted samples, never to anchor adoption.
+    private static let sampleFutureToleranceSeconds: Int64 = 300
 
     private static func plausibleAnchorMs(fromEpochSeconds seconds: Int64) -> Int64? {
         guard seconds >= minPlausibleEpochSeconds, seconds <= maxPlausibleEpochSeconds else { return nil }
@@ -272,8 +284,9 @@ public final class OuraDriver {
         case .spo2IbiAmplitude:
             return (OuraDecoders.decodeSpO2IBI(record) ?? []).map { OuraEvent.ibi($0) }
         case .ibi:
-            // The bare 0x44 IBI tag shares the bit-packed layout family; route through the same decoder.
-            return (OuraDecoders.decodeIBIAmplitude(record) ?? []).map { OuraEvent.ibi($0) }
+            // Same layout as 0x60, but retain its distinct on-wire source label.
+            return (OuraDecoders.decodeIBIAmplitude(record, channel: .ibiBare) ?? [])
+                .map { OuraEvent.ibi($0) }
 
         // --- Tier A: HRV ---
         case .hrvRmssd:

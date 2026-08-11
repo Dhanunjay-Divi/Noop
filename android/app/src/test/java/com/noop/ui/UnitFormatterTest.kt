@@ -77,6 +77,9 @@ class UnitFormatterTest {
         assertEquals("74.5 kg", UnitFormatter.massFromKilograms(74.5, UnitSystem.METRIC))
         // 74.5 * 2.20462 = 164.24419 → "164.2 lb"
         assertEquals("164.2 lb", UnitFormatter.massFromKilograms(74.5, UnitSystem.IMPERIAL))
+        assertEquals("74.5 kg", UnitFormatter.massFromKilograms(74.5, MassUnit.KILOGRAMS))
+        assertEquals("164.2 lb", UnitFormatter.massFromKilograms(74.5, MassUnit.POUNDS))
+        assertEquals(74.5, UnitFormatter.poundsToKg(UnitFormatter.kgToPounds(74.5)), 1e-9)
     }
 
     // --- Height formatting ---
@@ -92,6 +95,8 @@ class UnitFormatterTest {
         assertEquals("5′ 10″", UnitFormatter.heightFromCentimeters(178.0, UnitSystem.IMPERIAL))
         // 152.4 cm = exactly 60 in = 5 ft 0 in
         assertEquals("5′ 0″", UnitFormatter.heightFromCentimeters(152.4, UnitSystem.IMPERIAL))
+        assertEquals("5′ 10″", UnitFormatter.heightFromCentimeters(178.0, HeightUnit.FEET_INCHES))
+        assertEquals(178.0, UnitFormatter.inchesToCm(UnitFormatter.cmToInches(178.0)), 1e-9)
     }
 
     @Test
@@ -131,6 +136,16 @@ class UnitFormatterTest {
         assertEquals(TemperatureUnit.FAHRENHEIT, UnitPrefs.resolveTemperature(UnitSystem.METRIC, "fahrenheit"))
     }
 
+    @Test
+    fun independentBodyUnitResolutionPreservesLegacyThenAllowsMixedUnits() {
+        assertEquals(MassUnit.KILOGRAMS, UnitPrefs.resolveMass(UnitSystem.METRIC, null))
+        assertEquals(MassUnit.POUNDS, UnitPrefs.resolveMass(UnitSystem.IMPERIAL, null))
+        assertEquals(HeightUnit.CENTIMETERS, UnitPrefs.resolveHeight(UnitSystem.METRIC, null))
+        assertEquals(HeightUnit.FEET_INCHES, UnitPrefs.resolveHeight(UnitSystem.IMPERIAL, null))
+        assertEquals(MassUnit.KILOGRAMS, UnitPrefs.resolveMass(UnitSystem.IMPERIAL, "kg"))
+        assertEquals(HeightUnit.FEET_INCHES, UnitPrefs.resolveHeight(UnitSystem.METRIC, "ft_in"))
+    }
+
     // --- Unit labels ---
 
     @Test
@@ -139,6 +154,8 @@ class UnitFormatterTest {
         assertEquals("mi", UnitFormatter.distanceUnit(UnitSystem.IMPERIAL))
         assertEquals("kg", UnitFormatter.massUnit(UnitSystem.METRIC))
         assertEquals("lb", UnitFormatter.massUnit(UnitSystem.IMPERIAL))
+        assertEquals("kg", UnitFormatter.massUnit(MassUnit.KILOGRAMS))
+        assertEquals("lb", UnitFormatter.massUnit(MassUnit.POUNDS))
         assertEquals("°C", UnitFormatter.temperatureUnit(TemperatureUnit.CELSIUS))
         assertEquals("°F", UnitFormatter.temperatureUnit(TemperatureUnit.FAHRENHEIT))
     }
@@ -153,5 +170,9 @@ class UnitFormatterTest {
         assertEquals(TemperatureUnit.CELSIUS, TemperatureUnit.fromRaw("celsius"))
         assertEquals(TemperatureUnit.FAHRENHEIT, TemperatureUnit.fromRaw("fahrenheit"))
         assertEquals(null, TemperatureUnit.fromRaw(""))
+        assertEquals(MassUnit.KILOGRAMS, MassUnit.fromRaw("kg"))
+        assertEquals(MassUnit.POUNDS, MassUnit.fromRaw("lb"))
+        assertEquals(HeightUnit.CENTIMETERS, HeightUnit.fromRaw("cm"))
+        assertEquals(HeightUnit.FEET_INCHES, HeightUnit.fromRaw("ft_in"))
     }
 }

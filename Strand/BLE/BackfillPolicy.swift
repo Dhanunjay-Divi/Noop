@@ -15,6 +15,22 @@ enum BackfillTrigger {
                        // so it can't loop forever the way an un-floored periodic could.
 }
 
+/// Pure bookkeeping for the empty-offload streak fed into `BackfillPolicy`. A timeout with zero rows is
+/// just as empty as a clean HISTORY_COMPLETE with zero rows, while the empty tail after a productive
+/// auto-continue burst must neither increment nor clear the existing streak.
+enum EmptyOffloadBackoff {
+    static func nextStreak(currentStreak: Int, rowsPersisted: Int,
+                           productiveBurstTail: Bool) -> Int {
+        if rowsPersisted > 0 { return 0 }
+        if productiveBurstTail { return currentStreak }
+        return currentStreak + 1
+    }
+
+    static func effectiveStreak(consoleOnlyStreak: Int, emptyOffloadStreak: Int) -> Int {
+        max(consoleOnlyStreak, emptyOffloadStreak)
+    }
+}
+
 /// Pure rate-limiter for historical-offload kicks. No BLE/store deps. Floors match WHOOP
 /// (observed: ~15-min periodic + expedited event syncs).
 enum BackfillPolicy {

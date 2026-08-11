@@ -11,14 +11,14 @@ import kotlin.math.sqrt
  * BYTE-PARITY on the detection logic (same thresholds, same span/merge/overlap rules,
  * same outputs), verified by the mirrored unit tests on each platform.
  *
- * This is DELIBERATELY SEPARATE from [WorkoutDetector] (the exercise.py port that computes
- * calories / zones / strain and writes the durable "detected" rows the IntelligenceEngine
- * churns). This one is the lightweight, OPT-IN, NON-DESTRUCTIVE MVP that only ever SUGGESTS
- * a workout via a dismissible Today card — it never writes a row on its own. The user taps
- * "Save" to turn a suggestion into a manual workout, or X to dismiss it forever.
+ * This is DELIBERATELY SEPARATE from [WorkoutDetector] (the internal scoring detector). This one is the
+ * canonical PURE detector. This component never performs I/O; the app-level Off / Ask / Auto-save
+ * policy decides whether a candidate is ignored, shown for approval, or persisted as a Detected row.
  *
- * The thresholds here are intentionally CONSERVATIVE (low sensitivity): a sustained ≥12-min
- * elevation of HR ≥ resting+30 bpm, brief (≤90 s) dips tolerated, near windows merged. This
+ * The thresholds here are intentionally CONSERVATIVE (low sensitivity): a sustained ≥10-min
+ * elevation of HR ≥ resting+30 bpm, brief (≤90 s) dips tolerated, near windows merged. A window
+ * is offered only after the stream contains >90 s of post-session quiet; an elevated span at the
+ * end of the available data is still in progress and is never suggested. This
  * is tuned to avoid false positives from stress / caffeine / a brief flight of stairs, at the
  * cost of missing the odd short or gentle session — exactly right for a SUGGESTION you can
  * decline. An OPTIONAL continuous motion signal, when one is readily available, is required as
@@ -35,14 +35,14 @@ object AutoWorkoutDetector {
     /** Elevated gate: bpm must be at least restingHR + this margin to count as "working". */
     const val elevatedMarginBPM: Int = 30
 
-    /** A candidate must hold the elevated gate for a contiguous span of at least this long. */
-    const val minSustainedMin: Double = 12.0
+    /** WHOOP's Jan 2026 baseline: hold the elevated gate for at least 10 minutes. */
+    const val minSustainedMin: Double = 10.0
 
     /** A dip below the gate no longer than this does NOT break the span (a red light, a sip of water). */
     const val maxDipS: Long = 90L
 
-    /** Two detected windows whose gap is strictly less than this are merged into one. */
-    const val mergeGapS: Long = 5L * 60L // 5 min
+    /** WHOOP's June 2026 fragment rule: nearby detected fragments within an hour form one activity. */
+    const val mergeGapS: Long = 60L * 60L
 
     /**
      * When an OPTIONAL continuous motion series is supplied, a window must ALSO show elevated motion
@@ -52,8 +52,35 @@ object AutoWorkoutDetector {
      */
     const val motionConfirmMean: Double = 0.05
 
+    /** Sparse motion cannot honestly veto an otherwise-valid HR candidate. */
+    const val motionConfirmationMinSamples: Int = 30
+    const val motionConfirmationMinSpanS: Long = 60L
+
+    const val maxHRSampleGapS: Long = 60L
+    const val minHRSamples: Int = 60
+    const val maxSecondsPerHRSample: Long = 15L
+
     /** Resting-HR fallback when the caller has no nightly RHR for the day. */
     const val defaultRestingHR: Int = 60
+
+    internal fun effectiveRestingBPM(restingHR: Int?, hr: List<HrSample>): Int {
+        if (restingHR != null && restingHR in 30..120) return restingHR
+        val values = hr.map { it.bpm }.filter { it in 30..220 }.sorted()
+        if (values.isEmpty()) return defaultRestingHR
+        val index = kotlin.math.floor((values.size - 1) * 0.10).toInt()
+        return values[index].coerceIn(defaultRestingHR, 100)
+    }
+
+    internal fun hasSufficientHRCoverage(window: List<HrSample>, start: Long, end: Long): Boolean {
+        if (end <= start) return false
+        val ordered = window.sortedBy { it.ts }
+        val required = maxOf(
+            minHRSamples,
+            kotlin.math.ceil((end - start).toDouble() / maxSecondsPerHRSample.toDouble()).toInt(),
+        )
+        if (ordered.size < required) return false
+        return ordered.zipWithNext().all { (a, b) -> b.ts - a.ts <= maxHRSampleGapS }
+    }
 
     /**
      * A detected workout window. All fields are derived purely from the HR samples inside the window.
@@ -66,7 +93,35 @@ object AutoWorkoutDetector {
         val avgBpm: Int,
         val peakBpm: Int,
         val durationMin: Int,
+        /** Advisory broad-type hint attached after detection; null means the evidence was unclear. */
+        val suggestedClass: CoarseWorkoutClass? = null,
+        val suggestionConfidence: Double? = null,
     )
+
+    sealed interface MotionConfirmation {
+        data object Unavailable : MotionConfirmation
+        data class Confirmed(val mean: Double) : MotionConfirmation
+        data class Rejected(val mean: Double) : MotionConfirmation
+    }
+
+    /**
+     * Require at least 30 motion points spanning the smaller of five minutes or one quarter of the
+     * candidate. Missing/sparse motion returns [MotionConfirmation.Unavailable] and cannot veto HR.
+     */
+    internal fun motionConfirmation(
+        motion: Map<Long, Double>,
+        start: Long,
+        end: Long,
+    ): MotionConfirmation {
+        if (end <= start) return MotionConfirmation.Unavailable
+        val inWindow = motion.entries.filter { it.key in start..end }.sortedBy { it.key }
+        if (inWindow.size < motionConfirmationMinSamples) return MotionConfirmation.Unavailable
+        val requiredSpan = minOf(5L * 60L, maxOf(motionConfirmationMinSpanS, (end - start) / 4L))
+        if (inWindow.last().key - inWindow.first().key < requiredSpan) return MotionConfirmation.Unavailable
+        val mean = inWindow.sumOf { it.value } / inWindow.size.toDouble()
+        return if (mean >= motionConfirmMean) MotionConfirmation.Confirmed(mean)
+        else MotionConfirmation.Rejected(mean)
+    }
 
     /** Sorted (ts, bpm) HR pairs, ascending by ts. */
     private fun cleanHR(hr: List<HrSample>): List<HrSample> = hr.sortedBy { it.ts }
@@ -105,8 +160,9 @@ object AutoWorkoutDetector {
      *  2. Grow a contiguous span across elevated samples. A run of NON-elevated samples is tolerated
      *     (does not end the span) ONLY while the dip's wall-clock duration stays <= [maxDipS]; a longer
      *     dip closes the span. The span's [start, end] are the first/last ELEVATED sample timestamps.
-     *  3. Keep a span only when it lasts >= [minSustainedMin].
-     *  4. Merge two kept spans when the gap between them is strictly < [mergeGapS].
+     *  3. Keep a span only when it lasts >= [minSustainedMin] AND a later below-threshold quiet tail
+     *     exceeds [maxDipS]. An open span at end-of-input is still in progress and is not emitted.
+     *  4. Merge two kept spans when the gap between them is <= [mergeGapS].
      *  5. If a motion series is supplied, drop a window unless its mean motion intensity over the window
      *     is >= [motionConfirmMean] (confirmation). With no motion series, HR-only — keep it.
      *  6. Drop a window that OVERLAPS any [savedWorkouts] [start, end] span (never re-suggest a logged one).
@@ -126,7 +182,7 @@ object AutoWorkoutDetector {
         val seg = cleanHR(hr)
         if (seg.isEmpty()) return emptyList()
 
-        val floor = (restingHR ?: defaultRestingHR) + elevatedMarginBPM
+        val floor = effectiveRestingBPM(restingHR, seg) + elevatedMarginBPM
 
         // --- 1+2+3: grow sustained spans tolerating brief dips ---
         // A span is [spanStart, spanEnd] over ELEVATED-sample timestamps. `dipStart` marks where the
@@ -157,17 +213,19 @@ object AutoWorkoutDetector {
                 if ((sample.ts - d) > maxDipS) closeSpan()
             }
         }
-        closeSpan()
+        // Deliberately DO NOT close an open span at end-of-input. Until a below-threshold tail lasts
+        // longer than maxDipS, the workout may still be in progress and its endpoint is not stable.
+        // The next scan will close it once enough post-session HR has arrived.
 
         if (spans.isEmpty()) return emptyList()
 
-        // --- 4: merge spans whose gap is strictly < mergeGapS (spans are start-ascending by build) ---
+        // --- 4: merge spans whose gap is <= mergeGapS (spans are start-ascending by build) ---
         val merged = ArrayList<Pair<Long, Long>>()
         var curStart = spans[0].first
         var curEnd = spans[0].second
         for (k in 1 until spans.size) {
             val next = spans[k]
-            if ((next.first - curEnd) < mergeGapS) {
+            if ((next.first - curEnd) <= mergeGapS) {
                 curEnd = maxOf(curEnd, next.second)
             } else {
                 merged.add(curStart to curEnd)
@@ -186,12 +244,11 @@ object AutoWorkoutDetector {
 
             val window = seg.filter { it.ts in start..end }
             if (window.isEmpty()) continue
+            if (!hasSufficientHRCoverage(window, start, end)) continue
 
-            // 5: motion confirmation, only when a continuous motion series was supplied.
+            // 5: sufficiently-covered motion can confirm or reject. Sparse motion falls back to HR-only.
             if (motion.isNotEmpty()) {
-                val inWin = motion.entries.filter { it.key in start..end }.map { it.value }
-                val meanMotion = if (inWin.isEmpty()) 0.0 else inWin.sum() / inWin.size.toDouble()
-                if (meanMotion < motionConfirmMean) continue
+                if (motionConfirmation(motion, start, end) is MotionConfirmation.Rejected) continue
             }
 
             val bpms = window.map { it.bpm }

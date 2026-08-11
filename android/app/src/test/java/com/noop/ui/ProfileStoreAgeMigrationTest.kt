@@ -2,6 +2,7 @@ package com.noop.ui
 
 import android.content.SharedPreferences
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -19,6 +20,32 @@ import org.junit.Test
  * that reproduces the SharedPreferences read/write contract.
  */
 class ProfileStoreAgeMigrationTest {
+
+    @Test
+    fun seedValuesAreNotConfirmed_untilUserAcceptsEachInput() {
+        val prefs = FakeSharedPreferences()
+        val profile = ProfileStore(prefs)
+        assertEquals(30, profile.age) // materialises the seed DOB but must not confirm it
+        assertEquals("male", profile.sex)
+        assertFalse(profile.ageInputConfirmed)
+        assertFalse(profile.sexInputConfirmed)
+        assertFalse(profile.fitnessInputsConfirmed)
+
+        profile.setAge(41)
+        assertTrue(profile.ageInputConfirmed)
+        assertFalse(profile.fitnessInputsConfirmed)
+        profile.sex = "female"
+        assertTrue(profile.fitnessInputsConfirmed)
+    }
+
+    @Test
+    fun legacyCompletedOnboardingMigratesBothInputs() {
+        assertTrue(ProfileStore.fitnessInputsAreConfirmed(
+            ageConfirmed = false,
+            sexConfirmed = false,
+            onboardingCompleted = true,
+        ))
+    }
 
     @Test
     fun freshInstall_defaultsTo30_andPersistsADob() {
@@ -59,6 +86,23 @@ class ProfileStoreAgeMigrationTest {
         profile.setAge(50)
         assertEquals(50, profile.age)
         assertEquals("legacy age key stays mirrored for the backup whitelist", 50, prefs.getInt("age", -1))
+        assertTrue(profile.fitnessAgeProvenanceRequired)
+        assertTrue(profile.vo2maxProvenanceRequired)
+        assertTrue(profile.vitalityProvenanceRequired)
+    }
+
+    @Test
+    fun sexAndWaistChangesInvalidateOnlyTheirDependentAgeMetrics() {
+        val profile = ProfileStore(FakeSharedPreferences())
+        profile.waistCm = 82.0
+        assertFalse(profile.fitnessAgeProvenanceRequired)
+        assertTrue(profile.vo2maxProvenanceRequired)
+        assertFalse(profile.vitalityProvenanceRequired)
+
+        profile.sex = "female"
+        assertTrue(profile.fitnessAgeProvenanceRequired)
+        assertTrue(profile.vo2maxProvenanceRequired)
+        assertFalse(profile.vitalityProvenanceRequired)
     }
 
     @Test

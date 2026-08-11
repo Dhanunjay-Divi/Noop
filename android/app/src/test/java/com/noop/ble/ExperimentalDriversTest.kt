@@ -100,8 +100,8 @@ class ExperimentalDriversTest {
     }
 
     @Test
-    fun onlyOuraCannotStreamLive() {
-        assertFalse(ExperimentalBrand.OURA.canStreamLiveHR)
+    fun everyExperimentalBrandCanStreamLive() {
+        assertTrue(ExperimentalBrand.OURA.canStreamLiveHR)
         assertTrue(ExperimentalBrand.AMAZFIT.canStreamLiveHR)
         assertTrue(ExperimentalBrand.MI_BAND.canStreamLiveHR)
         assertTrue(ExperimentalBrand.GARMIN.canStreamLiveHR)

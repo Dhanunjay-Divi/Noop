@@ -175,10 +175,15 @@ final class TodayExplainabilityTests: XCTestCase {
         XCTAssertEqual(s, .lastSynced(minutesAgo: 2))
     }
 
-    func testRecordingState_connectedNoLiveHR_noSync_isNotRecording() {
-        // Connected, no live HR, and nothing ever synced → "Not recording" (never a false "Recording").
+    func testRecordingState_connectedNoLiveHR_noSync_isConnectedNoData() {
         let s = RecordingState.resolve(connected: true, heartRate: nil, lastSyncedAt: nil, now: 10_000)
-        XCTAssertEqual(s, .notRecording)
+        XCTAssertEqual(s, .connectedNoData)
+    }
+
+    func testRecordingState_sustainedEmptyKeepsConnectionHonest() {
+        let s = RecordingState.resolve(connected: true, heartRate: nil, lastSyncedAt: 9_900,
+                                       sustainedEmptyOffload: true, now: 10_000)
+        XCTAssertEqual(s, .connectedNoData)
     }
 
     func testRecordingState_notConnectedWithStaleHR_isNotRecording() {
@@ -238,7 +243,8 @@ final class TodayExplainabilityTests: XCTestCase {
     }
 
     func testRecordingState_copy_hasNoEmDash() {
-        let states: [RecordingState] = [.recording, .lastSynced(minutesAgo: 5), .notRecording]
+        let states: [RecordingState] = [.recording, .lastSynced(minutesAgo: 5), .notRecording,
+                                        .connectedNoData]
         for s in states {
             XCTAssertFalse(s.accessibilityText.contains("\u{2014}"),
                            "RecordingState \(s) must not contain an em-dash")

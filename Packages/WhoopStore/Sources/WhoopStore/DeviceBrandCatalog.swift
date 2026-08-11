@@ -21,8 +21,8 @@ public struct DeviceBrandSpec: Sendable, Equatable {
     public let sourceKind: SourceKind
     /// The registry id prefix for a device of this brand ("huami", "oura", "garmin", "strap").
     public let idPrefix: String
-    /// Whether this brand can stream LIVE heart rate at all in NOOP. `false` for Oura (no open live stream)
-    /// — the wizard routes those to import instead of pretending to connect.
+    /// Whether this brand can stream LIVE heart rate at all in NOOP. Oura uses NOOP's experimental,
+    /// authenticated custom-protocol source; standard chest straps use the open 0x180D service.
     public let canStreamLiveHR: Bool
     /// True for the opt-in EXPERIMENTAL tier (Amazfit / Mi Band / Garmin / Oura); false for the shipped
     /// generic HR straps (Polar / Wahoo / …). `ExperimentalBrand.recognise` returns only these.
@@ -53,7 +53,7 @@ public enum DeviceBrandCatalog {
                         nameTokens: ["garmin", "forerunner", "fenix", "vivoactive", "venu", "instinct", "epix", "vivosmart", "hrm"],
                         sourceKind: .liveBLE, idPrefix: "garmin", canStreamLiveHR: true, isExperimentalTier: true),
         DeviceBrandSpec(brand: "Oura", nameTokens: ["oura"],
-                        sourceKind: .oura, idPrefix: "oura", canStreamLiveHR: false, isExperimentalTier: true),
+                        sourceKind: .oura, idPrefix: "oura", canStreamLiveHR: true, isExperimentalTier: true),
         // Shipped generic HR straps — standard 0x180D broadcast, labelled for display only. All route as a
         // generic live-BLE strap; the wizard picks these through the "Heart-rate strap" type.
         DeviceBrandSpec(brand: "Polar", nameTokens: ["polar"],

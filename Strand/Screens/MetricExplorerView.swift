@@ -220,50 +220,32 @@ private let readingShortDateFormatter: DateFormatter = {
 /// MetricDetailView. A faint trailing "•" marks metrics whose series is empty.
 struct MetricExplorerView: View {
     @EnvironmentObject var repo: Repository
-    /// metric.id → whether its series is empty. Filled INCREMENTALLY by `probeEmptiness()`; a metric
+    /// metric.id → whether its series is empty. Filled INCREMENTALLY by each visible category's probe; a metric
     /// absent from the map simply has no empty-dot yet (rows never wait on it — see `MetricRow`).
     @State private var emptyByID: [String: Bool] = [:]
     @State private var probedRefreshSeq: Int?
-    /// True while the empty-dot probe is still running its first pass. Drives a small inline progress
-    /// hint in the header, never gating the rows: the catalog is static, so every row's label/icon/unit
-    /// must paint immediately even before any series read returns (#199).
-    @State private var probing = true
 
     var body: some View {
         #if os(macOS)
         // macOS: Explore is a standalone detail pane, so it owns its NavigationStack.
         NavigationStack { exploreScaffold }
-            .task(id: repo.refreshSeq) { await probeEmptiness(refreshSeq: repo.refreshSeq) }
         #else
         // iOS: Explore is pushed INSIDE the More tab's NavigationStack. A nested NavigationStack made
         // tapping a metric bounce straight back to the More list (#199) — so use the ambient stack; the
         // rows push their detail with a direct closure-based NavigationLink (#38).
         exploreScaffold
-            .task(id: repo.refreshSeq) { await probeEmptiness(refreshSeq: repo.refreshSeq) }
         #endif
     }
 
     private var exploreScaffold: some View {
         // PERF (scroll): lazy column. Unlike most screens, Explore's content is a flat list of sibling
-        // sections (the probe hint, the Deep Timeline row, then a long per-category ForEach of metric
+        // sections (the Deep Timeline row, then a long per-category ForEach of metric
         // cards), so LazyVStack genuinely builds the off-screen category cards on demand. No
         // `staggeredAppear` here and identical column alignment/spacing (20) + per-child bottom padding,
         // so the layout is byte-identical to the eager VStack.
         ScreenScaffold(title: "Explore", subtitle: "Every signal, one tap deep.",
                        onRefresh: { await repo.refresh() }, lazy: true,
                        topBackground: liquidScaffoldSky()) {
-            // A quiet, non-blocking hint while the empty-dot probe runs its first pass. The rows below
-            // render in full immediately regardless — this only reassures during the scan, and never
-            // leaves the screen reading as a bare/empty list before the probe lands (#199).
-            if probing {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Scanning your data…")
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
             // The headline tap-through (#575): a full-day, full-resolution, zoomable timeline. Sits above
             // the per-metric catalog because it's a different kind of view — every second of one day rather
             // than one number per day. Closure-based NavigationLink, matching the metric rows below (#38/#199).
@@ -321,6 +303,11 @@ struct MetricExplorerView: View {
                         }
                     }
                     .padding(.bottom, NoopMetrics.sectionGap - 20)
+                    // ScreenScaffold's outer column is lazy, so only an on-screen category pays for its
+                    // no-data-dot checks. Opening Explore no longer performs a full-catalog history sweep.
+                    .task(id: repo.refreshSeq) {
+                        await probeEmptiness(metrics: metrics, refreshSeq: repo.refreshSeq)
+                    }
                 }
             }
         }
@@ -363,29 +350,20 @@ struct MetricExplorerView: View {
         .accessibilityAddTraits(.isButton)
     }
 
-    /// One lightweight pass to learn which metrics have no series, so rows can flag them with the
-    /// faint trailing dot. Failures default to "has data" (no dot).
-    ///
-    /// Crucially this assigns into `emptyByID` PER METRIC, not in one final batch (#199): the previous
-    /// version ran ~35 sequential `exploreSeries` reads — each hopping back to the @MainActor Repository
-    /// — before publishing a single result, so on iOS the main thread stayed busy and the freshly-pushed
-    /// list painted blank until the whole sweep finished. Publishing each result (with a `Task.yield()`
-    /// between reads so the run loop can lay the rows out) lets the catalog rows render immediately and
-    /// the dots fill in as the probe lands. Rows already render their label/icon/unit without waiting on
-    /// this — the map only ever ADDS a trailing dot.
-    private func probeEmptiness(refreshSeq: Int) async {
-        guard probedRefreshSeq != refreshSeq || emptyByID.isEmpty else { probing = false; return }
-        probedRefreshSeq = refreshSeq
-        emptyByID = [:]
-        probing = true
-        for metric in MetricCatalog.all {
+    /// Demand-driven empty-dot probe for one visible category. Failures default to "has data" (no dot).
+    /// Results publish per metric, so labels/icons never wait on store reads.
+    private func probeEmptiness(metrics: [MetricDescriptor], refreshSeq: Int) async {
+        if probedRefreshSeq != refreshSeq {
+            probedRefreshSeq = refreshSeq
+            emptyByID = [:]
+        }
+        for metric in metrics where emptyByID[metric.id] == nil {
             guard !Task.isCancelled else { return }
             let s = await repo.exploreSeries(key: metric.key, source: metric.source)
             guard !Task.isCancelled else { return }
             emptyByID[metric.id] = s.isEmpty
             await Task.yield()
         }
-        probing = false
     }
 }
 
@@ -398,25 +376,20 @@ private struct MetricRow: View {
     // Trailing unit chip follows the Imperial/Metric preference (kg→lb, °C→°F) and the Effort scale
     // (/100→/21, #268).
     @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    @AppStorage(UnitPrefs.massKey) private var massUnitRaw = ""
     @AppStorage(UnitPrefs.temperatureKey) private var temperatureRaw = ""
     @AppStorage(UnitPrefs.effortScaleKey) private var effortScaleRaw = EffortScale.hundred.rawValue
     private var unitLabel: String {
         let system = UnitSystem(rawValue: unitSystemRaw) ?? .metric
+        let mass = UnitPrefs.resolveMass(system: system, override: massUnitRaw)
         let temp = UnitPrefs.resolveTemperature(system: system, override: temperatureRaw)
         let effort = UnitPrefs.resolveEffortScale(effortScaleRaw)
-        return metric.displayUnit(system: system, temperature: temp, effortScale: effort)
+        return metric.displayUnit(system: system, temperature: temp, effortScale: effort, mass: mass)
     }
 
     var body: some View {
         HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(StrandPalette.surfaceInset)
-                Image(systemName: metric.icon)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(metricAccent(metric))
-            }
-            .frame(width: 34, height: 34)
+            MetricGlyph(metric.icon, size: 34)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(metric.title)
@@ -465,10 +438,9 @@ private struct MetricRow: View {
 struct MetricDetailView: View {
     let metric: MetricDescriptor
     @EnvironmentObject var repo: Repository
-    /// #430 parity: the detail carries the SAME backdrop as the screen that pushed it — the day-cycle sky
-    /// when the setting is on, the plain canvas when off — so a Key-Metrics tile tap doesn't jar from the
-    /// liquid Today's sky to a flat page. Same keys TodayView/LiquidTodayView gate on; "Sky behind cards"
-    /// extends the sky to the full viewport (softer settle) so the transparent cards reveal it throughout.
+    /// The detail carries the SAME backdrop as Liquid Today: the satin-obsidian field when dimensional
+    /// backgrounds are enabled, or the plain canvas when they are not. Keeping the persisted switches in
+    /// lockstep means a metric tap never jumps from the black titanium shell to the old blue day-cycle sky.
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
     @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = true
     // Profile basics for the Fitness Age not-ready countdown (age/sex gate its readiness lead). Injected
@@ -478,10 +450,13 @@ struct MetricDetailView: View {
     @EnvironmentObject var intelligence: IntelligenceEngine
     /// True while a manual Fitness Age refresh runs (spinner on the not-ready empty state).
     @State private var refreshing = false
+    /// Standard Apple-style information controls in the education card open the concise explainer.
+    @State private var showingMetricExplanation = false
 
     // Imperial/Metric display preference (D#103). Display-only: weight (kg) and skin temp (°C) re-label
     // here; everything else is unit-agnostic and renders unchanged.
     @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    @AppStorage(UnitPrefs.massKey) private var massUnitRaw = ""
     @AppStorage(UnitPrefs.temperatureKey) private var temperatureRaw = ""
     // Effort display scale (#268) — routes the Effort metric's numbers + unit; display-only, the plotted
     // series stays 0–100. Every other metric is scale-agnostic (see MetricDescriptor.format).
@@ -490,9 +465,11 @@ struct MetricDetailView: View {
     private var temperatureUnit: TemperatureUnit {
         UnitPrefs.resolveTemperature(system: unitSystem, override: temperatureRaw)
     }
+    private var massUnit: MassUnit { UnitPrefs.resolveMass(system: unitSystem, override: massUnitRaw) }
     private var effortScale: EffortScale { UnitPrefs.resolveEffortScale(effortScaleRaw) }
     private func fmt(_ v: Double) -> String {
-        metric.format(v, system: unitSystem, temperature: temperatureUnit, effortScale: effortScale)
+        metric.format(v, system: unitSystem, temperature: temperatureUnit,
+                      effortScale: effortScale, mass: massUnit)
     }
 
     @State private var range: ExploreRange = .month
@@ -516,7 +493,13 @@ struct MetricDetailView: View {
     @State private var correlationCache: [CorrRow] = []
     /// The (metricID, range) the cache was built for; nil means "not yet computed".
     @State private var correlationKey: String? = nil
-    private var loadTaskID: String { "\(metric.id)|\(repo.refreshSeq)" }
+    /// The selected metric is published before the catalog-wide relationship scan finishes. This keeps
+    /// a tap responsive while the lower dossier progressively gathers comparison series off the store.
+    @State private var correlationsLoading = false
+    /// True after the optional catalog-wide scan has completed for this repository generation.
+    @State private var correlationSeriesLoaded = false
+    private var loadTaskID: String { "\(metric.id)|\(repo.refreshSeq)|\(profile.ageMetricStateToken)" }
+    private var correlationLoadTaskID: String { "\(loadTaskID)|relationships" }
 
     // MARK: Derived
 
@@ -623,6 +606,55 @@ struct MetricDetailView: View {
     }
 
     private var latest: (day: String, value: Double)? { series.last }
+    private var education: MetricEducation { MetricKnowledge.education(for: metric) }
+
+    /// Daily physiology gets a seven-reading cold start. Weekly, slow-moving model estimates would take
+    /// nearly two months at that threshold, so three prior weekly points is the honest useful minimum.
+    private var baselineMinimumSamples: Int {
+        ["fitness_age", "body_age", "vitality"].contains(metric.key) ? 3 : 7
+    }
+
+    private var baselineRead: MetricBaselineRead {
+        MetricBaselineRead.analyze(
+            series.map(\.value),
+            minimumSamples: baselineMinimumSamples,
+            maxSamples: metric.key == "fitness_age" ? 8 : 30
+        )
+    }
+
+    private struct RelatedShift: Identifiable {
+        let metric: MetricDescriptor
+        let read: MetricBaselineRead
+        let day: String
+        var id: String { metric.id }
+    }
+
+    /// At most three fresh, education-relevant metrics that are also outside their own recent range.
+    /// This is factual corroboration only — no causal or diagnostic claim.
+    private var relatedShifts: [RelatedShift] {
+        guard let anchorDay = latest?.day, let anchorDate = parseDay(anchorDay) else { return [] }
+        var result: [RelatedShift] = []
+        for key in education.relatedKeys {
+            let candidates = others.filter { $0.metric.key == key && !$0.series.isEmpty }
+            // Prefer the same partition, then NOOP/strap, then the series with the most coverage.
+            let chosen = candidates.sorted { lhs, rhs in
+                let lhsRank = lhs.metric.source == metric.source ? 2 : (lhs.metric.source == "my-whoop" ? 1 : 0)
+                let rhsRank = rhs.metric.source == metric.source ? 2 : (rhs.metric.source == "my-whoop" ? 1 : 0)
+                if lhsRank != rhsRank { return lhsRank > rhsRank }
+                return lhs.series.count > rhs.series.count
+            }.first
+            guard let chosen, let last = chosen.series.last, let lastDate = parseDay(last.day),
+                  abs(lastDate.timeIntervalSince(anchorDate)) <= 3 * 86_400 else { continue }
+            let read = MetricBaselineRead.analyze(
+                chosen.series.map(\.value),
+                minimumSamples: ["fitness_age", "body_age", "vitality"].contains(key) ? 3 : 7
+            )
+            guard read.position == .above || read.position == .below else { continue }
+            result.append(RelatedShift(metric: chosen.metric, read: read, day: last.day))
+            if result.count == 3 { break }
+        }
+        return result
+    }
 
     // MARK: Body
 
@@ -634,7 +666,9 @@ struct MetricDetailView: View {
         let win = slice(for: effRange)
         let fellBack = effRange != range
         return ScrollView {
-            VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+            // Keep the long dossier lazy: the expensive relationship card does not even appear (and
+            // therefore does not start its catalog scan) until the user approaches it.
+            LazyVStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 if loaded && series.isEmpty {
                     // No data in the entire history — keep the range bar for context, then the
                     // honest empty state (no scenic hero floating over nothing). Deliberately
@@ -642,6 +676,7 @@ struct MetricDetailView: View {
                     // the ranges to misrepresent, and hiding the bar here would regress this
                     // "for context" intent.
                     rangeBar(effectiveRange: effRange, windowed: win, windowFellBack: fellBack)
+                    metricMeaningCard
                     if metric.key == "fitness_age" {
                         // Fitness Age is COMPUTED on-device from resting HR + activity — not imported — so
                         // the generic "import your history" copy was wrong (and a dead end) here. Lead with
@@ -650,7 +685,12 @@ struct MetricDetailView: View {
                         // `what` is a LocalizedStringKey; the lead is an already-resolved String, so wrap
                         // it in an interpolation (renders verbatim) rather than passing it as a lookup key.
                         VStack(alignment: .leading, spacing: NoopMetrics.space2) {
-                            ComingSoon(what: "\(fitnessReadyLeadCopy(rhrDays: repo.days.suffix(7).compactMap { $0.restingHr }.count, hasAge: profile.age > 0, hasSex: !profile.sex.isEmpty))", symbol: "figure.run")
+                            ComingSoon(what: LocalizedStringKey(fitnessReadyLeadCopy(
+                                rhrDays: repo.days.suffix(7).compactMap { $0.restingHr }.count,
+                                hasAge: profile.ageInputConfirmed
+                                    && FitnessAgeEngine.supports(age: Double(profile.age)),
+                                hasSex: profile.sexInputConfirmed
+                                    && FitnessAgeEngine.supports(sex: profile.sex))), symbol: "figure.run")
                             // Force the weekly recompute NOW from stored data (works offline), then re-read.
                             if refreshing {
                                 ProgressView().controlSize(.small).tint(StrandPalette.accent)
@@ -676,12 +716,16 @@ struct MetricDetailView: View {
                     }
                 } else if !loaded {
                     rangeBar(effectiveRange: effRange, windowed: win, windowFellBack: fellBack)
+                    metricMeaningCard
                     ComingSoon(what: "Reading your \(metric.title.lowercased())…")
                 } else {
                     // Scenic hero: the metric's current value as a layered ring gauge (0–100
                     // scores) or a big SF-Rounded headline, floated over the domain's starfield,
                     // with the range pill. Then the frosted chart / stat tiles / correlations.
                     heroHeader(effectiveRange: effRange, windowed: win, windowFellBack: fellBack)
+                    personalReadCard
+                    metricMeaningCard
+                    guidanceCard
                     heroChart(effectiveRange: effRange, windowed: win, windowFellBack: fellBack)
                     statRow(effectiveRange: effRange, windowed: win)
                     readingsTable(windowed: win)
@@ -691,17 +735,15 @@ struct MetricDetailView: View {
             .padding(NoopMetrics.screenPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        // Day-cycle-aware backdrop (#430 parity): the top sky band every liquid screen uses when the
-        // setting is on — or the FULL-viewport sky with the softer settle when "Sky behind cards" is also
-        // on (the LiquidTodayView treatment, so the transparent cards reveal it the whole way down); the
-        // plain canvas when off.
+        // Match Liquid Today exactly: a fixed satin-obsidian field under glass, optionally clipped to
+        // the header when "Background behind cards" is disabled.
         .background(alignment: .top) {
             ZStack(alignment: .top) {
                 StrandPalette.surfaceBase
                 if showDayCycleBackground {
-                    LiquidSkyStatic(hour: nil, settleStrength: skyBehindCards ? 0.78 : 1)
+                    ObsidianFlowBackground(compact: !skyBehindCards, intensity: 0.94)
                         .frame(maxWidth: .infinity)
-                        .frame(height: skyBehindCards ? nil : 240, alignment: .top)
+                        .frame(height: skyBehindCards ? nil : 340, alignment: .top)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
@@ -709,6 +751,9 @@ struct MetricDetailView: View {
             .ignoresSafeArea()
         }
         .navigationTitle(metric.title)
+        .sheet(isPresented: $showingMetricExplanation) {
+            MetricExplanationSheet(metric: metric)
+        }
         .task(id: loadTaskID) { await load() }
         // Range changes the window, hence the correlation inputs — recompute the
         // cached scan rather than letting `correlationCard` run it inside body.
@@ -716,25 +761,112 @@ struct MetricDetailView: View {
     }
 
     private func load() async {
-        series = await repo.exploreSeries(key: metric.key, source: metric.source)
+        loaded = false
+        correlationsLoading = false
+        correlationSeriesLoaded = false
+        others = []
+        correlationCache = []
+        correlationKey = nil
+
+        // Close the brief launch/reset window before the analysis pass has purged an age-shaped value
+        // computed from an older profile. Seed editor defaults are never treated as confirmed inputs.
+        if metric.key == "fitness_age"
+            && (!profile.fitnessInputsConfirmed
+                || !FitnessAgeEngine.supports(age: Double(profile.age))
+                || !FitnessAgeEngine.supports(sex: profile.sex)) {
+            series = []
+            sourceByDay = [:]
+            loaded = true
+            return
+        }
+        if ["vitality", "body_age"].contains(metric.key)
+            && (!profile.ageInputConfirmed || !(20...80).contains(profile.age)) {
+            series = []
+            sourceByDay = [:]
+            loaded = true
+            return
+        }
+
+        let ageMetricAccepted: Bool
+        switch metric.key {
+        case "fitness_age":
+            let token = (await repo.exploreSeries(
+                key: AgeMetricProfile.fitnessAgeKey, source: "my-whoop")).last?.value
+            ageMetricAccepted = profile.acceptsFitnessAge(provenance: token)
+        case "vo2max_est":
+            let token = (await repo.exploreSeries(
+                key: AgeMetricProfile.vo2maxEstimateKey, source: "my-whoop")).last?.value
+            ageMetricAccepted = profile.acceptsVO2maxEstimate(provenance: token)
+        case "vitality", "body_age":
+            let token = (await repo.exploreSeries(
+                key: AgeMetricProfile.vitalityKey, source: "my-whoop")).last?.value
+            ageMetricAccepted = profile.acceptsVitality(provenance: token)
+        default:
+            ageMetricAccepted = true
+        }
+        guard ageMetricAccepted else {
+            series = []
+            sourceByDay = [:]
+            loaded = true
+            return
+        }
+
+        let selectedSeries = await repo.exploreSeries(key: metric.key, source: metric.source)
+        guard !Task.isCancelled else { return }
         // Per-day provenance for the readings table (task #8). resolvedSeries names the source that
         // actually supplied each day (imported strap / on-device / Apple Health / Health Connect); the
         // chart still rides `series` above, so this only ADDS the source column, never moves the line.
         let resolution = await repo.resolvedSeries(key: metric.key, source: metric.source)
+        guard !Task.isCancelled else { return }
+        series = selectedSeries
         sourceByDay = Dictionary(resolution.points.map { ($0.day, $0.source) },
                                  uniquingKeysWith: { first, _ in first })
-        var loadedOthers: [(metric: MetricDescriptor, series: [(day: String, value: Double)])] = []
-        for other in MetricCatalog.all where other.id != metric.id {
-            let s = await repo.exploreSeries(key: other.key, source: other.source)
-            if !s.isEmpty { loadedOthers.append((other, s)) }
-        }
-        others = loadedOthers
+        // The main dossier is now ready. Publish it before touching the rest of the catalog so opening a
+        // metric costs two focused reads instead of blocking on dozens of unrelated series.
         loaded = true
-        // #943 selection seam: a locked default (.month with under a week of history) no longer
-        // OVERWRITES @State range - it renders through `coercedSelection` instead (non-destructive,
-        // recomputed every body eval), so a shrinking history re-coerces and a growing one un-coerces
-        // with no snap-back. See `coercedSelection`.
-        // First correlation build, now that `series`/`others` exist.
+        guard !selectedSeries.isEmpty else {
+            correlationsLoading = false
+            return
+        }
+
+        let relevantKeys = Set(education.relatedKeys)
+        let candidates = MetricCatalog.all.filter { $0.id != metric.id }
+        let relevant = candidates.filter { relevantKeys.contains($0.key) }
+
+        // Load the handful used by "What may be influencing it" first. Publishing this partial set lets
+        // the useful guidance settle without paying for the optional catalog-wide relationship scan.
+        for other in relevant {
+            let s = await repo.exploreSeries(key: other.key, source: other.source)
+            guard !Task.isCancelled else { return }
+            if !s.isEmpty, !others.contains(where: { $0.metric.id == other.id }) {
+                others.append((other, s))
+            }
+        }
+    }
+
+    /// The broad Pearson scan is optional and demand-driven. `correlationCard` lives at the bottom of a
+    /// `LazyVStack`; its task starts only as the user approaches it, avoiding dozens of full-history reads
+    /// for the common open-read-back flow.
+    private func loadCorrelationSeriesIfNeeded() async {
+        guard loaded, !series.isEmpty, !correlationSeriesLoaded, !correlationsLoading else { return }
+        correlationsLoading = true
+        defer {
+            // A LazyVStack cancels this task when the card scrolls far away. Re-arm it so returning to
+            // the card resumes the demand-driven scan instead of leaving a permanent spinner.
+            if Task.isCancelled { correlationsLoading = false }
+        }
+
+        for other in MetricCatalog.all where other.id != metric.id {
+            guard !Task.isCancelled else { return }
+            if others.contains(where: { $0.metric.id == other.id }) { continue }
+            let s = await repo.exploreSeries(key: other.key, source: other.source)
+            guard !Task.isCancelled else { return }
+            if !s.isEmpty { others.append((other, s)) }
+        }
+
+        correlationSeriesLoaded = true
+        correlationsLoading = false
+        correlationKey = nil
         recomputeCorrelations()
     }
 
@@ -786,13 +918,13 @@ struct MetricDetailView: View {
                 // well — never over the chart below.
                 HStack {
                     Spacer(minLength: 0)
-                    if let fraction, let v = value {
+                    if fraction != nil, let v = value {
                         VStack(spacing: 10) {
                             ZStack {
                                 // The big hero vessel stays live (animated) — the one sloshing gauge on the
                                 // screen, exactly like the hero gauges on Today.
                                 LiquidVessel(value: heroAnimatedFraction, tint: domain.bright, animated: true)
-                                    .frame(width: 188, height: 188)
+                                    .frame(width: 160, height: 160)
                                     .accessibilityHidden(true)
                                 VStack(spacing: 2) {
                                     CountUpNumber(value: v, font: StrandFont.rounded(48))
@@ -867,6 +999,277 @@ struct MetricDetailView: View {
                 heroAnimatedFraction = fraction ?? 0
             }
         }
+    }
+
+    // MARK: Personal read + education + safe guidance
+
+    private var personalReadCard: some View {
+        let read = baselineRead
+        let tint = metricDomain(metric).color
+        return NoopCard(tint: tint) {
+            VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                HStack(spacing: NoopMetrics.space2) {
+                    Image(systemName: baselineSymbol(read.position))
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(tint)
+                        .frame(width: 28, height: 28)
+                        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("YOUR READ TODAY").strandOverline()
+                        Text(MetricKnowledge.dataKind(for: metric))
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                    Spacer(minLength: NoopMetrics.space2)
+                    SourceBadge("\(metric.sourceLabel)", tint: tint)
+                        .fixedSize()
+                }
+
+                Text(baselineHeadline(read))
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(baselineSupport(read))
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if metric.key == "fitness_age", let age = read.latest, profile.age > 0 {
+                    Divider().overlay(StrandPalette.hairline)
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("FITNESS COMPARISON").strandOverline()
+                            Text(fitnessAgeComparison(age))
+                                .font(StrandFont.subhead)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                        }
+                        Spacer()
+                        Text("model ± \(Int((FitnessAgeEngine.uncertaintyBandYears(sex: profile.sex) ?? 20).rounded())) yr")
+                            .font(StrandFont.captionNumber)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                    Text("Updated weekly · a fitness estimate, not biological age")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+            }
+        }
+    }
+
+    private var metricMeaningCard: some View {
+        let tint = metricDomain(metric).color
+        return NoopCard(tint: tint) {
+            VStack(alignment: .leading, spacing: NoopMetrics.space4) {
+                meaningBlock(
+                    title: String(localized: "WHAT IT IS"),
+                    body: education.whatItIs,
+                    tint: tint
+                )
+                Divider().overlay(StrandPalette.hairline)
+                meaningBlock(
+                    title: String(localized: "WHY IT MATTERS"),
+                    body: education.whyItMatters,
+                    tint: tint
+                )
+                Divider().overlay(StrandPalette.hairline)
+                VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                    Label("How NOOP gets it", systemImage: "point.3.connected.trianglepath.dotted")
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text(education.method)
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(education.limitations)
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private var guidanceCard: some View {
+        let read = baselineRead
+        let tint = metricDomain(metric).color
+        let personalized = read.position != .building
+        return NoopCard(tint: tint) {
+            VStack(alignment: .leading, spacing: NoopMetrics.space4) {
+                VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                    Text("WHAT MAY BE INFLUENCING IT").strandOverline()
+                    if personalized, !relatedShifts.isEmpty {
+                        Text("Other fresh signals outside their own recent range")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                        VStack(spacing: 0) {
+                            ForEach(Array(relatedShifts.enumerated()), id: \.element.id) { index, shift in
+                                relatedShiftRow(shift)
+                                if index < relatedShifts.count - 1 {
+                                    Divider().overlay(StrandPalette.hairline)
+                                }
+                            }
+                        }
+                        Text("These signals shifted in the same time window. That association does not show that one caused another.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if personalized {
+                        Text("No education-related signal is clearly outside its own recent range right now.")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                    } else {
+                        Text("NOOP needs \(max(0, baselineMinimumSamples - read.sampleCount)) more prior readings before it personalizes this section.")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                    }
+
+                    Text("Common possibilities — general education")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .padding(.top, NoopMetrics.space1)
+                    VStack(alignment: .leading, spacing: 7) {
+                        ForEach(Array(education.commonInfluences.prefix(4)), id: \.self) { influence in
+                            bulletLine(influence, symbol: "circle.fill", tint: tint)
+                        }
+                    }
+                }
+
+                Divider().overlay(StrandPalette.hairline)
+
+                VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                    Text("WHAT YOU CAN TRY").strandOverline()
+                    Text(personalized
+                         ? "Low-risk next steps. Use how you feel and watch the next 2–3 readings."
+                         : "General ideas while your personal baseline builds.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                    VStack(alignment: .leading, spacing: 9) {
+                        ForEach(Array(education.actions.prefix(3)), id: \.self) { action in
+                            bulletLine(action, symbol: "checkmark", tint: StrandPalette.statusPositive)
+                        }
+                    }
+                }
+
+                Text(MetricKnowledge.safetyBoundary)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, NoopMetrics.space1)
+            }
+        }
+    }
+
+    private func meaningBlock(title: String, body: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+            HStack(spacing: NoopMetrics.space2) {
+                MetricInfoButton(
+                    title: String(localized: "More information: \(title)"),
+                    tint: tint
+                ) {
+                    showingMetricExplanation = true
+                }
+                Text(title).strandOverline()
+            }
+            Text(body)
+                .font(StrandFont.body)
+                .foregroundStyle(StrandPalette.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func bulletLine(_ text: String, symbol: String, tint: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: NoopMetrics.space2) {
+            Image(systemName: symbol)
+                .font(.system(size: symbol == "circle.fill" ? 5 : 10, weight: .bold))
+                .foregroundStyle(tint)
+                .frame(width: 16)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func relatedShiftRow(_ shift: RelatedShift) -> some View {
+        HStack(spacing: NoopMetrics.space3) {
+            MetricGlyph(shift.metric.icon, size: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(shift.metric.title)
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(shift.read.position == .above ? "Above its recent range" : "Below its recent range")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
+            Spacer(minLength: NoopMetrics.space2)
+            if let value = shift.read.latest {
+                Text(shift.metric.format(
+                    value,
+                    system: unitSystem,
+                    temperature: temperatureUnit,
+                    effortScale: effortScale
+                ))
+                    .font(StrandFont.captionNumber)
+                    .foregroundStyle(StrandPalette.textSecondary)
+            }
+        }
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func baselineSymbol(_ position: MetricBaselineRead.Position) -> String {
+        switch position {
+        case .building: return "ellipsis"
+        case .within: return "equal"
+        case .above: return "arrow.up.right"
+        case .below: return "arrow.down.right"
+        }
+    }
+
+    private func baselineHeadline(_ read: MetricBaselineRead) -> String {
+        guard let latest = read.latest else { return String(localized: "No reading yet") }
+        switch read.position {
+        case .building:
+            return String(localized: "Building your personal baseline")
+        case .within:
+            return String(localized: "\(fmt(latest)) is within your recent range.")
+        case .above, .below:
+            guard let delta = read.delta else { return String(localized: "Comparing with your recent range") }
+            let direction = read.position == .above ? String(localized: "above") : String(localized: "below")
+            let magnitude = metric.formatDelta(
+                abs(delta),
+                system: unitSystem,
+                temperature: temperatureUnit,
+                effortScale: effortScale
+            )
+            return String(localized: "\(fmt(latest)) is \(magnitude) \(direction) your recent baseline.")
+        }
+    }
+
+    private func baselineSupport(_ read: MetricBaselineRead) -> String {
+        guard read.position != .building, let baseline = read.baseline else {
+            let remaining = max(0, baselineMinimumSamples - read.sampleCount)
+            if remaining == 1 { return String(localized: "1 more prior reading needed for a personal comparison.") }
+            return String(localized: "\(remaining) more prior readings needed for a personal comparison.")
+        }
+        return String(localized: "Baseline \(fmt(baseline)) · \(read.sampleCount) prior readings · personal, not population norms")
+    }
+
+    private func fitnessAgeComparison(_ estimate: Double) -> String {
+        let delta = Double(profile.age) - estimate
+        let years = Int(abs(delta).rounded())
+        if years == 0 { return String(localized: "About the same as your profile age") }
+        if delta > 0 {
+            return years == 1
+                ? String(localized: "1 year younger than your profile age")
+                : String(localized: "\(years) years younger than your profile age")
+        }
+        return years == 1
+            ? String(localized: "1 year older than your profile age")
+            : String(localized: "\(years) years older than your profile age")
     }
 
     // MARK: Range bar
@@ -1145,12 +1548,24 @@ struct MetricDetailView: View {
         return NoopCard(tint: metricDomain(metric).color) {
             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("What correlates").strandOverline()
+                    Text("EXPLORATORY RELATIONSHIPS").strandOverline()
                     Text("Pearson r over the visible window · |r| ≥ 0.30, n ≥ 10")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                 }
-                if rows.isEmpty {
+                if correlationsLoading {
+                    HStack(spacing: NoopMetrics.space2) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(metricDomain(metric).color)
+                        Text("Checking the rest of your local metrics…")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Checking the rest of your local metrics")
+                } else if rows.isEmpty {
                     Text("Nothing in the catalog moves clearly with \(metric.title.lowercased()) over this window. Widen the range to surface relationships.")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textTertiary)
@@ -1166,7 +1581,14 @@ struct MetricDetailView: View {
                         }
                     }
                 }
+                Text("These metrics moved together in this window. Correlation does not show that one caused another, and this exploratory scan does not correct for testing many metrics.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+        }
+        .task(id: correlationLoadTaskID) {
+            await loadCorrelationSeriesIfNeeded()
         }
     }
 
@@ -1210,7 +1632,10 @@ struct MetricDetailView: View {
     private func signed(_ delta: Double) -> String {
         // A difference between two readings: route through the delta formatter so a temperature Δ
         // scales without the +32 offset.
-        (delta >= 0 ? "+" : "−") + metric.formatDelta(abs(delta), system: unitSystem, temperature: temperatureUnit, effortScale: effortScale)
+        (delta >= 0 ? "+" : "−") + metric.formatDelta(
+            abs(delta), system: unitSystem, temperature: temperatureUnit,
+            effortScale: effortScale, mass: massUnit
+        )
     }
 
     private func correlationColor(_ r: Double) -> Color {

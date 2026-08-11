@@ -452,7 +452,7 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
         ) {
             FormToggleRow(
                 label = uiString(R.string.l10n_notifications_settings_screen_morning_recap_45ec05c5),
-                help = "After last night is processed, a notification with your Charge and Rest. Posts " +
+                help = "After last night is processed, a notification with your Recovery and Sleep Score. Posts " +
                     "once a day, after your strap has synced the night.",
                 checked = morningReport,
                 onChange = {

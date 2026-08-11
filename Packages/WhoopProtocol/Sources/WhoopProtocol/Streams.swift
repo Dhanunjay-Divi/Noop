@@ -10,10 +10,33 @@ public struct HRSample: Equatable, Codable {
     public init(ts: Int, bpm: Int) { self.ts = ts; self.bpm = bpm }
 }
 
+/// Sensor channel that produced an R-R interval. Raw values are durable across SQLite and `.noopbak`;
+/// never renumber existing cases.
+public enum RRSourceChannel: Int, Equatable, Codable, Sendable, CaseIterable {
+    case greenQuality = 1
+    case spo2Ibi = 2
+    case ibiAmplitude = 3
+    case ibiBare = 4
+}
+
 public struct RRInterval: Equatable, Codable {
     public let ts: Int          // wall-clock unix seconds
     public let rrMs: Int
-    public init(ts: Int, rrMs: Int) { self.ts = ts; self.rrMs = rrMs }
+    /// nil for sources with one unnamed beat channel (including WHOOP) and legacy rows.
+    public let srcChannel: RRSourceChannel?
+    public init(ts: Int, rrMs: Int, srcChannel: RRSourceChannel? = nil) {
+        self.ts = ts; self.rrMs = rrMs; self.srcChannel = srcChannel
+    }
+}
+
+public extension Array where Element == RRInterval {
+    /// Ascending by timestamp while preserving emission order for beats sharing a whole-second stamp.
+    /// Swift's standard sort is not guaranteed stable; the original offset makes this comparator total.
+    func sortedByTsStable() -> [RRInterval] {
+        enumerated()
+            .sorted { ($0.element.ts, $0.offset) < ($1.element.ts, $1.offset) }
+            .map(\.element)
+    }
 }
 
 public struct WhoopEvent: Equatable, Codable {

@@ -65,6 +65,7 @@ import com.noop.data.PairedDeviceRow
 import com.noop.data.SourceKind
 import com.noop.ingest.AppleHealthImporter
 import com.noop.ingest.HealthConnectImporter
+import com.noop.ingest.HealthConnectBackgroundPolicy
 import com.noop.ingest.HealthConnectWriter
 import com.noop.ingest.ActivityFileImporter
 import com.noop.ingest.LiftingImporter
@@ -94,7 +95,7 @@ import kotlinx.coroutines.withContext
  *   - Apple Health  — live counts of cached "apple-health" data, plus a working streaming
  *                     import of an Apple Health export.zip/export.xml via
  *                     [com.noop.ingest.AppleHealthImporter].
- *   - Health Connect— native Android import (steps/HR/HRV/sleep/SpO₂/weight/workouts) via
+ *   - Health Connect— native Android import (steps/HR/HRV/sleep/SpO₂/temperature/weight/workouts) via
  *                     [com.noop.ingest.HealthConnectImporter], gated on runtime permission.
  *   - Nutrition CSV — daily calories / macros / body weight from a nutrition CSV
  *                     (MyFitnessPal, Cronometer, or any date+columns spreadsheet) via
@@ -118,6 +119,9 @@ fun DataSourcesScreen(vm: AppViewModel) {
     val hcLastSync by vm.hcLastSync.collectAsStateWithLifecycle()
     val hcWriteback by vm.hcWriteback.collectAsStateWithLifecycle()
     val hcWbStatus by vm.hcWritebackStatus.collectAsStateWithLifecycle()
+    var hcBackgroundAccess by remember { mutableStateOf(false) }
+    var hcHasAnyReadAccess by remember { mutableStateOf(false) }
+    var hcMissingTemperaturePermissions by remember { mutableStateOf(emptySet<String>()) }
     // A background (BLE-path) writeback updates prefs, not the VM's flow — re-read on entry so the
     // status line reflects the latest attempt whenever this screen is opened (#660).
     LaunchedEffect(Unit) { vm.refreshHcWritebackStatus() }
@@ -132,6 +136,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
     // export so each card reflects its own data rather than both showing under Apple Health (issue #34).
     var hcDays by remember { mutableStateOf<Int?>(null) }
     var hcWorkouts by remember { mutableStateOf<Int?>(null) }
+    var hcTemperaturePoints by remember { mutableStateOf<Int?>(null) }
     // Nutrition CSV writes long-format metricSeries rows under its own source ("nutrition-csv"),
     // so its card counts days-with-calories and weigh-ins straight off that table.
     var nutritionDays by remember { mutableStateOf<Int?>(null) }
@@ -157,6 +162,9 @@ fun DataSourcesScreen(vm: AppViewModel) {
         appleWorkouts = vm.repo.workoutsCount("apple-health", 0L, nowS)
         hcDays = vm.repo.appleDailyCount("health-connect", "0000-01-01", "9999-12-31")
         hcWorkouts = vm.repo.workoutsCount("health-connect", 0L, nowS)
+        hcTemperaturePoints =
+            vm.repo.metricSeriesKeyCount(HealthConnectImporter.DEVICE_ID, HealthConnectImporter.BODY_TEMPERATURE_KEY) +
+            vm.repo.metricSeriesKeyCount(HealthConnectImporter.DEVICE_ID, HealthConnectImporter.BASAL_BODY_TEMPERATURE_KEY)
         nutritionDays = vm.repo.metricSeriesKeyCount(NutritionCsvImporter.SOURCE_ID, "calories_in")
         nutritionWeighIns = vm.repo.metricSeriesKeyCount(NutritionCsvImporter.SOURCE_ID, "weight")
         liftingWorkouts = vm.repo.workoutsCount(LiftingImporter.SOURCE_ID, 0L, nowS)
@@ -278,16 +286,37 @@ fun DataSourcesScreen(vm: AppViewModel) {
     // Health Connect permission request → import once granted.
     val hcPermissionLauncher = rememberLauncherForActivityResult(
         PermissionController.createRequestPermissionResultContract(),
-    ) { granted ->
-        if (granted.any { it in HealthConnectImporter.PERMISSIONS }) {
-            runImport { HealthConnectImporter.import(context, vm.repo, ProfileStore.from(context).heightCm) }
-        } else {
-            Toast.makeText(context, "Health Connect access not granted.", Toast.LENGTH_LONG).show()
+    ) {
+        // The result set can contain only the newly-requested background permission. Re-read the full
+        // controller state before deciding whether a partial data-type grant can import.
+        scope.launch {
+            val allGranted = runCatching {
+                HealthConnectImporter.client(context).permissionController.getGrantedPermissions()
+            }.getOrDefault(emptySet())
+            hcBackgroundAccess = HealthConnectBackgroundPolicy.runtimeCanRunInBackground(allGranted)
+            hcHasAnyReadAccess = allGranted.any { it in HealthConnectImporter.PERMISSIONS }
+            hcMissingTemperaturePermissions = HealthConnectImporter.TEMPERATURE_PERMISSIONS - allGranted
+            if (allGranted.any { it in HealthConnectImporter.PERMISSIONS }) {
+                runImport { HealthConnectImporter.import(context, vm.repo, ProfileStore.from(context).heightCm) }
+            } else {
+                Toast.makeText(context, "Health Connect access not granted.", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
     val healthConnectAvailable = remember {
         HealthConnectImporter.sdkStatus(context) == HealthConnectClient.SDK_AVAILABLE
+    }
+
+    LaunchedEffect(healthConnectAvailable, hcAutoSync) {
+        if (healthConnectAvailable) {
+            val granted = runCatching {
+                HealthConnectImporter.client(context).permissionController.getGrantedPermissions()
+            }.getOrDefault(emptySet())
+            hcBackgroundAccess = HealthConnectBackgroundPolicy.runtimeCanRunInBackground(granted)
+            hcHasAnyReadAccess = granted.any { it in HealthConnectImporter.PERMISSIONS }
+            hcMissingTemperaturePermissions = HealthConnectImporter.TEMPERATURE_PERMISSIONS - granted
+        }
     }
 
     // "Broadcast heart rate": flip the toggle on only AFTER the BLUETOOTH_ADVERTISE (+ CONNECT) runtime
@@ -296,15 +325,25 @@ fun DataSourcesScreen(vm: AppViewModel) {
     val requestAdvertise = rememberRequestAdvertise(onGranted = { vm.setHrBroadcast(true) })
 
     // Import directly if permissions already granted, otherwise request them first.
-    fun startHealthConnect() {
+    fun startHealthConnect(requestBackground: Boolean = false) {
         scope.launch {
             val granted = runCatching {
                 HealthConnectImporter.client(context).permissionController.getGrantedPermissions()
             }.getOrDefault(emptySet())
-            if (granted.any { it in HealthConnectImporter.PERMISSIONS }) {
+            hcBackgroundAccess = HealthConnectBackgroundPolicy.runtimeCanRunInBackground(granted)
+            hcHasAnyReadAccess = granted.any { it in HealthConnectImporter.PERMISSIONS }
+            hcMissingTemperaturePermissions = HealthConnectImporter.TEMPERATURE_PERMISSIONS - granted
+            val missing = if (requestBackground) {
+                HealthConnectBackgroundPolicy.runtimeMissingPermissionsForAutoSync(granted)
+            } else if (granted.none { it in HealthConnectImporter.PERMISSIONS }) {
+                HealthConnectImporter.PERMISSIONS
+            } else {
+                emptySet()
+            }
+            if (missing.isEmpty()) {
                 runImport { HealthConnectImporter.import(context, vm.repo, ProfileStore.from(context).heightCm) }
             } else {
-                hcPermissionLauncher.launch(HealthConnectImporter.PERMISSIONS)
+                hcPermissionLauncher.launch(missing)
             }
         }
     }
@@ -425,16 +464,18 @@ fun DataSourcesScreen(vm: AppViewModel) {
         SourceCard(
             title = uiString(R.string.l10n_data_sources_screen_health_connect_be6bca3e),
             icon = Icons.Filled.MonitorHeart,
-            subtitle = "Pull steps, heart rate, HRV, sleep, SpO₂, weight and workouts straight from " +
+            subtitle = "Pull steps, heart rate, HRV, sleep, SpO₂, body and basal temperature, weight and workouts straight from " +
                 "Android's Health Connect. No file needed. On-device; it never overwrites richer " +
                 "WHOOP data, and writes nothing unless you opt in to sharing back below.",
         ) {
-            val hasHc = (hcDays ?: 0) > 0 || (hcWorkouts ?: 0) > 0
+            val hasHc = (hcDays ?: 0) > 0 || (hcWorkouts ?: 0) > 0 || (hcTemperaturePoints ?: 0) > 0
             if (hasHc) {
                 StatePill(title = uiString(R.string.l10n_data_sources_screen_imported_434eb26f), tone = StrandTone.Accent, showsDot = true)
                 CountLine(
                     primary = hcDays?.let { "$it days" } ?: "—",
-                    secondary = hcWorkouts?.let { "$it workouts" } ?: "Counting…",
+                    secondary = if (hcWorkouts != null && hcTemperaturePoints != null) {
+                        "${hcWorkouts} workouts · ${hcTemperaturePoints} temperature records"
+                    } else "Counting…",
                 )
             }
             if (healthConnectAvailable) {
@@ -445,9 +486,22 @@ fun DataSourcesScreen(vm: AppViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                 ) { startHealthConnect() }
 
-                // Auto-sync: pull new Health Connect data when you open NOOP, if it's been longer than
-                // the chosen interval — no manual taps. On-open only (no background worker): it avoids a
-                // sensitive background-health permission and is reliable, and opening the app is enough.
+                // Existing installs may already have a useful partial grant from before temperature
+                // support was added. Keep importing those records without nagging, but provide a clear,
+                // explicit affordance to add the two new read permissions when the user chooses.
+                if (hcHasAnyReadAccess && hcMissingTemperaturePermissions.isNotEmpty()) {
+                    Text(
+                        "Body-temperature access is off. Tap to review the missing Health Connect permissions.",
+                        style = NoopType.footnote,
+                        color = Palette.accent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { hcPermissionLauncher.launch(hcMissingTemperaturePermissions) },
+                    )
+                }
+
+                // Auto-sync always catches up in foreground. Eligible platform/provider versions may
+                // additionally grant the background-health permission for best-effort WorkManager catch-up.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -467,8 +521,8 @@ fun DataSourcesScreen(vm: AppViewModel) {
                         checked = hcAutoSync,
                         onCheckedChange = { on ->
                             vm.setHcAutoSync(on)
-                            // Ensure permissions (and an immediate first sync) when turning it on.
-                            if (on) startHealthConnect()
+                            // Ensure data + optional background permission, then import immediately.
+                            if (on) startHealthConnect(requestBackground = true)
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Palette.surfaceBase,
@@ -501,6 +555,19 @@ fun DataSourcesScreen(vm: AppViewModel) {
                         else DateUtils.getRelativeTimeSpanString(hcLastSync).toString(),
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
+                    )
+                    val backgroundSupported = HealthConnectBackgroundPolicy.runtimeSupportsBackground()
+                    Text(
+                        when {
+                            hcBackgroundAccess -> "Background Health Connect access granted · periodic sync is best effort."
+                            backgroundSupported -> "On-open sync is active. Tap to allow optional background access."
+                            else -> "This Android version supports on-open sync only."
+                        },
+                        style = NoopType.footnote,
+                        color = if (hcBackgroundAccess) Palette.statusPositive else Palette.textTertiary,
+                        modifier = if (backgroundSupported && !hcBackgroundAccess) {
+                            Modifier.clickable { startHealthConnect(requestBackground = true) }
+                        } else Modifier,
                     )
                 }
 

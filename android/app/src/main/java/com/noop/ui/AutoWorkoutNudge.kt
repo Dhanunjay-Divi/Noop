@@ -31,45 +31,91 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.analytics.AutoWorkoutDetector
-import com.noop.analytics.AutoWorkoutDetectorTrace
+import com.noop.analytics.CoarseWorkoutClass
 import com.noop.data.DailyMetric
-import kotlinx.coroutines.launch
+import com.noop.notif.AutoWorkoutCandidateNotifier
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
- * AutoWorkoutNudge — the NON-DESTRUCTIVE "looks like a workout" Today card (MVP auto-detect, opt-in).
+ * Today surface for Off / Ask / confidence-gated Auto-save automatic activity modes.
  *
  * Android twin of iOS `AutoWorkoutCard` (Strand/Screens/AutoWorkoutCard.swift), wired to the byte-parity
- * [AutoWorkoutDetector]. Gated on [NoopPrefs.autoDetectWorkouts] (default OFF) — when off, NOTHING runs
- * and nothing renders. When on, after Today appears (and whenever the data refreshes) it scans the last
+ * [AutoWorkoutDetector]. [AutoWorkoutMode.OFF] runs nothing; Ask presents an approval card; Auto-save
+ * writes only a stronger 15+ minute candidate as Detected and presents a Keep/undo review. It scans the last
  * couple of days of strap HR through the pure detector, excludes any window that OVERLAPS a saved workout
  * (any source) or was previously dismissed, and surfaces ONE card — the most recent candidate:
  *
  *   "Looks like a workout around <start>–<end> (avg HR <avg>, <dur> min). Save it?"
  *
- * SAVE → builds a manual-style "Workout" row over the window (avg HR filled) via the existing
- * [WorkoutEditing.buildManualRow] + [com.noop.data.WhoopRepository.saveManualWorkout] path. DISMISS
- * (× or "Not a workout") → records the window in the durable, SEPARATE [AutoWorkoutPrefs] dismissed set
- * so it never re-prompts. It NEVER creates a workout without the user tapping Save.
+ * SAVE or Auto-save → builds a `<strap>-noop` Detected row (avg HR filled). DISMISS (× or "Not a
+ * workout") records the window in the durable, SEPARATE [AutoWorkoutPrefs] dismissed set so it never
+ * re-prompts. Every saved row remains editable/relabelable/dismissible in Workouts.
  *
  * Design-Reset compliant: a flat accent-tinted [NoopCard], NoopMetrics tokens, no gold — matching the
  * other Today cards (matches the iOS source exactly).
  */
 
-/** The strap source the scan + saves use, matching the rest of Today ("my-whoop"). */
-private const val AUTO_DETECT_DEVICE = "my-whoop"
-
 /** Generic sport label for a saved auto-detected bout — the user can re-label via Workouts → Edit. */
 private const val AUTO_DETECT_SPORT = "Workout"
 
-/** Days of HR history the scan covers — matches the iOS `autoDetectCandidate(daysBack: 2)`. */
-private const val AUTO_DETECT_DAYS_BACK = 2L
+internal object AutoWorkoutAutomationPolicy {
+    const val minimumAutoSaveMinutes = 15
+
+    fun shouldAutoSave(candidate: AutoWorkoutDetector.DetectedWorkout): Boolean {
+        if (candidate.startSec <= 0L || candidate.endSec <= candidate.startSec ||
+            candidate.durationMin < minimumAutoSaveMinutes || candidate.avgBpm !in 30..220 ||
+            candidate.peakBpm !in candidate.avgBpm..250
+        ) return false
+        if (candidate.suggestedClass != null) {
+            val confidence = candidate.suggestionConfidence ?: return false
+            if (!confidence.isFinite() ||
+                confidence < com.noop.analytics.WorkoutTypeClassifier.minAdvisoryConfidence
+            ) return false
+        }
+        return true
+    }
+}
+
+internal fun buildDetectedAutoWorkoutRow(
+    computedDeviceId: String,
+    candidate: AutoWorkoutDetector.DetectedWorkout,
+) = WorkoutEditing.buildDetectedSuggestionRow(
+    deviceId = computedDeviceId,
+    startSeconds = candidate.startSec,
+    endSeconds = candidate.endSec,
+    sport = acceptedAutoDetectSport(candidate.suggestedClass),
+    avgHr = candidate.avgBpm,
+    source = computedDeviceId,
+)
+
+private fun className(value: CoarseWorkoutClass): String = when (value) {
+    CoarseWorkoutClass.WALK -> "Walk"
+    CoarseWorkoutClass.RUN -> "Run"
+    CoarseWorkoutClass.STRENGTH -> "Strength"
+    CoarseWorkoutClass.CYCLE -> "Cycling"
+    CoarseWorkoutClass.SKI -> "Skiing"
+    CoarseWorkoutClass.OTHER -> "Workout"
+}
+
+internal fun acceptedAutoDetectSport(value: CoarseWorkoutClass?): String = when (value) {
+    CoarseWorkoutClass.WALK -> "Walking"
+    CoarseWorkoutClass.RUN -> "Running"
+    CoarseWorkoutClass.STRENGTH -> "Strength Training"
+    CoarseWorkoutClass.CYCLE -> "Cycling"
+    CoarseWorkoutClass.SKI -> "Skiing"
+    CoarseWorkoutClass.OTHER, null -> AUTO_DETECT_SPORT
+}
+
+private fun suggestionTitle(w: AutoWorkoutDetector.DetectedWorkout): String =
+    w.suggestedClass?.let { "Possible ${className(it)}" } ?: "Looks like a workout"
 
 private val autoNudgeTimeFmt: DateTimeFormatter =
     // HH:mm in the user's locale/timezone — mirrors the iOS card's short-time DateFormatter.
@@ -108,26 +154,122 @@ fun AutoWorkoutNudgeCard(
     days: List<DailyMetric>,
 ) {
     val context = LocalContext.current
-    // Read once — SharedPreferences isn't reactive; when off, the whole feature is invisible + inert.
-    val enabled = remember { NoopPrefs.autoDetectWorkouts(context) }
-    if (!enabled) return
+    // Settings and Today are separate destinations, so reading on composition picks up the latest mode.
+    val mode = remember { NoopPrefs.autoWorkoutMode(context) }
 
     // The single surfaced candidate (null = nothing to suggest). Re-scanned whenever the day data grows.
     var candidate by remember { mutableStateOf<AutoWorkoutDetector.DetectedWorkout?>(null) }
+    var autoSavedReview by remember { mutableStateOf<AutoWorkoutPrefs.Review?>(null) }
     // Hide immediately on Save/X without waiting for the next reload (mirrors iOS `handledThisSession`).
     var handledThisSession by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+    var saveFailed by remember { mutableStateOf(false) }
+    val activeDeviceId by viewModel.selectedDeviceId.collectAsStateWithLifecycle()
 
     // Re-scan after Today appears / when the data refreshes (days = the recompute trigger; the Android
     // analog of the iOS refreshSeq). All reads + detection run off the main thread. Mirrors `reload()`.
-    LaunchedEffect(days, enabled) {
-        val next = runCatching { autoDetectCandidate(viewModel, context, days) }.getOrNull()
+    LaunchedEffect(days, mode, activeDeviceId) {
+        val storedReview = AutoWorkoutPrefs.pendingReview(context)
+        if (storedReview != null) {
+            val exists = runCatching {
+                viewModel.repo.detectedWorkoutsUnion(
+                    activeDeviceId,
+                    storedReview.startSec - 1L,
+                    storedReview.endSec + 1L,
+                    limit = 200,
+                ).any {
+                    it.startTs == storedReview.startSec && it.sport == storedReview.sport &&
+                        it.source == storedReview.source && it.deviceId == storedReview.deviceId
+                }
+            }.getOrDefault(false)
+            if (exists) {
+                autoSavedReview = storedReview
+                candidate = null
+                handledThisSession = false
+                return@LaunchedEffect
+            }
+            AutoWorkoutPrefs.clearReview(context, storedReview.startSec)
+        }
+        autoSavedReview = null
+        if (mode == AutoWorkoutMode.OFF) {
+            candidate = null
+            return@LaunchedEffect
+        }
+        val traceSink: ((String) -> Unit)? =
+            if (com.noop.testcentre.TestCentre.from(context)
+                    .active(com.noop.testcentre.TestDomain.WORKOUTS)
+            ) {
+                { line -> viewModel.ble.externalLog(line, com.noop.testcentre.TestDomain.WORKOUTS) }
+            } else null
+        val next = runCatching {
+            AutoWorkoutCandidateScan.latest(
+                repository = viewModel.repo,
+                activeDeviceId = activeDeviceId,
+                days = days,
+                dismissedTokens = AutoWorkoutPrefs.dismissed(context),
+                traceSink = traceSink,
+            )
+        }.getOrNull()
+        if (mode == AutoWorkoutMode.AUTO_SAVE && next != null &&
+            AutoWorkoutAutomationPolicy.shouldAutoSave(next)
+        ) {
+            val computedId = viewModel.repo.computedDeviceId(activeDeviceId)
+            val row = buildDetectedAutoWorkoutRow(computedId, next)
+            val saved = row != null && runCatching {
+                viewModel.repo.saveManualWorkout(row)
+            }.isSuccess
+            if (saved && row != null) {
+                val review = AutoWorkoutPrefs.Review(
+                    startSec = next.startSec, endSec = next.endSec,
+                    sport = row.sport, deviceId = row.deviceId, source = row.source,
+                    avgBpm = next.avgBpm, peakBpm = next.peakBpm,
+                )
+                AutoWorkoutPrefs.recordReview(context, review)
+                AutoWorkoutCandidateNotifier.cancelHandled(context)
+                AutoWorkoutCandidateNotifier.postAutoSavedIfAuthorized(
+                    context, next.startSec, next.endSec,
+                )
+                viewModel.loadWorkouts()
+                autoSavedReview = review
+                candidate = null
+                handledThisSession = false
+                return@LaunchedEffect
+            }
+            // Never claim a failed write was saved. The candidate stays visible as an explicit retry.
+        }
         // A fresh scan that surfaces a DIFFERENT window resets the session guard so a new bout can show.
         if (next != candidate) handledThisSession = false
         candidate = next
     }
 
-    val w = candidate
-    if (handledThisSession || w == null) return
+    if (handledThisSession) return
+
+    val review = autoSavedReview
+    if (review != null) {
+        AutoSavedWorkoutReviewCard(
+            review = review,
+            saving = saving,
+            onKeep = {
+                AutoWorkoutPrefs.clearReview(context, review.startSec)
+                AutoWorkoutCandidateNotifier.cancelHandled(context)
+                autoSavedReview = null
+                handledThisSession = true
+            },
+            onUndo = {
+                saving = true
+                AutoWorkoutPrefs.dismiss(context, review.row())
+                viewModel.dismissDetected(review.row())
+                AutoWorkoutPrefs.clearReview(context, review.startSec)
+                AutoWorkoutCandidateNotifier.cancelHandled(context)
+                autoSavedReview = null
+                handledThisSession = true
+                saving = false
+            },
+        )
+        return
+    }
+
+    val w = candidate ?: return
 
     NoopCard(tint = Palette.accent) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -140,12 +282,14 @@ fun AutoWorkoutNudgeCard(
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text(uiString(R.string.l10n_auto_workout_nudge_looks_like_a_workout_e745e403), style = NoopType.headline, color = Palette.textPrimary)
+                    Text(suggestionTitle(w), style = NoopType.headline, color = Palette.textPrimary)
                 }
                 // Standard × dismiss → record the window durably so it never re-prompts.
                 IconButton(
+                    enabled = !saving,
                     onClick = {
                         AutoWorkoutPrefs.dismiss(context, w)
+                        AutoWorkoutCandidateNotifier.cancelHandled(context)
                         handledThisSession = true
                         candidate = null
                     },
@@ -167,6 +311,15 @@ fun AutoWorkoutNudgeCard(
                 style = NoopType.footnote,
                 color = Palette.textSecondary,
             )
+            val hint = w.suggestedClass
+            val hintConfidence = w.suggestionConfidence
+            if (hint != null && hintConfidence != null) {
+                Text(
+                    "Experimental type hint · ${className(hint)} · ${(hintConfidence * 100).roundToInt()}% signal confidence",
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -174,19 +327,10 @@ fun AutoWorkoutNudgeCard(
             ) {
                 Button(
                     onClick = {
-                        // Build the manual-style "Workout" row over the detected window (avg HR filled),
-                        // saved via the SAME manual path the Workouts screen uses. buildManualRow is pure.
-                        val durMin = ((w.endSec - w.startSec) / 60L).toInt().coerceAtLeast(1)
-                        val row = WorkoutEditing.buildManualRow(
-                            // Save under the ACTIVE strap id (what the Workouts union reads, #200/#814),
-                            // mirroring iOS `saveDetectedWorkout`. Not the visibility fix (workoutsUnion
-                            // reads "my-whoop" too) but keeps the id consistent with the list + exclusion.
-                            deviceId = viewModel.deviceId,
-                            startSeconds = w.startSec,
-                            durationMin = durMin,
-                            sport = AUTO_DETECT_SPORT,
-                            avgHr = w.avgBpm,
-                            energyKcal = null,
+                        // Even an explicitly accepted detector suggestion remains honestly classified as
+                        // Detected/NOOP (not Manual) and is editable/dismissible in Workouts.
+                        val row = buildDetectedAutoWorkoutRow(
+                            viewModel.repo.computedDeviceId(activeDeviceId), w,
                         )
                         // #214 ROOT CAUSE: save on the ViewModel's scope, NOT the card's. Setting
                         // handledThisSession=true removes this card from composition immediately (see the
@@ -194,90 +338,104 @@ fun AutoWorkoutNudgeCard(
                         // `scope.launch { saveManualWorkout }` was killed before the suspend DB write
                         // committed. The workout never saved and the card kept re-prompting. viewModel
                         // .saveManualWorkout runs on viewModelScope (survives) + reloads the list itself.
-                        if (row != null) viewModel.saveManualWorkout(row)
-                        handledThisSession = true
-                        candidate = null
+                        if (row == null) {
+                            saveFailed = true
+                        } else {
+                            saving = true
+                            saveFailed = false
+                            viewModel.saveManualWorkout(row) { saved ->
+                                saving = false
+                                when (AutoWorkoutSuggestionPolicy.afterSave(saved)) {
+                                    AutoWorkoutSuggestionPolicy.SaveDisposition.CLEAR_CANDIDATE -> {
+                                        AutoWorkoutCandidateNotifier.cancelHandled(context)
+                                        handledThisSession = true
+                                        candidate = null
+                                    }
+                                    AutoWorkoutSuggestionPolicy.SaveDisposition.KEEP_FOR_RETRY -> {
+                                        // Keep the card/candidate visible so failure cannot look like success.
+                                        saveFailed = true
+                                    }
+                                }
+                            }
+                        }
                     },
+                    enabled = !saving,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Palette.accent, contentColor = Palette.surfaceBase,
                     ),
-                ) { Text(uiString(R.string.l10n_auto_workout_nudge_save_it_01d23661)) }
+                ) {
+                    Text(w.suggestedClass?.let { "Save as ${className(it)}" }
+                        ?: uiString(R.string.l10n_auto_workout_nudge_save_it_01d23661))
+                }
 
                 OutlinedButton(
                     onClick = {
                         AutoWorkoutPrefs.dismiss(context, w)
+                        AutoWorkoutCandidateNotifier.cancelHandled(context)
                         handledThisSession = true
                         candidate = null
                     },
+                    enabled = !saving,
                 ) { Text(uiString(R.string.l10n_auto_workout_nudge_not_a_workout_15c5f784), color = Palette.textSecondary) }
+            }
+            if (saveFailed) {
+                Text(
+                    "Could not save locally. Your suggestion is still here - try again.",
+                    style = NoopType.footnote,
+                    color = Palette.statusCritical,
+                )
             }
         }
     }
 }
 
-/**
- * Pure read + suggestion path mirroring iOS `Repository.autoDetectCandidate(daysBack:)`. Scans the last
- * [AUTO_DETECT_DAYS_BACK] days of HR, runs the byte-parity detector, excludes saved + dismissed windows,
- * and returns the MOST RECENT surviving candidate (newest first), or null. Never writes anything.
- */
-private suspend fun autoDetectCandidate(
-    viewModel: AppViewModel,
-    context: android.content.Context,
-    days: List<DailyMetric>,
-): AutoWorkoutDetector.DetectedWorkout? {
-    val nowSec = System.currentTimeMillis() / 1000
-    val fromSec = nowSec - AUTO_DETECT_DAYS_BACK * 86_400L
-    val repo = viewModel.repo
-
-    val hr = repo.hrSamples(AUTO_DETECT_DEVICE, fromSec, nowSec, limit = 200_000)
-    if (hr.size < 2) return null
-
-    // Resting HR: most recent nightly RHR in history, else the detector's own default (60). Byte-faithful
-    // to iOS `days.last(where: { restingHr != nil })?.restingHr`.
-    val restingHr = days.lastOrNull { it.restingHr != null }?.restingHr
-
-    // Exclude EVERY already-saved workout window (any source — strap/manual, Apple Health, Health Connect,
-    // computed "detected" bouts, imported lifting). Matches the iOS `workoutRows()` source union.
-    val computed = repo.computedDeviceId(AUTO_DETECT_DEVICE)
-    val saved = (
-        repo.workouts(AUTO_DETECT_DEVICE, fromSec, nowSec) +
-            // #214: also exclude workouts under the ACTIVE strap id — the id we now SAVE under. Without
-            // this the just-saved workout wouldn't be seen by the overlap exclusion and the card would
-            // re-prompt for the same window. (Equals "my-whoop" for a legacy install, a harmless dup.)
-            repo.workouts(viewModel.deviceId, fromSec, nowSec) +
-            repo.workouts("apple-health", fromSec, nowSec) +
-            repo.workouts("health-connect", fromSec, nowSec) +
-            repo.workouts(computed, fromSec, nowSec) +
-            repo.workouts("lifting", fromSec, nowSec)
-        ).map { it.startTs to it.endTs }
-
-    // Workouts & GPS test mode (Test Centre): when on, run the diagnostic twin which returns the SAME
-    // candidates detect(...) does (it reuses detect verbatim) plus the inputs / thresholds / per-window why
-    // trace, routed to the .workouts-tagged strap log. Zero-cost when off: one SharedPreferences bool read,
-    // and detectTrace is only called on that branch, so the default path runs the untraced detect.
-    val candidates = if (com.noop.testcentre.TestCentre.from(context)
-            .active(com.noop.testcentre.TestDomain.WORKOUTS)
-    ) {
-        val (results, trace) = AutoWorkoutDetectorTrace.detectTrace(
-            hr = hr,
-            restingHR = restingHr,
-            gravity = emptyList(),
-            savedWorkouts = saved,
-            path = "autoDetect",
-        )
-        for (line in trace) viewModel.ble.externalLog(line, com.noop.testcentre.TestDomain.WORKOUTS)
-        results
-    } else {
-        AutoWorkoutDetector.detect(
-            hr = hr,
-            restingHR = restingHr,
-            gravity = emptyList(), // HR-only MVP (matches iOS passing motion: nil)
-            savedWorkouts = saved,
-        )
+@Composable
+private fun AutoSavedWorkoutReviewCard(
+    review: AutoWorkoutPrefs.Review,
+    saving: Boolean,
+    onKeep: () -> Unit,
+    onUndo: () -> Unit,
+) {
+    val durationMin = maxOf(1L, (review.endSec - review.startSec) / 60L)
+    NoopCard(tint = Palette.accent) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.AutoMirrored.Filled.DirectionsRun,
+                    contentDescription = null,
+                    tint = Palette.accent,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Workout saved automatically", style = NoopType.headline, color = Palette.textPrimary)
+            }
+            Text(
+                "NOOP detected ${review.sport} from ${hhmm(review.startSec)} - ${hhmm(review.endSec)} " +
+                    "(avg HR ${review.avgBpm}, $durationMin min).",
+                style = NoopType.footnote,
+                color = Palette.textSecondary,
+            )
+            Text(
+                "Keep it here, mark it as not a workout, or edit its time and activity type anytime in Workouts. Detected workouts are labelled NOOP, not Manual.",
+                style = NoopType.caption,
+                color = Palette.textTertiary,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(
+                    onClick = onKeep,
+                    enabled = !saving,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Palette.accent, contentColor = Palette.surfaceBase,
+                    ),
+                ) { Text("Keep") }
+                OutlinedButton(onClick = onUndo, enabled = !saving) {
+                    Text("Not a workout", color = Palette.textSecondary)
+                }
+            }
+        }
     }
-    // Drop anything the user already dismissed, then take the most recent. Mirrors iOS exactly.
-    val dismissed = AutoWorkoutPrefs.dismissed(context)
-    return candidates
-        .filter { AutoWorkoutPrefs.token(it) !in dismissed }
-        .maxByOrNull { it.startSec }
 }

@@ -56,28 +56,25 @@ public enum OuraStreamMapping {
                 out.hr.append(HRSample(ts: ts, bpm: v.bpm))
 
             case .ibi(let v):
-                out.rr.append(RRInterval(ts: ts, rrMs: v.ibiMs))
+                out.rr.append(RRInterval(ts: ts, rrMs: v.ibiMs,
+                                         srcChannel: rrChannel(v.channel)))
 
             case .hrv(let v):
-                // The ring's own 0x5D tag, carried RAW for diagnostics/parity. The two int8 fields
-                // (b1/b2) plus the sample's relative time offset are surfaced under units-neutral keys.
-                // We do NOT mint an `rmssd_ms` here: the int8 b1/b2 byte -> millisecond scaling is NOT
-                // Tier-A (OURA_PROTOCOL.md s6.9 leaves it unpinned), so labelling a raw byte as a
-                // millisecond RMSSD would fabricate units (honest-data invariant). NOOP's own scoring
-                // RMSSD is reconstructed from the IBI stream (`rr`), never from this open tag. Keys and
-                // values are IDENTICAL to the Kotlin twin (OuraStreamMapping.kt) so both platforms emit
-                // byte-for-byte the same OURA_HRV payload.
-                out.events.append(WhoopEvent(ts: ts, kind: hrvEventKind, payload: [
-                    "time_ms": .int(v.timeMs),
-                    "b1": .int(v.b1),
-                    "b2": .int(v.b2),
+                // The first pair is the oldest bucket; the record timestamp marks the covered span's end.
+                // A bucket is stamped at its start, and count includes padding omitted by the decoder.
+                let bucketTs = ts - (v.count - v.index) * 300
+                out.events.append(WhoopEvent(ts: bucketTs, kind: hrvEventKind, payload: [
+                    "pair_index": .int(v.index),
+                    "hr_bpm": .int(v.hrBpm),
+                    "rmssd_ms": .int(v.rmssdMs),
                 ]))
 
             case .spo2(let v):
                 // Oura reports a single SpO2 channel; `SpO2Sample` is the WHOOP-shaped two-channel raw row,
                 // so we record the decoded value on `red` and leave `ir` at 0 (no second channel). `unit`
                 // carries the decoder's own scale tag ("raw"/"dc_raw") so downstream never assumes a %.
-                out.spo2.append(SpO2Sample(ts: ts, red: v.value, ir: 0, unit: v.unit))
+                let sampleTs = ts - max(0, v.count - 1 - v.index)
+                out.spo2.append(SpO2Sample(ts: sampleTs, red: v.value, ir: 0, unit: v.unit))
 
             case .temp(let v):
                 // The decoder yields degrees C. The durable `SkinTempSample.raw` is an integer in the
@@ -110,5 +107,31 @@ public enum OuraStreamMapping {
             }
         }
         return out
+    }
+
+    /// Group already-stamped events into one insert per timestamp while preserving arrival order.
+    /// StreamStore's R-R `ord` counter is batch-local, so per-beat inserts would reset it to zero.
+    public static func batched(_ stamped: [(event: OuraEvent, ts: Int)])
+        -> [(ts: Int, events: [OuraEvent])] {
+        var order: [Int] = []
+        var byTs: [Int: [OuraEvent]] = [:]
+        for value in stamped {
+            if byTs[value.ts] == nil {
+                order.append(value.ts)
+                byTs[value.ts] = []
+            }
+            byTs[value.ts]?.append(value.event)
+        }
+        return order.map { (ts: $0, events: byTs[$0] ?? []) }
+    }
+
+    public static func rrChannel(_ channel: OuraIBIChannel?) -> RRSourceChannel? {
+        switch channel {
+        case .greenQuality: return .greenQuality
+        case .spo2Ibi: return .spo2Ibi
+        case .ibiAmplitude: return .ibiAmplitude
+        case .ibiBare: return .ibiBare
+        case nil: return nil
+        }
     }
 }

@@ -683,10 +683,10 @@ class OuraLiveSource(
         if (pendingAnchorEvents.isEmpty()) return@guardedCallback
         val d = driver ?: return@guardedCallback
         val now = (System.currentTimeMillis() / 1000L).toInt()
-        for ((event, ringTimestamp) in pendingAnchorEvents) {
-            val ts = d.unixSeconds(forRingTimestamp = ringTimestamp)?.toInt() ?: now
-            enqueue(listOf(event), ts)
+        val stamped = pendingAnchorEvents.map { (event, ringTimestamp) ->
+            event to (d.unixSeconds(forRingTimestamp = ringTimestamp)?.toInt() ?: now)
         }
+        for ((ts, events) in OuraStreamMapping.batched(stamped)) enqueue(events, ts)
         pendingAnchorEvents.clear()
     }
 
@@ -1128,6 +1128,14 @@ class OuraLiveSource(
         if (events.isEmpty()) return@guardedCallback
         val d = driver ?: return@guardedCallback
         val now = (System.currentTimeMillis() / 1000L).toInt()
+        // A record's beats must reach the store together. The R-R `ord`/`seq` counters are batch-local;
+        // one persist per beat would restart both counters and destroy same-second emission order.
+        val anchoredBeats = events.mapNotNull { event ->
+            if (event !is OuraEvent.Ibi) null
+            else d.unixSeconds(forRingTimestamp = event.value.ringTimestamp)
+                ?.let { event as OuraEvent to it.toInt() }
+        }
+        for ((ts, batch) in OuraStreamMapping.batched(anchoredBeats)) enqueue(batch, ts)
         for (e in events) when (e) {
             is OuraEvent.Hr -> {
                 val bpm = e.value.bpm
@@ -1166,11 +1174,10 @@ class OuraLiveSource(
             is OuraEvent.Ibi -> {
                 val rr = e.value.ibiMs
                 if (rr in 250..3000) handler.post { guardedCallback("live-sink") { liveSink(0, listOf(rr)) } }
-                // A banked IBI is history data: anchor it to its REAL ring-time (via [enqueueAnchoredOrPark]),
-                // exactly like the sibling banked streams (.Hrv/.Temp/.Spo2/.SleepPhaseEvent) - never the
-                // drain-arrival `now`. Stamping at `now` misfiled every overnight beat to the daytime sync
-                // moment, so the sleep window ended up with zero R-R -> no restingHr/avgHrv for the night.
-                enqueueAnchoredOrPark(e, e.value.ringTimestamp, d)
+                // Anchored beats were enqueued above as one record batch. Only unanchored beats park here.
+                if (d.unixSeconds(forRingTimestamp = e.value.ringTimestamp) == null) {
+                    pendingAnchorEvents.add(e to e.value.ringTimestamp)
+                }
             }
             is OuraEvent.Battery -> {
                 handleBattery(e.value.percent)

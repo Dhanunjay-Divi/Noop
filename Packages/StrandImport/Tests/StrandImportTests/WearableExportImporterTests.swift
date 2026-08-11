@@ -263,7 +263,7 @@ final class WearableExportImporterTests: XCTestCase {
         XCTAssertEqual(d.totalKcal!, 2450, accuracy: 1e-6)
         XCTAssertEqual(d.distanceM!, 6200, accuracy: 1e-6)       // equivalent_walking_distance (m)
         XCTAssertEqual(d.spo2Pct!, 97.4, accuracy: 1e-6)         // dailyspo2 spo2_percentage
-        XCTAssertEqual(d.vo2max!, 44.6, accuracy: 1e-6)          // vo2max vo2_max → Fitness Age
+        XCTAssertEqual(d.vo2max!, 44.6, accuracy: 1e-6)          // vo2max vo2_max → device VO2max series
         // The deleted sleep row left NO fabricated sleep metrics on the day (durations came from the night).
         XCTAssertEqual(d.totalSleepMin!, 420, accuracy: 1e-6)
     }

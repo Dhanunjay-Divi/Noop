@@ -5,11 +5,8 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 /**
- * Guards the onboarding Units control (#781). The ProfileStep onboarding step now carries a
- * Metric/Imperial [SegmentedPillControl] so US users can pick their units during setup, instead of being
- * locked to kg/cm until they later found Settings. That control writes [NoopPrefs.KEY_UNIT_SYSTEM] (via
- * NoopPrefs.setUnitSystem) and labels its segments from the [UnitSystem] raw values, exactly like the
- * Settings -> Units card.
+ * Guards the independent onboarding Weight and Height controls. Stored values remain SI while display
+ * choices can be mixed, and old combined Metric/Imperial preferences resolve safely on upgrade.
  *
  * These tests pin that wiring contract so a rename of the key or a raw value can't silently leave the
  * onboarding picker writing one place while the formatter reads another (the bug #781 fixed). Mirrors the
@@ -17,43 +14,48 @@ import org.junit.Test
  */
 class OnboardingUnitsPickerTest {
 
-    /** The onboarding picker, the Settings card, and the formatter must all read/write the SAME key. */
+    /** Onboarding, Settings and the formatter must share the same stable keys. */
     @Test
-    fun unitSystemKeyIsTheSharedPrefsKey() {
-        assertEquals("units.system", NoopPrefs.KEY_UNIT_SYSTEM)
+    fun independentKeysAreStable() {
+        assertEquals("units.mass", NoopPrefs.KEY_MASS_UNIT)
+        assertEquals("units.height", NoopPrefs.KEY_HEIGHT_UNIT)
     }
 
-    /** The control's items are the [UnitSystem] entries; their raw values must round-trip through the
-     *  same [UnitSystem.fromRaw] resolver every screen reads units with. */
     @Test
     fun rawValuesRoundTripThroughResolver() {
-        assertEquals(UnitSystem.METRIC, UnitSystem.fromRaw(UnitSystem.METRIC.raw))
-        assertEquals(UnitSystem.IMPERIAL, UnitSystem.fromRaw(UnitSystem.IMPERIAL.raw))
-        assertEquals("metric", UnitSystem.METRIC.raw)
-        assertEquals("imperial", UnitSystem.IMPERIAL.raw)
+        assertEquals(MassUnit.KILOGRAMS, MassUnit.fromRaw("kg"))
+        assertEquals(MassUnit.POUNDS, MassUnit.fromRaw("lb"))
+        assertEquals(HeightUnit.CENTIMETERS, HeightUnit.fromRaw("cm"))
+        assertEquals(HeightUnit.FEET_INCHES, HeightUnit.fromRaw("ft_in"))
     }
 
-    /** An unset or unknown stored value resolves to Metric, matching the wizard's default. */
     @Test
-    fun unknownRawDefaultsToMetric() {
-        assertEquals(UnitSystem.METRIC, UnitSystem.fromRaw("nonsense"))
-        assertEquals(UnitSystem.METRIC, UnitSystem.fromRaw(null))
+    fun legacyCombinedPreferenceMigratesWithoutChangingPresentation() {
+        assertEquals(MassUnit.KILOGRAMS, UnitPrefs.resolveMass(UnitSystem.METRIC, null))
+        assertEquals(HeightUnit.CENTIMETERS, UnitPrefs.resolveHeight(UnitSystem.METRIC, null))
+        assertEquals(MassUnit.POUNDS, UnitPrefs.resolveMass(UnitSystem.IMPERIAL, null))
+        assertEquals(HeightUnit.FEET_INCHES, UnitPrefs.resolveHeight(UnitSystem.IMPERIAL, null))
     }
 
-    /** Picking Imperial must actually change what the Weight/Height steppers render. */
     @Test
-    fun pickingImperialChangesTheDisplayedWeightAndHeight() {
+    fun weightAndHeightCanUseMixedCombinations() {
         val kg = 74.5
         val cm = 178.0
-        assertEquals("74.5 kg", UnitFormatter.massFromKilograms(kg, UnitSystem.METRIC))
+        assertEquals("74.5 kg", UnitFormatter.massFromKilograms(kg, MassUnit.KILOGRAMS))
+        assertEquals("5′ 10″", UnitFormatter.heightFromCentimeters(cm, HeightUnit.FEET_INCHES))
         assertNotEquals(
-            UnitFormatter.massFromKilograms(kg, UnitSystem.METRIC),
-            UnitFormatter.massFromKilograms(kg, UnitSystem.IMPERIAL),
+            UnitFormatter.massFromKilograms(kg, MassUnit.KILOGRAMS),
+            UnitFormatter.massFromKilograms(kg, MassUnit.POUNDS),
         )
-        assertEquals("178 cm", UnitFormatter.heightFromCentimeters(cm, UnitSystem.METRIC))
         assertNotEquals(
-            UnitFormatter.heightFromCentimeters(cm, UnitSystem.METRIC),
-            UnitFormatter.heightFromCentimeters(cm, UnitSystem.IMPERIAL),
+            UnitFormatter.heightFromCentimeters(cm, HeightUnit.CENTIMETERS),
+            UnitFormatter.heightFromCentimeters(cm, HeightUnit.FEET_INCHES),
         )
+    }
+
+    @Test
+    fun explicitIndependentChoiceWinsOverLegacySystem() {
+        assertEquals(MassUnit.KILOGRAMS, UnitPrefs.resolveMass(UnitSystem.IMPERIAL, "kg"))
+        assertEquals(HeightUnit.FEET_INCHES, UnitPrefs.resolveHeight(UnitSystem.METRIC, "ft_in"))
     }
 }

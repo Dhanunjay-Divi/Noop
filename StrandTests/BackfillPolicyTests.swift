@@ -91,4 +91,24 @@ final class BackfillPolicyTests: XCTestCase {
         XCTAssertTrue(BackfillPolicy.shouldRun(trigger: .manual, now: 1000, lastBackfillAt: 999, clockUntrusted: true))
         XCTAssertTrue(BackfillPolicy.shouldRun(trigger: .autoContinue, now: 1000, lastBackfillAt: 999, clockUntrusted: true))
     }
+
+    /// #1125: zero-row timeout stalls count toward backoff, productive burst tails are neutral, and the
+    /// next session that persists rows immediately resets the cadence.
+    func testEmptyOffloadBookkeepingCountsStallsAndResetsOnRows() {
+        var streak = EmptyOffloadBackoff.nextStreak(
+            currentStreak: 2, rowsPersisted: 0, productiveBurstTail: false)
+        XCTAssertEqual(streak, 3)
+
+        streak = EmptyOffloadBackoff.nextStreak(
+            currentStreak: streak, rowsPersisted: 0, productiveBurstTail: true)
+        XCTAssertEqual(streak, 3)
+
+        streak = EmptyOffloadBackoff.nextStreak(
+            currentStreak: streak, rowsPersisted: 12, productiveBurstTail: false)
+        XCTAssertEqual(streak, 0)
+        XCTAssertEqual(EmptyOffloadBackoff.effectiveStreak(
+            consoleOnlyStreak: 4, emptyOffloadStreak: 2), 4)
+        XCTAssertEqual(EmptyOffloadBackoff.effectiveStreak(
+            consoleOnlyStreak: 1, emptyOffloadStreak: 5), 5)
+    }
 }

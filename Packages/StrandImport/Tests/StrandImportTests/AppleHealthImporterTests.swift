@@ -28,6 +28,27 @@ final class AppleHealthImporterTests: XCTestCase {
         XCTAssertFalse(types.contains("DietaryWater"))
     }
 
+    func testStaticExportMapsBodyAndWristTemperatureToSeparateSeries() throws {
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <HealthData>
+         <Record type="HKQuantityTypeIdentifierBodyTemperature" sourceName="Thermometer" unit="degF" startDate="2024-05-01 08:00:00 +0000" endDate="2024-05-01 08:00:00 +0000" value="98.6"/>
+         <Record type="HKQuantityTypeIdentifierAppleSleepingWristTemperature" sourceName="Apple Watch" unit="degC" startDate="2024-05-01 06:00:00 +0000" endDate="2024-05-01 06:00:00 +0000" value="34.1"/>
+        </HealthData>
+        """
+        let result = try AppleHealthImporter().importXML(data: Data(xml.utf8))
+        XCTAssertEqual(Set(result.samples.map(\.type)),
+                       ["BodyTemperature", "AppleSleepingWristTemperature"])
+
+        let aggregate = try XCTUnwrap(AppleHealthAggregator.aggregate(result).first)
+        XCTAssertEqual(try XCTUnwrap(aggregate.bodyTemperatureC), 37.0, accuracy: 0.000_001)
+        XCTAssertEqual(try XCTUnwrap(aggregate.wristTemperatureC), 34.1, accuracy: 0.000_001)
+        let keys = Set(AppleHealthAggregator.metricPoints([aggregate]).map(\.key))
+        XCTAssertTrue(keys.contains("body_temp"))
+        XCTAssertTrue(keys.contains("wrist_temp"))
+        XCTAssertFalse(keys.contains("skin_temp"))
+    }
+
     // MARK: - OxygenSaturation ×100
 
     func testOxygenSaturationFractionScaledToPercent() throws {

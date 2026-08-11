@@ -58,7 +58,17 @@ public struct DeviceRegistryStore: Sendable {
     /// strap's service family is known from a live BLE connect).
     public func setModel(_ id: String, model: String) throws {
         try dbQueue.write { db in
-            try db.execute(sql: "UPDATE pairedDevice SET model = ? WHERE id = ?", arguments: [model, id])
+            // A model attestation also repairs the seeded WHOOP's capability truth. This is important
+            // for a 5/MG: only after generation is known can the live `steps` capability be advertised.
+            let capabilities = WhoopLiveCapabilities.encoded(forModel: model)
+            try db.execute(sql: """
+                UPDATE pairedDevice SET model = ?,
+                    capabilities = CASE
+                        WHEN brand = 'WHOOP' OR id = 'my-whoop' OR id LIKE 'whoop-%' THEN ?
+                        ELSE capabilities
+                    END
+                WHERE id = ?
+                """, arguments: [model, capabilities, id])
         }
     }
 
@@ -106,6 +116,8 @@ public struct DeviceRegistryStore: Sendable {
         // v28-raw-imu (#423): the opt-in 5/MG raw-IMU offload capture is deviceId-keyed too — "delete all
         // of this device's data" must clear it, or the raw inertial samples survive deletion (same defect).
         "rawImuSample",
+        // v34: timestamped external body-weight readings are device-scoped canonical health data too.
+        "bodyMeasurement",
     ]
 
     /// Permanently delete every recorded sample/derived row belonging to one device, across all
@@ -155,11 +167,17 @@ public struct DeviceRegistryStore: Sendable {
     }
 
     private static func decode(_ row: Row) -> PairedDevice {
-        let caps = (row["capabilities"] as String).split(separator: ",").compactMap { Metric(rawValue: String($0)) }
-        return PairedDevice(id: row["id"], brand: row["brand"], model: row["model"], nickname: row["nickname"],
+        var caps = Set((row["capabilities"] as String).split(separator: ",")
+            .compactMap { Metric(rawValue: String($0)) })
+        let id = row["id"] as String
+        let brand = row["brand"] as String
+        if brand.caseInsensitiveCompare("WHOOP") == .orderedSame || id == "my-whoop" || id.hasPrefix("whoop-") {
+            caps = WhoopLiveCapabilities.withoutCalibratedSpo2(caps)
+        }
+        return PairedDevice(id: id, brand: brand, model: row["model"], nickname: row["nickname"],
                             peripheralId: row["peripheralId"],
                             sourceKind: SourceKind(rawValue: row["sourceKind"]) ?? .liveBLE,
-                            capabilities: Set(caps), status: DeviceStatus(rawValue: row["status"]) ?? .paired,
+                            capabilities: caps, status: DeviceStatus(rawValue: row["status"]) ?? .paired,
                             addedAt: row["addedAt"], lastSeenAt: row["lastSeenAt"])
     }
 }

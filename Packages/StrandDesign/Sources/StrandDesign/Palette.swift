@@ -54,10 +54,9 @@ public extension Color {
 
 // MARK: - Strand Palette
 //
-// The "Titanium & Gold" re-skin: a premium dark theme built on a deep navy canvas with
-// per-domain accent "colour worlds" (Charge = gold, Effort = amber, Rest = blue,
-// Stress = blue→gold→orange). GOLD is the dominant brand anchor; titanium drives the
-// neutral chrome (tiles, avatars, icons).
+// The Obsidian re-skin: a premium monochrome shell built on black / pearl surfaces.
+// Colour is reserved for physiological meaning (Charge, Effort, Rest, stress, HR
+// zones and alerts); navigation, controls and identity stay neutral.
 //
 // PUBLIC API IS FROZEN: every property name below is depended on by screens across
 // macOS / iOS, so the names never change — only the VALUES were re-themed. New
@@ -66,19 +65,30 @@ public extension Color {
 
 public enum StrandPalette {
 
-    // MARK: Surfaces — deep navy canvas, tinted frosted cards
-    // Background is a near-black navy (NOT pure black); cards float just above it.
-    public static let surfaceBase    = Color(light: "#F2F2F7", dark: "#121518") // WHOOP dark blue-grey canvas (sampled)
-    public static let surfaceRaised  = Color(light: "#FFFFFF", dark: "#25292C") // WHOOP grey list-card fill (sampled)
-    public static let surfaceOverlay = Color(light: "#FFFFFF", dark: "#1C1F26") // popovers / sheets / tooltips
-    public static let surfaceInset   = Color(light: "#E9E9EE", dark: "#1F2229") // wells / chart insets / segmented track
-    public static let hairline       = Color(light: "#D8D0BD", dark: "#21304A") // soft 1px border (stronger on light for card edges)
-    public static let hairlineStrong = Color(light: "#C7BCA4", dark: "#2E3C57") // hover / emphasis border
+    // MARK: Surfaces — pearl canvas / obsidian canvas
+    public static let surfaceBase    = Color(light: "#F4F4F2", dark: "#050505")
+    public static let surfaceRaised  = Color(light: "#FFFFFF", dark: "#111111")
+    public static let surfaceOverlay = Color(light: "#FBFBFA", dark: "#171717")
+    public static let surfaceInset   = Color(light: "#EAEAE7", dark: "#0B0B0B")
+    public static let hairline       = Color(light: "#D7D7D2", dark: "#2A2A2A")
+    public static let hairlineStrong = Color(light: "#B8B8B2", dark: "#4A4A4A")
 
-    // MARK: Text — deep navy-ink on paper / cool off-white on navy
-    public static let textPrimary    = Color(light: "#1A2230", dark: "#F4F6F8")
-    public static let textSecondary  = Color(light: "#4C5564", dark: "#C8CFD8")
-    public static let textTertiary   = Color(light: "#7C8696", dark: "#8A94A4")
+    // MARK: Dimensional chrome — shared by glass, cards and extruded glyphs
+    public static let atmosphereLift = Color(light: "#E6E6E2", dark: "#17181C")
+    public static let glassScrim      = Color(light: "#FFFFFF", dark: "#070708")
+    public static let bevelTop        = Color(light: "#FFFFFF", dark: "#FFFFFF")
+    public static let bevelSide       = Color(light: "#D4D4CF", dark: "#55565A")
+    public static let bevelBottom     = Color(light: "#A9A9A4", dark: "#020203")
+    public static let glyphFaceTop    = Color(light: "#FFFFFF", dark: "#292A2D")
+    public static let glyphFaceBottom = Color(light: "#DEDED9", dark: "#0B0C0E")
+    public static let glyphExtrusion  = Color(light: "#BEBEB8", dark: "#030304")
+    public static let glyphInkTop     = Color(light: "#343431", dark: "#F5F5F2")
+    public static let glyphInkBottom  = Color(light: "#050505", dark: "#B8B8B2")
+
+    // MARK: Text — neutral ink on pearl / soft white on obsidian
+    public static let textPrimary    = Color(light: "#111111", dark: "#F7F7F5")
+    public static let textSecondary  = Color(light: "#4F4F4C", dark: "#C7C7C2")
+    public static let textTertiary   = Color(light: "#7D7D78", dark: "#8F8F89")
 
     // MARK: Text ON a permanently-dark surface (scheme-invariant)
     // Use these — NOT textPrimary/Secondary/Tertiary — for labels/pills drawn over a fill that is pinned
@@ -86,21 +96,20 @@ public enum StrandPalette {
     // a fixed near-black). The regular text tokens FLIP to dark ink in Light mode, so on a fixed-dark card
     // they render dark-on-near-black and vanish (#1013). These hold the light-on-dark values in BOTH
     // schemes, so a label always reads on the card. (Same hex as the *.dark side of the text tokens.)
-    public static let onDarkPrimary   = Color(hex: "#F4F6F8")
-    public static let onDarkSecondary = Color(hex: "#C8CFD8")
-    public static let onDarkTertiary  = Color(hex: "#8A94A4")
+    public static let onDarkPrimary   = Color(hex: "#F7F7F5")
+    public static let onDarkSecondary = Color(hex: "#C7C7C2")
+    public static let onDarkTertiary  = Color(hex: "#8F8F89")
 
     // MARK: Glow — ambient bloom behind heroes / charts (additive on dark; faint warm on light)
-    public static let glowAmbient    = Color(light: "#F0E4C0", dark: "#3A2D0A")
+    public static let glowAmbient    = Color(light: "#E8E8E4", dark: "#FFFFFF")
 
-    // MARK: Accent — chrome anchor (links, selection, focus, generic accent). On DARK this is the brand
-    // GOLD; on LIGHT it shifts to the deep brand BLUE so gold is reserved for the recovery/Charge world
-    // and the gold FAB — keeping the light theme from reading as wall-to-wall gold (the maintainer 2026-06-16).
-    public static let accent         = Color(light: "#234F9E", dark: "#60A0E0") // WHOOP link/action blue (gold killed 2026-06-22)
-    public static let accentHover    = Color(light: "#1C3F80", dark: "#8FBEEC")
-    public static let accentMuted    = Color(light: "#E4ECF6", dark: "#16233A") // selected-row tint (pale blue / dark blue)
-    /// Focus ring color (blue on both schemes — WHOOP has no gold).
-    public static let focusRing      = Color(light: "#2F6FCB", dark: "#60A0E0")
+    // MARK: Accent — monochrome chrome. Data colours remain below.
+    public static let accent         = Color(light: "#111111", dark: "#F7F7F5")
+    public static let accentHover    = Color(light: "#2C2C2A", dark: "#FFFFFF")
+    public static let accentMuted    = Color(light: "#E5E5E1", dark: "#202020")
+    public static let focusRing      = Color(light: "#333330", dark: "#E7E7E2")
+    /// Ink placed on the dynamic accent fill: white on light-mode black, black on dark-mode white.
+    public static let accentInk      = Color(light: "#FFFFFF", dark: "#070707")
     /// Opacity for dimmed/disabled sections (shared so screens don't invent their own value).
     public static let disabledOpacity: Double = 0.45
 

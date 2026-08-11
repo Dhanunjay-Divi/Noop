@@ -208,6 +208,38 @@ final class OuraDriverTests: XCTestCase {
         XCTAssertEqual(d.unixSeconds(forRingTimestamp: anchorRt + 100), Int(anchorEpochSeconds) + 10)
     }
 
+    func testSampleConvertingToFutureIsRejected() {
+        let anchorEpochSeconds: Int64 = 1_700_000_000
+        let anchorRt: UInt32 = 1_000_000
+        let d = OuraDriver(ringGen: .gen3, authKey: key,
+                           nowMsProvider: { anchorEpochSeconds * 1000 })
+        let payload = le8(anchorEpochSeconds) + [0x00]
+        _ = d.ingest(record: OuraRecord(type: OuraEventTag.timeSync.rawValue,
+                                        ringTimestamp: anchorRt, payload: payload))
+
+        XCTAssertEqual(d.unixSeconds(forRingTimestamp: anchorRt - 100), Int(anchorEpochSeconds) - 10)
+        XCTAssertEqual(d.unixSeconds(forRingTimestamp: anchorRt), Int(anchorEpochSeconds))
+        XCTAssertEqual(d.unixSeconds(forRingTimestamp: anchorRt + 2_000), Int(anchorEpochSeconds) + 200)
+        XCTAssertNil(d.unixSeconds(forRingTimestamp: anchorRt + 3_010))
+        XCTAssertNil(d.unixSeconds(forRingTimestamp: anchorRt + 315_360_000),
+                     "a sample a year in the future must not pass the anchor plausibility window")
+    }
+
+    func testAnchorAdoptionStillUsesFullWindowIndependentOfNow() {
+        let futureAnchorSeconds: Int64 = 2_020_000_000
+        let anchorRt: UInt32 = 500
+        let d = OuraDriver(ringGen: .gen3, authKey: key,
+                           nowMsProvider: { 1_700_000_000 * 1000 })
+        let payload = le8(futureAnchorSeconds) + [0x00]
+        let events = d.ingest(record: OuraRecord(type: OuraEventTag.timeSync.rawValue,
+                                                 ringTimestamp: anchorRt, payload: payload))
+        XCTAssertEqual(events, [.timeSync(OuraTimeSync(ringTimestamp: anchorRt,
+                                                       epochMs: futureAnchorSeconds,
+                                                       tzOffsetSeconds: 0))])
+        XCTAssertNil(d.unixSeconds(forRingTimestamp: anchorRt),
+                     "sample conversion must use now even when the anchor itself is plausible")
+    }
+
     func testRtcBeaconOnlyAnchorsWhenNoTimeSyncSeenYet() {
         let d = OuraDriver(ringGen: .gen3, authKey: key)
         let beaconRt: UInt32 = 5_000
@@ -353,16 +385,16 @@ final class OuraDriverTests: XCTestCase {
         // 0x4B was previously a Tier-B "sleep summary" (dropped by default). It is actually a hypnogram
         // alias (open_oura `0x4b | 0x4e | 0x5a => decode_sleep_phases`), so it now decodes with the SAME
         // validated 2-bit phase decoder as 0x4E/0x5A and emits Tier-A sleep-phase events even when
-        // allowTierB == false. Same payload as the 0x4E golden -> light, deep, rem, awake.
+        // allowTierB == false. Same payload as the 0x4E golden -> light, REM, awake, deep.
         XCTAssertEqual(OuraEventTag(rawValue: 0x4B), .sleepPhaseB)
         XCTAssertEqual(OuraEventTag.sleepPhaseB.tier, .tierA)
         let d = OuraDriver(ringGen: .gen3, authKey: key)   // allowTierB defaults to false
         let rec = OuraFraming.parseRecord(bytes("4b0602000100006c"))!
         XCTAssertEqual(d.ingest(record: rec), [
             .sleepPhase(OuraSleepPhase(ringTimestamp: rt, index: 0, stage: .light)),
-            .sleepPhase(OuraSleepPhase(ringTimestamp: rt, index: 1, stage: .deep)),
-            .sleepPhase(OuraSleepPhase(ringTimestamp: rt, index: 2, stage: .rem)),
-            .sleepPhase(OuraSleepPhase(ringTimestamp: rt, index: 3, stage: .awake)),
+            .sleepPhase(OuraSleepPhase(ringTimestamp: rt, index: 1, stage: .rem)),
+            .sleepPhase(OuraSleepPhase(ringTimestamp: rt, index: 2, stage: .awake)),
+            .sleepPhase(OuraSleepPhase(ringTimestamp: rt, index: 3, stage: .deep)),
         ])
     }
 

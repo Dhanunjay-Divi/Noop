@@ -369,18 +369,46 @@ interface WhoopDao : DeviceRegistryDao {
     suspend fun ppgWaveformSamples(deviceId: String, from: Long, to: Long, limit: Int):
         List<PpgWaveformSampleEntity>
 
-    /** Aggregate HR over a window (one indexed (deviceId,ts) range scan — no row materialisation,
-     *  no [hrSamples] LIMIT truncation). Backs the imported-workout HR fallback (#77). */
+    /**
+     * Aggregate HR over a workout window for up to two source ids, with [primaryId] winning when the
+     * same second was re-banked under both ids (#836/#1039). Each id first coalesces measured HR with
+     * its PPG-derived fallback; grouping by timestamp then prevents a naive cross-id UNION from inflating
+     * count/average. Passing the same id twice is the single-source control.
+     */
     @Query(
-        "SELECT COUNT(*) AS n, AVG(bpm) AS avg, MAX(bpm) AS max FROM hrSample " +
-            "WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to"
+        "SELECT COUNT(*) AS n, AVG(bpm) AS avg, MAX(bpm) AS max FROM (" +
+            "SELECT ts, MIN(pri), bpm FROM (" +
+            "SELECT ts, bpm, 0 AS pri FROM hrSample " +
+            "WHERE deviceId = :primaryId AND ts >= :from AND ts <= :to " +
+            "UNION ALL " +
+            "SELECT p.ts AS ts, p.bpm AS bpm, 0 AS pri FROM ppgHrSample p " +
+            "WHERE p.deviceId = :primaryId AND p.ts >= :from AND p.ts <= :to " +
+            "AND NOT EXISTS (SELECT 1 FROM hrSample h WHERE h.deviceId = p.deviceId AND h.ts = p.ts) " +
+            "UNION ALL " +
+            "SELECT ts, bpm, 1 AS pri FROM hrSample " +
+            "WHERE deviceId = :secondaryId AND ts >= :from AND ts <= :to " +
+            "UNION ALL " +
+            "SELECT p.ts AS ts, p.bpm AS bpm, 1 AS pri FROM ppgHrSample p " +
+            "WHERE p.deviceId = :secondaryId AND p.ts >= :from AND p.ts <= :to " +
+            "AND NOT EXISTS (SELECT 1 FROM hrSample h WHERE h.deviceId = p.deviceId AND h.ts = p.ts) " +
+            ") GROUP BY ts" +
+            ")"
     )
-    suspend fun hrWindowStats(deviceId: String, from: Long, to: Long): HrWindowStats
+    suspend fun hrWindowStats(
+        primaryId: String,
+        secondaryId: String,
+        from: Long,
+        to: Long,
+    ): HrWindowStats
 
     @Query(
-        // ts, rrMs matches Swift Reads.swift; seq only tiebreaks the rare EQUAL same-second beats (v18).
+        // ord preserves same-second emission order; legacy NULLs fall through to deterministic value order.
+        // Oura's SpO2 IBI stream (durable channel 2) duplicates its green beat train, so it remains stored
+        // for diagnostics but is excluded from scoring. NULL keeps all WHOOP and pre-migration rows.
         "SELECT * FROM rrInterval WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
-            "ORDER BY ts ASC, rrMs ASC, seq ASC LIMIT :limit"
+            "AND (tsSuspect IS NULL OR tsSuspect <> 1) " +
+            "AND (srcChannel IS NULL OR srcChannel <> 2) " +
+            "ORDER BY ts ASC, ord ASC, rrMs ASC, seq ASC LIMIT :limit"
     )
     suspend fun rrIntervals(deviceId: String, from: Long, to: Long, limit: Int): List<RrInterval>
 
@@ -587,6 +615,11 @@ interface WhoopDao : DeviceRegistryDao {
     @Query("DELETE FROM metricSeries WHERE deviceId = :deviceId AND day = :day AND key = :key")
     suspend fun deleteMetricSeriesPoint(deviceId: String, day: String, key: String)
 
+    /** Physically delete one complete source/key series. Used for explicit deletion of sensitive,
+     *  user-owned local series such as period-start history; unrelated keys and sources are untouched. */
+    @Query("DELETE FROM metricSeries WHERE deviceId = :deviceId AND key = :key")
+    suspend fun deleteMetricSeries(deviceId: String, key: String): Int
+
     // MARK: - Lab Book markers (Swift labMarker, v17 / LabMarkerStore.swift)
     //
     // The book is `labMarker` (one row per dated reading the user entered themselves); the daily
@@ -757,6 +790,15 @@ interface WhoopDao : DeviceRegistryDao {
     )
     suspend fun workouts(deviceId: String, from: Long, to: Long, limit: Int): List<WorkoutRow>
 
+    /** Every workout from every device/source that overlaps [from, to]. Auto-suggestion exclusion must
+     *  be source-complete: imported files, current/old straps, computed siblings and future sources all
+     *  suppress a duplicate prompt without maintaining a hard-coded id list. */
+    @Query(
+        "SELECT * FROM workout WHERE endTs >= :from AND startTs <= :to " +
+            "ORDER BY startTs ASC LIMIT :limit"
+    )
+    suspend fun workoutsOverlappingAllSources(from: Long, to: Long, limit: Int): List<WorkoutRow>
+
     /** Natural-key paged twin for the bounded self-hosted sync request. */
     @Query(
         "SELECT * FROM workout WHERE deviceId = :deviceId AND startTs >= :from AND startTs <= :to " +
@@ -777,6 +819,12 @@ interface WhoopDao : DeviceRegistryDao {
      *  badges that were materializing the row list for `.size`. */
     @Query("SELECT COUNT(*) FROM workout WHERE deviceId = :deviceId AND startTs >= :from AND startTs <= :to")
     suspend fun workoutsCount(deviceId: String, from: Long, to: Long): Int
+
+    @Query(
+        "SELECT COALESCE(SUM(steps), 0) FROM workout " +
+            "WHERE deviceId = :deviceId AND steps IS NOT NULL AND startTs >= :from AND startTs < :to"
+    )
+    suspend fun sumWorkoutSteps(deviceId: String, from: Long, to: Long): Int
 
     /**
      * Apple-Health daily aggregates for days in [from, to] (lexicographic compare), oldest first.

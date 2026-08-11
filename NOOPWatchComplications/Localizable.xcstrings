@@ -121,500 +121,500 @@
         }
       }
     },
-    "Charge": {
+    "Recovery": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ladung"
+            "value": "Erholung"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge"
+            "value": "Recovery"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carga"
+            "value": "Recuperación"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge"
+            "value": "Récupération"
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carica"
+            "value": "Recupero"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carga"
+            "value": "Recuperação"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Заряд"
+            "value": "Восстановление"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "能量"
+            "value": "恢复"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "能量"
+            "value": "恢復"
           }
         }
       }
     },
-    "Charge %lld out of 100": {
+    "Recovery %lld out of 100": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ladung %lld von 100"
+            "value": "Erholung %lld von 100"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge %lld out of 100"
+            "value": "Recovery %lld out of 100"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carregue %lld de 100"
+            "value": "Recuperação %lld de 100"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Заряд %lld из 100"
+            "value": "Восстановление %lld из 100"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carga %1$lld de 100"
+            "value": "Recuperación %1$lld de 100"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Chargez %1$lld sur 100"
+            "value": "Récupération %1$lld sur 100"
           }
         }
       }
     },
-    "Charge %lld · %lld bpm%@": {
+    "Recovery %lld · %lld bpm%@": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ladung %lld · %lld bpm%@"
+            "value": "Erholung %lld · %lld bpm%@"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge %lld · %lld bpm%@"
+            "value": "Recovery %lld · %lld bpm%@"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carregar %lld · %lld bpm%@"
+            "value": "Recuperação %lld · %lld bpm%@"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Заряд %lld · %lld уд/мин%@"
+            "value": "Восстановление %lld · %lld уд/мин%@"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carga %1$lld · %2$lld bpm%3$@"
+            "value": "Recuperación %1$lld · %2$lld lpm%3$@"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charger %1$lld · %2$lld bpm%3$@"
+            "value": "Récupération %1$lld · %2$lld bpm%3$@"
           }
         }
       }
     },
-    "Charge %lld%@": {
+    "Recovery %lld%@": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ladung %lld%@"
+            "value": "Erholung %lld%@"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge %lld%@"
+            "value": "Recovery %lld%@"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carregar %lld%@"
+            "value": "Recuperação %lld%@"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Заряд %lld%@"
+            "value": "Восстановление %lld%@"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carga %1$lld%2$@"
+            "value": "Recuperación %1$lld%2$@"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charger %1$lld%2$@"
+            "value": "Récupération %1$lld%2$@"
           }
         }
       }
     },
-    "Charge calibrating": {
+    "Recovery calibrating": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ladung wird kalibriert"
+            "value": "Erholung wird kalibriert"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge calibrating"
+            "value": "Recovery calibrating"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Calibração de carga"
+            "value": "A calibrar recuperação"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Заряд калибруется"
+            "value": "Восстановление калибруется"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Calibración de carga"
+            "value": "Calibrando recuperación"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Étalonnage des charges"
+            "value": "Étalonnage de la récupération"
           }
         }
       }
     },
-    "Charge calibrating, needs more data": {
+    "Recovery calibrating, needs more data": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ladung wird kalibriert, mehr Daten nötig"
+            "value": "Erholung wird kalibriert, mehr Daten nötig"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge calibrating, needs more data"
+            "value": "Recovery calibrating, needs more data"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Calibração de carga, necessita de mais dados"
+            "value": "A calibrar recuperação, são necessários mais dados"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Заряд калибруется, нужно больше данных"
+            "value": "Восстановление калибруется, нужно больше данных"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Calibración de carga, necesita más datos"
+            "value": "Calibrando recuperación, se necesitan más datos"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Étalonnage de charge, besoin de plus de données"
+            "value": "Étalonnage de la récupération, davantage de données sont nécessaires"
           }
         }
       }
     },
-    "Charge out of date, last synced %@. Open NOOP on iPhone.": {
+    "Recovery out of date, last synced %@. Open NOOP on iPhone.": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ladung veraltet, zuletzt synchronisiert %@. Öffne NOOP auf dem iPhone."
+            "value": "Erholung veraltet, zuletzt synchronisiert %@. Öffne NOOP auf dem iPhone."
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge out of date, last synced %@. Open NOOP on iPhone."
+            "value": "Recovery out of date, last synced %@. Open NOOP on iPhone."
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carga desatualizada, última sincronização %@. Abra o NOOP no iPhone."
+            "value": "Recuperação desatualizada, última sincronização %@. Abra o NOOP no iPhone."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Заряд устарел, последняя синхронизация %@. Откройте NOOP на iPhone."
+            "value": "Восстановление устарело, последняя синхронизация %@. Откройте NOOP на iPhone."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carga fuera de la fecha, última sincronizada %1$@. Abrir NOOP en iPhone."
+            "value": "Recuperación desactualizada, última sincronización %1$@. Abre NOOP en el iPhone."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge hors date, dernière synchronisation %1$@. Ouvrez NOOP sur iPhone."
+            "value": "Récupération obsolète, dernière synchronisation %1$@. Ouvrez NOOP sur l’iPhone."
           }
         }
       }
     },
-    "Charge stale · %@": {
+    "Recovery stale · %@": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ladung veraltet · %@"
+            "value": "Erholung veraltet · %@"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge stale · %@"
+            "value": "Recovery stale · %@"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carga obsoleta · %@"
+            "value": "Recuperação desatualizada · %@"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Заряд устарел · %@"
+            "value": "Восстановление устарело · %@"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Estabilización de carga · %1$@"
+            "value": "Recuperación desactualizada · %1$@"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Intervalle de charge · %1$@"
+            "value": "Récupération obsolète · %1$@"
           }
         }
       }
     },
-    "Charge unavailable": {
+    "Recovery unavailable": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ladung nicht verfügbar"
+            "value": "Erholung nicht verfügbar"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge unavailable"
+            "value": "Recovery unavailable"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carga indisponível"
+            "value": "Recuperação indisponível"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Заряд недоступен"
+            "value": "Восстановление недоступно"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carga no disponible"
+            "value": "Recuperación no disponible"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Frais non disponibles"
+            "value": "Récupération indisponible"
           }
         }
       }
     },
-    "Charge · %@": {
+    "Recovery · %@": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ladung · %@"
+            "value": "Erholung · %@"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge · %@"
+            "value": "Recovery · %@"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cobrar · %@"
+            "value": "Recuperação · %@"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Заряд · %@"
+            "value": "Восстановление · %@"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carga · %1$@"
+            "value": "Recuperación · %1$@"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge · %1$@"
+            "value": "Récupération · %1$@"
           }
         }
       }
     },
-    "Charge · cal": {
+    "Recovery · cal": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ladung · cal"
+            "value": "Erholung · cal"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge · cal"
+            "value": "Recovery · cal"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carregar · cal"
+            "value": "Recuperação · cal"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Заряд · кал"
+            "value": "Восстановление · кал"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carga · cal"
+            "value": "Recuperación · cal"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge"
+            "value": "Récupération · cal"
           }
         }
       }
     },
-    "Charge –": {
+    "Recovery –": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ladung –"
+            "value": "Erholung –"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge –"
+            "value": "Recovery –"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cobrar -"
+            "value": "Recuperação –"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Заряд –"
+            "value": "Восстановление –"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carga –"
+            "value": "Recuperación –"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Frais –"
+            "value": "Récupération –"
           }
         }
       }
@@ -677,60 +677,60 @@
         }
       }
     },
-    "NOOP Charge": {
+    "NOOP Recovery": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "NOOP Ladung"
+            "value": "NOOP Erholung"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "NOOP Charge"
+            "value": "NOOP Recovery"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carga de NOOP"
+            "value": "Recuperación de NOOP"
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carica NOOP"
+            "value": "Recupero NOOP"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carga NOOP"
+            "value": "Recuperação NOOP"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "NOOP Заряд"
+            "value": "Восстановление NOOP"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "NOOP 能量"
+            "value": "NOOP 恢复"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "NOOP 能量"
+            "value": "NOOP 恢復"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Charge NOOP"
+            "value": "Récupération NOOP"
           }
         }
       }
@@ -975,118 +975,118 @@
         }
       }
     },
-    "Rest": {
+    "Sleep": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ruhe"
+            "value": "Schlaf"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Rest"
+            "value": "Sleep"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Descanso"
+            "value": "Sueño"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Repos"
+            "value": "Sommeil"
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Riposo"
+            "value": "Sonno"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Descanso"
+            "value": "Sono"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Отдых"
+            "value": "Сон"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "休息"
+            "value": "睡眠"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "休息"
+            "value": "睡眠"
           }
         }
       }
     },
-    "Your Charge (recovery) on the watch face, with Effort and Rest in the rectangular card.": {
+    "Your Recovery on the watch face, with Effort and Sleep Score in the rectangular card.": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Deine Ladung (Erholung) auf dem Zifferblatt, mit Anstrengung und Ruhe in der rechteckigen Karte."
+            "value": "Deine Erholung auf dem Zifferblatt, mit Anstrengung und Schlafwert in der rechteckigen Anzeige."
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Your Charge (recovery) on the watch face, with Effort and Rest in the rectangular card."
+            "value": "Your Recovery on the watch face, with Effort and Sleep Score in the rectangular card."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tu Carga (recuperación) en la esfera del reloj, con Esfuerzo y Descanso en la tarjeta rectangular."
+            "value": "Tu Recuperación en la esfera del reloj, con Esfuerzo y Puntuación de sueño en la tarjeta rectangular."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "La tua Carica (recupero) sul quadrante, con Sforzo e Riposo nella scheda rettangolare."
+            "value": "Il tuo Recupero sul quadrante, con Sforzo e Punteggio del sonno nella scheda rettangolare."
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "A tua Carga (recuperação) no mostrador do relógio, com Esforço e Descanso no cartão rectangular."
+            "value": "A tua Recuperação no mostrador do relógio, com Esforço e Pontuação do sono no cartão retangular."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ваш заряд (восстановление) на циферблате, с показателями «Усилие» и «Отдых» в прямоугольной карточке."
+            "value": "Ваше восстановление на циферблате, с показателями «Усилие» и «Оценка сна» в прямоугольной карточке."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "表盘上显示你的能量（恢复），矩形卡片中显示消耗和休息。"
+            "value": "表盘上显示你的恢复，矩形卡片中显示消耗和睡眠评分。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "錶面上顯示你的能量（恢復），矩形卡片中則是消耗與休息。"
+            "value": "錶面上顯示你的恢復，矩形卡片中則是消耗與睡眠評分。"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Votre charge (récupération) sur le cadran, avec l'effort et le repos dans la carte rectangulaire."
+            "value": "Votre Récupération sur le cadran, avec l’Effort et le Score de sommeil dans la carte rectangulaire."
           }
         }
       }

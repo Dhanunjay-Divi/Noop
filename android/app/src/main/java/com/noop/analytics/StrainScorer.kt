@@ -163,6 +163,13 @@ object StrainScorer {
 
     // ---- TRIMP accumulation ----
 
+    /** One never-decreasing Effort value shared by every Today read-out. */
+    fun effectiveEffort(live: Double?, stored: Double?): Double? {
+        if (live == null) return stored
+        if (stored == null) return live
+        return kotlin.math.max(live, stored)
+    }
+
     /**
      * Infer per-sample duration (minutes) from the first two timestamps. Falls
      * back to 1 s when fewer than two samples or coincident timestamps.

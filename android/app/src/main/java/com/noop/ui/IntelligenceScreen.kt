@@ -103,7 +103,7 @@ fun IntelligenceScreen(vm: AppViewModel) {
 
     LazyScreenScaffold(
         title = uiString(R.string.l10n_intelligence_screen_intelligence_c698f940),
-        subtitle = "Charge, effort and rest - scored with the model, explained in plain terms.",
+        subtitle = "Recovery, effort and sleep - scored with the model, explained in plain terms.",
     ) {
         item { forecast?.let { ForecastCard(it) } }
         item { ExplainerCard(effortScale) }
@@ -179,7 +179,7 @@ private fun ForecastCard(f: RecoveryForecast) {
     val charge = f.charge.roundToInt()
     val band = f.band.roundToInt()
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader("Tomorrow's Charge", overline = "Evening forecast", trailing = "Estimate")
+        SectionHeader("Tomorrow's Recovery", overline = "Evening forecast", trailing = "Estimate")
         NoopCard(padding = 20.dp) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -219,7 +219,7 @@ private fun ForecastCard(f: RecoveryForecast) {
                     )
                     Text(
                         uiString(R.string.l10n_intelligence_screen_estimate_from_today_s_effort_your_667d7560, f.nights) +
-                            "recovery baseline - not a measurement. Your real Charge is scored from " +
+                            "recovery baseline - not a measurement. Your real Recovery is scored from " +
                             "tomorrow's HRV when you wake.",
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
@@ -260,7 +260,7 @@ private fun ExplainerCard(effortScale: EffortScale) {
                 uiString(R.string.l10n_intelligence_screen_charge_weighs_your_heart_rate_variability_026745e6) +
                     "(~55%), resting heart rate (~20%), rest quality (~15%), respiration (~5%) " +
                     "and skin-temperature deviation (~5%). Effort is a 0 - ${UnitFormatter.effortScaleMax(effortScale)} " +
-                    "cardiovascular load from time spent in each heart-rate zone. Rest is staged " +
+                    "cardiovascular load from time spent in each heart-rate zone. Sleep is staged " +
                     "from movement and heart rate. The full on-device recompute from the strap's raw " +
                     "streams is a later port; the scores below are read from each day's cached metrics.",
                 style = NoopType.subhead,
@@ -287,7 +287,7 @@ private fun EmptyNote() {
             )
             Text(
                 uiString(R.string.l10n_intelligence_screen_no_scored_days_yet_sync_your_cdd47684) +
-                    "scored once a day's data is in. Charge needs about four nights of sleep to learn your " +
+                    "scored once a day's data is in. Recovery needs about four nights of sleep to learn your " +
                     "baseline (you'll see \"Calibrating\" until then), and keeps sharpening over your first " +
                     "couple of weeks. On a WHOOP 5 or MG the strap banks little history, so that night count " +
                     "can climb slowly or sit at 0 of 4 until you have worn it across a few nights. That's " +
@@ -309,10 +309,10 @@ private fun EmptyNote() {
 private fun ModelBreakdownCard(effortScale: EffortScale) {
     NoopCard(padding = 20.dp, tint = Palette.chargeColor) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Overline("Charge model")
+            Overline("Recovery model")
             WeightRow("Heart-rate variability", "~55%", 0.55f, Palette.metricPurple)
             WeightRow("Resting heart rate", "~20%", 0.20f, Palette.metricRose)
-            WeightRow("Rest quality", "~15%", 0.15f, Palette.metricCyan)
+            WeightRow("Sleep quality", "~15%", 0.15f, Palette.metricCyan)
             WeightRow("Respiration", "~5%", 0.05f, Palette.accent)
             WeightRow("Skin-temperature deviation", "~5%", 0.05f, Palette.metricAmber)
 
@@ -401,7 +401,7 @@ private fun DayCard(d: DailyMetric, effortScale: EffortScale) {
 
             Row(modifier = Modifier.fillMaxWidth()) {
                 DayStat(
-                    "Charge",
+                    "Recovery",
                     d.recovery?.let { "${it.roundToInt()}%" } ?: "—",
                     d.recovery?.let { Palette.recoveryColor(it) } ?: Palette.textSecondary,
                     Modifier.weight(1f),
@@ -413,7 +413,7 @@ private fun DayCard(d: DailyMetric, effortScale: EffortScale) {
                     Modifier.weight(1f),
                 )
                 DayStat(
-                    "Rest",
+                    "Sleep",
                     sleepValue(d.totalSleepMin),
                     Palette.restColor,
                     Modifier.weight(1f),

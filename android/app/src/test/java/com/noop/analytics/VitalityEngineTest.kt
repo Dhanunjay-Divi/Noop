@@ -40,8 +40,10 @@ class VitalityEngineTest {
     @Test fun nilBelowMinFactors() {
         assertNull(VitalityEngine.compute(VitalityEngine.Inputs(
             chronoAge = 40.0, restingHR = 65.0, sleepHours = 7.5)))
-        assertNotNull(VitalityEngine.compute(VitalityEngine.Inputs(
+        assertNull(VitalityEngine.compute(VitalityEngine.Inputs(
             chronoAge = 40.0, restingHR = 65.0, sleepHours = 7.5, sleepConsistency = 0.75)))
+        assertNotNull(VitalityEngine.compute(VitalityEngine.Inputs(
+            chronoAge = 40.0, restingHR = 65.0, sleepHours = 7.5, rmssd = 40.0, rmssdNorm = 40.0)))
     }
 
     @Test fun clamps() {
@@ -52,7 +54,7 @@ class VitalityEngineTest {
         assertTrue(young.vitality in 0.0..100.0)
 
         val old = VitalityEngine.compute(VitalityEngine.Inputs(
-            chronoAge = 85.0, restingHR = 110.0, vo2max = 12.0, expectedVO2max = 35.0,
+            chronoAge = 80.0, restingHR = 110.0, vo2max = 12.0, expectedVO2max = 35.0,
             sleepHours = 3.0, sleepConsistency = 0.1, rmssd = 8.0, rmssdNorm = 30.0, steps = 200.0))!!
         assertTrue(old.bodyAge <= VitalityEngine.maxBodyAge)
         assertTrue(old.vitality >= 0.0)

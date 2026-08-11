@@ -17,9 +17,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * version 2 added the v8 journal/workout/appleDaily caches. **v3 (#78)** adds the stepSample table
  * + dailyMetric.steps/activeKcalEst via a REAL additive migration (MIGRATION_2_3), NOT a destructive
  * rebuild, so a user's already-offloaded raw streams survive (the strap trims acked history and won't
- * re-send it). The destructive fallback is deliberately GONE: with exportSchema=false there's no
- * build-time schema check, so a hand-written-SQL mismatch would otherwise SILENTLY wipe that history;
- * without the fallback Room throws loudly instead, and MigrationRoundTripTest guards the SQL in CI.
+ * re-send it). The destructive fallback is deliberately GONE: a hand-written-SQL mismatch would
+ * otherwise SILENTLY wipe that history; without the fallback Room throws loudly instead. Room's
+ * generated schema is exported at build time and checked against the same fixture as GRDB.
  */
 @Database(
     entities = [
@@ -50,8 +50,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PpgWaveformSampleEntity::class,
         RawImuSampleEntity::class,
     ],
-    version = 22,
-    exportSchema = false,
+    version = 27,
+    // Build-time artifact only; this does not change runtime database behavior.
+    exportSchema = true,
 )
 abstract class WhoopDatabase : RoomDatabase() {
     abstract fun whoopDao(): WhoopDao
@@ -581,6 +582,84 @@ abstract class WhoopDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * #1073: quarantine already-stored R-R beats whose timestamp is in the future. A corrupt Oura
+         * history timestamp previously could convert to a date years ahead and poison a future scoring
+         * window. The ingest gate rejects new occurrences; this additive migration marks old occurrences,
+         * and [WhoopDao.rrIntervals] excludes them from scoring.
+         *
+         * Real beats are deliberately retained for inspection/recovery. The nullable column is appended
+         * last to match [RrInterval], does not enter its primary key, and has no SQL default.
+         */
+        internal val RR_FUTURE_QUARANTINE_MIGRATION_SQL: List<String> = listOf(
+            "ALTER TABLE `rrInterval` ADD COLUMN `tsSuspect` INTEGER",
+            "UPDATE `rrInterval` SET `tsSuspect` = 1 WHERE `ts` > CAST(strftime('%s','now') AS INTEGER)",
+        )
+
+        internal val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (stmt in RR_FUTURE_QUARANTINE_MIGRATION_SQL) db.execSQL(stmt)
+            }
+        }
+
+        /** Additive R-R emission order; legacy rows remain null because their order is unknowable. */
+        internal val RR_ORD_MIGRATION_SQL: List<String> = listOf(
+            "ALTER TABLE `rrInterval` ADD COLUMN `ord` INTEGER",
+        )
+
+        internal val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (stmt in RR_ORD_MIGRATION_SQL) db.execSQL(stmt)
+            }
+        }
+
+        /** Additive durable optical-channel label; null remains the valid WHOOP value. */
+        internal val RR_SRC_CHANNEL_MIGRATION_SQL: List<String> = listOf(
+            "ALTER TABLE `rrInterval` ADD COLUMN `srcChannel` INTEGER",
+        )
+
+        internal val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (stmt in RR_SRC_CHANNEL_MIGRATION_SQL) db.execSQL(stmt)
+            }
+        }
+
+        /** Additive per-session activity-file steps; nullable and outside the workout primary key. */
+        internal val WORKOUT_STEPS_MIGRATION_SQL: List<String> = listOf(
+            "ALTER TABLE `workout` ADD COLUMN `steps` INTEGER",
+        )
+
+        internal val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (stmt in WORKOUT_STEPS_MIGRATION_SQL) db.execSQL(stmt)
+            }
+        }
+
+        /** Data-only correction: live WHOOP does not provide a calibrated SpO2 percentage. */
+        internal val MIGRATION_26_27 = object : Migration(26, 27) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                val cursor = db.query(
+                    "SELECT `id`, `capabilities` FROM `pairedDevice` " +
+                        "WHERE lower(`brand`) = 'whoop' OR `id` = 'my-whoop' OR `id` LIKE 'whoop-%'",
+                )
+                cursor.use { rows ->
+                    val idIndex = rows.getColumnIndex("id")
+                    val capabilitiesIndex = rows.getColumnIndex("capabilities")
+                    while (rows.moveToNext()) {
+                        val id = rows.getString(idIndex)
+                        val encoded = rows.getString(capabilitiesIndex) ?: continue
+                        val stripped = WhoopLiveCapabilities.stripSpo2Token(encoded)
+                        if (stripped != encoded) {
+                            db.execSQL(
+                                "UPDATE `pairedDevice` SET `capabilities` = ? WHERE `id` = ?",
+                                arrayOf(stripped, id),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         private fun build(appContext: Context): WhoopDatabase =
             Room.databaseBuilder(appContext, WhoopDatabase::class.java, DB_NAME)
                 // #1014: replace ONLY the corruption handling of the default open-helper. The
@@ -597,6 +676,8 @@ abstract class WhoopDatabase : RoomDatabase() {
                     MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14,
                     MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
                     MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22,
+                    MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
+                    MIGRATION_26_27,
                 )
                 // #1037: a FRESH install builds the schema straight at the current version and runs NO
                 // migrations, so the MIGRATION_7_8 "my-whoop" registry seed never fires and the WHOOP,
@@ -611,7 +692,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                                 "(`id`, `brand`, `model`, `nickname`, `sourceKind`, `capabilities`, " +
                                 "`status`, `addedAt`, `lastSeenAt`) VALUES " +
                                 "('my-whoop', 'WHOOP', 'WHOOP', NULL, 'liveBLE', " +
-                                "'hr,hrv,spo2,skinTemp,sleep,strainLoad', 'active', $now, $now)",
+                                "'${WhoopLiveCapabilities.encoded("WHOOP")}', 'active', $now, $now)",
                         )
                     }
                 })

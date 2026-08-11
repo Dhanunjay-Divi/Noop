@@ -47,12 +47,15 @@ final class AppModel: ObservableObject {
     let live: LiveState
     /// CoreBluetooth engine , scans, connects, bonds, streams.
     let ble: BLEManager
+    /// Independent Bluetooth SIG Weight Scale collector (0x181D/0x2A9D). It never participates in
+    /// the active HR-source coordinator and therefore cannot interrupt the WHOOP connection.
+    let weightScaleSource: WeightScaleSource
     /// Read model over the on-device store (dashboard + detail screens).
     let repo: Repository
     /// User profile (age/sex/body/HR-max) for zones, calories, baselines.
-    let profile = ProfileStore()
+    let profile: ProfileStore
     /// Behaviour settings: double-tap action, wear automation, zone coaching, smart alarm, illness watch.
-    let behavior = BehaviorStore()
+    let behavior: BehaviorStore
     /// On-device WHOOP-style recovery/strain/sleep computation from raw strap streams.
     let intelligence: IntelligenceEngine
 
@@ -100,6 +103,10 @@ final class AppModel: ObservableObject {
     /// True while the active workout is a GPS-type session (drives the End-time route persist). Mirrors
     /// Android's `ActiveWorkout.gpsEnabled`.
     private var activeWorkoutIsGps = false
+    /// A manual workout owns one logical realtime lease from explicit Start through End. The central
+    /// foreground policy temporarily disarms its physical stream when the app is inactive without
+    /// ending or corrupting the durable workout.
+    private var activeWorkoutOwnsRealtimeLease = false
 
     /// A manual workout in progress. `samples` accumulate from the smoothed live `bpm`; `liveStrain`
     /// is recomputed as the window grows so the active card can show strain building in real time.
@@ -196,9 +203,37 @@ final class AppModel: ObservableObject {
     /// Daily re-arm timer for the single-instant firmware smart alarm (see scheduleDailySmartAlarmRearm).
     private var smartAlarmRearmTimer: Timer?
 
+    private static func applyPendingRestoreAtColdLaunch() {
+        do {
+            let path = try StorePaths.defaultDatabasePath()
+            switch try PendingDatabaseRestore.applyIfPresent(toDatabaseAt: path) {
+            case .none:
+                break
+            case .applied(let safetySnapshot):
+                NSLog("NOOP: applied pending restore before app-model startup; previous database saved at \(safetySnapshot.path)")
+            case .discarded(let reason):
+                NSLog("NOOP: discarded pending restore safely before app-model startup: \(reason)")
+            }
+        } catch {
+            // The per-process claim prevents StoreOpenGate from retrying after ProfileStore/BLE/Repository
+            // have been constructed; it repeats the recorded failure instead of opening an uncertain
+            // store. The untouched pending manifest is retried from this same cold boundary next launch.
+            NSLog("NOOP: pending restore deferred after a safe startup failure: \(error.localizedDescription)")
+        }
+    }
+
     init() {
+        // A restore is validated/staged by the running app and consumed only on a cold launch. Apply it
+        // synchronously before ProfileStore reads the restored settings and before BLE/Repository can
+        // create either of the two live WhoopStore pools. PendingDatabaseRestore's per-process claim also
+        // prevents any store opened later in THIS session from consuming a restore the user just staged.
+        Self.applyPendingRestoreAtColdLaunch()
+        let profile = ProfileStore()
+        self.profile = profile
+        self.behavior = BehaviorStore()
         let live = LiveState()
         self.live = live
+        self.weightScaleSource = WeightScaleSource()
         // SEED every subsystem with the same id (`deviceId`, "my-whoop" at launch). The store/registry
         // aren't open yet here, so the registry's active id can't be read synchronously; `bootstrapStore`
         // (write side) and `wireSourceCoordinator → adoptActiveDevice` (read spine, #814) re-point them to
@@ -231,6 +266,16 @@ final class AppModel: ObservableObject {
                     hrMax: Double(self.profile.hrMax), sex: self.profile.sex)
             }
         }.store(in: &hrCancellables)
+        // Every valid standards-level scale indication is first persisted with its source + precise
+        // timestamp. Only the explicitly selected scale user (or a single-user packet with no user id)
+        // may then project into ProfileStore; the shared freshness API prevents a stored backlog from
+        // rolling the profile backwards.
+        weightScaleSource.$latestCapture
+            .compactMap { $0 }
+            .sink { [weak self] capture in
+                Task { [weak self] in await self?.ingestWeightScaleCapture(capture) }
+            }
+            .store(in: &hrCancellables)
         // Smooth HR centrally so it's solid everywhere it's shown.
         live.$heartRate.sink { [weak self] _ in self?.ingestHR() }.store(in: &hrCancellables)
         live.$rr.sink { [weak self] _ in self?.ingestHR() }.store(in: &hrCancellables)
@@ -338,6 +383,10 @@ final class AppModel: ObservableObject {
 
         AppModel.shared = self   // publish for App Intents (Shortcuts) , see the static above (#42)
 
+        // No open discovery and no anonymous adoption: this only asks CoreBluetooth to resume the
+        // exact scale the user already paired. A fresh install with no paired id is a no-op.
+        weightScaleSource.resumePairedScale()
+
         // Seed the BLE client with the persisted "Continuous HRV capture" intent so `wantsRealtime`
         // reflects it from launch , the reconciler then arms the dense stream as soon as the strap bonds
         // (and the bond sink above re-applies it on every reconnect).
@@ -368,6 +417,11 @@ final class AppModel: ObservableObject {
                 // Give the demo a plausible strap battery so the Today header badge renders (the live
                 // battery is runtime-only and nil without a connected strap).
                 self.live.batteryPct = 68
+                // Optional screenshot-only live fixture. Keeping this behind its own argument preserves
+                // the production truth gate (a stale percentage is never shown while disconnected).
+                if CommandLine.arguments.contains("--demo-band-connected") {
+                    self.live.connected = true
+                }
             }
             #endif
             await self.repo.refresh()                          // surface any imported data at once
@@ -501,6 +555,12 @@ final class AppModel: ObservableObject {
         await intelligence.analyzeRecent()
     }
 
+    #if os(iOS)
+    /// Injected by the iOS scene so freshly completed offloads write through to Apple Health instead
+    /// of waiting for a later foreground launch. Nil on macOS and in headless tests.
+    var healthWriteBack: (() async -> Void)?
+    #endif
+
     private func refreshAfterCompletedBackfill() async {
         live.append(log: "Backfill: refreshing dashboard cache from completed sync")
         await repo.refresh(days: 120)
@@ -508,8 +568,12 @@ final class AppModel: ObservableObject {
         // analyzeRecent tick , otherwise a just-synced night's Charge / Effort / Rest can take up to
         // 15 minutes to appear on a strap-only (no-import) dashboard. analyzeRecent no-ops if a tick is
         // already running and refreshes the dashboard itself once the new scores persist. (PR #218)
-        await intelligence.analyzeRecent()
+        await intelligence.analyzeRecent(force: true, skipIfUnchanged: true)
         await refreshV5Signals()
+        // A completed sync is the earliest reliable moment to inspect an offloaded session. Existing
+        // users keep their former Ask/Off choice; fresh installs may confidence-gated auto-save one
+        // finalized bout and receive a privacy-safe notification with a Today Keep/undo review path.
+        await processAutomaticWorkoutAfterSync()
         #if os(iOS)
         // #980: a strap backfill routinely completes while the app is BACKGROUNDED (it runs as a
         // bluetooth-central, so it stays alive to receive the offload). The only other widget-publish
@@ -518,7 +582,77 @@ final class AppModel: ObservableObject {
         // widget kept showing yesterday's numbers. Publishing here, on the real "new data landed"
         // signal, pushes the fresh snapshot to the home-screen widget without needing a foreground.
         await WidgetSnapshot.publish(from: self)
+        await healthWriteBack?()
         #endif
+    }
+
+    private func processAutomaticWorkoutAfterSync() async {
+        let mode = PuffinExperiment.autoWorkoutMode
+        guard mode != .off, let candidate = await repo.autoDetectCandidate() else { return }
+        if mode == .autoSave, AutoWorkoutAutomationPolicy.shouldAutoSave(candidate) {
+            if await repo.saveDetectedWorkout(candidate, markForReview: true) {
+                await repo.refresh()
+                await AutoWorkoutNotifications.postAutoSavedIfAuthorized(
+                    startSec: candidate.startSec, endSec: candidate.endSec)
+                return
+            }
+            // A failed unattended write is never reported as saved. Fall through to the review prompt so
+            // the user can retry explicitly when notifications are already available.
+        }
+        await AutoWorkoutNotifications.postIfAuthorized(
+            startSec: candidate.startSec, endSec: candidate.endSec)
+    }
+
+    /// Canonical ingest for one Bluetooth SIG Weight Measurement. This is deliberately separate from
+    /// ProfileStore: all valid user slots remain in timestamped SQLite history, while only a safe/current
+    /// slot is allowed to update the single-person profile projection.
+    private func ingestWeightScaleCapture(_ capture: WeightScaleSource.Capture) async {
+        let measurement = capture.measurement
+        let measuredAt = measurement.timestamp ?? capture.receivedAt
+        guard ExternalWeightUpdatePolicy.accepts(weightKg: measurement.weightKg,
+                                                 measuredAt: measuredAt,
+                                                 receivedAt: capture.receivedAt,
+                                                 previousExternalAt: nil,
+                                                 manualOverrideAt: nil),
+              let store = await repo.storeHandle() else { return }
+
+        let sourceDeviceID = "weight-scale-" + capture.peripheralID.uuidString.lowercased()
+        let row = BodyMeasurementRow(
+            measuredAt: Int(measuredAt.timeIntervalSince1970.rounded(.down)),
+            receivedAt: Int(capture.receivedAt.timeIntervalSince1970.rounded(.down)),
+            weightKg: measurement.weightKg,
+            bmi: measurement.bmi,
+            heightCm: measurement.heightCm,
+            userID: measurement.userID.map(Int.init),
+            unit: measurement.unit.rawValue,
+            source: "bluetooth-sig-wss"
+        )
+        do {
+            try await store.upsertBodyMeasurements([row], deviceId: sourceDeviceID)
+        } catch {
+            // Never advance profile provenance if the canonical history write failed: a future replay
+            // must still be eligible to store + apply this reading atomically from the user's perspective.
+            return
+        }
+
+        guard weightScaleSource.mayUpdateProfile(for: measurement),
+              profile.acceptExternalWeight(weightKg: measurement.weightKg,
+                                           measuredAt: measuredAt,
+                                           source: "bluetooth-sig-wss:\(capture.peripheralID.uuidString)",
+                                           receivedAt: capture.receivedAt) else { return }
+
+        // Daily projection is only for the profile-selected person. Unknown/other scale users stay in
+        // bodyMeasurement history and can never leak into this user's dashboard metric series.
+        let day = Repository.localDayKey(measuredAt)
+        var points = [MetricPoint(day: day, key: "weightKg", value: measurement.weightKg)]
+        if let bmi = measurement.bmi, bmi.isFinite, bmi > 0 {
+            points.append(MetricPoint(day: day, key: "bmi", value: bmi))
+        }
+        if let heightCm = measurement.heightCm, heightCm.isFinite, heightCm > 0 {
+            points.append(MetricPoint(day: day, key: "heightCm", value: heightCm))
+        }
+        try? await store.upsertMetricSeries(points, deviceId: sourceDeviceID)
+        await repo.refresh()
     }
 
     /// Fold a fresh reading into the smoothing window and republish a stable bpm.
@@ -567,6 +701,7 @@ final class AppModel: ObservableObject {
         let resolved = name.isEmpty ? WorkoutCatalog.defaultSportName : name
         let started = Date()
         activeWorkout = ActiveWorkout(start: started, sport: resolved)
+        holdActiveWorkoutRealtimeLease()
         // #524: arm GPS route recording for a distance-type sport (run / ride / walk / hike), mirroring
         // Android, which defaults GPS on for `isDistanceSport`. Manual-first / opt-in: only these sports
         // record a route, and the recorder still captures nothing unless the user grants When-In-Use
@@ -650,6 +785,19 @@ final class AppModel: ObservableObject {
         w.peakHr = snap.peakHr
         w.liveStrain = snap.liveStrain
         activeWorkout = w
+        holdActiveWorkoutRealtimeLease()
+    }
+
+    private func holdActiveWorkoutRealtimeLease() {
+        guard !activeWorkoutOwnsRealtimeLease else { return }
+        activeWorkoutOwnsRealtimeLease = true
+        startRealtimeHR()
+    }
+
+    private func releaseActiveWorkoutRealtimeLease() {
+        guard activeWorkoutOwnsRealtimeLease else { return }
+        activeWorkoutOwnsRealtimeLease = false
+        stopRealtimeHR()
     }
 
     /// Finish the active workout: finalize the GPS route (#524), score the captured HR window, and save it
@@ -658,6 +806,7 @@ final class AppModel: ObservableObject {
     func endWorkout() {
         guard let w = activeWorkout else { return }
         activeWorkout = nil
+        releaseActiveWorkoutRealtimeLease()
         let wasGps = activeWorkoutIsGps
         activeWorkoutIsGps = false
         // Drop the durable snapshot the instant the session ends , whether it saves below or is discarded
@@ -743,7 +892,7 @@ final class AppModel: ObservableObject {
 
     /// Drop the smoothing window and blank the hero number so a resume / re-attach shows ","
     /// until a genuinely fresh sample arrives, instead of republishing the stale pre-gap median.
-    /// Called on Live-tab entry / manual Start HR (see `startRealtimeHR`), NOT on the 30s keep-alive
+    /// Called on an explicit foreground Live/workout/reading/session arm (see `startRealtimeHR`), NOT on the 30s keep-alive
     /// re-arm , so steady-state smoothing is untouched. Fixes #46 (HR jumped to a stale ~100 on
     /// reopen, then "slowly came back down" as fresh low samples refilled the window).
     func resetSmoothing() {
@@ -811,6 +960,17 @@ final class AppModel: ObservableObject {
     // #690: read-only body-location/status probe (0x54). User-initiated, Test-Centre-gated in DevicesView.
     func probeBodyLocationAndStatus() { ble.probeBodyLocationAndStatus() }
     func clearBodyLocationProbe() { ble.clearBodyLocationProbe() }
+
+    // WHOOP MG ECG ("Labrador") research probe. BLEManager owns the safety gates: explicit opt-in,
+    // positively identified MG hardware, a live connection, and a user-initiated action.
+    var isWhoop5MG: Bool { ble.isWhoop5MG }
+    func ecgSelectWrist(_ wrist: Whoop5Ecg.WristSelection) { ble.ecgSelectWrist(wrist) }
+    func ecgStartCapture() { ble.ecgStartCapture() }
+    func ecgStopCapture(reportsResult: Bool = true) {
+        ble.ecgStopCapture(reportsResult: reportsResult)
+    }
+    func clearEcgProbe() { ble.clearEcgProbe() }
+    var ecgMayBeRunning: Bool { ble.ecgMayBeRunning }
 
     /// Drop the current strap and clear bond state so a newly-picked strap model connects fresh
     /// (lets a user with both a WHOOP 4 and a 5/MG switch between them).
@@ -921,14 +1081,12 @@ final class AppModel: ObservableObject {
             .store(in: &ouraAdoptCancellables)
     }
 
-    /// How many on-screen surfaces currently want the realtime HR stream (the Live tab and the
-    /// in-exercise LiveWorkoutView, which can be open at the same time , the workout sheet sits over
-    /// Live, or is reached straight from the Workouts tab without Live ever appearing). The stream
-    /// stays armed while ANY of them is visible, so a second surface arming it never disarms it out
-    /// from under the first (#681 , a WHOOP 5/MG manual workout started without first opening Live got
-    /// no live HR, so every sample was dropped and the session was silently discarded). Ref-counted to
-    /// match Android's `realtimeWanters` (AppViewModel.requestRealtimeHr/releaseRealtimeHr).
-    private var realtimeWanters = 0
+    /// Ref-count + app-lifecycle gate for battery-intensive realtime requests. Logical leases survive a
+    /// background transition, but the physical screen stream does not: it is disarmed while inactive and
+    /// re-armed exactly once if the same explicit Live/workout/session lease still exists on foreground.
+    /// BLEManager composes this screen intent with the separate Continuous HRV setting, so backgrounding
+    /// a foreground lease never disables that independently opted-in capture or lightweight history sync.
+    private var realtimeLeasePolicy = ForegroundRealtimeLeasePolicy()
 
     /// A surface that shows live HR appeared. Arms the realtime stream on the 0→1 edge , and ONLY on
     /// that edge blanks the stale smoothing window (#46) so a resume shows "," until a fresh sample
@@ -936,18 +1094,32 @@ final class AppModel: ObservableObject {
     /// keep-alive re-arm goes through `ble.startRealtime()` directly, NOT here, so steady-state is
     /// untouched. Each surface must balance this with exactly one `stopRealtimeHR()` on disappear.
     func startRealtimeHR() {
-        if realtimeWanters == 0 {
+        if realtimeLeasePolicy.requestLease() == .arm {
             resetSmoothing()
             ble.startRealtime()
         }
-        realtimeWanters += 1
     }
     /// A live-HR surface went away. Stops the realtime stream only when the last one leaves (1→0 edge);
     /// the lightweight 0x2A37 HR keeps recording regardless. Clamped at 0 so an unbalanced extra stop
     /// can't drive the count negative and wedge the stream off.
     func stopRealtimeHR() {
-        realtimeWanters = max(0, realtimeWanters - 1)
-        if realtimeWanters == 0 { ble.stopRealtime() }
+        if realtimeLeasePolicy.releaseLease() == .disarm { ble.stopRealtime() }
+    }
+
+    /// App/scene lifecycle gate for high-rate foreground leases. This deliberately does not disconnect
+    /// BLE, stop historical sync, or change Continuous HRV capture; it only applies/removes the screen
+    /// side of BLEManager's combined realtime want. Re-entering foreground blanks stale smoothing before
+    /// re-arming so a paused session never flashes its pre-background BPM as current.
+    func setRealtimeForeground(_ foreground: Bool) {
+        switch realtimeLeasePolicy.setForeground(foreground) {
+        case .arm:
+            resetSmoothing()
+            ble.startRealtime()
+        case .disarm:
+            ble.stopRealtime()
+        case .none:
+            break
+        }
     }
 
     /// Re-issue the BLE realtime arm WITHOUT touching the ref-count , used when a fresh
@@ -956,7 +1128,7 @@ final class AppModel: ObservableObject {
     /// connection event can't arm it behind a closed Live tab. Mirrors that Android re-arms via its
     /// own keep-alive rather than re-calling `requestRealtimeHr` on reconnect.
     func rearmRealtimeIfWanted() {
-        guard realtimeWanters > 0 else { return }
+        guard realtimeLeasePolicy.shouldArm else { return }
         ble.startRealtime()
     }
     /// Ask the strap for a fresh battery reading.
@@ -1346,14 +1518,17 @@ final class AppModel: ObservableObject {
     /// read asynchronously, so this kicks a Task; the published `illnessSignal` + the `healthAlert`
     /// banner both come from the engine's single decision. On-device only, APPROXIMATE , not a diagnosis.
     private func evaluateIllness(_ days: [DailyMetric]) {
-        guard behavior.illnessWatch, days.count >= 14 else {
+        let ordered = days.sorted { $0.day < $1.day }
+        let currentKey = max(Repository.logicalDayKey(Date()), Repository.localDayKey(Date()))
+        guard behavior.illnessWatch, ordered.count >= 14,
+              Self.illnessHistoryIsFresh(dayKeys: ordered.map(\.day), todayKey: currentKey) else {
             healthAlert = nil; illnessSignal = nil; illnessDistance = nil; return
         }
         Task { [weak self] in
             guard let self else { return }
             // Confounder tags from the recent journal (within the last ~2 days). Read once, off the
             // engine's hot path , the engine only needs presence flags, not the rows.
-            let recentDays = Set(days.suffix(2).map(\.day))
+            let recentDays = Set(ordered.suffix(2).map(\.day))
             let journal = await self.repo.journalEntries(days: 7)
             var ctxAlcohol = false, ctxHardWorkout = false, ctxAlreadyUnwell = false
             for e in journal where e.answeredYes && recentDays.contains(e.day) {
@@ -1362,9 +1537,25 @@ final class AppModel: ObservableObject {
                 if q.contains("workout") || q.contains("train") || q.contains("exercise") { ctxHardWorkout = true }
                 if q.contains("sick") || q.contains("ill") || q.contains("unwell") { ctxAlreadyUnwell = true }
             }
-            self.applyIllnessSignal(days, alcohol: ctxAlcohol, hardOrLateWorkout: ctxHardWorkout,
+            self.applyIllnessSignal(ordered, alcohol: ctxAlcohol, hardOrLateWorkout: ctxHardWorkout,
                                     alreadyUnwell: ctxAlreadyUnwell)
         }
+    }
+
+    /// Pure freshness seam for the illness adapter. A historical import must never be presented as a
+    /// current multi-vital shift; allow today plus the prior two wake days, reject future-dated rows.
+    nonisolated static func illnessHistoryIsFresh(dayKeys: [String], todayKey: String,
+                                                  maxAgeDays: Int = 2) -> Bool {
+        guard let latestKey = dayKeys.max() else { return false }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let latest = formatter.date(from: latestKey),
+              let today = formatter.date(from: todayKey) else { return false }
+        let age = formatter.calendar.dateComponents([.day], from: latest, to: today).day ?? Int.max
+        return age >= 0 && age <= maxAgeDays
     }
 
     /// Run the `IllnessSignalEngine` from the day history + the journal-derived confounder context, then
@@ -1398,7 +1589,10 @@ final class AppModel: ObservableObject {
         var skin: (IllnessSignalEngine.SignalReading, Bool)? = nil
         if let recentSkin = rm({ $0.skinTempDevC }) {
             let z = recentSkin / 0.3     // ~0.3 °C ≈ one personal spread (matches skin_temp floorSpread)
-            skin = (IllnessSignalEngine.SignalReading(zIllnessward: z), true)
+            // Skin temperature is a deviation, but it still needs enough same-stream history before it
+            // may count as a trusted corroborator. It can remain visible in detail during calibration.
+            let trusted = base.compactMap(\.skinTempDevC).count >= 14
+            skin = (IllnessSignalEngine.SignalReading(zIllnessward: z), trusted)
         }
 
         let inputs = IllnessSignalEngine.Inputs(
@@ -1420,8 +1614,17 @@ final class AppModel: ObservableObject {
             respiration: zIfPresent(resp))
         illnessDistance = IllnessDistance.evaluate(features: distanceFeatures, correlation: nil)
 
-        // baselineTrusted: require the HRV/RHR baselines to be trusted before the engine may raise.
-        let trusted = (rhr?.1 ?? false) || (hrv?.1 ?? false)
+        // A raised multi-vital message requires TWO firing readings with trusted personal baselines.
+        // The previous `(RHR trusted) || (HRV trusted)` gate let one trusted metric lend certainty to an
+        // unrelated untrusted signal (and skin temperature was hard-coded trusted).
+        let trustedFiringCount = [rhr, skin, hrv, resp]
+            .compactMap { $0 }
+            .filter { reading, baselineTrusted in
+                baselineTrusted && reading.present
+                    && reading.zIllnessward > IllnessSignalEngine.signalZThreshold
+            }
+            .count
+        let trusted = trustedFiringCount >= IllnessSignalEngine.minCorroboratingSignals
         let context = IllnessSignalEngine.Context(
             alcohol: alcohol, hardOrLateWorkout: hardOrLateWorkout,
             alreadyUnwell: alreadyUnwell, baselineTrusted: trusted)
@@ -1523,7 +1726,13 @@ final class AppModel: ObservableObject {
             nights.append(CyclePhaseEngine.Night(day: d.day, tempZ: tempZ, rhrZ: rhrZ, hrvZ: hrvZ))
             if let fused = CyclePhaseEngine.fusedIndex(tempZ: tempZ, rhrZ: rhrZ, hrvZ: hrvZ) { curve.append(fused) }
         }
-        cyclePhase = CyclePhaseEngine.classify(nights, baselineUsable: skinState.usable)
+        // User-entered cycle-day-1 anchors live in the isolated local `noop-cycle` series. The pure
+        // engine cross-validates them against the temperature shift; a mistimed log is flagged rather
+        // than silently overriding the sensor evidence.
+        let loggedPeriodStarts = await repo.periodStarts()
+        cyclePhase = CyclePhaseEngine.classify(nights,
+                                               baselineUsable: skinState.usable,
+                                               loggedPeriodStarts: loggedPeriodStarts)
         cycleCurve = curve
     }
 

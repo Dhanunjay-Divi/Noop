@@ -276,6 +276,106 @@ final class RemoteSyncCoordinatorTests: XCTestCase {
         XCTAssertNil(daily["strain"])
     }
 
+    func testNoopComputedDailyIncludesBoundedCanonicalRestSeries() async throws {
+        let store = try await WhoopStore.inMemory()
+        let localId = "my-whoop-noop"
+        _ = try await store.upsertDailyMetrics(
+            [
+                DailyMetric(
+                    day: "2026-07-24", totalSleepMin: 420, efficiency: 0.91,
+                    deepMin: 60, remMin: 90, lightMin: 270, disturbances: nil,
+                    restingHr: 52, avgHrv: 64, recovery: 72, strain: 50,
+                    exerciseCount: 1
+                ),
+            ],
+            deviceId: localId
+        )
+        _ = try await store.upsertMetricSeries(
+            [
+                MetricPoint(day: "2026-07-23", key: "sleep_performance", value: 61),
+                MetricPoint(day: "2026-07-24", key: "sleep_performance", value: 84),
+                // A Rest-only day must still cross the daily boundary; Rest's source of truth is the
+                // metric-series row, so requiring a legacy DailyMetric twin would silently drop it.
+                MetricPoint(day: "2026-07-25", key: "sleep_performance", value: 73),
+                // A corrupt out-of-domain value is omitted rather than clamped into a believable score.
+                MetricPoint(day: "2026-07-26", key: "sleep_performance", value: 101),
+                MetricPoint(day: "2026-07-27", key: "sleep_performance", value: 88),
+            ],
+            deviceId: localId
+        )
+        let uploader = RecordingUploader()
+        let coordinator = RemoteSyncCoordinator(store: store, uploader: uploader)
+
+        _ = try await coordinator.sync(
+            source: RemoteSyncSource(deviceId: "scoped-noop-computed"),
+            storeDeviceId: localId,
+            includeRaw: false,
+            derivedMetricProvenance: .noopComputed,
+            derivedWindow: RemoteDerivedWindow(
+                fromTs: 1_721_779_200,
+                toTs: 1_722_038_400,
+                fromDay: "2026-07-24",
+                toDay: "2026-07-26"
+            )
+        )
+
+        let envelopes = await uploader.envelopes
+        let daily = try XCTUnwrap(envelopes.first?.dailyMetrics)
+        XCTAssertEqual(Set(daily.keys), Set(["2026-07-24", "2026-07-25"]))
+        XCTAssertEqual(daily["2026-07-24"]?["sleep_performance"], 84)
+        XCTAssertEqual(daily["2026-07-25"]?["sleep_performance"], 73)
+        XCTAssertEqual(daily["2026-07-24"]?["recovery"], 72)
+        XCTAssertNil(daily["2026-07-24"]?["rest"])
+    }
+
+    func testRestSeriesIsNotRelabelledIntoNonNoopNamespaces() async throws {
+        let store = try await WhoopStore.inMemory()
+        let localId = "my-whoop"
+        _ = try await store.upsertDailyMetrics(
+            [
+                DailyMetric(
+                    day: "2026-07-24", totalSleepMin: 420, efficiency: 0.91,
+                    deepMin: 60, remMin: 90, lightMin: 270, disturbances: nil,
+                    restingHr: 52, avgHrv: 64, recovery: 72, strain: 50,
+                    exerciseCount: 1
+                ),
+            ],
+            deviceId: localId
+        )
+        _ = try await store.upsertMetricSeries(
+            [MetricPoint(day: "2026-07-24", key: "sleep_performance", value: 84)],
+            deviceId: localId
+        )
+        let window = RemoteDerivedWindow(
+            fromTs: 1_721_779_200,
+            toTs: 1_721_865_600,
+            fromDay: "2026-07-24",
+            toDay: "2026-07-24"
+        )
+
+        for (sourceId, provenance) in [
+            ("whoop-official-reference", RemoteDerivedMetricProvenance.officialReference),
+            ("apple-health-import", RemoteDerivedMetricProvenance.userOwned),
+        ] {
+            let uploader = RecordingUploader()
+            let coordinator = RemoteSyncCoordinator(store: store, uploader: uploader)
+            _ = try await coordinator.sync(
+                source: RemoteSyncSource(deviceId: sourceId),
+                storeDeviceId: localId,
+                includeRaw: false,
+                derivedMetricProvenance: provenance,
+                derivedWindow: window
+            )
+
+            let envelopes = await uploader.envelopes
+            let daily = try XCTUnwrap(envelopes.first?.dailyMetrics["2026-07-24"])
+            XCTAssertNil(
+                daily["sleep_performance"],
+                "\(sourceId) must not present a local metric-series Rest value as its own"
+            )
+        }
+    }
+
     func testDerivedReplayPagesBeyondServerCollectionCapAndResumesCursor() async throws {
         let store = try await WhoopStore.inMemory()
         let localId = "my-whoop-noop"

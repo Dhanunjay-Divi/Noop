@@ -183,6 +183,9 @@ final class AICoachEngine: ObservableObject {
     @Published var customBaseURL: String {
         didSet { UserDefaults.standard.set(customBaseURL, forKey: AIProvider.customBaseURLKey) }
     }
+    @Published var customAuthHeader: CustomAIAuthHeader {
+        didSet { UserDefaults.standard.set(customAuthHeader.rawValue, forKey: AIProvider.customAuthHeaderKey) }
+    }
     /// Whether the user has committed the Custom provider (tapped Connect with a base URL). Lets the
     /// keyless local path reach the chat without a stored key, while avoiding a flip mid-typing.
     @Published var customConnected: Bool {
@@ -214,13 +217,13 @@ final class AICoachEngine: ObservableObject {
     /// custom is stored. Editing the live prompt overrides this via `systemPromptKey`.
     static let defaultSystemPrompt = """
     You are an elite, supportive recovery and performance coach with a real training methodology. \
-    You may be given a summary of the user's own wearable data (charge 0-100, effort 0-100, rest 0-100, \
-    HRV, resting heart rate) and recent workouts. Charge is the daily recovery/readiness score, effort \
-    is the daily cardiovascular load score, and rest is the nightly sleep-quality score. \
+    You may be given a summary of the user's own wearable data (Recovery 0-100, Effort 0-100, sleep \
+    duration, HRV, resting heart rate) and recent workouts. Recovery is the daily readiness score, Effort \
+    is the daily cardiovascular-load score, and sleep duration is reported in hours. \
     Coach using autoregulation:
-    • Readiness → prescription: charge 67-100 = green light to build/push, higher effort is fine; \
+    • Readiness → prescription: Recovery 67-100 = green light to build/push, higher Effort is fine; \
     34-66 = maintain, quality over volume, keep it controlled; 0-33 = active recovery only \
-    (Zone 2, mobility, extra sleep) and protect against accumulating effort debt.
+    (Zone 2, mobility, extra sleep) and protect against accumulating Effort debt.
     • Workout optimisation: progressive overload, polarised ~80/20 intensity, space hard sessions, \
     program deloads/periodisation, and treat sleep as the single biggest recovery lever.
     • Always cite the user's ACTUAL numbers, give a concrete plan (today and the week ahead), and \
@@ -303,6 +306,7 @@ final class AICoachEngine: ObservableObject {
 
         self.dataConsent = UserDefaults.standard.bool(forKey: Self.consentKey)
         self.customBaseURL = UserDefaults.standard.string(forKey: AIProvider.customBaseURLKey) ?? ""
+        self.customAuthHeader = AIProvider.customAuthHeader
         self.customConnected = UserDefaults.standard.bool(forKey: Self.customConnectedKey)
         self.includeOnDeviceSignals = UserDefaults.standard.bool(forKey: Self.onDeviceSignalsKey)
     }
@@ -510,9 +514,9 @@ final class AICoachEngine: ObservableObject {
         let context = await buildFullContext()
         let instruction = """
         Based on the data above, give me TODAY'S coaching brief in three short parts: \
-        (1) my readiness in one line, citing charge, HRV and rest; \
+        (1) my readiness in one line, citing Recovery, HRV and sleep; \
         (2) exactly what training to do today and what to avoid; \
-        (3) one specific thing to improve my charge. Be punchy and motivating.
+        (3) one specific thing to improve my Recovery. Be punchy and motivating.
         """
         let wire: [(role: ChatMessage.Role, content: String)] = [(.user, context + "\n\n---\n\n" + instruction)]
         do {
@@ -554,9 +558,9 @@ final class AICoachEngine: ObservableObject {
     func personalCalibrationBlock() -> String {
         let store = PersonalCalibrationModelStore()
         let choices: [(String, WhoopComparableMetric, String)] = [
-            ("Charge", .recoveryScore, NoopScoreAlgorithmRevision.charge),
+            ("Recovery", .recoveryScore, NoopScoreAlgorithmRevision.charge),
             ("Effort", .effortScore, NoopScoreAlgorithmRevision.effort),
-            ("Rest", .restScore, NoopScoreAlgorithmRevision.rest),
+            ("Sleep Score", .restScore, NoopScoreAlgorithmRevision.rest),
         ]
         let rows = choices.compactMap { label, metric, revision -> String? in
             guard let record = store.load(metric: metric, noopAlgorithmVersion: revision) else {
@@ -604,7 +608,7 @@ final class AICoachEngine: ObservableObject {
     func onDeviceSignalsBlock() async -> String {
         var lines: [String] = []
 
-        // 1. Strongest behaviour→outcome associations (EffectRanker over the journal × Charge).
+        // 1. Strongest behaviour→outcome associations (EffectRanker over the journal × Recovery).
         let entries = await repo.journalEntries()
         var byBehaviour: [String: Set<String>] = [:]
         for e in entries where e.answeredYes { byBehaviour[e.question, default: []].insert(e.day) }
@@ -612,7 +616,7 @@ final class AICoachEngine: ObservableObject {
             let outcomeByDay = Dictionary(
                 repo.days.compactMap { d in d.recovery.map { (d.day, $0) } },
                 uniquingKeysWith: { _, last in last })
-            let ranked = EffectRanker.rank(behaviors: byBehaviour, outcomeByDay: outcomeByDay, outcome: "Charge")
+            let ranked = EffectRanker.rank(behaviors: byBehaviour, outcomeByDay: outcomeByDay, outcome: "Recovery")
                 .filter { $0.effect.significant }
                 .prefix(3)
             if !ranked.isEmpty {
@@ -688,7 +692,7 @@ final class AICoachEngine: ObservableObject {
     // MARK: - Context builder
 
     /// Build a compact plain-text summary of the user's recent data: last ~14 days of
-    /// recovery/strain/sleep-hours/HRV/restingHR where present, plus 30-day averages, plus a few
+    /// Recovery/Effort/sleep-hours/HRV/resting-HR where present, plus 30-day averages, plus a few
     /// recent workouts. Kept well under ~1500 tokens. If there's no data, it says so.
     func buildContext() -> String {
         let days = repo.days // oldest → newest
@@ -705,7 +709,7 @@ final class AICoachEngine: ObservableObject {
         // Last ~14 days, newest first for readability.
         let recent = Array(days.suffix(14)).reversed()
         lines.append("")
-        lines.append("Recent days (newest first) — charge(0-100), effort(0-100), rest/sleep(h), HRV(ms), RHR(bpm):")
+        lines.append("Recent days (newest first) — Recovery(0-100), Effort(0-100), sleep(h), HRV(ms), RHR(bpm):")
         for d in recent {
             lines.append("  " + dayLine(d))
         }
@@ -714,8 +718,8 @@ final class AICoachEngine: ObservableObject {
         let last30 = Array(days.suffix(30))
         lines.append("")
         lines.append("30-day averages:")
-        lines.append("  charge: \(avgInt(last30.compactMap { $0.recovery }))"
-                     + ", effort: \(avgOne(last30.compactMap { $0.strain }))"
+        lines.append("  Recovery: \(avgInt(last30.compactMap { $0.recovery }))"
+                     + ", Effort: \(avgOne(last30.compactMap { $0.strain }))"
                      + ", sleep: \(avgSleepHours(last30))h"
                      + ", HRV: \(avgInt(last30.compactMap { $0.avgHrv })) ms"
                      + ", RHR: \(avgInt(last30.compactMap { $0.restingHr.map(Double.init) })) bpm")
@@ -739,7 +743,7 @@ final class AICoachEngine: ObservableObject {
         for w in rows.prefix(limit) {
             var parts = ["  \(dateString(w.startTs)) \(w.sport)"]
             if let dur = w.durationS { parts.append("\(Int((dur / 60).rounded())) min") }
-            if let s = w.strain { parts.append("effort \(String(format: "%.1f", s))") }
+            if let s = w.strain { parts.append("Effort \(String(format: "%.1f", s))") }
             if let hr = w.avgHr { parts.append("avg HR \(hr)") }
             if let kcal = w.energyKcal { parts.append("\(Int(kcal.rounded())) kcal") }
             if let dist = w.distanceM { parts.append("\(String(format: "%.1f", dist / 1000)) km") }
@@ -752,9 +756,9 @@ final class AICoachEngine: ObservableObject {
 
     private func dayLine(_ d: DailyMetric) -> String {
         var parts: [String] = [d.day + ":"]
-        parts.append("charge " + (d.recovery.map { "\(Int($0.rounded()))" } ?? "—"))
-        parts.append("effort " + (d.strain.map { String(format: "%.1f", $0) } ?? "—"))
-        parts.append("rest " + (d.totalSleepMin.map { String(format: "%.1fh", $0 / 60) } ?? "—"))
+        parts.append("Recovery " + (d.recovery.map { "\(Int($0.rounded()))" } ?? "—"))
+        parts.append("Effort " + (d.strain.map { String(format: "%.1f", $0) } ?? "—"))
+        parts.append("sleep " + (d.totalSleepMin.map { String(format: "%.1fh", $0 / 60) } ?? "—"))
         parts.append("HRV " + (d.avgHrv.map { "\(Int($0.rounded()))ms" } ?? "—"))
         parts.append("RHR " + (d.restingHr.map { "\($0)bpm" } ?? "—"))
         return parts.joined(separator: ", ")

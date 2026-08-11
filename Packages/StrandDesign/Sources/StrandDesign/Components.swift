@@ -16,12 +16,11 @@ public enum NoopMetrics {
     // plain value tile read the same. maxHeight: .infinity can't equalise them inside a LazyVGrid (the
     // grid only offers a cell its content height, so there's nothing for the shorter tile to grow into),
     // so we pin a single height that clears the tallest layout (value + inline sparkline + caption).
-    public static let keyMetricTileHeight: CGFloat = 122
+    public static let keyMetricTileHeight: CGFloat = 132
     public static let chartHeight: CGFloat = 220
     /// Canonical compact provenance-chip height; shared with overlays that align the chip to a border.
     public static let sourceBadgeHeight: CGFloat = 18
     public static let hypnogramBandMinThickness: CGFloat = 14  // floor so short stages read as bars, not ticks
-    public static let tabBarClearance: CGFloat = 76  // iOS: extra bottom scroll room so the last card clears the floating tab bar
 
     // MARK: Standardised spacing scale (the ONE source of truth for margins)
     //
@@ -131,19 +130,38 @@ public struct NoopCard<Content: View>: View {
 // MARK: - Section header
 
 public struct SectionHeader: View {
-    let overline: LocalizedStringKey?; let title: LocalizedStringKey; let trailing: String?
-    public init(_ title: LocalizedStringKey, overline: LocalizedStringKey? = nil, trailing: String? = nil) {
-        self.title = title; self.overline = overline; self.trailing = trailing
+    let overline: LocalizedStringKey?
+    let title: LocalizedStringKey
+    let trailing: String?
+    let onDark: Bool
+
+    /// `onDark` is for a bare header placed directly over a scheme-invariant dark scene or vessel.
+    /// It deliberately defaults off: headers inside light-mode cards must keep the normal dynamic ink.
+    public init(_ title: LocalizedStringKey, overline: LocalizedStringKey? = nil,
+                trailing: String? = nil, onDark: Bool = false) {
+        self.title = title
+        self.overline = overline
+        self.trailing = trailing
+        self.onDark = onDark
     }
+
     public var body: some View {
+        let primary = onDark ? StrandPalette.onDarkPrimary : StrandPalette.textPrimary
+        let secondary = onDark ? StrandPalette.onDarkSecondary : StrandPalette.textSecondary
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
-                if let overline { Text(overline).strandOverline() }
-                Text(title).font(StrandFont.title2).foregroundStyle(StrandPalette.textPrimary)
+                if let overline {
+                    Text(overline)
+                        .font(StrandFont.overline)
+                        .tracking(StrandFont.overlineTracking)
+                        .textCase(.uppercase)
+                        .foregroundStyle(secondary)
+                }
+                Text(title).font(StrandFont.title2).foregroundStyle(primary)
             }
             Spacer()
             if let trailing {
-                Text(trailing).font(StrandFont.footnote).foregroundStyle(StrandPalette.textSecondary)
+                Text(trailing).font(StrandFont.footnote).foregroundStyle(secondary)
             }
         }
     }
@@ -153,6 +171,7 @@ public struct SectionHeader: View {
 
 public struct StatTile<Accessory: View>: View {
     let label: LocalizedStringKey, value: String
+    var systemImage: String? = nil
     var caption: String? = nil
     var accent: Color = StrandPalette.textPrimary
     var delta: String? = nil
@@ -164,12 +183,14 @@ public struct StatTile<Accessory: View>: View {
     /// top of the value, sparkline or trend chip on a narrow tile (#495). Defaults to nothing.
     @ViewBuilder var accessory: () -> Accessory
 
-    public init(label: LocalizedStringKey, value: String, caption: String? = nil,
+    public init(label: LocalizedStringKey, value: String, systemImage: String? = nil,
+                caption: String? = nil,
                 accent: Color = StrandPalette.textPrimary, delta: String? = nil,
                 deltaColor: Color = StrandPalette.textTertiary,
                 sparkline: [Double]? = nil, sparkColor: Color = StrandPalette.accent,
                 @ViewBuilder accessory: @escaping () -> Accessory) {
-        self.label = label; self.value = value; self.caption = caption; self.accent = accent
+        self.label = label; self.value = value; self.systemImage = systemImage
+        self.caption = caption; self.accent = accent
         self.delta = delta; self.deltaColor = deltaColor; self.sparkline = sparkline; self.sparkColor = sparkColor
         self.accessory = accessory
     }
@@ -182,6 +203,12 @@ public struct StatTile<Accessory: View>: View {
                 // Header row: the metric label, and (right-aligned) the optional accessory laid out in
                 // flow so it reserves its own space rather than floating over the value below (#495).
                 HStack(alignment: .top, spacing: 4) {
+                    if let systemImage {
+                        // 24 pt is the smallest size where the physical lower lip
+                        // and specular rim survive a real iPhone render.
+                        MetricGlyph(systemImage, size: 24)
+                            .padding(.trailing, 4)
+                    }
                     Text(label).strandOverline()
                     Spacer(minLength: 0)
                     accessory()
@@ -224,11 +251,13 @@ public struct StatTile<Accessory: View>: View {
 // Backward-compatible convenience: a StatTile with NO accessory (the common case) — every existing
 // call site keeps working unchanged, and the type defaults `Accessory` to `EmptyView`.
 public extension StatTile where Accessory == EmptyView {
-    init(label: LocalizedStringKey, value: String, caption: String? = nil,
+    init(label: LocalizedStringKey, value: String, systemImage: String? = nil,
+         caption: String? = nil,
          accent: Color = StrandPalette.textPrimary, delta: String? = nil,
          deltaColor: Color = StrandPalette.textTertiary,
          sparkline: [Double]? = nil, sparkColor: Color = StrandPalette.accent) {
-        self.init(label: label, value: value, caption: caption, accent: accent, delta: delta,
+        self.init(label: label, value: value, systemImage: systemImage,
+                  caption: caption, accent: accent, delta: delta,
                   deltaColor: deltaColor, sparkline: sparkline, sparkColor: sparkColor,
                   accessory: { EmptyView() })
     }
@@ -658,6 +687,8 @@ private struct PulseDot: View {
     var size: CGFloat
     @State private var animate = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var motion = NoopMotionState.shared
+    private var poseStill: Bool { motion.poseStill(reduceMotion) }
     @Environment(\.colorScheme) private var scheme
     var body: some View {
         ZStack {
@@ -679,8 +710,8 @@ private struct PulseDot: View {
                 .shadow(color: color.opacity(0.8), radius: pulsing ? 4 : 2)
         }
         .frame(width: size, height: size)
-        .onAppear { if pulsing && !reduceMotion { animate = true } }
-        .animation(pulsing && !reduceMotion ? StrandMotion.breathe : nil, value: animate)
+        .onAppear { if pulsing && !poseStill { animate = true } }
+        .animation(pulsing && !poseStill ? StrandMotion.breathe : nil, value: animate)
         .accessibilityHidden(true)
     }
 }

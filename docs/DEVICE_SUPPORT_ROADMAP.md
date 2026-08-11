@@ -1,21 +1,73 @@
 # Device support — roadmap & protocol notes
 
-NOOP's north star is **WHOOP**, fully supported. Everything else is an opportunistic, easy-first
+Last reviewed: **2026-08-11**
+
+NOOP's north star is **WHOOP**. WHOOP 4 is the stable path; WHOOP 5/MG remains explicitly experimental
+until the physical-device release checklist is complete. Everything else is an opportunistic, easy-first
 expansion that must never regress the WHOOP experience. This file records where each additional
 source stands and the protocol facts we've verified, so the next build can pick up cleanly.
 
 | Source | Status | How |
 |--------|--------|-----|
-| **WHOOP 4 / 5 / MG** | ✅ Shipped, primary | Local BLE decode |
+| **WHOOP 4** | ✅ Shipped, primary | Local BLE decode |
+| **WHOOP 5 / MG** | 🧪 Experimental | Local BLE decode; software regression coverage passes, real-device validation remains required |
 | **Generic BLE heart-rate straps** (Polar / Wahoo / Coospo / Garmin HRM / Amazfit Helio HR-broadcast) | ✅ Shipped (v3.8.0), live HR + RR | Standard HR service `0x180D` / `0x2A37` |
-| **Fitness Age / Vitality / Body Age** | ✅ Shipped (v4.0.0) | On-device, from the data above |
+| **Foreground Live mode** | ✅ Shipped, explicit opt-in | User-started high-rate HR (plus R-R when the source exposes it) while the Live surface/session is active; higher battery use is disclosed and the foreground demand is released on exit |
+| **Continuous HRV background mode** | 🧪 Advanced opt-in, off by default | Separate from Live: keeps the detailed stream armed with background connection enabled, either overnight-only (fresh-install default) or 24/7; OS/device limits still apply |
+| **Apple Watch / Apple Health** | ✅ Shipped on iPhone, permission-gated | Native HealthKit read/write, observer-driven hourly background refresh plus foreground catch-up, and a Watch app for explicit workout/breathing/interval experiences. This is not direct proprietary Watch BLE and ordinary HealthKit delivery is not a guaranteed second-by-second live feed. |
+| **Android watches and apps via Health Connect** | ✅ Shipped, permission-gated | Native Health Connect import/writeback for supported records (including HR/RHR/HRV, exercise, sleep/stages, steps, energy, SpO₂, respiration, VO₂ max, body composition, absolute body temperature, and basal body temperature where a source supplies them). This is an exchange layer, not direct control of every watch, and source/OS cadence applies. |
+| **Gym equipment (FTMS)** | ✅ Shipped | Standard Bluetooth Fitness Machine Service `0x1826`; live machine metrics and HR when the machine exposes it |
+| **Fitness Age / Vitality / Wellness Age** | 🧪 Experimental | On-device; coverage-gated, non-clinical, and not WHOOP Age |
 | **Xiaomi Smart Band 8 / 9 / 10** (Mi Band) | ✅ Shipped, **import lane** | Read the Mi Fitness iOS app's own SQLite, on-device (below) |
 | **Xiaomi Smart Band — live BLE sync** | 🔬 Protocol researched, decoder not built | Mi protobuf-v2 over BLE GATT + `encryptKey` handshake (below) — hardware-gated |
 | **Polar deep streams** (ECG / PPG / ACC / PPI) | 🔬 Pure PPI decoder built (`Packages/PolarProtocol` + `com.noop.polar`, tests green both platforms); live `PolarPMDSource` + ECG/PPG decode still to build | PMD service (below) — alpha, hardware-gated |
-| **Garmin** (sleep / HRV / Body Battery / SpO₂ / FIT) | 📋 Researched, not built | Local BLE re-derive (Gadgetbridge-informed, **never** GPLv3 copy) |
-| **Amazfit / Zepp** (incl. Helio deep) | 📋 Researched, not built | Encrypted Huami BLE — needs a one-time **user-pasted** vendor key (NOOP never logs into the vendor cloud) |
+| **Garmin** | ✅ Export import; 🧪 broadcast Live | Garmin wellness JSON and FIT/GPX/TCX activity files import locally. A Garmin/HRM that advertises standard `0x180D` can use the experimental live-Broadcast lane. Proprietary deep BLE history, Body Battery recreation, and Garmin cloud sync are not implemented. |
+| **Amazfit / Zepp / Helio** | 🧪 Best-effort live HR only | Experimental isolated Huami driver reads standard `0x180D` when exposed, then the documented readable Huami HR characteristic. Models requiring vendor authentication remain unsupported; there is no deep history/sleep sync and NOOP never logs into the vendor cloud. |
 | **Oura** (Gen 3/4/5) | 🔬 Cloud import shipped; local BLE ring **experimental** | Cloud API v2 (off-by-default OAuth backfill) **+** clean-room BLE ring — auth, live HR/IBI, history drain, sleep hypnogram, activity/HR research (below) |
-| **Fitbit / Google** | 📋 Researched, not built | Build against **Google Health** API (Fitbit Web API sunsets Sept 2026) — off-by-default import |
+| **Fitbit / Google** | ✅ Fitbit export import; no direct live lane | Local Google Takeout/Fitbit JSON import for sleep and stages, resting HR, and steps. Missing Fitbit fields remain absent rather than inferred. Automatic Google Health/cloud integration and proprietary Fitbit BLE are not implemented. |
+
+## What “supports a device” means
+
+NOOP has three deliberately separate integration lanes. A checkmark in one lane does not imply the
+other two:
+
+1. **Direct live source:** the app connects to an open/decoded BLE service and receives what that service
+   actually emits. Standard HR straps can provide HR and R-R; an FTMS machine can provide workout data;
+   neither becomes a sleep/temperature/SpO₂ tracker by inference.
+2. **Platform exchange:** Apple Health/HealthKit and Android Health Connect expose records another watch
+   or app has already written, with user permission. Refresh timing and available metrics are controlled
+   by the source platform, device, region, permissions, and OS scheduling.
+3. **Owner-data import:** WHOOP CSV, Apple Health XML/Shortcuts, Xiaomi Mi Fitness SQLite, Oura/Fitbit/
+   Garmin exports, and FIT/GPX/TCX files are parsed locally. This is historical import, not a persistent
+   account connection or a live device driver.
+
+If a device does not measure or export a required input, NOOP keeps that metric unavailable and marks
+dependent outputs as not ready. It does not synthesize body temperature, calibrated SpO₂, HRV, sleep
+stages, or another vendor's proprietary score from an unrelated signal. A wearable may bank readings
+while the phone is away and upload them later **only when that device/protocol actually exposes a history
+offload or its vendor/platform later writes the records**; NOOP cannot trigger unsupported sensors or
+recover history that the device never exposes.
+
+Platform references: [Apple HealthKit](https://developer.apple.com/documentation/healthkit),
+[Apple Watch workout sessions](https://developer.apple.com/documentation/healthkit/running-workout-sessions),
+and [Android Health Connect](https://developer.android.com/health-and-fitness/health-connect).
+
+### Health Connect temperature and scheduling boundary
+
+- The pinned Android SDK exposes separate `BodyTemperatureRecord` and
+  `BasalBodyTemperatureRecord` types. NOOP stores them as absolute `body_temp` and
+  `basal_body_temp` °C series under the `health-connect` source.
+- That SDK does **not** expose a distinct skin-temperature or sleeping-wrist-temperature record type.
+  A body-temperature record whose measurement-location metadata says wrist is therefore still body
+  temperature; it is never relabelled as Apple `wrist_temp` or WHOOP `skin_temp`/temperature deviation.
+- Manual import reads the available history. Automatic catch-up uses a bounded 35-day window. It runs
+  on app open wherever Health Connect is available. Android 15+, and Android 14 once U extension 13 is
+  installed, may additionally grant the dedicated background-health permission for best-effort periodic
+  WorkManager runs. Earlier platform/provider versions remain foreground/on-open only, and OS scheduling
+  is never guaranteed.
+- Permissions remain granular: any already-granted record types continue importing. Existing users get
+  an explicit in-app affordance to add body- and basal-temperature read access; NOOP does not treat a
+  partial grant as consent to every Health Connect category.
 
 ## Polar Measurement Data (PMD) — verified protocol
 
@@ -155,8 +207,11 @@ branch/PR); if not, it is a documented dead-end and MET stays the daytime proxy.
 **Analysis tooling:** `diagnostics/oura_met_crosscheck.py` cross-checks the MET + IBI-HR corpora against the
 app SQLite (workouts/sleep) and, with `--suunto`, a `.fit` export — per-minute MET/HR profiles + correlations.
 
-## Notes on the deep-band lanes (Garmin / Amazfit / cloud)
+## Remaining deep/vendor lanes
 
-These "earn their place" — pursue only while tractable, defer/drop if they threaten WHOOP stability or
-become a time-sink. Garmin/Amazfit decode is genuinely L-effort and best done with a device to capture
-against; the cloud lanes need registered OAuth apps + real accounts to verify. None will ship "blind."
+The Garmin export and standard-HR-broadcast paths, the best-effort Huami live-HR path, and the Oura and
+Fitbit import paths above already exist. What remains is materially different work: proprietary Garmin
+deep-history sync, authenticated Amazfit/Xiaomi history, and automatic vendor-service connections. Those
+lanes require a physical device or registered vendor application plus real consented test data. They stay
+experimental or unavailable until validated end to end; a shallow HR/import lane must never be presented
+as full-device parity.

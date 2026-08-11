@@ -9,7 +9,7 @@ enum AppleHealthImport {
 
     /// The Apple Health mapping revision, stamped into the Import test-mode parser line. Bump when this
     /// importer's aggregate->store mapping changes.
-    static let importerVersion = 1
+    static let importerVersion = 2
 
     @discardableResult
     static func importExport(url: URL, into store: WhoopStore, deviceId: String,

@@ -7,7 +7,10 @@ import Foundation
 /// stores and charts alongside Whoop.
 ///
 /// All `*Min` fields are minutes; energies are kcal; heart rates are count/min;
-/// `spo2Pct` is a 0–100 percentage; `vo2max` is mL/kg/min.
+/// `spo2Pct` is a 0–100 percentage; `vo2max` is mL/kg/min; temperatures are
+/// absolute degrees Celsius. Body and sleeping-wrist temperatures deliberately
+/// remain separate from one another and from NOOP's WHOOP skin-temperature
+/// deviation series.
 public struct AppleDailyAggregate: Equatable, Sendable {
     /// `yyyy-MM-dd` in the sample's own UTC offset (local civil day).
     public let day: String
@@ -35,6 +38,10 @@ public struct AppleDailyAggregate: Equatable, Sendable {
     public let leanMassKg: Double?
     public let bmi: Double?
 
+    // Temperature (daily latest, absolute °C). These are not skin-temp deviation.
+    public let bodyTemperatureC: Double?
+    public let wristTemperatureC: Double?
+
     // Sleep (minutes per stage), keyed by the wake day
     public let asleepMin: Double?
     public let deepMin: Double?
@@ -60,6 +67,8 @@ public struct AppleDailyAggregate: Equatable, Sendable {
         bodyFatPct: Double? = nil,
         leanMassKg: Double? = nil,
         bmi: Double? = nil,
+        bodyTemperatureC: Double? = nil,
+        wristTemperatureC: Double? = nil,
         asleepMin: Double? = nil,
         deepMin: Double? = nil,
         remMin: Double? = nil,
@@ -83,6 +92,8 @@ public struct AppleDailyAggregate: Equatable, Sendable {
         self.bodyFatPct = bodyFatPct
         self.leanMassKg = leanMassKg
         self.bmi = bmi
+        self.bodyTemperatureC = bodyTemperatureC
+        self.wristTemperatureC = wristTemperatureC
         self.asleepMin = asleepMin
         self.deepMin = deepMin
         self.remMin = remMin
@@ -118,6 +129,8 @@ public enum AppleHealthAggregator {
     static let bodyFat = "BodyFatPercentage"
     static let leanMass = "LeanBodyMass"
     static let bodyMassIndex = "BodyMassIndex"
+    static let bodyTemperature = "BodyTemperature"
+    static let sleepingWristTemperature = "AppleSleepingWristTemperature"
 
     /// Normalize a sample's `type` to the stripped HK identifier so matching
     /// works whether the caller passed `HeartRate` or
@@ -140,6 +153,22 @@ public enum AppleHealthAggregator {
     static func unitLooksLikePounds(_ unit: String?) -> Bool {
         guard let u = unit?.lowercased() else { return false }
         return u == "lb" || u == "lbs" || u.contains("pound")
+    }
+
+    /// Normalize an Apple Health export temperature to absolute degrees Celsius.
+    /// Health exports normally use `degC`; explicit Fahrenheit/Kelvin spellings are
+    /// handled without guessing from the numeric value.
+    static func temperatureCelsius(_ value: Double, unit: String?) -> Double {
+        let normalized = (unit ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "°", with: "deg")
+            .replacingOccurrences(of: " ", with: "")
+        switch normalized {
+        case "degf", "fahrenheit": return (value - 32.0) * 5.0 / 9.0
+        case "k", "kelvin":        return value - 273.15
+        default:                     return value
+        }
     }
 
     // MARK: Day bucketing
@@ -253,6 +282,8 @@ public enum AppleHealthAggregator {
                 bodyFatPct: base?.bodyFatPct,
                 leanMassKg: base?.leanMassKg,
                 bmi: base?.bmi,
+                bodyTemperatureC: base?.bodyTemperatureC,
+                wristTemperatureC: base?.wristTemperatureC,
                 asleepMin: s?.asleep,
                 deepMin: s?.deep,
                 remMin: s?.rem,
@@ -290,6 +321,8 @@ public enum AppleHealthAggregator {
             add("body_fat", d.bodyFatPct)
             add("lean_mass", d.leanMassKg)
             add("bmi", d.bmi)
+            add("body_temp", d.bodyTemperatureC)
+            add("wrist_temp", d.wristTemperatureC)
             add("asleep_min", d.asleepMin)
             add("deep_min", d.deepMin)
             add("rem_min", d.remMin)
@@ -349,6 +382,8 @@ public struct AppleDailySampleAccumulator {
         var bodyFat: Double?; var bodyFatAt: Date?
         var lean: Double?;    var leanAt: Date?
         var bmi: Double?;     var bmiAt: Date?
+        var bodyTemp: Double?; var bodyTempAt: Date?
+        var wristTemp: Double?; var wristTempAt: Date?
     }
 
     private var byDay: [String: DayAcc] = [:]
@@ -445,6 +480,24 @@ public struct AppleDailySampleAccumulator {
                     byDay[day]!.bmiAt = s.end
                 }
             }
+        case AppleHealthAggregator.bodyTemperature:
+            if let v = s.value, v.isFinite {
+                let celsius = AppleHealthAggregator.temperatureCelsius(v, unit: s.unit)
+                let acc = byDay[day]!
+                if acc.bodyTemp == nil || (acc.bodyTempAt ?? .distantPast) <= s.end {
+                    byDay[day]!.bodyTemp = celsius
+                    byDay[day]!.bodyTempAt = s.end
+                }
+            }
+        case AppleHealthAggregator.sleepingWristTemperature:
+            if let v = s.value, v.isFinite {
+                let celsius = AppleHealthAggregator.temperatureCelsius(v, unit: s.unit)
+                let acc = byDay[day]!
+                if acc.wristTemp == nil || (acc.wristTempAt ?? .distantPast) <= s.end {
+                    byDay[day]!.wristTemp = celsius
+                    byDay[day]!.wristTempAt = s.end
+                }
+            }
         default:
             break
         }
@@ -474,7 +527,9 @@ public struct AppleDailySampleAccumulator {
                 weightKg: a.weight,
                 bodyFatPct: a.bodyFat,
                 leanMassKg: a.lean,
-                bmi: a.bmi
+                bmi: a.bmi,
+                bodyTemperatureC: a.bodyTemp,
+                wristTemperatureC: a.wristTemp
             )
         }
         return result.sorted { $0.day < $1.day }

@@ -70,6 +70,7 @@ public enum ReadinessEngine {
     private static let minBaseline    = 7    // need at least this many baseline nights
     private static let acuteWindow    = 7
     private static let chronicWindow  = 28
+    private static let minAcute       = 4    // do not call a sparse one-or-two-day sample a "7-day" load
     private static let minChronic     = 14   // need at least this much strain history for ACWR
 
     // MARK: Entry point
@@ -182,19 +183,25 @@ public enum ReadinessEngine {
         }
 
         // Training Stress Balance (ACWR) + monotony --------------------------
-        let strainSeries = sorted.compactMap { $0.strain }
         var acwr: Double? = nil
         var monotony: Double? = nil
-        if strainSeries.count >= minChronic {
-            let acute = mean(Array(strainSeries.suffix(acuteWindow)))!
-            let chronic = mean(Array(strainSeries.suffix(chronicWindow)))!
+        // Anchor load windows to the selected/latest calendar day. The old `sorted.compactMap` path
+        // included rows AFTER an explicitly selected historical day, and `suffix(28)` treated 28 sparse
+        // readings spread across months as a 28-day training block. Calendar-bounded, one-value-per-day
+        // windows prevent both future leakage and false coverage.
+        let loadRows = sorted.filter { $0.day <= latest.day }
+        if let acuteSeries = calendarWindowStrains(rows: loadRows, ending: latest.day, days: acuteWindow),
+           let chronicSeries = calendarWindowStrains(rows: loadRows, ending: latest.day, days: chronicWindow),
+           acuteSeries.count >= minAcute, chronicSeries.count >= minChronic {
+            let acute = mean(acuteSeries)!
+            let chronic = mean(chronicSeries)!
             if chronic > 0 {
                 let ratio = acute / chronic
                 acwr = ratio
                 signals.append(acwrSignal(ratio, acute: acute, chronic: chronic))
             }
             // Foster monotony over the last week of strain.
-            let week = Array(strainSeries.suffix(acuteWindow))
+            let week = acuteSeries
             if week.count >= 4, let sd = sampleSD(week), sd > 0, let m = mean(week) {
                 let mono = m / sd
                 monotony = mono
@@ -268,6 +275,27 @@ public enum ReadinessEngine {
         decimals == 0
             ? String(Int(value.rounded()))
             : String(format: "%.\(decimals)f", value)
+    }
+
+    /// Values inside an actual calendar window, deduplicated to one daily row. ISO day keys compare
+    /// lexicographically, but we parse the anchor once so month/year boundaries are handled correctly.
+    private static func calendarWindowStrains(rows: [DailyMetric], ending endDay: String,
+                                              days: Int) -> [Double]? {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let end = formatter.date(from: endDay),
+              let start = formatter.calendar.date(byAdding: .day, value: -(days - 1), to: end) else {
+            return nil
+        }
+        let startDay = formatter.string(from: start)
+        var byDay: [String: Double] = [:]
+        for row in rows where row.day >= startDay && row.day <= endDay {
+            if let strain = row.strain { byDay[row.day] = strain }
+        }
+        return byDay.keys.sorted().compactMap { byDay[$0] }
     }
 
     // MARK: Synthesis

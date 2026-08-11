@@ -110,6 +110,13 @@ public enum WhoopCommand: UInt8, CaseIterable {
     /// on-device: 2.1/s → 0/s, and it persists across reconnect.
     case sendR10R11Realtime    = 63
 
+    // WHOOP MG ECG (Labrador) family. Safe/reversible, but exposed only through the explicit,
+    // positively identified MG experiment; never sent automatically.
+    case selectWrist = 123
+    case toggleLabradorDataGeneration = 124
+    case toggleLabradorRawSave = 125
+    case toggleLabradorFiltered = 139
+
     // MARK: Alarm commands (confirmed for interoperability)
     /// Arm the strap's FIRMWARE alarm for a specific UTC time. The strap will buzz at that time
     /// even if the app is backgrounded or killed (event STRAP_DRIVEN_ALARM_EXECUTED=57).
@@ -156,6 +163,10 @@ public enum WhoopCommand: UInt8, CaseIterable {
         case .runHapticsPattern:     return "Run Haptics Pattern"
         case .stopHaptics:           return "Stop Haptics"
         case .sendR10R11Realtime:    return "R10/R11 Realtime (raw stream)"
+        case .selectWrist:           return "Select Wrist (MG ECG, persistent)"
+        case .toggleLabradorDataGeneration: return "ECG Data Generation (MG)"
+        case .toggleLabradorRawSave: return "ECG Raw Save (MG)"
+        case .toggleLabradorFiltered:return "ECG Filtered Stream (MG)"
         case .setAlarmTime:          return "Set Alarm Time"
         case .getAlarmTime:          return "Get Alarm Time"
         case .runAlarm:              return "Run Alarm"

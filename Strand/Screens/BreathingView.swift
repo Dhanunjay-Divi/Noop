@@ -365,16 +365,16 @@ private struct BreathingContent: View {
                         CountUpText(value: Double(bpm),
                                     format: { "\(Int($0.rounded()))" },
                                     font: StrandFont.number(40),
-                                    color: StrandPalette.textPrimary)
+                                    color: StrandPalette.onDarkPrimary)
                     } else {
                         Text("—")
                             .font(StrandFont.number(40))
-                            .foregroundStyle(StrandPalette.textPrimary)
+                            .foregroundStyle(StrandPalette.onDarkPrimary)
                     }
                     Text(String(localized: "BPM"))
                         .font(StrandFont.footnote)
                         .tracking(0.8)
-                        .foregroundStyle(StrandPalette.textTertiary)
+                        .foregroundStyle(StrandPalette.onDarkSecondary)
                 }
                 .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
                 .allowsHitTesting(false)   // taps fall through to the vessel → splash

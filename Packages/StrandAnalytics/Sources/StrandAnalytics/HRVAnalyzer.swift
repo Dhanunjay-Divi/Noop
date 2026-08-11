@@ -50,6 +50,8 @@ public enum HRVAnalyzer {
         /// RMSSD in milliseconds, or nil when too few valid beats.
         public let rmssd: Double?
         /// SDNN (sample SD, ddof=1) in milliseconds, or nil when too few valid beats.
+        /// A caller with timestamps must also withhold this value when either the coverage or beat-time
+        /// integrity gates below fail; `analyze` receives intervals only and cannot make that decision.
         public let sdnn: Double?
         /// Mean NN interval (ms) over the cleaned beats, or nil.
         public let meanNN: Double?
@@ -320,7 +322,7 @@ public enum HRVAnalyzer {
                                     stepSec: Int = 0,
                                     minBeatsPerWindow: Int = 8) -> [RollingRmssdPoint] {
         guard windowSec > 0, rr.count >= minBeatsPerWindow else { return [] }
-        let sorted = rr.sorted { $0.ts < $1.ts }
+        let sorted = rr.sortedByTsStable()
         var out: [RollingRmssdPoint] = []
         var lastEmitTs: Int? = nil
         var left = 0   // index of the oldest interval still inside the trailing window
@@ -342,6 +344,40 @@ public enum HRVAnalyzer {
     }
 
     // MARK: - R-R integrity diagnostics (#257)
+
+    /// What the raw and same-second-collapsed coverage pair says about the capture.
+    public enum RrCoverageVerdict: String, Equatable, Sendable {
+        case plausible
+        case underCovered
+        case sameSecondOverCount
+        case crossSecondOverCount
+        case unmeasurable
+    }
+
+    /// SDNN and other beat-spread statistics are unsafe when duplicated beats over-cover the window.
+    /// Missing or unmeasurable coverage is not treated as duplication; live spot reads commonly have no
+    /// usable timestamp span and should not be suppressed merely because coverage cannot be measured.
+    public static func beatSpreadIsTrustworthy(_ verdict: RrCoverageVerdict) -> Bool {
+        switch verdict {
+        case .sameSecondOverCount, .crossSecondOverCount:
+            return false
+        case .plausible, .underCovered, .unmeasurable:
+            return true
+        }
+    }
+
+    /// Symmetric rounding allowance around 1.0 for whole-second timestamps.
+    public static let coveragePlausibleFloor: Double = 1.0 - (coveragePlausibleCeiling - 1.0)
+    public static let coveragePlausibleCeiling: Double = 1.10
+
+    /// Classify coverage before any beat-spread metric is surfaced. The negated upper comparison keeps
+    /// NaN behavior deterministic: non-positive and non-finite coverage is unmeasurable, never plausible.
+    public static func classifyCoverage(coverage: Double, collapsed: Double) -> RrCoverageVerdict {
+        guard coverage > 0 else { return .unmeasurable }
+        guard coverage >= coveragePlausibleFloor else { return .underCovered }
+        guard coverage > coveragePlausibleCeiling else { return .plausible }
+        return collapsed > coveragePlausibleCeiling ? .crossSecondOverCount : .sameSecondOverCount
+    }
 
     /// Total heartbeat-time (sum of NN intervals, ms) ÷ wall-clock span of the R-R window (ms). A value
     /// > ~1.0 is physically impossible — you can't record more beat-time than elapsed time — so it
@@ -397,6 +433,31 @@ public enum HRVAnalyzer {
             if !dup { keptTs.append(t); keptRr.append(r) }
         }
         return rrCoverage(tsSec: keptTs, rrMs: keptRr)
+    }
+
+    /// Fraction of consecutive beats whose wall-clock step agrees with that beat's R-R interval. A
+    /// beat-accurate stream approaches 1.0; a banked record stamps several intervals at the same second
+    /// and collapses toward zero. Short or mismatched inputs stay trusted because the property is unknown.
+    public static func beatAccurateFraction(tsSec: [Int], rrMs: [Double]) -> Double {
+        guard tsSec.count == rrMs.count, tsSec.count >= 2 else { return 1.0 }
+        var accurate = 0
+        for i in 1..<tsSec.count {
+            let gapS = Double(tsSec[i] - tsSec[i - 1])
+            if abs(gapS - rrMs[i] / 1000.0) <= beatAccuracyToleranceS {
+                accurate += 1
+            }
+        }
+        return Double(accurate) / Double(tsSec.count - 1)
+    }
+
+    /// Whole-second timestamps need a loose tolerance against sub-second R-R values.
+    public static let beatAccuracyToleranceS: Double = 0.5
+    /// Observed beat-accurate and banked streams lie far apart; values below this midpoint are refused.
+    public static let beatAccuracyMinFraction: Double = 0.5
+
+    public static func beatValuesAreTrustworthy(beatAccurateFraction: Double) -> Bool {
+        // Negated `<` deliberately leaves unmeasured/NaN input trusted, matching classifyCoverage.
+        !(beatAccurateFraction < beatAccuracyMinFraction)
     }
 
     // MARK: - Helpers

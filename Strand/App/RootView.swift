@@ -1,8 +1,11 @@
 import SwiftUI
 import StrandDesign
+import Foundation
+import Combine
 
 enum NavItem: String, CaseIterable, Identifiable, Hashable {
     case today = "Today"
+    case friends = "Friends"
     case intelligence = "Intelligence"
     case insightsHub = "What Moves You"
     case coach = "Coach"
@@ -38,10 +41,11 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
     var titleKey: LocalizedStringKey {
         switch self {
         case .today: return "Today"
+        case .friends: return "Friends"
         case .intelligence: return "Intelligence"
         case .insightsHub: return "What Moves You"
         case .coach: return "Coach"
-        case .live: return "Live"
+        case .live: return "Band"
         case .breathe: return "Breathe"
         case .intervals: return "Intervals"
         case .explore: return "Explore"
@@ -80,10 +84,11 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
     var localizedTitle: String {
         switch self {
         case .today: return String(localized: "Today")
+        case .friends: return String(localized: "Friends")
         case .intelligence: return String(localized: "Intelligence")
         case .insightsHub: return String(localized: "What Moves You")
         case .coach: return String(localized: "Coach")
-        case .live: return String(localized: "Live")
+        case .live: return String(localized: "Band")
         case .breathe: return String(localized: "Breathe")
         case .intervals: return String(localized: "Intervals")
         case .explore: return String(localized: "Explore")
@@ -114,6 +119,7 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
     var icon: String {
         switch self {
         case .today: return "circle.hexagongrid.fill"
+        case .friends: return "person.2.fill"
         case .intelligence: return "brain.head.profile"
         case .insightsHub: return "wand.and.sparkles"
         case .coach: return "sparkles"
@@ -145,8 +151,8 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
-/// One collapsible sidebar section (S1, #805): the 27 flat `NavItem` cases are grouped into ~5
-/// labelled sections so the macOS sidebar stops being a 28-item flat wall. The enum cases are NOT
+/// One collapsible sidebar section (S1, #805): the 29 flat `NavItem` cases are grouped into
+/// labelled sections so the macOS sidebar stops being a flat wall. The enum cases are NOT
 /// touched (M5 gate): only the layout that consumes them changes. `NavGroup.all` is the single source
 /// of truth for what each section holds, so the M5 routability test can assert every `NavItem` case is
 /// still present across the groups (nothing vanished the way the iPhone Smart-Alarm row did).
@@ -156,12 +162,13 @@ struct NavGroup: Identifiable {
     let id: String
     let items: [NavItem]
 
-    /// The 5 sidebar sections, in order, mirroring the iOS More-tab grouping idiom (Insights / Body /
-    /// Data & App) plus Today + Sleep as their own top sections. Devices/pairing sits at the TOP of the
+    /// The sidebar sections, in order, mirroring the iOS More-tab grouping idiom (Circle / Insights /
+    /// Body / Data & App) plus Today + Sleep as their own top sections. Devices/pairing sits at the TOP of the
     /// Data & App group so the first thing a new user reaches for stays near the surface. Every one of the
-    /// 27 `NavItem` cases appears exactly once across these groups (asserted by the M5 routability test).
+    /// 29 `NavItem` cases appear exactly once across these groups (asserted by the M5 routability test).
     static let all: [NavGroup] = [
         NavGroup(title: "Today", id: "today", items: [.today]),
+        NavGroup(title: "Circle", id: "circle", items: [.friends]),
         NavGroup(title: "Sleep", id: "sleep", items: [.sleep]),
         NavGroup(title: "Body", id: "body", items: [
             .workouts, .live, .health, .stress, .intervals, .breathe,
@@ -199,7 +206,7 @@ struct RootView: View {
     /// (`.today`). The single-item Today/Sleep sections always read expanded so their one row shows; the
     /// multi-item groups (Body / Insights / Data & App) collapse to just their header until tapped.
     @State private var expandedGroups: Set<String> = Self.initialExpandedGroups(for: .today)
-    /// Sidebar filter text (#915). Since the collapsible sections landed (S1), 27 of the 28
+    /// Sidebar filter text (#915). Since the collapsible sections landed (S1), most
     /// destinations sit inside collapsed groups; typing here filters every group by its localized row
     /// title so any screen is reachable without knowing which section owns it.
     @State private var searchQuery = ""
@@ -313,6 +320,7 @@ struct RootView: View {
         .onChangeCompat(of: router.requestedDestination) { dest in
             switch dest {
             case .devices: selection = .devices
+            case .friends: selection = .friends
             case .insightsHub: selection = .insightsHub
             case .labBook: selection = .labBook
             case .fusedRecord: selection = .fusedRecord
@@ -364,6 +372,28 @@ struct RootView: View {
                 }
             }
         }
+        .onAppear {
+            DailyReviewNotifications.restoreScheduleIfAuthorized()
+            // Defer one turn so NavigationSplitView has installed its initial selection before a
+            // cold-launch reminder replaces it.
+            Task { @MainActor in
+                await Task.yield()
+                consumePendingNotificationRoute()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NotificationRouteBridge.routeRequested)) { _ in
+            consumePendingNotificationRoute()
+        }
+    }
+
+    /// Cold and warm notification taps converge here. `consumePending` removes the route before the
+    /// sidebar selection changes, so a later foreground/relaunch cannot replay an old reminder.
+    private func consumePendingNotificationRoute() {
+        guard let route = NotificationRouteBridge.consumePending() else { return }
+        switch route {
+        case .sleep: selection = .sleep
+        case .today: selection = .today
+        }
     }
 
     /// The filter text that actually applies: trimmed, so a whitespace-only query is no query at all.
@@ -400,8 +430,7 @@ struct RootView: View {
 
     private var brand: some View {
         HStack(spacing: 8) {
-            // In-app logo: the open recovery-ring mark so the wordmark reads as a true lockup
-            // (README logo system — mark + "NOOP"). Flat gold gradient, low glow per the v3 restraint.
+            // The shared dimensional obsidian mark keeps the Mac and iPhone identity in lockstep.
             BrandMark(size: 22)
             Text("NOOP")
                 .font(StrandFont.rounded(20, weight: .bold))
@@ -418,6 +447,7 @@ struct RootView: View {
     @ViewBuilder private var detail: some View {
         switch selection ?? .today {
         case .today: todayDetail
+        case .friends: FriendsView()
         case .intelligence: IntelligenceView()
         case .insightsHub: InsightsHubView()
         case .coach: CoachView()
@@ -488,39 +518,6 @@ struct RootView: View {
         #else
         LiveView()
         #endif
-    }
-}
-
-/// The NOOP logo mark — an **open recovery ring** (~80% arc, round caps, starting at 12 o'clock)
-/// with a **solid centre core dot** ("on-device core"), per the README logo system. Rendered in the
-/// gold gradient and kept deliberately flat / low-glow for the v3 Titanium & Gold restraint. Drawn
-/// purely from design tokens so it tracks the palette. Sized to optically x-height-match the wordmark.
-struct BrandMark: View {
-    var size: CGFloat = 22
-
-    var body: some View {
-        ZStack {
-            // Open ring: leave ~20% of the circumference as a gap (trim 0 → 0.8), then rotate so the
-            // gap sits at the top — the gold gradient sweeps clockwise from 12 o'clock.
-            Circle()
-                .trim(from: 0, to: 0.8)
-                .stroke(
-                    AngularGradient(gradient: StrandPalette.goldGradient,
-                                    center: .center,
-                                    angle: .degrees(-90)),
-                    style: StrokeStyle(lineWidth: size * 0.16, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
-                .frame(width: size * 0.84, height: size * 0.84)
-
-            // Solid centre core dot — the "on-device core".
-            Circle()
-                .fill(LinearGradient(gradient: StrandPalette.goldGradient,
-                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: size * 0.26, height: size * 0.26)
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
     }
 }
 

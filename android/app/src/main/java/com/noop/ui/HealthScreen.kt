@@ -31,7 +31,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -39,6 +38,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -70,6 +70,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.noop.analytics.Baselines
+import com.noop.analytics.AgeMetricProfile
 import com.noop.analytics.IllnessSignalEngine
 import com.noop.analytics.V5HealthSignals
 import com.noop.analytics.FitnessAgeEngine
@@ -88,6 +89,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // MARK: - Health Monitor (ported from Strand/Screens/HealthView.swift)
 //
@@ -118,15 +120,14 @@ fun HealthScreen(
     // analytics pass and published by the ViewModel. Cycle awareness gates on its opt-in pref.
     val v5Signals by vm.v5Signals.collectAsStateWithLifecycle()
     val cycleEnabled by vm.cycleTrackingEnabled.collectAsStateWithLifecycle()
+    val periodStarts by vm.periodStarts.collectAsStateWithLifecycle()
+    var cycleTrackerPresented by remember { mutableStateOf(false) }
+    val cycleScope = rememberCoroutineScope()
     val hrMax = profile.hrMax
 
-    // Health Monitor shows live HR too, so it must keep the realtime stream on while it's visible —
-    // otherwise leaving the Live page stopped the stream and this page froze (issue #18). Ref-counted
-    // in the ViewModel, so handing off between Live and here never drops the stream.
-    DisposableEffect(Unit) {
-        vm.requestRealtimeHr()
-        onDispose { vm.releaseRealtimeHr() }
-    }
+    // Health Monitor is a lightweight observer. It may display standard-profile HR already arriving
+    // from the connected wearable, but opening this screen never starts the battery-intensive stream.
+    // Users explicitly start that from Live Tracking (or an explicit workout/HRV/session capture).
 
     // PERF (#scroll-jank): the BLE live state + smoothed bpm tick ~1Hz. Reading them in this body to
     // compute the empty-state gate recomposed the WHOLE Health screen on every HR tick. The body only
@@ -203,6 +204,14 @@ fun HealthScreen(
                     // #801: symmetric off-control. Cycle awareness could be turned ON here but only OFF from
                     // Automations; let the user turn it off in-place where they turned it on.
                     onTurnOffCycle = { vm.setCycleTrackingEnabled(false) },
+                    onLogPeriod = {
+                        cycleScope.launch {
+                            if (!vm.logPeriodStart(LocalDate.now().toString())) {
+                                Toast.makeText(context, "Couldn’t log the period start. Please try again.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onOpenCycleTracker = { cycleTrackerPresented = true },
                 )
             }
             // CONTRIBUTORS (README screen #5, recovery detail) — the signals behind recovery as
@@ -218,6 +227,19 @@ fun HealthScreen(
                     onOpenFusedRecord = onOpenFusedRecord,
                 )
             }
+        }
+    }
+
+    if (cycleTrackerPresented) {
+        v5Signals?.cycle?.let { cycle ->
+            CycleTrackerSheet(
+                result = cycle,
+                periodStarts = periodStarts,
+                onLogPeriodStart = { vm.logPeriodStart(it) },
+                onDeletePeriodStart = { vm.deletePeriodStart(it) },
+                onDeleteAllPeriodStarts = { vm.deleteAllPeriodStarts() },
+                onDismiss = { cycleTrackerPresented = false },
+            )
         }
     }
 }
@@ -435,6 +457,8 @@ private fun SkinTempSuiteSection(
     onEnableCycle: () -> Unit,
     // #801: symmetric off-control, surfaced on the live card.
     onTurnOffCycle: () -> Unit,
+    onLogPeriod: () -> Unit,
+    onOpenCycleTracker: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         SectionHeader("Skin Temperature", overline = "From your nightly readings")
@@ -450,7 +474,14 @@ private fun SkinTempSuiteSection(
         // opt-in invitation is shown ONLY for profiles it can apply to (sex-gated); a male profile that
         // previously enabled it still sees its existing card, only the invitation is gated.
         if (cycleEnabled) {
-            signals?.cycle?.let { CycleAwarenessCard(result = it, onTurnOff = onTurnOffCycle) }
+            signals?.cycle?.let {
+                CycleAwarenessCard(
+                    result = it,
+                    onLogPeriod = onLogPeriod,
+                    onOpenDetail = onOpenCycleTracker,
+                    onTurnOff = onTurnOffCycle,
+                )
+            }
         } else if (cycleOptInApplies) {
             CycleAwarenessOptInCard(onEnable = onEnableCycle)
         }
@@ -592,14 +623,16 @@ private fun ContributorBar(
 @Composable
 private fun rememberFitnessReadiness(days: List<DailyMetric>, profile: ProfileStore): Pair<Int, FitnessAgeReadiness> {
     val rhrDays = remember(days) { days.takeLast(7).count { it.restingHr != null } }
-    val readiness = remember(days, profile.age, profile.sex, profile.waistCm) {
+    val readiness = remember(
+        days, profile.age, profile.sex, profile.waistCm,
+        profile.ageInputConfirmed, profile.sexInputConfirmed,
+    ) {
         val activityDays = days.takeLast(7).count { it.strain != null }
         FitnessAgeEngine.assessReadiness(
-            hasAge = profile.age > 0,
-            hasSex = profile.sex.isNotBlank(),
+            hasAge = profile.ageInputConfirmed && FitnessAgeEngine.supportsAge(profile.age.toDouble()),
+            hasSex = profile.sexInputConfirmed && FitnessAgeEngine.supportsSex(profile.sex),
             rhrDays = rhrDays,
             activityDays = activityDays,
-            hasHeightWeight = profile.heightCm > 0 && profile.weightKg > 0,
             hasWaist = profile.waistCm > 0,
         )
     }
@@ -617,7 +650,19 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
     // this tick, which re-keys the read below so a freshly written value shows without waiting for a sync.
     var refreshTick by remember { mutableStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
-    LaunchedEffect(days, refreshTick) {
+    val profileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
+    val profileState = remember(profileVersion) { profile.ageMetricStateToken }
+    var loadedProfileState by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(days, refreshTick, profileVersion) {
+        if (!profile.fitnessInputsConfirmed ||
+            !FitnessAgeEngine.supportsAge(profile.age.toDouble()) ||
+            !FitnessAgeEngine.supportsSex(profile.sex)
+        ) {
+            fitnessAge = null
+            vo2max = null
+            loadedProfileState = profileState
+            return@LaunchedEffect
+        }
         // Latest-value reads (LIMIT-1 per source) — the full-series `.lastOrNull()` scan is gone (perf).
         val fa = runCatching {
             vm.repo.latestMetricComputedUnion(vm.activeStrapId, "fitness_age")?.value
@@ -625,13 +670,24 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
         val vo2 = runCatching {
             vm.repo.latestMetricComputedUnion(vm.activeStrapId, "vo2max_est")?.value
         }.getOrNull()
-        fitnessAge = fa
-        vo2max = vo2
+        val faProfile = runCatching {
+            vm.repo.latestMetricComputedUnion(
+                vm.activeStrapId, AgeMetricProfile.FITNESS_AGE_KEY,
+            )?.value
+        }.getOrNull()
+        val vo2Profile = runCatching {
+            vm.repo.latestMetricComputedUnion(
+                vm.activeStrapId, AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
+            )?.value
+        }.getOrNull()
+        fitnessAge = fa.takeIf { profile.acceptsFitnessAge(faProfile) }
+        vo2max = vo2.takeIf { profile.acceptsVO2maxEstimate(vo2Profile) }
+        loadedProfileState = profileState
     }
 
     // Readiness from what THIS screen can see: the last 7 merged daily rows. RHR coverage drives the
-    // age; activity (a scored strain day) is an enrichment signal; height/weight/waist sit under the
-    // VO₂max role. Age/sex come from the profile. Approximate by design — the weekly value is the
+    // age; activity (a scored strain day) is an enrichment signal; waist sits under the VO₂max role.
+    // Age/sex come from the profile. Approximate by design — the weekly value is the
     // authority; this just explains the gaps.
     // rhrDays drives BOTH the readiness verdict AND the not-ready countdown lead. Shared with the Today
     // card's tap-through (VitalDetailScreen) via one helper so a single gate feeds both surfaces.
@@ -640,13 +696,16 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
     var showChecklist by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader("Fitness Age", overline = "Weekly", trailing = "± 5 yr")
-        val value = fitnessAge
+        val modelBand = (FitnessAgeEngine.uncertaintyBandYears(profile.sex) ?: 20.0).roundToInt()
+        SectionHeader("Fitness Age", overline = "Weekly", trailing = "model ± $modelBand yr")
+        val value = fitnessAge.takeIf { loadedProfileState == profileState }
+        val visibleVo2max = vo2max.takeIf { loadedProfileState == profileState }
         if (value != null) {
             FitnessAgeHero(
                 fitnessAge = value,
                 chronoAge = profile.age,
-                vo2max = vo2max,
+                vo2max = visibleVo2max,
+                modelBandYears = modelBand,
                 onHowAccurate = { showChecklist = !showChecklist },
                 checklistOpen = showChecklist,
             )
@@ -658,7 +717,11 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
             // forces the weekly recompute now (from stored data), so a ready user doesn't have to wait.
             FitnessReadinessCard(
                 readiness = readiness, headed = true,
-                lead = fitnessReadyLead(rhrDays, profile.age > 0, profile.sex.isNotBlank()),
+                lead = fitnessReadyLead(
+                    rhrDays,
+                    profile.ageInputConfirmed && FitnessAgeEngine.supportsAge(profile.age.toDouble()),
+                    profile.sexInputConfirmed && FitnessAgeEngine.supportsSex(profile.sex),
+                ),
                 refreshing = refreshing,
                 onRefresh = {
                     refreshing = true
@@ -678,46 +741,69 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
     }
 }
 
-/** Vitality / Body Age: a weekly 0–100 wellness score + Body Age in years, computed by
- *  IntelligenceEngine from the mortality-hazard model and read from metricSeries. A wellness trend
- *  from your habits — NOT a clinical biological age. Recomputes the live best/worst factor for the why. */
+/** Vitality / Wellness Age: an experimental weekly wellness score + age-shaped comparison. It is not
+ *  WHOOP Age or biological age. Recomputes the live best/worst factor for the why. */
 @Composable
 private fun VitalitySection(vm: AppViewModel, days: List<DailyMetric>, profile: ProfileStore) {
     var vitality by remember { mutableStateOf<Double?>(null) }
     var bodyAge by remember { mutableStateOf<Double?>(null) }
-    LaunchedEffect(days) {
+    val profileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
+    val profileState = remember(profileVersion) { profile.ageMetricStateToken }
+    var loadedProfileState by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(days, profileVersion) {
+        if (!profile.ageInputConfirmed || profile.age !in 20..80) {
+            vitality = null
+            bodyAge = null
+            loadedProfileState = profileState
+            return@LaunchedEffect
+        }
         // Latest-value reads (LIMIT-1 per source) — the full-series `.lastOrNull()` scan is gone (perf).
-        vitality = runCatching {
+        val newVitality = runCatching {
             vm.repo.latestMetricComputedUnion(vm.activeStrapId, "vitality")?.value
         }.getOrNull()
-        bodyAge = runCatching {
+        val newBodyAge = runCatching {
             vm.repo.latestMetricComputedUnion(vm.activeStrapId, "body_age")?.value
         }.getOrNull()
+        val provenance = runCatching {
+            vm.repo.latestMetricComputedUnion(
+                vm.activeStrapId, AgeMetricProfile.VITALITY_KEY,
+            )?.value
+        }.getOrNull()
+        val accepted = profile.acceptsVitality(provenance)
+        vitality = newVitality.takeIf { accepted }
+        bodyAge = newBodyAge.takeIf { accepted }
+        loadedProfileState = profileState
     }
     val contributions = remember(days, profile.age) {
-        val last7 = days.takeLast(7)
-        val nights = last7.mapNotNull { it.totalSleepMin }.map { it / 60.0 }.filter { it > 0 }
-        val hrvs = last7.mapNotNull { it.avgHrv }
-        val rhrs = last7.mapNotNull { it.restingHr }.map { it.toDouble() }
-        val steps = last7.mapNotNull { it.steps }.map { it.toDouble() }
+        val last21 = days.takeLast(21)
+        val minCoverage = 14
+        val nights = last21.mapNotNull { it.totalSleepMin }.map { it / 60.0 }.filter { it > 0 }
+        val hrvs = last21.mapNotNull { it.avgHrv }
+        val rhrs = last21.mapNotNull { it.restingHr }.map { it.toDouble() }
+        val steps = last21.mapNotNull { it.steps }.map { it.toDouble() }
         fun mean(a: List<Double>): Double? = if (a.isEmpty()) null else a.average()
         // Match the STORED headline's aggregation (IntelligenceEngine.medianOfDoubles): median resting HR +
         // HRV (robust to one outlier night), mean sleep + steps — so this "what's driving it" breakdown
-        // reconciles with the Vitality / Body Age number it explains rather than drifting on the mean (review).
+        // reconciles with the stored Vitality / Wellness Age number rather than drifting on the mean.
         fun median(a: List<Double>): Double? {
             if (a.isEmpty()) return null
             val s = a.sorted(); val n = s.size
             return if (n % 2 == 1) s[n / 2] else (s[n / 2 - 1] + s[n / 2]) / 2.0
         }
         VitalityEngine.contributions(VitalityEngine.Inputs(
-            chronoAge = profile.age.toDouble(), restingHR = median(rhrs), sleepHours = mean(nights),
-            sleepConsistency = VitalityEngine.sleepConsistency(nights),
-            rmssd = median(hrvs), rmssdNorm = VitalityEngine.rmssdNorm(profile.age.toDouble()), steps = mean(steps)))
+            chronoAge = profile.age.toDouble(),
+            restingHR = if (rhrs.size >= minCoverage) median(rhrs) else null,
+            sleepHours = if (nights.size >= minCoverage) mean(nights) else null,
+            sleepConsistency = if (nights.size >= minCoverage) VitalityEngine.sleepConsistency(nights) else null,
+            rmssd = if (hrvs.size >= minCoverage) median(hrvs) else null,
+            rmssdNorm = VitalityEngine.rmssdNorm(profile.age.toDouble()),
+            steps = if (steps.size >= minCoverage) mean(steps) else null))
     }
-    val v = vitality; val ba = bodyAge
+    val v = vitality.takeIf { loadedProfileState == profileState }
+    val ba = bodyAge.takeIf { loadedProfileState == profileState }
     if (v != null && ba != null) {
         Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-            SectionHeader("Vitality", overline = "Weekly", trailing = "Body Age ${ba.roundToInt()}")
+            SectionHeader("Vitality", overline = "Weekly", trailing = "Wellness Age ${ba.roundToInt()}")
             VitalityHero(vitality = v, bodyAge = ba, chronoAge = profile.age, contributions = contributions)
         }
     }
@@ -751,7 +837,7 @@ private fun VitalityHero(
                     Text(uiString(R.string.l10n_health_screen_out_of_100_da0953a8), style = NoopType.footnote, color = Palette.textTertiary)
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Overline("Body Age")
+                    Overline("Wellness Age")
                     CountUpText(
                         value = bodyAge,
                         format = { it.roundToInt().toString() },
@@ -774,7 +860,7 @@ private fun VitalityHero(
                 Text(uiString(R.string.l10n_health_screen_holding_you_back_worst_label_863a1809, worst.label), style = NoopType.footnote, color = Palette.statusWarning)
             }
             Text(
-                uiString(R.string.l10n_health_screen_a_wellness_estimate_from_your_habits_d00f36de),
+                "Experimental lifestyle estimate · not biological, medical, or WHOOP Age.",
                 style = NoopType.footnote, color = Palette.textTertiary,
             )
         }
@@ -851,6 +937,7 @@ private fun FitnessAgeHero(
     fitnessAge: Double,
     chronoAge: Int,
     vo2max: Double?,
+    modelBandYears: Int,
     onHowAccurate: () -> Unit,
     checklistOpen: Boolean,
 ) {
@@ -864,10 +951,10 @@ private fun FitnessAgeHero(
         else -> "${kotlin.math.abs(deltaYears)} ${yearWord(deltaYears)} older than your age"
     }
     // Vessel fill: a bounded, honest reading of the SAME younger/older signal the card already states,
-    // mapped across the ±5 yr band the section advertises — "about your age" is half-full, younger fills
-    // it up, older empties it, clamped to the band. Presentation only; the shown number is unchanged.
+    // mapped across the model-error band the section advertises — "about your age" is half-full,
+    // younger fills it up, older empties it. Presentation only; the shown number is unchanged.
     val youthFraction = if (chronoAge > 0) {
-        (0.5 + (chronoAge - fitnessAge) / 10.0).coerceIn(0.0, 1.0)
+        (0.5 + (chronoAge - fitnessAge) / (2.0 * modelBandYears.coerceAtLeast(1))).coerceIn(0.0, 1.0)
     } else 0.5
 
     // The "How accurate is this?" toggle presses inward on tap (the pilot liquidPress feel); the SAME
@@ -906,7 +993,7 @@ private fun FitnessAgeHero(
             }
 
             Text(
-                text = uiString(R.string.l10n_health_screen_5_yr_a_fitness_comparison_not_418aa11d),
+                text = "Approx. model uncertainty ± $modelBandYears yr · a fitness comparison, not a biological age",
                 style = NoopType.footnote,
                 color = Palette.textTertiary,
             )
@@ -947,6 +1034,10 @@ private fun FitnessAgeHero(
 private fun fitnessReadyLead(rhrDays: Int, hasAge: Boolean, hasSex: Boolean): String {
     val remaining = FitnessAgeEngine.nightsUntilReady(rhrDays)
     val needsBasics = !hasAge || !hasSex
+    if (needsBasics) {
+        return "Fitness Age is unavailable for this profile. The published model covers ages 20–80 " +
+            "and provides male/female coefficients only."
+    }
     return when {
         remaining == 0 && !needsBasics -> "A few more days and we can show your Fitness Age."
         remaining == 0 && needsBasics  -> "Add your age and sex below and we can show your Fitness Age."
@@ -1641,6 +1732,8 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
     val effortScale = UnitPrefs.effortScale(context)
     // Profile drives the Fitness Age readiness/countdown shown when that vital has no value yet.
     val profile = remember { ProfileStore.from(context.applicationContext) }
+    val profileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
+    val ageMetricState = remember(profileVersion) { profile.ageMetricStateToken }
     val isSeriesBacked = key in SERIES_BACKED_VITAL_KEYS
 
     // Series-backed metrics are loaded async from metricSeries; the plain daily vitals build synchronously
@@ -1652,13 +1745,36 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
     // button recomputes then bumps this tick, re-running the series read so a fresh value shows at once.
     var refreshTick by remember { mutableStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
+    var loadedAgeMetricState by remember(key) { mutableStateOf<String?>(null) }
     if (isSeriesBacked) {
-        LaunchedEffect(key, refreshTick) {
-            seriesDetail = buildSeriesVitalDetail(vm, key)
+        LaunchedEffect(key, refreshTick, profileVersion) {
+            val profileAllowsMetric = when (key) {
+                "fitness_age" -> profile.fitnessInputsConfirmed &&
+                    FitnessAgeEngine.supportsAge(profile.age.toDouble()) &&
+                    FitnessAgeEngine.supportsSex(profile.sex)
+                "vitality" -> profile.ageInputConfirmed && profile.age in 20..80
+                else -> true
+            }
+            val provenanceAllowsMetric = if (!profileAllowsMetric) false else when (key) {
+                "fitness_age" -> profile.acceptsFitnessAge(
+                    vm.repo.latestMetricComputedUnion(
+                        vm.activeStrapId, AgeMetricProfile.FITNESS_AGE_KEY,
+                    )?.value,
+                )
+                "vitality" -> profile.acceptsVitality(
+                    vm.repo.latestMetricComputedUnion(
+                        vm.activeStrapId, AgeMetricProfile.VITALITY_KEY,
+                    )?.value,
+                )
+                else -> true
+            }
+            seriesDetail = if (provenanceAllowsMetric) buildSeriesVitalDetail(vm, key) else null
+            loadedAgeMetricState = ageMetricState
             seriesLoaded = true
         }
     }
-    val detail = if (isSeriesBacked) seriesDetail
+    val ageMetricCurrent = key !in setOf("fitness_age", "vitality") || loadedAgeMetricState == ageMetricState
+    val detail = if (isSeriesBacked) seriesDetail.takeIf { ageMetricCurrent }
     else remember(days, key, tempUnit, effortScale) { buildVitalDetail(days, key, tempUnit, effortScale) }
     var range by remember { mutableStateOf(VitalDetailRange.MONTH) }
 
@@ -1700,7 +1816,11 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
                 val (rhrDays, readiness) = rememberFitnessReadiness(days, profile)
                 FitnessReadinessCard(
                     readiness = readiness, headed = true,
-                    lead = fitnessReadyLead(rhrDays, profile.age > 0, profile.sex.isNotBlank()),
+                    lead = fitnessReadyLead(
+                        rhrDays,
+                        profile.ageInputConfirmed && FitnessAgeEngine.supportsAge(profile.age.toDouble()),
+                        profile.sexInputConfirmed && FitnessAgeEngine.supportsSex(profile.sex),
+                    ),
                     refreshing = refreshing,
                     onRefresh = {
                         refreshing = true

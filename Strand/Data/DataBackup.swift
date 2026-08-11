@@ -11,16 +11,18 @@ import ZIPFoundation
 
 /// Full-database EXPORT / IMPORT for device migration.
 ///
-/// NOOP keeps everything in one SQLite file (`<AppSupport>/OpenWhoop/whoop.sqlite`, plus the
-/// `-wal`/`-shm` WAL sidecars while the store is open). Export checkpoints the WAL (so the
-/// single file is whole), then wraps the SQLite in a ZIP written as `.noopbak`, alongside a
+/// NOOP keeps its database-backed history in one logical SQLite database
+/// (`<AppSupport>/OpenWhoop/whoop.sqlite`, plus the `-wal`/`-shm` sidecars while the store is open).
+/// Export uses SQLite's online-backup API to create a private, immutable standalone snapshot, then
+/// wraps that snapshot in a ZIP written as `.noopbak`, alongside a
 /// small `settings.json` entry (#1000) carrying the whitelisted profile/display settings (see
 /// `BackupSettings`) so a restore also brings back weight/height/units, not just the rows.
 /// ZIP deflate typically cuts a 100 MB+ SQLite backup to 10–20 MB. The format is a standard
 /// ZIP — users can rename `.noopbak` → `.zip` and extract the SQLite manually on any OS.
 ///
 /// Import detects the format by magic bytes: ZIP (`PK\x03\x04`) or legacy plain SQLite. ZIP
-/// backups are extracted to a temp dir, validated, then swapped in exactly like a plain import.
+/// backups are extracted to a temp dir, validated, then staged for the next cold launch exactly like
+/// a plain import.
 /// Old `.sqlite` / `.noopdb` backups keep working.
 ///
 /// Sandbox-safe: relies on the `com.apple.security.files.user-selected.read-write` entitlement and
@@ -35,8 +37,9 @@ enum DataBackup {
     enum BackupResult {
         /// Export wrote the backup to `url`.
         case exported(URL)
-        /// Import succeeded; a relaunch is required for it to take effect. `sidecar` is where the
-        /// previous database was preserved, in case the user wants to roll back.
+        /// Import was validated and staged; a relaunch is required for it to take effect. `sidecar`
+        /// is where the cold-launch apply will preserve the complete previous database (including any
+        /// committed WAL rows), in case the user wants to roll back.
         case imported(sidecar: URL)
         /// The user dismissed the save/open panel — nothing happened, show nothing loud.
         case cancelled
@@ -46,13 +49,12 @@ enum DataBackup {
 
     // MARK: - Export
 
-    /// Checkpoint the store and write the live database as a compressed `.noopbak` (single-entry
-    /// ZIP) to a user-chosen file.
+    /// Snapshot the live store and write it as a compressed `.noopbak` to a user-chosen file.
     ///
-    /// - Parameter checkpoint: invoked first to flush the WAL into the main file. Pass
-    ///   `repo.checkpointForBackup`. Must succeed — a failed checkpoint means committed pages still
-    ///   live in the WAL and would be silently absent from the ZIP; we fail loudly rather than ship
-    ///   a partial backup.
+    /// - Parameter checkpoint: retained for source compatibility and invoked as a best-effort WAL
+    ///   compaction. Correctness does not depend on it: another live pool can write immediately after
+    ///   it, so the ZIP is always built from an SQLite online-backup snapshot that includes committed
+    ///   WAL frames at one consistent instant.
     @MainActor
     static func runExport(checkpoint: @escaping () async -> Bool) async -> BackupResult {
         let dbPath: String
@@ -64,11 +66,9 @@ enum DataBackup {
             return .failure(String(localized: "There's no NOOP data to export yet. Import or record some first."))
         }
 
-        // Flush the WAL so the single .sqlite carries everything. Required for ZIP (no sidecar
-        // fallback in a single-file archive).
-        guard await checkpoint() else {
-            return .failure(String(localized: "Couldn't safely export right now. Recent changes are still in the database's write-ahead log. Close any in-flight sync, then try again."))
-        }
+        // Best-effort compaction only. The immutable online-backup snapshot below is the correctness
+        // boundary and remains complete if BLE/Repository writes more WAL frames after this returns.
+        _ = await checkpoint()
 
         #if os(macOS)
         let panel = NSSavePanel()
@@ -112,7 +112,11 @@ enum DataBackup {
         } catch {
             return .failure(String(localized: "Export failed: \(error.localizedDescription)"))
         }
-        guard let dest = await DocumentPicker.export(staged) else { return .cancelled }
+        let pickedDestination = await DocumentPicker.export(staged)
+        if pickedDestination?.standardizedFileURL != staged.standardizedFileURL {
+            try? fm.removeItem(at: staged)
+        }
+        guard let dest = pickedDestination else { return .cancelled }
         return .exported(dest)
         #endif
     }
@@ -127,18 +131,121 @@ enum DataBackup {
         }
     }
 
-    /// The production export path: verify, then archive. GRDB checkpoints the WAL first (the
-    /// callers' `checkpoint()` guard), so at this point the single file IS the whole store — run a
-    /// read-only `PRAGMA quick_check` over it BEFORE zipping (#1014). Archiving an already-corrupt
-    /// database writes a `.noopbak` that only fails the import-side integrity gate months later,
-    /// when the original data may be long gone; failing loudly NOW is the honest move. The read-only
-    /// probe sits safely beside the app's open GRDB pool (WAL allows concurrent readers).
+    /// The production export path: copy the logical live database (main + committed WAL frames) into
+    /// a unique private file with SQLite's online-backup API, make that copy standalone, quick-check
+    /// it, and archive only that immutable file. A second app-lifetime pool may keep writing while ZIP
+    /// compression runs; those later commits belong to the next backup and cannot tear this one.
+    /// Archiving an already-corrupt database writes a `.noopbak` that only fails the import-side gate
+    /// months later, when the original may be gone, so the private snapshot is verified before zipping.
     /// `writeBackupForTesting` deliberately bypasses this so tests can build damaged containers.
-    private static func writeVerifiedBackupZip(dbURL: URL, to dest: URL, settingsJSON: Data?) throws {
-        if let complaint = DatabaseIntegrity.quickCheckFailure(atPath: dbURL.path) {
-            throw ExportIntegrityFailure(complaint: complaint)
+    private static func writeVerifiedBackupZip(
+        dbURL: URL,
+        to dest: URL,
+        settingsJSON: Data?,
+        afterSnapshotInitialized: (() throws -> Void)? = nil
+    ) throws {
+        let fm = FileManager.default
+        let snapshotDirectory = fm.temporaryDirectory
+            .appendingPathComponent("noop-export-\(UUID().uuidString)", isDirectory: true)
+        let snapshot = snapshotDirectory.appendingPathComponent("snapshot.sqlite")
+        try fm.createDirectory(at: snapshotDirectory, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: snapshotDirectory) }
+
+        do {
+            try createStandaloneSnapshot(
+                from: dbURL, to: snapshot, afterBackupInitialized: afterSnapshotInitialized)
+            if let complaint = DatabaseIntegrity.quickCheckFailure(atPath: snapshot.path) {
+                throw ExportIntegrityFailure(complaint: complaint)
+            }
+            try writeBackupZip(dbURL: snapshot, to: dest, settingsJSON: settingsJSON)
+        } catch {
+            // ZIPFoundation creates the destination before streaming entries. Never leave a truncated
+            // file that looks like a usable backup after snapshot, integrity, or compression failure.
+            try? fm.removeItem(at: dest)
+            throw error
         }
-        try writeBackupZip(dbURL: dbURL, to: dest, settingsJSON: settingsJSON)
+    }
+
+    private struct SQLiteSnapshotFailure: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    /// Copy one consistent logical SQLite state. `sqlite3_backup` reads committed WAL pages through
+    /// the source connection and writes a transactionally complete destination; it never copies the
+    /// live main file byte-for-byte and never needs to stop the other app pool from writing.
+    private static func createStandaloneSnapshot(
+        from sourceURL: URL,
+        to destinationURL: URL,
+        afterBackupInitialized: (() throws -> Void)? = nil
+    ) throws {
+        let fm = FileManager.default
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let path = destinationURL.path + suffix
+            if fm.fileExists(atPath: path) { try fm.removeItem(atPath: path) }
+        }
+
+        var source: OpaquePointer?
+        var destination: OpaquePointer?
+        guard sqlite3_open_v2(sourceURL.path, &source,
+                              SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            let detail = sqliteErrorMessage(source)
+            sqlite3_close(source)
+            throw SQLiteSnapshotFailure(message: "Couldn't open the live database for a backup snapshot: \(detail)")
+        }
+        defer { sqlite3_close(source) }
+        guard sqlite3_open_v2(destinationURL.path, &destination,
+                              SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
+                              nil) == SQLITE_OK else {
+            let detail = sqliteErrorMessage(destination)
+            sqlite3_close(destination)
+            throw SQLiteSnapshotFailure(message: "Couldn't create the private backup snapshot: \(detail)")
+        }
+        defer { sqlite3_close(destination) }
+        sqlite3_busy_timeout(source, 5_000)
+        sqlite3_busy_timeout(destination, 5_000)
+
+        guard let backup = sqlite3_backup_init(destination, "main", source, "main") else {
+            throw SQLiteSnapshotFailure(
+                message: "Couldn't initialize the private backup snapshot: \(sqliteErrorMessage(destination))")
+        }
+        var backupFinished = false
+        defer { if !backupFinished { sqlite3_backup_finish(backup) } }
+
+        try afterBackupInitialized?()
+        let stepResult = sqlite3_backup_step(backup, -1)
+        let finishResult = sqlite3_backup_finish(backup)
+        backupFinished = true
+        guard stepResult == SQLITE_DONE, finishResult == SQLITE_OK else {
+            throw SQLiteSnapshotFailure(message:
+                "Couldn't complete the private backup snapshot (step=\(stepResult), finish=\(finishResult)): \(sqliteErrorMessage(destination))")
+        }
+
+        // A backup destination normally starts in DELETE mode. Assert it explicitly so the ZIP's one
+        // SQLite entry never depends on a private -wal/-shm sibling.
+        let journalMode = try sqliteTextResult(destination, sql: "PRAGMA journal_mode=DELETE")
+        guard journalMode.lowercased() == "delete" else {
+            throw SQLiteSnapshotFailure(message:
+                "Couldn't make the private backup snapshot standalone (journal_mode=\(journalMode)).")
+        }
+    }
+
+    private static func sqliteTextResult(_ db: OpaquePointer?, sql: String) throws -> String {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw SQLiteSnapshotFailure(message: "SQLite snapshot verification failed: \(sqliteErrorMessage(db))")
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW,
+              let value = sqlite3_column_text(statement, 0) else {
+            throw SQLiteSnapshotFailure(message: "SQLite snapshot verification returned no result.")
+        }
+        return String(cString: value)
+    }
+
+    private static func sqliteErrorMessage(_ db: OpaquePointer?) -> String {
+        guard let db, let message = sqlite3_errmsg(db) else { return "unknown SQLite error" }
+        return String(cString: message)
     }
 
     /// Write the live SQLite at `dbURL` into a fresh deflate ZIP at `dest`: the DB under the canonical
@@ -157,8 +264,8 @@ enum DataBackup {
         let fm = FileManager.default
         let tmpJSON = fm.temporaryDirectory
             .appendingPathComponent("noop-settings-\(UUID().uuidString).json")
-        try settingsJSON.write(to: tmpJSON)
         defer { try? fm.removeItem(at: tmpJSON) }
+        try settingsJSON.write(to: tmpJSON)
         try archive.addEntry(with: BackupSettings.entryName, fileURL: tmpJSON, compressionMethod: .deflate)
     }
 
@@ -171,8 +278,8 @@ enum DataBackup {
     }
 
     /// (Backup & Sync) Write a `.noopbak` to a SPECIFIC `dest` URL with NO save panel: the folder /
-    /// auto-backup path. Checkpoints the WAL (so the single `.sqlite` is whole) then writes the same
-    /// deflate ZIP via the same `writeBackupZip` the interactive export uses, so folder / auto backups
+    /// auto-backup path. It writes the same immutable online-backup snapshot and deflate ZIP as manual
+    /// export, so folder / auto backups
     /// are byte-identical to a manual export. The CALLER owns any security-scoped access to `dest`
     /// (start/stop around this call). Never presents UI, so it is safe off the main actor.
     static func writeBackup(checkpoint: @escaping () async -> Bool, to dest: URL) async -> BackupResult {
@@ -184,11 +291,9 @@ enum DataBackup {
         guard FileManager.default.fileExists(atPath: dbPath) else {
             return .failure(String(localized: "There's no NOOP data to export yet."))
         }
-        // Flush the WAL into the single file (same requirement as the interactive export: a single-file
-        // ZIP has no sidecar fallback, so committed pages still in the WAL would otherwise be absent).
-        guard await checkpoint() else {
-            return .failure(String(localized: "Couldn't safely back up right now. Recent changes are still in the write-ahead log."))
-        }
+        // Retained as best-effort compaction for source compatibility. The online backup below is what
+        // makes the archive complete if another pool writes before or during export.
+        _ = await checkpoint()
         do {
             let fm = FileManager.default
             if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
@@ -212,12 +317,29 @@ enum DataBackup {
                            settingsJSON: settings.flatMap { BackupSettings.encode($0) })
     }
 
+    /// Test seam for the exact production snapshot path. The hook runs after `sqlite3_backup_init`
+    /// and before pages are copied, allowing a second WAL connection to commit deterministically.
+    static func writeSnapshotBackupForTesting(
+        databaseAt dbURL: URL,
+        to dest: URL,
+        afterSnapshotInitialized: (() throws -> Void)? = nil
+    ) throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+        try writeVerifiedBackupZip(
+            dbURL: dbURL,
+            to: dest,
+            settingsJSON: nil,
+            afterSnapshotInitialized: afterSnapshotInitialized)
+    }
+
     // MARK: - Import
 
-    /// Pick a `.noopbak` (ZIP) or legacy `.sqlite` backup, validate it, snapshot the current DB
-    /// to a side file, then copy the backup over the live database path (removing the `-wal`/`-shm`
-    /// siblings). The store stays open, so the swapped-in file only takes effect after a relaunch —
-    /// the caller informs the user.
+    /// Pick a `.noopbak` (ZIP) or legacy `.sqlite` backup, validate it, and stage a private standalone
+    /// restore candidate. The live database is not opened, checkpointed, copied, removed, or replaced
+    /// here: Repository and BLE each own a live GRDB pool, so swapping the file in-session would leave
+    /// stale handles on an unlinked inode. The process-wide WhoopStore open gate applies the candidate
+    /// before either pool opens on the next launch.
     @MainActor
     static func runImport() async -> BackupResult {
         let dbPath: String
@@ -244,9 +366,9 @@ enum DataBackup {
         #endif
 
         // Hand the chosen file to the same hardened restore core the folder (Backup & Sync) path uses,
-        // so the unzip / magic-byte / GRDB-origin / sidecar-snapshot / rollback logic lives in one place.
-        // The restore does heavy synchronous file work (unzip, copy the whole DB, scan sqlite_master,
-        // snapshot + rollback), which can run tens of seconds on a big library. Push it off the main
+        // so the unzip / magic-byte / GRDB-origin / pending-candidate logic lives in one place.
+        // The restore does heavy synchronous file work (unzip, normalize the whole DB, scan
+        // sqlite_master, integrity-check), which can run tens of seconds on a big library. Push it off the main
         // actor so the picker's UI thread stays live; the security-scoped access opened above (macOS)
         // stays valid because the surrounding function is still awaiting here. Only Sendable value
         // types (URL, String) cross the hop; the result hops back to main for handleBackup.
@@ -260,9 +382,8 @@ enum DataBackup {
     /// security-scoped access around the call). Runs against the live database path.
     ///
     /// Reuses the exact same hardened path as the picker import: ZIP extraction, SQLite magic-byte
-    /// validation, GRDB-origin rejection (a foreign-but-valid SQLite is refused), a timestamped
-    /// sidecar snapshot of the current store, and rollback-on-failure so a failed restore leaves the
-    /// live database untouched.
+    /// validation, GRDB-origin rejection (a foreign-but-valid SQLite is refused), and a private pending
+    /// candidate. The live database remains untouched until the next cold launch.
     static func restore(from pickedSource: URL) -> BackupResult {
         let dbPath: String
         do { dbPath = try StorePaths.defaultDatabasePath() }
@@ -270,13 +391,10 @@ enum DataBackup {
         return restore(from: pickedSource, toDatabaseAt: dbPath)
     }
 
-    /// The hardened restore core, with the destination database path injected so it is unit-testable
-    /// against a throwaway DB (real file I/O, never the user's live store). Behaviour is identical to
-    /// the previous `runImport` body; only the picker and path-resolution moved out to the callers.
-    /// `settingsDefaults` is where a `settings.json` entry (#1000) is re-applied — injected for the
-    /// same reason as `dbPath` (tests use a suite-scoped UserDefaults, never the runner's real domain).
-    static func restore(from pickedSource: URL, toDatabaseAt dbPath: String,
-                        settingsDefaults: UserDefaults = .standard) -> BackupResult {
+    /// The hardened staging core, with the destination database path injected so it is unit-testable
+    /// against a throwaway DB (real file I/O, never the user's live store). A successful return means the
+    /// candidate is ready; `PendingDatabaseRestore.applyIfPresent` performs the cold-launch transaction.
+    static func restore(from pickedSource: URL, toDatabaseAt dbPath: String) -> BackupResult {
         // If the picked file is a .noopbak ZIP, extract the SQLite entry to a temp dir first.
         // Legacy plain-SQLite files fall straight through. The extracted dir is cleaned up below.
         let fm = FileManager.default
@@ -330,12 +448,12 @@ enum DataBackup {
         // torn by a flaky drive/cloud sync, and such a file then "restores" into a store that
         // silently shows no data (the #1014 report; the #1000 settings code was exonerated, the
         // family needed armour). Run SQLite's own `PRAGMA quick_check` over the STAGED file,
-        // read-only, BEFORE anything touches the live database, and refuse the swap honestly.
+        // read-only, BEFORE anything stages the candidate, and refuse it honestly.
         // One carve-out: a legacy plain-SQLite file still travelling with its -wal/-shm siblings
         // (an uncheckpointed manual copy) skips THIS gate — a read-only probe can't recover someone
         // else's WAL (shm rebuild needs write access) and would refuse spuriously. Those rare files
-        // are still verified by the post-swap check below, which runs on the landed main file
-        // BEFORE the sidecars are laid down and rolls back automatically on failure.
+        // are normalized with their sidecars into the private pending candidate below, and that complete
+        // candidate gets its own quick_check before the manifest is published.
         let legacySidecarsPresent = extractedDir == nil
             && (fm.fileExists(atPath: source.path + "-wal") || fm.fileExists(atPath: source.path + "-shm"))
         if !legacySidecarsPresent,
@@ -344,86 +462,26 @@ enum DataBackup {
         }
 
         let dbURL = URL(fileURLWithPath: dbPath)
+        let sidecar = dbURL.deletingLastPathComponent().appendingPathComponent(
+            "whoop-replaced-\(timestamp())-\(UUID().uuidString.prefix(8)).sqlite")
+
+        // Filter settings NOW, but do not apply them now. They travel with the pending candidate and are
+        // written to UserDefaults only after the cold-launch database transaction passes its post-check.
+        let pendingSettingsJSON: Data? = extractedDir.flatMap { directory in
+            let settingsURL = directory.appendingPathComponent(BackupSettings.entryName)
+            guard let data = try? Data(contentsOf: settingsURL) else { return nil }
+            return BackupSettings.encode(BackupSettings.decode(data))
+        }
 
         do {
-            // Snapshot the current DB (+ sidecars) to a timestamped side file so the user can roll back.
-            var sidecar = dbURL.deletingLastPathComponent()
-                .appendingPathComponent("whoop-replaced-\(timestamp()).sqlite")
-            if fm.fileExists(atPath: dbURL.path) {
-                if fm.fileExists(atPath: sidecar.path) { try fm.removeItem(at: sidecar) }
-                try fm.copyItem(at: dbURL, to: sidecar)
-            } else {
-                // Nothing to preserve (fresh install); report a placeholder so the message reads sensibly.
-                sidecar = dbURL
-            }
-
-            // Remove the live DB and its WAL/SHM siblings, then drop the backup in.
-            removeIfPresent(dbURL)
-            removeIfPresent(URL(fileURLWithPath: dbPath + "-wal"))
-            removeIfPresent(URL(fileURLWithPath: dbPath + "-shm"))
-
-            do {
-                try fm.copyItem(at: source, to: dbURL)
-            } catch {
-                // The live DB was just removed and the replacement didn't land. Roll back to the
-                // snapshot so a failed import leaves the user's data exactly as it was, instead of a
-                // fresh-empty DB on relaunch (mirrors the Android rollback). Clear any partial-copy
-                // leftover first — copyItem fails if the destination exists, which would otherwise
-                // block the restore.
-                if sidecar != dbURL, fm.fileExists(atPath: sidecar.path) {
-                    removeIfPresent(dbURL)
-                    try? fm.copyItem(at: sidecar, to: dbURL)
-                }
-                return .failure(String(localized: "Import failed. Your existing data was kept. \(error.localizedDescription)"))
-            }
-
-            // #1014 defence-in-depth, post-swap: re-verify the file that actually LANDED at the
-            // live path with a second read-only quick_check. The staged file was verified above,
-            // but the copy itself can tear — disk-full mid-copy, a dying filesystem, the device
-            // sleeping — and the next launch would meet a corrupt store. Runs BEFORE any legacy
-            // sidecars are laid down: a bare main file is always read-only verifiable, and WAL
-            // frames carry their own checksums (SQLite validates them on the first real open), so
-            // the sidecars don't need this gate. On failure, roll back to the snapshot
-            // AUTOMATICALLY and say so; the snapshot file is kept either way (same policy as a
-            // successful import: the user can always reach the pre-import bytes).
-            if let complaint = DatabaseIntegrity.quickCheckFailure(atPath: dbURL.path) {
-                removeIfPresent(dbURL)
-                if sidecar != dbURL, fm.fileExists(atPath: sidecar.path) {
-                    try? fm.copyItem(at: sidecar, to: dbURL)
-                    return .failure(String(localized: "Import failed its post-restore integrity check (SQLite reports: \(complaint)). Your previous data was rolled back automatically and is unchanged."))
-                }
-                // Fresh install: there was no previous store to preserve, so removing the damaged
-                // file (done above) restores the exact pre-import state — an empty slate.
-                return .failure(String(localized: "Import failed its post-restore integrity check (SQLite reports: \(complaint)). The damaged file was removed; there was no previous data to roll back."))
-            }
-
-            // Restore sidecars only for legacy plain-SQLite backups whose WAL wasn't
-            // checkpointed at export. ZIP imports are always checkpointed; no sidecars expected.
-            // Deliberately AFTER the post-swap integrity check (see above) — this is best-effort
-            // (`try?` inside) and can't throw, so the rollback semantics are unchanged.
-            if extractedDir == nil {
-                restoreSidecar(from: source, toMainPath: dbPath, suffix: "-wal")
-                restoreSidecar(from: source, toMainPath: dbPath, suffix: "-shm")
-            }
-
-            // #1000: re-apply the backup's whitelisted profile/display settings (weight, height, age,
-            // sex, HR-max override, unit prefs) — but only NOW, after the DB swap landed. A failed or
-            // rolled-back restore returns above and never touches settings. Legacy single-entry ZIPs
-            // and plain-SQLite backups have no `settings.json` (extractedDir nil / entry absent) and
-            // restore exactly as before — no settings, no error. A malformed settings entry degrades
-            // to "fewer keys applied" inside BackupSettings.decode; it can never fail the restore.
-            if let extractedDir {
-                let settingsURL = extractedDir.appendingPathComponent(BackupSettings.entryName)
-                if let data = try? Data(contentsOf: settingsURL) {
-                    BackupSettings.apply(BackupSettings.decode(data), to: settingsDefaults)
-                }
-            }
-            // #57 debug: record when a restore swapped the DB, so the export can correlate a restore with a
-            // later write stall (a restore not followed by a relaunch is the #57 failure).
-            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "backup.lastRestoreAt")
+            try PendingDatabaseRestore.stage(
+                databaseAt: source.path,
+                settingsJSON: pendingSettingsJSON,
+                forDatabaseAt: dbPath,
+                safetySnapshot: sidecar)
             return .imported(sidecar: sidecar)
         } catch {
-            return .failure(String(localized: "Import failed: \(error.localizedDescription)"))
+            return .failure(String(localized: "Import failed while staging the restore. Your existing data was kept. \(error.localizedDescription)"))
         }
     }
 
@@ -567,20 +625,4 @@ enum DataBackup {
         return Array(head) == magic
     }
 
-    private static func removeIfPresent(_ url: URL) {
-        let fm = FileManager.default
-        if fm.fileExists(atPath: url.path) { try? fm.removeItem(at: url) }
-    }
-
-    /// Copy a legacy backup's `<source><suffix>` sidecar next to the live DB if it exists, so an
-    /// old plain-SQLite backup whose WAL wasn't checkpointed at export restores its committed pages
-    /// (SQLite folds them in on open). Not called for ZIP imports (those are always checkpointed).
-    private static func restoreSidecar(from source: URL, toMainPath dbPath: String, suffix: String) {
-        let fm = FileManager.default
-        let src = URL(fileURLWithPath: source.path + suffix)
-        guard fm.fileExists(atPath: src.path) else { return }
-        let dst = URL(fileURLWithPath: dbPath + suffix)
-        if fm.fileExists(atPath: dst.path) { try? fm.removeItem(at: dst) }
-        try? fm.copyItem(at: src, to: dst)
-    }
 }

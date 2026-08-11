@@ -7,7 +7,14 @@ from datetime import UTC, date, datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 IDENTIFIER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 METRIC_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
@@ -102,6 +109,159 @@ class StrictModel(BaseModel):
         str_strip_whitespace=True,
         validate_default=True,
     )
+
+
+def validate_display_name(value: str) -> str:
+    if not value.isprintable() or any(ord(character) < 32 for character in value):
+        raise ValueError("display name must contain printable characters only")
+    return value
+
+
+class FriendProfileCreate(StrictModel):
+    display_name: str = Field(min_length=1, max_length=64)
+    installation_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=IDENTIFIER_PATTERN,
+    )
+    daily_device_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=IDENTIFIER_PATTERN,
+        description="Producer whose daily summaries this profile may share.",
+    )
+
+    _display_name = field_validator("display_name")(validate_display_name)
+
+    @model_validator(mode="after")
+    def device_belongs_to_installation(self) -> "FriendProfileCreate":
+        components = self.daily_device_id.split(":", 2)
+        if (
+            len(components) != 3
+            or components[0] not in {"ios", "android", "macos"}
+            or components[1] != self.installation_id
+            or not components[2]
+        ):
+            raise ValueError("daily_device_id must be scoped to this installation_id")
+        return self
+
+
+class FriendProfileUpdate(StrictModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=64)
+    daily_device_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=IDENTIFIER_PATTERN,
+    )
+
+    _display_name = field_validator("display_name")(validate_display_name)
+
+    @model_validator(mode="after")
+    def require_change(self) -> "FriendProfileUpdate":
+        if not self.model_fields_set:
+            raise ValueError("at least one profile field is required")
+        if any(
+            field in self.model_fields_set and getattr(self, field) is None
+            for field in ("display_name", "daily_device_id")
+        ):
+            raise ValueError("profile fields cannot be null")
+        return self
+
+
+class FriendInviteCreate(StrictModel):
+    expires_in_hours: int = Field(default=72, ge=1, le=168)
+
+
+class FriendInviteRedeem(StrictModel):
+    code: str = Field(min_length=8, max_length=64)
+
+    @field_validator("code")
+    @classmethod
+    def normalise_code(cls, value: str) -> str:
+        compact = "".join(
+            character for character in value.upper() if character.isalnum()
+        )
+        if not 12 <= len(compact) <= 32 or not compact.isascii():
+            raise ValueError("invite code is invalid")
+        return compact
+
+
+class FriendInviteJoin(FriendProfileCreate):
+    code: str = Field(min_length=8, max_length=64)
+    enrollment_id: UUID
+    member_token: SecretStr
+
+    @field_validator("code")
+    @classmethod
+    def normalise_code(cls, value: str) -> str:
+        compact = "".join(
+            character for character in value.upper() if character.isalnum()
+        )
+        if not 12 <= len(compact) <= 32 or not compact.isascii():
+            raise ValueError("invite code is invalid")
+        return compact
+
+    @field_validator("member_token")
+    @classmethod
+    def valid_member_token(cls, value: SecretStr) -> SecretStr:
+        plaintext = value.get_secret_value()
+        suffix = plaintext.removeprefix("noop_member_")
+        if (
+            not plaintext.startswith("noop_member_")
+            or not 43 <= len(suffix) <= 86
+            or re.fullmatch(r"[A-Za-z0-9_-]+", suffix) is None
+        ):
+            raise ValueError(
+                "member_token must be a 256-bit URL-safe Noop member token"
+            )
+        return value
+
+
+class FriendRequestDecision(StrictModel):
+    decision: Literal["accept", "decline"]
+
+
+class FriendVisibility(StrictModel):
+    """Daily summary fields an owner exposes to one accepted friend.
+
+    The core scores default on. More identifying physiological details remain
+    off until the owner explicitly enables them for that individual.
+    """
+
+    charge: bool = True
+    effort: bool = True
+    rest: bool = True
+    sleep_duration: bool = False
+    hrv: bool = False
+    rhr: bool = False
+
+
+class FriendVisibilityPatch(StrictModel):
+    charge: bool | None = None
+    effort: bool | None = None
+    rest: bool | None = None
+    sleep_duration: bool | None = None
+    hrv: bool | None = None
+    rhr: bool | None = None
+
+    @model_validator(mode="after")
+    def require_change(self) -> "FriendVisibilityPatch":
+        if not self.model_fields_set:
+            raise ValueError("at least one visibility field is required")
+        if any(
+            field in self.model_fields_set and getattr(self, field) is None
+            for field in (
+                "charge",
+                "effort",
+                "rest",
+                "sleep_duration",
+                "hrv",
+                "rhr",
+            )
+        ):
+            raise ValueError("visibility fields cannot be null")
+        return self
 
 
 def _normalise_datetime(value: datetime) -> datetime:

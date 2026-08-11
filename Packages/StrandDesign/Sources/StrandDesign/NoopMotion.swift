@@ -56,6 +56,62 @@ public enum NoopMotion {
     }
 }
 
+// MARK: - Quiet motion
+
+/// Persisted opt-in that poses decorative motion still even when the system settings do not.
+/// Low Power Mode and the system Reduce Motion setting always take precedence over this value.
+public enum QuietMotionPrefs {
+    public static let enabledKey = "noop.quietMotion"
+}
+
+/// One process-wide source of truth for non-essential animation policy.
+///
+/// Views supply SwiftUI's live Reduce Motion environment value to `poseStill(_:)`; this object
+/// publishes the two signals that do not have an environment key: Low Power Mode and NOOP's own
+/// quiet-motion preference. Keeping one observer here avoids installing a power-state listener for
+/// every animated card as it scrolls on and off screen.
+@MainActor
+public final class NoopMotionState: ObservableObject {
+    public static let shared = NoopMotionState()
+
+    @Published public private(set) var isLowPower: Bool
+    @Published public private(set) var quietMotion: Bool
+
+    private init() {
+        isLowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        quietMotion = UserDefaults.standard.bool(forKey: QuietMotionPrefs.enabledKey)
+
+        NotificationCenter.default.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.isLowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+            }
+        }
+        NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                let enabled = UserDefaults.standard.bool(forKey: QuietMotionPrefs.enabledKey)
+                if self?.quietMotion != enabled { self?.quietMotion = enabled }
+            }
+        }
+    }
+
+    @inline(__always)
+    public func poseStill(_ accessibilityReduceMotion: Bool) -> Bool {
+        accessibilityReduceMotion || isLowPower || quietMotion
+    }
+
+    /// For imperative readers such as the liquid tilt sensor. SwiftUI views should use
+    /// `poseStill(_:)` so accessibility changes invalidate their body immediately.
+    public var poseStillIgnoringReduceMotion: Bool { isLowPower || quietMotion }
+}
+
 // MARK: - CountUpText
 //
 // Animates a numeric value counting up (or down) to its latest value whenever `value`

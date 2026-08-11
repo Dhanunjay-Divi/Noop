@@ -21,6 +21,7 @@ struct LiveSessionView: View {
     @EnvironmentObject private var repo: Repository
     @EnvironmentObject private var profile: ProfileStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var motion = NoopMotionState.shared
 
     /// "Card transparency" (0–100, default 100): fades the live-session cards in lockstep with the frosted
     /// cards; content stays readable. Mirrors Kotlin `NoopPrefs.cardOpacityPercent`.
@@ -168,7 +169,7 @@ struct LiveSessionView: View {
 
     /// Breathing is the "on track" signal: only in band, only once active, never for Reduce Motion.
     private var isBreathing: Bool {
-        !reduceMotion
+        !motion.poseStill(reduceMotion)
             && runner.output?.status == .active
             && runner.output?.position == .inBand
     }
@@ -254,9 +255,9 @@ struct LiveSessionView: View {
         guard let band = runner.baseBand else { return "" }
         let floor = Int(band.floorBpm.rounded()), ceiling = Int(band.ceilingBpm.rounded())
         if let charge = runner.chargeAtStart {
-            return String(localized: "Charge \(Int(charge.rounded())) today, so your band is \(floor)–\(ceiling) bpm.")
+            return String(localized: "Recovery \(Int(charge.rounded())) today, so your band is \(floor)–\(ceiling) bpm.")
         }
-        return String(localized: "No Charge banked today, so your band takes a careful middle course: \(floor)–\(ceiling) bpm.")
+        return String(localized: "No Recovery score is banked today, so your band takes a careful middle course: \(floor)–\(ceiling) bpm.")
     }
 
     /// 6 s on screen, then a slow fade — the sentence said its piece; the ring carries it from here.
@@ -405,7 +406,7 @@ struct LiveSessionSummarySheet: View {
         }
         return row.belowSec >= row.aboveSec
             ? String(localized: "Mostly under the band — there was more in the tank today.")
-            : String(localized: "Mostly over the band — harder than today's Charge could pay for.")
+            : String(localized: "Mostly over the band — harder than today's Recovery supports.")
     }
 
     /// m:ss off the banked seconds (sessions are an hour-scale affair; no hour arithmetic needed).

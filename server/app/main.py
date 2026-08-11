@@ -4,11 +4,12 @@ import hashlib
 import hmac
 import json
 import re
+import secrets
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import (
     APIRouter,
@@ -22,6 +23,7 @@ from fastapi import (
     status,
 )
 from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
@@ -30,6 +32,13 @@ from pydantic import ValidationError
 from app import __version__
 from app.config import Settings
 from app.models import (
+    FriendInviteCreate,
+    FriendInviteJoin,
+    FriendInviteRedeem,
+    FriendProfileCreate,
+    FriendProfileUpdate,
+    FriendRequestDecision,
+    FriendVisibilityPatch,
     IDENTIFIER_PATTERN,
     STREAM_RANGES,
     StrictModel,
@@ -37,6 +46,9 @@ from app.models import (
     SyncResult,
 )
 from app.repository import (
+    FriendConflictError,
+    FriendForbiddenError,
+    FriendNotFoundError,
     MemoryRepository,
     PostgresRepository,
     Repository,
@@ -48,6 +60,15 @@ RAW_NOTICE = (
     "values. In particular, raw_adc is not clinical SpO2, temperature, or "
     "respiration data. Noop metrics are informational and not medical advice."
 )
+SOCIAL_SYNC_DAILY_RANGES: dict[str, tuple[float, float]] = {
+    "recovery": (0.0, 100.0),
+    "effort": (0.0, 100.0),
+    "sleep_performance": (0.0, 100.0),
+    "total_sleep_min": (0.0, 2_880.0),
+    "avg_hrv": (0.0, 1_000.0),
+    "resting_hr": (20.0, 260.0),
+}
+SOCIAL_SYNC_DAILY_METRICS = frozenset(SOCIAL_SYNC_DAILY_RANGES)
 DEVICE_RE = re.compile(IDENTIFIER_PATTERN)
 security = HTTPBearer(auto_error=False)
 
@@ -80,6 +101,49 @@ def _canonical_payload_hash(payload: SyncPayload) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
+
+
+def _secret_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _new_friend_token() -> str:
+    # 256 bits of entropy. Only its digest is persisted.
+    return f"noop_member_{secrets.token_urlsafe(32)}"
+
+
+def _new_invite_code() -> tuple[str, str]:
+    # 96 random bits, formatted for copy/paste. The repository stores only the
+    # compact code's digest; this plaintext is returned exactly once.
+    compact = f"NOOP{secrets.token_hex(12).upper()}"
+    display = "-".join(
+        (compact[:4], compact[4:10], compact[10:16], compact[16:22], compact[22:])
+    )
+    return display, compact
+
+
+async def require_friend_profile(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+) -> dict[str, Any]:
+    supplied = (
+        credentials.credentials
+        if credentials is not None and credentials.scheme.casefold() == "bearer"
+        else ""
+    )
+    repository: Repository = request.app.state.repository
+    profile = (
+        await repository.friend_profile_for_token(_secret_hash(supplied))
+        if supplied.startswith("noop_member_")
+        else None
+    )
+    if profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid or missing member token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return profile
 
 
 def _json_download(value: Any, filename: str) -> Response:
@@ -137,6 +201,21 @@ def create_app(
     app.state.settings = runtime_settings
     app.state.repository = runtime_repository
 
+    @app.exception_handler(RequestValidationError)
+    async def redact_request_validation_secrets(
+        _: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        errors = []
+        for validation_error in exc.errors():
+            redacted = dict(validation_error)
+            if "member_token" in redacted.get("loc", ()):
+                redacted["input"] = "[redacted]"
+            errors.append(redacted)
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content=jsonable_encoder({"detail": errors}),
+        )
+
     @app.middleware("http")
     async def privacy_headers(request: Request, call_next):
         response = await call_next(request)
@@ -152,6 +231,7 @@ def create_app(
         return response
 
     async def require_api_token(
+        request: Request,
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
     ) -> None:
         expected = runtime_settings.api_token or ""
@@ -160,14 +240,36 @@ def create_app(
             if credentials is not None and credentials.scheme.casefold() == "bearer"
             else ""
         )
-        if not expected or not hmac.compare_digest(
+        is_admin = bool(expected) and hmac.compare_digest(
             supplied.encode("utf-8"), expected.encode("utf-8")
+        )
+        if is_admin:
+            request.state.auth_scope = "admin"
+            return
+        if request.url.path in {"/v1/sync", "/v1/status"} and supplied.startswith(
+            "noop_member_"
         ):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="invalid or missing bearer token",
-                headers={"WWW-Authenticate": "Bearer"},
+            profile = await runtime_repository.friend_profile_for_token(
+                _secret_hash(supplied)
             )
+            if profile is not None:
+                request.state.auth_scope = "social_member"
+                request.state.friend_profile = profile
+                return
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid or missing bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    def raise_social_error(exc: Exception) -> None:
+        if isinstance(exc, FriendNotFoundError):
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if isinstance(exc, FriendConflictError):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if isinstance(exc, FriendForbiddenError):
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        raise exc
 
     @app.get("/healthz", tags=["operations"])
     async def health() -> dict[str, str]:
@@ -180,7 +282,17 @@ def create_app(
     )
 
     @router.get("/status", tags=["operations"])
-    async def service_status() -> dict[str, Any]:
+    async def service_status(request: Request) -> dict[str, Any]:
+        if getattr(request.state, "auth_scope", None) == "social_member":
+            return {
+                "status": "ok",
+                "version": __version__,
+                "scope": "social_member",
+                "notice": (
+                    "This credential can upload its exact computed daily producer "
+                    "and use invitation-only social summary routes."
+                ),
+            }
         stats = await runtime_repository.stats()
         return {
             "status": "ok",
@@ -188,6 +300,386 @@ def create_app(
             "retention_days": runtime_settings.retention_days,
             "stats": stats,
             "notice": RAW_NOTICE,
+        }
+
+    @router.post(
+        "/social/bootstrap",
+        status_code=status.HTTP_201_CREATED,
+        tags=["friends-admin"],
+    )
+    async def bootstrap_friend_profile(body: FriendProfileCreate) -> dict[str, Any]:
+        token = _new_friend_token()
+        profile_id = str(uuid4())
+        try:
+            profile = await runtime_repository.create_friend_profile(
+                profile_id,
+                str(uuid4()),
+                body.display_name,
+                body.installation_id,
+                body.daily_device_id,
+                _secret_hash(token),
+            )
+        except (FriendNotFoundError, FriendConflictError) as exc:
+            raise_social_error(exc)
+            raise AssertionError("unreachable")
+        return {
+            "profile": profile,
+            "member_token": token,
+            "token_notice": (
+                "Store this member token securely. It is returned only once and "
+                "can access computed daily sync and social summary routes only."
+            ),
+        }
+
+    @router.get("/social/admin/profiles", tags=["friends-admin"])
+    async def friend_profiles() -> dict[str, Any]:
+        return {"profiles": await runtime_repository.list_friend_profiles()}
+
+    @router.patch(
+        "/social/admin/profiles/{profile_id}",
+        tags=["friends-admin"],
+    )
+    async def update_friend_profile(
+        profile_id: UUID, body: FriendProfileUpdate
+    ) -> dict[str, Any]:
+        try:
+            profile = await runtime_repository.update_friend_profile(
+                str(profile_id), body.model_dump(exclude_unset=True)
+            )
+        except (FriendNotFoundError, FriendConflictError) as exc:
+            raise_social_error(exc)
+            raise AssertionError("unreachable")
+        return {"profile": profile}
+
+    @router.post(
+        "/social/admin/profiles/{profile_id}/rotate-token",
+        tags=["friends-admin"],
+    )
+    async def rotate_friend_profile_token(profile_id: UUID) -> dict[str, Any]:
+        token = _new_friend_token()
+        try:
+            profile = await runtime_repository.rotate_friend_token(
+                str(profile_id), _secret_hash(token)
+            )
+        except (FriendNotFoundError, FriendConflictError) as exc:
+            raise_social_error(exc)
+            raise AssertionError("unreachable")
+        return {
+            "profile": profile,
+            "member_token": token,
+            "token_notice": "The previous member token is no longer valid.",
+        }
+
+    @router.delete(
+        "/social/admin/profiles/{profile_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        tags=["friends-admin"],
+    )
+    async def disable_friend_profile(
+        profile_id: UUID,
+        confirmation: Annotated[str | None, Header(alias="X-Noop-Confirm")] = None,
+    ) -> Response:
+        expected = f"DISABLE {profile_id}"
+        if confirmation != expected:
+            raise HTTPException(
+                status_code=412,
+                detail=f"set X-Noop-Confirm to {expected!r}",
+            )
+        try:
+            await runtime_repository.disable_friend_profile(str(profile_id))
+        except FriendNotFoundError as exc:
+            raise_social_error(exc)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    social_router = APIRouter(prefix="/v1/social")
+
+    @social_router.get("/me", tags=["friends"])
+    async def social_profile(
+        member: Annotated[dict[str, Any], Depends(require_friend_profile)],
+    ) -> dict[str, Any]:
+        return {
+            "profile": member,
+            "privacy": (
+                "Friend credentials can upload only their scoped computed daily "
+                "summary and cannot access exports, raw streams, location, "
+                "workouts, or journal entries."
+            ),
+        }
+
+    @social_router.delete(
+        "/me",
+        status_code=status.HTTP_204_NO_CONTENT,
+        tags=["friends"],
+    )
+    async def delete_social_profile(
+        member: Annotated[dict[str, Any], Depends(require_friend_profile)],
+        confirmation: Annotated[str | None, Header(alias="X-Noop-Confirm")] = None,
+    ) -> Response:
+        if confirmation != "DELETE MY SOCIAL PROFILE":
+            raise HTTPException(
+                status_code=412,
+                detail=("set X-Noop-Confirm to 'DELETE MY SOCIAL PROFILE'"),
+            )
+        try:
+            await runtime_repository.delete_friend_profile_data(
+                str(member["profile_id"]),
+                str(member["daily_device_id"]),
+            )
+        except FriendForbiddenError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @social_router.post(
+        "/invites",
+        status_code=status.HTTP_201_CREATED,
+        tags=["friends"],
+    )
+    async def create_friend_invite(
+        body: FriendInviteCreate,
+        member: Annotated[dict[str, Any], Depends(require_friend_profile)],
+    ) -> dict[str, Any]:
+        display_code, compact_code = _new_invite_code()
+        expires_at = datetime.now(UTC) + timedelta(hours=body.expires_in_hours)
+        try:
+            invite = await runtime_repository.create_friend_invite(
+                str(uuid4()),
+                str(member["profile_id"]),
+                _secret_hash(compact_code),
+                expires_at,
+            )
+        except (FriendNotFoundError, FriendConflictError) as exc:
+            raise_social_error(exc)
+            raise AssertionError("unreachable")
+        return {
+            "invite": invite,
+            "code": display_code,
+            "code_notice": (
+                "This one-time code expires at expires_at. It contains no server "
+                "or member credential."
+            ),
+        }
+
+    @social_router.post(
+        "/invites/join",
+        status_code=status.HTTP_201_CREATED,
+        tags=["friends"],
+    )
+    async def join_with_friend_invite(body: FriendInviteJoin) -> dict[str, Any]:
+        try:
+            joined = await runtime_repository.join_friend_invite(
+                _secret_hash(body.code),
+                str(uuid4()),
+                str(body.enrollment_id),
+                body.display_name,
+                body.installation_id,
+                body.daily_device_id,
+                _secret_hash(body.member_token.get_secret_value()),
+                str(uuid4()),
+                datetime.now(UTC),
+            )
+        except (FriendNotFoundError, FriendConflictError) as exc:
+            raise_social_error(exc)
+            raise AssertionError("unreachable")
+        request_row = joined["request"]
+        return {
+            "profile": joined["profile"],
+            "request": {
+                "request_id": request_row["request_id"],
+                "status": request_row["status"],
+                "created_at": request_row["created_at"],
+                "decided_at": request_row["decided_at"],
+                "recipient": {
+                    "display_name": joined["inviter_display_name"],
+                },
+            },
+            "idempotent_replay": joined["idempotent_replay"],
+            "token_notice": (
+                "The supplied member token was stored only as a digest; "
+                "the request field contains the current friendship decision state."
+            ),
+        }
+
+    @social_router.delete(
+        "/invites/{invite_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        tags=["friends"],
+    )
+    async def revoke_friend_invite(
+        invite_id: UUID,
+        member: Annotated[dict[str, Any], Depends(require_friend_profile)],
+    ) -> Response:
+        try:
+            await runtime_repository.revoke_friend_invite(
+                str(member["profile_id"]), str(invite_id)
+            )
+        except (FriendNotFoundError, FriendConflictError) as exc:
+            raise_social_error(exc)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @social_router.post(
+        "/invites/redeem",
+        status_code=status.HTTP_201_CREATED,
+        tags=["friends"],
+    )
+    async def redeem_friend_invite(
+        body: FriendInviteRedeem,
+        member: Annotated[dict[str, Any], Depends(require_friend_profile)],
+    ) -> dict[str, Any]:
+        try:
+            request_row = await runtime_repository.redeem_friend_invite(
+                _secret_hash(body.code),
+                str(member["profile_id"]),
+                str(uuid4()),
+                datetime.now(UTC),
+            )
+        except (FriendNotFoundError, FriendConflictError) as exc:
+            raise_social_error(exc)
+            raise AssertionError("unreachable")
+        return {"request": request_row}
+
+    @social_router.get("/requests", tags=["friends"])
+    async def friend_requests(
+        member: Annotated[dict[str, Any], Depends(require_friend_profile)],
+    ) -> dict[str, Any]:
+        return {
+            "requests": await runtime_repository.list_friend_requests(
+                str(member["profile_id"])
+            )
+        }
+
+    @social_router.post("/requests/{request_id}", tags=["friends"])
+    async def decide_friend_request(
+        request_id: UUID,
+        body: FriendRequestDecision,
+        member: Annotated[dict[str, Any], Depends(require_friend_profile)],
+    ) -> dict[str, Any]:
+        try:
+            request_row = await runtime_repository.decide_friend_request(
+                str(member["profile_id"]),
+                str(request_id),
+                body.decision,
+                datetime.now(UTC),
+            )
+        except (FriendNotFoundError, FriendConflictError) as exc:
+            raise_social_error(exc)
+            raise AssertionError("unreachable")
+        return {"request": request_row}
+
+    @social_router.get("/friends", tags=["friends"])
+    async def list_friends(
+        member: Annotated[dict[str, Any], Depends(require_friend_profile)],
+    ) -> dict[str, Any]:
+        return {
+            "friends": await runtime_repository.list_friends(str(member["profile_id"]))
+        }
+
+    @social_router.patch("/friends/{friend_id}/privacy", tags=["friends"])
+    async def update_friend_privacy(
+        friend_id: UUID,
+        body: FriendVisibilityPatch,
+        member: Annotated[dict[str, Any], Depends(require_friend_profile)],
+    ) -> dict[str, Any]:
+        changes = body.model_dump(exclude_unset=True)
+        try:
+            visibility = await runtime_repository.update_friend_visibility(
+                str(member["profile_id"]),
+                str(friend_id),
+                changes,
+            )
+        except FriendNotFoundError as exc:
+            raise_social_error(exc)
+            raise AssertionError("unreachable")
+        return {
+            "friend_id": friend_id,
+            "sharing": visibility,
+            "privacy": "This allowlist is applied by the server to every feed read.",
+        }
+
+    @social_router.delete(
+        "/friends/{friend_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        tags=["friends"],
+    )
+    async def remove_friend(
+        friend_id: UUID,
+        member: Annotated[dict[str, Any], Depends(require_friend_profile)],
+    ) -> Response:
+        try:
+            await runtime_repository.remove_friend(
+                str(member["profile_id"]), str(friend_id)
+            )
+        except FriendNotFoundError as exc:
+            raise_social_error(exc)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @social_router.post(
+        "/blocks/{profile_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        tags=["friends"],
+    )
+    async def block_friend(
+        profile_id: UUID,
+        member: Annotated[dict[str, Any], Depends(require_friend_profile)],
+    ) -> Response:
+        try:
+            await runtime_repository.block_friend(
+                str(member["profile_id"]), str(profile_id)
+            )
+        except (FriendNotFoundError, FriendConflictError) as exc:
+            raise_social_error(exc)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @social_router.delete(
+        "/blocks/{profile_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        tags=["friends"],
+    )
+    async def unblock_friend(
+        profile_id: UUID,
+        member: Annotated[dict[str, Any], Depends(require_friend_profile)],
+    ) -> Response:
+        try:
+            await runtime_repository.unblock_friend(
+                str(member["profile_id"]), str(profile_id)
+            )
+        except FriendNotFoundError as exc:
+            raise_social_error(exc)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @social_router.get("/feed", tags=["friends"])
+    async def friend_feed(
+        member: Annotated[dict[str, Any], Depends(require_friend_profile)],
+        start: date | None = None,
+        end: date | None = None,
+    ) -> dict[str, Any]:
+        finish = end or datetime.now(UTC).date()
+        beginning = start or finish - timedelta(days=6)
+        if beginning > finish:
+            raise HTTPException(status_code=422, detail="start must not be after end")
+        if (finish - beginning).days > 89:
+            raise HTTPException(
+                status_code=422,
+                detail="friend feed date range cannot exceed 90 days",
+            )
+        return {
+            "start": beginning,
+            "end": finish,
+            "days": await runtime_repository.friend_feed(
+                str(member["profile_id"]), beginning, finish
+            ),
+            "units": {
+                "charge": "score_0_to_100",
+                "effort": "score_0_to_100",
+                "rest": "score_0_to_100",
+                "sleep_duration": "minutes",
+                "hrv": "milliseconds",
+                "rhr": "beats_per_minute",
+            },
+            "privacy": (
+                "Only the owner's enabled daily summary fields are returned. "
+                "Raw streams, location, journal, sleep stages, and workouts are "
+                "never part of this endpoint."
+            ),
         }
 
     @router.post(
@@ -221,6 +713,44 @@ def create_app(
                 status_code=422,
                 content={"detail": jsonable_encoder(exc.errors())},
             )
+        if getattr(request.state, "auth_scope", None) == "social_member":
+            member = request.state.friend_profile
+            metadata = payload.source.metadata
+            has_streams = bool(payload.streams.events) or any(
+                samples for _, samples in payload.streams.numeric_items()
+            )
+            daily_keys = {
+                metric
+                for metrics in payload.daily_metrics.values()
+                for metric in metrics
+            }
+            daily_values_allowed = all(
+                SOCIAL_SYNC_DAILY_RANGES[metric][0]
+                <= value
+                <= SOCIAL_SYNC_DAILY_RANGES[metric][1]
+                for metrics in payload.daily_metrics.values()
+                for metric, value in metrics.items()
+                if metric in SOCIAL_SYNC_DAILY_RANGES
+            )
+            member_payload_allowed = (
+                payload.source.device_id == member["daily_device_id"]
+                and metadata.get("installation_id") == member["installation_id"]
+                and metadata.get("namespace") == "noop_computed"
+                and not has_streams
+                and not payload.sleep_sessions
+                and not payload.workouts
+                and not payload.journal
+                and daily_keys <= SOCIAL_SYNC_DAILY_METRICS
+                and daily_values_allowed
+            )
+            if not member_payload_allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=(
+                        "member sync is limited to this profile's exact "
+                        "noop_computed daily producer and social summary fields"
+                    ),
+                )
         if idempotency_key is not None:
             try:
                 header_batch = UUID(idempotency_key)
@@ -235,10 +765,18 @@ def create_app(
                 )
         try:
             return await runtime_repository.sync(
-                payload, _canonical_payload_hash(payload)
+                payload,
+                _canonical_payload_hash(payload),
+                (
+                    str(request.state.friend_profile["profile_id"])
+                    if getattr(request.state, "auth_scope", None) == "social_member"
+                    else None
+                ),
             )
         except SyncConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except FriendForbiddenError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     @router.get("/devices", tags=["read"])
     async def devices() -> dict[str, Any]:
@@ -464,6 +1002,7 @@ def create_app(
         }
 
     app.include_router(router)
+    app.include_router(social_router)
 
     static_root = Path(__file__).resolve().parent / "static"
     if runtime_settings.dashboard_enabled:

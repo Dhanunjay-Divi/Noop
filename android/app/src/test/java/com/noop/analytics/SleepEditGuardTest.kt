@@ -180,4 +180,14 @@ class SleepEditGuardTest {
         assertNull(SleepEditGuard.clampedEditWindow(5_000, 4_000, nowTs = 10_000))
         assertNull(SleepEditGuard.clampedEditWindow(5_000, 5_000, nowTs = 10_000))
     }
+
+    @Test
+    fun windowLongerThanOneDayIsRefused() {
+        val day = SleepEditGuard.MAX_EDIT_WINDOW_SEC
+        assertEquals(1_000L to 1_000L + day,
+            SleepEditGuard.clampedEditWindow(1_000, 1_000 + day, nowTs = 1_000 + day + 60))
+        assertNull(
+            SleepEditGuard.clampedEditWindow(1_000, 1_001 + day, nowTs = 1_001 + day + 60),
+        )
+    }
 }

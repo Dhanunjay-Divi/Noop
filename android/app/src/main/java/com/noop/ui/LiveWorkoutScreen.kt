@@ -53,8 +53,9 @@ import kotlinx.coroutines.delay
  *
  * Live HR is the smoothed [AppViewModel.bpm]; the zone is derived from the user's HR-max via the
  * shared [HrZones] model; elapsed time ticks from the workout's start; effort is the running
- * [AppViewModel.ActiveWorkout.liveStrain] (StrainScorer over the captured window). Keeps the realtime
- * HR stream on while visible, ref-counted in the ViewModel so it hands off cleanly with Live/Health.
+ * [AppViewModel.ActiveWorkout.liveStrain] (StrainScorer over the captured window). The explicit workout
+ * owns its realtime lease from Start through End in AppViewModel, so dismissing this overlay does not
+ * silently downgrade the recording; the Activity foreground gate still releases the transport in the background.
  */
 @Composable
 fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
@@ -71,12 +72,6 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
     val sensor by remember(context) {
         (context.applicationContext as com.noop.NoopApplication).sourceCoordinator.sensorMetrics
     }.collectAsStateWithLifecycle()
-
-    // Keep the live HR stream on for the duration of the workout screen (ref-counted with Live/Health).
-    DisposableEffect(Unit) {
-        vm.requestRealtimeHr()
-        onDispose { vm.releaseRealtimeHr() }
-    }
 
     // Keep the screen awake while recording (#703). Opt-in, default off; the toggle lives in Settings.
     // Read the same pref key the iOS @AppStorage uses ("workoutKeepScreenOn") and flag the view's window

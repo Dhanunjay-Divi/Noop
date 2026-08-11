@@ -82,4 +82,21 @@ class RespRateRsaTest {
         assertTrue(SleepStager.respRateFromRR(rows, start, start + 10).isNaN())
         assertTrue(SleepStager.respRateFromRR(emptyList(), start, start + 10).isNaN())
     }
+
+    @Test
+    fun respRateFromRR_batchedTimestampsIsNaN() {
+        val start = 1_700_000_000L
+        val rows = buildList {
+            for (second in 0 until 80) {
+                for (beat in 0 until 6) {
+                    add(RrInterval("ring", start + second, 940 + (beat * 13) % 70))
+                }
+            }
+        }
+        val fraction = HrvAnalyzer.beatAccurateFraction(
+            rows.map { it.ts }, rows.map { it.rrMs.toDouble() },
+        )
+        assertTrue(!HrvAnalyzer.beatValuesAreTrustworthy(fraction))
+        assertTrue(SleepStager.respRateFromRR(rows, start, start + 90).isNaN())
+    }
 }

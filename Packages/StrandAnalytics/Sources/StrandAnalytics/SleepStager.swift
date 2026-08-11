@@ -859,7 +859,7 @@ public enum SleepStager {
         if grav.count < 2 { return [] }
 
         let hrS = hr.sorted { $0.ts < $1.ts }
-        let rrS = rr.sorted { $0.ts < $1.ts }
+        let rrS = rr.sortedByTsStable()
         let respS = resp.sorted { $0.ts < $1.ts }
 
         let baseline = hrBaseline(hrS)
@@ -999,7 +999,7 @@ public enum SleepStager {
     static func efficiency(start: Int, end: Int, stages: [StageSegment]) -> Double {
         let inBed = Double(end - start)
         if inBed <= 0 { return 0 }
-        let wake = stages.filter { $0.stage == "wake" }.reduce(0.0) { $0 + Double($1.end - $1.start) }
+        let wake = stages.filter { SleepStageVocabulary.isWake($0.stage) }.reduce(0.0) { $0 + Double($1.end - $1.start) }
         let asleep = max(0.0, inBed - wake)
         return min(1.0, asleep / inBed)
     }
@@ -1404,6 +1404,12 @@ public enum SleepStager {
     /// Per-window length for the per-window rate estimate (seconds).
     static let rsaWindowS = 300.0
 
+    /// #977: wall-clock seconds a beat-to-beat step may exceed its own RR before the series is treated
+    /// as SPLICED there. `ts` is whole seconds, so a 1 s discrepancy is quantisation, not a gap; the
+    /// blocks that prompted this were 30-45 s. PROVISIONAL, like `coveragePlausibleCeiling` - wide
+    /// enough that only an unambiguous dropout trips it, and deliberately not tuned to a corpus.
+    static let rsaGapToleranceS = 3.0
+
     /// Physiologic breath-interval band (seconds): 0.1–0.4 Hz = 6–24 breaths/min.
     static let rsaMinBreathIntervalS = 2.5   // 24 bpm
     static let rsaMaxBreathIntervalS = 10.0  // 6 bpm
@@ -1423,31 +1429,73 @@ public enum SleepStager {
     /// does not equal a chest-band / capnography rate.
     ///
     /// Pipeline (per matched in-bed session [start, end], unix SECONDS):
-    ///   1. Restrict RR rows to ts in [start, end]; range-filter the RR values
-    ///      (HRVAnalyzer.rangeFilter) to drop dropouts/ectopics.
+    ///   1. Restrict RR ROWS to ts in [start, end] and apply the same range test
+    ///      HRVAnalyzer.rangeFilter applies, keeping the rows so `ts` survives (#977).
     ///   2. Reconstruct beat times by cumulatively summing the kept RR intervals
-    ///      from the first in-bed beat, yielding an (irregular) tachogram.
+    ///      from the first in-bed beat, yielding an (irregular) tachogram, and note
+    ///      where the wall clock outran the beats (#977) — the cumulative sum cannot
+    ///      represent a dropout, so those points are splices, not elapsed time.
     ///   3. Resample the tachogram onto a uniform ~4 Hz grid by linear interpolation.
     ///   4. Detrend: subtract a centered moving mean (rsaDetrendWindowS).
-    ///   5. Per ~5-min window: findPeaks (min distance rsaMinPeakDistanceS) on the
-    ///      detrended grid, keep peak-to-peak intervals in the 6–24 bpm band, rate =
-    ///      60 / median(intervals). Take the median across windows.
+    ///   5. Per ~5-min window, SKIPPING any window containing a splice: findPeaks
+    ///      (min distance rsaMinPeakDistanceS) on the detrended grid, keep peak-to-peak
+    ///      intervals in the 6–24 bpm band, rate = 60 / median(intervals). Take the
+    ///      median across windows.
+    ///
+    /// Known bound on the splice skip (#977): step 4's centered mean spans ±rsaDetrendWindowS/2, so a
+    /// splice just inside one window's edge leaves ~4 s of contaminated samples at the neighbouring
+    /// window's edge. That window is KEPT deliberately — discarding five minutes to avoid four seconds
+    /// costs far more data than it saves, and both medians (over intervals, then over windows) dilute a
+    /// single spurious peak among a five-minute window's worth.
     /// Returns NaN when too few intervals survive (honest no-data).
     static func respRateFromRR(_ rr: [RRInterval], start: Int, end: Int) -> Double {
         let nan = Double.nan
         if end <= start { return nan }
 
-        // 1. In-bed RR rows in chronological order, range-filtered.
-        let inBed = rr.filter { $0.ts >= start && $0.ts <= end }
-            .sorted { $0.ts < $1.ts }
-            .map { Double($0.rrMs) }
-        let filtered = HRVAnalyzer.rangeFilter(inBed)
+        // 1. In-bed RR ROWS in chronological order, range-filtered.
+        //
+        // #977: the ROWS are kept, not just their values, because `ts` is the only signal that a beat is
+        // missing. Beats lost before storage never enter the array, so contiguity derived from rejection
+        // (cleanRRGapAware) cannot see them - it takes only [Double] and has no clock. Filtering the rows
+        // by the same predicate `HRVAnalyzer.rangeFilter` applies keeps the surviving VALUES identical
+        // (it is an order-preserving range test), which RespRateGapAwareTests pins.
+        let inBedRows = rr.filter { $0.ts >= start && $0.ts <= end }
+            .sortedByTsStable()
+            .filter { Double($0.rrMs) >= HRVAnalyzer.rrMinMs && Double($0.rrMs) <= HRVAnalyzer.rrMaxMs }
+
+        // RSA needs true beat-to-beat values. Banked Oura records can preserve their total duration
+        // while assigning several reconstructed intervals one coarse timestamp; that produces a
+        // plausible-looking spectral peak with no respiratory information. Share HRVAnalyzer's single
+        // beat-accuracy judgement so SDNN and respiration cannot disagree about the same evidence.
+        if inBedRows.count >= 30 {
+            let fraction = HRVAnalyzer.beatAccurateFraction(
+                tsSec: inBedRows.map(\.ts),
+                rrMs: inBedRows.map { Double($0.rrMs) })
+            if !HRVAnalyzer.beatValuesAreTrustworthy(beatAccurateFraction: fraction) { return nan }
+        }
+        let filtered = inBedRows.map { Double($0.rrMs) }
         if filtered.count < 30 { return nan }  // need enough beats for any RSA estimate
 
         // 2. Reconstruct beat times (seconds from session start) by cumulative sum.
+        // #977: a dropout is where the WALL CLOCK outran the beat - ts jumps 30-45 s while the RR only
+        // accounts for ~1 s. The cumulative sum cannot represent that, so it stitches the two sides
+        // together and the tachogram gets a discontinuity the peak-picker reads as breathing. Record the
+        // beat-time of each splice here; step 5 drops the windows containing one. Beat times are NOT
+        // shifted by the gap: within a run the relative timing is right, and that is all a kept window uses.
+        //
+        // This fires on a beat REJECTED just above too, not only one lost before storage: the range
+        // test drops out-of-range intervals, so `ts` steps across them exactly as it does across a
+        // dropout. That is the intent - both genuinely splice the tachogram, which is the same reason
+        // #204/#195 made RMSSD skip differences across a removed beat - but it does mean a night with
+        // heavy ectopic rejection now loses windows it used to keep.
         var beatTimes = [Double](repeating: 0, count: filtered.count)
+        var spliceAtS: [Double] = []
         var acc = 0.0
         for i in filtered.indices {
+            if i > 0 {
+                let wallStepS = Double(inBedRows[i].ts - inBedRows[i - 1].ts)
+                if wallStepS - filtered[i] / 1000.0 > rsaGapToleranceS { spliceAtS.append(acc) }
+            }
             acc += filtered[i] / 1000.0
             beatTimes[i] = acc
         }
@@ -1484,13 +1532,18 @@ public enum SleepStager {
         if standardDeviation(detrended) <= 1e-9 { return nan }  // flat → no RSA
 
         // 5. Per ~5-min window peak-pick → 60/median(breath interval); median across.
+        let spliceGrid = spliceAtS.map { Int($0 / dt) }
         let minDistSamples = max(2, Int((rsaMinPeakDistanceS * rsaResampleHz).rounded()))
         let windowSamples = max(minDistSamples * 3, Int((rsaWindowS * rsaResampleHz).rounded()))
         var perWindowRates: [Double] = []
         var w = 0
         while w < nGrid {
             let wEnd = min(nGrid, w + windowSamples)
-            if wEnd - w >= minDistSamples * 3 {
+            // #977: a window straddling a splice is measuring a discontinuity, not a breath. Dropping it
+            // costs one window; keeping it puts a fabricated interval into the median. All windows spliced
+            // leaves perWindowRates empty and the function returns NaN, which is the honest answer.
+            let spliced = spliceGrid.contains { $0 >= w && $0 < wEnd }
+            if !spliced && wEnd - w >= minDistSamples * 3 {
                 let winSeg = Array(detrended[w..<wEnd])
                 // findPeaks with height = 0.0 selects the positive RSA peaks (one per
                 // breath) on the zero-mean detrended tachogram.
@@ -1621,6 +1674,44 @@ public enum SleepStager {
         return Double(sparse) >= cardiacSparseEpochFrac * Double(sleepFeats.count)
     }
 
+    /// Explicitly separates an absent respiration measurement from a measured regular one.
+    /// The five cases preserve the former pair of boolean predicates exactly, including the reachable
+    /// case where coincident percentile bars make both predicates true.
+    enum RespEvidence: Equatable {
+        case regular
+        case irregular
+        case measuredMidBand
+        case unmeasured
+        case barsDegenerate
+
+        static func of(_ rrv: Double, lowBar: Double?, highBar: Double?) -> RespEvidence {
+            guard rrv.isFinite else { return .unmeasured }
+            let atOrAboveHigh = highBar.map { rrv >= $0 } ?? false
+            let atOrBelowLow = lowBar.map { rrv <= $0 } ?? false
+            switch (atOrAboveHigh, atOrBelowLow) {
+            case (true, true): return .barsDegenerate
+            case (true, false): return .irregular
+            case (false, true): return .regular
+            case (false, false): return .measuredMidBand
+            }
+        }
+
+        /// Missing respiration is waived for depth, but is never represented as measured regularity.
+        var contradictsDepth: Bool {
+            switch self {
+            case .regular, .unmeasured, .barsDegenerate: return false
+            case .irregular, .measuredMidBand: return true
+            }
+        }
+
+        var meetsIrregularBar: Bool {
+            switch self {
+            case .irregular, .barsDegenerate: return true
+            case .regular, .measuredMidBand, .unmeasured: return false
+            }
+        }
+    }
+
     static func classifyOne(_ f: EpochFeatures, hrLo: Double?, hrHi: Double?,
                             rmssdHi: Double?, hrvarHi: Double?, rrvHi: Double?, rrvLo: Double?,
                             cardiacSparse: Bool = false) -> String {
@@ -1646,9 +1737,7 @@ public enum SleepStager {
         // Dense 4.0 nights keep the full `hrHigh || hrvarHigh` signal, so their behaviour is unchanged. (#705)
         let cardiacActivatedForWake = cardiacSparse ? hrHigh : cardiacActivated
 
-        let rrvIrregular = f.rrv.isFinite && rrvHi != nil && f.rrv >= rrvHi!
-        // Missing respiration (NaN RRV) treated as "regular" (pro-deep bias).
-        let rrvRegular = (!f.rrv.isFinite) || (rrvLo != nil && f.rrv <= rrvLo!)
+        let resp = RespEvidence.of(f.rrv, lowBar: rrvLo, highBar: rrvHi)
 
         let still = f.moveFrac <= stageStillMoveFrac
         let moving = f.moveFrac >= stageWakeMoveFrac
@@ -1658,9 +1747,9 @@ public enum SleepStager {
         // over-promotes still sleep to wake. (#705)
         if moving && (cardiacActivatedForWake || !hasHR) { return "wake" }
         // DEEP: still + low HR + regular respiration, with high parasympathetic tone when measurable.
-        if still && parasympOK && hrLow && rrvRegular { return "deep" }
+        if still && parasympOK && hrLow && !resp.contradictsDepth { return "deep" }
         // REM: still body + activated cardiac + irregular respiration.
-        if still && cardiacActivated && rrvIrregular { return "rem" }
+        if still && cardiacActivated && resp.meetsIrregularBar { return "rem" }
         // REM fallback when respiration unavailable: require BOTH cardiac signals.
         if still && hrHigh && hrvarHigh && !f.rrv.isFinite { return "rem" }
         return "light"
@@ -1794,17 +1883,16 @@ public enum SleepStager {
         let hrvarHigh = f.hrVar.isFinite && hrvarHi != nil && f.hrVar >= hrvarHi!
         let cardiacActivated = hrHigh || hrvarHigh
         let cardiacActivatedForWake = cardiacSparse ? hrHigh : cardiacActivated
-        let rrvIrregular = f.rrv.isFinite && rrvHi != nil && f.rrv >= rrvHi!
-        let rrvRegular = (!f.rrv.isFinite) || (rrvLo != nil && f.rrv <= rrvLo!)
+        let resp = RespEvidence.of(f.rrv, lowBar: rrvLo, highBar: rrvHi)
         let still = f.moveFrac <= stageStillMoveFrac
         let moving = f.moveFrac >= stageWakeMoveFrac
 
         // classifyOne precedence: WAKE, then DEEP, then REM (then REM fallback), else LIGHT.
         // An epoch that wins WAKE or DEEP was never a REM candidate.
         if moving && (cardiacActivatedForWake || !hasHR) { return .wonOtherStage }     // → wake
-        if still && parasympOK && hrLow && rrvRegular { return .wonOtherStage } // → deep
+        if still && parasympOK && hrLow && !resp.contradictsDepth { return .wonOtherStage } // → deep
         // From here the epoch did NOT win wake/deep; it is either REM or falls through to LIGHT.
-        if still && cardiacActivated && rrvIrregular { return .remEligible }
+        if still && cardiacActivated && resp.meetsIrregularBar { return .remEligible }
         if still && hrHigh && hrvarHigh && !f.rrv.isFinite { return .remEligible }
         // Not REM → attribute to the FIRST unmet REM precondition (in REM-rule order).
         if !still { return .notStill }
@@ -2115,7 +2203,7 @@ public enum SleepStager {
 
         var waso = 0.0
         var disturbances = 0
-        for s in segs where s.stage == "wake" {
+        for s in segs where SleepStageVocabulary.isWake(s.stage) {
             let w0 = max(Double(s.start), onset)
             let w1 = min(Double(s.end), sptEnd)
             if w1 > w0 { waso += (w1 - w0); disturbances += 1 }

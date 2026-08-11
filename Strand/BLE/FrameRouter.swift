@@ -207,9 +207,23 @@ public final class FrameRouter {
                    let ch = parsed.parsed["battery_charging"]?.intValue {
                     state.charging = (ch != 0)
                 }
+                // Some 4.0 firmware pushes the current percentage only in this event instead of a
+                // command response. Apply that live value immediately; this router never receives
+                // historical backfill frames, so an old archived event cannot roll the gauge back.
+                if ev.hasPrefix("BATTERY_LEVEL"),
+                   let pct = parsed.parsed["battery_pct"]?.doubleValue {
+                    state.setBattery(pct)
+                }
                 // #592: the same battery event carries pack voltage (mv@21) — surface it on the Devices card.
                 if ev.hasPrefix("BATTERY_LEVEL"), let mv = parsed.parsed["battery_mV"]?.intValue {
                     state.batteryMv = mv
+                }
+                // Dedicated charger edge events are emitted by some firmware without a
+                // BATTERY_LEVEL payload. Honour them so the charging indicator cannot remain stale.
+                if ev.hasPrefix("CHARGING_ON") {
+                    state.charging = true
+                } else if ev.hasPrefix("CHARGING_OFF") {
+                    state.charging = false
                 }
                 // Physical inputs the strap exposes — live only (this path never sees historical
                 // replay, which goes through the Backfiller). Event strings are "NAME(rawValue)".

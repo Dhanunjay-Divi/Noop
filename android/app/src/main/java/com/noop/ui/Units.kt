@@ -7,15 +7,14 @@ import kotlin.math.roundToInt
 // MARK: - Unit system preference
 //
 // NOOP stores EVERYTHING in SI (km, kg, cm, °C) — the importers normalise on the way in, so this is a
-// purely cosmetic, display-only layer. There is no data migration and nothing in Room changes when the
-// user flips this. One Metric/Imperial switch for length+mass with a SEPARATE temperature override,
-// because plenty of people think in kg/cm but still read body temperature in °F (and vice versa).
-// Default is Metric — most of the world, and it matches what we store.
+// purely cosmetic, display-only layer. There is no Room migration and stored profile values never change
+// when the user flips a display unit. Distance, weight, height and temperature are independent because
+// mixed combinations such as miles + kilograms + feet/inches + °C are common.
 //
 // Persisted via NoopPrefs (SharedPreferences), the same mechanism every other Android preference uses.
 // This mirrors the macOS Units.swift + @AppStorage side exactly.
 
-/** Length+mass unit system. Temperature has its own override (see [UnitPrefs.temperature]). */
+/** Distance unit system. Kept on the legacy key so existing preferences remain stable. */
 enum class UnitSystem(val raw: String) {
     METRIC("metric"),
     IMPERIAL("imperial");
@@ -26,6 +25,26 @@ enum class UnitSystem(val raw: String) {
 
     companion object {
         fun fromRaw(raw: String?): UnitSystem = entries.firstOrNull { it.raw == raw } ?: METRIC
+    }
+}
+
+/** Weight display unit. Profile and imported values remain kilograms. */
+enum class MassUnit(val raw: String) {
+    KILOGRAMS("kg"),
+    POUNDS("lb");
+
+    companion object {
+        fun fromRaw(raw: String?): MassUnit? = entries.firstOrNull { it.raw == raw }
+    }
+}
+
+/** Height (and waist) display unit. Profile values remain centimetres. */
+enum class HeightUnit(val raw: String) {
+    CENTIMETERS("cm"),
+    FEET_INCHES("ft_in");
+
+    companion object {
+        fun fromRaw(raw: String?): HeightUnit? = entries.firstOrNull { it.raw == raw }
     }
 }
 
@@ -97,14 +116,45 @@ enum class HrvWindow(val raw: String) {
 }
 
 /**
- * Reads the two unit preferences from [NoopPrefs] and resolves the "match the system" default for
- * temperature. SharedPreferences isn't reactive, so Compose screens read these once into remembered
- * state (exactly like the other toggles) and re-read on a recomposition triggered by the Settings write.
+ * Reads unit preferences from [NoopPrefs]. Weight and height were historically coupled to
+ * [UnitSystem]; the first read materialises independent keys from that legacy preference. That preserves
+ * every existing user's display choice without touching their canonical SI values, while allowing mixed
+ * unit combinations from then on.
  */
 object UnitPrefs {
-    /** The length/mass system (default Metric). */
+    /** The distance system (default Metric). */
     fun system(context: Context): UnitSystem =
         UnitSystem.fromRaw(NoopPrefs.of(context).getString(NoopPrefs.KEY_UNIT_SYSTEM, null))
+
+    /** Weight display unit, migrated once from the former combined Metric/Imperial preference. */
+    fun mass(context: Context): MassUnit {
+        val prefs = NoopPrefs.of(context)
+        val raw = prefs.getString(NoopPrefs.KEY_MASS_UNIT, null)
+        val resolved = resolveMass(system(context), raw)
+        if (MassUnit.fromRaw(raw) == null) {
+            prefs.edit().putString(NoopPrefs.KEY_MASS_UNIT, resolved.raw).apply()
+        }
+        return resolved
+    }
+
+    /** Height and waist display unit, migrated once from the former combined preference. */
+    fun height(context: Context): HeightUnit {
+        val prefs = NoopPrefs.of(context)
+        val raw = prefs.getString(NoopPrefs.KEY_HEIGHT_UNIT, null)
+        val resolved = resolveHeight(system(context), raw)
+        if (HeightUnit.fromRaw(raw) == null) {
+            prefs.edit().putString(NoopPrefs.KEY_HEIGHT_UNIT, resolved.raw).apply()
+        }
+        return resolved
+    }
+
+    /** Pure migration resolver: an explicit independent choice wins, otherwise use the legacy system. */
+    fun resolveMass(system: UnitSystem, raw: String?): MassUnit =
+        MassUnit.fromRaw(raw) ?: if (system == UnitSystem.IMPERIAL) MassUnit.POUNDS else MassUnit.KILOGRAMS
+
+    /** Pure migration resolver: an explicit independent choice wins, otherwise use the legacy system. */
+    fun resolveHeight(system: UnitSystem, raw: String?): HeightUnit =
+        HeightUnit.fromRaw(raw) ?: if (system == UnitSystem.IMPERIAL) HeightUnit.FEET_INCHES else HeightUnit.CENTIMETERS
 
     /** The resolved temperature unit, applying the "match the length/mass system" default. */
     fun temperature(context: Context): TemperatureUnit {
@@ -216,19 +266,32 @@ object UnitFormatter {
     /** kg → pounds. */
     fun kgToPounds(kg: Double): Double = kg * POUNDS_PER_KILOGRAM
 
+    /** pounds → kg. */
+    fun poundsToKg(lb: Double): Double = lb / POUNDS_PER_KILOGRAM
+
     /** Format a mass given in KILOGRAMS with one decimal + unit. Metric: "74.5 kg". Imperial: "164.2 lb". */
-    fun massFromKilograms(kg: Double, system: UnitSystem): String = when (system) {
-        UnitSystem.METRIC -> oneDecimal(kg) + " kg"
-        UnitSystem.IMPERIAL -> oneDecimal(kgToPounds(kg)) + " lb"
+    fun massFromKilograms(kg: Double, unit: MassUnit): String = when (unit) {
+        MassUnit.KILOGRAMS -> oneDecimal(kg) + " kg"
+        MassUnit.POUNDS -> oneDecimal(kgToPounds(kg)) + " lb"
     }
 
+    /** Legacy overload for distance-system-only callers; new UI should pass [MassUnit]. */
+    fun massFromKilograms(kg: Double, system: UnitSystem): String =
+        massFromKilograms(kg, UnitPrefs.resolveMass(system, null))
+
     /** Mass unit label only. "kg" / "lb". */
-    fun massUnit(system: UnitSystem): String = if (system == UnitSystem.IMPERIAL) "lb" else "kg"
+    fun massUnit(unit: MassUnit): String = unit.raw
+
+    /** Legacy overload for distance-system-only callers. */
+    fun massUnit(system: UnitSystem): String = massUnit(UnitPrefs.resolveMass(system, null))
 
     // MARK: Height (stored cm)
 
     /** cm → total inches. */
     fun cmToInches(cm: Double): Double = cm / CENTIMETERS_PER_INCH
+
+    /** total inches → cm. */
+    fun inchesToCm(inches: Double): Double = inches * CENTIMETERS_PER_INCH
 
     /** Decompose a height in CENTIMETRES into whole feet + inches (inches rounded, carried into feet). */
     fun cmToFeetInches(cm: Double): Pair<Int, Int> {
@@ -240,14 +303,18 @@ object UnitFormatter {
     }
 
     /** Format a height given in CENTIMETRES. Metric: "178 cm". Imperial: "5′ 10″". */
-    fun heightFromCentimeters(cm: Double, system: UnitSystem): String = when (system) {
-        UnitSystem.METRIC -> "${cm.roundToInt()} cm"
-        UnitSystem.IMPERIAL -> {
+    fun heightFromCentimeters(cm: Double, unit: HeightUnit): String = when (unit) {
+        HeightUnit.CENTIMETERS -> "${cm.roundToInt()} cm"
+        HeightUnit.FEET_INCHES -> {
             val (ft, inch) = cmToFeetInches(cm)
             // Prime/double-prime are the conventional ft/in glyphs and read cleanly at small sizes.
             "$ft′ $inch″"
         }
     }
+
+    /** Legacy overload for distance-system-only callers; new UI should pass [HeightUnit]. */
+    fun heightFromCentimeters(cm: Double, system: UnitSystem): String =
+        heightFromCentimeters(cm, UnitPrefs.resolveHeight(system, null))
 
     // MARK: Temperature (stored °C — absolute)
 

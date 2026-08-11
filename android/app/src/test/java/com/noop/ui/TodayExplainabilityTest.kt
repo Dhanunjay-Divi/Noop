@@ -137,9 +137,18 @@ class TodayExplainabilityTest {
 
     @Test
     fun recording_notClaimed_whenConnectedButNoLiveHr() {
-        // A bonded-but-silent link must not claim it's saving data — falls to last-synced / not-recording.
         val state = recordingStateFor(connected = true, liveHeartRate = null, lastSyncAtSec = null, nowSec = 1_000_000)
-        assertEquals(RecordingState.NotRecording, state)
+        assertEquals(RecordingState.ConnectedNoData, state)
+        assertEquals("Connected", state.title)
+    }
+
+    @Test
+    fun sustainedEmptyStillReportsTheLiveConnection() {
+        val state = recordingStateFor(
+            connected = true, liveHeartRate = null, lastSyncAtSec = 999_900, nowSec = 1_000_000,
+            sustainedEmptyOffload = true,
+        )
+        assertEquals(RecordingState.ConnectedNoData, state)
     }
 
     @Test

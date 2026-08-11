@@ -89,7 +89,7 @@ public enum RhythmScreener {
 
     /// One resting window, already assembled by the caller (app layer). Pure inputs —
     /// no I/O. `rrMs` is the raw successive R-R series (ms); `ts` is the matching
-    /// wall-clock seconds (used only for night-span aggregation, optional).
+    /// wall-clock seconds used for integrity checks (optional for timestamp-less live reads).
     public struct WindowInput: Equatable, Sendable {
         /// Raw successive R-R intervals (ms), in time order, BEFORE cleaning.
         public let rrMs: [Double]
@@ -239,6 +239,22 @@ public enum RhythmScreener {
         // Gate 3: plausible resting rate.
         guard input.meanHR >= restingHrMinBpm, input.meanHR <= restingHrMaxBpm else {
             return .unreadable(nBeats: clean.count, confidence: confidence(for: clean.count))
+        }
+
+        // Gate 4: every statistic below is a spread over the interval cloud. Reject either duplicated
+        // over-coverage or banked records whose per-beat values do not line up with their timestamps.
+        // Empty/mismatched timestamps remain readable because no integrity conclusion can be measured.
+        if input.ts.count == input.rrMs.count, !input.ts.isEmpty {
+            let coverage = HRVAnalyzer.rrCoverage(tsSec: input.ts, rrMs: input.rrMs)
+            let collapsed = HRVAnalyzer.collapsedCoverage(tsSec: input.ts, rrMs: input.rrMs)
+            let verdict = HRVAnalyzer.classifyCoverage(coverage: coverage, collapsed: collapsed)
+            guard HRVAnalyzer.beatSpreadIsTrustworthy(verdict) else {
+                return .unreadable(nBeats: clean.count, confidence: confidence(for: clean.count))
+            }
+            let accurate = HRVAnalyzer.beatAccurateFraction(tsSec: input.ts, rrMs: input.rrMs)
+            guard HRVAnalyzer.beatValuesAreTrustworthy(beatAccurateFraction: accurate) else {
+                return .unreadable(nBeats: clean.count, confidence: confidence(for: clean.count))
+            }
         }
 
         // Core descriptive statistics over the clean (range-filtered, ectopy-kept) series.

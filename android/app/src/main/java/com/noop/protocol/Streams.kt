@@ -11,8 +11,25 @@ package com.noop.protocol
 /** A heart-rate sample at wall-clock unix seconds [ts]. */
 data class HrSample(val ts: Int, val bpm: Int)
 
+/** Durable sensor-channel code for an R-R interval. Never renumber; only append. */
+enum class RrSourceChannel(val code: Int) {
+    GREEN_QUALITY(1),
+    SPO2_IBI(2),
+    IBI_AMPLITUDE(3),
+    IBI_BARE(4),
+    ;
+
+    companion object {
+        fun fromCode(code: Int?): RrSourceChannel? = entries.firstOrNull { it.code == code }
+    }
+}
+
 /** A single beat-to-beat R-R interval (ms) at wall-clock unix seconds [ts]. */
-data class RrInterval(val ts: Int, val rrMs: Int)
+data class RrInterval(
+    val ts: Int,
+    val rrMs: Int,
+    val srcChannel: RrSourceChannel? = null,
+)
 
 /**
  * A raw-ADC SpO2 sample at wall-clock unix seconds [ts]. Mirrors the Room `Spo2Sample` (red/ir)

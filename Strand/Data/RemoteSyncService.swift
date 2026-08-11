@@ -265,6 +265,20 @@ enum RemoteSyncService {
         RemoteSyncPreferences.clearConfiguration()
     }
 
+    /// A dedicated installation-scoped producer for the sparse Friends projection. It is deliberately
+    /// distinct from the normal `noop_computed` archive producer: leaving a circle can erase this
+    /// social copy without deleting the user's separately configured self-hosted backup.
+    static func socialDailyDeviceId(for strapId: String) -> String {
+        RemoteNamespaceIdentifier.scoped(
+            platform: platform,
+            installationId: RemoteSyncPreferences.installationId,
+            logicalSourceId: strapId + "-noop-friends",
+            revisionToken: RemoteNamespaceIdentifier.revisionToken(
+                noopAlgorithmRevisions + ["friends-v1"]
+            )
+        )
+    }
+
     static func testConnection(endpoint: String, apiKeyInput: String) async throws -> String {
         let normalized = try normalizedEndpoint(endpoint)
         let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)

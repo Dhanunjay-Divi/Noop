@@ -69,8 +69,8 @@ private struct HealthSectionsStack: View {
             // "fitness_age" metricSeries). Its own view depending only on `repo`/`profile`,
             // so the live HR stream never re-renders it.
             FitnessAgeSection()
-            // Vitality / Body Age (weekly, computed by IntelligenceEngine from the mortality-
-            // hazard model). Its own view depending only on repo/profile.
+            // Vitality / Wellness Age (weekly experimental lifestyle composite). Its own view depends
+            // only on repo/profile.
             VitalitySection()
             // Screen-5 recovery detail: the CONTRIBUTORS to today's recovery as
             // labelled progress bars (HRV / Resting HR / Sleep / Respiratory), each
@@ -133,6 +133,7 @@ private struct HealthFirstRunContent: View {
 private struct SyncStatusSection: View {
     @EnvironmentObject var live: LiveState
     @EnvironmentObject var model: AppModel
+    @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
 
     /// The strap link is usable for a manual offload kick (matches BLEManager.syncNow's own gate).
     private var canSync: Bool { live.connected && live.bonded && !live.backfilling }
@@ -140,7 +141,8 @@ private struct SyncStatusSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Sync", overline: "Strap history",
-                          trailing: live.connected ? (live.bonded ? String(localized: "Connected") : String(localized: "Pairing…")) : String(localized: "Offline"))
+                          trailing: live.connected ? (live.bonded ? String(localized: "Connected") : String(localized: "Pairing…")) : String(localized: "Offline"),
+                          onDark: showDayCycleBackground)
 
             NoopCard(tint: StrandPalette.chargeColor) {
                 VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
@@ -214,6 +216,8 @@ private struct HeartRateSection: View {
     @EnvironmentObject var live: LiveState
     @EnvironmentObject var profile: ProfileStore
     @EnvironmentObject var model: AppModel
+    @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
+    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = true
 
     /// Rolling buffer of recently-streamed live HR (newest last), so the hero graph builds a real
     /// continuous time-series instead of collapsing to a 2-point flat line when the strap streams HR
@@ -297,7 +301,9 @@ private struct HeartRateSection: View {
         let series = hrSeries(displayHR)
 
         return VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Heart Rate", overline: "Live", trailing: hrIsDerived ? String(localized: "from R-R") : nil)
+            SectionHeader("Heart Rate", overline: "Live",
+                          trailing: hrIsDerived ? String(localized: "from R-R") : nil,
+                          onDark: showDayCycleBackground && skyBehindCards)
 
             // The live HR hero is a flat WHOOP card tinted rose — heart-rate's metric accent.
             // No scenic starfield / bloom: fill contrast carries the edge (Apple-flat).
@@ -643,7 +649,7 @@ private struct ContributorBar: View {
 ///   • no value yet → the checklist card directly, with required-missing inputs deep-linking to Settings.
 ///
 /// The checklist groups inputs by ROLE exactly as the engine reports them: "Drives your Fitness Age"
-/// (age/sex/resting-HR/activity) vs "Unlocks your VO₂max" (height+weight/waist) — never implying the body
+/// (age/sex/resting-HR/activity) vs "Unlocks your VO₂max" (waist only) — never implying the body
 /// measurements sharpen the age (the body term cancels in the model).
 private struct FitnessAgeSection: View {
     @EnvironmentObject var repo: Repository
@@ -656,6 +662,7 @@ private struct FitnessAgeSection: View {
     /// Latest estimated VO₂max (ml/kg/min) from "vo2max_est" — only present once a waist is set.
     @State private var vo2max: Double?
     @State private var loaded = false
+    @State private var loadedProfileState: String?
     /// True while a manual "refresh Fitness Age" recompute is running (spinner in the readiness card).
     @State private var refreshing = false
 
@@ -676,6 +683,12 @@ private struct FitnessAgeSection: View {
 
     /// The catalog descriptor backing the trend sheet + accent.
     private var fitnessAgeMetric: MetricDescriptor? { MetricCatalog.all.first { $0.key == "fitness_age" } }
+    private var visibleFitnessAge: Double? {
+        loadedProfileState == profile.ageMetricStateToken ? fitnessAge : nil
+    }
+    private var visibleVO2max: Double? {
+        loadedProfileState == profile.ageMetricStateToken ? vo2max : nil
+    }
 
     /// Build the readiness verdict from the same signals IntelligenceEngine feeds the engine: the last 7
     /// computed/imported days give the resting-HR + activity coverage counts; the profile gives the rest.
@@ -684,11 +697,10 @@ private struct FitnessAgeSection: View {
         let rhrDays = last7.compactMap { $0.restingHr }.count
         let activityDays = last7.compactMap { $0.strain }.count
         return FitnessAgeEngine.assessReadiness(
-            hasAge: profile.age > 0,
-            hasSex: !profile.sex.isEmpty,
+            hasAge: profile.ageInputConfirmed && FitnessAgeEngine.supports(age: Double(profile.age)),
+            hasSex: profile.sexInputConfirmed && FitnessAgeEngine.supports(sex: profile.sex),
             rhrDays: rhrDays,
             activityDays: activityDays,
-            hasHeightWeight: profile.heightCm > 0 && profile.weightKg > 0,
             hasWaist: profile.waistCm > 0)
     }
 
@@ -697,13 +709,14 @@ private struct FitnessAgeSection: View {
     private func fitnessReadyLead() -> String {
         fitnessReadyLeadCopy(
             rhrDays: repo.days.suffix(7).compactMap { $0.restingHr }.count,
-            hasAge: profile.age > 0, hasSex: !profile.sex.isEmpty)
+            hasAge: profile.ageInputConfirmed && FitnessAgeEngine.supports(age: Double(profile.age)),
+            hasSex: profile.sexInputConfirmed && FitnessAgeEngine.supports(sex: profile.sex))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Fitness Age", overline: "Weekly",
-                          trailing: fitnessAge != nil ? String(localized: "vs age \(profile.age)") : nil)
+                          trailing: visibleFitnessAge != nil ? String(localized: "vs age \(profile.age)") : nil)
             content
         }
         .sheet(item: $fitnessSheet) { which in
@@ -719,11 +732,11 @@ private struct FitnessAgeSection: View {
             .frame(width: 900, height: 820)
             #endif
         }
-        .task(id: repo.refreshSeq) { await load() }
+        .task(id: "\(repo.refreshSeq)|\(profile.ageMetricStateToken)") { await load() }
     }
 
     @ViewBuilder private var content: some View {
-        if let age = fitnessAge {
+        if let age = visibleFitnessAge {
             heroCard(age: age)
             if showReadiness {
                 ReadinessChecklistCard(readiness: readiness,
@@ -782,6 +795,7 @@ private struct FitnessAgeSection: View {
         let delta = Double(profile.age) - age        // +ve = fitness age younger than chronological
         let years = Int(abs(delta).rounded())
         let younger = delta >= 0
+        let band = Int((FitnessAgeEngine.uncertaintyBandYears(sex: profile.sex) ?? 20).rounded())
         return VStack(alignment: .leading, spacing: NoopMetrics.space4) {
             // Tap the hero body to open the full "fitness_age" trend.
             Button { fitnessSheet = .trend } label: {
@@ -804,7 +818,7 @@ private struct FitnessAgeSection: View {
                             .foregroundStyle(younger ? StrandPalette.statusPositive : StrandPalette.statusWarning)
                     }
                     Spacer(minLength: 0)
-                    if let vo2 = vo2max {
+                    if let vo2 = visibleVO2max {
                         VStack(alignment: .trailing, spacing: 2) {
                             Text("VO₂max").strandOverline()
                             Text(String(format: "%.0f", vo2))
@@ -826,7 +840,7 @@ private struct FitnessAgeSection: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Fitness Age \(shown), \(ageDeltaLine(years: years, younger: younger)). Tap to see the trend.")
 
-            Text("± \(Int(FitnessAgeEngine.displayBandYears)) yr · a fitness comparison, not a biological age")
+            Text("Approx. model uncertainty ± \(band) yr · a fitness comparison, not a biological age")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
 
@@ -872,10 +886,28 @@ private struct FitnessAgeSection: View {
     /// "my-whoop" (the Repository merges the computed "-noop" rows under any real import). Takes the
     /// freshest point — the weekly value is keyed to the week's Saturday and refines through the week.
     private func load() async {
-        let faPts = await repo.exploreSeries(key: "fitness_age", source: "my-whoop")
-        let vo2Pts = await repo.exploreSeries(key: "vo2max_est", source: "my-whoop")
-        fitnessAge = faPts.last?.value
-        vo2max = vo2Pts.last?.value
+        let profileState = profile.ageMetricStateToken
+        guard profile.fitnessInputsConfirmed,
+              FitnessAgeEngine.supports(age: Double(profile.age)),
+              FitnessAgeEngine.supports(sex: profile.sex) else {
+            fitnessAge = nil
+            vo2max = nil
+            loadedProfileState = profileState
+            loaded = true
+            return
+        }
+        async let faPtsA = repo.exploreSeries(key: "fitness_age", source: "my-whoop")
+        async let vo2PtsA = repo.exploreSeries(key: "vo2max_est", source: "my-whoop")
+        async let faProfileA = repo.exploreSeries(
+            key: AgeMetricProfile.fitnessAgeKey, source: "my-whoop")
+        async let vo2ProfileA = repo.exploreSeries(
+            key: AgeMetricProfile.vo2maxEstimateKey, source: "my-whoop")
+        let faProfile = (await faProfileA).last?.value
+        let vo2Profile = (await vo2ProfileA).last?.value
+        fitnessAge = profile.acceptsFitnessAge(provenance: faProfile) ? (await faPtsA).last?.value : nil
+        vo2max = profile.acceptsVO2maxEstimate(provenance: vo2Profile) ? (await vo2PtsA).last?.value : nil
+        guard !Task.isCancelled else { return }
+        loadedProfileState = profileState
         loaded = true
     }
 }
@@ -888,6 +920,9 @@ private struct FitnessAgeSection: View {
 func fitnessReadyLeadCopy(rhrDays: Int, hasAge: Bool, hasSex: Bool) -> String {
     let remaining = FitnessAgeEngine.nightsUntilReady(rhrDays: rhrDays)
     let needsBasics = !hasAge || !hasSex
+    if needsBasics {
+        return String(localized: "Fitness Age is unavailable for this profile. The published model covers ages 20–80 and provides male/female coefficients only.")
+    }
     switch (remaining, needsBasics) {
     case (0, false): return String(localized: "A few more days and we can show your Fitness Age.")
     case (0, true):  return String(localized: "Add your age and sex below and we can show your Fitness Age.")
@@ -983,7 +1018,7 @@ private struct ReadinessChecklistCard: View {
         // only when it's actually fixable there (age/sex/body metrics/waist) — resting-HR and activity
         // coverage come from wearing the strap, so those get no fix button.
         let fixable = item.status != .satisfied
-            && (item.key == "age" || item.key == "sex" || item.key == "bodyMetrics" || item.key == "waist")
+            && (item.key == "age" || item.key == "sex" || item.key == "waist")
         let row = HStack(alignment: .firstTextBaseline, spacing: 12) {
             Image(systemName: statusIcon(item.status))
                 .font(.system(size: 14, weight: .semibold))
@@ -1043,11 +1078,11 @@ private struct ReadinessChecklistCard: View {
     }
 }
 
-// MARK: - Vitality / Body Age
+// MARK: - Vitality / Wellness Age
 
-/// The "Vitality" section: a weekly wellness score (0–100) + a Body Age in years, computed by
-/// IntelligenceEngine from the published mortality-hazard model and read back from the metricSeries.
-/// A wellness trend from your habits — NOT a clinical biological age. Recomputes the live best/worst
+/// The "Vitality" section: a weekly experimental wellness score (0–100) + Wellness Age in years,
+/// computed by IntelligenceEngine and read back from metricSeries. It is not WHOOP/biological age.
+/// Recomputes the live best/worst
 /// factor the same way the engine does, for the plain-English "why".
 private struct VitalitySection: View {
     @EnvironmentObject var repo: Repository
@@ -1055,34 +1090,44 @@ private struct VitalitySection: View {
     @State private var vitality: Double?
     @State private var bodyAge: Double?
     @State private var loaded = false
+    @State private var loadedProfileState: String?
+
+    private var visibleVitality: Double? {
+        loadedProfileState == profile.ageMetricStateToken ? vitality : nil
+    }
+    private var visibleBodyAge: Double? {
+        loadedProfileState == profile.ageMetricStateToken ? bodyAge : nil
+    }
 
     private var contributions: [VitalityEngine.Contribution] {
-        let last7 = repo.days.suffix(7)
-        let nights = last7.compactMap { $0.totalSleepMin }.map { Double($0) / 60.0 }.filter { $0 > 0 }
-        let hrvs = last7.compactMap { $0.avgHrv }
-        let rhrs = last7.compactMap { $0.restingHr }.map(Double.init)
-        let steps = last7.compactMap { $0.steps }.map(Double.init)
+        let last21 = repo.days.suffix(21)
+        let minCoverage = 14
+        let nights = last21.compactMap { $0.totalSleepMin }.map { Double($0) / 60.0 }.filter { $0 > 0 }
+        let hrvs = last21.compactMap { $0.avgHrv }
+        let rhrs = last21.compactMap { $0.restingHr }.map(Double.init)
+        let steps = last21.compactMap { $0.steps }.map(Double.init)
         func mean(_ a: [Double]) -> Double? { a.isEmpty ? nil : a.reduce(0, +) / Double(a.count) }
         // Aggregate EXACTLY as the stored headline does (IntelligenceEngine), so this "what's driving it"
-        // breakdown reconciles with the Vitality / Body Age number it explains rather than being recomputed
+        // breakdown reconciles with the stored Vitality / Wellness Age number it explains.
         // on different statistics: resting HR + HRV are MEDIANED (robust to one outlier night), sleep +
         // steps are MEANED. Using the mean for all four let a single bad RHR/HRV reading drift the breakdown
         // out of step with the median-based headline (code review).
         return VitalityEngine.contributions(.init(
             chronoAge: Double(profile.age),
-            restingHR: rhrs.isEmpty ? nil : IntelligenceEngine.medianOf(rhrs),
-            sleepHours: mean(nights),
-            sleepConsistency: VitalityEngine.sleepConsistency(nightlyHours: nights),
-            rmssd: hrvs.isEmpty ? nil : IntelligenceEngine.medianOf(hrvs),
+            restingHR: rhrs.count >= minCoverage ? IntelligenceEngine.medianOf(rhrs) : nil,
+            sleepHours: nights.count >= minCoverage ? mean(nights) : nil,
+            sleepConsistency: nights.count >= minCoverage
+                ? VitalityEngine.sleepConsistency(nightlyHours: nights) : nil,
+            rmssd: hrvs.count >= minCoverage ? IntelligenceEngine.medianOf(hrvs) : nil,
             rmssdNorm: VitalityEngine.rmssdNorm(forAge: Double(profile.age)),
-            steps: mean(steps)))
+            steps: steps.count >= minCoverage ? mean(steps) : nil))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Vitality", overline: "Weekly",
-                          trailing: bodyAge != nil ? String(localized: "Body Age \(Int((bodyAge ?? 0).rounded()))") : nil)
-            if let v = vitality, let ba = bodyAge {
+                          trailing: visibleBodyAge != nil ? String(localized: "Wellness Age \(Int((visibleBodyAge ?? 0).rounded()))") : nil)
+            if let v = visibleVitality, let ba = visibleBodyAge {
                 hero(vitality: v, bodyAge: ba)
             } else if loaded {
                 ComingSoon(what: "A few more days and we can show your Vitality.", symbol: "sparkles")
@@ -1090,7 +1135,7 @@ private struct VitalitySection: View {
                 ComingSoon(what: "Reading your Vitality…", symbol: "sparkles")
             }
         }
-        .task(id: repo.refreshSeq) { await load() }
+        .task(id: "\(repo.refreshSeq)|\(profile.ageMetricStateToken)") { await load() }
     }
 
     private func hero(vitality v: Double, bodyAge ba: Double) -> some View {
@@ -1114,7 +1159,9 @@ private struct VitalitySection: View {
                             CountUpNumber(value: v, font: StrandFont.rounded(38))
                                 .foregroundStyle(.white)
                                 .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
-                            Text("of 100").font(StrandFont.caption).foregroundStyle(StrandPalette.textSecondary)
+                            Text("of 100")
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.onDarkSecondary)
                         }
                         .allowsHitTesting(false)
                     }
@@ -1123,7 +1170,7 @@ private struct VitalitySection: View {
                 }
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: NoopMetrics.space1) {
-                    Text("Body Age").strandOverline()
+                    Text("Wellness Age").strandOverline()
                     CountUpText(value: ba,
                                 format: { "\(Int($0.rounded()))" },
                                 font: StrandFont.number(34),
@@ -1144,7 +1191,7 @@ private struct VitalitySection: View {
                         .font(StrandFont.footnote).foregroundStyle(StrandPalette.statusWarning)
                 }
             }
-            Text("A wellness estimate from your habits, not a clinical biological age.")
+            Text("Experimental lifestyle estimate · not biological, medical, or WHOOP Age.")
                 .font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
         }
         .padding(NoopMetrics.space5)
@@ -1157,7 +1204,7 @@ private struct VitalitySection: View {
         .clipShape(RoundedRectangle(cornerRadius: NoopMetrics.cardRadius, style: .continuous))
     }
 
-    /// The Body Age delta as whole-phrase variants per count and direction, so translators see
+    /// The Wellness Age delta as whole-phrase variants per count and direction, so translators see
     /// complete phrases (never a stitched plural or direction fragment).
     private func bodyAgeDeltaLine(yrs: Int, younger: Bool) -> String {
         if yrs == 0 { return String(localized: "about your age") }
@@ -1170,8 +1217,23 @@ private struct VitalitySection: View {
     }
 
     private func load() async {
-        vitality = (await repo.exploreSeries(key: "vitality", source: "my-whoop")).last?.value
-        bodyAge = (await repo.exploreSeries(key: "body_age", source: "my-whoop")).last?.value
+        let profileState = profile.ageMetricStateToken
+        guard profile.ageInputConfirmed, (20...80).contains(profile.age) else {
+            vitality = nil
+            bodyAge = nil
+            loadedProfileState = profileState
+            loaded = true
+            return
+        }
+        async let vitalityA = repo.exploreSeries(key: "vitality", source: "my-whoop")
+        async let bodyAgeA = repo.exploreSeries(key: "body_age", source: "my-whoop")
+        let provenance = (await repo.exploreSeries(
+            key: AgeMetricProfile.vitalityKey, source: "my-whoop")).last?.value
+        let accepted = profile.acceptsVitality(provenance: provenance)
+        vitality = accepted ? (await vitalityA).last?.value : nil
+        bodyAge = accepted ? (await bodyAgeA).last?.value : nil
+        guard !Task.isCancelled else { return }
+        loadedProfileState = profileState
         loaded = true
     }
 }
@@ -1235,7 +1297,10 @@ private struct LiquidVitalTile: View {
     var body: some View {
         NoopCard(padding: 14, tint: reading.accent) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("\(reading.label)").strandOverline()
+                HStack(spacing: 8) {
+                    MetricGlyph(reading.systemImage, size: 28)
+                    Text("\(reading.label)").strandOverline()
+                }
                 Spacer(minLength: 8)
                 HStack(alignment: .center, spacing: 10) {
                     // The signature liquid gauge — static (posed) so a grid of them doesn't each run a live
@@ -1305,9 +1370,13 @@ private struct LiquidVitalTile: View {
 private struct SkinTempSection: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var repo: Repository
+    #if os(iOS)
+    @EnvironmentObject private var health: HealthKitBridge
+    #endif
 
     /// The cycle-awareness opt-in (default OFF). The same key AppModel reads, so a flip is consistent.
     @AppStorage(AppModel.cycleAwarenessKey) private var cycleEnabled = false
+    @State private var cycleTrackerPresented = false
 
     /// Whether the cycle-awareness opt-in is offered for this profile (#801). Delegates to the shared
     /// ``ProfileStore/cycleAwarenessApplies`` gate so Health + Automations stay in lockstep: cycle phase
@@ -1335,18 +1404,35 @@ private struct SkinTempSection: View {
             // rather than silently hiding their data; only the OPT-IN invitation is gated.
             if cycleEnabled, let cycle = model.cyclePhase {
                 CycleAwarenessCard(result: cycle, curve: model.cycleCurve,
+                                   onLogPeriod: {
+                                       Task {
+                                           _ = await repo.logPeriodStart(day: Repository.localDayKey(Date()))
+                                           await model.refreshV5Signals()
+                                       }
+                                   },
+                                   onOpenDetail: { cycleTrackerPresented = true },
                                    // Symmetric off (#801): turn it off in-place, here in Health, where
                                    // it was turned on, not only from Automations.
                                    onTurnOff: {
                                        cycleEnabled = false
                                        model.cycleAwarenessEnabled = false
-                                       Task { await model.refreshV5Signals() }
+                                       Task {
+                                           #if os(iOS)
+                                           await health.disableCycleDataImport()
+                                           #endif
+                                           await model.refreshV5Signals()
+                                       }
                                    })
             } else if !cycleEnabled && cycleOptInApplies {
                 CycleAwarenessOptInCard(onEnable: {
                     cycleEnabled = true
                     model.cycleAwarenessEnabled = true
-                    Task { await model.refreshV5Signals() }
+                    Task {
+                        #if os(iOS)
+                        await health.requestCycleDataAccessAndImport()
+                        #endif
+                        await model.refreshV5Signals()
+                    }
                 })
             }
 
@@ -1358,6 +1444,13 @@ private struct SkinTempSection: View {
                 && model.illnessSignal == nil && model.circadianPhase == nil && model.cyclePhase == nil {
                 ComingSoon(what: "Wear the strap overnight and these read from your nightly skin temperature.",
                            symbol: "thermometer.medium")
+            }
+        }
+        .sheet(isPresented: $cycleTrackerPresented) {
+            if let cycle = model.cyclePhase {
+                CycleTrackerView(result: cycle, curve: model.cycleCurve)
+                    .environmentObject(repo)
+                    .environmentObject(model)
             }
         }
     }

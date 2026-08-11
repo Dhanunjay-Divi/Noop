@@ -56,4 +56,26 @@ final class MetricCatalogStepsTests: XCTestCase {
     func testBareKeyStepsResolutionStaysAppleHealth() {
         XCTAssertEqual(MetricCatalog.all.first(where: { $0.key == "steps" })?.source, "apple-health")
     }
+
+    /// A catalog row describes a namespace, not necessarily the producer of every resolved point.
+    /// `my-whoop` can resolve to measured strap data or a `-noop` computed sibling, so it must never
+    /// present an independent score as if it were an official WHOOP value.
+    func testSourceLabelsKeepIndependentAndOfficialSeriesDistinct() {
+        XCTAssertEqual(
+            MetricCatalog.metric(key: "recovery", source: "my-whoop")?.sourceLabel,
+            "NOOP / strap"
+        )
+
+        let official = MetricDescriptor(
+            key: "recovery",
+            title: "Recovery",
+            category: "Charge",
+            unit: "%",
+            source: "whoop-official-reference",
+            icon: "heart",
+            decimals: 0,
+            higherIsBetter: true
+        )
+        XCTAssertEqual(official.sourceLabel, "WHOOP import")
+    }
 }

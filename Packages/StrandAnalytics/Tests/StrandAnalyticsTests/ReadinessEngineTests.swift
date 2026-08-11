@@ -77,6 +77,37 @@ final class ReadinessEngineTests: XCTestCase {
         XCTAssertNotEqual(ReadinessEngine.evaluate(days: days).level, .insufficient)
     }
 
+    func testHistoricalReadinessIgnoresFutureLoadRows() {
+        var days = baseline(todayHrv: 60, todayRhr: 52, todayStrain: 10)
+        let historical = ReadinessEngine.evaluate(days: days, today: "2024-03-29")
+        days.append(DailyMetric(
+            day: "2024-03-30", totalSleepMin: nil, efficiency: nil, deepMin: nil,
+            remMin: nil, lightMin: nil, disturbances: nil, restingHr: 52, avgHrv: 60,
+            recovery: nil, strain: 100, exerciseCount: nil, spo2Pct: nil,
+            skinTempDevC: nil, respRateBpm: 14))
+        let withFuture = ReadinessEngine.evaluate(days: days, today: "2024-03-29")
+        XCTAssertEqual(withFuture.acwr, historical.acwr)
+        XCTAssertEqual(withFuture.signals.first { $0.key == "acwr" },
+                       historical.signals.first { $0.key == "acwr" })
+    }
+
+    func testSparseRowsAcrossMonthsDoNotBecomeTwentyEightDayLoad() {
+        var days: [DailyMetric] = []
+        for month in 1...12 {
+            for day in [1, 15] {
+                days.append(DailyMetric(
+                    day: String(format: "2024-%02d-%02d", month, day),
+                    totalSleepMin: nil, efficiency: nil, deepMin: nil, remMin: nil,
+                    lightMin: nil, disturbances: nil, restingHr: 52, avgHrv: 60,
+                    recovery: nil, strain: 10, exerciseCount: nil, spo2Pct: nil,
+                    skinTempDevC: nil, respRateBpm: 14))
+            }
+        }
+        let result = ReadinessEngine.evaluate(days: days, today: "2024-12-15")
+        XCTAssertNil(result.acwr)
+        XCTAssertFalse(result.signals.contains { $0.key == "acwr" })
+    }
+
     func testStatsHelpers() {
         XCTAssertEqual(ReadinessEngine.mean([2, 4, 6]), 4)
         XCTAssertEqual(ReadinessEngine.sampleSD([2, 4, 6])!, 2.0, accuracy: 0.0001)

@@ -65,6 +65,8 @@ final class UnitFormatterTests: XCTestCase {
         XCTAssertEqual(UnitFormatter.massFromKilograms(74.5, system: .metric), "74.5 kg")
         // 74.5 * 2.20462 = 164.24419 → "164.2 lb"
         XCTAssertEqual(UnitFormatter.massFromKilograms(74.5, system: .imperial), "164.2 lb")
+        XCTAssertEqual(UnitFormatter.massFromKilograms(74.5, unit: .kilograms), "74.5 kg")
+        XCTAssertEqual(UnitFormatter.massFromKilograms(74.5, unit: .pounds), "164.2 lb")
     }
 
     // MARK: - Height formatting
@@ -78,6 +80,8 @@ final class UnitFormatterTests: XCTestCase {
         XCTAssertEqual(UnitFormatter.heightFromCentimeters(178, system: .imperial), "5′ 10″")
         // 152.4 cm = exactly 60 in = 5 ft 0 in
         XCTAssertEqual(UnitFormatter.heightFromCentimeters(152.4, system: .imperial), "5′ 0″")
+        XCTAssertEqual(UnitFormatter.heightFromCentimeters(178, unit: .feetInches), "5′ 10″")
+        XCTAssertEqual(UnitFormatter.heightFromCentimeters(178, unit: .centimeters), "178 cm")
     }
 
     func testHeightRoundingCarriesInchesIntoFeet() {
@@ -129,6 +133,20 @@ final class UnitFormatterTests: XCTestCase {
         XCTAssertEqual(UnitPrefs.resolveTemperature(system: .metric, override: "fahrenheit"), .fahrenheit)
     }
 
+    func testMassAndHeightOverridesResolveIndependently() {
+        // Unset follows the legacy system choice, preserving existing installs.
+        XCTAssertEqual(UnitPrefs.resolveMass(system: .metric, override: ""), .kilograms)
+        XCTAssertEqual(UnitPrefs.resolveMass(system: .imperial, override: ""), .pounds)
+        XCTAssertEqual(UnitPrefs.resolveHeight(system: .metric, override: ""), .centimeters)
+        XCTAssertEqual(UnitPrefs.resolveHeight(system: .imperial, override: ""), .feetInches)
+
+        // Explicit choices can be mixed freely.
+        XCTAssertEqual(UnitPrefs.resolveMass(system: .imperial, override: "kg"), .kilograms)
+        XCTAssertEqual(UnitPrefs.resolveHeight(system: .metric, override: "ft_in"), .feetInches)
+        XCTAssertEqual(UnitPrefs.resolveMass(system: .metric, override: "lb"), .pounds)
+        XCTAssertEqual(UnitPrefs.resolveHeight(system: .imperial, override: "cm"), .centimeters)
+    }
+
     // MARK: - Unit labels
 
     func testUnitLabels() {
@@ -136,6 +154,8 @@ final class UnitFormatterTests: XCTestCase {
         XCTAssertEqual(UnitFormatter.distanceUnit(.imperial), "mi")
         XCTAssertEqual(UnitFormatter.massUnit(.metric), "kg")
         XCTAssertEqual(UnitFormatter.massUnit(.imperial), "lb")
+        XCTAssertEqual(UnitFormatter.massUnit(MassUnit.kilograms), "kg")
+        XCTAssertEqual(UnitFormatter.massUnit(MassUnit.pounds), "lb")
         XCTAssertEqual(UnitFormatter.temperatureUnit(.celsius), "°C")
         XCTAssertEqual(UnitFormatter.temperatureUnit(.fahrenheit), "°F")
     }

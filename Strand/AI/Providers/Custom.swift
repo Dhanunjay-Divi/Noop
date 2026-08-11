@@ -61,7 +61,7 @@ struct CustomClient: AIProviderClient {
         try AIProvider.guardCustomBaseURL()   // #321: reject a public cleartext Custom URL before egress
         var req = URLRequest(url: AIProvider.custom.modelsEndpoint)
         req.httpMethod = "GET"
-        if !key.isEmpty { req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        AIProvider.applyCustomAuthHeader(key, to: &req)
 
         return parseModels(try await performRequest(req, session: session))
     }
@@ -69,11 +69,16 @@ struct CustomClient: AIProviderClient {
     /// Pure: unwrap an OpenAI-compatible `/models` body into ids. Unlike OpenAI we keep *all* ids —
     /// a local server names models freely (`llama3.1`, `qwen2.5`, …). No network — unit-tested.
     func parseModels(_ json: [String: Any]) -> [String] {
-        guard let list = json["data"] as? [[String: Any]] else { return [] }
-        return list.compactMap { row in
-            guard let id = row["id"] as? String, !id.isEmpty else { return nil }
-            return id
+        if let list = json["data"] as? [[String: Any]] {
+            return list.compactMap { row in
+                guard let id = row["id"] as? String, !id.isEmpty else { return nil }
+                return id
+            }
         }
+        guard let catalog = json["catalog"] as? [[String: Any]] else { return [] }
+        var seen = Set<String>()
+        return catalog.flatMap { ($0["models"] as? [String]) ?? [] }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 
     // MARK: Private
@@ -97,7 +102,7 @@ struct CustomClient: AIProviderClient {
 
         var req = URLRequest(url: AIProvider.custom.endpoint)
         req.httpMethod = "POST"
-        if !key.isEmpty { req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        AIProvider.applyCustomAuthHeader(key, to: &req)
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
 

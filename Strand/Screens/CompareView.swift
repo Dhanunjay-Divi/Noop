@@ -117,6 +117,8 @@ private struct CompareSeries: Identifiable {
 
 struct CompareView: View {
     @EnvironmentObject var repo: Repository
+    @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
+    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = true
     @EnvironmentObject var intelligence: IntelligenceEngine
 
     // Effort display scale (#268) — routes the Effort metric's min/max + hover read-outs onto WHOOP's
@@ -170,6 +172,8 @@ struct CompareView: View {
     @State private var referenceReport: WhoopReferenceComparisonReport?
     @State private var referenceEstimate: CalibratedMetricEstimate?
     @State private var referenceError: String?
+    @State private var showingReferenceExport = false
+    @State private var referenceExportStatus: String?
     /// nil means this Compare visit has not completed a proof-producing score pass yet. An empty set is a
     /// valid completed receipt (no qualifying WHOOP raw nights), and must not trigger another 120-day pass
     /// every time the selected reference metric changes.
@@ -223,6 +227,22 @@ struct CompareView: View {
         .task(id: "\(referenceMetric.rawValue)|\(WhoopImporter.importerVersion)") {
             await loadOfficialReference()
         }
+        .sheet(isPresented: $showingReferenceExport) {
+            if let report = referenceReport, let statistics = report.statistics {
+                ReferenceComparisonExportSheet(
+                    metricName: referenceMetric.label,
+                    pairedDays: statistics.sampleCount
+                ) { scope in
+                    // Let SwiftUI dismiss both the confirmation alert and this review sheet before
+                    // presenting NSSavePanel / UIActivityViewController. No package is assembled until
+                    // after the confirmed UI has cleared.
+                    showingReferenceExport = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        Task { await exportReferenceComparison(report: report, scope: scope) }
+                    }
+                }
+            }
+        }
     }
 
     private enum ReferenceMetricChoice: String, CaseIterable, Identifiable {
@@ -230,9 +250,9 @@ struct CompareView: View {
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .charge: return String(localized: "Charge")
+            case .charge: return String(localized: "Recovery")
             case .effort: return String(localized: "Effort")
-            case .rest: return String(localized: "Rest")
+            case .rest: return String(localized: "Sleep Score")
             }
         }
         var metric: WhoopComparableMetric {
@@ -249,10 +269,12 @@ struct CompareView: View {
             case .rest: return NoopScoreAlgorithmRevision.rest
             }
         }
+        var units: String { String(localized: "0–100 score") }
     }
 
     private func loadOfficialReference() async {
         referenceError = nil
+        referenceExportStatus = nil
         referenceReport = nil
         referenceEstimate = nil
         guard let store = await repo.storeHandle() else {
@@ -326,7 +348,8 @@ struct CompareView: View {
 
     private var officialReferenceSection: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Official reference", overline: "Your WHOOP export vs Noop")
+            SectionHeader("Official reference", overline: "Your WHOOP export vs Noop",
+                          onDark: showDayCycleBackground && skyBehindCards)
             NoopCard {
                 VStack(alignment: .leading, spacing: NoopMetrics.gap) {
                     Picker("Reference metric", selection: $referenceMetric) {
@@ -412,6 +435,28 @@ struct CompareView: View {
                             .font(StrandFont.caption)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
+
+                        Divider().overlay(StrandPalette.hairline)
+                        VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                            NoopButton(
+                                "Export comparison…",
+                                systemImage: "square.and.arrow.up",
+                                kind: .secondary
+                            ) {
+                                referenceExportStatus = nil
+                                showingReferenceExport = true
+                            }
+                            Text("Summary-only is recommended. Nothing is prepared or uploaded until you review a privacy scope and confirm the export.")
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let referenceExportStatus {
+                                Label(referenceExportStatus, systemImage: "checklist")
+                                    .font(StrandFont.caption)
+                                    .foregroundStyle(StrandPalette.statusPositive)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
                     } else if let referenceError {
                         Text(referenceError)
                             .font(StrandFont.footnote)
@@ -473,6 +518,47 @@ struct CompareView: View {
 
     private func signed(_ value: Double) -> String {
         String(format: "%+.2f", value)
+    }
+
+    @MainActor
+    private func exportReferenceComparison(
+        report: WhoopReferenceComparisonReport,
+        scope: ReferenceComparisonExport.Scope
+    ) async {
+        #if os(iOS)
+        let platform = "iOS"
+        #else
+        let platform = "macOS"
+        #endif
+        let context = ReferenceComparisonExport.Context(
+            appVersion: Bundle.main.object(
+                forInfoDictionaryKey: "CFBundleShortVersionString"
+            ) as? String ?? "unknown",
+            platform: platform,
+            whoopImporterRevision: WhoopImporter.schemaRevision
+        )
+        guard let package = ReferenceComparisonExport.makePackage(
+            report: report,
+            metricName: referenceMetric.label,
+            units: referenceMetric.units,
+            context: context,
+            scope: scope
+        ) else {
+            referenceExportStatus = nil
+            return
+        }
+
+        let result = await FileExport.exportBundle(
+            entries: package.entries,
+            suggestedName: package.suggestedName
+        )
+        guard result != nil else {
+            referenceExportStatus = nil
+            return
+        }
+        referenceExportStatus = scope == .summaryOnly
+            ? String(localized: "NOOP summary ZIP ready. In Files, select it with your latest original WHOOP export ZIP, then Share → Messages and use the same trial conversation. Verify the recipient; nothing was sent automatically.")
+            : String(localized: "Sensitive NOOP exact-pairs ZIP ready. In Files, select it with your latest original WHOOP export ZIP, then Share → Messages and use the same trial conversation. Verify the recipient; nothing was sent automatically.")
     }
 
     // MARK: - Selection key (re-loads when the set of metrics changes)
@@ -611,7 +697,8 @@ struct CompareView: View {
 
     private var metricSection: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Metrics", overline: "Overlay 2-4 signals")
+            SectionHeader("Metrics", overline: "Overlay 2-4 signals",
+                          onDark: showDayCycleBackground)
             NoopCard {
                 VStack(alignment: .leading, spacing: NoopMetrics.gap) {
                     // Responsive: range pills + the Add menu side-by-side when there's room, else
@@ -938,6 +1025,208 @@ struct CompareView: View {
     private func correlationColor(_ r: Double) -> Color {
         let base = r >= 0 ? StrandPalette.statusPositive : StrandPalette.statusCritical
         return base.opacity(0.55 + 0.45 * min(abs(r), 1.0))
+    }
+}
+
+// MARK: - Official-reference export review
+
+/// Privacy gate for comparison exports. Opening this sheet does not build a file. The selected scope is
+/// passed back only after the user presses the export action and confirms the system alert.
+private struct ReferenceComparisonExportSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var scope: ReferenceComparisonExport.Scope = .summaryOnly
+    @State private var showingConfirmation = false
+
+    let metricName: String
+    let pairedDays: Int
+    let onConfirm: (ReferenceComparisonExport.Scope) -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
+                    VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                        Label("Local export", systemImage: "lock.shield")
+                            .font(StrandFont.overline)
+                            .foregroundStyle(StrandPalette.statusPositive)
+                        Text("\(metricName) · \(pairedDays) paired days")
+                            .font(StrandFont.title2)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text("Choose exactly how much leaves NOOP. Opening this screen has not created or uploaded a file.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                        scopeOption(
+                            .summaryOnly,
+                            title: "Summary only",
+                            badge: "RECOMMENDED",
+                            detail: "Aggregate bias, error, correlation, revisions, and calibration status. No exact dates, daily values, or personal means."
+                        )
+                        scopeOption(
+                            .exactDailyPairs,
+                            title: "Exact daily pairs",
+                            badge: "SENSITIVE",
+                            detail: "Adds a CSV with every matched date, official WHOOP value, NOOP value, and their difference."
+                        )
+                    }
+
+                    NoopCard {
+                        VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                            Label("Send both files in Messages", systemImage: "message.fill")
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.textPrimary)
+
+                            Text("After you confirm, save the NOOP ZIP to Files. In Files, select both ZIPs together, tap Share → Messages, and use the same iMessage conversation with your trial coordinator:")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            sharingChecklistRow(
+                                number: "1",
+                                title: "Latest original WHOOP export ZIP",
+                                detail: "Keep the unmodified ZIP you downloaded from WHOOP."
+                            )
+                            sharingChecklistRow(
+                                number: "2",
+                                title: "NOOP comparison ZIP",
+                                detail: "This is created only after you confirm below."
+                            )
+
+                            Divider().overlay(StrandPalette.hairline)
+
+                            Text("The WHOOP ZIP contains sensitive health data. Verify the iMessage recipient before sending. NOOP never chooses a contact, sends a message, or uploads either file automatically.")
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.statusWarning)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    NoopButton(
+                        scope == .summaryOnly ? "Review summary export" : "Review exact export",
+                        systemImage: "square.and.arrow.up",
+                        kind: .primary,
+                        fullWidth: true
+                    ) {
+                        showingConfirmation = true
+                    }
+                }
+                .screenPadding()
+                .padding(.vertical, NoopMetrics.space6)
+            }
+            .background(StrandPalette.surfaceBase.ignoresSafeArea())
+            .navigationTitle("Export comparison")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 500, idealWidth: 560, minHeight: 540, idealHeight: 620)
+        #endif
+        .alert("Confirm local export", isPresented: $showingConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button {
+                let confirmedScope = scope
+                onConfirm(confirmedScope)
+                dismiss()
+            } label: {
+                Text(scope == .summaryOnly
+                     ? "Export summary"
+                     : "Include exact pairs & export")
+            }
+        } message: {
+            Text(confirmationMessage)
+        }
+    }
+
+    private func scopeOption(
+        _ option: ReferenceComparisonExport.Scope,
+        title: LocalizedStringKey,
+        badge: LocalizedStringKey,
+        detail: LocalizedStringKey
+    ) -> some View {
+        let selected = scope == option
+        return Button {
+            scope = option
+        } label: {
+            HStack(alignment: .top, spacing: NoopMetrics.space3) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(selected ? StrandPalette.accent : StrandPalette.textTertiary)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                    HStack(spacing: NoopMetrics.space2) {
+                        Text(title)
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text(badge)
+                            .font(StrandFont.caption)
+                            .foregroundStyle(
+                                option == .summaryOnly
+                                ? StrandPalette.statusPositive
+                                : StrandPalette.statusWarning
+                            )
+                    }
+                    Text(detail)
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(NoopMetrics.space4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(StrandPalette.surfaceRaised)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(
+                        selected ? StrandPalette.accent : StrandPalette.hairline,
+                        lineWidth: selected ? 2 : 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(title))
+        .accessibilityValue(selected ? Text("Selected") : Text("Not selected"))
+    }
+
+    private func sharingChecklistRow(
+        number: String,
+        title: LocalizedStringKey,
+        detail: LocalizedStringKey
+    ) -> some View {
+        HStack(alignment: .top, spacing: NoopMetrics.space3) {
+            Text(number)
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.surfaceBase)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(StrandPalette.accent))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(StrandFont.body)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(detail)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var confirmationMessage: String {
+        if scope == .summaryOnly {
+            return String(localized: "Create an aggregate-only ZIP now? It omits exact comparison dates, daily values, and personal means. Save the ZIP, then in Files select it with your latest original WHOOP export ZIP and tap Share → Messages. NOOP does not choose a recipient or send automatically.")
+        }
+        return String(localized: "This ZIP will contain sensitive health data: every matched date and daily official WHOOP and NOOP value. Include those exact pairs? If you continue, save the ZIP, then in Files select it with your latest original WHOOP export ZIP and tap Share → Messages. Verify the recipient; NOOP does not send automatically.")
     }
 }
 

@@ -1,6 +1,7 @@
 package com.noop.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -95,5 +96,48 @@ class ReadSpineUnionTest {
         val union = WhoopRepository.unionByDay(listOf(active, canonicalOnly))
         // mergeDaily re-sorts oldest-first downstream; here assert the day SET is the union.
         assertTrue(union.map { it.day }.toSet() == setOf("2026-06-09", "2026-06-13"))
+    }
+
+    @Test
+    fun hollowWinnerKeepsOtherStrapColumns() {
+        val active = DailyMetric(deviceId = reAdded, day = "2026-07-29", steps = 10_775)
+        val filler = DailyMetric(
+            deviceId = canonical, day = "2026-07-29", totalSleepMin = 435.0,
+            efficiency = 91.0, deepMin = 96.0, remMin = 110.0, lightMin = 229.0,
+            recovery = 93.2, restingHr = 64, avgHrv = 37.06, strain = 8.4,
+        )
+        val merged = WhoopRepository.unionByDay(listOf(listOf(active), listOf(filler))).single()
+
+        assertEquals(reAdded, merged.deviceId)
+        assertEquals(10_775, merged.steps)
+        assertEquals(435.0, merged.totalSleepMin)
+        assertEquals(96.0, merged.deepMin)
+        assertEquals(93.2, merged.recovery)
+    }
+
+    @Test
+    fun measuredZeroIsNotTreatedAsMissing() {
+        val active = DailyMetric(deviceId = reAdded, day = "2026-07-29",
+            steps = 0, strain = 0.0, avgHrv = 0.0)
+        val filler = DailyMetric(deviceId = canonical, day = "2026-07-29",
+            steps = 9_120, strain = 14.7, avgHrv = 42.0)
+        val merged = WhoopRepository.unionByDay(listOf(listOf(active), listOf(filler))).single()
+
+        assertEquals(0, merged.steps)
+        assertEquals(0.0, merged.strain)
+        assertEquals(0.0, merged.avgHrv)
+    }
+
+    @Test
+    fun sleepBlockIsNeverAssembledAcrossTwoDevices() {
+        val active = DailyMetric(deviceId = reAdded, day = "2026-07-29", totalSleepMin = 402.0)
+        val filler = DailyMetric(deviceId = canonical, day = "2026-07-29",
+            totalSleepMin = 435.0, deepMin = 96.0, remMin = 110.0, lightMin = 229.0)
+        val merged = WhoopRepository.unionByDay(listOf(listOf(active), listOf(filler))).single()
+
+        assertEquals(402.0, merged.totalSleepMin)
+        assertNull(merged.deepMin)
+        assertNull(merged.remMin)
+        assertNull(merged.lightMin)
     }
 }

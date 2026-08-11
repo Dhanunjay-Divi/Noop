@@ -33,7 +33,13 @@ class DeviceRegistry(
     )
 
     /** All paired devices, oldest first. */
-    suspend fun all(): List<PairedDeviceRow> = dao.pairedDevices()
+    suspend fun all(): List<PairedDeviceRow> = dao.pairedDevices().map { row ->
+        val whoop = row.brand.equals("WHOOP", ignoreCase = true) || row.id == "my-whoop" || row.id.startsWith("whoop-")
+        if (!whoop) row else {
+            val stripped = WhoopLiveCapabilities.stripSpo2Token(row.capabilities)
+            if (stripped == row.capabilities) row else row.copy(capabilities = stripped)
+        }
+    }
 
     /** The single active device id, or null if none. */
     suspend fun activeDeviceId(): String? = dao.activeDeviceId()

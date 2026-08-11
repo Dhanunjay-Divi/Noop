@@ -1,5 +1,6 @@
 import XCTest
 import SQLite3
+import WhoopStore
 import ZIPFoundation
 @testable import Strand
 
@@ -7,7 +8,8 @@ import ZIPFoundation
 ///
 /// These exercise the SAME hardened core the picker import uses, via the injectable
 /// `DataBackup.restore(from:toDatabaseAt:)` seam (a throwaway DB path, never the user's live store):
-///  - a `.noopbak` ZIP backup round-trips: `writeBackupForTesting` then `restore` returns the same rows;
+///  - a `.noopbak` ZIP backup stages without touching live data, then cold-launch apply returns the rows;
+///  - committed rows present only in a live WAL are preserved in the safety snapshot;
 ///  - a foreign-but-valid SQLite (Room / no `grdb_migrations`) is REJECTED and the live DB is intact;
 ///  - a corrupt (non-SQLite) file is REJECTED and the live DB is intact;
 ///  - a folder prune actually deletes the oldest files past keep-N (pure selection, applied to real files).
@@ -40,7 +42,8 @@ final class BackupSyncRoundTripTests: XCTestCase {
     // MARK: - Round trip: backupNow → restore returns the same rows
 
     func testBackupThenRestoreReturnsTheSameRows() throws {
-        // A valid GRDB-origin source DB (carries `grdb_migrations`) with one data table + known rows.
+        // A genuine v1 NOOP database. Staging must run every later production migration privately
+        // before it publishes the restore marker.
         let sourceDB = tmp.appendingPathComponent("source.sqlite")
         try makeNoopDatabase(at: sourceDB, deviceRows: ["my-whoop", "watch"])
 
@@ -54,10 +57,51 @@ final class BackupSyncRoundTripTests: XCTestCase {
         let result = DataBackup.restore(from: backup, toDatabaseAt: liveDB.path)
 
         guard case .imported = result else {
-            return XCTFail("Restore should succeed for a valid NOOP backup, got \(result)")
+            return XCTFail("Restore should stage a valid NOOP backup, got \(result)")
         }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: liveDB.path),
+                       "Staging must not create or replace the live database in-session")
+        try applyPendingRestore(to: liveDB, settingsDefaults: freshDefaults())
         XCTAssertEqual(try deviceRows(in: liveDB), ["my-whoop", "watch"],
                        "Restored DB should hold exactly the backed-up rows")
+    }
+
+    func testSnapshotExportCapturesWALCommitMadeAfterCheckpointBoundary() throws {
+        let sourceDB = tmp.appendingPathComponent("export-source.sqlite")
+        try makeNoopDatabase(at: sourceDB, deviceRows: ["before-checkpoint"])
+
+        var writer: OpaquePointer?
+        guard sqlite3_open_v2(sourceDB.path, &writer,
+                              SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            throw TestError("could not open export writer")
+        }
+        defer { sqlite3_close(writer) }
+        try exec(writer, "PRAGMA journal_mode=WAL")
+        try exec(writer, "PRAGMA wal_autocheckpoint=0")
+        try exec(writer, "PRAGMA wal_checkpoint(TRUNCATE)")
+
+        let backup = tmp.appendingPathComponent("immutable-export.noopbak")
+        try DataBackup.writeSnapshotBackupForTesting(
+            databaseAt: sourceDB,
+            to: backup,
+            afterSnapshotInitialized: {
+                // This separate live connection commits after the old export's checkpoint boundary
+                // but before the online backup copies pages. A raw main-file ZIP would omit this WAL
+                // row; sqlite3_backup reads it as part of one consistent logical snapshot.
+                try self.exec(writer, "INSERT INTO device (id, name) VALUES ('after-checkpoint', 'late')")
+            })
+
+        let archive = try XCTUnwrap(Archive(url: backup, accessMode: .read))
+        let entry = try XCTUnwrap(archive["noop-backup.sqlite"])
+        var payload = Data()
+        _ = try archive.extract(entry) { payload.append($0) }
+        let extracted = tmp.appendingPathComponent("exported-snapshot.sqlite")
+        try payload.write(to: extracted)
+
+        XCTAssertNil(DatabaseIntegrity.quickCheckFailure(atPath: extracted.path))
+        XCTAssertEqual(try deviceRows(in: extracted), ["after-checkpoint", "before-checkpoint"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: extracted.path + "-wal"),
+                       "the archive must contain a standalone SQLite snapshot")
     }
 
     // MARK: - Settings round trip (#1000: restore brings back weight/height/settings)
@@ -80,11 +124,14 @@ final class BackupSyncRoundTripTests: XCTestCase {
         // Restore into a throwaway DB path AND a suite-scoped defaults (never the runner's real domain).
         let defaults = try freshDefaults()
         let liveDB = tmp.appendingPathComponent("live.sqlite")
-        let result = DataBackup.restore(from: backup, toDatabaseAt: liveDB.path, settingsDefaults: defaults)
+        let result = DataBackup.restore(from: backup, toDatabaseAt: liveDB.path)
 
         guard case .imported = result else {
-            return XCTFail("Restore should succeed, got \(result)")
+            return XCTFail("Restore should stage, got \(result)")
         }
+        XCTAssertNil(defaults.object(forKey: "profile.age"),
+                     "Settings must not apply while live pools are still open")
+        try applyPendingRestore(to: liveDB, settingsDefaults: defaults)
         XCTAssertEqual(try deviceRows(in: liveDB), ["my-whoop"], "DB half still round-trips")
         XCTAssertEqual(defaults.object(forKey: "profile.age") as? Int, 34)
         XCTAssertEqual(defaults.string(forKey: "profile.sex"), "female")
@@ -104,11 +151,12 @@ final class BackupSyncRoundTripTests: XCTestCase {
 
         let defaults = try freshDefaults()
         let liveDB = tmp.appendingPathComponent("live.sqlite")
-        let result = DataBackup.restore(from: backup, toDatabaseAt: liveDB.path, settingsDefaults: defaults)
+        let result = DataBackup.restore(from: backup, toDatabaseAt: liveDB.path)
 
         guard case .imported = result else {
             return XCTFail("A legacy single-entry ZIP must restore exactly as today, got \(result)")
         }
+        try applyPendingRestore(to: liveDB, settingsDefaults: defaults)
         XCTAssertEqual(try deviceRows(in: liveDB), ["legacy-strap"])
         XCTAssertNil(defaults.object(forKey: "profile.age"), "No settings entry → defaults untouched")
         XCTAssertNil(defaults.object(forKey: "units.system"))
@@ -127,13 +175,142 @@ final class BackupSyncRoundTripTests: XCTestCase {
         let liveDB = tmp.appendingPathComponent("live.sqlite")
         try makeNoopDatabase(at: liveDB, deviceRows: ["original"])
 
-        let result = DataBackup.restore(from: backup, toDatabaseAt: liveDB.path, settingsDefaults: defaults)
+        let result = DataBackup.restore(from: backup, toDatabaseAt: liveDB.path)
         guard case .failure = result else {
             return XCTFail("Foreign backup must still be rejected, got \(result)")
         }
         XCTAssertNil(defaults.object(forKey: "profile.age"),
                      "A rejected restore must never apply the backup's settings")
         XCTAssertEqual(try deviceRows(in: liveDB), ["original"], "Live DB untouched")
+    }
+
+    func testClaimedV1WithMissingBaseTablesIsRejectedBeforePendingPublish() throws {
+        let malformed = tmp.appendingPathComponent("malformed-v1.sqlite")
+        try makeMalformedClaimedV1Database(at: malformed)
+        let backup = tmp.appendingPathComponent("malformed-v1.noopbak")
+        try DataBackup.writeBackupForTesting(databaseAt: malformed, to: backup)
+
+        let liveDB = tmp.appendingPathComponent("live.sqlite")
+        try makeNoopDatabase(at: liveDB, deviceRows: ["original"])
+        let result = DataBackup.restore(from: backup, toDatabaseAt: liveDB.path)
+
+        guard case .failure = result else {
+            return XCTFail("a migration ledger must not substitute for the actual v1 schema: \(result)")
+        }
+        XCTAssertEqual(try deviceRows(in: liveDB), ["original"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: liveDB.path + ".pending-restore.json"),
+                       "a candidate that cannot run the real migrator must never be published")
+    }
+
+    func testUnrelatedSQLiteWithoutMigrationLedgerIsRejected() throws {
+        let unrelated = tmp.appendingPathComponent("unrelated.sqlite")
+        var db: OpaquePointer?
+        guard sqlite3_open(unrelated.path, &db) == SQLITE_OK else {
+            throw TestError("could not open unrelated fixture")
+        }
+        try exec(db, "CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)")
+        sqlite3_close(db)
+
+        let liveDB = tmp.appendingPathComponent("live.sqlite")
+        try makeNoopDatabase(at: liveDB, deviceRows: ["original"])
+        let result = DataBackup.restore(from: unrelated, toDatabaseAt: liveDB.path)
+        guard case .failure = result else {
+            return XCTFail("an unrelated valid SQLite file must not become an empty NOOP store: \(result)")
+        }
+        XCTAssertEqual(try deviceRows(in: liveDB), ["original"])
+    }
+
+    // MARK: - P0: cold-launch apply preserves WAL data and never strands an open inode
+
+    func testColdLaunchApplySnapshotsCommittedWALAndKeepsExistingHandleCoherent() throws {
+        let sourceDB = tmp.appendingPathComponent("source.sqlite")
+        try makeNoopDatabase(at: sourceDB, deviceRows: ["restored"])
+        let backup = tmp.appendingPathComponent("wal-safe.noopbak")
+        try DataBackup.writeBackupForTesting(databaseAt: sourceDB, to: backup)
+
+        let liveDB = tmp.appendingPathComponent("live.sqlite")
+        try makeNoopDatabase(at: liveDB, deviceRows: ["main-row"])
+
+        // Keep this connection open across stage + apply. It stands in for another-process access and,
+        // more importantly, proves the implementation never unlinks the inode underneath SQLite.
+        // (Production's two in-process GRDB pools are absent at cold apply by construction.)
+        var liveHandle: OpaquePointer?
+        guard sqlite3_open_v2(liveDB.path, &liveHandle,
+                              SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            throw TestError("could not open live WAL fixture")
+        }
+        defer { sqlite3_close(liveHandle) }
+        try exec(liveHandle, "PRAGMA journal_mode=WAL")
+        try exec(liveHandle, "PRAGMA wal_autocheckpoint=0")
+        try exec(liveHandle, "PRAGMA wal_checkpoint(TRUNCATE)")
+        try exec(liveHandle, "INSERT INTO device (id) VALUES ('wal-only-row')")
+
+        let walSize = ((try FileManager.default.attributesOfItem(atPath: liveDB.path + "-wal"))[.size]
+            as? NSNumber)?.int64Value ?? 0
+        XCTAssertGreaterThan(walSize, 0, "precondition: the committed row is still represented in WAL")
+        XCTAssertEqual(try deviceRows(using: liveHandle), ["main-row", "wal-only-row"])
+
+        let result = DataBackup.restore(from: backup, toDatabaseAt: liveDB.path)
+        guard case .imported(let promisedSnapshot) = result else {
+            return XCTFail("valid backup should stage, got \(result)")
+        }
+
+        // Staging is deliberately non-destructive: both committed rows and the WAL remain visible through
+        // the exact same connection until the simulated cold-launch handoff is consumed.
+        XCTAssertEqual(try deviceRows(using: liveHandle), ["main-row", "wal-only-row"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: promisedSnapshot.path),
+                       "the live snapshot is created at cold apply, not by the running app")
+
+        let apply = try PendingDatabaseRestore.applyIfPresent(
+            toDatabaseAt: liveDB.path, settingsDefaults: freshDefaults())
+        guard case .applied(let snapshot) = apply else {
+            return XCTFail("pending restore should apply, got \(apply)")
+        }
+        XCTAssertEqual(snapshot.standardizedFileURL, promisedSnapshot.standardizedFileURL)
+
+        // The old raw-copy implementation left this handle on the deleted pre-restore inode. SQLite's
+        // transactional backup writes the same inode, so a fresh statement on the SAME handle sees the
+        // restored row immediately — no stale-handle split brain.
+        XCTAssertEqual(try deviceRows(using: liveHandle), ["restored"])
+        XCTAssertEqual(try deviceRows(in: liveDB), ["restored"])
+
+        // The rollback side file is a standalone logical snapshot, not just a copy of the main file:
+        // it contains the row that was committed only to the live WAL at the time of restore.
+        XCTAssertEqual(try deviceRows(in: snapshot), ["main-row", "wal-only-row"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: snapshot.path + "-wal"),
+                       "the safety snapshot must not depend on a WAL sidecar")
+    }
+
+    func testCorruptRestoreLeavesCommittedWALAndOpenHandleUntouched() throws {
+        let liveDB = tmp.appendingPathComponent("live.sqlite")
+        try makeNoopDatabase(at: liveDB, deviceRows: ["main-row"])
+
+        var liveHandle: OpaquePointer?
+        guard sqlite3_open_v2(liveDB.path, &liveHandle,
+                              SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            throw TestError("could not open live WAL fixture")
+        }
+        defer { sqlite3_close(liveHandle) }
+        try exec(liveHandle, "PRAGMA journal_mode=WAL")
+        try exec(liveHandle, "PRAGMA wal_autocheckpoint=0")
+        try exec(liveHandle, "PRAGMA wal_checkpoint(TRUNCATE)")
+        try exec(liveHandle, "INSERT INTO device (id) VALUES ('wal-only-row')")
+
+        let corrupt = tmp.appendingPathComponent("corrupt.noopbak")
+        try Data("not sqlite and not zip".utf8).write(to: corrupt)
+        let result = DataBackup.restore(from: corrupt, toDatabaseAt: liveDB.path)
+        guard case .failure = result else {
+            return XCTFail("corrupt restore must be rejected, got \(result)")
+        }
+
+        XCTAssertEqual(try deviceRows(using: liveHandle), ["main-row", "wal-only-row"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: liveDB.path + "-wal"),
+                      "rejection must not remove the live WAL")
+        if case .none = try PendingDatabaseRestore.applyIfPresent(toDatabaseAt: liveDB.path) {
+            // expected: corrupt input never publishes a pending marker
+        } else {
+            XCTFail("corrupt input must not leave a pending restore")
+        }
     }
 
     // MARK: - Foreign SQLite is rejected, live DB untouched
@@ -291,8 +468,22 @@ final class BackupSyncRoundTripTests: XCTestCase {
 
     // MARK: - SQLite fixtures (system SQLite3)
 
-    /// Build a minimal valid GRDB-origin NOOP DB: a `grdb_migrations` bookkeeping table (so the origin
-    /// gate accepts it as this app's backup) plus a `device` table holding the given identifiers.
+    @discardableResult
+    private func applyPendingRestore(to database: URL,
+                                     settingsDefaults: UserDefaults = .standard) throws -> URL {
+        switch try PendingDatabaseRestore.applyIfPresent(
+            toDatabaseAt: database.path, settingsDefaults: settingsDefaults) {
+        case .applied(let safetySnapshot):
+            return safetySnapshot
+        case .none:
+            throw TestError("no pending restore was published")
+        case .discarded(let reason):
+            throw TestError("pending restore was discarded: \(reason)")
+        }
+    }
+
+    /// Build the exact schema produced by migration v1, then mark only v1 applied. Restore staging is
+    /// expected to run v2...current on its private candidate without mutating this source fixture.
     private func makeNoopDatabase(at url: URL, deviceRows: [String]) throws {
         var db: OpaquePointer?
         guard sqlite3_open(url.path, &db) == SQLITE_OK else {
@@ -301,15 +492,60 @@ final class BackupSyncRoundTripTests: XCTestCase {
         defer { sqlite3_close(db) }
         try exec(db, "CREATE TABLE grdb_migrations (identifier TEXT NOT NULL PRIMARY KEY)")
         try exec(db, "INSERT INTO grdb_migrations (identifier) VALUES ('v1')")
-        try exec(db, "CREATE TABLE device (id TEXT NOT NULL PRIMARY KEY)")
+        try exec(db, """
+            CREATE TABLE device (
+                id TEXT PRIMARY KEY,
+                mac TEXT,
+                name TEXT,
+                firstSeen INTEGER,
+                lastSeen INTEGER
+            );
+            CREATE TABLE hrSample (
+                deviceId TEXT NOT NULL,
+                ts INTEGER NOT NULL,
+                bpm INTEGER NOT NULL,
+                PRIMARY KEY (deviceId, ts)
+            );
+            CREATE TABLE rrInterval (
+                deviceId TEXT NOT NULL,
+                ts INTEGER NOT NULL,
+                rrMs INTEGER NOT NULL,
+                PRIMARY KEY (deviceId, ts, rrMs)
+            );
+            CREATE TABLE event (
+                deviceId TEXT NOT NULL,
+                ts INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                payloadJSON TEXT NOT NULL,
+                PRIMARY KEY (deviceId, ts, kind)
+            );
+            CREATE TABLE battery (
+                deviceId TEXT NOT NULL,
+                ts INTEGER NOT NULL,
+                soc REAL,
+                mv INTEGER,
+                PRIMARY KEY (deviceId, ts)
+            );
+            CREATE TABLE rawBatch (
+                batchId TEXT PRIMARY KEY,
+                deviceId TEXT NOT NULL,
+                capturedAt INTEGER NOT NULL,
+                deviceClockRef INTEGER NOT NULL,
+                wallClockRef INTEGER NOT NULL,
+                startTs INTEGER NOT NULL,
+                endTs INTEGER NOT NULL,
+                frameCount INTEGER NOT NULL,
+                byteSize INTEGER NOT NULL,
+                framesBlob BLOB NOT NULL,
+                syncedAt INTEGER
+            );
+            """)
         for id in deviceRows {
             try exec(db, "INSERT INTO device (id) VALUES ('\(id)')")
         }
     }
 
-    /// Build a valid GRDB-origin NOOP DB that spans MULTIPLE pages, so a truncation fixture can cut
-    /// real pages off while page 1 (magic + sqlite_master) stays perfectly readable (#1014).
-    private func makeMultiPageNoopDatabase(at url: URL) throws {
+    private func makeMalformedClaimedV1Database(at url: URL) throws {
         var db: OpaquePointer?
         guard sqlite3_open(url.path, &db) == SQLITE_OK else {
             throw TestError("open failed: \(url.path)")
@@ -317,10 +553,22 @@ final class BackupSyncRoundTripTests: XCTestCase {
         defer { sqlite3_close(db) }
         try exec(db, "CREATE TABLE grdb_migrations (identifier TEXT NOT NULL PRIMARY KEY)")
         try exec(db, "INSERT INTO grdb_migrations (identifier) VALUES ('v1')")
-        try exec(db, "CREATE TABLE device (id TEXT NOT NULL PRIMARY KEY, blob TEXT NOT NULL)")
+        try exec(db, "CREATE TABLE device (id TEXT NOT NULL PRIMARY KEY)")
+        try exec(db, "INSERT INTO device (id) VALUES ('fake-v1')")
+    }
+
+    /// Build a valid GRDB-origin NOOP DB that spans MULTIPLE pages, so a truncation fixture can cut
+    /// real pages off while page 1 (magic + sqlite_master) stays perfectly readable (#1014).
+    private func makeMultiPageNoopDatabase(at url: URL) throws {
+        try makeNoopDatabase(at: url, deviceRows: [])
+        var db: OpaquePointer?
+        guard sqlite3_open(url.path, &db) == SQLITE_OK else {
+            throw TestError("open failed: \(url.path)")
+        }
+        defer { sqlite3_close(db) }
         let filler = String(repeating: "x", count: 200)
         for i in 0..<200 {
-            try exec(db, "INSERT INTO device (id, blob) VALUES ('row-\(i)', '\(filler)')")
+            try exec(db, "INSERT INTO device (id, name) VALUES ('row-\(i)', '\(filler)')")
         }
     }
 
@@ -343,6 +591,10 @@ final class BackupSyncRoundTripTests: XCTestCase {
             throw TestError("open (read) failed: \(url.path)")
         }
         defer { sqlite3_close(db) }
+        return try deviceRows(using: db)
+    }
+
+    private func deviceRows(using db: OpaquePointer?) throws -> [String] {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, "SELECT id FROM device ORDER BY id", -1, &stmt, nil) == SQLITE_OK else {
             throw TestError("prepare failed")

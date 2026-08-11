@@ -282,6 +282,9 @@ sealed class RecordingState {
      *  experimental on 5.0. Surfaced from `LiveState.historySyncExperimental`, overriding the resolver. */
     object HistoryExperimental : RecordingState()
 
+    /** The BLE link is up, but neither live HR nor usable synced history has arrived. */
+    object ConnectedNoData : RecordingState()
+
     /** The chip's status word. VERBATIM, mirror Swift exactly. */
     val title: String
         get() = when (this) {
@@ -289,6 +292,7 @@ sealed class RecordingState {
             is LastSynced -> "Last synced ${minutesAgo}m ago"
             NotRecording -> "Not recording"
             HistoryExperimental -> "Connected"
+            ConnectedNoData -> "Connected"
         }
 
     /** The chip's one-line detail. VERBATIM, mirror Swift exactly. */
@@ -298,6 +302,7 @@ sealed class RecordingState {
             is LastSynced -> "Reconnect to pull the latest."
             NotRecording -> "Strap not connected. Tap to connect."
             HistoryExperimental -> "History sync is experimental on 5.0."
+            ConnectedNoData -> "No live heart rate or synced history yet this session."
         }
 
     /** Chip hue: live recording reads positive (gold/green dot), a stale-but-recent sync reads neutral,
@@ -309,6 +314,7 @@ sealed class RecordingState {
             is LastSynced -> StrandTone.Neutral
             NotRecording -> StrandTone.Critical
             HistoryExperimental -> StrandTone.Accent
+            ConnectedNoData -> StrandTone.Accent
         }
 }
 
@@ -327,8 +333,10 @@ internal fun recordingStateFor(
     liveHeartRate: Int?,
     lastSyncAtSec: Long?,
     nowSec: Long,
+    sustainedEmptyOffload: Boolean = false,
 ): RecordingState = when {
     connected && liveHeartRate != null -> RecordingState.Recording
+    connected && (lastSyncAtSec == null || sustainedEmptyOffload) -> RecordingState.ConnectedNoData
     lastSyncAtSec != null -> {
         // Clamp at 0 (a sync stamped slightly in the future from strap-clock skew can't read negative)
         // then ROUND UP so a 30-second-old sync reads "1m ago", never "0m ago", matches the Swift

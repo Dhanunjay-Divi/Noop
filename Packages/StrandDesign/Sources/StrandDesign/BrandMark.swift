@@ -1,25 +1,16 @@
 import SwiftUI
 
-// MARK: - BrandMark — the NOOP logo mark (Titanium & Gold)
+// MARK: - BrandMark — the NOOP monogram
 //
-// The app's identity glyph, rendered natively for use as a hero on onboarding,
-// "about", and empty states. Per the design handoff ("Engraved" app-icon
-// direction + the brand glyph spec):
+// The canonical brand lock-up is a compact 2×2 NO / OP grid:
 //
-//   • a circular DEEP-NAVY tile (Circle filled with the navy ramp, a faint top
-//     sheen, and a 1px hairline rim), over which sits
-//   • an OPEN GOLD recovery ring — an ~80% arc starting at 12 o'clock (-90°) and
-//     sweeping clockwise, stroked with the gold ramp and round-capped (a THICK
-//     stroke to match the app icon), and
-//   • a solid GOLD CORE DOT centred ("on-device core").
+//      N O
+//      O P
 //
-// Gold-on-navy, matching the app icon (the maintainer's brand direction, 2026-06-15).
-//
-// It reads as the "O" in NOOP and as a small echo of the hero recovery ring.
-// CLEAN and flat by design: no bloom, no shadow, no glow — the titanium does the
-// depth via its gradient + sheen, the gold ring does the accent. Everything is
-// driven off a single `size`, so the mark stays crisp from a 28pt list avatar up
-// to a 120pt onboarding hero.
+// The diagonal cut in the upper O is the one custom gesture: an interrupted
+// biometric trace / open data path. The letters are native geometry rather than
+// a system font, so every platform can reproduce exactly the same silhouette
+// from a 22pt navigation mark to a 1024px launcher master.
 
 public struct BrandMark: View {
 
@@ -30,24 +21,29 @@ public struct BrandMark: View {
         self.size = size
     }
 
-    // The open ring sweeps ~80% of a full turn (≈291° of 364, per the logo spec),
-    // starting at 12 o'clock and going clockwise — the same orientation as the
-    // hero recovery ring, so the two read as one family.
-    private let openFraction: Double = 0.80
-    private var startAngle: Angle { .degrees(-90) }
-
-    // Proportions derived from `size` so the mark is resolution-independent.
-    private var ringInset: CGFloat { size * 0.20 }          // tile edge → ring band
-    private var ringWidth: CGFloat { size * 0.13 }          // THICK gold stroke (matches the icon)
-    private var ringDiameter: CGFloat { size - ringInset * 2 }
-    private var coreDiameter: CGFloat { size * 0.18 }       // centre core dot
-    private var rimWidth: CGFloat { max(1, size * 0.008) }  // ~1px hairline rim
+    private let tileColor = Color(hex: "#050505")
+    private let letterColor = Color(hex: "#F4F1EA")
+    private var cornerRadius: CGFloat { size * 0.235 }
+    private var rimWidth: CGFloat { max(0.5, size * 0.006) }
 
     public var body: some View {
         ZStack {
-            navyTile
-            goldRing
-            coreDot
+            obsidianTile
+
+            NoopMonogram()
+                .fill(letterColor, style: FillStyle(eoFill: true))
+
+            // A narrow radial incision turns the upper-right O into NOOP's
+            // proprietary "open signal" glyph. It remains at least one point
+            // wide so it survives 22pt navigation rendering.
+            Rectangle()
+                .fill(tileColor)
+                .frame(
+                    width: max(1, size * 0.014),
+                    height: size * 0.095
+                )
+                .rotationEffect(.degrees(35))
+                .position(x: size * 0.707, y: size * 0.253)
         }
         .frame(width: size, height: size)
         .accessibilityElement(children: .ignore)
@@ -55,65 +51,110 @@ public struct BrandMark: View {
         .accessibilityAddTraits(.isImage)
     }
 
-    // MARK: Deep-navy tile
-
-    /// The navy disc the gold mark sits on — a deep-navy vertical ramp (lifted at
-    /// the top, deeper at the bottom) with a faint cool top sheen and a soft
-    /// hairline rim, matching the app icon. No shadow — flat and clean.
-    private var navyTile: some View {
-        Circle()
-            .fill(
-                LinearGradient(
-                    colors: [Color(hex: "#1A1E24"), Color(hex: "#0E1116")],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            // Faint cool top sheen — a soft light catch across the upper third (flat, no bloom).
+    /// The icon material is intentionally flat. Recognition comes from the
+    /// monogram and notch, not a generic glass/power-button treatment.
+    private var obsidianTile: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(tileColor)
             .overlay(
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(hex: "#2A2F37").opacity(0.5), .clear],
-                            startPoint: .top,
-                            endPoint: .center
-                        )
-                    )
-                    .opacity(0.6)
-            )
-            // 1px hairline rim so the disc reads cleanly on the navy canvas.
-            .overlay(
-                Circle().strokeBorder(StrandPalette.hairline, lineWidth: rimWidth)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.10), lineWidth: rimWidth)
             )
     }
+}
 
-    // MARK: Open gold recovery ring
-
-    /// The open ~80% gold arc — round-capped, stroked with the gold ramp via an
-    /// AngularGradient so the metal shifts along the sweep (light → gold → deep),
-    /// matching how the hero recovery ring fills.
-    private var goldRing: some View {
-        RecoveryArc(
-            startAngle: startAngle,
-            spanDegrees: 360 * openFraction,
-            fraction: 1,
-            lineWidth: ringWidth
+/// Geometric master for the NO / OP letter grid. All coordinates are fractions
+/// of a square, matching the approved raster composition.
+private struct NoopMonogram: Shape {
+    func path(in rect: CGRect) -> Path {
+        let edge = min(rect.width, rect.height)
+        let origin = CGPoint(
+            x: rect.midX - edge / 2,
+            y: rect.midY - edge / 2
         )
-        .stroke(
-            StrandPalette.chargeColor,
-            style: StrokeStyle(lineWidth: ringWidth, lineCap: .round)
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: origin.x + edge * x, y: origin.y + edge * y)
+        }
+
+        var path = Path()
+
+        // N — deliberately geometric, with the same mass as the circular O's.
+        path.move(to: point(0.210, 0.205))
+        path.addLine(to: point(0.305, 0.205))
+        path.addLine(to: point(0.405, 0.340))
+        path.addLine(to: point(0.405, 0.205))
+        path.addLine(to: point(0.490, 0.205))
+        path.addLine(to: point(0.490, 0.490))
+        path.addLine(to: point(0.397, 0.490))
+        path.addLine(to: point(0.303, 0.358))
+        path.addLine(to: point(0.303, 0.490))
+        path.addLine(to: point(0.210, 0.490))
+        path.closeSubpath()
+
+        // Upper O. The diagonal notch is applied as an obsidian overlay in
+        // BrandMark so its width can be pixel-clamped at tiny sizes.
+        path.addEllipse(in: CGRect(
+            x: origin.x + edge * 0.515,
+            y: origin.y + edge * 0.200,
+            width: edge * 0.295,
+            height: edge * 0.292
+        ))
+        path.addEllipse(in: CGRect(
+            x: origin.x + edge * 0.604,
+            y: origin.y + edge * 0.287,
+            width: edge * 0.117,
+            height: edge * 0.121
+        ))
+
+        // Lower O.
+        path.addEllipse(in: CGRect(
+            x: origin.x + edge * 0.207,
+            y: origin.y + edge * 0.500,
+            width: edge * 0.296,
+            height: edge * 0.287
+        ))
+        path.addEllipse(in: CGRect(
+            x: origin.x + edge * 0.296,
+            y: origin.y + edge * 0.579,
+            width: edge * 0.119,
+            height: edge * 0.128
+        ))
+
+        // P outer silhouette.
+        path.move(to: point(0.516, 0.505))
+        path.addLine(to: point(0.680, 0.505))
+        path.addCurve(
+            to: point(0.802, 0.608),
+            control1: point(0.756, 0.505),
+            control2: point(0.802, 0.546)
         )
-        .frame(width: ringDiameter, height: ringDiameter)
-    }
+        path.addCurve(
+            to: point(0.680, 0.711),
+            control1: point(0.802, 0.670),
+            control2: point(0.756, 0.711)
+        )
+        path.addLine(to: point(0.614, 0.711))
+        path.addLine(to: point(0.614, 0.780))
+        path.addLine(to: point(0.516, 0.780))
+        path.closeSubpath()
 
-    // MARK: Solid gold core
+        // P counter.
+        path.move(to: point(0.614, 0.576))
+        path.addLine(to: point(0.678, 0.576))
+        path.addCurve(
+            to: point(0.724, 0.608),
+            control1: point(0.707, 0.576),
+            control2: point(0.724, 0.589)
+        )
+        path.addCurve(
+            to: point(0.678, 0.641),
+            control1: point(0.724, 0.627),
+            control2: point(0.707, 0.641)
+        )
+        path.addLine(to: point(0.614, 0.641))
+        path.closeSubpath()
 
-    /// The "on-device core" — a solid gold dot at the exact centre, completing the
-    /// open-ring + core-dot lock-up.
-    private var coreDot: some View {
-        Circle()
-            .fill(Color.white)
-            .frame(width: coreDiameter, height: coreDiameter)
+        return path
     }
 }
 

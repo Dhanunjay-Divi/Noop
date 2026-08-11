@@ -12,7 +12,7 @@ import Foundation
 //     (the prior `baselineWeeks` complete weeks before this one),
 //   • a sleep-consistency read (SD of the night's values across the week — lower
 //     is steadier),
-//   • a strain-vs-recovery balance read (is Effort outrunning Charge this week?),
+//   • an effort-vs-recovery balance read (is Effort outrunning Recovery this week?),
 //   • the 1–3 biggest movers ranked by normalised week-over-week change, and
 //   • 1–2 plain-English focal points, rendered the way BehaviorInsights.sentence
 //     renders an effect.
@@ -41,9 +41,9 @@ public enum WeeklyMetric: String, CaseIterable, Sendable {
     /// Human label for the metric (matches the rest of the app's naming).
     public var label: String {
         switch self {
-        case .charge: return "Charge"
+        case .charge: return "Recovery"
         case .effort: return "Effort"
-        case .rest:   return "Rest"
+        case .rest:   return "Sleep Score"
         case .rhr:    return "Resting HR"
         case .hrv:    return "HRV"
         }
@@ -75,7 +75,7 @@ public enum WeeklyMetric: String, CaseIterable, Sendable {
         switch self {
         case .charge: return 12.0   // recovery points
         case .effort: return 12.0   // Effort points
-        case .rest:   return 12.0   // Rest points
+        case .rest:   return 12.0   // Sleep Score points
         case .rhr:    return 4.0    // bpm
         case .hrv:    return 8.0    // ms
         }
@@ -154,10 +154,10 @@ public struct WeeklyDigest: Equatable, Sendable {
     public let metrics: [WeeklyMetricSummary]
     /// Number of distinct days this week that carried at least one reading.
     public let daysWithData: Int
-    /// Sleep-consistency: SD of this week's Rest values (lower = steadier). nil when
-    /// fewer than 2 Rest nights this week. In Rest points.
+    /// Sleep-consistency: SD of this week's Sleep Score values (lower = steadier). nil when
+    /// fewer than 2 scored nights this week. In Sleep Score points.
     public let sleepConsistencySD: Double?
-    /// Strain-vs-recovery balance read for the week (see `BalanceRead`).
+    /// Effort-vs-recovery balance read for the week (see `BalanceRead`).
     public let balance: BalanceRead
     /// 1–2 plain-English focal points, most salient first.
     public let focalPoints: [String]
@@ -184,24 +184,24 @@ public struct WeeklyDigest: Equatable, Sendable {
     public var isEmpty: Bool { daysWithData == 0 }
 }
 
-/// How this week's Effort (strain) sat against this week's Charge (recovery).
+/// How this week's Effort sat against this week's Recovery.
 public enum BalanceRead: String, Equatable, Sendable {
-    case overreaching   // Effort high vs Charge — leaning into the red
-    case balanced       // Effort and Charge roughly tracking
-    case underloaded    // Effort low vs Charge — lots in the tank, little spent
+    case overreaching   // Effort high vs Recovery — leaning into the red
+    case balanced       // Effort and Recovery roughly tracking
+    case underloaded    // Effort low vs Recovery — lots in the tank, little spent
     case insufficient   // not enough of both to call it
 
     /// Plain-English line for the UI.
     public var sentence: String {
         switch self {
         case .overreaching:
-            return "Your Effort outpaced your Charge this week: you leaned into the red. Watch for a recovery dip."
+            return "Your Effort outpaced your Recovery this week: you leaned into the red. Watch for a recovery dip."
         case .balanced:
-            return "Effort and Charge tracked together this week: a sustainable load."
+            return "Effort and Recovery tracked together this week: a sustainable load."
         case .underloaded:
-            return "You carried more Charge than you spent this week: there's room to push if you want it."
+            return "You carried more Recovery than you spent this week: there's room to push if you want it."
         case .insufficient:
-            return "Not enough Effort and Charge days this week to read your balance."
+            return "Not enough Effort and Recovery days this week to read your balance."
         }
     }
 }
@@ -267,7 +267,7 @@ public enum WeeklyDigestEngine {
                 baselineMean: baseMean, vsBaseline: vsBase))
         }
 
-        // Sleep consistency: SD of this week's Rest series (lower = steadier).
+        // Sleep consistency: SD of this week's Sleep Score series (lower = steadier).
         let restStat = summaries.first { $0.metric == .rest }?.thisWeek
         let restConsistency: Double? = (restStat?.n ?? 0) >= 2 ? restStat?.stdev : nil
 
@@ -284,8 +284,8 @@ public enum WeeklyDigestEngine {
 
     // MARK: - Balance read
 
-    /// Read this week's Effort against this week's Charge. Both are 0–100; a clearly
-    /// higher Effort mean than Charge mean is "overreaching", clearly lower is
+    /// Read this week's Effort against this week's Recovery. Both are 0–100; a clearly
+    /// higher Effort mean than Recovery mean is "overreaching", clearly lower is
     /// "underloaded", within `balanceBand` is "balanced". Needs ≥ minDaysForFocus
     /// of each, else `.insufficient`.
     static let balanceBand: Double = 10.0
@@ -363,7 +363,7 @@ public enum WeeklyDigestEngine {
                 lines.append("Last week only had \(prevDays) \(dayWord) of data, so week-over-week "
                     + "changes are rough, not a trend.")
             } else if let sd = consistencySD, sd <= 6.0 {
-                lines.append("A steady week: Rest held even (±\(round1(sd)) pts) and nothing moved much.")
+                lines.append("A steady week: Sleep Score held even (±\(round1(sd)) pts) and nothing moved much.")
             } else {
                 lines.append("A steady week: no metric moved meaningfully from last week.")
             }
@@ -373,7 +373,7 @@ public enum WeeklyDigestEngine {
     }
 
     /// Render one mover as a plain-English sentence, the way BehaviorInsights.sentence
-    /// renders an effect. Folds in good/bad framing (a Charge rise is "up — good", a
+    /// renders an effect. Folds in good/bad framing (a Recovery rise is "up — good", a
     /// Resting HR rise is "up — worth a look"). `effortDisplayFactor` rescales the
     /// EFFORT averages (and its pts fallback) for display only — % is scale-invariant.
     static func moverSentence(_ s: WeeklyMetricSummary,

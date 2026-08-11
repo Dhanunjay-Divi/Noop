@@ -108,10 +108,12 @@ fun HrvSnapshotScreen(
 
     val bonded = live.bonded
 
-    // Keep the live HR stream on for the duration of the reading (ref-counted with Live/Health/Breathe).
-    DisposableEffect(Unit) {
-        viewModel.requestRealtimeHr()
-        onDispose { viewModel.releaseRealtimeHr() }
+    // The Start-reading tap is the explicit high-rate opt-in. Idle/done sheets stay low-power; changing
+    // phase or leaving the sheet releases exactly the one capture lease. Activity background is gated in
+    // AppViewModel, so an in-progress visible capture re-arms only if the same Activity returns.
+    DisposableEffect(phase == HrvPhase.Capturing) {
+        if (phase == HrvPhase.Capturing) viewModel.requestRealtimeHr()
+        onDispose { if (phase == HrvPhase.Capturing) viewModel.releaseRealtimeHr() }
     }
 
     // Pull new R-R intervals into the capture buffer as they arrive — same path as BreatheScreen.

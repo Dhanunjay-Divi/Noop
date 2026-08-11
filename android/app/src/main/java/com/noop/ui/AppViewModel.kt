@@ -39,9 +39,12 @@ import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
 import com.noop.ingest.ActivityFileImporter
 import com.noop.ingest.HealthConnectImporter
+import com.noop.ingest.HealthConnectSyncScheduler
 import com.noop.ble.WhoopBleClient
+import com.noop.ble.ForegroundRealtimeLeasePolicy
 import com.noop.ingest.HealthConnectWriter
 import com.noop.ingest.LiftingImporter
+import com.noop.notif.AutoWorkoutCandidateNotifier
 import com.noop.notif.IllnessAlertNotifier
 import com.noop.notif.ScheduledReportNotifier
 import com.noop.notif.StrainTargetNotifier
@@ -58,6 +61,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
@@ -94,6 +98,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     val repo: WhoopRepository get() = repository
 
+    /** Current registry selection. Unlike the process-start BLE seed, this changes immediately when the
+     *  user switches devices, so scans and accepted suggestions never stay pinned to the prior source. */
+    private val _selectedDeviceId = MutableStateFlow(noopApp.activeDeviceId)
+    val selectedDeviceId: StateFlow<String> = _selectedDeviceId.asStateFlow()
+
     /** The registry's active strap id (the same id the read path resolves to). Public so the Test Centre
      *  can read the right source for the CAPTURE-D data-volume snapshot. */
     val activeStrapId: String get() = deviceId
@@ -119,6 +128,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  (a no-op for a single-WHOOP install). Mirrors macOS DevicesView's `registry.setActive`. */
     suspend fun setActiveDevice(id: String) {
         noopApp.deviceRegistry.setActive(id)
+        _selectedDeviceId.value = id
         noopApp.sourceCoordinator.onActiveDeviceChanged(id)
         refreshActiveDeviceName()
     }
@@ -320,12 +330,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // store the Settings screen edits. Feeds the on-device scorer's HRmax/zones/calories.
     private val profileStore = ProfileStore.from(app.applicationContext)
 
-    /** The active strap source id (raw streams + imported history live under this). Resolved once at
-     *  startup from the device registry (see [NoopApplication.activeDeviceId]); falls back to the
-     *  legacy "my-whoop", so behaviour is unchanged today. Public (not private) so the Today screen's
+    /** The currently selected strap source id (raw streams + imported history live under this). Seeded
+     *  from [NoopApplication.activeDeviceId], then updated by [setActiveDevice]. Public so the Today screen's
      *  workout union can follow a re-paired strap's fresh "whoop-<id>" instead of stranding its
      *  recordings under a read pinned to the literal "my-whoop" (#814 twin of the Workouts screen). */
-    val deviceId = noopApp.activeDeviceId
+    val deviceId: String get() = _selectedDeviceId.value
 
     /** Live connection + biometric snapshot, surfaced straight from the BLE client. */
     val live: StateFlow<LiveState> = ble.state
@@ -377,6 +386,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _cycleTrackingEnabled = MutableStateFlow(NoopPrefs.cycleTracking(appContext))
     /** Whether cycle-phase awareness is enabled (reads a coarse phase from nightly skin temperature). */
     val cycleTrackingEnabled: StateFlow<Boolean> = _cycleTrackingEnabled.asStateFlow()
+
+    // User-entered cycle-day-1 anchors. These are loaded from the isolated local `noop-cycle /
+    // period_start` metric series and exposed only so the private tracker sheet can render its history.
+    // Declared before init because the recentDays collector populates it on its first cached emission.
+    private val _periodStarts = MutableStateFlow<List<String>>(emptyList())
+    /** Logged period starts, oldest first. Dates only; local Room storage, no account or cloud. */
+    val periodStarts: StateFlow<List<String>> = _periodStarts.asStateFlow()
 
     // The v5 Health-hub skin-temp-suite engine snapshot (Cycle / Body clock / Illness heads-up), recomputed
     // from the cached merged days each analytics pass and published for HealthScreen's skin-temp section.
@@ -510,6 +526,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * loaded this process; the cached triple is restored into the screen's local state on first composition.
      */
     var todayCardsLoadedSig: Int? = null
+    var todayCardsLoadedProfileSig: String? = null
     var todayStressCache: Double? = null
     var todayFitnessAgeCache: Double? = null
     var todayVitalityCache: Double? = null
@@ -520,13 +537,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * rows (from [IntelligenceEngine]) gap-fill, so recovery/strain/sleep populate from
      * the strap with no WHOOP import.
      */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val recentDays: StateFlow<List<DailyMetric>> =
         // #797: bound the dashboard merge window. The unbounded daysMergedFlow re-merged the WHOLE daily
         // history on every DB change; a years-deep import made that a heavy refresh feeding Today / Trends /
         // illness watch. recentDaysMergedFlow caps each source to RECENT_DAYS_CAP most-recent days first, so
         // the merge stays bounded while every current surface (deepest Trends range, 7-day Fitness Age /
         // Vitality windows) keeps its data. Same oldest-first ordering as before.
-        repository.recentDaysMergedFlow(deviceId)
+        selectedDeviceId.flatMapLatest { repository.recentDaysMergedFlow(it) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /**
@@ -696,9 +714,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // so the contract the notification path relies on is untouched. Best-effort — never let a
                 // signals hiccup kill the collector.
                 runCatching {
+                    val loggedPeriodStarts = repository.periodStarts()
+                    _periodStarts.value = loggedPeriodStarts
                     _v5Signals.value = V5HealthSignals.evaluate(
                         days = days,
                         cycleOptedIn = _cycleTrackingEnabled.value,
+                        loggedPeriodStarts = loggedPeriodStarts,
                         journalContext = illnessJournalContext(days),
                     )
                 }
@@ -900,7 +921,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     // analyzeRecent now hops to Dispatchers.Default; a scope cancellation surfaces as a
                     // CancellationException that runCatching would otherwise swallow, breaking the loop's
                     // own cancellation — rethrow it so onCleared() actually stops the loop. (#125)
-                }.onSuccess { NoopPrefs.setAnalyzeWatermark(appContext, analyzeFp) }
+                }.onSuccess {
+                    NoopPrefs.setAnalyzeWatermark(appContext, analyzeFp)
+                    // Foreground/periodic reanalysis parity with the background post-sync hook. Reuse the
+                    // Today card's suggestion-only scan; the notifier never asks permission or saves.
+                    AutoWorkoutCandidateNotifier.afterReanalysis(
+                        context = appContext,
+                        repository = repository,
+                        activeDeviceId = deviceId,
+                        traceSink =
+                            if (com.noop.testcentre.TestCentre.from(appContext)
+                                    .active(com.noop.testcentre.TestDomain.WORKOUTS))
+                                { line -> ble.externalLog(line, com.noop.testcentre.TestDomain.WORKOUTS) }
+                            else null,
+                    )
+                }
                     .onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
                 // Opt-in writeback: push the freshly computed nights into Health Connect so other
                 // apps see them. Idempotent (clientRecordId per metric+day), so re-running every
@@ -1028,6 +1063,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         sex = profileStore.sex,
         stepTicksPerStep = profileStore.stepTicksPerStep,
         waistCm = profileStore.waistCm,
+        ageInputConfirmed = profileStore.ageInputConfirmed,
+        sexInputConfirmed = profileStore.sexInputConfirmed,
+        fitnessAgeProvenanceRequired = profileStore.fitnessAgeProvenanceRequired,
+        vo2maxProvenanceRequired = profileStore.vo2maxProvenanceRequired,
+        vitalityProvenanceRequired = profileStore.vitalityProvenanceRequired,
     )
 
     // MARK: - HR smoothing (median filter)
@@ -1068,6 +1108,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val activeWorkout: StateFlow<ActiveWorkout?> = _activeWorkout.asStateFlow()
     private val _lastWorkout = MutableStateFlow<WorkoutRow?>(null)
     val lastWorkout: StateFlow<WorkoutRow?> = _lastWorkout.asStateFlow()
+
+    /** Ref-count + Activity-lifecycle gate for battery-intensive realtime requests. Declared before the
+     *  workout-rehydrate init blocks so a restored explicit workout can safely reclaim its lease. */
+    private val realtimeLeasePolicy = ForegroundRealtimeLeasePolicy()
+    private var activeWorkoutOwnsRealtimeLease = false
 
     /** One-shot: the Today "workout in progress" indicator card raises this (via [openActiveWorkout]) so the
      *  Live screen presents the in-exercise overlay for an ALREADY-RUNNING workout. The overlay normally only
@@ -1117,6 +1162,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _lastWorkout.value = null
         val startMs = System.currentTimeMillis()
         _activeWorkout.value = ActiveWorkout(startMs = startMs, sport = sport, gpsEnabled = gpsEnabled)
+        holdActiveWorkoutRealtimeLease()
         buzz(1)
         // Workouts & GPS test mode (Test Centre): one session-start line tagged .workouts. Zero-cost when off.
         emitWorkoutsTrace {
@@ -1184,6 +1230,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             startMs = s.startMs, sport = sport, gpsEnabled = true,
             track = s.track, distanceM = s.distanceM, paceSecPerKm = s.paceSecPerKm,
         )
+        holdActiveWorkoutRealtimeLease()
         observeGpsSession()
     }
 
@@ -1203,6 +1250,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             startMs = snap.startMs, sport = sport, gpsEnabled = false,
             samples = snap.samples, avgHr = snap.avgHr, peakHr = snap.peakHr, liveStrain = snap.liveStrain,
         )
+        holdActiveWorkoutRealtimeLease()
+    }
+
+    /** A manually-started workout owns one logical high-rate lease until End, even if its overlay is
+     *  dismissed. The foreground policy still physically disarms it whenever the Activity is paused. */
+    private fun holdActiveWorkoutRealtimeLease() {
+        if (activeWorkoutOwnsRealtimeLease) return
+        activeWorkoutOwnsRealtimeLease = true
+        requestRealtimeHr()
+    }
+
+    private fun releaseActiveWorkoutRealtimeLease() {
+        if (!activeWorkoutOwnsRealtimeLease) return
+        activeWorkoutOwnsRealtimeLease = false
+        releaseRealtimeHr()
     }
 
     /** Finish the active workout: score the captured HR window + finalize the GPS route, save a
@@ -1211,6 +1273,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun endWorkout() {
         val w = _activeWorkout.value ?: return
         _activeWorkout.value = null
+        releaseActiveWorkoutRealtimeLease()
         gpsJob?.cancel(); gpsJob = null
         // Drop the durable non-GPS snapshot the instant the session ends — whether it saves below or is
         // discarded as too-short — so a relaunch never rehydrates an already-finished session (#529).
@@ -1601,14 +1664,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Save a retroactive / edited manual workout, then reload. [replacing] is the original on edit. */
-    fun saveManualWorkout(row: WorkoutRow, replacing: WorkoutRow? = null) {
+    fun saveManualWorkout(
+        row: WorkoutRow,
+        replacing: WorkoutRow? = null,
+        onResult: (Boolean) -> Unit = {},
+    ) {
         viewModelScope.launch {
-            runCatching { repository.saveManualWorkout(row, replacing) }
+            val saved = runCatching { repository.saveManualWorkout(row, replacing) }.isSuccess
+            if (!saved) {
+                onResult(false)
+                return@launch
+            }
+            if (replacing != null && WorkoutEditing.classify(replacing.source) == WorkoutSource.DETECTED) {
+                AutoWorkoutPrefs.dismiss(appContext, replacing)
+                AutoWorkoutPrefs.clearReview(appContext, replacing.startTs)
+            }
             // #598: rescore the just-added workout from the strap's HR for its window NOW, so its average /
             // peak HR, strain and calories appear immediately instead of waiting for the next analyze tick.
             // No-ops when there's no strap HR for the window; never overrides a value the user typed.
             rescoreAfterEdit()
             loadWorkouts()
+            onResult(true)
         }
     }
 
@@ -1616,6 +1692,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun relabelDetected(row: WorkoutRow, sport: String) {
         viewModelScope.launch {
             runCatching { repository.relabelDetected(row, sport) }
+                .onSuccess { AutoWorkoutPrefs.clearReview(getApplication(), row.startTs) }
             loadWorkouts()
         }
     }
@@ -1624,6 +1701,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissDetected(row: WorkoutRow) {
         viewModelScope.launch {
             runCatching { repository.dismissDetected(row) }
+                .onSuccess {
+                    AutoWorkoutPrefs.dismiss(getApplication(), row)
+                    AutoWorkoutPrefs.clearReview(getApplication(), row.startTs)
+                }
             loadWorkouts()
         }
     }
@@ -1632,6 +1713,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteWorkout(row: WorkoutRow) {
         viewModelScope.launch {
             runCatching { repository.deleteWorkout(row) }
+                .onSuccess {
+                    if (WorkoutEditing.classify(row.source) == WorkoutSource.DETECTED) {
+                        AutoWorkoutPrefs.dismiss(getApplication(), row)
+                        AutoWorkoutPrefs.clearReview(getApplication(), row.startTs)
+                    }
+                }
             loadWorkouts()
         }
     }
@@ -1646,6 +1733,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val merged = WorkoutMerge.merge(rows, sport = sport, strapDeviceId = deviceId) ?: return
         viewModelScope.launch {
             runCatching { repository.mergeWorkouts(rows, merged) }
+                .onSuccess {
+                    rows.filter { WorkoutEditing.classify(it.source) == WorkoutSource.DETECTED }
+                        .forEach {
+                            AutoWorkoutPrefs.dismiss(appContext, it)
+                            AutoWorkoutPrefs.clearReview(appContext, it.startTs)
+                        }
+                }
             // #598: rescore the merged row's strain from the strap's HR over its window now, so its Effort
             // appears immediately instead of waiting for the next analyze tick.
             rescoreAfterEdit()
@@ -1658,6 +1752,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun bulkDeleteWorkouts(rows: List<WorkoutRow>) {
         viewModelScope.launch {
             runCatching { repository.bulkDeleteWorkouts(rows) }
+                .onSuccess {
+                    rows.filter { WorkoutEditing.classify(it.source) == WorkoutSource.DETECTED }
+                        .forEach {
+                            AutoWorkoutPrefs.dismiss(appContext, it)
+                            AutoWorkoutPrefs.clearReview(appContext, it.startTs)
+                        }
+                }
             loadWorkouts()
         }
     }
@@ -1665,7 +1766,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * Drop the smoothing window and blank the hero number so a resume / re-attach shows "—" until a
      * genuinely fresh sample arrives, instead of republishing the stale pre-gap median. Called on
-     * Live/Health screen entry (requestRealtimeHr 0->1), NOT on keep-alive re-arm, so steady-state
+     * explicit foreground Live/workout/reading/session arm (requestRealtimeHr 0->1), NOT on keep-alive re-arm, so steady-state
      * smoothing is untouched. Mirrors AppModel.resetSmoothing and the existing disconnect() clear.
      * Fixes #46 (HR jumped to a stale ~100 on reopen, then settled as fresh low samples refilled).
      */
@@ -1862,10 +1963,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshHcWritebackStatus() { _hcWritebackStatus.value = readHcWritebackStatus() }
 
     init {
-        // On app open, catch up the Health Connect sync if it's overdue. This on-open import is the
-        // ONLY auto-sync path: we deliberately skip a true-background worker — it needs a sensitive
-        // background-health permission and is unreliable on Android 14+, and opening the app regularly
-        // is enough for a personal health app.
+        // On app open, catch up Health Connect if it is overdue. This remains the dependable path on
+        // every supported Android release. Eligible platform versions can additionally run the opt-in,
+        // best-effort periodic worker when the dedicated background-health permission is granted.
         syncHealthConnectIfStale()
 
         // If a GPS workout is still tracking in the background (the screen was off and this VM was
@@ -1879,18 +1979,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         rehydrateActiveNonGpsWorkout()
     }
 
-    /** Flip auto-sync. Persists and, on enable, kicks an immediate import; thereafter it catches up on
-     *  app open via [syncHealthConnectIfStale]. */
+    /** Flip auto-sync. Enabling kicks an immediate import, retains foreground catch-up everywhere,
+     *  and reconciles the eligible-platform best-effort background worker. */
     fun setHcAutoSync(enabled: Boolean) {
         _hcAutoSync.value = enabled
         NoopPrefs.setHcAutoSync(appContext, enabled)
+        runCatching { HealthConnectSyncScheduler.reconcile(appContext) }
         if (enabled) syncHealthConnectIfStale(force = true)
     }
 
-    /** Change the sync interval (hours). Takes effect on the next on-open catch-up sync. */
+    /** Change the sync interval (hours) for foreground catch-up and any eligible periodic worker. */
     fun setHcSyncHours(hours: Int) {
         _hcSyncHours.value = hours
         NoopPrefs.setHcSyncHours(appContext, hours)
+        runCatching { HealthConnectSyncScheduler.reconcile(appContext) }
     }
 
     /** Flip Health Connect writeback (computed metrics → HC). Persists; the UI requests the write
@@ -1913,9 +2015,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Foreground catch-up import: when auto-sync is on and the last sync is older than the chosen
-     * interval (or [force]), pull from Health Connect now. Health Connect background reads are
-     * restricted, so opening the app is the guaranteed sync point. No-ops silently if Health Connect
-     * is unavailable or its read permissions aren't granted (the UI requests them when enabling).
+     * interval (or [force]), pull from Health Connect now. Opening the app remains the dependable sync
+     * point because background work is permission-gated and OS-scheduled. No-ops silently if Health
+     * Connect is unavailable or its read permissions aren't granted (the UI requests them on enable).
      */
     fun syncHealthConnectIfStale(force: Boolean = false) {
         if (!_hcAutoSync.value) return
@@ -1934,7 +2036,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // Partial permissions are fine (#150): auto-import as long as at least one type is granted.
                 if (granted.none { it in HealthConnectImporter.PERMISSIONS }) return@withContext false
                 // Pass the profile height so the importer can derive BMI (Health Connect has no BMI record).
-                runCatching { HealthConnectImporter.import(appContext, repository, profileStore.heightCm) }.isSuccess
+                runCatching {
+                    HealthConnectImporter.import(
+                        appContext,
+                        repository,
+                        profileStore.heightCm,
+                        lookbackDays = HealthConnectImporter.AUTOMATIC_LOOKBACK_DAYS,
+                    )
+                }.isSuccess
             }
             if (ran) {
                 val t = System.currentTimeMillis()
@@ -1944,16 +2053,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** How many screens currently want the live HR stream (Live, Health Monitor, …). The stream stays
-     *  on while ANY of them is visible, so navigating between them doesn't stop it (issue #18: leaving
-     *  Live sent TOGGLE_REALTIME_HR=0, leaving Health Monitor with a frozen value). */
-    private var realtimeWanters = 0
-
     /** A screen that shows live HR appeared. Arms the realtime stream on the 0→1 transition, and
      *  blanks the stale smoothing window so a resume shows "—" until a fresh sample lands (#46).
      *  Guarded on 0→1 so a second concurrent HR screen doesn't re-clear an already-live window. */
     fun requestRealtimeHr() {
-        if (realtimeWanters++ == 0) {
+        if (realtimeLeasePolicy.requestLease() == ForegroundRealtimeLeasePolicy.Transition.ARM) {
             resetSmoothing()
             ble.startRealtime()
         }
@@ -1961,8 +2065,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** A live-HR screen went away. Stops the realtime stream only when the last one leaves. */
     fun releaseRealtimeHr() {
-        realtimeWanters = (realtimeWanters - 1).coerceAtLeast(0)
-        if (realtimeWanters == 0) ble.stopRealtime()
+        if (realtimeLeasePolicy.releaseLease() == ForegroundRealtimeLeasePolicy.Transition.DISARM) {
+            ble.stopRealtime()
+        }
+    }
+
+    /** Gate high-rate UI/session leases on Activity foreground. This does not disconnect BLE, stop
+     *  history sync, or change Continuous HRV capture. A still-held explicit lease re-arms once when the
+     *  Activity resumes; stale smoothing is cleared before that resumed stream is shown. */
+    fun setRealtimeForeground(foreground: Boolean) {
+        when (realtimeLeasePolicy.setForeground(foreground)) {
+            ForegroundRealtimeLeasePolicy.Transition.ARM -> {
+                resetSmoothing()
+                ble.startRealtime()
+            }
+            ForegroundRealtimeLeasePolicy.Transition.DISARM -> ble.stopRealtime()
+            ForegroundRealtimeLeasePolicy.Transition.NONE -> Unit
+        }
     }
 
     /** Refresh the battery reading. Reads the standard 0x2A19 characteristic (works on 5/MG, where the
@@ -2106,10 +2225,52 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _cycleTrackingEnabled.value = enabled
         NoopPrefs.setCycleTracking(appContext, enabled)
         val days = recentDays.value
+        viewModelScope.launch {
+            runCatching {
+                val loggedPeriodStarts = repository.periodStarts()
+                _periodStarts.value = loggedPeriodStarts
+                _v5Signals.value = V5HealthSignals.evaluate(
+                    days = days,
+                    cycleOptedIn = enabled,
+                    loggedPeriodStarts = loggedPeriodStarts,
+                    journalContext = illnessJournalContext(days),
+                )
+            }
+        }
+    }
+
+    /** Store a user-confirmed cycle day 1, then immediately republish history + the anchored estimate. */
+    suspend fun logPeriodStart(day: String): Boolean {
+        val saved = repository.logPeriodStart(day)
+        if (saved) refreshCycleTrackingAfterMutation()
+        return saved
+    }
+
+    /** Physically delete one user-confirmed cycle day 1 and immediately recompute the estimate. */
+    suspend fun deletePeriodStart(day: String): Boolean {
+        val deleted = repository.deletePeriodStart(day)
+        if (deleted) refreshCycleTrackingAfterMutation()
+        return deleted
+    }
+
+    /** Physically delete all local period-start history; sensor history and other metrics are untouched. */
+    suspend fun deleteAllPeriodStarts(): Boolean {
+        val deleted = repository.deleteAllPeriodStarts()
+        if (deleted) refreshCycleTrackingAfterMutation()
+        return deleted
+    }
+
+    /** A metricSeries mutation does not invalidate recentDays, so explicitly reload the isolated series
+     *  and rerun the v5 adapter instead of waiting for unrelated daily data to change. */
+    private suspend fun refreshCycleTrackingAfterMutation() {
+        val starts = repository.periodStarts()
+        _periodStarts.value = starts
+        val days = recentDays.value
         runCatching {
             _v5Signals.value = V5HealthSignals.evaluate(
                 days = days,
-                cycleOptedIn = enabled,
+                cycleOptedIn = _cycleTrackingEnabled.value,
+                loggedPeriodStarts = starts,
                 journalContext = illnessJournalContext(days),
             )
         }
@@ -2310,6 +2471,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        // The process-owned BLE client outlives this Activity-scoped ViewModel. Drop this VM's durable
+        // workout lease before a replacement VM rehydrates the same session, preventing a stale screen
+        // want or double acquisition across Activity teardown.
+        releaseActiveWorkoutRealtimeLease()
         super.onCleared()
         // #78 hole-4: drop the app-foreground salvage-probe hook with this ViewModel (the next Activity's
         // ViewModel re-registers its own), so a cleared VM can never leak resume callbacks.

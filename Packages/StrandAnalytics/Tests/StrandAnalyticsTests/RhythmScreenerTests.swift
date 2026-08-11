@@ -144,6 +144,23 @@ final class RhythmScreenerTests: XCTestCase {
         XCTAssertEqual(r.label, .unreadable)
     }
 
+    func testBankedButPerfectlyCoveredIntervalsAreUnreadable() {
+        let rr = [Double](repeating: 63_000.0 / 60.0, count: 60)
+        let ts = (0..<60).map { ($0 / 6) * 7 }
+        let r = RhythmScreener.screenWindow(
+            .init(rrMs: rr, ts: ts, motionStill: true, meanHR: 60_000.0 / rr[0]))
+        XCTAssertEqual(r.label, .unreadable)
+        XCTAssertNil(r.sd2)
+    }
+
+    func testBeatAccurateTimestampedIntervalsRemainReadable() {
+        let rr = Self.regularSinus()
+        let r = RhythmScreener.screenWindow(
+            .init(rrMs: rr, ts: Array(0..<rr.count), motionStill: true, meanHR: 60))
+        XCTAssertNotEqual(r.label, .unreadable)
+        XCTAssertNotNil(r.sd2)
+    }
+
     // MARK: - Cross-source agreement (optional PPG IBI channel)
 
     func testPpgDisagreementSuppressesAgreement() {

@@ -27,11 +27,22 @@ object FitnessAgeEngine {
     const val restingHRReference = 65.0
     const val paiReference = 5.0
 
-    /** Displayed uncertainty band (years) — a presentation constant; see the Swift file rationale. */
-    const val displayBandYears = 5.0
     const val minAge = 20.0; const val maxAge = 80.0
 
-    private fun isFemale(sex: String): Boolean = sex.lowercase() == "female"
+    private fun isFemale(sex: String): Boolean = sex.trim().lowercase() == "female"
+
+    fun supportsSex(sex: String): Boolean =
+        sex.trim().lowercase().let { it == "male" || it == "female" }
+
+    fun supportsAge(age: Double): Boolean = age in minAge..maxAge
+
+    /** Approximate age-axis uncertainty implied by the published VO₂max SEE. This is a model-level
+     *  communication aid, not an individual confidence interval. */
+    fun uncertaintyBandYears(sex: String): Double? {
+        if (!supportsSex(sex)) return null
+        val c = coeffs(sex)
+        return (if (isFemale(sex)) seeWomen else seeMen) / c[1]
+    }
 
     // (intercept, ageC, wcC, rhrC, paiC) for the user's sex.
     private fun coeffs(sex: String): DoubleArray =
@@ -104,18 +115,20 @@ object FitnessAgeEngine {
         return frequency * intensityDuration
     }
 
-    /** Full Fitness Age. Returns null only if RHR or age is missing. [vo2max] is filled only when a
-     *  waist measurement is supplied; callers gate data-coverage separately. */
+    /** Full Fitness Age. Returns null outside the published age/sex model population or when RHR is
+     *  missing. [vo2max] is filled only when a waist measurement is supplied; callers gate both RHR
+     *  and observed-activity coverage separately. */
     fun compute(age: Double, sex: String, restingHR: Double, paIndex: Double,
                 waistCm: Double? = null, lowerConfidence: Boolean = false): FitnessAgeResult? {
-        if (age <= 0 || restingHR <= 0) return null
+        if (!supportsAge(age) || !supportsSex(sex) || !restingHR.isFinite() || restingHR !in 30.0..220.0 ||
+            !paIndex.isFinite() || paIndex !in 0.0..15.0) return null
         val fa = fitnessAge(age, sex, restingHR, paIndex)
-        val vo2 = if (waistCm != null && waistCm > 0)
+        val vo2 = if (waistCm != null && waistCm.isFinite() && waistCm in 50.0..200.0)
             estimateVO2max(age, sex, waistCm, restingHR, paIndex) else null
-        val nb = sex.lowercase() != "male" && sex.lowercase() != "female"
+        val bandYears = uncertaintyBandYears(sex)!!
         return FitnessAgeResult(
             vo2max = vo2, fitnessAge = fa, chronoAge = age, deltaYears = age - fa,
-            bandYears = displayBandYears, lowerConfidence = lowerConfidence || nb)
+            bandYears = bandYears, lowerConfidence = lowerConfidence)
     }
 
     // ── Readiness checklist (transparency: which inputs we have, grouped by what each unlocks) ──
@@ -133,36 +146,33 @@ object FitnessAgeEngine {
         else -> FitnessReadinessStatus.MISSING
     }
 
-    /** Build the readiness checklist + overall confidence. Weight/height/waist sit under the VO₂max
-     *  role — they don't move the headline age (body term cancels). */
+    /** Build the readiness checklist + overall confidence. The published waist-variant equation uses
+     *  only waist for the optional VO₂max estimate; height/weight are not inputs to this model. */
     fun assessReadiness(hasAge: Boolean, hasSex: Boolean, rhrDays: Int, activityDays: Int,
-                        hasHeightWeight: Boolean, hasWaist: Boolean): FitnessAgeReadiness {
+                        hasWaist: Boolean): FitnessAgeReadiness {
         val items = listOf(
-            FitnessReadinessItem("age", "Your age",
+            FitnessReadinessItem("age", "Age in model range (20–80)",
                 if (hasAge) FitnessReadinessStatus.SATISFIED else FitnessReadinessStatus.MISSING,
                 required = true, role = FitnessReadinessRole.DRIVES_AGE,
-                detail = if (hasAge) "Set" else "Add it in Settings"),
-            FitnessReadinessItem("sex", "Biological sex",
+                detail = if (hasAge) "Supported" else "Outside the published model range"),
+            FitnessReadinessItem("sex", "Model coefficient",
                 if (hasSex) FitnessReadinessStatus.SATISFIED else FitnessReadinessStatus.MISSING,
                 required = true, role = FitnessReadinessRole.DRIVES_AGE,
-                detail = if (hasSex) "Set" else "Add it in Settings"),
+                detail = if (hasSex) "Supported" else "Published equations provide male/female coefficients only"),
             FitnessReadinessItem("rhr", "Resting heart rate",
                 coverageStatus(rhrDays, minCoverageDays), required = true,
                 role = FitnessReadinessRole.DRIVES_AGE, detail = "$rhrDays of last 7 nights"),
             FitnessReadinessItem("activity", "Recent activity",
-                coverageStatus(activityDays, minCoverageDays), required = false,
+                coverageStatus(activityDays, minCoverageDays), required = true,
                 role = FitnessReadinessRole.DRIVES_AGE, detail = "$activityDays of last 7 days"),
-            FitnessReadinessItem("bodyMetrics", "Height & weight",
-                if (hasHeightWeight) FitnessReadinessStatus.SATISFIED else FitnessReadinessStatus.MISSING,
-                required = false, role = FitnessReadinessRole.UNLOCKS_VO2MAX,
-                detail = if (hasHeightWeight) "Unlocks your VO₂max" else "Add to also see VO₂max"),
-            FitnessReadinessItem("waist", "Waist (optional)",
+            FitnessReadinessItem("waist", "Waist measurement (optional)",
                 if (hasWaist) FitnessReadinessStatus.SATISFIED else FitnessReadinessStatus.MISSING,
                 required = false, role = FitnessReadinessRole.UNLOCKS_VO2MAX,
-                detail = if (hasWaist) "Sharpens VO₂max" else "Optional - sharpens VO₂max"),
+                detail = if (hasWaist) "VO₂max estimate available" else "Add waist to estimate VO₂max"),
         )
         val confidence = when {
-            !hasAge || !hasSex || rhrDays < minCoverageDays -> FitnessAgeConfidence.NOT_READY
+            !hasAge || !hasSex || rhrDays < minCoverageDays || activityDays < minCoverageDays ->
+                FitnessAgeConfidence.NOT_READY
             rhrDays >= goodCoverageDays && activityDays >= goodCoverageDays -> FitnessAgeConfidence.READY
             else -> FitnessAgeConfidence.ESTIMATE
         }

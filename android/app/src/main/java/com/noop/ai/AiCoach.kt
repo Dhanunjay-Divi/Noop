@@ -67,6 +67,7 @@ class AiCoach(private val repo: WhoopRepository) {
         model: String,
         consent: Boolean = false,
         customBaseUrl: String = "",
+        customAuthHeader: CustomAiAuthHeader = CustomAiAuthHeader.BEARER,
         includeSignals: Boolean = false,
     ): String = withContext(Dispatchers.IO) {
         // Local (Custom) servers usually need no key; the cloud providers always do. The guarded read
@@ -125,7 +126,10 @@ class AiCoach(private val repo: WhoopRepository) {
             AiProvider.GEMINI ->
                 callGemini(provider, model, key!!, grounded, systemPrompt)
             AiProvider.CUSTOM ->
-                callOpenAiCompatible(provider, customChatUrl(customBaseUrl), model, key, grounded, systemPrompt)
+                callOpenAiCompatible(
+                    provider, customChatUrl(customBaseUrl), model, key, grounded, systemPrompt,
+                    customAuthHeader,
+                )
         }
     }
 
@@ -158,6 +162,7 @@ class AiCoach(private val repo: WhoopRepository) {
         ctx: Context,
         provider: AiProvider,
         customBaseUrl: String = "",
+        customAuthHeader: CustomAiAuthHeader = CustomAiAuthHeader.BEARER,
     ): List<String> = withContext(Dispatchers.IO) {
         // Guarded read: only a key saved for THIS provider (or a legacy cloud key) is used, never one
         // provider's key against another's models endpoint.
@@ -184,7 +189,7 @@ class AiCoach(private val repo: WhoopRepository) {
                 builder.addHeader("anthropic-version", "2023-06-01")
             }
             AiProvider.GEMINI -> builder.addHeader("x-goog-api-key", key!!)
-            AiProvider.CUSTOM -> if (!key.isNullOrBlank()) builder.addHeader("Authorization", "Bearer $key")
+            AiProvider.CUSTOM -> applyCustomAuthHeader(builder, key, customAuthHeader)
         }
 
         runCatching {
@@ -195,21 +200,7 @@ class AiCoach(private val repo: WhoopRepository) {
             // parse; every other provider is OpenAI-shaped ({"data":[{"id":"…"}]}).
             if (provider == AiProvider.GEMINI) return@runCatching parseGeminiModels(text)
 
-            val data = JSONObject(text).optJSONArray("data") ?: return@runCatching emptyList<String>()
-            val ids = ArrayList<String>(data.length())
-            for (i in 0 until data.length()) {
-                val id = data.optJSONObject(i)?.optString("id")?.trim().orEmpty()
-                if (id.isEmpty()) continue
-                val keep = when (provider) {
-                    AiProvider.OPENAI -> id.startsWith("gpt") || id.startsWith("o")
-                    // Anthropic + a local server name models freely → keep all.
-                    AiProvider.ANTHROPIC, AiProvider.CUSTOM -> true
-                    // GEMINI returned early above.
-                    AiProvider.GEMINI -> true
-                }
-                if (keep) ids.add(id)
-            }
-            ids.distinct()
+            parseOpenAiCompatibleModels(provider, text)
         }.getOrDefault(emptyList())
     }
 
@@ -219,7 +210,7 @@ class AiCoach(private val repo: WhoopRepository) {
 
     /**
      * Compact plain-text summary of the user's recent data: the last ~14 days of
-     * charge / effort / rest-hours / HRV / resting-HR (where present), 30-day averages,
+     * Recovery / Effort / sleep-hours / HRV / resting-HR (where present), 30-day averages,
      * and a recent-workouts line derived from logged exercise counts and effort.
      *
      * Kept well under ~1500 tokens. If there is no data at all, says so explicitly so the
@@ -248,15 +239,15 @@ class AiCoach(private val repo: WhoopRepository) {
             val hrv = d.avgHrv?.let { "${it.roundToInt()}ms" } ?: "-"
             val rhr = d.restingHr?.let { "${it}bpm" } ?: "-"
             sb.append(
-                "  ${d.day}: charge $recovery, effort $strain, rest $sleepH, HRV $hrv, RHR $rhr\n"
+                "  ${d.day}: recovery $recovery, effort $strain, sleep $sleepH, HRV $hrv, RHR $rhr\n"
             )
         }
 
         // --- 30-day averages ---
         sb.append("\n30-day averages (over ${last30.size} days):\n")
-        sb.append("  charge ${avgInt(last30) { it.recovery }}%, ")
+        sb.append("  recovery ${avgInt(last30) { it.recovery }}%, ")
         sb.append("effort ${avg1(last30) { it.strain }}, ")
-        sb.append("rest ${avg1(last30) { d -> d.totalSleepMin?.div(60.0) }}h, ")
+        sb.append("sleep ${avg1(last30) { d -> d.totalSleepMin?.div(60.0) }}h, ")
         sb.append("HRV ${avgInt(last30) { it.avgHrv }}ms, ")
         sb.append("RHR ${avgInt(last30) { d -> d.restingHr?.toDouble() }}bpm\n")
         // Additional vitals when present (#124, the coach used to see only recovery/strain/sleep/HRV/RHR).
@@ -284,7 +275,7 @@ class AiCoach(private val repo: WhoopRepository) {
         days.lastOrNull()?.let { latest ->
             val r = latest.recovery?.let { "${it.roundToInt()}%" } ?: "n/a"
             val s = latest.strain?.let { fmt1(it) } ?: "n/a"
-            sb.append("\nMost recent day (${latest.day}): charge $r, effort $s.\n")
+            sb.append("\nMost recent day (${latest.day}): recovery $r, effort $s.\n")
         }
 
         return sb.toString().trim()
@@ -304,7 +295,7 @@ class AiCoach(private val repo: WhoopRepository) {
         val days = runCatching { repo.daysMerged(deviceId) }.getOrDefault(emptyList())
         if (behaviours.isNotEmpty() && days.isNotEmpty()) {
             val recoveryByDay = days.mapNotNull { d -> d.recovery?.let { d.day to it } }.toMap()
-            val ranked = runCatching { EffectRanker.rank(behaviours, recoveryByDay, "Charge") }
+            val ranked = runCatching { EffectRanker.rank(behaviours, recoveryByDay, "Recovery") }
                 .getOrDefault(emptyList())
                 .take(3)
             if (ranked.isNotEmpty()) {
@@ -382,6 +373,7 @@ class AiCoach(private val repo: WhoopRepository) {
         key: String?,
         history: List<ChatMsg>,
         systemPrompt: String,
+        customAuthHeader: CustomAiAuthHeader = CustomAiAuthHeader.BEARER,
     ): String {
         val messages = JSONArray()
         messages.put(JSONObject().put("role", "system").put("content", systemPrompt))
@@ -390,20 +382,25 @@ class AiCoach(private val repo: WhoopRepository) {
             messages.put(JSONObject().put("role", m.role).put("content", m.text))
         }
 
-        val body = JSONObject()
-            .put("model", model)
-            .put("messages", messages)
-            .put("temperature", 0.6)
-            .put("max_tokens", 900)
-            .toString()
+        fun request(modernParams: Boolean): Pair<Int, String> {
+            val body = JSONObject().put("model", model).put("messages", messages)
+            if (modernParams) body.put("max_completion_tokens", 900)
+            else body.put("temperature", 0.6).put("max_tokens", 900)
+            val builder = Request.Builder()
+                .url(url)
+                .addHeader("Content-Type", "application/json")
+                .post(body.toString().toRequestBody(JSON))
+            if (provider == AiProvider.CUSTOM) applyCustomAuthHeader(builder, key, customAuthHeader)
+            else if (!key.isNullOrBlank()) builder.addHeader("Authorization", "Bearer $key")
+            return execute(builder.build())
+        }
 
-        val builder = Request.Builder()
-            .url(url)
-            .addHeader("Content-Type", "application/json")
-            .post(body.toRequestBody(JSON))
-        if (!key.isNullOrBlank()) builder.addHeader("Authorization", "Bearer $key")
-
-        val (code, text) = execute(builder.build())
+        val first = request(modernParams = false)
+        val (code, text) = if (first.first == 400 && shouldRetryOpenAiModernParams(first.second)) {
+            request(modernParams = true)
+        } else {
+            first
+        }
         if (code !in 200..299) throw httpError(provider, code, text)
 
         val json = parse(text)
@@ -419,6 +416,24 @@ class AiCoach(private val repo: WhoopRepository) {
         // and give NO error, keep the partial text and append the actionable notice so it isn't silent.
         val truncated = firstChoice.optString("finish_reason").lowercase() == "length"
         return if (truncated) content + TRUNCATION_NOTE else content
+    }
+
+    private fun applyCustomAuthHeader(
+        builder: Request.Builder,
+        key: String?,
+        header: CustomAiAuthHeader,
+    ) {
+        if (key.isNullOrBlank()) return
+        when (header) {
+            CustomAiAuthHeader.BEARER -> builder.addHeader("Authorization", "Bearer $key")
+            CustomAiAuthHeader.X_API_KEY -> builder.addHeader("x-api-key", key)
+        }
+    }
+
+    private fun shouldRetryOpenAiModernParams(text: String): Boolean {
+        val detail = runCatching { JSONObject(text).toString() }.getOrDefault(text).lowercase()
+        return detail.contains("max_completion_tokens") || detail.contains("max_tokens") ||
+            detail.contains("temperature") || detail.contains("unsupported")
     }
 
     /** Base for the Custom provider, the user's URL with any trailing slashes trimmed. */
@@ -667,6 +682,34 @@ class AiCoach(private val repo: WhoopRepository) {
             return ids.distinct()
         }
 
+        internal fun parseOpenAiCompatibleModels(provider: AiProvider, text: String): List<String> {
+            val json = runCatching { JSONObject(text) }.getOrNull() ?: return emptyList()
+            val data = json.optJSONArray("data")
+            if (data != null) {
+                val ids = ArrayList<String>(data.length())
+                for (i in 0 until data.length()) {
+                    val id = data.optJSONObject(i)?.optString("id")?.trim().orEmpty()
+                    if (id.isEmpty()) continue
+                    val keep = when (provider) {
+                        AiProvider.OPENAI -> id.startsWith("gpt") || id.startsWith("o")
+                        AiProvider.ANTHROPIC, AiProvider.CUSTOM, AiProvider.GEMINI -> true
+                    }
+                    if (keep) ids += id
+                }
+                return ids.distinct()
+            }
+            val catalog = json.optJSONArray("catalog") ?: return emptyList()
+            val ids = ArrayList<String>()
+            for (i in 0 until catalog.length()) {
+                val models = catalog.optJSONObject(i)?.optJSONArray("models") ?: continue
+                for (j in 0 until models.length()) {
+                    val id = models.optString(j).trim()
+                    if (id.isNotEmpty()) ids += id
+                }
+            }
+            return ids.distinct()
+        }
+
         /**
          * True when [host] is local/private enough for Custom-provider plain HTTP: localhost,
          * loopback, RFC1918 private LAN, IPv4 link-local, or any *.local mDNS name. Anything else
@@ -746,10 +789,11 @@ class AiCoach(private val repo: WhoopRepository) {
          */
         const val DEFAULT_SYSTEM_PROMPT =
             "You are an elite, supportive recovery and performance coach with a real training " +
-                "methodology. You may be given a summary of the user's own wearable data (charge " +
-                "0-100, effort 0-100, rest/sleep, HRV, resting heart rate) and recent workouts. " +
-                "Charge is the daily recovery/readiness score; effort is the day's cardiovascular " +
-                "load. Coach using autoregulation: charge 67-100 = green light to build/push, " +
+                "methodology. You may be given a summary of the user's own wearable data (Recovery " +
+                "0-100, Effort 0-100, sleep duration, Sleep Score 0-100 when available, HRV, and resting " +
+                "heart rate) and recent workouts. Recovery is the daily readiness score; Effort is " +
+                "the day's cardiovascular load. Coach using autoregulation: Recovery 67-100 = green " +
+                "light to build/push, " +
                 "higher effort is fine; 34-66 = maintain, quality over volume, keep it controlled; " +
                 "0-33 = active recovery only (Zone 2, mobility, extra sleep) and protect against " +
                 "accumulating effort debt. Optimise workouts with progressive overload, polarised ~80/20 " +

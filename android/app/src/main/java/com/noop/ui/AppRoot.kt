@@ -273,6 +273,17 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
     val updateStore = remember { UpdateStore.from(context) }
     var showUpdatesInbox by remember { mutableStateOf(false) }
 
+    // Notification route bridge: StateFlow emits immediately, so this consumes a cold-launch route that
+    // arrived before AppRoot mounted; later emissions handle warm SINGLE_TOP taps. Only trusted top-level
+    // routes can enter the bridge, and consumePending removes each request before navigation.
+    LaunchedEffect(nav, context) {
+        NotificationRouteBridge.routeRequests.collect {
+            NotificationRouteBridge.consumePending(context)?.let { route ->
+                nav.navigateTopLevel(route.navRoute)
+            }
+        }
+    }
+
     run {
         Scaffold(
             containerColor = Palette.surfaceBase,

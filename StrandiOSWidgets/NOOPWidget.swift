@@ -14,11 +14,12 @@ struct NOOPProvider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (NOOPEntry) -> Void) {
-        completion(NOOPEntry(date: Date(), snapshot: WidgetSnapshot.load() ?? .placeholder))
+        let fallback: WidgetSnapshot = context.isPreview ? .placeholder : .unavailable
+        completion(NOOPEntry(date: Date(), snapshot: WidgetSnapshot.load() ?? fallback))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<NOOPEntry>) -> Void) {
-        let snap = WidgetSnapshot.load() ?? .placeholder
+        let snap = WidgetSnapshot.load() ?? .unavailable
         // Refresh roughly every 15 minutes; the app also forces a reload when it publishes fresh data.
         let next = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date().addingTimeInterval(900)
         completion(Timeline(entries: [NOOPEntry(date: Date(), snapshot: snap)], policy: .after(next)))
@@ -67,7 +68,7 @@ struct NOOPWidgetView: View {
 
     private var inlineText: String {
         var parts: [String] = []
-        if let r = snap.recovery { parts.append("Charge \(r)%") }
+        if let r = snap.recovery { parts.append(String(localized: "Recovery \(r)%")) }
         if let b = snap.bpm { parts.append("\(b) bpm") }
         return parts.isEmpty ? "NOOP" : parts.joined(separator: " · ")
     }
@@ -82,13 +83,13 @@ struct NOOPWidgetView: View {
         .tint(recoveryColor)
     }
 
-    /// Lock-Screen rectangular accessory. Two lines (#446): line 1 the Charge headline, line 2 the live
+    /// Lock-Screen rectangular accessory. Two lines (#446): line 1 the Recovery headline, line 2 the live
     /// HR alongside Effort so the at-a-glance pair the users asked for both fit the tinted accessory.
     private var rectangular: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
                 Image(systemName: "heart.fill").foregroundStyle(recoveryColor)
-                Text("Charge \(snap.recovery.map(String.init) ?? "–")%").font(.headline)
+                Text("Recovery \(snap.recovery.map(String.init) ?? "–")%").font(.headline)
             }
             Text("HR \(snap.bpm.map(String.init) ?? "–") · Effort \(snap.effort.map(String.init) ?? "–")")
                 .font(.caption)
@@ -111,11 +112,11 @@ struct NOOPWidgetView: View {
                     .foregroundStyle(recoveryColor)
                 Text("%").font(.headline).foregroundStyle(StrandPalette.textTertiary)
             }
-            Text("Charge").font(.caption).foregroundStyle(StrandPalette.textTertiary)
+            Text("Recovery").font(.caption).foregroundStyle(StrandPalette.textTertiary)
             Spacer(minLength: 0)
             HStack {
                 Label("\(snap.bpm.map(String.init) ?? "–")", systemImage: "waveform.path.ecg")
-                // Medium has room for one more stat (#446); small stays a clean Charge + HR + battery.
+                // Medium has room for one more stat (#446); small stays a clean Recovery + HR + battery.
                 if family == .systemMedium {
                     Spacer()
                     Label("\(snap.effort.map(String.init) ?? "–")", systemImage: "bolt.fill")
@@ -128,7 +129,7 @@ struct NOOPWidgetView: View {
         .padding(12)
     }
 
-    /// The rich `systemLarge` layout (#446): the Charge headline plus a stat grid of Effort, Rest, HRV,
+    /// The rich `systemLarge` layout (#446): the Recovery headline plus a stat grid of Effort, Sleep, HRV,
     /// Resting HR, live HR and strap battery — the "show me more" the issue asked for.
     private var large: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -144,19 +145,19 @@ struct NOOPWidgetView: View {
                     .font(.system(size: 48, weight: .bold, design: .rounded))
                     .foregroundStyle(recoveryColor)
                 Text("%").font(.title3).foregroundStyle(StrandPalette.textTertiary)
-                Text("Charge").font(.subheadline).foregroundStyle(StrandPalette.textTertiary)
+                Text("Recovery").font(.subheadline).foregroundStyle(StrandPalette.textTertiary)
                     .padding(.leading, 2)
             }
             Divider()
             // Two-by-three stat grid of the richer scores. Each cell is a value + label pairing, tinted to
-            // match its Today tile where a token exists (Effort, Rest); raw vitals stay neutral.
+            // match its Today tile where a token exists (Effort, Sleep); raw vitals stay neutral.
             HStack(alignment: .top, spacing: 0) {
                 statCell("Effort", value: snap.effort.map(String.init), tint: effortColor)
-                statCell("Rest", value: snap.rest.map { "\($0)%" }, tint: restColor)
+                statCell("Sleep", value: snap.rest.map { "\($0)%" }, tint: restColor)
                 statCell("HRV", value: snap.hrv.map { "\($0)" }, unit: "ms")
             }
             HStack(alignment: .top, spacing: 0) {
-                statCell("Rest HR", value: snap.restingHr.map { "\($0)" }, unit: "bpm")
+                statCell("Resting HR", value: snap.restingHr.map { "\($0)" }, unit: "bpm")
                 statCell("HR", value: snap.bpm.map { "\($0)" }, unit: "bpm")
                 statCell("Battery", value: snap.batteryPct.map { "\($0)%" })
             }
@@ -166,7 +167,7 @@ struct NOOPWidgetView: View {
     }
 
     /// One labelled stat in the large grid — value over a caption, equal-width so the three columns align.
-    private func statCell(_ label: String, value: String?, unit: String? = nil,
+    private func statCell(_ label: LocalizedStringKey, value: String?, unit: String? = nil,
                           tint: Color = StrandPalette.textPrimary) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 2) {
@@ -197,8 +198,8 @@ struct NOOPWidget: Widget {
                     .background(StrandPalette.surfaceBase)
             }
         }
-        .configurationDisplayName("NOOP Charge")
-        .description("Charge, Effort, Rest, HRV, resting and live heart rate, and strap battery at a glance.")
+        .configurationDisplayName("NOOP Recovery")
+        .description("Recovery, Effort, Sleep Score, HRV, resting and live heart rate, and strap battery at a glance.")
         .supportedFamilies([
             .systemSmall, .systemMedium, .systemLarge,
             .accessoryCircular, .accessoryInline, .accessoryRectangular

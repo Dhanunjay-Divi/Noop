@@ -57,7 +57,7 @@ class AutoWorkoutDetectorTest {
     }
 
     @Test fun shortSpanIsRejected() {
-        // 8 min at 120 (< 12 min minimum) → nothing.
+        // 8 min at 120 (< 10 min minimum) → nothing.
         val rest = 60
         val start = 3_000_000L
         val hr = block(start - 300, 300, 65) + block(start, 8 * 60, 120) + block(start + 480, 300, 65)
@@ -73,14 +73,14 @@ class AutoWorkoutDetectorTest {
     }
 
     @Test fun nearWindowsAreMerged() {
-        // Two 15 min bouts at 120 separated by a 3 min true rest at 65 (< 5 min merge gap, but the rest
+        // Two 16 min bouts at 120 separated by a 3 min true rest at 65 (< 60 min merge gap, but the rest
         // is > 90 s so it CLOSES each span). The two closed spans are then MERGED into one (gap < 5 min).
         val rest = 60
         val start = 5_000_000L
-        val a = block(start, 15 * 60, 120)
-        val gap = block(start + 900, 3 * 60, 65) // 180 s rest > maxDipS → span closes
-        val b = block(start + 1080, 15 * 60, 120)
-        val hr = block(start - 300, 300, 65) + a + gap + b + block(start + 1980, 300, 65)
+        val a = block(start, 16 * 60, 120)
+        val gap = block(start + 960, 3 * 60, 65) // 180 s rest > maxDipS → span closes
+        val b = block(start + 1140, 16 * 60, 120)
+        val hr = block(start - 300, 300, 65) + a + gap + b + block(start + 2100, 300, 65)
         val out = AutoWorkoutDetector.detect(hr, restingHR = rest)
         assertEquals("near windows not merged: ${out.size}", 1, out.size)
         // Merged span runs from the first bout's start to the second bout's end (~33 min).
@@ -88,15 +88,27 @@ class AutoWorkoutDetectorTest {
     }
 
     @Test fun farWindowsStaySeparate() {
-        // Two 15 min bouts at 120 separated by a 10 min rest (>= 5 min merge gap) → two workouts.
+        // Two 16 min bouts at 120 separated by a 70 min rest (>= 60 min merge gap) → two workouts.
         val rest = 60
         val start = 6_000_000L
-        val a = block(start, 15 * 60, 120)
-        val gap = block(start + 900, 10 * 60, 65)
-        val b = block(start + 1500, 15 * 60, 120)
-        val hr = block(start - 300, 300, 65) + a + gap + b + block(start + 2400, 300, 65)
+        val a = block(start, 16 * 60, 120)
+        val gap = block(start + 960, 70 * 60, 65)
+        val b = block(start + 5160, 16 * 60, 120)
+        val hr = block(start - 300, 300, 65) + a + gap + b + block(start + 6120, 300, 65)
         val out = AutoWorkoutDetector.detect(hr, restingHR = rest)
         assertEquals(2, out.size)
+    }
+
+    @Test fun fragmentsExactlySixtyMinutesApartAreMerged() {
+        val start = 6_500_000L
+        val first = block(start, 20 * 60, 120)
+        // First end is start+1199; second starts exactly 3600 seconds after that endpoint.
+        val rest = block(start + 1200, 3599, 65)
+        val secondStart = start + 4799
+        val second = block(secondStart, 20 * 60, 120)
+        val hr = block(start - 300, 300, 65) + first + rest + second +
+            block(secondStart + 20 * 60, 300, 65)
+        assertEquals(1, AutoWorkoutDetector.detect(hr, restingHR = 60).size)
     }
 
     @Test fun windowOverlappingSavedWorkoutIsExcluded() {
@@ -124,14 +136,62 @@ class AutoWorkoutDetectorTest {
         assertEquals(1, AutoWorkoutDetector.detect(hr, restingHR = rest, gravity = moving).size)
     }
 
+    @Test fun sparseMotionCannotVetoAnHrCandidate() {
+        val rest = 60
+        val start = 8_500_000L
+        val hr = block(start - 300, 300, 65) + block(start, 20 * 60, 120) + block(start + 1200, 300, 65)
+        val sparseStill = (start until start + 1200 step 120).map { grav(it, 0.0) }
+        val motion = AutoWorkoutDetector.motionIntensityByTs(sparseStill)
+
+        assertEquals(
+            AutoWorkoutDetector.MotionConfirmation.Unavailable,
+            AutoWorkoutDetector.motionConfirmation(motion, start, start + 1199),
+        )
+        assertEquals(1, AutoWorkoutDetector.detect(hr, restingHR = rest, gravity = sparseStill).size)
+    }
+
     @Test fun emptyInputIsEmpty() {
         assertTrue(AutoWorkoutDetector.detect(emptyList()).isEmpty())
     }
 
     @Test fun defaultRestingHrIsUsedWhenNull() {
-        // No restingHR → default 60 → floor 90. 20 min at 120 is detected.
+        // No restingHR → lower-decile observed baseline (65 here), still detects the workout.
         val start = 9_000_000L
         val hr = block(start - 300, 300, 65) + block(start, 20 * 60, 120) + block(start + 1200, 300, 65)
         assertEquals(1, AutoWorkoutDetector.detect(hr).size)
+    }
+
+    @Test fun sparseSamplesCannotFakeSustainedActivity() {
+        val start = 10_000_000L
+        val sparse = (start..start + 20 * 60 step 120).map { hr(it, 130) }
+        assertTrue(AutoWorkoutDetector.detect(sparse, restingHR = 60).isEmpty())
+    }
+
+    @Test fun missingRhrUsesConservativeObservedBaseline() {
+        val hr = block(11_000_000L, 20 * 60, 120)
+        assertEquals(100, AutoWorkoutDetector.effectiveRestingBPM(null, hr))
+        assertTrue(AutoWorkoutDetector.detect(hr).isEmpty())
+    }
+
+
+    @Test fun thresholdAndFragmentMergeAreWhoop2026Aligned() {
+        assertEquals(10.0, AutoWorkoutDetector.minSustainedMin, 0.0)
+        assertEquals(60L * 60L, AutoWorkoutDetector.mergeGapS)
+        val start = 12_000_000L
+        val nineMinutes = block(start, 9 * 60, 120) + block(start + 9 * 60, 300, 65)
+        assertTrue(AutoWorkoutDetector.detect(nineMinutes, restingHR = 60).isEmpty())
+    }
+
+    @Test fun ongoingSpanWaitsForPostSessionQuietTail() {
+        val start = 13_000_000L
+        val elevated = block(start, 20 * 60, 120)
+        assertTrue("an elevated EOF span is still in progress",
+            AutoWorkoutDetector.detect(elevated, restingHR = 60).isEmpty())
+
+        val finalized = elevated + block(start + 20 * 60, AutoWorkoutDetector.maxDipS.toInt() + 2, 65)
+        val out = AutoWorkoutDetector.detect(finalized, restingHR = 60)
+        assertEquals(1, out.size)
+        assertEquals(start, out[0].startSec)
+        assertEquals(start + 20 * 60 - 1, out[0].endSec)
     }
 }

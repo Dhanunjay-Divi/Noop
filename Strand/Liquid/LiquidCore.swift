@@ -11,6 +11,7 @@
 //  that drifts and re-catches the light, a reflection that follows the tilt.
 
 import SwiftUI
+import StrandDesign
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -87,15 +88,63 @@ final class LiquidMotion {
     private var started = false
     private var refCount = 0
 
-    private init() {}
+    private init() {
+        #if os(iOS) && !targetEnvironment(macCatalyst)
+        // SwiftUI does not send onDisappear when an app backgrounds. Stop the decorative 60 Hz
+        // device-motion feed explicitly at the process boundary and re-arm it only when a mounted
+        // liquid surface still wants it after returning to the foreground.
+        let notifications = NotificationCenter.default
+        notifications.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in self?.stop() }
+        notifications.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in self?.startIfWanted() }
+        notifications.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in self?.syncToPolicy() }
+        notifications.addObserver(
+            forName: UIAccessibility.reduceMotionStatusDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in self?.syncToPolicy() }
+        notifications.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard,
+            queue: .main
+        ) { [weak self] _ in self?.syncToPolicy() }
+        #endif
+    }
+
+    /// Imperative twin of `NoopMotionState.poseStill(_:)`, used before starting the sensor itself.
+    static var quietNow: Bool {
+        if ProcessInfo.processInfo.isLowPowerModeEnabled { return true }
+        if UserDefaults.standard.bool(forKey: QuietMotionPrefs.enabledKey) { return true }
+        #if canImport(UIKit) && !os(watchOS)
+        if UIAccessibility.isReduceMotionEnabled { return true }
+        #endif
+        return false
+    }
 
     /// Ref-counted start/stop so the sensor only runs while a liquid screen is visible.
     func acquire() {
         refCount += 1
-        guard !started else { return }
+        startIfWanted()
+    }
+
+    /// Policy is enforced here as well as in the views, so a future animated surface cannot
+    /// accidentally re-arm Core Motion while the user or system has requested quiet operation.
+    private func startIfWanted() {
+        guard !started, refCount > 0, !LiquidMotion.quietNow else { return }
         started = true
         #if os(iOS) && !targetEnvironment(macCatalyst)
-        guard manager.isDeviceMotionAvailable else { return }
+        guard manager.isDeviceMotionAvailable else { started = false; return }
         manager.deviceMotionUpdateInterval = 1.0 / 60.0
         manager.startDeviceMotionUpdates(to: motionQueue) { [weak self] motion, _ in
             guard let self, let m = motion else { return }
@@ -125,12 +174,23 @@ final class LiquidMotion {
 
     func release() {
         refCount = max(0, refCount - 1)
-        guard refCount == 0, started else { return }
+        guard refCount == 0 else { return }
+        stop()
+    }
+
+    /// Stop the sensor without clearing the mounted-view reference count. Foregrounding or leaving
+    /// quiet mode can therefore resume it only when a liquid surface is still present.
+    private func stop() {
+        guard started else { return }
         started = false
         #if os(iOS) && !targetEnvironment(macCatalyst)
         manager.stopDeviceMotionUpdates()
         #endif
         tilt = 0
+    }
+
+    private func syncToPolicy() {
+        if LiquidMotion.quietNow { stop() } else { startIfWanted() }
     }
 }
 

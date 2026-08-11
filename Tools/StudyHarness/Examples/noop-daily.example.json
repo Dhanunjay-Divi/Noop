@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "subjectID": "P-7K4M",
+  "source": "noop-on-device",
+  "measurementPipelineRevision": "noop-device-pipeline-v1",
+  "metricRevisions": {
+    "recoveryScore": "noop-charge-v1",
+    "effortScore": "noop-effort-v1",
+    "restScore": "noop-rest-v1"
+  },
+  "days": [
+    {
+      "day": "2026-01-02",
+      "metrics": {
+        "recoveryScore": 67.2,
+        "effortScore": 42.1,
+        "restScore": 81.4,
+        "restingHeartRate": 52,
+        "hrvRMSSD": 61.8,
+        "respiratoryRate": 14.2,
+        "totalSleepMinutes": 421,
+        "deepSleepMinutes": 86,
+        "remSleepMinutes": 104,
+        "lightSleepMinutes": 231,
+        "sleepEfficiencyPercent": 92.5
+      }
+    }
+  ]
+}

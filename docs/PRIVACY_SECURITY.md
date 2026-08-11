@@ -27,8 +27,11 @@ local SQLite — has no network layer at all: no phone-home, no analytics, no ac
 no login, no cloud sync, and no telemetry. Everything NOOP computes about you lives in a
 single SQLite file on your own device.
 
-There are exactly **three data-bearing** opt-in network features: the **AI Coach** (§1.1a),
-the **Oura history import** (§1.1b), and **Self-hosted Sync** (§1.1c). The AI Coach is off until you turn it on with your own API key; when you
+There are exactly **three data-bearing destinations**: the **AI Coach** (§1.1a),
+the **Oura history import** (§1.1b), and a server the user operates through
+**Self-hosted Sync** (§1.1c). **Friends** (§1.1d) is a least-privilege daily-summary
+projection on that same self-hosted server, not a fourth service or a
+Noop-operated social network. The AI Coach is off until you turn it on with your own API key; when you
 ask it a question it sends a short text summary of your recent metrics to the provider you
 choose. The Oura history import is **not even compiled into a default build** — the code
 only exists in your binary if you build from source with your own Oura developer app's
@@ -47,19 +50,21 @@ one of the explicit outputs:
 | Live collection | Bluetooth LE, strap → device | Read-only from the strap |
 | File import (Apple Health, WHOOP CSV, nutrition CSV) | User-selected files on disk | Read-only from disk |
 | Oura history import (opt-in build flag, §1.1b) | HTTPS OAuth + REST, `api.ouraring.com` → device | Read-only from your own Oura account |
-| Self-hosted Sync (§1.1c) | HTTPS, or HTTP only on loopback/private LAN | Decoded streams/derived rows → the server you configure |
+| Self-hosted Sync + Friends (§1.1c–d) | HTTPS, or HTTP only on loopback/private LAN | Selected records and optional friend summaries ↔ the server you configure |
 | Check for updates | HTTPS GET to GitHub's public releases API, only when tapped | Public version metadata → device; no biometric payload |
 | Apple Health export, incl. iOS "Export for Shortcuts" | On-device, user-initiated | NOOP → your Apple Health, on your device only (§1.3) |
 
-The only **data-bearing network** paths are those three opt-ins. The collection/analysis pipeline itself
-produces no network traffic. Apple Health export is an **on-device** hand-off — see §1.3.
+The only **data-bearing network destinations** are those three opt-ins. Friends
+uses the already configured self-hosted destination and its own scoped
+credential. The collection/analysis pipeline itself produces no network traffic.
+Apple Health export is an **on-device** hand-off — see §1.3.
 
 ### 1.1 Network code: only explicit optional destinations
 
 The biometric pipeline and core decode/analytics packages
 (`WhoopProtocol`, `WhoopStore`, `StrandAnalytics`, `StrandImport`, `StrandDesign`)
 contain **no runtime network transport**. The isolated `NoopRemoteSync` package contains the
-authenticated client for the self-host feature; the Oura lane's OAuth
+authenticated sync and invitation-only Friends clients for the self-host feature; the Oura lane's OAuth
 and REST calls live entirely in the app target, `Strand/Oura/`, and `StrandImport`
 gained only pure, network-free parsers for Oura's payload shapes. These Swift packages
 are **shared by the macOS and iOS apps** (iOS is build-from-source only — no App Store /
@@ -82,8 +87,8 @@ importers. Neither opens a socket.
 
 ### 1.1a The AI Coach (optional, off by default, bring your own key)
 
-The AI Coach lets you ask questions about your data in plain language. It is one of the
-three opt-in data-bearing network features, and runs only on your terms:
+The AI Coach lets you ask questions about your data in plain language. It uses
+one of the three opt-in data-bearing destinations and runs only on your terms:
 
 - **Off until you enable it.** You enter your own API key for the provider you choose
   (Anthropic, OpenAI, or a local / self-hosted OpenAI-compatible LLM such as Ollama or
@@ -100,9 +105,10 @@ three opt-in data-bearing network features, and runs only on your terms:
   provider you picked, under your own account. NOOP runs no server in between and keeps
   no copy.
 
-If you never enable the AI Coach or Self-hosted Sync, never build the Oura import in
-(§1.1b), and never tap **Check for updates**, NOOP makes zero network connections — and
-in a default build, the Oura code isn't in the binary to begin with.
+If you never enable the AI Coach, Self-hosted Sync, or Friends, never build the
+Oura import in (§1.1b), and never tap **Check for updates**, NOOP makes zero
+network connections — and in a default build, the Oura code isn't in the binary
+to begin with.
 
 ### 1.1b The Oura history import (compiled out by default, bring your own OAuth app)
 
@@ -195,6 +201,82 @@ Raw ADC fields remain labeled raw/unvalidated throughout ingestion and display. 
 not silently turn optical or thermistor register values into clinical SpO₂, temperature,
 or respiration.
 
+### 1.1d Private Friends (optional, self-hosted, Apple clients)
+
+Friends is an invitation-only summary layer on the server in §1.1c. It does not
+create a Noop-operated account, directory, or social graph:
+
+- **Separate credentials.** The configured `NOOP_API_TOKEN` is used once to
+  bootstrap the server owner's profile and remains the full-data/admin
+  credential. The server returns a random 256-bit `noop_member_…` token for
+  normal Friends use, stores only its SHA-256 digest, and can rotate or disable
+  it. A first-time invited member instead has the Apple client generate its own
+  256-bit member token and enrollment UUID. The client saves the token before
+  the join request and reuses the same token and enrollment UUID for a
+  retry-safe, idempotent enrollment if the response is lost. The server does not
+  echo the plaintext invited-member token. The Apple app keeps member tokens under
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`; non-secret endpoint,
+  profile, display-name, and producer identifiers live in preferences.
+- **Accepted-only, minimized upload.** The client fetches its accepted-friend
+  visibility rules first and uploads no biometric summary values while no
+  friendship is accepted. It may send empty replacement maps to clear a
+  previously populated Friends window.
+  Once accepted, it uploads only the union of fields currently enabled across
+  accepted friends. The member token can write only a dedicated logical
+  `*-noop-friends` daily producer, separate from the full self-hosted backup
+  producer. Daily keys are restricted to `recovery`, `effort`,
+  `sleep_performance`, `total_sleep_min`, `avg_hrv`, and `resting_hr`, with
+  server-side range checks. Streams, events, sleep sessions, workouts, and
+  journal entries must be empty. The credential cannot call raw, export,
+  device, or admin routes; its status response omits server-wide storage
+  statistics.
+- **Plain-text invitation details.** Invite codes contain 96 random bits, expire
+  within one to 168 hours (72 hours by default), work once, and are stored only
+  as SHA-256 digests. The invitation shares the full configured server address
+  and code as plain text, never an admin or member token. The recipient reviews
+  and enters both manually. NOOP intentionally does not create a
+  capability-bearing custom app URL, avoiding custom-scheme interception.
+- **Mutual consent.** Redeeming or joining with a code creates a pending request,
+  not a friendship. The original inviter must accept before either person
+  appears in the other's feed or the client uploads any Friends summary. A
+  first-time recipient atomically creates a scoped profile and request with the
+  invite code, client-generated member token, and enrollment UUID, so the
+  administrator credential is never handed to them.
+- **Directional, per-friend visibility.** Charge, Effort, and Rest start enabled
+  after acceptance. Sleep duration, HRV, and resting HR start disabled. Each
+  owner controls their allowlist independently for each accepted friend.
+- **Projection, not raw access.** The feed reads only those six fields from
+  the dedicated Friends daily rows, omits values disabled for that reader, and
+  starts on the friendship's acceptance date—earlier history is not returned.
+  It never queries or returns raw heart rate/R-R, sensor streams, protocol
+  events, location, routes, workouts, journals, sleep stages, exports, device
+  identifiers, metadata, or imported WHOOP-reference rows.
+- **Server-operator trust, not end-to-end encryption.** HTTPS protects the
+  connection in transit, and per-friend projection limits what another member
+  receives. Friends is not end-to-end encrypted: the operator of the selected
+  server can inspect the membership graph and every summary field the client
+  uploads (the union needed by accepted friends). Join only a server whose
+  operator you trust.
+- **Best-effort foreground catch-up.** When the Apple app becomes active it
+  attempts at most one automatic Friends catch-up per 15 minutes. This is not a
+  periodic background timer and iOS does not guarantee background delivery;
+  opening or refreshing Friends is the reliable user-driven path.
+- **Revocation.** Removing a friendship deletes both directional visibility
+  records immediately. Blocking additionally cancels pending requests and
+  prevents the blocked pair from reconnecting through another invite until
+  unblocked. **Leave & delete profile** removes the member profile, credential,
+  social graph, and dedicated Friends summary rows from the server, while local
+  health data and a separately configured full self-hosted backup remain.
+- **One server at a time.** The Apple client refuses to replace an existing
+  Friends origin with an invite from another server. There is no federation,
+  contacts upload, handle search, public profile, follower model, leaderboard,
+  or Android Friends UI.
+
+Anyone with both the full server address and an unredeemed code can spend that
+one-time capability. Share both only with the intended recipient, use HTTPS
+outside a trusted private network, and revoke an unused invite if it may have
+leaked. The complete API and operator contract is in `server/FRIENDS.md`.
+
 ### 1.2 The macOS sandbox (and what it means for optional network features)
 
 On macOS the App Sandbox is the backstop. The app ships with a minimal entitlement set
@@ -217,8 +299,8 @@ That is the entire entitlement file. Four keys:
   explicitly enable your own self-hosted server."*
 - **`files.user-selected.read-write`** — lets the app read import files the user
   explicitly picks (and write the database in its own container).
-- **`network.client`** — outbound socket access. Used by the explicit AI Coach, Oura,
-  and Self-hosted Sync opt-ins on a
+- **`network.client`** — outbound socket access. Used by the explicit AI Coach,
+  Oura, Self-hosted Sync, and Friends opt-ins on a
   signed/sandboxed build, where the sandbox otherwise refuses any socket the app tries
   to open (#128); the Oura history import (§1.1b) now relies on the same entitlement. The
   ad-hoc distributed build applies **no** entitlements at all (unsigned build + ad-hoc
@@ -394,16 +476,18 @@ about what NOOP does and does not do with it:
   hours, only-when-worn), and if all pass, sends a haptic-pattern command to the strap.
   The notification's title, text, sender, and extras are never read, stored, logged, or
   transmitted.
-- **Nothing leaves the device.** There is no server; the only output is a Bluetooth
-  buzz to your own strap. (`android/.../notif/NoopNotificationListener.kt`.)
+- **Nothing from a notification leaves the device.** The optional self-hosted
+  server is not involved; the only output is a Bluetooth buzz to your own strap.
+  (`android/.../notif/NoopNotificationListener.kt`.)
 
 ---
 
 ## 3. Threat model
 
-NOOP parses two classes of **untrusted input**: bytes arriving over Bluetooth, and
-files chosen for import. Both are treated as hostile and validated before anything
-reaches the database. Apple Health and WHOOP files in particular can be very large
+NOOP parses three classes of **untrusted input**: bytes arriving over Bluetooth,
+files chosen for import, and responses/capabilities from user-configured network
+destinations. They are treated as hostile and validated before they can update
+trusted app state. Apple Health and WHOOP files in particular can be very large
 (multi-hundred-MB to multi-GB), so resource exhaustion is part of the model.
 
 What is explicitly **out of scope**: NOOP cannot defend the data against an attacker
@@ -546,18 +630,53 @@ recognised numeric fields are read — no archive member or cell is ever execute
 interpreted. The result is projected into the long-format `metricSeries` store under the
 dedicated source id `nutrition-csv`, alongside your other metrics and entirely on-device.
 
+### 3.3 Threat C: malicious Friends invitation details or server
+
+NOOP does not register a capability-bearing custom URL. An invitation is the
+full server address and one-time code in plain text, and the recipient manually
+reviews and enters both. This avoids custom-scheme interception, but it does not
+make the code secret: anyone who obtains both values before redemption can spend
+the capability. Use a trusted sharing channel and revoke a suspected leak.
+
+Before any request, the client applies the same endpoint validator as
+Self-hosted Sync: public destinations require HTTPS; URL credentials, query
+configuration, fragments, and unsafe cleartext hosts are rejected. The join
+sheet displays the full destination and the default/optional/never-shared
+categories before the request. If a member profile already exists, the invite
+must have the same normalized endpoint; the app refuses to migrate the stored
+member credential to another origin.
+
+For first enrollment, the client creates and Keychain-saves a 256-bit member
+token plus an enrollment UUID before sending the request. A lost response can
+therefore retry the same enrollment safely: the server returns the original
+result for that enrollment, while a different enrollment cannot claim the
+already consumed invite. Server-side transactional redemption prevents a raced
+or invalid join from leaving an orphan profile. Responses are decoded into fixed
+models, cross-origin/downgrade redirects are rejected by the shared client, and
+server error text is redacted for both administrator and member credentials.
+
+The server remains a trust boundary. Friends is not end-to-end encrypted, so a
+malicious or compromised operator can inspect the social graph and the summary
+field union uploaded for accepted friends. Other members are restricted to
+their directional projections from the friendship acceptance date, and even a
+valid member credential can access only daily-summary and social routes in
+§1.1d; raw-data authorization is enforced again by the server rather than by UI
+visibility alone.
+
 ---
 
 ## 4. What NOOP does *not* collect or transmit
 
-- **No NOOP account, no NOOP login.** Nothing to sign into with NOOP itself; NOOP
-  issues no credentials of its own. The one exception is opt-in: the Oura history import
-  (§1.1b) has *you* sign into *your own* Oura account, at Oura's own login page, over
-  OAuth — NOOP never sees your Oura password, only the resulting tokens, kept in the
-  Keychain.
+- **No Noop-operated account or login.** Core use requires no identity. An
+  optional self-hosted Friends profile uses a local scoped member credential
+  (§1.1d)—server-issued for owner bootstrap or client-generated for an invited
+  first join. It is not a Noop account and is never sent to a Noop-operated service.
+  Separately, Oura history import (§1.1b) has *you* sign into *your own* Oura
+  account, at Oura's login page, over OAuth—NOOP never sees your password, only
+  the resulting tokens kept in Keychain.
 - **No telemetry / analytics / crash reporting.** No third-party SDKs of that kind.
-- **No Noop-operated cloud.** Self-hosted Sync (§1.1c) can replicate your data only to
-  the endpoint you configure; it is off by default. Oura history import is inbound-only.
+- **No Noop-operated cloud.** Self-hosted Sync and Friends (§1.1c–d) use only the
+  endpoint you configure; both are optional. Oura history import is inbound-only.
 - **No advertising identifiers, no tracking.**
 - **No WHOOP account or API credentials.** NOOP talks only to the strap over local
   BLE; it does not authenticate against, or pull from, any WHOOP server. (Oura is the
@@ -569,8 +688,9 @@ dedicated source id `nutrition-csv`, alongside your other metrics and entirely o
 
 | Surface | Risk | Mitigation | Where |
 |---------|------|------------|-------|
-| Process | Data exfiltration / network egress | Three explicit opt-ins: AI Coach (your provider/key and text summary — §1.1a), Oura import (your OAuth app, inbound-only — §1.1b), and Self-hosted Sync (your endpoint/token and selected local records — §1.1c). No telemetry or project-operated cloud. | `Strand/AI/`, `Strand/Oura/`, `Packages/NoopRemoteSync`, `Strand/Data/RemoteSyncService.swift`, Android remote-sync client |
+| Process | Data exfiltration / network egress | Three explicit destinations: AI Coach (your provider/key and text summary — §1.1a), Oura import (your OAuth app, inbound-only — §1.1b), and your self-hosted server (Sync plus optional Friends — §1.1c–d). No telemetry or project-operated cloud. | `Strand/AI/`, `Strand/Oura/`, `Packages/NoopRemoteSync`, `Strand/Data/RemoteSyncService.swift`, `Strand/Data/FriendsService.swift`, Android remote-sync client |
 | Self-hosted sync | Token leak, cleartext egress, redirect exfiltration, lost backfill | Token in Keychain/encrypted preferences; HTTPS required except validated local/private literals; URL credentials/query/fragment rejected; redirects cannot cross origin or downgrade transport; error reflection redacted; per-row acknowledgement only after a matching accepted response; resumable, bounded replay on destination change. Local deletions require a separate authenticated server delete. | `Packages/NoopRemoteSync`, `Packages/WhoopStore/.../RemoteSyncStore.swift`, `server/` |
+| Private Friends | Invite theft, retry races, over-broad access, operator visibility, unwanted continued sharing | Plain-text server address + one-time code with manual review and no custom capability URL; hashed codes/tokens; client-generated Keychain token plus idempotent enrollment UUID; no biometric summary values before acceptance; empty replacement maps clear stale shares; accepted-friend field union limited to six range-checked keys; dedicated `*-noop-friends` producer; per-friend projection only from acceptance date; explicit not-E2E/operator-trust disclosure; remove/block/token rotation and Leave & delete controls; foreground catch-up is best effort, not guaranteed background delivery. | `Strand/Data/FriendsService.swift`, `Strand/Screens/FriendsView.swift`, `Packages/NoopRemoteSync`, `server/FRIENDS.md`, `server/migrations/003_friends.sql` |
 | Oura history import | OAuth token / scope leakage, cross-account data mixing | Compiled out by default (`OURA_CLOUD_IMPORT`, §1.1b); tokens Keychain-only (`kSecAttrAccessibleAfterFirstUnlock`, never UserDefaults/plist); fixed OAuth scopes set at build time; raw + normalized rows partitioned under `deviceId = "oura-api"`; Oura's own scores kept reference-only (`ref_*`/`oura_*` metricSeries keys, never NOOP's Charge/Effort/Rest); `.cloudImport` is structurally priority-2 so it never seizes a WHOOP day; Forget Oura access purges tokens + every `oura-api` row incl. the raw archive | `Strand/Oura/OuraTokenStore.swift`, `Strand/Oura/OuraConnectModel.swift`, `Packages/WhoopStore/Sources/WhoopStore/OuraRawStore.swift` |
 | Filesystem | Broad disk access | Only `files.user-selected.read-write`; data stays in the sandbox container | `Strand.entitlements`, `Strand/Collect/StorePaths.swift` |
 | BLE frames | Malformed / adversarial packets | CRC8 + CRC32 (+ CRC16 for v5) gating; reject on failure | `WhoopProtocol/Framing.swift`, `Strand/BLE/FrameRouter.swift` |

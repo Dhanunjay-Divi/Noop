@@ -41,6 +41,11 @@ struct SettingsView: View {
     /// BLE sensor for Garmin/Zwift/gym kit. See [PuffinExperiment.broadcastHrKey]. (#181)
     @AppStorage(PuffinExperiment.broadcastHrKey) private var broadcastHrEnabled = false
 
+    /// WHOOP MG ECG ("Labrador") experiment. Unlocks the gated, user-initiated ECG probe on the Devices
+    /// card. Default off; with it off the four ECG opcodes are dropped by the command allowlist, so no
+    /// ECG byte can reach a strap. See [PuffinExperiment.ecgKey].
+    @AppStorage(PuffinExperiment.ecgKey) private var ecgEnabled = false
+
     /// Opt-in "Continuous HRV capture" (off by default) — holds the dense realtime stream armed 24/7 so
     /// the strap banks beat-to-beat R-R for better overnight HRV/recovery/sleep, at a battery cost.
     /// See [PuffinExperiment.keepRealtimeForDataKey].
@@ -50,7 +55,7 @@ struct SettingsView: View {
     /// inside the nightly quiet-hours window instead of 24/7. Composed with the base toggle (base on +
     /// this off = ALWAYS, the pre-#927 behaviour) so existing users see no change and need no migration.
     /// See [PuffinExperiment.continuousHrvOvernightOnlyKey].
-    @AppStorage(PuffinExperiment.continuousHrvOvernightOnlyKey) private var continuousHrvOvernightOnly = false
+    @AppStorage(PuffinExperiment.continuousHrvOvernightOnlyKey) private var continuousHrvOvernightOnly = true
 
     // #477 Power saving (parity with Android). Battery-adaptive sync cadence + an HRV-pause sub-option.
     @AppStorage(PuffinExperiment.powerSavingKey) private var powerSavingEnabled = false
@@ -75,6 +80,8 @@ struct SettingsView: View {
     // distances/weights/heights/temperatures are SHOWN — and lets the profile fields below take
     // imperial entry. Temperature has a separate override so °C/°F can be picked independently.
     @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    @AppStorage(UnitPrefs.massKey) private var massUnitRaw = ""
+    @AppStorage(UnitPrefs.heightKey) private var heightUnitRaw = ""
     @AppStorage(UnitPrefs.temperatureKey) private var temperatureRaw = ""
     // Effort display scale (#268). Display-only — Effort stays stored 0–100, this only chooses whether
     // it's shown on NOOP's 0–100 axis or WHOOP's 0–21 Day Strain axis.
@@ -98,14 +105,16 @@ struct SettingsView: View {
     @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = true
     // Card-surface opacity percent (100 = solid). Reactive — moving the slider live-updates every card.
     @AppStorage(CardAppearancePrefs.opacityKey) private var cardOpacityPercent = CardAppearancePrefs.defaultPercent
+    /// Poses all never-settling decorative animations and disables the liquid tilt sensor.
+    /// System Reduce Motion and Low Power Mode apply the same policy even when this is off.
+    @AppStorage(QuietMotionPrefs.enabledKey) private var quietMotion = false
     // Hydration tracker (opt-in, MVP). Default OFF — when off the hydration dashboard card + detail are
     // hidden. Mirrors the Android pref so the toggle reads the same on both platforms.
     @AppStorage(HydrationStore.enabledKey) private var hydrationEnabled = false
 
-    /// Opt-in "Auto-detect workouts" (default OFF). When ON, Today scans the last day or two of HR for a
-    /// sustained-elevated window and offers — via a single dismissible card — to save it as a workout.
-    /// Nothing is ever created automatically. Mirrors the Android `NoopPrefs.KEY_AUTO_DETECT_WORKOUTS`.
-    @AppStorage(PuffinExperiment.autoDetectWorkoutsKey) private var autoDetectWorkoutsEnabled = false
+    /// Empty means the richer mode has never been selected, so `PuffinExperiment.autoWorkoutMode`
+    /// applies its legacy-safe migration (old true → Ask, old false → Off, fresh install → Auto-save).
+    @AppStorage(PuffinExperiment.autoWorkoutModeKey) private var autoWorkoutModeRaw = ""
 
     /// "Journal reminder" (#627, default ON). When ON, Today shows the persistent journal widget
     /// (last-7-days strip + tap-through). Mirrors the Android `NoopPrefs.KEY_JOURNAL_REMINDER_ENABLED`.
@@ -137,6 +146,8 @@ struct SettingsView: View {
     }
 
     private var unitSystem: UnitSystem { UnitSystem(rawValue: unitSystemRaw) ?? .metric }
+    private var massUnit: MassUnit { UnitPrefs.resolveMass(system: unitSystem, override: massUnitRaw) }
+    private var heightUnit: HeightUnit { UnitPrefs.resolveHeight(system: unitSystem, override: heightUnitRaw) }
     private var temperatureUnit: TemperatureUnit {
         UnitPrefs.resolveTemperature(system: unitSystem, override: temperatureRaw)
     }
@@ -145,6 +156,7 @@ struct SettingsView: View {
     /// macOS can "Reveal in Finder" after a share, mirroring the puffin-capture export.
     @State private var rawCsvBusy = false
     @State private var lastRawCsvURL: URL?
+    @State private var rawAndLogBusy = false
 
     /// Confirm gate for the "Recalibrate Charge baseline" action (it re-learns the HRV anchor from tonight).
     @State private var showRecalibrateConfirm = false
@@ -227,12 +239,12 @@ struct SettingsView: View {
         } message: {
             Text(backupAlertMessage)
         }
-        .confirmationDialog("Recalibrate your Charge baseline?",
+        .confirmationDialog("Recalibrate your Recovery baseline?",
                             isPresented: $showRecalibrateConfirm, titleVisibility: .visible) {
             Button("Recalibrate") { recalibrateHrvBaseline() }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This restarts the roughly 4-night build-up for Charge and your HRV baseline. Your history stays. Use it if a bad first week, like wearing it while sick, set your baseline off.")
+            Text("This restarts the roughly 4-night build-up for Recovery and your HRV baseline. Your history stays. Use it if a bad first week, like wearing it while sick, set your baseline off.")
         }
         .sheet(isPresented: $showWhatsNew) {
             WhatsNewView(onClose: { showWhatsNew = false })
@@ -350,8 +362,7 @@ struct SettingsView: View {
                 }
                 rowDivider
                 FormRow(label: "Weight") {
-                    // Imperial mode steps in pounds and stores the kg equivalent; metric steps in kg.
-                    if unitSystem == .imperial {
+                    if massUnit == .pounds {
                         poundsField(weightKg: $profile.weightKg)
                     } else {
                         measureField(value: $profile.weightKg, unit: "kg",
@@ -361,8 +372,7 @@ struct SettingsView: View {
                 }
                 rowDivider
                 FormRow(label: "Height") {
-                    // Imperial mode steps in whole inches and stores the cm equivalent; metric steps in cm.
-                    if unitSystem == .imperial {
+                    if heightUnit == .feetInches {
                         feetInchesField(heightCm: $profile.heightCm)
                     } else {
                         measureField(value: $profile.heightCm, unit: "cm",
@@ -376,8 +386,7 @@ struct SettingsView: View {
                 // NOT sharpen the Fitness Age itself (the body term cancels in the Nes model), so it sits
                 // apart with an honest "adds your VO₂max estimate" note rather than implying it tunes the age.
                 FormRow(label: "Waist (optional)") {
-                    // Imperial mode steps in whole inches and stores the cm equivalent; metric steps in cm.
-                    if unitSystem == .imperial {
+                    if heightUnit == .feetInches {
                         waistInchesField(waistCm: $profile.waistCm)
                     } else {
                         waistCentimetresField(waistCm: $profile.waistCm)
@@ -395,6 +404,7 @@ struct SettingsView: View {
                             Text("bpm")
                                 .font(StrandFont.caption)
                                 .foregroundStyle(StrandPalette.textTertiary)
+                                .fixedSize(horizontal: true, vertical: false)
                         }
                         Text(profile.hrMaxOverride > 0
                              ? "Manual override"
@@ -403,6 +413,8 @@ struct SettingsView: View {
                             .foregroundStyle(profile.hrMaxOverride > 0
                                              ? StrandPalette.accent
                                              : StrandPalette.textTertiary)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 rowDivider
@@ -483,6 +495,7 @@ struct SettingsView: View {
                 Text(unit)
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             Stepper(accessibility, value: value, in: range, step: step)
                 .labelsHidden()
@@ -506,6 +519,7 @@ struct SettingsView: View {
                 Text("lb")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             Stepper("Weight in pounds", value: lb, in: 66...551, step: 1)
                 .labelsHidden()
@@ -610,28 +624,56 @@ struct SettingsView: View {
 
     // MARK: - Units
 
-    /// Imperial/Metric display toggle + a separate temperature override. Display-only — nothing stored
-    /// changes, NOOP keeps everything in SI and converts at the point of display.
+    /// Independent display choices. Nothing stored changes: NOOP keeps canonical SI values and converts
+    /// at render/entry time, so kg + ft/in and lb + cm are both supported without a migration.
     private var unitsCard: some View {
         SettingsSection(
             icon: "ruler",
             title: "Units",
-            blurb: "Choose how distances, weights, heights, temperatures and Effort are shown. Your data is always stored the same way. This only changes the display."
+            blurb: "Choose distance, weight, height and temperature separately. Your underlying data never changes."
         ) {
             VStack(spacing: 0) {
-                FormRow(label: "Measurement system") {
-                    Picker("Measurement system", selection: $unitSystemRaw) {
-                        Text("Metric").tag(UnitSystem.metric.rawValue)
-                        Text("Imperial").tag(UnitSystem.imperial.rawValue)
+                FormRow(label: "Distance") {
+                    Picker("Distance unit", selection: $unitSystemRaw) {
+                        Text("km").tag(UnitSystem.metric.rawValue)
+                        Text("mi").tag(UnitSystem.imperial.rawValue)
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
                     .tint(StrandPalette.accent)
-                    .accessibilityLabel("Measurement system")
+                    .accessibilityLabel("Distance unit")
+                }
+                rowDivider
+                FormRow(label: "Weight") {
+                    Picker("Weight unit", selection: Binding(
+                        get: { massUnit.rawValue },
+                        set: { massUnitRaw = $0 }
+                    )) {
+                        Text("kg").tag(MassUnit.kilograms.rawValue)
+                        Text("lb").tag(MassUnit.pounds.rawValue)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .tint(StrandPalette.accent)
+                    .accessibilityLabel("Weight unit")
+                }
+                rowDivider
+                FormRow(label: "Height") {
+                    Picker("Height unit", selection: Binding(
+                        get: { heightUnit.rawValue },
+                        set: { heightUnitRaw = $0 }
+                    )) {
+                        Text("cm").tag(HeightUnit.centimeters.rawValue)
+                        Text("ft / in").tag(HeightUnit.feetInches.rawValue)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .tint(StrandPalette.accent)
+                    .accessibilityLabel("Height unit")
                 }
                 rowDivider
                 FormRow(label: "Temperature") {
-                    // Three-way: "Match" follows the system above; °C / °F pin it explicitly. Stored as
+                    // Three-way: "Match" follows the distance choice; °C / °F pin it explicitly. Stored as
                     // an empty string ("match") or the TemperatureUnit raw value.
                     Picker("Temperature", selection: $temperatureRaw) {
                         Text("Match").tag("")
@@ -715,8 +757,8 @@ struct SettingsView: View {
                 rowDivider   // #79: separator before App icon (inside #if so macOS keeps a single divider)
                 FormRow(label: "App icon") {
                     Picker("App icon", selection: $useNavyIcon) {
-                        Text("Default").tag(false)
-                        Text("Navy").tag(true)
+                        Text("Obsidian").tag(false)
+                        Text("Legacy navy").tag(true)
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
@@ -727,34 +769,46 @@ struct SettingsView: View {
                 #endif
 
                 Divider().overlay(StrandPalette.hairline).padding(.vertical, 4)
-                // MARK: Day-cycle background — the time-of-day scene behind Today (#698). On by default.
-                // Off swaps it for the plain dark canvas for people who find the moving scene distracting.
-                Toggle(isOn: $showDayCycleBackground) {
-                    Text("Day-cycle background")
+                Toggle(isOn: $quietMotion) {
+                    Text("Reduce motion in NOOP")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
                 .toggleStyle(.switch)
                 .tint(StrandPalette.accent)
-                Text("Shows a soft sunrise, day, dusk and night scene behind the Today screen. Turn it off for a plain dark canvas. Your cards stay exactly as readable.")
+                Text("Holds liquid gauges, active metric illustrations, live-status pulses, and the tilt response still. Low Power Mode and the system Reduce Motion setting already do this automatically.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                // MARK: Sky behind cards — extend the day-cycle sky behind the WHOLE Today scroll so the
-                // Card-transparency slider reveals it under every card (not just the hero). Opt-in, off by
-                // default; pairs with Card transparency below.
-                Toggle(isOn: $skyBehindCards) {
-                    Text("Sky behind cards")
+                Divider().overlay(StrandPalette.hairline).padding(.vertical, 4)
+                // MARK: Dimensional background — the restrained obsidian field behind primary pages.
+                Toggle(isOn: $showDayCycleBackground) {
+                    Text("Dimensional background")
                         .font(StrandFont.subhead)
-                        // Greyed when day-cycle is off — the sky it extends isn't drawn then (Android parity).
+                        .foregroundStyle(StrandPalette.textPrimary)
+                }
+                .toggleStyle(.switch)
+                .tint(StrandPalette.accent)
+                Text("Shows the sculpted obsidian surface behind NOOP. Turn it off for a plain monochrome canvas.")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                // MARK: Background behind cards — extend the material behind the WHOLE scroll so the
+                // Card-transparency slider reveals it under every card.
+                Toggle(isOn: $skyBehindCards) {
+                    Text("Background behind cards")
+                        .font(StrandFont.subhead)
+                        // Greyed when the dimensional backdrop is off.
                         .foregroundStyle(showDayCycleBackground ? StrandPalette.textPrimary : StrandPalette.textTertiary)
                 }
                 .toggleStyle(.switch)
                 .tint(StrandPalette.accent)
                 .disabled(!showDayCycleBackground)
-                Text("Extends the sky behind the whole Today screen, so lowering Card transparency lets it show through every card. Needs the day-cycle background on.")
+                Text("Extends the obsidian surface behind the whole screen, so lowering Card transparency lets it show through every card. Needs Dimensional background on.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1093,14 +1147,14 @@ struct SettingsView: View {
         SettingsSection(
             icon: "heart.text.square",
             title: "Recovery",
-            blurb: "Your Charge score learns a personal baseline from your heart-rate variability, resting heart rate and more over time. If a bad first week set it off, you can re-learn it from tonight. Your history stays."
+            blurb: "Your Recovery score learns a personal baseline from your heart-rate variability, resting heart rate and more over time. If a bad first week set it off, you can re-learn it from tonight. Your history stays."
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.rowSpacing) {
-                NoopButton("Recalibrate Charge baseline", systemImage: "arrow.triangle.2.circlepath", kind: .secondary) {
+                NoopButton("Recalibrate Recovery baseline", systemImage: "arrow.triangle.2.circlepath", kind: .secondary) {
                     showRecalibrateConfirm = true
                 }
 
-                Text("Restarts the roughly 4-night build-up for Charge and your HRV baseline from tonight. Use it if a bad first week set your baseline off. Your history stays.")
+                Text("Restarts the roughly 4-night build-up for Recovery and your HRV baseline from tonight. Use it if a bad first week set your baseline off. Your history stays.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1120,7 +1174,7 @@ struct SettingsView: View {
             await model.intelligence.analyzeRecent()
             await model.repo.refresh()
         }
-        backupAlertTitle = String(localized: "Charge baseline recalibrating")
+        backupAlertTitle = String(localized: "Recovery baseline recalibrating")
         backupAlertMessage = String(localized: "NOOP will re-learn your baseline from tonight's data onward. Your history is kept, and it takes a few nights to settle.")
         showBackupAlert = true
     }
@@ -1161,7 +1215,7 @@ struct SettingsView: View {
         SettingsSection(
             icon: "drop.fill",
             title: "Features",
-            blurb: "Optional trackers, off by default. Turn them on to add their cards. Everything stays on \(Platform.deviceNounPhrase)."
+            blurb: "Choose the local trackers and automations you want. Each control explains its own default and tradeoffs. Everything stays on \(Platform.deviceNounPhrase)."
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.space2 + 2) {
                 Toggle(isOn: $hydrationEnabled) {
@@ -1180,16 +1234,29 @@ struct SettingsView: View {
 
                 Divider().overlay(StrandPalette.hairline)
 
-                Toggle(isOn: $autoDetectWorkoutsEnabled) {
-                    Text("Auto-detect workouts")
+                VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                    Text("Automatic activity tracking")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
+                    Picker("Automatic activity tracking", selection: Binding(
+                        get: {
+                            PuffinExperiment.AutoWorkoutMode(rawValue: autoWorkoutModeRaw)
+                                ?? PuffinExperiment.autoWorkoutMode
+                        },
+                        set: { mode in
+                            autoWorkoutModeRaw = mode.rawValue
+                            PuffinExperiment.setAutoWorkoutMode(mode)
+                        }
+                    )) {
+                        ForEach(PuffinExperiment.AutoWorkoutMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityHint("Choose off, ask before saving, or confidence-gated automatic saving")
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
-                .accessibilityHint("Offers to save a workout when it spots sustained elevated heart rate")
 
-                Text("After a sync, NOOP looks over your recent heart rate for a sustained, raised stretch that looks like exercise and offers to save it. It only ever suggests. Nothing is saved until you tap Save, and you can dismiss any suggestion. Deliberately conservative, so the odd workout may be missed. On \(Platform.deviceNounPhrase) only.")
+                Text("After a sync, NOOP looks for a finalized, sustained rise in heart rate with sufficient signal coverage and motion confirmation when available. Ask always waits for you. Auto-save writes only stronger 15+ minute candidates as Detected, then lets you keep, edit or dismiss them. This is a conservative on-device heuristic, not WHOOP's proprietary detector, so it can miss or misread activities. On \(Platform.deviceNounPhrase) only.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1277,7 +1344,7 @@ struct SettingsView: View {
         SettingsSection(
             icon: "shield.lefthalf.filled",
             title: "Experimental · Live Sessions",
-            blurb: "A one-tap guarded workout: the strap watches your heart rate against a band gated on today's Charge, and only ever buzzes to correct course. Silence means you're on track."
+            blurb: "A one-tap guarded workout: the strap watches your heart rate against a band gated on today's Recovery, and only ever buzzes to correct course. Silence means you're on track."
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.rowSpacing) {
                 Toggle(isOn: $liveSessionsBeta) {
@@ -1460,6 +1527,42 @@ struct SettingsView: View {
                     .accessibilityElement(children: .combine)
                 }
 
+                Divider().overlay(StrandPalette.hairline)
+
+                // MARK: WHOOP MG ECG (Labrador) — MG-only, writes ECG control commands. NOT medical.
+                Toggle(isOn: $ecgEnabled) {
+                    Text("WHOOP MG ECG capture (experimental)")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                }
+                .toggleStyle(.switch)
+                .tint(StrandPalette.accent)
+                // Turning the switch off also tells the strap to stop, so a stream can't be left running
+                // by a user who simply flips the toggle back. `ecgStopCapture` is deliberately reachable
+                // with the opt-in already off (see BLEManager.ecgStopOverride). When the strap isn't a
+                // connected MG the send can't happen — the Devices "Stop" control then stays offered via
+                // `ecgMayBeRunning` so there is still a route once the link is back.
+                // `reportsResult: false`: switching a setting off must not pop the Devices result sheet.
+                .onChangeCompat(of: ecgEnabled) { on in if !on { model.ecgStopCapture(reportsResult: false) } }
+                Text("The WHOOP MG has ECG electrodes in its clasp. This unlocks a gated, hand-run probe on the Devices screen that asks the strap to start its ECG subsystem and logs whatever comes back. MG only — a plain WHOOP 5.0 has no electrodes, and NOOP will refuse to send unless your strap identifies itself as an MG. Nobody has confirmed a strap honours these commands, so it may simply do nothing. Turn on “Record puffin frames to a file” below first if you want a complete byte-level capture to share.")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if ecgEnabled {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(StrandPalette.statusWarning)
+                            .accessibilityHidden(true)
+                        Text("NOOP is not a medical device and this is not an ECG test. Anything the strap reports here — including any heart-rhythm classification it happens to send — is unvalidated instrumentation for protocol research, not a measurement and not a diagnosis. Never use it to make a decision about your health. If you have symptoms or are worried about your heart, talk to a doctor.")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.statusWarning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityElement(children: .combine)
+                }
+
                 Toggle(isOn: $puffinCapture) {
                     Text("Record puffin frames to a file")
                         .font(StrandFont.subhead)
@@ -1494,7 +1597,16 @@ struct SettingsView: View {
                     // and the strap log together (timestamped, same minute) so a protocol-mapping issue
                     // arrives with the frames AND the context that produced them.
                     NoopButton("Export raw + log", systemImage: "square.and.arrow.up.on.square", kind: .secondary) {
-                        exportRawAndLog()
+                        Task { await exportRawAndLog() }
+                    }
+                    .disabled(rawAndLogBusy)
+                    if rawAndLogBusy {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Working…")
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                        }
                     }
                     Text("Saves the raw capture and the strap log together as a matched pair. Attach both to a protocol-mapping issue.")
                         .font(StrandFont.caption)
@@ -1633,7 +1745,10 @@ struct SettingsView: View {
     /// both stamped with the same `yyMMdd-HHmm` minute so they're obviously a pair. Reuses the existing
     /// export utilities — `FileExport.exportPair` shares both files in one iOS share sheet, and saves
     /// each via its own NSSavePanel on macOS (no new file plumbing).
-    private func exportRawAndLog() {
+    private func exportRawAndLog() async {
+        guard !rawAndLogBusy else { return }
+        rawAndLogBusy = true
+        defer { rawAndLogBusy = false }
         model.ble.flushPuffinCaptures()
         guard let capture = live.puffinCaptureURL else {
             backupAlertTitle = String(localized: "Nothing to export")
@@ -1642,7 +1757,7 @@ struct SettingsView: View {
             return
         }
         let stamp = FileExport.timestamp()
-        FileExport.exportPair(
+        await FileExport.exportPair(
             file: capture, fileSuggestedName: "noop-raw-capture-\(stamp).json",
             text: live.exportableLogText(), textSuggestedName: "noop-strap-log-\(stamp).txt")
     }
@@ -1660,7 +1775,7 @@ struct SettingsView: View {
         SettingsSection(
             icon: "externaldrive.fill",
             title: "Backup & restore",
-            blurb: "Move all your NOOP data to another machine. Export saves everything (history, sleeps, workouts, settings) to a single file you can copy across; import replaces \(Platform.deviceNounPhrase)'s data with a backup."
+            blurb: "Move your NOOP database history and selected profile/display settings to another machine in one file. Routes and other local-only auxiliary state are not yet included; import stages a replacement for the next launch."
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.space4) {
                 // Three labelled buttons must share a narrow iPhone row without wrapping mid-word
@@ -1709,7 +1824,7 @@ struct SettingsView: View {
                         .foregroundStyle(StrandPalette.textTertiary)
                         .font(.system(size: 13))
                         .accessibilityHidden(true)
-                    Text("Importing overwrites everything currently on \(Platform.deviceNounPhrase). Your old data is kept in a side file just in case. NOOP needs a relaunch for an import to take effect. Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into NOOP on Mac, iPhone, or Android. On-device computed rows are marked APPROXIMATE in its Source column; the full backup stays the lossless restore path.")
+                    Text("Import validates and stages a backup without touching the open database. Fully quit and reopen NOOP to apply it; the complete current database is preserved in a side file first. Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into NOOP on Mac, iPhone, or Android. On-device computed rows are marked APPROXIMATE in its Source column. A full backup is the most complete database restore path, but routes and other local-only auxiliary state are not yet included.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1798,11 +1913,11 @@ struct SettingsView: View {
             return
         case .exported(let url):
             backupAlertTitle = String(localized: "Backup exported")
-            backupAlertMessage = String(localized: "Saved to \(url.lastPathComponent). Copy this file to your other \(Platform.deviceNoun) and use Import there to restore everything.")
+            backupAlertMessage = String(localized: "Saved to \(url.lastPathComponent). Copy this file to your other \(Platform.deviceNoun) and use Import there to restore your database history and selected profile/display settings.")
             showBackupAlert = true
         case .imported:
-            backupAlertTitle = String(localized: "Backup imported")
-            backupAlertMessage = String(localized: "Your data has been restored. Quit and reopen NOOP for it to take effect.")
+            backupAlertTitle = String(localized: "Backup ready")
+            backupAlertMessage = String(localized: "Quit NOOP completely and reopen it. Your current database will be preserved and the restore applied before NOOP opens it.")
             showBackupAlert = true
         case .failure(let message):
             backupAlertTitle = String(localized: "Backup problem")
@@ -1882,7 +1997,7 @@ struct SettingsView: View {
                             Text("How your scores work")
                                 .font(StrandFont.body)
                                 .foregroundStyle(StrandPalette.textPrimary)
-                            Text("Charge, Effort and Rest (and how they differ from WHOOP).")
+                            Text("Recovery, Effort and Sleep Score (and how they differ from WHOOP).")
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.textTertiary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -2169,7 +2284,11 @@ struct SettingsView: View {
                     .foregroundStyle(StrandPalette.textPrimary)
             }
 
-            iphoneExpectationLine(String(localized: "This is a sideloaded build, installed outside the App Store. It needs re-signing periodically: roughly every 7 days on a free Apple ID, about a year on a paid developer account."))
+            if diag.isSideloaded == true {
+                iphoneExpectationLine(String(localized: "This is a sideloaded build, installed outside the App Store. It needs re-signing periodically: roughly every 7 days on a free Apple ID, about a year on a paid developer account."))
+            } else {
+                iphoneExpectationLine(String(localized: "This build is delivered through Apple. TestFlight beta builds are available for up to 90 days; install the latest version when TestFlight prompts you."))
+            }
             iphoneExpectationLine(String(localized: "After your iPhone reboots, unlock it once. Until you do, iOS keeps NOOP's files locked (Data Protection), so new history can't be written or synced."))
             iphoneExpectationLine(String(localized: "Background Bluetooth has OS limits: iOS may pause NOOP when it's not in the foreground, so keep it open while syncing a fresh strap."))
             iphoneExpectationLine(String(localized: "On a beta version of iOS, things can break that work on the release build."))
@@ -2855,14 +2974,31 @@ private struct FormRow<Control: View>: View {
     @ViewBuilder var control: () -> Control
 
     var body: some View {
-        HStack(alignment: .center, spacing: NoopMetrics.space4) {
-            Text(label)
-                .font(StrandFont.body)
-                .foregroundStyle(StrandPalette.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            control()
+        // Keep the two-column row while both sides fit at their ideal widths. At narrow widths,
+        // in longer localisations, or with Larger Text, stack rather than compressing value/unit
+        // labels underneath native controls such as Stepper.
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: NoopMetrics.space4) {
+                labelView
+                    .fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: NoopMetrics.space2)
+                control()
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+
+            VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                labelView
+                control()
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
         }
         .frame(minHeight: 32)
+    }
+
+    private var labelView: some View {
+        Text(label)
+            .font(StrandFont.body)
+            .foregroundStyle(StrandPalette.textPrimary)
     }
 }
 

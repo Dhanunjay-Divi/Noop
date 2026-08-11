@@ -82,6 +82,7 @@ import com.noop.ingest.WhoopCsvImporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 // MARK: - OnboardingScreen
 //
@@ -126,6 +127,11 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
     ) { pageIndex++ }
 
     fun advance() {
+        if (page == OnboardingPage.Profile) {
+            // Save & Continue explicitly accepts both visible inputs, including intentionally keeping
+            // the seeded editor values. Until this tap, age-shaped estimates remain unavailable.
+            ProfileStore.from(context).confirmFitnessInputs()
+        }
         when (page) {
             OnboardingPage.Bluetooth -> {
                 val granted = blePerms.all {
@@ -661,11 +667,11 @@ private fun BondedStep(viewModel: AppViewModel) {
 private fun ProfileStep() {
     val context = LocalContext.current
     val profile = remember { ProfileStore.from(context.applicationContext) }
-    // Imperial/Metric display preference (D#103). The stored profile is always SI; the steppers keep
-    // operating in SI and only the DISPLAYED value re-labels to lb / ft-in. Held in remembered state
-    // (#781) so the Units control below can flip it live. SharedPreferences isn't reactive, so the
-    // picker writes through to NoopPrefs AND updates this state to re-render the Weight/Height labels.
-    var unitSystem by remember { mutableStateOf(UnitPrefs.system(context)) }
+    // Weight and height are independent display choices. The stored profile always stays kg/cm; each
+    // wheel converts its selected display value back to SI. Reading these also migrates an existing
+    // combined Metric/Imperial preference once, so upgrades retain the exact presentation users had.
+    var massUnit by remember { mutableStateOf(UnitPrefs.mass(context)) }
+    var heightUnit by remember { mutableStateOf(UnitPrefs.height(context)) }
     var rev by remember { mutableIntStateOf(0) }
     fun mutate(block: () -> Unit) {
         block()
@@ -677,11 +683,30 @@ private fun ProfileStep() {
     // stored profile stays SI; Weight/Height option labels re-format per the live unit system, and the
     // picker maps the chosen index back to SI on select. Age is 13..100 (matches setAge's clamp).
     val ageSteps = remember { (13..100).toList() }
-    val weightSteps = remember { generateSequence(30.0) { it + 0.5 }.takeWhile { it <= 250.0001 }.toList() }
-    val heightSteps = remember { (120..230).toList() }
+    val weightStepsKg = remember(massUnit) {
+        when (massUnit) {
+            MassUnit.KILOGRAMS -> generateSequence(30.0) { it + 0.5 }
+                .takeWhile { it <= 250.0001 }
+                .toList()
+            MassUnit.POUNDS -> (66..551).map { UnitFormatter.poundsToKg(it.toDouble()) }
+        }
+    }
+    val heightStepsCm = remember(heightUnit) {
+        when (heightUnit) {
+            HeightUnit.CENTIMETERS -> (120..230).map(Int::toDouble)
+            HeightUnit.FEET_INCHES -> (47..91).map { UnitFormatter.inchesToCm(it.toDouble()) }
+        }
+    }
     val ageOptions = remember { ageSteps.map { "$it" } }
-    val weightOptions = remember(unitSystem) { weightSteps.map { UnitFormatter.massFromKilograms(it, unitSystem) } }
-    val heightOptions = remember(unitSystem) { heightSteps.map { UnitFormatter.heightFromCentimeters(it.toDouble(), unitSystem) } }
+    val weightOptions = remember(massUnit, weightStepsKg) {
+        when (massUnit) {
+            MassUnit.KILOGRAMS -> weightStepsKg.map { UnitFormatter.massFromKilograms(it, massUnit) }
+            MassUnit.POUNDS -> weightStepsKg.map { "${UnitFormatter.kgToPounds(it).roundToInt()} lb" }
+        }
+    }
+    val heightOptions = remember(heightUnit, heightStepsCm) {
+        heightStepsCm.map { UnitFormatter.heightFromCentimeters(it, heightUnit) }
+    }
 
     StepShell(
         title = uiString(R.string.l10n_onboarding_screen_about_you_5c4698b6),
@@ -714,19 +739,28 @@ private fun ProfileStep() {
                     )
                 }
                 ThinDivider()
-                // Units control (#781). Onboarding read `unitSystem` for the Weight/Height display but
-                // had no way to set it, so US users were locked to kg/cm until they found Settings →
-                // Units. Mirror the Sex picker idiom; the stored profile stays SI either way, only the
-                // displayed labels re-format (lb / ft-in). Same key Settings → Units writes.
+                // Independent controls support mixed choices such as height in ft/in and weight in kg.
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Overline("Units", color = Palette.textTertiary)
+                    Text("Weight", style = NoopType.footnote, color = Palette.textSecondary)
                     SegmentedPillControl(
-                        items = listOf(UnitSystem.METRIC, UnitSystem.IMPERIAL),
-                        selection = unitSystem,
-                        label = { if (it == UnitSystem.METRIC) "Metric" else "Imperial" },
+                        items = listOf(MassUnit.KILOGRAMS, MassUnit.POUNDS),
+                        selection = massUnit,
+                        label = { if (it == MassUnit.KILOGRAMS) "kg" else "lb" },
                         onSelect = {
-                            unitSystem = it
-                            NoopPrefs.setUnitSystem(context, it)
+                            massUnit = it
+                            NoopPrefs.setMassUnit(context, it)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text("Height", style = NoopType.footnote, color = Palette.textSecondary)
+                    SegmentedPillControl(
+                        items = listOf(HeightUnit.CENTIMETERS, HeightUnit.FEET_INCHES),
+                        selection = heightUnit,
+                        label = { if (it == HeightUnit.CENTIMETERS) "cm" else "ft / in" },
+                        onSelect = {
+                            heightUnit = it
+                            NoopPrefs.setHeightUnit(context, it)
                         },
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -735,23 +769,27 @@ private fun ProfileStep() {
                 ProfileFieldRow(label = uiString(R.string.l10n_onboarding_screen_weight_69c0b815)) {
                     WheelPickerField(
                         // Full re-labelled string (e.g. "74.5 kg" / "164.2 lb"); unit folded into value.
-                        value = UnitFormatter.massFromKilograms(profile.weightKg, unitSystem),
+                        value = UnitFormatter.massFromKilograms(profile.weightKg, massUnit),
                         accessibility = "Weight",
                         options = weightOptions,
-                        selectedIndex = weightSteps.indices.minByOrNull { kotlin.math.abs(weightSteps[it] - profile.weightKg) } ?: 0,
+                        selectedIndex = weightStepsKg.indices.minByOrNull {
+                            kotlin.math.abs(weightStepsKg[it] - profile.weightKg)
+                        } ?: 0,
                         dialogTitle = "Weight",
-                        onSelected = { mutate { profile.weightKg = weightSteps[it] } },
+                        onSelected = { mutate { profile.weightKg = weightStepsKg[it] } },
                     )
                 }
                 ThinDivider()
                 ProfileFieldRow(label = uiString(R.string.l10n_onboarding_screen_height_3f608b49)) {
                     WheelPickerField(
-                        value = UnitFormatter.heightFromCentimeters(profile.heightCm, unitSystem),
+                        value = UnitFormatter.heightFromCentimeters(profile.heightCm, heightUnit),
                         accessibility = "Height",
                         options = heightOptions,
-                        selectedIndex = heightSteps.indices.minByOrNull { kotlin.math.abs(heightSteps[it] - profile.heightCm) } ?: 0,
+                        selectedIndex = heightStepsCm.indices.minByOrNull {
+                            kotlin.math.abs(heightStepsCm[it] - profile.heightCm)
+                        } ?: 0,
                         dialogTitle = "Height",
-                        onSelected = { mutate { profile.heightCm = heightSteps[it].toDouble() } },
+                        onSelected = { mutate { profile.heightCm = heightStepsCm[it] } },
                     )
                 }
             }
@@ -848,7 +886,7 @@ private fun ImportStep(viewModel: AppViewModel) {
                 icon = Icons.Filled.AutoGraph,
                 tint = Palette.accent,
                 title = uiString(R.string.l10n_onboarding_screen_history_fills_the_dashboard_immediately_9728dde5),
-                message = "A WHOOP export backfills recovery, strain, sleep and workouts. Health Connect can add steps, HR, HRV, sleep and weight from Android sources.",
+                message = "A WHOOP export backfills recovery, strain, sleep and workouts. Health Connect can add steps, HR, HRV, sleep, absolute body temperature and weight from Android sources.",
             )
 
             NoopCard(padding = 16.dp) {

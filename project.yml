@@ -21,7 +21,7 @@ settings:
     # iOS build number (CFBundleVersion). GLOBAL so the iOS app AND its widget extension inherit the
     # SAME value — they must match or iOS warns "extension version must match parent app" (#416).
     # macOS sets its own CFBundleVersion on the Strand target and is unaffected by this.
-    CURRENT_PROJECT_VERSION: "208"
+    CURRENT_PROJECT_VERSION: "209"
     SWIFT_VERSION: "5.0"
     # Emit localizable strings so Xcode auto-extracts every LocalizedStringKey into the
     # String Catalog on build (the English (US) base entries).
@@ -100,7 +100,7 @@ targets:
         CFBundleVersion: "198"
         LSMinimumSystemVersion: "13.0"
         LSApplicationCategoryType: public.app-category.healthcare-fitness
-        NSBluetoothAlwaysUsageDescription: "NOOP connects directly to your WHOOP strap to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server."
+        NSBluetoothAlwaysUsageDescription: "NOOP connects directly to your wearable and standards-compatible Bluetooth health devices, including an explicitly paired weight scale, to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server."
         NSLocalNetworkUsageDescription: "NOOP connects to a self-hosted server on your local network only when you configure and enable that optional sync."
         NSLocationWhenInUseUsageDescription: "NOOP records your route during an outdoor workout to show distance, pace, and a map. The route stays on your device. Nothing leaves it."
         # The AI Coach's "Custom (OpenAI-compatible)" provider talks to a LOCAL LLM server over plain
@@ -159,6 +159,7 @@ targets:
     deploymentTarget: "13.0"
     sources:
       - StrandTests
+      - StrandiOSShared/WidgetSnapshot.swift
     # Same wrapper as the app target, so the OURA_CLOUD_IMPORT-gated Oura tests compile exactly
     # when the app's Oura lane does (flag + creds both come from the untracked OuraSecrets.xcconfig).
     configFiles:
@@ -230,8 +231,8 @@ targets:
         AppGroupIdentifier: "$(APP_GROUP_ID)"
         LSApplicationCategoryType: public.app-category.healthcare-fitness
         UILaunchScreen: {}
-        # Alternate app icons (v3 "Titanium & Gold"). The primary icon stays the asset-catalog
-        # AppIcon (machined titanium); the alternate "AppIcon-Navy" (blued titanium) is declared
+        # Alternate app icons. The primary icon is the monochrome AppIcon-Obsidian;
+        # the legacy "AppIcon-Navy" option remains available from Appearance.
         # here so UIApplication.setAlternateIconName("AppIcon-Navy") can switch to it at runtime.
         # CFBundleIconFiles is intentionally empty — the artwork lives in the asset catalog, shipped
         # via ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS, so no loose PNGs are listed here.
@@ -266,7 +267,7 @@ targets:
         # way) and be registered at launch (StrandiOSApp.init), or iOS refuses to schedule/deliver it.
         BGTaskSchedulerPermittedIdentifiers:
           - $(PRODUCT_BUNDLE_IDENTIFIER).debugexport
-        NSBluetoothAlwaysUsageDescription: "NOOP connects directly to your WHOOP strap to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server."
+        NSBluetoothAlwaysUsageDescription: "NOOP connects directly to your wearable and standards-compatible Bluetooth health devices, including an explicitly paired weight scale, to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server."
         NSLocalNetworkUsageDescription: "NOOP connects to a self-hosted server on your local network only when you configure and enable that optional sync."
         NSLocationWhenInUseUsageDescription: "NOOP records your route during an outdoor workout to show distance, pace, and a map, and keeps recording while the screen is off. The route stays on your device. Nothing leaves it."
         NSHealthShareUsageDescription: "NOOP reads your Apple Health data to compute metrics locally. It uploads derived records only if you explicitly enable your own self-hosted server."
@@ -296,6 +297,9 @@ targets:
       path: StrandiOS/Resources/NOOP.entitlements
       properties:
         com.apple.developer.healthkit: true
+        # Required for HKObserverQuery delivery while iOS schedules NOOP in the background.
+        # This does not guarantee timing; Apple may coalesce or defer wakes.
+        com.apple.developer.healthkit.background-delivery: true
         com.apple.developer.healthkit.access: []
         com.apple.security.application-groups:
           - $(APP_GROUP_ID)
@@ -303,7 +307,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).noop
         PRODUCT_NAME: "NOOP Staging"
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon-Obsidian
         # Ship every *.appiconset (not just the primary AppIcon) so the alternate "AppIcon-Navy"
         # set is compiled into the bundle and is available to UIApplication.setAlternateIconName.
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES

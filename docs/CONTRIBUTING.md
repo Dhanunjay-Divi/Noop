@@ -484,9 +484,11 @@ Schema lives in `Packages/WhoopStore/Sources/WhoopStore/Database.swift` as a **v
 - **Each package owns its tests** under `Packages/<Name>/Tests/…`; run them with `swift test`.
   Coverage already includes framing/CRC parity, reassembly, schema, stream decode, store
   insert/read/migration/prune, the analyzers (HRV, recovery, strain, sleep, correlation, baselines,
-  workout detection), and the CSV / Apple Health importers (including real-export tests).
-- **`Fixtures/`** holds a sample WHOOP export for the import tests; `StrandImport` test resources are
-  bundled via the package's `Package.swift`.
+  workout detection), and the CSV / Apple Health importers (including schema-derived synthetic
+  export recreations).
+- **`StrandImport` test resources are synthetic.** They are bundled via the package's
+  `Package.swift`; never copy a person's export into a committed fixture. A real export may reproduce
+  a bug locally, but the regression must use invented dates/values with every identifier removed.
 - **Prefer pure tests.** Because `WhoopProtocol`, `StrandAnalytics`, and `FrameRouter` are
   framework-free, you can (and should) cover new decode/routing/math with captured frames and
   fixtures rather than requiring a strap.

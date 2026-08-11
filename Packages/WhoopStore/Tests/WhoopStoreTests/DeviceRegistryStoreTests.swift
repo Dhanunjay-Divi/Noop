@@ -45,6 +45,20 @@ final class DeviceRegistryStoreTests: XCTestCase {
         XCTAssertNil(seeded?.peripheralId)
     }
 
+    func testWhoopModelAttestationRepairsGenerationCapabilities() throws {
+        let store = DeviceRegistryStore(dbQueue: try makeDB())
+
+        try store.setModel("my-whoop", model: "WHOOP 5.0 / MG")
+        var device = try XCTUnwrap(store.all().first { $0.id == "my-whoop" })
+        XCTAssertTrue(device.capabilities.contains(.steps))
+        XCTAssertFalse(device.capabilities.contains(.spo2))
+
+        try store.setModel("my-whoop", model: "WHOOP 4.0")
+        device = try XCTUnwrap(store.all().first { $0.id == "my-whoop" })
+        XCTAssertFalse(device.capabilities.contains(.steps))
+        XCTAssertFalse(device.capabilities.contains(.spo2))
+    }
+
     func testPeripheralIdRoundTripsThroughAddAndAll() throws {
         let store = DeviceRegistryStore(dbQueue: try makeDB())
         let pid = "8E1A2B3C-4D5E-6F70-8192-A3B4C5D6E7F8"

@@ -186,6 +186,8 @@ object WorkoutTypeClassifier {
      * too close and reports OTHER instead of an arbitrary tie-break.
      */
     const val minMargin: Double = 0.05
+    /** UI type hints require this confidence plus real decoded activity-class coverage. */
+    const val minAdvisoryConfidence: Double = 0.35
 
     // ─────────────────────────────────────────────────────────────────────────
     // Public API

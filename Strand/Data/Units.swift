@@ -4,9 +4,9 @@ import Foundation
 //
 // NOOP stores EVERYTHING in SI (km, kg, cm, °C) — the importers normalise on the way in, so this is a
 // purely cosmetic, display-only layer. There is no data migration and nothing on disk changes when the
-// user flips this. We keep one Metric/Imperial switch for length+mass with a SEPARATE temperature
-// override, because plenty of people think in kg/cm but still read body temperature in °F (and vice
-// versa). Default is Metric — most of the world, and it matches what we store.
+// user flips this. Distance keeps the familiar Metric/Imperial preference, while mass, height and
+// temperature each have an optional independent override: real people commonly use combinations such
+// as kg + ft/in or lb + cm. Default is Metric — most of the world, and it matches what we store.
 //
 // Persisted via @AppStorage (UserDefaults), the same mechanism every other macOS NOOP preference uses.
 // The Android side mirrors this exactly in Units.kt + NoopPrefs.
@@ -26,6 +26,22 @@ enum UnitSystem: String, CaseIterable, Identifiable {
 enum TemperatureUnit: String, CaseIterable, Identifiable {
     case celsius
     case fahrenheit
+    var id: String { rawValue }
+}
+
+/// Display-only mass choice. Kept separate from distance/height so mixed preferences (for example kg
+/// with ft/in) are first-class instead of being forced through one global Metric/Imperial switch.
+enum MassUnit: String, CaseIterable, Identifiable {
+    case kilograms = "kg"
+    case pounds = "lb"
+    var id: String { rawValue }
+}
+
+/// Display-only stature choice. `feetInches` is stored as centimetres internally just like `.centimeters`;
+/// only the editor and formatter change.
+enum HeightUnit: String, CaseIterable, Identifiable {
+    case centimeters = "cm"
+    case feetInches = "ft_in"
     var id: String { rawValue }
 }
 
@@ -72,6 +88,10 @@ enum HrvWindow: String, CaseIterable, Identifiable {
 /// `@AppStorage(UnitPrefs.systemKey)` and the formatter read the SAME key — no drift.
 enum UnitPrefs {
     static let systemKey = "units.system"
+    /// Optional independent overrides. Empty/unset follows `systemKey`, preserving every existing
+    /// install's display until the user deliberately picks a mixed combination.
+    static let massKey = "units.mass"
+    static let heightKey = "units.height"
     /// Temperature override. Empty string = "match the length/mass system" (the default).
     static let temperatureKey = "units.temperature"
     /// Effort display scale (#268). Stored raw is an `EffortScale` rawValue; an unset/unknown value
@@ -110,6 +130,16 @@ enum UnitPrefs {
     static func resolveTemperature(system: UnitSystem, override raw: String) -> TemperatureUnit {
         if let explicit = TemperatureUnit(rawValue: raw) { return explicit }
         return system.temperatureMatching
+    }
+
+    static func resolveMass(system: UnitSystem, override raw: String) -> MassUnit {
+        if let explicit = MassUnit(rawValue: raw) { return explicit }
+        return system == .imperial ? .pounds : .kilograms
+    }
+
+    static func resolveHeight(system: UnitSystem, override raw: String) -> HeightUnit {
+        if let explicit = HeightUnit(rawValue: raw) { return explicit }
+        return system == .imperial ? .feetInches : .centimeters
     }
 
     /// Resolve the stored Effort-scale raw value, defaulting to NOOP's native 0–100 axis.
@@ -179,16 +209,19 @@ enum UnitFormatter {
 
     /// Format a mass given in KILOGRAMS with one decimal + unit. Metric: "74.5 kg". Imperial: "164.2 lb".
     static func massFromKilograms(_ kg: Double, system: UnitSystem) -> String {
-        switch system {
-        case .metric:   return oneDecimal(kg) + " kg"
-        case .imperial: return oneDecimal(kgToPounds(kg)) + " lb"
-        }
+        massFromKilograms(kg, unit: system == .imperial ? .pounds : .kilograms)
+    }
+
+    static func massFromKilograms(_ kg: Double, unit: MassUnit) -> String {
+        unit == .pounds ? oneDecimal(kgToPounds(kg)) + " lb" : oneDecimal(kg) + " kg"
     }
 
     /// Mass unit label only. "kg" / "lb".
     static func massUnit(_ system: UnitSystem) -> String {
         system == .imperial ? "lb" : "kg"
     }
+
+    static func massUnit(_ unit: MassUnit) -> String { unit.rawValue }
 
     // MARK: Height (stored cm)
 
@@ -206,10 +239,14 @@ enum UnitFormatter {
 
     /// Format a height given in CENTIMETRES. Metric: "178 cm". Imperial: "5′ 10″".
     static func heightFromCentimeters(_ cm: Double, system: UnitSystem) -> String {
-        switch system {
-        case .metric:
+        heightFromCentimeters(cm, unit: system == .imperial ? .feetInches : .centimeters)
+    }
+
+    static func heightFromCentimeters(_ cm: Double, unit: HeightUnit) -> String {
+        switch unit {
+        case .centimeters:
             return "\(Int(cm.rounded())) cm"
-        case .imperial:
+        case .feetInches:
             let (ft, inch) = cmToFeetInches(cm)
             // Prime/double-prime are the conventional ft/in glyphs and read cleanly at small sizes.
             return "\(ft)′ \(inch)″"

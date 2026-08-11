@@ -64,11 +64,11 @@ class DecoderGoldenTest {
         val ibis = OuraDecoders.decodeSpO2IBI(rec)
         assertEquals(
             listOf(
-                OuraIBI(ringTimestamp = rt, ibiMs = 400),
-                OuraIBI(ringTimestamp = rt, ibiMs = 320),
-                OuraIBI(ringTimestamp = rt, ibiMs = 240),
-                OuraIBI(ringTimestamp = rt, ibiMs = 160),
-                OuraIBI(ringTimestamp = rt, ibiMs = 80),
+                OuraIBI(ringTimestamp = rt, ibiMs = 400, channel = OuraIbiChannel.SPO2_IBI),
+                OuraIBI(ringTimestamp = rt, ibiMs = 320, channel = OuraIbiChannel.SPO2_IBI),
+                OuraIBI(ringTimestamp = rt, ibiMs = 240, channel = OuraIbiChannel.SPO2_IBI),
+                OuraIBI(ringTimestamp = rt, ibiMs = 160, channel = OuraIbiChannel.SPO2_IBI),
+                OuraIBI(ringTimestamp = rt, ibiMs = 80, channel = OuraIbiChannel.SPO2_IBI),
             ),
             ibis,
         )
@@ -78,10 +78,36 @@ class DecoderGoldenTest {
 
     @Test
     fun testHRV0x5D() {
-        // time 5000, b1=10, b2=-5
-        val rec = record("5d080200010088130afb")
+        val rec = record("5d080200010032843283")
         val hrv = OuraDecoders.decodeHRV(rec)
-        assertEquals(listOf(OuraHRV(ringTimestamp = rt, timeMs = 5000, b1 = 10, b2 = -5)), hrv)
+        assertEquals(
+            listOf(
+                OuraHRV(ringTimestamp = rt, index = 0, hrBpm = 50, rmssdMs = 132, count = 2),
+                OuraHRV(ringTimestamp = rt, index = 1, hrBpm = 50, rmssdMs = 131, count = 2),
+            ),
+            hrv,
+        )
+    }
+
+    @Test
+    fun testHRV0x5DOddLengthIsNil() {
+        assertNull(OuraDecoders.decodeHRV(record("5d0702000100328432")))
+    }
+
+    @Test
+    fun testHRV0x5DDropsPaddingWithoutRenumbering() {
+        assertEquals(
+            listOf(
+                OuraHRV(ringTimestamp = rt, index = 0, hrBpm = 50, rmssdMs = 132, count = 3),
+                OuraHRV(ringTimestamp = rt, index = 2, hrBpm = 49, rmssdMs = 130, count = 3),
+            ),
+            OuraDecoders.decodeHRV(record("5d0a02000100328400003182")),
+        )
+    }
+
+    @Test
+    fun testHRV0x5DAllPaddingIsNil() {
+        assertNull(OuraDecoders.decodeHRV(record("5d06020001000000")))
     }
 
     // MARK: - 0x6F SpO2 per-sample (base from high nibble << 7, then u8, 0xFF terminator)
@@ -93,8 +119,8 @@ class DecoderGoldenTest {
         val s = OuraDecoders.decodeSpO2PerSample(rec)
         assertEquals(
             listOf(
-                OuraSpO2(ringTimestamp = rt, value = 95),
-                OuraSpO2(ringTimestamp = rt, value = 96),
+                OuraSpO2(ringTimestamp = rt, value = 95, index = 0, count = 2),
+                OuraSpO2(ringTimestamp = rt, value = 96, index = 1, count = 2),
             ),
             s,
         )
@@ -137,15 +163,15 @@ class DecoderGoldenTest {
 
     @Test
     fun testSleepPhase0x4E() {
-        // header 0x00, phase byte 0x6C = bits 01 10 11 00 -> light, deep, rem, awake.
+        // header 0x00, phase byte 0x6C = bits 01 10 11 00 -> light, REM, awake, deep.
         val rec = record("4e0602000100006c")
         val phases = OuraDecoders.decodeSleepPhase(rec)
         assertEquals(
             listOf(
                 OuraSleepPhase(ringTimestamp = rt, index = 0, stage = OuraSleepStage.LIGHT),
-                OuraSleepPhase(ringTimestamp = rt, index = 1, stage = OuraSleepStage.DEEP),
-                OuraSleepPhase(ringTimestamp = rt, index = 2, stage = OuraSleepStage.REM),
-                OuraSleepPhase(ringTimestamp = rt, index = 3, stage = OuraSleepStage.AWAKE),
+                OuraSleepPhase(ringTimestamp = rt, index = 1, stage = OuraSleepStage.REM),
+                OuraSleepPhase(ringTimestamp = rt, index = 2, stage = OuraSleepStage.AWAKE),
+                OuraSleepPhase(ringTimestamp = rt, index = 3, stage = OuraSleepStage.DEEP),
             ),
             phases,
         )

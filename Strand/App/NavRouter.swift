@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import Foundation
 
 // MARK: - NavRouter
 //
@@ -10,9 +11,10 @@ import Combine
 // `selection` binding LiveView could reach. This object is the small, shared bridge between them.
 //
 // Usage: a screen calls `router.openDevices()`; the shell observes `requestedDestination` and routes
-// itself (macOS sets the sidebar selection to `.devices`; iOS presents `DevicesView`). Each consumer
-// clears the request once it's handled so the same tap can fire again later. Injected at both app
-// roots (`StrandApp`, `StrandiOSApp`) as an `@EnvironmentObject`.
+// itself (macOS sets the sidebar selection to `.devices`; iOS switches to More and pushes
+// `DevicesView`, preserving the persistent tab bar). Each consumer clears the request once it's
+// handled so the same tap can fire again later. Injected at both app roots (`StrandApp`,
+// `StrandiOSApp`) as an `@EnvironmentObject`.
 @MainActor
 final class NavRouter: ObservableObject {
     /// A top-level destination a screen can ask the shell to open. Deliberately minimal — the Devices
@@ -21,6 +23,7 @@ final class NavRouter: ObservableObject {
     /// the Today indicator card raises.
     enum Destination: String, Equatable, Identifiable {
         case devices
+        case friends
         case insightsHub
         case labBook
         case fusedRecord
@@ -55,11 +58,39 @@ final class NavRouter: ObservableObject {
     /// flight, so this is the one path that re-opens the live workout for an existing session.
     @Published var presentActiveWorkout = false
 
+    /// Parsed friend invitation details entered from the plain-text share sheet. They contain the
+    /// recipient-visible server address and a short-lived one-time code—never an administrator or
+    /// member token.
+    struct FriendInvite: Equatable {
+        let serverURL: URL
+        let code: String
+
+        init?(serverURL: URL, code rawCode: String) {
+            let code = rawCode.uppercased().filter { $0.isLetter || $0.isNumber }
+            guard (12...32).contains(code.count) else { return nil }
+            self.serverURL = serverURL
+            self.code = code
+        }
+
+        init?(serverAddress: String, code: String) {
+            let trimmed = serverAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let serverURL = URL(string: trimmed) else { return nil }
+            self.init(serverURL: serverURL, code: code)
+        }
+
+        /// Consent copy names the complete destination, including transport, port, and base path.
+        var serverDisplay: String {
+            serverURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        }
+    }
+
     /// Ask the shell to open the quick-action sheet (Live HR · workout · journal · breathe).
     func requestQuickActions() { quickActionsRequested = true }
 
     /// Ask the shell to open the Devices manager (pair / switch bands). The shell decides how.
     func openDevices() { requestedDestination = .devices }
+    /// Open the private Friends surface.
+    func openFriends() { requestedDestination = .friends }
     /// Open the v5 Insights hub (the n-of-1 "what moves your Charge" surface).
     func openInsightsHub() { requestedDestination = .insightsHub }
     /// Open the Lab Book (private health-records logbook).

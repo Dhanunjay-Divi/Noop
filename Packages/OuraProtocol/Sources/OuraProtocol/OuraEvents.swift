@@ -10,13 +10,24 @@ import Foundation
 // (OuraStreamMapping) apply the anchor. Honest-data invariant: a short/malformed record decodes to
 // nil upstream, so these structs only ever hold real decoded values.
 
+/// Optical channel that decoded an IBI. Values are durable storage codes shared with Android.
+public enum OuraIBIChannel: Int, Equatable, Sendable, Codable, CaseIterable {
+    case greenQuality = 1
+    case spo2Ibi = 2
+    case ibiAmplitude = 3
+    case ibiBare = 4
+}
+
 /// One decoded inter-beat interval (and optional amplitude), in milliseconds.
 public struct OuraIBI: Equatable, Sendable, Codable {
     public let ringTimestamp: UInt32
     public let ibiMs: Int
     public let amplitude: Int?
-    public init(ringTimestamp: UInt32, ibiMs: Int, amplitude: Int? = nil) {
+    public let channel: OuraIBIChannel?
+    public init(ringTimestamp: UInt32, ibiMs: Int, amplitude: Int? = nil,
+                channel: OuraIBIChannel? = nil) {
         self.ringTimestamp = ringTimestamp; self.ibiMs = ibiMs; self.amplitude = amplitude
+        self.channel = channel
     }
 }
 
@@ -30,16 +41,18 @@ public struct OuraHR: Equatable, Sendable, Codable {
     }
 }
 
-/// One decoded HRV (RMSSD-derived) sample from the ring's own 0x5D tag (OURA_PROTOCOL.md s6.9).
-/// NOOP also reconstructs RMSSD itself from the IBI streams for its own scoring; this is the ring's
-/// open HRV tag, NOT Oura's encrypted readiness score.
+/// One decoded five-minute bucket from the ring's own 0x5D tag: `(u8 avg HR, u8 avg RMSSD)`.
+/// This is an open summary, not Oura's proprietary readiness score.
 public struct OuraHRV: Equatable, Sendable, Codable {
     public let ringTimestamp: UInt32
-    public let timeMs: Int
-    public let b1: Int
-    public let b2: Int
-    public init(ringTimestamp: UInt32, timeMs: Int, b1: Int, b2: Int) {
-        self.ringTimestamp = ringTimestamp; self.timeMs = timeMs; self.b1 = b1; self.b2 = b2
+    public let index: Int
+    public let hrBpm: Int
+    public let rmssdMs: Int
+    /// Original pair count, including any `00 00` padding pair omitted by the decoder.
+    public let count: Int
+    public init(ringTimestamp: UInt32, index: Int, hrBpm: Int, rmssdMs: Int, count: Int = 1) {
+        self.ringTimestamp = ringTimestamp; self.index = index; self.hrBpm = hrBpm
+        self.rmssdMs = rmssdMs; self.count = count
     }
 }
 
@@ -48,8 +61,12 @@ public struct OuraSpO2: Equatable, Sendable, Codable {
     public let ringTimestamp: UInt32
     public let value: Int
     public let unit: String
-    public init(ringTimestamp: UInt32, value: Int, unit: String = "raw") {
+    public let index: Int
+    public let count: Int
+    public init(ringTimestamp: UInt32, value: Int, unit: String = "raw",
+                index: Int = 0, count: Int = 1) {
         self.ringTimestamp = ringTimestamp; self.value = value; self.unit = unit
+        self.index = index; self.count = count
     }
 }
 
@@ -73,12 +90,12 @@ public struct OuraBattery: Equatable, Sendable, Codable {
     }
 }
 
-/// Sleep phase code (OURA_PROTOCOL.md s6.12): 2-bit codes 0=awake, 1=light, 2=deep, 3=REM.
+/// Validated SleepNet mapping: 0=deep, 1=light, 2=REM, 3=awake.
 public enum OuraSleepStage: Int, Sendable, Equatable, Codable {
-    case awake = 0
+    case deep = 0
     case light = 1
-    case deep = 2
-    case rem = 3
+    case rem = 2
+    case awake = 3
 }
 
 /// One decoded sleep-phase code in order within a 0x4E/0x5A record (OURA_PROTOCOL.md s6.12).

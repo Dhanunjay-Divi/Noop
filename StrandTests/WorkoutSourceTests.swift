@@ -1,5 +1,6 @@
 import XCTest
 import WhoopStore
+import StrandAnalytics
 @testable import Strand
 
 /// Pins the pure workout-editing logic: source classification (the macOS read model has no
@@ -7,6 +8,38 @@ import WhoopStore
 /// re-detected bout hidden (#107), manual-row validation, and field preservation on edit.
 /// Mirrors the Android WorkoutEditingTest case-for-case.
 final class WorkoutSourceTests: XCTestCase {
+
+    func testAcceptedAutoDetectSportUsesOnlyExplicitBroadHint() {
+        XCTAssertEqual(Repository.acceptedAutoDetectSport(.run), "Running")
+        XCTAssertEqual(Repository.acceptedAutoDetectSport(.walk), "Walking")
+        XCTAssertEqual(Repository.acceptedAutoDetectSport(.strength), "Strength Training")
+        XCTAssertEqual(Repository.acceptedAutoDetectSport(.cycle), "Cycling")
+        XCTAssertEqual(Repository.acceptedAutoDetectSport(.ski), "Skiing")
+        XCTAssertEqual(Repository.acceptedAutoDetectSport(.other), "Workout")
+        XCTAssertEqual(Repository.acceptedAutoDetectSport(nil), "Workout")
+    }
+
+    func testAutomaticActivityModeMigrationPreservesExistingChoiceAndDefaultsFreshToAutoSave() {
+        XCTAssertEqual(PuffinExperiment.resolvedAutoWorkoutMode(storedRaw: nil, legacyEnabled: nil),
+                       .autoSave)
+        XCTAssertEqual(PuffinExperiment.resolvedAutoWorkoutMode(storedRaw: nil, legacyEnabled: true),
+                       .ask)
+        XCTAssertEqual(PuffinExperiment.resolvedAutoWorkoutMode(storedRaw: nil, legacyEnabled: false),
+                       .off)
+        XCTAssertEqual(PuffinExperiment.resolvedAutoWorkoutMode(storedRaw: "off", legacyEnabled: true),
+                       .off, "the explicit new mode wins over the legacy Boolean")
+        XCTAssertEqual(PuffinExperiment.resolvedAutoWorkoutMode(storedRaw: "bad", legacyEnabled: true),
+                       .ask, "a corrupt raw value falls back to the user's legacy choice")
+    }
+
+    func testUnattendedSaveUsesAStricterDurationGate() {
+        let short = DetectedWorkout(startSec: 1_000, endSec: 1_840, avgBpm: 130,
+                                    peakBpm: 160, durationMin: 14)
+        let confident = DetectedWorkout(startSec: 1_000, endSec: 1_900, avgBpm: 130,
+                                        peakBpm: 160, durationMin: 15)
+        XCTAssertFalse(AutoWorkoutAutomationPolicy.shouldAutoSave(short))
+        XCTAssertTrue(AutoWorkoutAutomationPolicy.shouldAutoSave(confident))
+    }
 
     private func row(start: Int, end: Int, sport: String, source: String,
                      avgHr: Int? = nil, maxHr: Int? = nil, strain: Double? = nil) -> WorkoutRow {
@@ -275,6 +308,43 @@ final class WorkoutSourceTests: XCTestCase {
         // Out-of-range HR / kcal.
         XCTAssertNil(WorkoutSource.buildManualRow(start: start, durationMin: 30, sport: "Run", avgHr: 10, energyKcal: nil, now: now))
         XCTAssertNil(WorkoutSource.buildManualRow(start: start, durationMin: 30, sport: "Run", avgHr: nil, energyKcal: 99_999, now: now))
+    }
+
+    func testBuildManualRowRejectsFutureEndButAllowsEndExactlyNow() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        XCTAssertNotNil(WorkoutSource.buildManualRow(
+            start: start, durationMin: 45, sport: "Run", avgHr: nil, energyKcal: nil,
+            now: start.addingTimeInterval(2_700)
+        ))
+        XCTAssertNil(WorkoutSource.buildManualRow(
+            start: start, durationMin: 45, sport: "Run", avgHr: nil, energyKcal: nil,
+            now: start.addingTimeInterval(2_699)
+        ))
+    }
+
+    func testBuildDetectedSuggestionRowPreservesExactEndpoint() {
+        let start = 1_700_000_000
+        let end = start + 1_237
+        let row = WorkoutSource.buildDetectedSuggestionRow(
+            startSec: start, endSec: end, sport: "  Running ", avgHr: 151,
+            now: Date(timeIntervalSince1970: TimeInterval(end + 60))
+        )
+        XCTAssertEqual(row?.startTs, start)
+        XCTAssertEqual(row?.endTs, end)
+        XCTAssertEqual(row?.durationS, 1_237)
+        XCTAssertEqual(row?.sport, "Running")
+    }
+
+    func testBuildDetectedSuggestionRowCanRemainHonestlyDetected() {
+        let start = 1_700_000_000
+        let end = start + 1_237
+        let row = WorkoutSource.buildDetectedSuggestionRow(
+            startSec: start, endSec: end, sport: "Running", avgHr: 151,
+            source: "strap-2-noop",
+            now: Date(timeIntervalSince1970: TimeInterval(end + 60))
+        )
+        XCTAssertEqual(row?.source, "strap-2-noop")
+        XCTAssertEqual(row.map { WorkoutSource.classify($0.source) }, .detected)
     }
 
     // MARK: - preservingCaptured

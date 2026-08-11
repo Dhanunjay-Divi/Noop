@@ -204,7 +204,7 @@ struct CoupledView: View {
         .buttonStyle(LiquidPressStyle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(heroAccessibilityLabel)
-        .accessibilityHint("See what shaped your Charge")
+        .accessibilityHint("See what shaped your Recovery")
     }
 
     /// The centre stack over the vessel: the recovery % counting up in white over the fluid, a RECOVERY
@@ -401,7 +401,7 @@ struct CoupledView: View {
         } label: {
             card {
                 VStack(alignment: .leading, spacing: 14) {
-                    SectionHeader("Sleep performance", overline: "Last night", trailing: String(localized: "Rest"))
+                    SectionHeader("Sleep performance", overline: "Last night", trailing: String(localized: "Sleep Score"))
                     HStack(alignment: .center, spacing: 16) {
                         // Left: the SLEEP PERFORMANCE % as the liquid vessel (Rest world), with the score
                         // counting up over the fluid. Empty vessel when there's no scored performance.
@@ -567,7 +567,7 @@ struct CoupledView: View {
                         } else {
                             NoopCard(padding: 18, tint: StrandPalette.chargeColor) {
                                 VStack(alignment: .leading, spacing: NoopMetrics.space2) {
-                                    Text("No Charge breakdown yet")
+                                    Text("No Recovery breakdown yet")
                                         .font(StrandFont.headline)
                                         .foregroundStyle(StrandPalette.textPrimary)
                                     Text("Wear the strap overnight to score a night first.")
@@ -589,7 +589,7 @@ struct CoupledView: View {
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(StrandPalette.chargeColor)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text("How Charge is calculated")
+                                Text("How Recovery is calculated")
                                     .font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
                                 Text("The method behind the score, not today's values.")
                                     .font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
@@ -604,13 +604,13 @@ struct CoupledView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("How Charge is calculated. The method behind the score.")
+                    .accessibilityLabel("How Recovery is calculated. The method behind the score.")
                 }
                 .padding(NoopMetrics.screenPadding)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(StrandPalette.surfaceBase.ignoresSafeArea())
-            .navigationTitle("What shaped your Charge")
+            .navigationTitle("What shaped your Recovery")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -635,7 +635,7 @@ struct CoupledView: View {
     private func calibrationCard(banked: Int) -> some View {
         let remaining = max(1, Baselines.minNightsSeed - banked)
         let countdown = ChargeBreakdownFormat.calibrationCountdown(nightsRemaining: remaining)
-        let unlock = ChargeBreakdownFormat.calibrationUnlockCopy(scoreName: String(localized: "Charge"))
+        let unlock = ChargeBreakdownFormat.calibrationUnlockCopy(scoreName: String(localized: "Recovery"))
         let progress = ChargeBreakdownFormat.calibrationProgress(banked: banked, seed: Baselines.minNightsSeed)
         return NoopCard(padding: 14, tint: StrandPalette.chargeColor) {
             HStack(alignment: .top, spacing: 12) {
@@ -662,7 +662,7 @@ struct CoupledView: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Charge baseline calibrating. \(countdown), \(unlock). \(progress).")
+        .accessibilityLabel("Recovery baseline calibrating. \(countdown), \(unlock). \(progress).")
     }
 
     // MARK: Shared helpers

@@ -30,6 +30,24 @@ enum class BackfillTrigger {
     AUTO_CONTINUE,
 }
 
+/** Pure bookkeeping for the empty-offload streak fed into [BackfillPolicy]. A timeout with zero rows is
+ * just as empty as a clean HISTORY_COMPLETE with zero rows, while the empty tail after a productive
+ * auto-continue burst must neither increment nor clear the existing streak. */
+internal object EmptyOffloadBackoff {
+    fun nextStreak(
+        currentStreak: Int,
+        rowsPersisted: Int,
+        productiveBurstTail: Boolean,
+    ): Int = when {
+        rowsPersisted > 0 -> 0
+        productiveBurstTail -> currentStreak
+        else -> currentStreak + 1
+    }
+
+    fun effectiveStreak(consoleOnlyStreak: Int, emptyOffloadStreak: Int): Int =
+        maxOf(consoleOnlyStreak, emptyOffloadStreak)
+}
+
 /**
  * Pure rate-limiter for historical-offload kicks. No BLE/store deps. Floors match WHOOP
  * (observed: ~15-min periodic + expedited event syncs). Exact port of the Swift `BackfillPolicy`

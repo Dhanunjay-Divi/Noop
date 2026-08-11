@@ -73,20 +73,14 @@ struct LiveWorkoutView: View {
         }
         // If the workout ended elsewhere (process restart cleared it), close the screen.
         .onChangeCompat(of: model.activeWorkout == nil) { gone in if gone { onClose() } }
-        // Arm the realtime HR stream while the in-exercise screen is up (#681). On a WHOOP 5/MG live HR
-        // only flows while the puffin realtime stream is armed; previously only the Live tab armed it, so
-        // starting a manual workout straight from Workouts (Live never opened) left `model.bpm == nil` —
-        // captureWorkoutSample bailed on every sample and endWorkout silently discarded the empty
-        // session. Ref-counted in AppModel, so when this sheet sits over an already-armed Live tab the
-        // two balance and neither disarms the other (mirrors Android LiveWorkoutScreen's DisposableEffect
-        // requestRealtimeHr/releaseRealtimeHr). Balanced: one start on appear, one stop on disappear.
+        // The explicit workout owns its realtime lease in AppModel from Start through End (#681). That
+        // keeps recording honest if this overlay is dismissed, while AppModel's foreground gate still
+        // physically releases the high-rate stream whenever the app is inactive.
         .onAppear {
-            model.startRealtimeHR()
             // Hold the display awake for the session only if the user opted in (#703).
             if keepScreenOn { ScreenIdle.keepAwake(true) }
         }
         .onDisappear {
-            model.stopRealtimeHR()
             // Always release on the way out so the system idle timer resumes. Even if the toggle was
             // flipped off mid-workout, this clears any hold we placed.
             ScreenIdle.keepAwake(false)
@@ -106,21 +100,50 @@ struct LiveWorkoutView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center) {
+        let sport = model.activeWorkout?.sport ?? String(localized: "Workout")
+        return ViewThatFits(in: .horizontal) {
+            workoutHeader(sport: sport, compact: false)
+            workoutHeader(sport: sport, compact: true)
+        }
+    }
+
+    private func workoutHeader(sport: String, compact: Bool) -> some View {
+        HStack(alignment: .center, spacing: compact ? 8 : 12) {
+            SemanticBodyIllustration(
+                .workout(systemImage: sportSymbol(sport)),
+                size: compact ? 44 : 52,
+                tint: StrandPalette.effortColor,
+                isActive: true
+            )
             VStack(alignment: .leading, spacing: 2) {
                 Text("RECORDING WORKOUT")
                     .font(StrandFont.overline).tracking(StrandFont.overlineTracking)
                     .foregroundStyle(StrandPalette.metricRose)
-                Text("Workout")
+                Text(sport)
                     .font(StrandFont.title1).foregroundStyle(StrandPalette.textPrimary)
-            }
-            Spacer()
-            if let start = model.activeWorkout?.start {
-                TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    Text(Self.elapsed(since: start))
-                        .font(StrandFont.number(34)).monospacedDigit()
-                        .foregroundStyle(StrandPalette.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.62)
+                if compact {
+                    elapsedClock(font: StrandFont.number(24))
                 }
+            }
+            .layoutPriority(1)
+            Spacer()
+            if !compact {
+                elapsedClock(font: StrandFont.number(32))
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func elapsedClock(font: Font) -> some View {
+        if let start = model.activeWorkout?.start {
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                Text(Self.elapsed(since: start))
+                    .font(font)
+                    .monospacedDigit()
+                    .foregroundStyle(StrandPalette.textPrimary)
             }
         }
     }

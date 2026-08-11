@@ -155,4 +155,53 @@ final class MetricSeriesStoreTests: XCTestCase {
         let span = try await store.metricDays(deviceId: "devA", key: "missing")
         XCTAssertNil(span)
     }
+
+    // MARK: - physical deletion for user-owned sensitive series
+
+    func testDeleteMetricSeriesPointIsIsolatedAndIdempotent() async throws {
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-07-01", key: "period_start", value: 1),
+            MetricPoint(day: "2026-08-01", key: "period_start", value: 1),
+            MetricPoint(day: "2026-07-01", key: "note", value: 9),
+        ], deviceId: "noop-cycle")
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-07-01", key: "period_start", value: 1),
+        ], deviceId: "another-device")
+
+        let firstDelete = try await store.deleteMetricSeriesPoint(
+            deviceId: "noop-cycle", day: "2026-07-01", key: "period_start")
+        let secondDelete = try await store.deleteMetricSeriesPoint(
+            deviceId: "noop-cycle", day: "2026-07-01", key: "period_start")
+        XCTAssertEqual(firstDelete, 1)
+        XCTAssertEqual(secondDelete, 0)
+
+        let starts = try await store.metricSeries(deviceId: "noop-cycle", key: "period_start",
+                                                  from: "0000-01-01", to: "9999-12-31")
+        XCTAssertEqual(starts.map(\.day), ["2026-08-01"])
+        let notes = try await store.metricSeries(deviceId: "noop-cycle", key: "note",
+                                                 from: "0000-01-01", to: "9999-12-31")
+        let otherStarts = try await store.metricSeries(deviceId: "another-device", key: "period_start",
+                                                       from: "0000-01-01", to: "9999-12-31")
+        XCTAssertEqual(notes.count, 1)
+        XCTAssertEqual(otherStarts.count, 1)
+    }
+
+    func testDeleteMetricSeriesRemovesOnlyRequestedSourceAndKey() async throws {
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-07-01", key: "period_start", value: 1),
+            MetricPoint(day: "2026-08-01", key: "period_start", value: 1),
+            MetricPoint(day: "2026-07-01", key: "note", value: 9),
+        ], deviceId: "noop-cycle")
+
+        let deleted = try await store.deleteMetricSeries(deviceId: "noop-cycle", key: "period_start")
+        XCTAssertEqual(deleted, 2)
+        let starts = try await store.metricSeries(deviceId: "noop-cycle", key: "period_start",
+                                                  from: "0000-01-01", to: "9999-12-31")
+        let notes = try await store.metricSeries(deviceId: "noop-cycle", key: "note",
+                                                 from: "0000-01-01", to: "9999-12-31")
+        XCTAssertTrue(starts.isEmpty)
+        XCTAssertEqual(notes.count, 1)
+    }
 }

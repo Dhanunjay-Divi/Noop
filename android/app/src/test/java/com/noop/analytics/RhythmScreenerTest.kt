@@ -142,6 +142,38 @@ class RhythmScreenerTest {
         assertEquals(RhythmRegularity.UNREADABLE, r.label)
     }
 
+    @Test
+    fun perfectlyCoveredBankedStream_isUnreadable() {
+        val rr = List(60) { 63_000.0 / 60.0 }
+        val ts = (0 until 60).map { (it / 6) * 7 }
+        val r = RhythmScreener.screenWindow(
+            RhythmScreener.WindowInput(
+                rrMs = rr,
+                ts = ts,
+                motionStill = true,
+                meanHR = 60_000.0 / rr.first(),
+            ),
+        )
+        assertEquals(RhythmRegularity.UNREADABLE, r.label)
+        assertNull(r.sd2)
+        assertTrue(r.poincare.isEmpty())
+    }
+
+    @Test
+    fun beatAccurateTimestampedStream_remainsReadable() {
+        val rr = regularSinus()
+        val r = RhythmScreener.screenWindow(
+            RhythmScreener.WindowInput(
+                rrMs = rr,
+                ts = rr.indices.toList(),
+                motionStill = true,
+                meanHR = 60.0,
+            ),
+        )
+        assertEquals(RhythmRegularity.STEADY, r.label)
+        assertNotNull(r.sd2)
+    }
+
     // ── Cross-source agreement ──────────────────────────────────────────────────────
 
     @Test

@@ -6,7 +6,7 @@ import WhoopProtocol
 /// transient, compressed, prunable outbox. Built on GRDB/SQLite.
 public enum WhoopStoreInfo {
     /// Bumped whenever the migrator gains a new migration.
-    public static let schemaVersion = 30
+    public static let schemaVersion = 36
 }
 
 /// Serializes `DatabasePool` creation + migration so two concurrent opens of the SAME file can never
@@ -30,6 +30,18 @@ private actor StoreOpenGate {
     static let shared = StoreOpenGate()
 
     func openAndMigrate(path: String, configuration config: Configuration) throws -> DatabasePool {
+        // A restore is staged while the app is running, but is NEVER swapped under the two live pools
+        // (Repository + BLE). Consume it here, synchronously behind the process-wide open gate, before
+        // the first pool opens this path. A second concurrent opener reaches this line only after the
+        // first has applied the restore and cleared its manifest.
+        switch try PendingDatabaseRestore.applyIfPresent(toDatabaseAt: path) {
+        case .none:
+            break
+        case .applied(let safetySnapshot):
+            NSLog("WhoopStore: applied pending restore; previous database saved at \(safetySnapshot.path)")
+        case .discarded(let reason):
+            NSLog("WhoopStore: discarded pending restore safely: \(reason)")
+        }
         // Self-heal a foreign DB left in place by a bad cross-platform restore (#222): an Android
         // (Room) backup that slipped past the import guard replaces our file with one that has our
         // data tables but NO `grdb_migrations` bookkeeping. The migrator then thinks nothing is
@@ -172,7 +184,33 @@ public actor WhoopStore {
     /// syncRead/syncWrite pattern). Runs on the actor's executor, off the main thread.
     private func checkpointWALImpl() throws {
         try dbWriter.writeWithoutTransaction { db in
-            try db.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
+            // `wal_checkpoint` reports SQLITE_OK even when a reader/writer prevented a complete
+            // checkpoint; the first result column carries that busy verdict. Discarding the row made
+            // callers believe a single-file export was complete while committed pages could still live
+            // only in `-wal`. Inspect all three fields and fail closed unless every WAL page landed.
+            guard let row = try Row.fetchOne(db, sql: "PRAGMA wal_checkpoint(TRUNCATE)") else {
+                throw WALCheckpointError.noResult
+            }
+            let busy: Int = row[0]
+            let log: Int = row[1]
+            let checkpointed: Int = row[2]
+            guard busy == 0, log == checkpointed else {
+                throw WALCheckpointError.incomplete(busy: busy, log: log, checkpointed: checkpointed)
+            }
+        }
+    }
+
+    private enum WALCheckpointError: LocalizedError {
+        case noResult
+        case incomplete(busy: Int, log: Int, checkpointed: Int)
+
+        var errorDescription: String? {
+            switch self {
+            case .noResult:
+                return "SQLite returned no WAL checkpoint result."
+            case .incomplete(let busy, let log, let checkpointed):
+                return "SQLite WAL checkpoint was incomplete (busy=\(busy), log=\(log), checkpointed=\(checkpointed))."
+            }
         }
     }
 

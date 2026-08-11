@@ -5,6 +5,7 @@ import UserNotifications
 @main
 struct StrandApp: App {
     init() {
+        PuffinExperiment.migrateContinuousHrvOvernightDefault()
         #if DEBUG
         // DEBUG-only promo-screenshot harness: when launched with `--demo-hour <Int>`, pin the Today
         // screen to that hour's day-cycle scene + a plausible per-hour stat frame. Runs synchronously
@@ -45,6 +46,7 @@ struct StrandApp: App {
                 // v5 L3: the shared stress check-in nudge surface, so the Breathe screen's passive
                 // card observes the SAME instance the central detector (AppModel.evaluateStress) posts to.
                 .environment(\.stressNudgeCenter, model.stressNudgeCenter)
+                .onAppear { model.setRealtimeForeground(scenePhase == .active) }
                 .frame(minWidth: 1000, minHeight: 700)
                 .preferredColorScheme(AppearanceMode.resolve(appearanceRaw).colorScheme)
                 .chartStyle(chartStyleRaw)
@@ -59,7 +61,13 @@ struct StrandApp: App {
                 // Single-param form (not the two-param `{ _, phase in }`) — that overload needs macOS 14,
                 // this target is macOS 13.
                 .onChange(of: scenePhase) { phase in
-                    if phase == .active { model.ble.requestSync(.foreground) }
+                    // Dense Live/workout/session streaming is foreground-only. This does not drop the
+                    // BLE connection, history sync, or the separate Continuous HRV background opt-in.
+                    model.setRealtimeForeground(phase == .active)
+                    if phase == .active {
+                        model.ble.requestSync(.foreground)
+                        Task { await FriendsService.catchUpIfDue(repo: model.repo) }
+                    }
                 }
         }
         .windowStyle(.hiddenTitleBar)

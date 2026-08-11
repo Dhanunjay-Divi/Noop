@@ -93,9 +93,9 @@ enum class ScoreSection {
 
     val label: String
         get() = when (this) {
-            CHARGE -> "Charge"
+            CHARGE -> "Recovery"
             EFFORT -> "Effort"
-            REST -> "Rest"
+            REST -> "Sleep"
         }
 
     /** A representative sample fraction (0–1) for the section's illustrative gauge — a
@@ -188,11 +188,11 @@ fun ScoringGuideScreen(
                 IntroCard()
                 ScoreCard(
                     section = ScoreSection.CHARGE,
-                    headline = "Charge: how recovered are you?",
+                    headline = "Recovery: how recovered are you?",
                     body = "Led by your heart-rate variability (HRV) measured against your own " +
-                        "personal baseline, plus resting heart rate, last night's Rest, breathing " +
+                        "personal baseline, plus resting heart rate, last night's Sleep Score, breathing " +
                         "rate, and a skin-temperature signal (an early illness or overreach flag). " +
-                        "Higher HRV versus your baseline means more Charge. NOOP needs a few nights " +
+                        "Higher HRV versus your baseline means higher Recovery. NOOP needs a few nights " +
                         "to learn your baseline first. Until then you'll see “Calibrating”.",
                     vsWhoop = "Same core idea as WHOOP's Recovery % (HRV-led recovery), but our " +
                         "weighting and baseline maths are our own, and openly documented.",
@@ -216,7 +216,7 @@ fun ScoringGuideScreen(
                 )
                 ScoreCard(
                     section = ScoreSection.REST,
-                    headline = "Rest: how restorative was your sleep?",
+                    headline = "Sleep Score: how restorative was your sleep?",
                     body = "A blend of how long you slept versus your personal need (the biggest " +
                         "factor), how efficiently (asleep versus in bed), how much was restorative " +
                         "(deep + REM sleep), and how consistent your sleep and wake timing is.",

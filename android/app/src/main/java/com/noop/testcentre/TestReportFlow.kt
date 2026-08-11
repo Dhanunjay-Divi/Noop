@@ -42,7 +42,7 @@ object TestReportFlow {
     /** Share the already-redacted bundle, open the prefilled issue, toast, and prime the copy fallback.
      *  `entries` is the redacted, capped bundle the caller assembled. Review-before-share is mandatory:
      *  nothing is shared until the gate is cleared (spec section 12). */
-    fun run(context: Context, profile: TestDomain, title: String,
+    suspend fun run(context: Context, profile: TestDomain, title: String,
             version: String, platform: String, osVersion: String,
             gate: ReportReviewGate,
             entries: List<Pair<String, ByteArray>>) {

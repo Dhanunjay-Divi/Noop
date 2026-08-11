@@ -309,7 +309,8 @@ fun ConnectionDot(
         // are several on Today (each StatePill, source pill, etc.) — kept a running animation-clock
         // subscription invalidating the frame, for a halo that wasn't even drawn. Hoisting it into a child
         // that's composed only when `pulsing` means a still dot does zero per-frame work. Identical visuals.
-        if (pulsing) {
+        val renderStill = rememberPoseStill()
+        if (pulsing && !renderStill) {
             PulsingDotHalo(tone = tone, size = size)
         }
         Box(

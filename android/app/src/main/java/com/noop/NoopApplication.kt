@@ -41,6 +41,7 @@ class NoopApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.noop.ui.NoopPrefs.migrateContinuousHrvOvernightDefault(this)
         // Preference initialization only; no network work occurs here. Self-hosted upload remains
         // opt-in and is scheduled later from the activity after the user saves a destination.
         RemoteSyncService.initialize(this)

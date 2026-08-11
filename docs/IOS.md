@@ -14,8 +14,9 @@ validation.
 
 ## Install (sideload)
 
-The community `.ipa` is unsigned on purpose. iOS will not run it until a
-sideloading tool signs it on your device with your Apple ID.
+The community `.ipa` has no Apple developer signature. Before packaging, NOOP applies a replaceable
+ad-hoc capability template so AltStore/SideStore can discover HealthKit and the App Group shared with
+the widget; iOS still will not run it until the sideloader signs it on your device with your Apple ID.
 
 1. Install [AltStore](https://altstore.io), [SideStore](https://sidestore.io),
    or another sideloader and complete its one-time setup.
@@ -48,17 +49,12 @@ historical upstream release.
 > - **7-day expiry.** Apps signed with a *free* Apple ID stop launching after 7 days and need
 >   re-signing. **AltStore/SideStore refresh this automatically** in the background — keep the
 >   sideloader installed and NOOP keeps working.
-> - **Some Apple-only features may be limited.** A free signing identity can't grant certain Apple
->   entitlements, so **Apple Health (HealthKit) read/write and the Live Activity / lock-screen
->   widgets may not work** on a free-signed sideload. The core app — pairing your strap, live HR,
->   recovery/strain/sleep, history, the AI Coach, everything on-device — works regardless. This is an
->   Apple signing constraint, not a NOOP limitation, and it is why a HealthKit
->   toggle can appear to do nothing on a free-signed build. The release IPA
->   retains `NOOPWidgets.appex`, so the sideloader must provision one additional
->   extension/app ID for Home/Lock-Screen widgets and Live Activities/Dynamic
->   Island. Removing `PlugIns` while signing disables those surfaces. Building
->   from source with your own team selected for both targets grants the
->   entitlements normally.
+> - **Apple-only features require their extensions and capabilities.** The release IPA retains
+>   `NOOPWidgets.appex` and requests matching App Group capabilities for app and extension. Keep the
+>   extension enabled when AltStore/SideStore asks so it can provision the additional app ID and shared
+>   container used by Home/Lock-Screen widgets and Live Activities. Removing `PlugIns` or using a signing
+>   tool that drops HealthKit/App Group entitlements disables those surfaces. Building from source with
+>   your own team selected for both targets configures them normally.
 
 iOS shares the core scoring implementation with macOS. It is newer and less
 battle-tested than macOS/Android, and real-device BLE validation is still
@@ -421,18 +417,19 @@ This is the biggest *additive* opportunity on iOS.
 
 | Direction | iOS capability |
 |---|---|
-| **Read** | Query HealthKit live (`HKHealthStore`, `HKSampleQuery`, anchored/observer queries) for HR, RHR, HRV SDNN, SpO₂, wrist/body temperature, respiratory rate, sleep stages, workouts, body composition — the same types `relevantTypes` already enumerates in `AppleHealthImporter`. No manual export needed. |
-| **Write** | Write NOOP-computed values back into Apple Health: HR / HRV / SpO₂ / temperature samples decoded from the strap, sleep analysis from `StrandAnalytics.SleepStager`, and workouts from `WorkoutDetector` — so NOOP data shows up across the user's Health ecosystem. |
-| **Background delivery** | `HKObserverQuery` + `enableBackgroundDelivery` to keep the on-device store in sync without opening the app. |
+| **Read** | After the user explicitly grants access, query the on-device HealthKit store (`HKHealthStore`, `HKSampleQuery`, anchored/observer queries) for HR, RHR, HRV SDNN, SpO₂, absolute wrist/body temperature, respiratory rate, sleep stages, workouts, activity and body composition. Body and wrist temperature use distinct `body_temp` / `wrist_temp` series and never populate WHOOP's `skin_temp` series. This is HealthKit access, not a direct Apple Watch or vendor-cloud API. |
+| **Write** | Where the user grants each share type, write supported NOOP data back: one-minute HR, nightly RHR/HRV/SpO₂/respiratory rate, staged sleep, workouts, energy and supported distance. NOOP does not claim to write a metric whose Health share type is not implemented. |
+| **Background delivery** | `HKObserverQuery` plus Apple's background-delivery entitlement allows iOS to schedule/coalesce update wakes; timing is not guaranteed. NOOP also performs a foreground catch-up. A re-signed profile missing that entitlement remains foreground-only and the UI says so. |
 
 Because `AppleHealthImporter` already defines the canonical type set, units, and
 `SleepStage` mapping, an iOS `HealthKitImporter` can map `HKSample` objects onto the
 **same** `StrandImport` models and feed the identical ingest path into `WhoopStore` —
 the static-export importer and the live HealthKit importer converge on one schema.
 
-> **Entitlement/Info.plist on iOS:** add the **HealthKit** capability and supply
+> **Entitlement/Info.plist on iOS:** add the **HealthKit** capability, the
+> `com.apple.developer.healthkit.background-delivery` entitlement for observer wakes, and supply
 > `NSHealthShareUsageDescription` (read) and `NSHealthUpdateUsageDescription` (write).
-> Keep both directions strictly opt-in and on-device — consistent with NOOP's
+> Permission sheets are opened only from explicit user actions. Keep both directions opt-in and on-device — consistent with NOOP's
 > offline, no-cloud stance.
 
 ---
@@ -575,10 +572,8 @@ targets:
 - [x] `MenuBarExtra` replaced by a WidgetKit widget + Live Activity (`StrandiOSWidgets`), reusing `StrandDesign`.
 - [x] iOS action layer: `lockScreen` returns false on iOS, `buzzBack`/`markMoment` portable, **App Intents** exposed (`StrandiOS/System/NOOPAppIntents.swift`).
 - [x] Clipboard + URL-open routed through `Platform.swift` (`PlatformPasteboard`/`PlatformOpen`).
-- [x] `HealthKitBridge` two-way Apple Health (read live + write NOOP metrics). _(See the device-id follow-up flagged below.)_
+- [x] `HealthKitBridge` two-way Apple Health (read live + write NOOP metrics from the computed `"<deviceId>-noop"` partition).
 - [ ] **Still TODO (needs hardware):** verify BLE on a **physical iPhone** with a real strap — CoreBluetooth has no Simulator. This is the one thing CI/compile can't cover.
-
-> **Open follow-up:** `HealthKitBridge.writeBack` reads NOOP-computed metrics under `deviceId = "my-whoop"`, but the on-device *computed* scores (recovery/HRV/…) are persisted under the **computed** id `"my-whoop-noop"` — so the Apple-Health write-back may read little/nothing for a strap-only user. Behavioural (not a compile issue); fix when the iOS HealthKit path gets device-tested.
 
 ---
 

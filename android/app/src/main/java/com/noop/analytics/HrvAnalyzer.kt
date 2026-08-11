@@ -309,6 +309,39 @@ object HrvAnalyzer {
             nInput = nInput, nClean = clean.size)
     }
 
+    /** What the raw and same-second-collapsed coverage pair says about an R-R capture. */
+    enum class RrCoverageVerdict(val raw: String) {
+        PLAUSIBLE("plausible"),
+        UNDER_COVERED("underCovered"),
+        SAME_SECOND_OVER_COUNT("sameSecondOverCount"),
+        CROSS_SECOND_OVER_COUNT("crossSecondOverCount"),
+        UNMEASURABLE("unmeasurable"),
+    }
+
+    /** Symmetric rounding allowance around 1.0 for whole-second timestamps. */
+    const val COVERAGE_PLAUSIBLE_CEILING: Double = 1.10
+    const val COVERAGE_PLAUSIBLE_FLOOR: Double = 1.0 - (COVERAGE_PLAUSIBLE_CEILING - 1.0)
+
+    /**
+     * SDNN and other beat-spread statistics are unsafe when duplicated beats over-cover a window.
+     * Missing or unmeasurable coverage is not evidence of duplication, so it remains readable.
+     */
+    fun beatSpreadIsTrustworthy(verdict: RrCoverageVerdict): Boolean = when (verdict) {
+        RrCoverageVerdict.SAME_SECOND_OVER_COUNT, RrCoverageVerdict.CROSS_SECOND_OVER_COUNT -> false
+        RrCoverageVerdict.PLAUSIBLE, RrCoverageVerdict.UNDER_COVERED,
+        RrCoverageVerdict.UNMEASURABLE -> true
+    }
+
+    /** Classify coverage before any beat-spread metric is surfaced. */
+    fun classifyCoverage(coverage: Double, collapsed: Double): RrCoverageVerdict {
+        // Negated comparisons keep NaN deterministic: it is unmeasurable, never plausible.
+        if (!(coverage > 0.0)) return RrCoverageVerdict.UNMEASURABLE
+        if (!(coverage >= COVERAGE_PLAUSIBLE_FLOOR)) return RrCoverageVerdict.UNDER_COVERED
+        if (!(coverage > COVERAGE_PLAUSIBLE_CEILING)) return RrCoverageVerdict.PLAUSIBLE
+        return if (collapsed > COVERAGE_PLAUSIBLE_CEILING) RrCoverageVerdict.CROSS_SECOND_OVER_COUNT
+        else RrCoverageVerdict.SAME_SECOND_OVER_COUNT
+    }
+
     /** #257: total heartbeat-time (sum of NN intervals, ms) ÷ wall-clock span of the R-R window (ms).
      *  A value > ~1.0 is physically impossible — you can't record more beat-time than elapsed time — so
      *  it directly flags DOUBLE-COUNTED / overlapping R-R (e.g. a live + historical merge storing the same
@@ -363,6 +396,31 @@ object HrvAnalyzer {
         }
         return rrCoverage(keptTs, keptRr)
     }
+
+    /**
+     * Fraction of consecutive beats whose timestamp step agrees with that beat's R-R value. A
+     * beat-accurate stream approaches 1.0; a banked record stamps several intervals at one second and
+     * collapses toward zero. Short or mismatched inputs stay trusted because timing is unknown.
+     */
+    fun beatAccurateFraction(tsSec: List<Long>, rrMs: List<Double>): Double {
+        if (tsSec.size != rrMs.size || tsSec.size < 2) return 1.0
+        var accurate = 0
+        for (i in 1 until tsSec.size) {
+            val gapS = (tsSec[i] - tsSec[i - 1]).toDouble()
+            if (abs(gapS - rrMs[i] / 1000.0) <= BEAT_ACCURACY_TOLERANCE_S) accurate++
+        }
+        return accurate.toDouble() / (tsSec.size - 1).toDouble()
+    }
+
+    /** Whole-second timestamps need a loose tolerance against sub-second R-R values. */
+    const val BEAT_ACCURACY_TOLERANCE_S: Double = 0.5
+
+    /** Observed beat-accurate and banked streams lie far apart; values below this midpoint are refused. */
+    const val BEAT_ACCURACY_MIN_FRACTION: Double = 0.5
+
+    fun beatValuesAreTrustworthy(beatAccurateFraction: Double): Boolean =
+        // Negated `<` deliberately leaves an unmeasured/NaN input trusted, matching classifyCoverage.
+        !(beatAccurateFraction < BEAT_ACCURACY_MIN_FRACTION)
 
     // ── Rolling / windowed rMSSD (#803) ──────────────────────────────────────
     //

@@ -5,8 +5,8 @@ package com.noop.analytics
  * dose-response fit shrinks toward until the user has logged enough nights.
  *
  * Faithful Kotlin mirror of StrandAnalytics/DoseResponsePriors.swift. Keep the enum raw
- * strings, the slope magnitudes, the clamp ranges, and the default-outcome mapping
- * byte-identical to Swift — cross-platform parity tests enforce it.
+ * strings, the slope magnitudes, the clamp ranges, and the default-outcome mapping aligned
+ * with Swift. Legacy outcome aliases remain accepted so saved or older call sites keep working.
  *
  * These are deliberately CONSERVATIVE, clearly-labelled "typical patterns, not yours"
  * constants — never learned from any user, never updated from the field. The shrinkage in
@@ -15,7 +15,7 @@ package com.noop.analytics
  * out entirely.
  *
  * Each prior is an EFFECT PER INCREMENTAL UNIT of dose on a named outcome:
- *   - Alcohol  → Charge (recovery, 0–100): roughly −Δ points per extra drink.
+ *   - Alcohol  → Recovery (0–100): roughly −Δ points per extra drink.
  *   - Caffeine → HRV (ms): roughly −Δ ms per step LATER in the day a caffeine dose lands
  *     (the caffeine "dose" axis is a TIMING bucket, not mg — copy says so).
  *
@@ -42,7 +42,7 @@ enum class DosedBehavior(val raw: String) {
 data class DoseResponsePrior(
     /** The dosed behaviour this prior describes. */
     val behavior: DosedBehavior,
-    /** The outcome label this prior is expressed in (e.g. "Charge", "HRV"). */
+    /** The user-facing outcome label this prior is expressed in (e.g. "Recovery", "HRV"). */
     val outcome: String,
     /** Typical signed effect per ONE extra unit of dose. Negative = lower with more dose. */
     val slopePerUnit: Double,
@@ -56,28 +56,34 @@ object DoseResponsePriors {
 
     /**
      * The default outcome each dosed behaviour's headline prior is expressed in.
-     * Alcohol's headline effect is on Charge; caffeine's is on HRV (timing proxy).
+     * Alcohol's headline effect is on Recovery; caffeine's is on HRV (timing proxy).
      */
     fun defaultOutcome(behavior: DosedBehavior): String = when (behavior) {
-        DosedBehavior.ALCOHOL -> "Charge"
+        DosedBehavior.ALCOHOL -> "Recovery"
         DosedBehavior.CAFFEINE -> "HRV"
     }
 
     /**
      * The documented, conservative priors. Mirror Swift exactly.
-     * - Alcohol → Charge: ≈ −5 Charge points per extra drink (clamped −15…+2).
+     * - Alcohol → Recovery: ≈ −5 Recovery points per extra drink (clamped −15…+2).
      * - Caffeine → HRV:   ≈ −4 ms per step later in the day (clamped −20…+4).
      */
     internal val table: List<DoseResponsePrior> = listOf(
-        DoseResponsePrior(DosedBehavior.ALCOHOL, "Charge", -5.0, -15.0, 2.0),
+        DoseResponsePrior(DosedBehavior.ALCOHOL, "Recovery", -5.0, -15.0, 2.0),
         DoseResponsePrior(DosedBehavior.CAFFEINE, "HRV", -4.0, -20.0, 4.0),
     )
 
-    /** Look up the documented prior for a (behaviour, outcome) pair, or null if none. */
+    /** Look up the documented prior for a (behaviour, outcome) pair, or null if none. The old
+     *  "Charge" label is an input alias only; returned priors always carry current display copy. */
     fun prior(behavior: DosedBehavior, outcome: String): DoseResponsePrior? =
-        table.firstOrNull { it.behavior == behavior && it.outcome == outcome }
+        table.firstOrNull { it.behavior == behavior && it.outcome == canonicalOutcome(outcome) }
 
     /** Convenience: the prior for a behaviour's default headline outcome. */
     fun prior(behavior: DosedBehavior): DoseResponsePrior? =
         prior(behavior, defaultOutcome(behavior))
+
+    private fun canonicalOutcome(outcome: String): String = when (outcome) {
+        "Charge" -> "Recovery"
+        else -> outcome
+    }
 }

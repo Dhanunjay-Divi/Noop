@@ -128,7 +128,8 @@ extension WhoopStore {
             }
             if !streams.rr.isEmpty {
                 let stmt = try db.cachedStatement(sql: """
-                    INSERT INTO rrInterval (deviceId, ts, rrMs, seq) VALUES (?, ?, ?, ?)
+                    INSERT INTO rrInterval (deviceId, ts, rrMs, seq, ord, srcChannel)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(deviceId, ts, rrMs, seq) DO NOTHING
                     """)
                 // v24 (#163): number EQUAL (ts, rrMs) beats 0, 1, … within this batch so both survive;
@@ -136,10 +137,14 @@ extension WhoopStore {
                 // dropped even across batches (rrMs stays in the key). Re-syncing identical rows reproduces
                 // the same (ts, rrMs, seq) → still idempotent. Nested dict = (ts, rrMs) occurrence counter.
                 var seqByTsRr: [Int: [Int: Int]] = [:]
+                var ordByTs: [Int: Int] = [:]
                 for r in streams.rr {
                     let seq = seqByTsRr[r.ts]?[r.rrMs] ?? 0
                     seqByTsRr[r.ts, default: [:]][r.rrMs] = seq + 1
-                    try stmt.execute(arguments: [deviceId, r.ts, r.rrMs, seq])
+                    let ord = ordByTs[r.ts] ?? 0
+                    ordByTs[r.ts] = ord + 1
+                    try stmt.execute(arguments: [deviceId, r.ts, r.rrMs, seq, ord,
+                                                 r.srcChannel?.rawValue])
                     rr += db.changesCount
                 }
             }
@@ -300,7 +305,8 @@ extension WhoopStore {
             }
             // rr: stream=rr → rr_ms (col 4).
             for r in try Row.fetchAll(db, sql:
-                "SELECT ts, rrMs FROM rrInterval WHERE deviceId = ? AND ts >= ? ORDER BY ts",
+                "SELECT ts, rrMs FROM rrInterval WHERE deviceId = ? AND ts >= ? " +
+                "ORDER BY ts, ord, rrMs, seq",
                 arguments: [deviceId, floor]) {
                 var row = RawCSVRow(ts: r["ts"]); row.cols[0] = "rr"
                 row.cols[2] = WhoopStore.intStr(r["rrMs"])
@@ -507,6 +513,23 @@ extension WhoopStore {
                 return nil
             }
             return (row["mac"], row["name"])
+        }
+    }
+
+    /// Re-run the v31 quarantine predicate against a fixed clock for deterministic tests.
+    public func markFutureRrSuspectForTest(nowSeconds: Int) async throws {
+        try syncWrite { db in
+            try db.execute(sql: "UPDATE rrInterval SET tsSuspect = 1 WHERE ts > ?",
+                           arguments: [nowSeconds])
+        }
+    }
+
+    /// Inspect all stored R-R rows without the scoring read's quarantine filter. Test-only.
+    public func rrSuspectRowsForTest(deviceId: String) async throws -> [(ts: Int, tsSuspect: Int?)] {
+        try syncRead { db in
+            try Row.fetchAll(db, sql: """
+                SELECT ts, tsSuspect FROM rrInterval WHERE deviceId = ? ORDER BY ts ASC
+                """, arguments: [deviceId]).map { (ts: $0["ts"], tsSuspect: $0["tsSuspect"]) }
         }
     }
 }

@@ -2,7 +2,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 import StrandDesign
 import WhoopStore
-import UserNotifications
 
 // MARK: - OnboardingWizard
 //
@@ -30,6 +29,15 @@ public struct OnboardingWizard: View {
 
     public init(onFinished: @escaping () -> Void) {
         self.onFinished = onFinished
+        #if DEBUG
+        let args = CommandLine.arguments
+        if let index = args.firstIndex(of: "--demo-onboarding-step"),
+           args.indices.contains(index + 1),
+           let rawValue = Int(args[index + 1]),
+           let requestedStep = Step(rawValue: rawValue) {
+            _step = State(initialValue: requestedStep)
+        }
+        #endif
     }
 
     // NOTE: the root deliberately does NOT observe the fast-updating model/live/profile
@@ -46,6 +54,9 @@ public struct OnboardingWizard: View {
 
     @State private var step: Step = .welcome
     @State private var glow = false
+    /// Notification permission is never bundled into a generic Continue tap. This explicit, default-off
+    /// choice is explained on the Notifications step and only then passed to the scheduler.
+    @State private var dailyReviewOptIn = DailyReviewNotifications.isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public var body: some View {
@@ -70,7 +81,7 @@ public struct OnboardingWizard: View {
                     case .bonded:     BondedStep()
                     case .profile:    ProfileStep()
                     case .importData: ImportStep()
-                    case .notifications: NotificationsStep()
+                    case .notifications: NotificationsStep(dailyReviewOptIn: $dailyReviewOptIn)
                     case .appearance: AppearanceStep()
                     case .done:       DoneStep()
                     }
@@ -189,7 +200,10 @@ public struct OnboardingWizard: View {
         case .bonded:     return String(localized: "Continue")
         case .profile:    return String(localized: "Save & Continue")
         case .importData: return String(localized: "Continue")
-        case .notifications: return String(localized: "Continue")
+        case .notifications:
+            return dailyReviewOptIn
+                ? String(localized: "Enable & Continue")
+                : String(localized: "Not now")
         case .appearance: return String(localized: "Continue")
         case .done:       return String(localized: "Enter NOOP")
         }
@@ -213,24 +227,25 @@ public struct OnboardingWizard: View {
 
     // MARK: Navigation
 
-    /// Leaving the Notifications step is the one point in onboarding where we actually ask the OS for
-    /// notification permission — everything before this only explained why (the `NotificationsStep`
-    /// card). Without this, NOOP never showed up under Settings → Notifications at all unless a user
-    /// later found and enabled one of the opt-in automations (wind-down, battery, illness) buried in
-    /// More → Alarms/Automations, each of which lazily requests on its own toggle. Mirrors the Android
-    /// onboarding's `OnboardingPage.Notifications` step (`OnboardingScreen.kt`): request only if not
-    /// already determined (so a re-run/upgrade doesn't re-prompt), and advance once the OS dialog is
-    /// dismissed either way — the per-feature toggles still handle a later denial on their own.
+    /// The Notifications page contains a clear, default-off opt-in. Continue never asks permission on
+    /// its own: only "Enable & Continue" calls the scheduler, which requests the OS permission if needed.
+    /// Denial does not block onboarding and the same control remains available under Automations.
     private func advance() {
+        if step == .profile {
+            // The editor is seeded with neutral defaults for layout, but age-shaped estimates must not
+            // treat those as user-provided. Tapping the explicitly labelled Save & Continue accepts both
+            // visible profile inputs, including when the user intentionally keeps the shown defaults.
+            ProfileStore.confirmFitnessInputsInDefaults()
+        }
         guard step != .notifications else {
-            UNUserNotificationCenter.current().getNotificationSettings { settings in
-                guard settings.authorizationStatus == .notDetermined else {
-                    Task { @MainActor in advanceStep() }
-                    return
-                }
-                UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in
-                    Task { @MainActor in advanceStep() }
-                }
+            guard dailyReviewOptIn else {
+                DailyReviewNotifications.setEnabled(false)
+                advanceStep()
+                return
+            }
+            DailyReviewNotifications.setEnabled(true) { outcome in
+                dailyReviewOptIn = outcome == .scheduled
+                advanceStep()
             }
             return
         }
@@ -403,13 +418,23 @@ private struct ExpectationsStep: View {
                 }
 
                 #if os(iOS)
-                // The iPhone-only reality: this is a sideloaded build, so set the re-sign + unlock
-                // expectation up front rather than letting it surprise people later (#222 / cert expiry).
-                expectationRow(
-                    icon: "iphone.gen3",
-                    title: String(localized: "Installed outside the App Store"),
-                    body: String(localized: "On iPhone this is a sideloaded build. Re-sign it about every 7 days on a free Apple ID (longer on a paid account). After your phone reboots, unlock it once so NOOP can read and sync its data.")
-                )
+                Group {
+                    if IOSDiagnostics.capture().isSideloaded == true {
+                        // Free-development / AltStore builds still need periodic re-signing.
+                        expectationRow(
+                            icon: "iphone.gen3",
+                            title: String(localized: "Installed outside the App Store"),
+                            body: String(localized: "On iPhone this is a sideloaded build. Re-sign it about every 7 days on a free Apple ID (longer on a paid account). After your phone reboots, unlock it once so NOOP can read and sync its data.")
+                        )
+                    } else {
+                        // TestFlight/App Store receipts must not receive the old seven-day sideload warning.
+                        expectationRow(
+                            icon: "checkmark.seal",
+                            title: String(localized: "Delivered through Apple"),
+                            body: String(localized: "This trial updates through TestFlight. Individual beta builds are available for up to 90 days, so install the latest version when TestFlight prompts you.")
+                        )
+                    }
+                }
                 .opacity(shown ? 1 : 0)
                 .offset(y: shown ? 0 : 8)
                 .animation(StrandMotion.gentle.delay(Double(AppChangelog.expectations.count) * 0.08), value: shown)
@@ -721,10 +746,17 @@ private struct BondedStep: View {
 private struct ProfileStep: View {
     @EnvironmentObject private var profile: ProfileStore
 
-    // Imperial/Metric display preference (D#103). The stored profile is always SI; the steppers keep
-    // operating in SI (0.5 kg / 1 cm) and only the DISPLAYED value re-labels to lb / ft-in.
+    // Distance keeps the app-wide system preference, but weight and height can override it independently:
+    // kg + ft/in and lb + cm are both common real-world combinations. Storage remains SI throughout.
     @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    @AppStorage(UnitPrefs.massKey) private var massUnitRaw = ""
+    @AppStorage(UnitPrefs.heightKey) private var heightUnitRaw = ""
     private var unitSystem: UnitSystem { UnitSystem(rawValue: unitSystemRaw) ?? .metric }
+    private var massUnit: MassUnit { UnitPrefs.resolveMass(system: unitSystem, override: massUnitRaw) }
+    private var heightUnit: HeightUnit { UnitPrefs.resolveHeight(system: unitSystem, override: heightUnitRaw) }
+
+    private enum InputField: Hashable { case weight, heightCm, heightFeet, heightInches }
+    @FocusState private var focusedField: InputField?
 
     private let sexes: [(String, String)] = [
         ("male", String(localized: "Male")), ("female", String(localized: "Female")),
@@ -761,39 +793,19 @@ private struct ProfileStep: View {
 
                         Divider().overlay(StrandPalette.hairline)
 
-                        // Units control (#781). Without this, onboarding read `unitSystemRaw` for the
-                        // Weight/Height display but had NO way to set it, so US users were locked to
-                        // kg/cm until they later found Settings → Units. Mirror the Sex picker idiom; the
-                        // stored profile stays SI either way, only the displayed labels re-format (lb / ft-in
-                        // via UnitFormatter). Same key (`units.system`) the Settings → Units card writes.
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Units").strandOverline()
-                            Picker("Units", selection: $unitSystemRaw) {
-                                Text("Metric").tag(UnitSystem.metric.rawValue)
-                                Text("Imperial").tag(UnitSystem.imperial.rawValue)
-                            }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
-                        }
+                        weightEditor
 
                         Divider().overlay(StrandPalette.hairline)
 
-                        // Steppers, not sliders — matches the Age row above and the macOS Settings
-                        // profile editor (same ranges/steps), so every numeric profile field is
-                        // consistent across onboarding and Settings on both platforms.
-                        Stepper(value: $profile.weightKg, in: 30...250, step: 0.5) {
-                            FieldRow(label: String(localized: "Weight"),
-                                     value: UnitFormatter.massFromKilograms(profile.weightKg, system: unitSystem))
-                        }
-
-                        Divider().overlay(StrandPalette.hairline)
-
-                        Stepper(value: $profile.heightCm, in: 120...230, step: 1) {
-                            FieldRow(label: String(localized: "Height"),
-                                     value: UnitFormatter.heightFromCentimeters(profile.heightCm, system: unitSystem))
-                        }
+                        heightEditor
                     }
                 }
+
+                Text("Weight and height units are independent. NOOP stores one precise value and only changes how it is displayed.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 8) {
                     Image(systemName: "bolt.heart")
@@ -804,6 +816,194 @@ private struct ProfileStep: View {
                 }
             }
         }
+        .keyboardDoneToolbar($focusedField)
+    }
+
+    private var massSelection: Binding<MassUnit> {
+        Binding(get: { massUnit }, set: { massUnitRaw = $0.rawValue })
+    }
+
+    private var heightSelection: Binding<HeightUnit> {
+        Binding(get: { heightUnit }, set: { heightUnitRaw = $0.rawValue })
+    }
+
+    private var displayedWeight: Binding<Double> {
+        Binding(
+            get: { massUnit == .pounds ? UnitFormatter.kgToPounds(profile.weightKg) : profile.weightKg },
+            set: { entered in
+                guard entered.isFinite else { return }
+                let kilograms = massUnit == .pounds
+                    ? entered / UnitFormatter.poundsPerKilogram
+                    : entered
+                profile.weightKg = min(250, max(30, kilograms))
+            }
+        )
+    }
+
+    private var displayedHeightCm: Binding<Double> {
+        Binding(
+            get: { profile.heightCm },
+            set: { entered in
+                guard entered.isFinite else { return }
+                profile.heightCm = min(230, max(120, entered))
+            }
+        )
+    }
+
+    private var displayedHeightInches: Binding<Double> {
+        Binding(
+            get: { UnitFormatter.cmToInches(profile.heightCm) },
+            set: { entered in
+                guard entered.isFinite else { return }
+                let inches = min(91, max(47, entered))
+                profile.heightCm = inches * UnitFormatter.centimetersPerInch
+            }
+        )
+    }
+
+    private var displayedFeet: Binding<Int> {
+        Binding(
+            get: { UnitFormatter.cmToFeetInches(profile.heightCm).feet },
+            set: { feet in
+                let inches = UnitFormatter.cmToFeetInches(profile.heightCm).inches
+                displayedHeightInches.wrappedValue = Double(feet * 12 + inches)
+            }
+        )
+    }
+
+    private var displayedRemainingInches: Binding<Int> {
+        Binding(
+            get: { UnitFormatter.cmToFeetInches(profile.heightCm).inches },
+            set: { inches in
+                let feet = UnitFormatter.cmToFeetInches(profile.heightCm).feet
+                displayedHeightInches.wrappedValue = Double(feet * 12 + min(11, max(0, inches)))
+            }
+        )
+    }
+
+    private var weightEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Text("Weight").strandOverline()
+                Spacer(minLength: 8)
+                Picker("Weight unit", selection: massSelection) {
+                    Text("kg").tag(MassUnit.kilograms)
+                    Text("lb").tag(MassUnit.pounds)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 116)
+            }
+            HStack(spacing: 10) {
+                Spacer(minLength: 0)
+                TextField("Weight", value: displayedWeight,
+                          format: .number.precision(.fractionLength(massUnit == .kilograms ? 1 : 0)))
+                    .font(StrandFont.bodyNumber)
+                    .multilineTextAlignment(.trailing)
+                    .numericKeyboard()
+                    .focused($focusedField, equals: .weight)
+                    .frame(width: 74)
+                    .padding(.horizontal, 10)
+                    .frame(height: 40)
+                    .background(StrandPalette.surfaceOverlay, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .strokeBorder(StrandPalette.hairline, lineWidth: 1))
+                    .accessibilityLabel("Weight value")
+                Text(massUnit.rawValue)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .frame(minWidth: 22, alignment: .leading)
+                Stepper("Adjust weight", value: displayedWeight,
+                        in: massUnit == .pounds ? 66...551 : 30...250,
+                        step: massUnit == .pounds ? 1 : 0.5)
+                    .labelsHidden()
+            }
+        }
+    }
+
+    @ViewBuilder private var heightEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Text("Height").strandOverline()
+                Spacer(minLength: 8)
+                Picker("Height unit", selection: heightSelection) {
+                    Text("cm").tag(HeightUnit.centimeters)
+                    Text("ft / in").tag(HeightUnit.feetInches)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 136)
+            }
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                if heightUnit == .centimeters {
+                    TextField("Height", value: displayedHeightCm,
+                              format: .number.precision(.fractionLength(0)))
+                        .font(StrandFont.bodyNumber)
+                        .multilineTextAlignment(.trailing)
+                        .numericKeyboard()
+                        .focused($focusedField, equals: .heightCm)
+                        .frame(width: 68)
+                        .measurementEntryChrome()
+                    Text("cm")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    Stepper("Adjust height", value: displayedHeightCm, in: 120...230, step: 1)
+                        .labelsHidden()
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            feetInchesFields
+                            Stepper("Adjust height", value: displayedHeightInches, in: 47...91, step: 1)
+                                .labelsHidden()
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+
+                        VStack(alignment: .trailing, spacing: 8) {
+                            feetInchesFields
+                            Stepper("Adjust height", value: displayedHeightInches, in: 47...91, step: 1)
+                                .labelsHidden()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var feetInchesFields: some View {
+        HStack(spacing: 8) {
+            TextField("Feet", value: displayedFeet, format: .number)
+                .font(StrandFont.bodyNumber)
+                .multilineTextAlignment(.trailing)
+                .numericKeyboard()
+                .focused($focusedField, equals: .heightFeet)
+                .frame(width: 46)
+                .measurementEntryChrome()
+            Text("ft")
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textSecondary)
+            TextField("Inches", value: displayedRemainingInches, format: .number)
+                .font(StrandFont.bodyNumber)
+                .multilineTextAlignment(.trailing)
+                .numericKeyboard()
+                .focused($focusedField, equals: .heightInches)
+                .frame(width: 46)
+                .measurementEntryChrome()
+            Text("in")
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textSecondary)
+        }
+    }
+}
+
+private extension View {
+    /// Shared compact field chrome for the independently editable onboarding measurements.
+    func measurementEntryChrome() -> some View {
+        self
+            .padding(.horizontal, 9)
+            .frame(height: 40)
+            .background(StrandPalette.surfaceOverlay,
+                        in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(StrandPalette.hairline, lineWidth: 1))
     }
 }
 
@@ -811,6 +1011,9 @@ private struct ProfileStep: View {
 
 private struct ImportStep: View {
     @EnvironmentObject private var model: AppModel
+    #if os(iOS)
+    @EnvironmentObject private var health: HealthKitBridge
+    #endif
     @State private var showingImporter = false
     @State private var importTarget: ImportTarget = .whoop
 
@@ -831,11 +1034,41 @@ private struct ImportStep: View {
                     icon: "clock.arrow.circlepath",
                     tint: StrandPalette.accent,
                     title: String(localized: "History fills the dashboard immediately"),
-                    message: String(localized: "A WHOOP export backfills recovery, strain, sleep and workouts. Apple Health can add HR, HRV, sleep, SpO₂, steps, workouts and weight.")
+                    message: String(localized: "A WHOOP export backfills recovery, strain, sleep and workouts. Apple Health can add HR, HRV, sleep, SpO₂, steps, workouts, weight, and body or sleeping-wrist temperature when a source records them.")
                 )
 
                 StrandCard {
                     VStack(spacing: 10) {
+                        #if os(iOS)
+                        // The normal iPhone path is a live, permissioned HealthKit connection. File
+                        // import remains immediately below as the explicit historical/fallback path.
+                        ImportActionButton(
+                            title: appleHealthConnectionTitle,
+                            systemImage: health.auth == .authorized
+                                ? "checkmark.circle.fill" : "heart.text.square.fill",
+                            disabled: health.syncing || health.auth == .unavailable
+                                || health.auth == .entitlementMissing
+                        ) {
+                            Task {
+                                if health.auth != .authorized {
+                                    await health.requestAuthorization()
+                                }
+                                if health.auth == .authorized {
+                                    await health.sync()
+                                    await model.repo.refresh()
+                                }
+                            }
+                        }
+                        if let note = appleHealthConnectionNote {
+                            Text(note)
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 4)
+                        }
+                        #endif
+
                         ImportActionButton(
                             title: model.isImporting(.whoop) ? String(localized: "Importing…") : String(localized: "Import WHOOP export"),
                             systemImage: "tray.and.arrow.down",
@@ -879,6 +1112,34 @@ private struct ImportStep: View {
             handleImportResult(result, for: importTarget)
         }
     }
+
+    #if os(iOS)
+    private var appleHealthConnectionTitle: String {
+        if health.syncing { return String(localized: "Syncing Apple Health…") }
+        switch health.auth {
+        case .authorized: return String(localized: "Apple Health connected")
+        case .denied: return String(localized: "Review Apple Health access")
+        case .unavailable: return String(localized: "Apple Health unavailable")
+        case .entitlementMissing: return String(localized: "Apple Health unavailable in this build")
+        case .unknown: return String(localized: "Connect Apple Health")
+        }
+    }
+
+    private var appleHealthConnectionNote: String? {
+        switch health.auth {
+        case .authorized:
+            return String(localized: "Automatic sync is on. New data is read when Health notifies NOOP and whenever you reopen the app.")
+        case .denied:
+            return String(localized: "If the permission sheet does not return, enable NOOP in Settings › Health › Data Access & Devices.")
+        case .entitlementMissing:
+            return String(localized: "This signed build cannot request Health access; use the Apple Health export below.")
+        case .unavailable:
+            return String(localized: "Apple Health is not available on this device.")
+        case .unknown:
+            return String(localized: "Connect once to import compatible watch, scale and health-app data automatically with your permission.")
+        }
+    }
+    #endif
 
     /// The AppModel source kind matching the last-chosen import target.
     private var importKind: DataSourceImportKind {
@@ -940,6 +1201,7 @@ private struct ImportStep: View {
 // MARK: - Step 9 · Notifications (wrist alerts priming)
 
 private struct NotificationsStep: View {
+    @Binding var dailyReviewOptIn: Bool
     @State private var pulse = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
@@ -992,6 +1254,34 @@ private struct NotificationsStep: View {
                 }
                 .frame(maxWidth: 460)
                 #endif
+
+                StrandCard(padding: 18, tint: StrandPalette.accent) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .center, spacing: 16) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Daily review reminders")
+                                    .font(StrandFont.headline)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                Text("Morning opens Sleep; evening opens Today. Scores appear only after your latest device sync.")
+                                    .font(StrandFont.footnote)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                            Toggle("", isOn: $dailyReviewOptIn)
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .tint(StrandPalette.accent)
+                                .accessibilityLabel("Daily review reminders")
+                        }
+
+                        Text("Off by default. If enabled, NOOP asks for notification access after you tap Enable & Continue. Reminder banners never include scores or health values.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: 460)
             }
         }
         .onAppear { if !reduceMotion { withAnimation(StrandMotion.breathe) { pulse = true } } }
@@ -1354,7 +1644,11 @@ private struct PrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .frame(maxWidth: .infinity)
-            .foregroundStyle(Color.white)
+            // `accent` intentionally flips with appearance (black in Light, near-white in Dark),
+            // so a hard-coded white label disappears on the Dark-mode CTA. `accentInk` is the
+            // paired contrast token: white over the Light-mode black fill, dark over the
+            // Dark-mode white fill. This one style drives every onboarding footer CTA.
+            .foregroundStyle(StrandPalette.accentInk)
             .padding(.vertical, 14)
             .padding(.horizontal, 20)
             .background(

@@ -508,9 +508,13 @@ struct WorkoutsView: View {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(StrandPalette.textTertiary)
+                    .foregroundStyle(StrandPalette.textSecondary)
                     .accessibilityHidden(true)
-                TextField(String(localized: "Search sport"), text: $searchText)
+                TextField(
+                    "",
+                    text: $searchText,
+                    prompt: Text("Search sport").foregroundColor(StrandPalette.textSecondary)
+                )
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textPrimary)
                     .textFieldStyle(.plain)
@@ -529,7 +533,7 @@ struct WorkoutsView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(StrandPalette.surfaceInset.opacity(0.6),
+            .background(StrandPalette.surfaceInset,
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
     }
@@ -549,7 +553,7 @@ struct WorkoutsView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
-                (active ? StrandPalette.effortColor.opacity(0.14) : StrandPalette.surfaceInset.opacity(0.6)),
+                (active ? StrandPalette.effortColor.opacity(0.14) : StrandPalette.surfaceInset),
                 in: Capsule()
             )
         }
@@ -588,14 +592,25 @@ struct WorkoutsView: View {
     /// place people instinctively look — instead of only from the Live screen. Starts the session and
     /// presents the in-exercise view directly (no cross-view auto-present race with LiveView's sheet).
     private var startLiveWorkoutButton: some View {
-        NoopButton(model.activeWorkout == nil ? "Start workout" : "View active workout",
-                   systemImage: model.activeWorkout == nil ? "figure.run" : "timer",
-                   kind: .primary) {
+        Button {
             // No active session → pick a named sport first (#519), then the sheet's onStart begins it
             // and opens the in-exercise view. Already active → jump straight back into the live view.
             if model.activeWorkout == nil { showStartSport = true }
             else { showLiveWorkout = true }
+        } label: {
+            HStack(spacing: NoopButtonMetrics.iconSpacing) {
+                SemanticBodyIllustration(
+                    .workout(systemImage: model.activeWorkout.map { sportSymbol($0.sport) } ?? "figure.run"),
+                    size: 30,
+                    tint: StrandPalette.effortColor,
+                    isActive: model.activeWorkout != nil
+                )
+                Text(model.activeWorkout == nil
+                     ? String(localized: "Start workout")
+                     : String(localized: "View active workout"))
+            }
         }
+        .buttonStyle(NoopButtonStyle(.primary))
         .accessibilityLabel(model.activeWorkout == nil ? "Start a workout" : "View the active workout")
     }
 
@@ -725,12 +740,12 @@ struct WorkoutsView: View {
                             value: displayValue,
                             format: { String(format: "%.1f", $0) },
                             font: StrandFont.rounded(46),
-                            color: StrandPalette.textPrimary
+                            color: StrandPalette.onDarkPrimary
                         )
                         .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
                         Text(effortScale == .whoop ? "of 21" : "of 100")
                             .font(StrandFont.caption)
-                            .foregroundStyle(StrandPalette.textSecondary)
+                            .foregroundStyle(StrandPalette.onDarkSecondary)
                     }
                     .allowsHitTesting(false)   // taps fall through to the vessel → splash
                 }
@@ -745,7 +760,7 @@ struct WorkoutsView: View {
                         .frame(width: diameter, height: diameter)
                     Text("No data")
                         .font(StrandFont.headline)
-                        .foregroundStyle(StrandPalette.textSecondary)
+                        .foregroundStyle(StrandPalette.onDarkSecondary)
                         .lineLimit(1).minimumScaleFactor(0.7).fixedSize()
                         .allowsHitTesting(false)
                 }

@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.data.DailyMetric
 import com.noop.data.MoodStore
+import com.noop.ingest.HealthConnectImporter
 import com.noop.ingest.NutritionCsvImporter
 import java.util.Locale
 import kotlin.math.abs
@@ -86,7 +87,7 @@ data class CompareMetric(
     val title: String,
     val category: String,
     val unit: String,
-    val source: String,      // "my-whoop" or "apple-health"
+    val source: String,      // explicit metricSeries source partition
     val decimals: Int,
     // Optional honesty note shown in the metric picker (e.g. BMI is derived from the profile height
     // when it comes from Health Connect, since Health Connect carries no measured BMI record). The
@@ -104,24 +105,24 @@ data class CompareMetric(
         return if (unit.isEmpty()) n else "$n $unit"
     }
 
-    /** Unit-aware format (D#103): weight/lean_mass (kg) and skin_temp (°C) convert + relabel via
+    /** Unit-aware format: weight/lean_mass (kg) and skin_temp (°C) convert + relabel via
      *  [UnitFormatter]; everything else (%, bpm, ms, min, …) is unit-agnostic and falls through. */
-    fun format(v: Double, system: UnitSystem, temperature: TemperatureUnit): String = when (unit) {
-        "kg" -> UnitFormatter.massFromKilograms(v, system)
+    fun format(v: Double, mass: MassUnit, temperature: TemperatureUnit): String = when (unit) {
+        "kg" -> UnitFormatter.massFromKilograms(v, mass)
         "°C" -> UnitFormatter.temperatureFromCelsius(v, temperature, decimals)
         else -> format(v)
     }
 
     /** Like [format] but for a DIFFERENCE: a temperature delta omits the +32 offset. */
-    fun formatDelta(v: Double, system: UnitSystem, temperature: TemperatureUnit): String = when (unit) {
-        "kg" -> UnitFormatter.massFromKilograms(v, system)
+    fun formatDelta(v: Double, mass: MassUnit, temperature: TemperatureUnit): String = when (unit) {
+        "kg" -> UnitFormatter.massFromKilograms(v, mass)
         "°C" -> UnitFormatter.temperatureDeltaFromCelsius(v, temperature, decimals)
         else -> format(v)
     }
 
     /** Displayed unit LABEL mapped to the active system (kg→lb, °C→°F); others unchanged. */
-    fun displayUnit(system: UnitSystem, temperature: TemperatureUnit): String = when (unit) {
-        "kg" -> UnitFormatter.massUnit(system)
+    fun displayUnit(mass: MassUnit, temperature: TemperatureUnit): String = when (unit) {
+        "kg" -> UnitFormatter.massUnit(mass)
         "°C" -> UnitFormatter.temperatureUnit(temperature)
         else -> unit
     }
@@ -144,16 +145,16 @@ private object CompareCatalog {
         CompareMetric("fitness_age", "Fitness Age", "Heart", "yrs", "my-whoop", 0),
         CompareMetric("vo2max_est", "VO₂ Max (estimated)", "Heart", "", "my-whoop", 1),
         CompareMetric("vitality", "Vitality", "Heart", "", "my-whoop", 0),
-        CompareMetric("body_age", "Body Age", "Heart", "yrs", "my-whoop", 0),
-        // Charge (was Recovery)
-        CompareMetric("recovery", "Charge", "Charge", "%", "my-whoop", 0),
+        CompareMetric("body_age", "Wellness Age", "Heart", "yrs", "my-whoop", 0),
+        // Recovery (stable internal category remains "Charge")
+        CompareMetric("recovery", "Recovery", "Charge", "%", "my-whoop", 0),
         CompareMetric("hrv", "Heart Rate Variability", "Charge", "ms", "my-whoop", 0),
         CompareMetric("rhr", "Resting Heart Rate", "Charge", "bpm", "my-whoop", 0),
         CompareMetric("resp_rate", "Respiratory Rate", "Charge", "rpm", "my-whoop", 1),
         CompareMetric("spo2", "Blood Oxygen", "Charge", "%", "my-whoop", 0),
         CompareMetric("skin_temp", "Skin Temperature", "Charge", "°C", "my-whoop", 1),
-        // Rest (was Sleep)
-        CompareMetric("sleep_performance", "Rest", "Rest", "%", "my-whoop", 0),
+        // Sleep (stable internal category remains "Rest")
+        CompareMetric("sleep_performance", "Sleep Score", "Rest", "%", "my-whoop", 0),
         CompareMetric("sleep_total_min", "Asleep Time", "Rest", "min", "my-whoop", 0),
         CompareMetric("sleep_efficiency", "Sleep Efficiency", "Rest", "%", "my-whoop", 0),
         CompareMetric("sleep_deep_min", "Deep (SWS) Sleep", "Rest", "min", "my-whoop", 0),
@@ -174,6 +175,33 @@ private object CompareCatalog {
         CompareMetric(
             "bmi", "BMI", "Health", "", "apple-health", 1,
             note = "From Health Connect this is derived from your weight and profile height.",
+        ),
+        CompareMetric(
+            HealthConnectImporter.BODY_TEMPERATURE_KEY,
+            "Body Temperature",
+            "Health",
+            "°C",
+            "apple-health",
+            1,
+            note = "Absolute body temperature; never WHOOP skin-temperature deviation.",
+        ),
+        CompareMetric(
+            "wrist_temp",
+            "Sleeping Wrist Temperature",
+            "Health",
+            "°C",
+            "apple-health",
+            1,
+            note = "Apple sleeping-wrist temperature only; Health Connect body temperature is not relabelled as wrist temperature.",
+        ),
+        CompareMetric(
+            HealthConnectImporter.BASAL_BODY_TEMPERATURE_KEY,
+            "Basal Body Temperature",
+            "Health",
+            "°C",
+            HealthConnectImporter.DEVICE_ID,
+            2,
+            note = "Absolute basal body temperature imported from Health Connect; not skin or sleeping-wrist temperature.",
         ),
         // Nutrition (imported from a food-tracker CSV — calories-in next to calories-out).
         // Mirrors the macOS MetricCatalog entries exactly (same keys + sources, v2.2.0 parity).
@@ -207,6 +235,13 @@ private object CompareCatalog {
         "sleep_light_min" -> { d -> d.lightMin }
         else -> null
     }
+}
+
+/** Stable category keys stay unchanged for filtering/backups; only their product-facing names change. */
+private fun categoryDisplayName(category: String): String = when (category) {
+    "Charge" -> "Recovery"
+    "Rest" -> "Sleep"
+    else -> category
 }
 
 // MARK: - Range control (shared spec — W / M / 3M / 6M / 1Y / ALL)
@@ -646,7 +681,7 @@ private fun AddMetricMenu(
                 val metrics = CompareCatalog.inCategory(category)
                 if (metrics.isNotEmpty()) {
                     Text(
-                        category.uppercase(),
+                        categoryDisplayName(category).uppercase(),
                         style = NoopType.overline,
                         color = Palette.textTertiary,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -937,10 +972,10 @@ private data class OverlayPrepared(
 
 @Composable
 private fun Legend(series: List<CompareSeries>) {
-    // Imperial/Metric display preference (D#103). Only weight/lean mass (kg) and skin temp (°C) in the
+    // Independent display preferences. Only weight/lean mass (kg) and skin temp (°C) in the
     // catalog carry a convertible unit; the min–max labels re-label under the toggle. Display-only.
     val context = LocalContext.current
-    val unitSystem = UnitPrefs.system(context)
+    val massUnit = UnitPrefs.mass(context)
     val tempUnit = UnitPrefs.temperature(context)
     Column {
         series.forEachIndexed { idx, s ->
@@ -967,8 +1002,8 @@ private fun Legend(series: List<CompareSeries>) {
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    uiString(R.string.l10n_compare_screen_s_metric_format_s_realmin_unitsystem_0da2a1f2, s.metric.format(s.realMin, unitSystem, tempUnit)) +
-                        s.metric.format(s.realMax, unitSystem, tempUnit),
+                    uiString(R.string.l10n_compare_screen_s_metric_format_s_realmin_unitsystem_0da2a1f2, s.metric.format(s.realMin, massUnit, tempUnit)) +
+                        s.metric.format(s.realMax, massUnit, tempUnit),
                     style = NoopType.captionNumber,
                     color = Palette.textSecondary,
                 )

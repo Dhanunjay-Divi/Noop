@@ -24,7 +24,9 @@ let package = Package(
         ),
         .testTarget(
             name: "WhoopStoreTests",
-            dependencies: ["WhoopStore", "WhoopProtocol", "OuraProtocol"]
+            dependencies: ["WhoopStore", "WhoopProtocol", "OuraProtocol"],
+            // Shared Room<->GRDB schema fixture. The Android test consumes a byte-identical copy.
+            resources: [.process("Resources")]
         ),
     ]
 )

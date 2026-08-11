@@ -7,7 +7,7 @@ final class DoseResponseEngineTests: XCTestCase {
 
     private func ymd(_ y: Int, _ m: Int, _ d: Int) -> String { String(format: "%04d-%02d-%02d", y, m, d) }
 
-    // The documented alcohol→Charge prior used throughout (mirror of DoseResponsePriors).
+    // The documented alcohol→Recovery prior used throughout (mirror of DoseResponsePriors).
     private let alcoholPrior = -5.0
 
     // MARK: - n_user = 0 returns the prior exactly
@@ -24,7 +24,9 @@ final class DoseResponseEngineTests: XCTestCase {
         XCTAssertTrue(r.priorDominated)
         XCTAssertFalse(r.contradictsPrior)
         XCTAssertEqual(r.confidence, .calibrating)
-        XCTAssertEqual(r.outcome, "Charge")
+        XCTAssertEqual(r.outcome, "Recovery")
+        XCTAssertTrue(r.sentence().contains("Recovery"))
+        XCTAssertFalse(r.sentence().contains("Charge"))
     }
 
     // MARK: - shrinkage weight w = n/(n+k) is exact at the boundary n = k
@@ -169,9 +171,17 @@ final class DoseResponseEngineTests: XCTestCase {
     // MARK: - no documented prior → nil
 
     func testNoPriorOutcomeReturnsNil() {
-        // Alcohol has a prior on "Charge" but not on "RHR" → nil.
+        // Alcohol has a prior on Recovery but not on RHR → nil.
         XCTAssertNil(DoseResponseEngine.estimate(behavior: .alcohol, outcome: "RHR",
                                                  doseByDay: [:], outcomeByDay: [:]))
+    }
+
+    func testLegacyChargeLookupCanonicalizesRenderedOutcomeToRecovery() {
+        let r = DoseResponseEngine.estimate(behavior: .alcohol, outcome: "Charge",
+                                            doseByDay: [:], outcomeByDay: [:])
+        XCTAssertEqual(r?.outcome, "Recovery")
+        XCTAssertTrue(r?.sentence().contains("Recovery") == true)
+        XCTAssertFalse(r?.sentence().contains("Charge") == true)
     }
 
     // MARK: - caffeine default outcome is HRV with its own prior

@@ -45,7 +45,14 @@ interface DeviceRegistryDao {
 
     /** Update the model label for an existing device (e.g. seeded "WHOOP" → "WHOOP 4.0" once the
      *  strap's service family is known from a live BLE connect). Twin of the Swift store's `setModel`. */
-    @Query("UPDATE pairedDevice SET model = :model WHERE id = :id")
+    @Query(
+        "UPDATE pairedDevice SET model = :model, capabilities = CASE " +
+            "WHEN brand = 'WHOOP' OR id = 'my-whoop' OR id LIKE 'whoop-%' THEN " +
+            "CASE WHEN lower(:model) LIKE '%5%' OR lower(:model) LIKE '%mg%' " +
+            "THEN 'hr,hrv,skinTemp,sleep,steps,strainLoad' " +
+            "ELSE 'hr,hrv,skinTemp,sleep,strainLoad' END " +
+            "ELSE capabilities END WHERE id = :id"
+    )
     suspend fun setModel(id: String, model: String)
 
     /** Persist (or clear) a device's stable BLE peripheral identifier (the MAC address on Android). Lets

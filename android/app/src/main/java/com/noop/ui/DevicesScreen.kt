@@ -1217,7 +1217,7 @@ private fun deviceProfile(device: PairedDeviceRow): DeviceCapabilityProfile {
         return DeviceCapabilityProfile(
             displayModel = "${device.brand} (experimental)",
             captures = "Heart rate (live, best-effort)",
-            powers = "Powers the live console + Effort. No Charge, Rest or Sleep",
+            powers = "Powers the live console + Effort. No Recovery or Sleep Score",
             footnote = "Experimental: live heart rate where the band exposes it. Some bands need a pairing " +
                 "we can't do yet. NOOP will say so honestly and never show a made-up number. No sleep, " +
                 "recovery, skin temp, SpO₂ or steps.",
@@ -1238,9 +1238,9 @@ private fun deviceProfile(device: PairedDeviceRow): DeviceCapabilityProfile {
         else
             "Heart rate · HRV* · Sleep · Resting HR · Skin temp* · Battery"
         val powers = if (newer)
-            "Powers Effort now; Charge and Rest once enough nights and decode are confirmed"
+            "Powers Effort now; Recovery and Sleep Score once enough nights and decode are confirmed"
         else
-            "Powers Charge, Effort, Rest and Sleep"
+            "Powers Recovery, Effort, Sleep Score and sleep data"
         return DeviceCapabilityProfile(
             displayModel = "${gen.displayName} (Beta)",
             captures = captures,
@@ -1255,12 +1255,12 @@ private fun deviceProfile(device: PairedDeviceRow): DeviceCapabilityProfile {
         return DeviceCapabilityProfile(
             displayModel = "Heart-rate strap",
             captures = "Heart rate · HRV (live)* · Strain",
-            powers = "Powers the live console + Effort. No Charge, Rest or Sleep",
+            powers = "Powers the live console + Effort. No Recovery or Sleep Score",
             footnote = "Live HR + R-R only · no sleep, recovery, skin temp, SpO₂, steps or battery " +
                 "(those are WHOOP-only).",
         )
     }
-    val whoopPowers = "Powers Charge, Effort, Rest, Sleep + Health Monitor"
+    val whoopPowers = "Powers Recovery, Effort, Sleep Score, sleep data + Health Monitor"
     val model = device.model.lowercase()
     // WHOOP 5.0 / MG — adds a (raw) step count the 4.0 can't read over BLE.
     if (model.contains("5") || model.contains("mg")) {

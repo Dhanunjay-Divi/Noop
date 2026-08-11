@@ -191,11 +191,246 @@ public actor RemoteSyncClient: RemoteSyncUploading {
     public func upload(_ envelope: RemoteSyncEnvelope) async throws -> RemoteSyncResponse {
         let request = try makeUploadRequest(envelope)
         let data = try await perform(request)
+        return try decode(RemoteSyncResponse.self, from: data)
+    }
+
+    // MARK: - Private social sharing
+
+    /// Create the first social profile with the configured self-hosted-server administrator token.
+    ///
+    /// Callers may explicitly supply a different authorization for administrative tooling, but the
+    /// normal app path uses the `.admin` default and stores the returned member token separately.
+    public func bootstrapFriendProfile(
+        _ profile: RemoteFriendProfileCreate,
+        authorization: RemoteSocialAuthorization = .admin
+    ) async throws -> RemoteFriendBootstrapResponse {
+        let request = try socialJSONRequest(
+            path: "v1/social/bootstrap",
+            method: "POST",
+            authorization: authorization,
+            body: profile
+        )
+        return try decode(
+            RemoteFriendBootstrapResponse.self,
+            from: try await perform(request)
+        )
+    }
+
+    public func friendProfile(
+        authorization: RemoteSocialAuthorization
+    ) async throws -> RemoteFriendProfileResponse {
+        let request = try socialRequest(
+            path: "v1/social/me",
+            method: "GET",
+            authorization: authorization
+        )
+        return try decode(
+            RemoteFriendProfileResponse.self,
+            from: try await perform(request)
+        )
+    }
+
+    /// Permanently delete the authenticated member's social profile and associated social data.
+    ///
+    /// The explicit confirmation header is intentionally fixed to the server's destructive-action
+    /// contract. The server invalidates the member credential as part of the successful deletion.
+    public func deleteFriendProfile(
+        authorization: RemoteSocialAuthorization
+    ) async throws {
+        var request = try socialRequest(
+            path: "v1/social/me",
+            method: "DELETE",
+            authorization: authorization
+        )
+        request.setValue(
+            "DELETE MY SOCIAL PROFILE",
+            forHTTPHeaderField: "X-Noop-Confirm"
+        )
+        _ = try await perform(request)
+    }
+
+    public func createFriendInvite(
+        _ invite: RemoteFriendInviteCreate = RemoteFriendInviteCreate(),
+        authorization: RemoteSocialAuthorization
+    ) async throws -> RemoteFriendInviteResponse {
+        let request = try socialJSONRequest(
+            path: "v1/social/invites",
+            method: "POST",
+            authorization: authorization,
+            body: invite
+        )
+        return try decode(
+            RemoteFriendInviteResponse.self,
+            from: try await perform(request)
+        )
+    }
+
+    public func revokeFriendInvite(
+        _ inviteId: UUID,
+        authorization: RemoteSocialAuthorization
+    ) async throws {
+        let request = try socialRequest(
+            path: "v1/social/invites/\(inviteId.uuidString.lowercased())",
+            method: "DELETE",
+            authorization: authorization
+        )
+        _ = try await perform(request)
+    }
+
+    /// Join a circle when this installation has no social profile yet.
+    ///
+    /// The one-time invite code is the capability, so this route intentionally sends no bearer
+    /// credential. Callers must persist and reuse the request's client-generated enrollment ID and
+    /// member token before retrying; the response intentionally never echoes the plaintext token.
+    public func joinFriendInvite(
+        _ join: RemoteFriendInviteJoin
+    ) async throws -> RemoteFriendInviteJoinResponse {
+        var request = request(
+            path: "v1/social/invites/join",
+            method: "POST",
+            authenticated: false
+        )
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         do {
-            return try decoder.decode(RemoteSyncResponse.self, from: data)
+            request.httpBody = try encoder.encode(join)
         } catch {
-            throw RemoteSyncError.decoding(error.localizedDescription)
+            throw RemoteSyncError.encoding(error.localizedDescription)
         }
+        return try decode(
+            RemoteFriendInviteJoinResponse.self,
+            from: try await perform(request)
+        )
+    }
+
+    public func redeemFriendInvite(
+        code: String,
+        authorization: RemoteSocialAuthorization
+    ) async throws -> RemoteFriendRequestResponse {
+        let request = try socialJSONRequest(
+            path: "v1/social/invites/redeem",
+            method: "POST",
+            authorization: authorization,
+            body: RemoteFriendInviteRedeem(code: code)
+        )
+        return try decode(
+            RemoteFriendRequestResponse.self,
+            from: try await perform(request)
+        )
+    }
+
+    public func friendRequests(
+        authorization: RemoteSocialAuthorization
+    ) async throws -> RemoteFriendRequestsResponse {
+        let request = try socialRequest(
+            path: "v1/social/requests",
+            method: "GET",
+            authorization: authorization
+        )
+        return try decode(
+            RemoteFriendRequestsResponse.self,
+            from: try await perform(request)
+        )
+    }
+
+    public func decideFriendRequest(
+        _ requestId: UUID,
+        decision: RemoteFriendDecision,
+        authorization: RemoteSocialAuthorization
+    ) async throws -> RemoteFriendRequestResponse {
+        let request = try socialJSONRequest(
+            path: "v1/social/requests/\(requestId.uuidString.lowercased())",
+            method: "POST",
+            authorization: authorization,
+            body: RemoteFriendRequestDecision(decision: decision)
+        )
+        return try decode(
+            RemoteFriendRequestResponse.self,
+            from: try await perform(request)
+        )
+    }
+
+    public func friends(
+        authorization: RemoteSocialAuthorization
+    ) async throws -> RemoteFriendsResponse {
+        let request = try socialRequest(
+            path: "v1/social/friends",
+            method: "GET",
+            authorization: authorization
+        )
+        return try decode(RemoteFriendsResponse.self, from: try await perform(request))
+    }
+
+    public func updateFriendPrivacy(
+        _ friendId: UUID,
+        changes: RemoteFriendVisibilityPatch,
+        authorization: RemoteSocialAuthorization
+    ) async throws -> RemoteFriendPrivacyResponse {
+        let request = try socialJSONRequest(
+            path: "v1/social/friends/\(friendId.uuidString.lowercased())/privacy",
+            method: "PATCH",
+            authorization: authorization,
+            body: changes
+        )
+        return try decode(
+            RemoteFriendPrivacyResponse.self,
+            from: try await perform(request)
+        )
+    }
+
+    public func removeFriend(
+        _ friendId: UUID,
+        authorization: RemoteSocialAuthorization
+    ) async throws {
+        let request = try socialRequest(
+            path: "v1/social/friends/\(friendId.uuidString.lowercased())",
+            method: "DELETE",
+            authorization: authorization
+        )
+        _ = try await perform(request)
+    }
+
+    public func blockFriend(
+        _ profileId: UUID,
+        authorization: RemoteSocialAuthorization
+    ) async throws {
+        let request = try socialRequest(
+            path: "v1/social/blocks/\(profileId.uuidString.lowercased())",
+            method: "POST",
+            authorization: authorization
+        )
+        _ = try await perform(request)
+    }
+
+    public func unblockFriend(
+        _ profileId: UUID,
+        authorization: RemoteSocialAuthorization
+    ) async throws {
+        let request = try socialRequest(
+            path: "v1/social/blocks/\(profileId.uuidString.lowercased())",
+            method: "DELETE",
+            authorization: authorization
+        )
+        _ = try await perform(request)
+    }
+
+    public func friendFeed(
+        startDay: String? = nil,
+        endDay: String? = nil,
+        authorization: RemoteSocialAuthorization
+    ) async throws -> RemoteFriendFeedResponse {
+        var query: [URLQueryItem] = []
+        if let startDay { query.append(URLQueryItem(name: "start", value: startDay)) }
+        if let endDay { query.append(URLQueryItem(name: "end", value: endDay)) }
+        let request = try socialRequest(
+            path: "v1/social/feed",
+            method: "GET",
+            authorization: authorization,
+            queryItems: query
+        )
+        return try decode(
+            RemoteFriendFeedResponse.self,
+            from: try await perform(request)
+        )
     }
 
     /// Kept internal so tests can inspect the exact request before URLSession
@@ -212,16 +447,84 @@ public actor RemoteSyncClient: RemoteSyncUploading {
         return request
     }
 
-    private func request(path: String, method: String, authenticated: Bool) -> URLRequest {
-        let url = configuration.baseURL.appendingPathComponent(path)
+    private func request(
+        path: String,
+        method: String,
+        authenticated: Bool,
+        bearerToken: String? = nil,
+        queryItems: [URLQueryItem] = []
+    ) -> URLRequest {
+        var url = configuration.baseURL.appendingPathComponent(path)
+        if !queryItems.isEmpty,
+           var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.queryItems = queryItems
+            url = components.url ?? url
+        }
         var request = URLRequest(url: url, timeoutInterval: configuration.timeout)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("Noop/remote-sync-v1", forHTTPHeaderField: "User-Agent")
         if authenticated {
-            request.setValue("Bearer \(configuration.apiKey)", forHTTPHeaderField: "Authorization")
+            request.setValue(
+                "Bearer \(bearerToken ?? configuration.apiKey)",
+                forHTTPHeaderField: "Authorization"
+            )
         }
         return request
+    }
+
+    private func socialRequest(
+        path: String,
+        method: String,
+        authorization: RemoteSocialAuthorization,
+        queryItems: [URLQueryItem] = []
+    ) throws -> URLRequest {
+        request(
+            path: path,
+            method: method,
+            authenticated: true,
+            bearerToken: try bearerToken(for: authorization),
+            queryItems: queryItems
+        )
+    }
+
+    private func socialJSONRequest<Body: Encodable>(
+        path: String,
+        method: String,
+        authorization: RemoteSocialAuthorization,
+        body: Body
+    ) throws -> URLRequest {
+        var request = try socialRequest(
+            path: path,
+            method: method,
+            authorization: authorization
+        )
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        do {
+            request.httpBody = try encoder.encode(body)
+        } catch {
+            throw RemoteSyncError.encoding(error.localizedDescription)
+        }
+        return request
+    }
+
+    private func bearerToken(for authorization: RemoteSocialAuthorization) throws -> String {
+        switch authorization {
+        case .admin:
+            return configuration.apiKey
+        case .member(let token):
+            let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { throw RemoteSyncError.missingAPIKey }
+            return trimmed
+        }
+    }
+
+    private func decode<Value: Decodable>(_ type: Value.Type, from data: Data) throws -> Value {
+        do {
+            return try decoder.decode(type, from: data)
+        } catch {
+            throw RemoteSyncError.decoding(error.localizedDescription)
+        }
     }
 
     private func perform(_ request: URLRequest) async throws -> Data {
@@ -234,14 +537,43 @@ public actor RemoteSyncClient: RemoteSyncUploading {
             if http.statusCode == 401 || http.statusCode == 403 {
                 message = "authentication failed"
             } else {
-                message = Self.safeServerMessage(data).replacingOccurrences(
-                    of: configuration.apiKey,
-                    with: "[REDACTED]"
-                )
+                var safe = Self.safeServerMessage(data)
+                // Redact both credential classes. Social requests can carry a member token instead
+                // of the configured administrator key; redacting only the latter would let a
+                // reflected member credential escape through a 4xx/5xx detail string.
+                let requestBearer = request.value(forHTTPHeaderField: "Authorization")
+                    .flatMap(Self.bearerValue)
+                let secrets = [configuration.apiKey, requestBearer].compactMap { $0 }
+                    + Self.secretBodyValues(in: request)
+                for secret in Set(secrets)
+                where !secret.isEmpty {
+                    safe = safe.replacingOccurrences(of: secret, with: "[REDACTED]")
+                }
+                message = safe
             }
             throw RemoteSyncError.server(status: http.statusCode, message: message)
         }
         return data
+    }
+
+    private static func bearerValue(_ header: String) -> String? {
+        let prefix = "Bearer "
+        guard header.count > prefix.count,
+              header.prefix(prefix.count).caseInsensitiveCompare(prefix) == .orderedSame else {
+            return nil
+        }
+        return String(header.dropFirst(prefix.count))
+    }
+
+    private static func secretBodyValues(in request: URLRequest) -> [String] {
+        guard let body = request.httpBody,
+              let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            return []
+        }
+        // Join enrollment sends its client-generated member credential in the body. Treat it with
+        // the same reflection protection as bearer credentials even though the server never
+        // intentionally returns it.
+        return ["member_token"].compactMap { object[$0] as? String }
     }
 
     private static func safeServerMessage(_ data: Data) -> String {

@@ -58,3 +58,27 @@ final class RestFreshnessTests: XCTestCase {
                                      isTodaySelected: true, todayKey: todayKey))
     }
 }
+
+/// The multi-vital adapter has its own, stricter freshness gate: imported history is useful for trends,
+/// but a weeks-old last row must never become a current "signals shifted together" message.
+final class IllnessFreshnessTests: XCTestCase {
+    func testCurrentAndRecentWakeDaysAreFresh() {
+        XCTAssertTrue(AppModel.illnessHistoryIsFresh(
+            dayKeys: ["2026-07-26"], todayKey: "2026-07-26"))
+        XCTAssertTrue(AppModel.illnessHistoryIsFresh(
+            dayKeys: ["2026-07-24"], todayKey: "2026-07-26"))
+    }
+
+    func testHistoricalImportAndFutureRowAreRejected() {
+        XCTAssertFalse(AppModel.illnessHistoryIsFresh(
+            dayKeys: ["2026-07-23"], todayKey: "2026-07-26"))
+        XCTAssertFalse(AppModel.illnessHistoryIsFresh(
+            dayKeys: ["2026-07-27"], todayKey: "2026-07-26"))
+    }
+
+    func testNewestKeyWinsRegardlessOfInputOrder() {
+        XCTAssertTrue(AppModel.illnessHistoryIsFresh(
+            dayKeys: ["2026-06-01", "2026-07-25", "2026-05-01"],
+            todayKey: "2026-07-26"))
+    }
+}

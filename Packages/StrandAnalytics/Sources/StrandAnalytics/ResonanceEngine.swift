@@ -121,7 +121,9 @@ public enum ResonanceEngine {
         let windowStart = sample.startTs + transientDropSeconds
         let steady = sample.rr
             .filter { $0.ts >= windowStart && $0.ts <= sample.endTs }
-            .sorted { $0.ts < $1.ts }
+            .enumerated()
+            .sorted { ($0.element.ts, $0.offset) < ($1.element.ts, $1.offset) }
+            .map(\.element)
 
         // Clean R-R (range + Malik) for both the RMSSD and the swing, so ectopic beats can't fabricate
         // an RSA swing. Cleaning operates on the rrMs values; we keep ts alongside for cycle bucketing.

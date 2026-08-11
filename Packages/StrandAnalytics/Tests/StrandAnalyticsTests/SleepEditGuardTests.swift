@@ -165,4 +165,12 @@ final class SleepEditGuardTests: XCTestCase {
         XCTAssertNil(SleepEditGuard.clampedEditWindow(start: 5_000, end: 4_000, now: 10_000))
         XCTAssertNil(SleepEditGuard.clampedEditWindow(start: 5_000, end: 5_000, now: 10_000))
     }
+
+    func testWindowLongerThanOneDayIsRefused() {
+        let day = SleepEditGuard.maxEditWindowSec
+        XCTAssertNotNil(SleepEditGuard.clampedEditWindow(start: 1_000, end: 1_000 + day,
+                                                         now: 1_000 + day + 60))
+        XCTAssertNil(SleepEditGuard.clampedEditWindow(start: 1_000, end: 1_001 + day,
+                                                      now: 1_001 + day + 60))
+    }
 }

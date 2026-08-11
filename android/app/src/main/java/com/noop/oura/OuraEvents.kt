@@ -14,21 +14,48 @@ package com.noop.oura
 // apply the anchor. Honest-data invariant: a short/malformed record decodes to null upstream, so
 // these structs only ever hold real decoded values.
 
+/** Durable optical-channel code for an Oura R-R interval. Never renumber; only append. */
+enum class OuraIbiChannel(val code: Int) {
+    GREEN_QUALITY(1),
+    SPO2_IBI(2),
+    IBI_AMPLITUDE(3),
+    IBI_BARE(4),
+    ;
+
+    companion object {
+        fun fromCode(code: Int?): OuraIbiChannel? = entries.firstOrNull { it.code == code }
+    }
+}
+
 /** One decoded inter-beat interval (and optional amplitude), in milliseconds. */
-data class OuraIBI(val ringTimestamp: Long, val ibiMs: Int, val amplitude: Int? = null)
+data class OuraIBI(
+    val ringTimestamp: Long,
+    val ibiMs: Int,
+    val amplitude: Int? = null,
+    val channel: OuraIbiChannel? = null,
+)
 
 /** One decoded heart-rate value in BPM (derived from a live-HR push IBI, OURA_PROTOCOL.md s5.6). */
 data class OuraHR(val ringTimestamp: Long, val bpm: Int, val ibiMs: Int)
 
-/**
- * One decoded HRV (RMSSD-derived) sample from the ring's own 0x5D tag (OURA_PROTOCOL.md s6.9).
- * NOOP also reconstructs RMSSD itself from the IBI streams for its own scoring; this is the ring's
- * open HRV tag, NOT Oura's encrypted readiness score.
- */
-data class OuraHRV(val ringTimestamp: Long, val timeMs: Int, val b1: Int, val b2: Int)
+/** One decoded five-minute `(u8 average HR, u8 average RMSSD)` bucket from tag 0x5D. */
+data class OuraHRV(
+    val ringTimestamp: Long,
+    val index: Int,
+    val hrBpm: Int,
+    val rmssdMs: Int,
+    /** Original pair count, including any `00 00` padding pair omitted by the decoder. */
+    val count: Int = 1,
+)
 
 /** One decoded SpO2 sample. `value` is the raw SpO2 reading; `unit` documents its scale. */
-data class OuraSpO2(val ringTimestamp: Long, val value: Int, val unit: String = "raw")
+data class OuraSpO2(
+    val ringTimestamp: Long,
+    val value: Int,
+    val unit: String = "raw",
+    val index: Int = 0,
+    val count: Int = 1,
+)
 
 /** One decoded skin-temperature sample in degrees C (value already / 100). */
 data class OuraTemp(val ringTimestamp: Long, val celsius: Double)
@@ -39,12 +66,12 @@ data class OuraTemp(val ringTimestamp: Long, val celsius: Double)
  */
 data class OuraBattery(val percent: Int, val voltageMv: Int? = null, val charging: Boolean? = null)
 
-/** Sleep phase code (OURA_PROTOCOL.md s6.12): 2-bit codes 0=awake, 1=light, 2=deep, 3=REM. */
+/** Validated SleepNet mapping: 0=deep, 1=light, 2=REM, 3=awake. */
 enum class OuraSleepStage(val raw: Int) {
-    AWAKE(0),
+    DEEP(0),
     LIGHT(1),
-    DEEP(2),
-    REM(3);
+    REM(2),
+    AWAKE(3);
 
     companion object {
         private val byRaw = entries.associateBy { it.raw }

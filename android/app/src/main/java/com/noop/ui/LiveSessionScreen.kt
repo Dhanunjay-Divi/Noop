@@ -283,8 +283,8 @@ private fun GuardianRing(
     }
     val ringColor by animateColorAsState(target, animationSpec = tween(600), label = uiString(R.string.l10n_live_session_screen_guardianringcolor_f20ad757))
 
-    val reduced = rememberReduceMotion()
-    val breathing = !stale && settled && position == LiveSessionEngine.Position.IN_BAND && !reduced
+    val renderStill = rememberPoseStill()
+    val breathing = !stale && settled && position == LiveSessionEngine.Position.IN_BAND && !renderStill
 
     val stateLabel = when {
         stale -> "Signal lost, coaching paused"
@@ -492,12 +492,12 @@ private fun LiveSessionSummary(
  * engine coaches to its middle-of-the-road default band, and we never invent a percentage.
  */
 internal fun liveSessionChargeSentence(charge: Double?): String {
-    if (charge == null) return "No Charge yet today — guarding a middle-of-the-road band."
+    if (charge == null) return "No Recovery yet today — guarding a middle-of-the-road band."
     val pct = charge.roundToInt()
     return when {
-        pct < 34 -> "Today's ceiling is lower — Charge is $pct%."
-        pct < 67 -> "A middling day — Charge is $pct%, so the band sits mid-range."
-        else -> "Plenty in the tank — Charge is $pct%, so today's ceiling is higher."
+        pct < 34 -> "Today's ceiling is lower — Recovery is $pct%."
+        pct < 67 -> "A middling day — Recovery is $pct%, so the band sits mid-range."
+        else -> "Plenty in the tank — Recovery is $pct%, so today's ceiling is higher."
     }
 }
 

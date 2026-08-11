@@ -2,7 +2,8 @@
 
 All notable changes to NOOP. NOOP is an independent, experimental project — not the WHOOP app, and
 not affiliated with WHOOP. It reads a strap you own, on your own device, fully offline. Dates are
-approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/releases) page.
+approximate; downloads for this fork are on the
+[Dhanunjay-Divi/Noop Releases](https://github.com/Dhanunjay-Divi/Noop/releases) page.
 
 ## What to expect
 
@@ -13,7 +14,55 @@ approximate; downloads are on the [Releases](https://github.com/NoopApp/noop/rel
   figured out. NOOP always tells you what's live versus still building.
 - **Your scores build over a few nights.** Live heart rate is instant; recovery, strain and sleep
   sharpen as NOOP learns your baseline. Import your WHOOP export to backfill your history instantly.
-- **Everything stays on your device.** No account, no cloud, no sync.
+- **Local first.** Collection and scoring stay on your device. Optional self-hosted sync is an
+  explicit opt-in to a server you control; it is not required for normal use.
+
+---
+
+## Unreleased: private Friends and the Obsidian Apple interface
+
+**New**
+
+- **Private Friends on iPhone and Mac.** A self-hosted Circle can invite people
+  by sharing the full server address and a short-lived, one-time code as plain
+  text for manual entry—no capability-bearing custom URL. The inviter must
+  accept each request before any Friends summary uploads. Accepted friends see
+  daily Charge/Effort/Rest from the acceptance date onward, while sleep
+  duration, HRV, and resting-HR visibility remain independently controllable.
+- **Invitation-only server API.** Separate installation-scoped member tokens,
+  retry-safe client-generated first-join enrollment, profile/token
+  administration, invite revocation, directional visibility, removal/blocking,
+  self-deletion, and a daily-summary feed now sit beside the existing FastAPI +
+  TimescaleDB archive. There is no public directory, follower model, team
+  ranking, or Android Friends UI yet.
+
+**Design**
+
+- **Obsidian on Apple.** iPhone and Mac use neutral black/pearl chrome,
+  dimensional system-symbol plates, a matching monochrome brand mark, and
+  restrained glass around navigation and controls; physiological color remains
+  reserved for the data it represents.
+- **Clearer navigation.** Circle stays visible at the top of iPhone More and in
+  the Mac sidebar. Devices is now distinct from **Live HR**, whose disconnected
+  state focuses on selecting and connecting a band instead of showing an empty
+  live console.
+
+**Privacy and security**
+
+- Friends credentials and invite codes are stored only as SHA-256 digests on
+  the server. For an invited first join, the Apple client creates and
+  Keychain-saves its member token plus an enrollment UUID before the request, so
+  a lost response can retry idempotently.
+- After acceptance, the client uploads only the union of fields enabled for
+  accepted friends, restricted to six range-checked `noop_computed` daily
+  values, through a dedicated logical `*-noop-friends` producer separate from
+  full backup. Raw streams, exports, workouts, journals, routes, sleep stages,
+  device APIs, and server administration remain inaccessible.
+- Friends is not end-to-end encrypted: the selected server operator can inspect
+  summary fields sent. Automatic catch-up is best effort when the Apple app is
+  foregrounded, throttled to one attempt per 15 minutes, not guaranteed in the
+  background. **Leave & delete profile** removes the dedicated server summary
+  copy while preserving local data and a separate full backup.
 
 ---
 

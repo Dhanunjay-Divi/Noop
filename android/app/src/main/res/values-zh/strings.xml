@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">NOOP</string>
-    <string name="widget_description">今日的恢复、充能与负荷情况，以及实时心率和手环电量，一目了然。</string>
+    <string name="widget_description">今日的恢复、负荷与睡眠情况，以及实时心率和手环电量，一目了然。</string>
     <string name="widget_compact_name">NOOP 迷你组件</string>
-    <string name="widget_compact_description">精简版的恢复、充能与负荷小组件，带实时心率与手环电量显示。</string>
+    <string name="widget_compact_description">精简版的恢复、负荷与睡眠小组件，带实时心率与手环电量显示。</string>
     <string name="widget_error">NOOP 组件渲染失败 — 将在下次刷新时恢复。</string>
     <string name="nav_today">今日</string>
     <string name="nav_intelligence">智能洞察</string>
@@ -67,9 +67,9 @@
     <string name="terms_checkbox">我已阅读并接受上述条款，我正在使用我个人的设备和数据，风险由我自己承担。</string>
     <string name="terms_accept">接受并继续</string>
     <string name="trends_subtitle">时间长河中，你身体的轨迹。</string>
-    <string name="trends_charge">充能</string>
+    <string name="trends_charge">恢复</string>
     <string name="trends_effort">负荷</string>
-    <string name="trends_rest">恢复</string>
+    <string name="trends_rest">睡眠评分</string>
     <string name="trends_hrv_full">心率变异性 (HRV)</string>
     <string name="trends_resting_hr_full">静息心率 (RHR)</string>
     <string name="trends_no_readings_this_week">本周暂无数据</string>
@@ -80,7 +80,7 @@
     <string name="trends_next_week">下一周</string>
     <string name="trends_daily_signals">每日体征</string>
     <string name="trends_week_in_review">本周回顾</string>
-    <string name="trends_charge_effort_rest">充能 · 负荷 · 恢复</string>
+    <string name="trends_charge_effort_rest">恢复 · 负荷 · 睡眠</string>
     <string name="trends_calendar">日历热力图</string>
     <string name="trends_avg">平均</string>
     <string name="trends_peak">峰值</string>
@@ -89,7 +89,7 @@
     <string name="trends_mean">平均</string>
     <string name="trends_min">最小</string>
     <string name="trends_max">最大</string>
-    <string name="trends_calendar_footnote">每根柱子代表一天的充能得分，从低到高排列。53周完整的年度热力图可在桌面版应用中查看。</string>
+    <string name="trends_calendar_footnote">每根柱子代表一天的恢复得分，从低到高排列。53周完整的年度热力图可在桌面版应用中查看。</string>
     <string name="trends_not_enough_data">该时间段数据不足。</string>
     <string name="trends_empty_title">趋势图需要历史数据</string>
     <string name="trends_empty_body">趋势图需要历史数据才能生成。在“数据源”中导入您的 WHOOP 导出数据，即可瞬间解锁以周、月、年为单位的宏观视图。</string>
@@ -480,7 +480,7 @@
     <string name="l10n_insights_screen_not_enough_overlap_between_your_journal_0ebdd7a2">您的日记回答与此项指标之间重叠的数据点不足</string>
     <string name="l10n_insights_screen_not_enough_overlapping_history_to_correlate_a552dbd4">暂时还没有足够多的重叠历史数据，无法将您的各项指标进行关联分析。</string>
     <string name="l10n_insights_screen_pick_one_behaviour_you_log_one_bd34090e">挑选一项您记录的习惯行为、一项期望的指标结果，以及一个短的时间窗口。NOOP 将...</string>
-    <string name="l10n_insights_screen_ranked_lag_aware_which_of_your_e0e91b39">经过排名的、包含时间滞后效应的分析：到底哪些习惯真正影响了您的充能分数？</string>
+    <string name="l10n_insights_screen_ranked_lag_aware_which_of_your_e0e91b39">经过排名的、包含时间滞后效应的分析：到底哪些习惯真正影响了您的恢复分数？</string>
     <string name="l10n_insights_screen_rest_baseline_b3ac52a5">恢复基线</string>
     <string name="l10n_insights_screen_run_a_clean_personal_test_4da69781">运行个人习惯对照测试</string>
     <string name="l10n_insights_screen_sessions_e11e37a9">记录次数</string>
@@ -496,14 +496,14 @@
     <string name="l10n_intelligence_screen_0_unitformatter_effortscalemax_effortscale_scale_b5c43f56">0 - %1$s 标尺</string>
     <string name="l10n_intelligence_screen_band_ec8a8993">区间 ± %1$s</string>
     <string name="l10n_intelligence_screen_by_day_2e5d14ca">按天查看</string>
-    <string name="l10n_intelligence_screen_charge_weighs_your_heart_rate_variability_026745e6">充能 (Charge) 是通过对比您的心率变异性 (HRV) 与个人历史基线得出的指标，衡量您身体的恢复水平。</string>
+    <string name="l10n_intelligence_screen_charge_weighs_your_heart_rate_variability_026745e6">恢复分数通过对比您的心率变异性 (HRV) 与个人历史基线，衡量您身体的恢复水平。</string>
     <string name="l10n_intelligence_screen_effort_8c974bc6">负荷</string>
     <string name="l10n_intelligence_screen_estimate_from_today_s_effort_your_667d7560">此预估值基于您今天的运动负荷、常规睡眠习惯，以及您 %1$s 晚的睡眠数据。</string>
     <string name="l10n_intelligence_screen_how_this_works_b895a8c3">工作原理</string>
     <string name="l10n_intelligence_screen_intelligence_c698f940">智能洞察</string>
     <string name="l10n_intelligence_screen_no_scored_days_in_this_window_03f1165b">当前时间段内没有已评分的日期。请扩大时间范围或导入更多历史数据。</string>
     <string name="l10n_intelligence_screen_no_scored_days_yet_sync_your_cdd47684">尚未产生评分数据。请同步手环以收集原始数据流；负荷与恢复评分将在数据积累后产生。</string>
-    <string name="l10n_intelligence_screen_you_ll_likely_wake_around_charge_ed3abe2e">如果您今晚睡眠情况大致相同，明天醒来时的充能水平预计在 %1$s (波动范围 ± %2$s)。</string>
+    <string name="l10n_intelligence_screen_you_ll_likely_wake_around_charge_ed3abe2e">如果您今晚睡眠情况大致相同，明天醒来时的恢复分数预计在 %1$s（波动范围 ± %2$s）。</string>
     <string name="l10n_intervals_screen_bond_your_strap_on_the_live_d799cbc2">在“实时心率”界面绑定手环，即可实现免接触自动记录间歇组间的过渡。</string>
     <string name="l10n_intervals_screen_interval_timer_1d703deb">间歇训练计时器</string>
     <string name="l10n_intervals_screen_pause_to_change_work_rest_or_f54f9cc5">暂停以修改训练时间、休息时间或组数。</string>
@@ -539,7 +539,7 @@
     <string name="l10n_lab_book_screen_markername_signal_title_e9c07909">%1$s ↔ %2$s</string>
     <string name="l10n_lab_book_screen_n_readings_line_up_but_there_27bfb506">有 %1$s 条记录成功对齐，但数值差异太小，不足以计算出相关性。</string>
     <string name="l10n_lab_book_screen_n_readings_used_strengthword_r_directionword_298baf9e">采纳了 %1$s 条记录 · 呈现%2$s%3$s相关性。这完全基于您个人的数据。</string>
-    <string name="l10n_lab_book_screen_pick_a_wearable_signal_resting_hr_8d8b01a2">挑选一项穿戴设备记录的生理指标（如静息心率、HRV、睡眠、充能得分或体重等），看看它与该医学指标的关联。</string>
+    <string name="l10n_lab_book_screen_pick_a_wearable_signal_resting_hr_8d8b01a2">挑选一项穿戴设备记录的生理指标（如静息心率、HRV、睡眠、恢复分数或体重等），看看它与该医学指标的关联。</string>
     <string name="l10n_lab_book_screen_r_signedr_r_fb21be90">r = %1$s</string>
     <string name="l10n_lab_book_screen_read_the_full_lab_book_note_3a250750">阅读完整的《实验室免责声明》</string>
     <string name="l10n_lab_book_screen_read_the_full_note_3fd0e4d1">阅读完整声明</string>
@@ -596,13 +596,13 @@
     <string name="l10n_mind_section_not_enough_overlapping_history_to_correlate_d36b91f9">重叠的历史数据不足，无法分析心情与您的</string>
     <string name="l10n_mind_section_one_check_in_per_day_picking_b103f22e">每天只需打卡一次；重新选择表情会覆盖今天的记录。</string>
     <string name="l10n_mind_section_reading_your_check_ins_71a100a9">正在读取您的打卡记录…</string>
-    <string name="l10n_noop_compact_glance_widget_charge_49a8cb83">充能</string>
+    <string name="l10n_noop_compact_glance_widget_charge_49a8cb83">恢复</string>
     <string name="l10n_noop_compact_glance_widget_effort_660752e7">负荷</string>
-    <string name="l10n_noop_compact_glance_widget_rest_cbaaa181">恢复</string>
+    <string name="l10n_noop_compact_glance_widget_rest_cbaaa181">睡眠</string>
     <string name="l10n_noop_compact_glance_widget_strap_battery_a6c7f09c">手环电量</string>
-    <string name="l10n_noop_glance_widget_charge_49a8cb83">充能</string>
+    <string name="l10n_noop_glance_widget_charge_49a8cb83">恢复</string>
     <string name="l10n_noop_glance_widget_effort_660752e7">负荷</string>
-    <string name="l10n_noop_glance_widget_rest_cbaaa181">恢复</string>
+    <string name="l10n_noop_glance_widget_rest_cbaaa181">睡眠</string>
     <string name="l10n_notifications_settings_screen_02d_02d_ce23a78c">%1$02d:%2$02d</string>
     <string name="l10n_notifications_settings_screen_all_other_apps_51a8af2c">所有其他 App</string>
     <string name="l10n_notifications_settings_screen_app_name_wrist_alerts_dd3540fa">%1$s 手腕震动提醒</string>
@@ -682,13 +682,13 @@
     <string name="l10n_rhythm_screen_rhythm_c715bb28">心跳节律</string>
     <string name="l10n_rhythm_screen_short_axis_66a0b7bf">短轴</string>
     <string name="l10n_rhythm_screen_the_numbers_7b3cbf64">具体数值</string>
-    <string name="l10n_scoring_guide_screen_charge_effort_rest_f396a530">充能 · 负荷 · 恢复</string>
+    <string name="l10n_scoring_guide_screen_charge_effort_rest_f396a530">恢复 · 负荷 · 睡眠</string>
     <string name="l10n_scoring_guide_screen_close_bbfa773e">关闭</string>
     <string name="l10n_scoring_guide_screen_every_score_carries_a_small_honesty_e5b722eb">每个评分都带有一个可信度标签。如果显示“校准中”，说明 NOOP 仍在了解您的个人基线。</string>
     <string name="l10n_scoring_guide_screen_got_it_5b8027fa">明白了</string>
     <string name="l10n_scoring_guide_screen_how_sure_is_noop_solid_building_c21d86d7">NOOP 有多确定？ · 可靠 · 采集中 · 校准中</string>
     <string name="l10n_scoring_guide_screen_how_your_scores_work_21a0e2be">评分是如何计算的</string>
-    <string name="l10n_scoring_guide_screen_noop_gives_you_three_daily_scores_36244209">NOOP 每天会为您提供三个维度的评分 (充能、负荷与恢复)，每项满分为 100。</string>
+    <string name="l10n_scoring_guide_screen_noop_gives_you_three_daily_scores_36244209">NOOP 每天会为您提供三个维度的评分（恢复、负荷与睡眠评分），每项满分为 100。</string>
     <string name="l10n_scoring_guide_screen_scorecardhighlight_4af6985c">评分卡高亮色</string>
     <string name="l10n_scoring_guide_screen_these_are_independent_approximations_from_a_301457ed">这些是基于公开科学研究、从消费级手环数据中推算出的独立评估值：并非绝对权威，仅供参考。</string>
     <string name="l10n_scoring_guide_screen_vs_whoop_9a8126a7">对比 WHOOP</string>
@@ -821,8 +821,8 @@
     <string name="l10n_test_centre_screen_hrv_readiness_experimental_word_a471930e">HRV 就绪度 (实验版)：%1$s</string>
     <string name="l10n_test_centre_screen_hrv_readiness_plews_altini_bce6578f">HRV 恢复就绪度 (Plews/Altini 算法模型)</string>
     <string name="l10n_test_centre_screen_recalibrate_aaa989ea">重新校准</string>
-    <string name="l10n_test_centre_screen_recalibrate_charge_baseline_52a05a26">重新校准“充能”基线</string>
-    <string name="l10n_test_centre_screen_recalibrate_your_charge_baseline_018e3846">确认要重新校准您的“充能”基线吗？</string>
+    <string name="l10n_test_centre_screen_recalibrate_charge_baseline_52a05a26">重新校准“恢复”基线</string>
+    <string name="l10n_test_centre_screen_recalibrate_your_charge_baseline_018e3846">确认要重新校准您的“恢复”基线吗？</string>
     <string name="l10n_test_centre_screen_report_a_bug_with_my_log_5101ee49">附带日志报告 Bug</string>
     <string name="l10n_test_centre_screen_report_ee45c303">报告</string>
     <string name="l10n_test_centre_screen_review_before_sharing_d7050383">在分享前先预览</string>
@@ -831,7 +831,7 @@
     <string name="l10n_test_centre_screen_test_centre_37b36828">测试与极客中心</string>
     <string name="l10n_test_centre_screen_test_modes_e21f1d3c">测试模式</string>
     <string name="l10n_test_centre_screen_this_is_exactly_what_your_report_77278bdd">这就您的日志报告包含的全部内容。在您点击“分享”之前，没有任何数据会离开您的手机。</string>
-    <string name="l10n_test_centre_screen_this_restarts_the_roughly_4_night_33cce377">此操作将重新开始为期约 4 晚的基线学习，以校准您的充能与 HRV 基线。历史数据不会丢失。</string>
+    <string name="l10n_test_centre_screen_this_restarts_the_roughly_4_night_33cce377">此操作将重新开始为期约 4 晚的基线学习，以校准您的恢复与 HRV 基线。历史数据不会丢失。</string>
     <string name="l10n_time_of_day_background_atmospherephase_5ce21300">氛围阶段</string>
     <string name="l10n_today_screen_arrange_today_6b699147">自定义“今日”</string>
     <string name="l10n_today_screen_calibrating_37c2c9bd">校准中</string>
@@ -843,8 +843,8 @@
     <string name="l10n_today_screen_done_e9b450d1">完成</string>
     <string name="l10n_today_screen_driver_label_driver_valuetext_driver_baselinetext_067bc963">%1$s, 当前 %2$s, 基线 %3$s,</string>
     <string name="l10n_today_screen_hold_a_section_and_drag_it_1d6e2441">长按列表项并拖动即可调整顺序 — 在这里操作，或者直接在“今日”首页长按拖动也可。</string>
-    <string name="l10n_today_screen_how_charge_is_calculated_142d5e8e">充能(Charge)是如何计算的？</string>
-    <string name="l10n_today_screen_how_charge_is_calculated_the_method_3ea7548b">“充能”计算原理。为您揭晓分数背后的科学机制。</string>
+    <string name="l10n_today_screen_how_charge_is_calculated_142d5e8e">恢复分数是如何计算的？</string>
+    <string name="l10n_today_screen_how_charge_is_calculated_the_method_3ea7548b">“恢复”计算原理。为您揭晓分数背后的科学机制。</string>
     <string name="l10n_today_screen_label_readout_3f166607">%1$s %2$s</string>
     <string name="l10n_today_screen_label_value_b781d590">%1$s %2$s</string>
     <string name="l10n_today_screen_move_item_card_title_down_abd8549a">下移 %1$s</string>
@@ -858,14 +858,14 @@
     <string name="l10n_today_screen_readiness_word_749b3330">身体准备度：%1$s</string>
     <string name="l10n_today_screen_reset_44c57abd">重置</string>
     <string name="l10n_today_screen_return_to_workout_30dc5509">返回运动界面</string>
-    <string name="l10n_today_screen_see_how_charge_effort_and_rest_80243197">了解充能、负荷和恢复分数是如何计算的，以及它们与 WHOOP 官方算法有何不同。</string>
+    <string name="l10n_today_screen_see_how_charge_effort_and_rest_80243197">了解恢复、负荷和睡眠评分是如何计算的，以及它们与 WHOOP 官方算法有何不同。</string>
     <string name="l10n_today_screen_see_how_it_works_f7b38f07">看看它是如何工作的</string>
     <string name="l10n_today_screen_show_item_card_title_7844540d">显示 %1$s</string>
     <string name="l10n_today_screen_signed_pts_5ea85678">%1$s 分</string>
     <string name="l10n_today_screen_state_title_state_detail_f5380609">%1$s · %2$s</string>
     <string name="l10n_today_screen_the_method_behind_the_score_not_5bc68508">这是分数背后的计算方法，而不是您今天的具体数值。</string>
     <string name="l10n_today_screen_title_beta_detail_6b39ae21">%1$s (测试版) · %2$s</string>
-    <string name="l10n_today_screen_what_shaped_your_charge_9f53a2b3">什么影响了你的充能</string>
+    <string name="l10n_today_screen_what_shaped_your_charge_9f53a2b3">什么影响了你的恢复</string>
     <string name="l10n_today_screen_wordmark_dx_d428284f">wordmark-dx</string>
     <string name="l10n_today_screen_wordmark_rot_21de874b">wordmark-rot</string>
     <string name="l10n_today_screen_wordmark_sx_68fa7b60">wordmark-sx</string>
@@ -1274,7 +1274,7 @@
     <string name="l10n_health_screen_refresh_fitness_age_now_85fc516f">立即刷新体能年龄</string>
     <string name="l10n_health_screen_resp_rate_1c48dbd8">呼吸频率</string>
     <string name="l10n_health_screen_respiratory_rate_3fbb532f">呼吸频率</string>
-    <string name="l10n_health_screen_rest_b79e5f48">恢复(Rest)</string>
+    <string name="l10n_health_screen_rest_b79e5f48">睡眠评分</string>
     <string name="l10n_health_screen_resting_heart_rate_9700f4d8">静息心率</string>
     <string name="l10n_health_screen_skin_temp_a4affc5a">皮肤体温</string>
     <string name="l10n_health_screen_skin_temperature_f59127f6">皮肤体温</string>
@@ -1292,12 +1292,12 @@
     <string name="l10n_hrv_snapshot_screen_a_60_second_snapshot_of_your_35f03f7c">一份基于手环 60 秒连续捕获的心跳间期(R-R)数据的快照，已进行降噪处理...</string>
     <string name="l10n_hrv_snapshot_screen_close_hrv_reading_a29a99a1">关闭 HRV 测量</string>
     <string name="l10n_hrv_snapshot_screen_hrv_reading_a2cf71f3">HRV 测量</string>
-    <string name="l10n_insights_screen_charge_d4e1aee4">充能(Charge)</string>
+    <string name="l10n_insights_screen_charge_d4e1aee4">恢复</string>
     <string name="l10n_insights_screen_insights_b4510362">数据洞察</string>
     <string name="l10n_insights_screen_insights_read_your_journal_and_outcomes_6ec8aaf9">数据洞察会分析您的日记行为和指标结果</string>
     <string name="l10n_insights_screen_pre_filled_from_last_night_tap_ce81097c">已从昨晚的数据预填入。点击以确认或修改。</string>
     <string name="l10n_insights_screen_reading_your_journal_and_outcomes_4a59af69">正在分析您的日记与指标数据…</string>
-    <string name="l10n_insights_screen_rest_b79e5f48">恢复(Rest)</string>
+    <string name="l10n_insights_screen_rest_b79e5f48">睡眠评分</string>
     <string name="l10n_insights_screen_rhr_04edf9b3">静息心率(RHR)</string>
     <string name="l10n_journal_log_journal_57d7f743">日记</string>
     <string name="l10n_journal_reminder_log_today_s_journal_cb33be3e">记录今天的日志</string>
@@ -1357,8 +1357,8 @@
     <string name="l10n_settings_screen_buzz_the_time_on_your_strap_06fc879d">在手环上通过震动播报时间</string>
     <string name="l10n_settings_screen_cancel_77dfd213">取消</string>
     <string name="l10n_settings_screen_card_transparency_c5c7b4f3">卡片透明度</string>
-    <string name="l10n_settings_screen_charge_d4e1aee4">充能(Charge)</string>
-    <string name="l10n_settings_screen_charge_effort_and_rest_and_how_d2c423a4">充能(Charge)、负荷(Effort)与恢复(Rest)，以及它们与官方 WHOOP 指标的区别</string>
+    <string name="l10n_settings_screen_charge_d4e1aee4">恢复</string>
+    <string name="l10n_settings_screen_charge_effort_and_rest_and_how_d2c423a4">恢复、负荷与睡眠评分，以及它们与官方 WHOOP 指标的区别</string>
     <string name="l10n_settings_screen_chart_colours_525f4a37">图表色彩</string>
     <string name="l10n_settings_screen_check_for_updates_736b9062">检查更新</string>
     <string name="l10n_settings_screen_checking_820d6004">正在检查…</string>
@@ -1417,8 +1417,8 @@
     <string name="l10n_settings_screen_project_home_source_994627c1">项目主页与源码</string>
     <string name="l10n_settings_screen_questions_feedback_bugs_support_email_ed10662a">疑问、反馈、Bug 提交: %1$s</string>
     <string name="l10n_settings_screen_recalibrate_aaa989ea">重新校准</string>
-    <string name="l10n_settings_screen_recalibrate_charge_baseline_52a05a26">重新校准充能(Charge)基线</string>
-    <string name="l10n_settings_screen_recalibrate_your_charge_baseline_018e3846">要重新校准您的充能(Charge)基线吗？</string>
+    <string name="l10n_settings_screen_recalibrate_charge_baseline_52a05a26">重新校准恢复基线</string>
+    <string name="l10n_settings_screen_recalibrate_your_charge_baseline_018e3846">要重新校准您的恢复基线吗？</string>
     <string name="l10n_settings_screen_recent_changes_and_what_to_expect_3ceb660b">近期功能更新与未来展望</string>
     <string name="l10n_settings_screen_record_5_mg_raw_capture_9354fe89">记录 5.0/MG 原始数据抓包</string>
     <string name="l10n_settings_screen_record_5_mg_raw_capture_research_1d966bbf">记录 5.0/MG 原始数据抓包 (供研究用)</string>
@@ -1426,7 +1426,7 @@
     <string name="l10n_settings_screen_remove_photo_c8f5eda8">移除头像</string>
     <string name="l10n_settings_screen_rename_d3f4cb89">重命名</string>
     <string name="l10n_settings_screen_rename_your_strap_s_bluetooth_name_6032668b">重命名您手环的蓝牙广播名称，这对于使用二手手环的用户非常实用。修改直接写入...</string>
-    <string name="l10n_settings_screen_restarts_the_roughly_4_night_build_84f9f8d0">从今晚开始，重新启动大约需要 4 个晚上的充能(Charge)基准与 HRV 基准建立过程。如果因为您第一周佩戴时状态不佳（如生病）导致基线严重偏离，请使用此功能。您的所有历史数据都将被保留。</string>
+    <string name="l10n_settings_screen_restarts_the_roughly_4_night_build_84f9f8d0">从今晚开始，重新启动大约需要 4 个晚上的恢复基准与 HRV 基准建立过程。如果因为您第一周佩戴时状态不佳（如生病）导致基线严重偏离，请使用此功能。您的所有历史数据都将被保留。</string>
     <string name="l10n_settings_screen_reviews_each_scored_wake_block_for_537924ea">审查每个被判定为“清醒”的睡眠片段，寻找您确实已经起床活动的真实证据（例如走路步频，或...</string>
     <string name="l10n_settings_screen_rhythm_experimental_12d357da">心律 Rhythm (实验性功能)</string>
     <string name="l10n_settings_screen_runs_the_continuous_hrv_stream_only_3fed47c5">仅在您设置的休息时间窗口（默认 22:00–07:00）内运行连续的 HRV 数据流捕获，这能省下大约一半的耗电量。代价是：白天的压力(Stress)读数会变得更加稀疏。</string>
@@ -1454,7 +1454,7 @@
     <string name="l10n_settings_screen_temperature_0a9062a9">温度</string>
     <string name="l10n_settings_screen_test_centre_37b36828">测试中心</string>
     <string name="l10n_settings_screen_theme_a797e309">主题</string>
-    <string name="l10n_settings_screen_this_restarts_the_roughly_4_night_c610a93d">这将重新启动大约需要 4 个晚上的充能(Charge)与 HRV 基准建立过程。您的历史数据都会被保留下来。如果因为您第一周佩戴时状态不佳（比如生病），导致基线严重偏离了正常水平，请使用此功能。</string>
+    <string name="l10n_settings_screen_this_restarts_the_roughly_4_night_c610a93d">这将重新启动大约需要 4 个晚上的恢复与 HRV 基准建立过程。您的历史数据都会被保留下来。如果因为您第一周佩戴时状态不佳（比如生病），导致基线严重偏离了正常水平，请使用此功能。</string>
     <string name="l10n_settings_screen_trend_charts_19085c81">趋势图表</string>
     <string name="l10n_settings_screen_try_whoop_5_mg_protocol_probes_1d584653">尝试触发 WHOOP 5.0/MG 协议探针</string>
     <string name="l10n_settings_screen_units_12748281">度量单位</string>
@@ -1544,7 +1544,7 @@
     <string name="l10n_today_screen_daytitle_humandate_tap_to_pick_a_7e12ce96">%1$s, %2$s。点击选择日期，左右滑动切换前/后一天。</string>
     <string name="l10n_today_screen_detailed_tiles_0801721b">详情数据面板</string>
     <string name="l10n_today_screen_dismiss_to_updates_2c7915b8">将此卡片收起至“更新”中</string>
-    <string name="l10n_today_screen_each_line_is_how_many_points_dec2c062">每一条线都代表该项体征导致您的充能(Charge)总分偏离了多少分（与</string>
+    <string name="l10n_today_screen_each_line_is_how_many_points_dec2c062">每一条线都代表该项体征导致您的恢复总分偏离了多少分（与</string>
     <string name="l10n_today_screen_edit_5301648d">编辑</string>
     <string name="l10n_today_screen_edit_key_metrics_f95e61a4">Edit Key Metrics</string>
     <string name="l10n_today_screen_heart_rate_variability_a137586d">心率变异性(HRV)</string>
@@ -1558,9 +1558,9 @@
     <string name="l10n_today_screen_pct_ee63e247">%1$s%%</string>
     <string name="l10n_today_screen_profile_and_settings_9b3d12f2">个人资料与设置</string>
     <string name="l10n_today_screen_recovery_ea924f72">恢复分数</string>
-    <string name="l10n_today_screen_recovery_roundtoint_charge_92fbaa5e">%1$s%% 充能(Charge)</string>
+    <string name="l10n_today_screen_recovery_roundtoint_charge_92fbaa5e">%1$s%% 恢复</string>
     <string name="l10n_today_screen_respiratory_1cd8c175">呼吸</string>
-    <string name="l10n_today_screen_rest_b79e5f48">恢复(Rest)</string>
+    <string name="l10n_today_screen_rest_b79e5f48">睡眠评分</string>
     <string name="l10n_today_screen_rest_hr_04005617">静息心率</string>
     <string name="l10n_today_screen_resting_heart_rate_348928d6">静息心率</string>
     <string name="l10n_today_screen_resting_hr_26677094">静息心率</string>
@@ -1579,7 +1579,7 @@
     <string name="l10n_today_screen_vismin_5d665ceb">最低: %1$s</string>
     <string name="l10n_today_screen_weight_69c0b815">体重</string>
     <string name="l10n_trends_explore_screen_blood_oxygen_a8ad9ff5">血氧饱和度</string>
-    <string name="l10n_trends_explore_screen_charge_d4e1aee4">充能(Charge)</string>
+    <string name="l10n_trends_explore_screen_charge_d4e1aee4">恢复</string>
     <string name="l10n_trends_explore_screen_effort_8c974bc6">负荷(Effort)</string>
     <string name="l10n_trends_explore_screen_respiratory_rate_3fbb532f">呼吸频率</string>
     <string name="l10n_trends_explore_screen_resting_hr_26677094">静息心率</string>
@@ -1608,9 +1608,9 @@
     <string name="timeline_metric_respiration">呼吸</string>
     <string name="timeline_metric_motion">体动幅度</string>
     <string name="timeline_metric_band_sleep_state">手环端睡眠状态</string>
-    <string name="explore_category_charge">充能(Charge)</string>
+    <string name="explore_category_charge">恢复</string>
     <string name="explore_category_effort">负荷(Effort)</string>
-    <string name="explore_category_rest">恢复(Rest)</string>
+    <string name="explore_category_rest">睡眠</string>
     <string name="explore_category_health">健康数据</string>
     <string name="explore_category_heart">心脏指标</string>
     <string name="explore_category_nutrition">营养摄入</string>

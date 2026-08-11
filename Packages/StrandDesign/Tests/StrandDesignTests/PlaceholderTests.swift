@@ -16,6 +16,16 @@ final class StrandDesignTests: XCTestCase {
         XCTAssertEqual(c.a, 1.0, accuracy: 0.001)
     }
 
+    func testMetricGlyphAutomaticMotionMatchesMeaning() {
+        XCTAssertEqual(MetricGlyph.automaticMotion(for: "heart.fill"), .pulse)
+        XCTAssertEqual(MetricGlyph.automaticMotion(for: "waveform.path.ecg"), .pulse)
+        XCTAssertEqual(MetricGlyph.automaticMotion(for: "lungs.fill"), .float)
+        XCTAssertEqual(MetricGlyph.automaticMotion(for: "moon.stars.fill"), .float)
+        XCTAssertEqual(MetricGlyph.automaticMotion(for: "flame.fill"), .rise)
+        XCTAssertEqual(MetricGlyph.automaticMotion(for: "figure.walk"), .rise)
+        XCTAssertEqual(MetricGlyph.automaticMotion(for: "thermometer.medium"), .settle)
+    }
+
     func testRecoveryGradientStops() {
         XCTAssertEqual(StrandPalette.recoveryStops.count, 5)
         XCTAssertEqual(StrandPalette.recoveryStops.first?.location, 0.0)

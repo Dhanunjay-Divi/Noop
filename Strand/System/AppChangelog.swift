@@ -926,17 +926,17 @@ enum AppChangelog {
                 "**Late nights and long lie-ins are captured** - the sleep-detection window was widened so a wake after noon isn't cut short. Thanks @ujix (#425).",
                 "**Smart alarm is now honestly flagged experimental.** The strap acknowledges the alarm, but a strap-driven wake hasn't been verified firing yet - on WHOOP 4.0 *or* 5/MG - so the app now asks you to keep a backup alarm while we confirm the exact firmware buzz pattern. Thanks Kaliarti (#428).",
                 "**Android: rename your WHOOP's Bluetooth name** - brings Android up to the iPhone/Mac feature. Thanks @cbarrado (#422).",
-                "**Polish from a full code review:** your Vitality breakdown now reconciles exactly with the Body Age number it explains; the new Age cards always compute on Android (the age control is bounded like iPhone/Mac); renaming no longer spins forever if your strap doesn't answer; and live workout detection now covers the whole calendar day. Thanks @rad182, @cbarrado, @j0b-dev.",
+                "**Polish from a full code review:** your Vitality breakdown now reconciles with its Wellness Age comparison; profile-age bounds match across platforms; renaming no longer spins forever if your strap doesn't answer; and live workout detection covers the whole calendar day. Thanks @rad182, @cbarrado, @j0b-dev.",
             ]),
         Release(
             version: "4.0.0",
-            title: "Your Fitness Age, Vitality & Body Age",
+            title: "Your Fitness Age, Vitality & Wellness Age",
             date: "June 2026",
             items: [
                 "**Fitness Age - a weekly number for how fit your heart is.** NOOP now estimates your **Fitness Age** from your resting heart rate and recent activity, and shows it against your real age - “35, four years younger than your calendar age.” Built on the published Nes/HUNT VO₂max model. Tap **“How accurate is this?”** to see exactly which of your inputs went in, grouped by what each one unlocks - we’re honest that it’s a fitness comparison, not a biological age.",
-                "**Vitality + Body Age - your longevity number.** A weekly **0-100 Vitality** score and a **Body Age in years**, built the way WHOOP’s Healthspan is: your resting HR, sleep duration + regularity, HRV, and activity, each weighed against published all-cause-mortality research, then turned into “how old your habits make your body.” It even tells you the **one thing helping most** and the **one holding you back**. A wellness trend - **never** a clinical or medical age.",
+                "**Vitality + Wellness Age - an experimental lifestyle view.** A weekly **0-100 Vitality** score and age-shaped comparison from coverage-gated resting HR, sleep-duration consistency, HRV, and activity. It shows what is helping and what may be holding you back. This is **not WHOOP Age, biological age, a diagnosis, or a lifespan estimate**.",
                 "**Optional: see your estimated VO₂max.** Add your waist measurement in Settings and NOOP will also show an estimated VO₂max alongside your Fitness Age. (Your Fitness Age itself never needs it.)",
-                "**Honest by design.** Every new number carries a ± band and a plain “this is a wellness estimate, not a clinical age” line. These build over a week or two of wear and sharpen as NOOP learns your baseline.",
+                "**Honest by design.** Fitness Age shows the source model's broad error translation; Wellness Age explicitly has no validated personal confidence interval. Both remain non-clinical.",
             ]),
         Release(
             version: "3.9.1",

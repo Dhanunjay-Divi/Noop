@@ -1,8 +1,10 @@
 # Noop self-hosted
 
 An optional, self-hosted destination for data already stored by the Noop app.
-It is off by default, has no account system or telemetry, and sends data only to
-the URL and Bearer token that the user configures.
+It is off by default, has no vendor account or telemetry, and sends data only to
+the URL and Bearer token that the user configures. An optional invitation-only
+Friends API can create local profiles on this server; it has no public directory
+and limits those credentials to computed daily-summary upload and social reads.
 
 This service is not affiliated with or endorsed by WHOOP. It does not log in to,
 scrape, or bypass WHOOP services. Imported WHOOP subscription exports remain a
@@ -45,7 +47,7 @@ private. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md).
 
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
-| `NOOP_API_TOKEN` | yes | none | At least 32 random bytes; authenticates every `/v1` endpoint |
+| `NOOP_API_TOKEN` | yes | none | At least 32 random bytes; authenticates full-data and social-admin routes |
 | `NOOP_DATABASE_URL` | in non-Compose deployments | none | PostgreSQL/TimescaleDB URL |
 | `NOOP_MAX_REQUEST_BYTES` | no | `10485760` | Hard maximum sync body size |
 | `NOOP_DB_POOL_MIN_SIZE` | no | `1` | Minimum async database connections |
@@ -59,12 +61,24 @@ commit `.env`, put the token in a URL, or send it in a bug report.
 
 ## API contract
 
-`GET /healthz` is the only public operational route and returns only
-`{"status":"ok"}`. Every route under `/v1` requires:
+`GET /healthz` is the only route with no credential or capability and returns
+only `{"status":"ok"}`. Full-data sync/reads, data control, and social bootstrap
+routes require:
 
 ```text
 Authorization: Bearer <NOOP_API_TOKEN>
 ```
+
+Friends endpoints use a separate per-installation `noop_member_…` credential
+issued by the admin-authenticated bootstrap route or generated and saved by a
+joining client before it consumes an invite. The server stores only its SHA-256
+digest. A member token cannot call export, device, raw-stream, journal, workout,
+or admin read routes. It can upload only its exact, dedicated `noop_computed`
+Friends producer through `POST /v1/sync`; each supplied day replaces the six
+allowlisted social keys for that day. A first-time join is retry-safe through
+its client-generated enrollment UUID and token, so a lost response does not
+orphan the profile. The server admin token is never shared. See
+[FRIENDS.md](FRIENDS.md) for the complete flow and privacy contract.
 
 The app uploads to `POST /v1/sync`. `batch_id` is the durable idempotency key;
 the optional `Idempotency-Key` header must contain that same UUID. A replay with
@@ -260,6 +274,44 @@ drained, while supported derived history is currently capped at ten years.
 - `DELETE /v1/devices/{id}` with `X-Noop-Confirm: DELETE <id>`
 - `POST /v1/admin/retention/run` with `X-Noop-Confirm: PURGE`
 
+### Invitation-only Friends
+
+Friends is an optional local-server feature. Bootstrap is protected by
+`NOOP_API_TOKEN`; existing profiles use member tokens, while invite join uses
+the one-time code to authorize a client-generated enrollment UUID and member
+token. There is no username search, contact upload, public profile, or public
+discovery.
+
+- `POST /v1/social/bootstrap`
+- `GET /v1/social/admin/profiles`
+- `PATCH /v1/social/admin/profiles/{id}`
+- `POST /v1/social/admin/profiles/{id}/rotate-token`
+- `DELETE /v1/social/admin/profiles/{id}`
+- `GET /v1/social/me`
+- `DELETE /v1/social/me` with
+  `X-Noop-Confirm: DELETE MY SOCIAL PROFILE`
+- `POST /v1/social/invites`
+- `DELETE /v1/social/invites/{id}`
+- `POST /v1/social/invites/join`
+- `POST /v1/social/invites/redeem`
+- `GET /v1/social/requests`
+- `POST /v1/social/requests/{id}`
+- `GET /v1/social/friends`
+- `PATCH /v1/social/friends/{id}/privacy`
+- `DELETE /v1/social/friends/{id}`
+- `POST /v1/social/blocks/{id}`
+- `DELETE /v1/social/blocks/{id}`
+- `GET /v1/social/feed`
+
+The feed is a server-side allowlist over `noop_computed` daily rows on or after
+the friendship's UTC creation date. Charge, Effort, and Rest are enabled when a
+friendship is accepted; sleep duration, HRV, and resting heart rate are disabled
+until the owner enables each field for that specific friend. Raw samples,
+events, location, journals, workouts, sleep stages, metadata, and provenance are
+never returned by the Friends API. A member-confirmed self-delete removes only
+that profile's exact dedicated social producer and social graph state, not the
+separate full-data archive producer.
+
 Export before destructive operations:
 
 ```sh
@@ -297,3 +349,7 @@ daily, sleep, workout, and journal row—not just on the latest device summary.
 The schema also keeps units, measurement class, and an explicit
 `clinical_interpretation_allowed` flag. Raw/unclassified sensor rows are
 database-constrained to `false`.
+
+Migration `003_friends.sql` adds invitation-only profiles, one-time invite and
+request state, canonical friendships, directional visibility, and blocks. Only
+credential/code digests are persisted.

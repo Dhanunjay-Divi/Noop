@@ -29,6 +29,8 @@ import WhoopStore
 
 struct StressView: View {
     @EnvironmentObject var repo: Repository
+    @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
+    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = true
 
     /// The stored 0–3 stress series ("my-whoop"), oldest→newest. Empty → derive.
     @State private var storedSeries: [(day: String, value: Double)] = []
@@ -152,7 +154,9 @@ struct StressView: View {
 
             // 2. Today's numbers — uniform tiles in one grid.
             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-                SectionHeader("Today", overline: "Markers", trailing: String(localized: "vs 30-day baseline"))
+                SectionHeader("Today", overline: "Markers",
+                              trailing: String(localized: "vs 30-day baseline"),
+                              onDark: showDayCycleBackground && skyBehindCards)
                 tileGrid(model)
             }
             .staggeredAppear(index: 1)
@@ -360,6 +364,7 @@ struct StressView: View {
                         StatTile(
                             label: "Baevsky Stress Index",
                             value: "\(Int(si.si.rounded()))",
+                            systemImage: "gauge.with.dots.needle.67percent",
                             caption: String(localized: "Autonomic rigidity from your heart-rate rhythm. Higher means a more rigid, stressed rhythm."),
                             accent: StressRamp.tense
                         )
@@ -372,6 +377,7 @@ struct StressView: View {
                             StatTile(
                                 label: "Autonomic balance (LF/HF)",
                                 value: String(format: "%.1f", ratio),
+                                systemImage: "waveform.path.ecg",
                                 caption: String(localized: "Sympathetic vs parasympathetic tone from frequency-domain HRV. Higher leans sympathetic (stress-ward)."),
                                 accent: StressRamp.steady
                             )
@@ -379,6 +385,7 @@ struct StressView: View {
                             StatTile(
                                 label: "HF power",
                                 value: "\(Int(f.hf.rounded()))",
+                                systemImage: "heart.text.square.fill",
                                 caption: String(localized: "Parasympathetic (rest) band of your HRV."),
                                 accent: StressRamp.steady
                             )
@@ -406,6 +413,7 @@ struct StressView: View {
             StatTile(
                 label: "Stress",
                 value: String(format: "%.1f", model.score),
+                systemImage: "gauge.with.dots.needle.50percent",
                 caption: String(localized: "of 3 · \(model.band.title)"),
                 accent: StressRamp.color(model.score),
                 sparkline: model.sparkValues.count > 1 ? model.sparkValues : nil,
@@ -415,6 +423,7 @@ struct StressView: View {
             markerTile(
                 label: "Resting HR",
                 value: model.rhrToday.map { String(localized: "\($0) bpm") } ?? "—",
+                systemImage: "heart.text.square.fill",
                 delta: model.rhrDelta,
                 accent: StrandPalette.metricRose,
                 higherIsStress: true
@@ -423,6 +432,7 @@ struct StressView: View {
             markerTile(
                 label: "HRV",
                 value: model.hrvToday.map { String(localized: "\(Int($0.rounded())) ms") } ?? "—",
+                systemImage: "waveform.path.ecg",
                 delta: model.hrvDelta,
                 accent: StrandPalette.metricPurple,
                 higherIsStress: false
@@ -431,6 +441,7 @@ struct StressView: View {
             StatTile(
                 label: "Calm time",
                 value: model.calmTimeValue,
+                systemImage: "wind",
                 caption: model.calmTimeCaption,
                 accent: StressRamp.calm
             )
@@ -439,7 +450,14 @@ struct StressView: View {
 
     /// A vs-baseline marker as a fixed-height StatTile. The delta is tinted by
     /// whether the move is toward stress (warning) or recovery (positive).
-    private func markerTile(label: LocalizedStringKey, value: String, delta: Double?, accent: Color, higherIsStress: Bool) -> some View {
+    private func markerTile(
+        label: LocalizedStringKey,
+        value: String,
+        systemImage: String,
+        delta: Double?,
+        accent: Color,
+        higherIsStress: Bool
+    ) -> some View {
         let deltaText: String?
         let deltaColor: Color
         if let delta, abs(delta) >= 0.5 {
@@ -454,6 +472,7 @@ struct StressView: View {
         return StatTile(
             label: label,
             value: value,
+            systemImage: systemImage,
             caption: nil,
             accent: accent,
             delta: deltaText,
@@ -597,7 +616,7 @@ private struct StressHeroGauge: View {
                 .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
                 Text("of 3")
                     .font(StrandFont.caption)
-                    .foregroundStyle(StrandPalette.textSecondary)
+                    .foregroundStyle(StrandPalette.onDarkSecondary)
             }
             .allowsHitTesting(false)   // taps fall through to the vessel → splash
         }

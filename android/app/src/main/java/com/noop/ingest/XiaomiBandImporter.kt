@@ -3,6 +3,7 @@ package com.noop.ingest
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
+import com.noop.analytics.SleepStageVocabulary
 import com.noop.data.DailyMetric
 import com.noop.data.ImportSummary
 import com.noop.data.MetricSeriesRow
@@ -332,7 +333,7 @@ object XiaomiBandImporter {
         var asleep = 0L
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
-            if (o.optString("stage") == "wake") continue
+            if (SleepStageVocabulary.isWake(o.optString("stage"))) continue
             asleep += (o.optLong("end") - o.optLong("start")).coerceAtLeast(0)
         }
         return minOf(100.0, asleep.toDouble() / (end - start) * 100.0)

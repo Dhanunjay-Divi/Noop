@@ -21,7 +21,8 @@ import Foundation
 //   daily_sleep        : day, score (sleep score, reference only).
 //   daily_spo2         : day, spo2_percentage.average (%); note the value is NESTED under that key, not
 //                        a flat number (verified against the real schema).
-//   vo2max             : day, vo2_max (mL/kg/min); feeds NOOP's Fitness Age, alongside Apple Health's.
+//   vo2max             : day, vo2_max (mL/kg/min); stored as a device-reported VO2max series.
+//                        It is not silently substituted into Fitness Age's non-exercise model.
 //
 // The MANY other files in a real export (bloodglucose, contraception, medication, ring config, raw
 // heart-rate / temperature sample streams, etc.) are health types NOOP doesn't model: they are skipped
@@ -120,7 +121,8 @@ enum OuraExportParser {
                 byDay[key] = row
             }
 
-            // VO2max → mL/kg/min (Oura key is `vo2_max`). Feeds NOOP's Fitness Age, same as Apple Health.
+            // VO2max → mL/kg/min (Oura key is `vo2_max`). Keep it as a separate device-reported
+            // series; Fitness Age deliberately retains the provenance of its non-exercise model.
             for v in categoryArray(root, "vo2max") ?? categoryArray(root, "vo2_max") ?? [] {
                 guard let key = WearableJSON.str(v, "day") else { continue }
                 var row = day(key)
@@ -262,7 +264,8 @@ enum OuraExportParser {
                 if let spo2 = cells.double("spo2_percentage", "spo2", "blood_oxygen", "average_spo2"), spo2 > 0 {
                     row.spo2Pct = row.spo2Pct ?? spo2
                 }
-                // VO2max: the real `vo2max` CSV column is `vo2_max` (mL/kg/min) → feeds Fitness Age.
+                // VO2max: the real `vo2max` CSV column is `vo2_max` (mL/kg/min). Store it separately;
+                // do not mix a device estimate into Fitness Age's non-exercise model.
                 if let v = cells.double("vo2_max", "vo2max"), v > 0 { row.vo2max = row.vo2max ?? v }
                 if let steps = cells.double("steps"), steps >= 0 { row.steps = row.steps ?? Int(steps) }
                 if let kcal = cells.double("active_calories", "activity_burn", "active_burn"), kcal > 0 {

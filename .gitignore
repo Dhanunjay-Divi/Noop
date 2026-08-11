@@ -83,10 +83,55 @@ Fixtures/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+*.db-wal
+*.db-shm
+*.noopbak
+*.parquet
+*.feather
+*.arrow
+*.jsonl
+# Health exports are overwhelmingly archives. Synthetic committed fixtures are
+# plain text under the explicit StrandImport test-resource allowlist.
+*.zip
 export.xml
 export.zip
 *whoop_export*.zip
 *apple_health*.zip
+# A loose WHOOP export must not become trackable merely because the archive was
+# unpacked or its filename localized.
+physiological_cycles.csv
+sleeps.csv
+workouts.csv
+journal_entries.csv
+physiologische_zyklen.csv
+schlaf.csv
+trainings.csv
+logbuch_eintraege.csv
+sueño.csv
+sueno.csv
+entrenamientos.csv
+sommeil.csv
+entrainements.csv
+entraînements.csv
+ciclos_fisiológicos.csv
+ciclos_fisiologicos.csv
+sonos.csv
+treinos.csv
+entradas_diário.csv
+entradas_diario.csv
+# Any fallback study folders created inside a checkout are ignored. The
+# supported location is the encrypted private root outside git.
+/.noop-study/
+/.noop-private/
+/StudyData/
+/StudyRuns/
+/private-data/
+/study-data/
+/reference-data/
 
 # Python bytecode
 __pycache__/
@@ -95,6 +140,11 @@ __pycache__/
 # Local release artifacts (zips/ipas built for upload; never tracked)
 dist/
 err.txt
+
+# Independently deployed/private web source and superseded local marketing bundles.
+# The current canonical app captures live directly under marketing/screenshots/.
+install-site/
+marketing/screenshots/share-kit-*/
 
 # Oura OAuth app credentials (BYO; never committed)
 Strand/Oura/OuraSecrets.xcconfig

@@ -100,6 +100,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.BuildConfig
+import com.noop.analytics.AgeMetricProfile
 import com.noop.analytics.Baselines
 import com.noop.analytics.Zones
 import com.noop.R
@@ -110,6 +111,9 @@ import com.noop.ingest.RawSensorExport
 import com.noop.ingest.WhoopCsvExporter
 import com.noop.update.UpdateCheck
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -172,10 +176,17 @@ class ProfileStore(private val prefs: SharedPreferences) {
             prefs.edit().putLong(KEY_DOB, dob).putInt(KEY_AGE, legacyAge).apply()
             return dob
         }
-        set(v) = prefs.edit()
-            .putLong(KEY_DOB, v)
-            .putInt(KEY_AGE, yearsFromDob(v).coerceIn(AGE_MIN, AGE_MAX))
-            .apply()
+        set(v) {
+            prefs.edit()
+                .putLong(KEY_DOB, v)
+                .putInt(KEY_AGE, yearsFromDob(v).coerceIn(AGE_MIN, AGE_MAX))
+                .putBoolean(KEY_AGE_CONFIRMED, true)
+                .putBoolean(KEY_FITNESS_AGE_PROVENANCE_REQUIRED, true)
+                .putBoolean(KEY_VO2MAX_PROVENANCE_REQUIRED, true)
+                .putBoolean(KEY_VITALITY_PROVENANCE_REQUIRED, true)
+                .apply()
+            signalAgeMetricProfileChange()
+        }
 
     /** Set age by anchoring a date of birth `years` before today (the +/- stepper and backup restore
      *  both go through here, so age always flows from a DOB). Clamped to [AGE_MIN]..[AGE_MAX]. */
@@ -184,7 +195,74 @@ class ProfileStore(private val prefs: SharedPreferences) {
     /** "male" | "female" | "nonbinary" — matches the macOS tag values. */
     var sex: String
         get() = prefs.getString(KEY_SEX, "male") ?: "male"
-        set(v) = prefs.edit().putString(KEY_SEX, v).apply()
+        set(v) {
+            prefs.edit()
+                .putString(KEY_SEX, v)
+                .putBoolean(KEY_SEX_CONFIRMED, true)
+                .putBoolean(KEY_FITNESS_AGE_PROVENANCE_REQUIRED, true)
+                .putBoolean(KEY_VO2MAX_PROVENANCE_REQUIRED, true)
+                .apply()
+            signalAgeMetricProfileChange()
+        }
+
+    /** Seed values shown by a fresh profile editor are not user-supplied age-model inputs. */
+    val ageInputConfirmed: Boolean get() = prefs.getBoolean(KEY_AGE_CONFIRMED, false)
+    val sexInputConfirmed: Boolean get() = prefs.getBoolean(KEY_SEX_CONFIRMED, false)
+    val fitnessInputsConfirmed: Boolean get() = ageInputConfirmed && sexInputConfirmed
+
+    val fitnessAgeProvenanceRequired: Boolean
+        get() = prefs.getBoolean(KEY_FITNESS_AGE_PROVENANCE_REQUIRED, false)
+    val vo2maxProvenanceRequired: Boolean
+        get() = prefs.getBoolean(KEY_VO2MAX_PROVENANCE_REQUIRED, false)
+    val vitalityProvenanceRequired: Boolean
+        get() = prefs.getBoolean(KEY_VITALITY_PROVENANCE_REQUIRED, false)
+    val fitnessAgeProfileToken: Double? get() = AgeMetricProfile.fitnessAgeToken(age.toDouble(), sex)
+    val vo2maxProfileToken: Double?
+        get() = AgeMetricProfile.vo2maxEstimateToken(age.toDouble(), sex, waistCm)
+    val vitalityProfileToken: Double get() = AgeMetricProfile.vitalityToken(age.toDouble())
+    val ageMetricStateToken: String
+        get() = "$fitnessAgeProfileToken|$vo2maxProfileToken|$vitalityProfileToken|" +
+            "$fitnessAgeProvenanceRequired|$vo2maxProvenanceRequired|$vitalityProvenanceRequired"
+
+    fun acceptsFitnessAge(provenance: Double?): Boolean = AgeMetricProfile.accepts(
+        provenance, fitnessAgeProfileToken, fitnessAgeProvenanceRequired,
+    )
+
+    fun acceptsVO2maxEstimate(provenance: Double?): Boolean = AgeMetricProfile.accepts(
+        provenance, vo2maxProfileToken, vo2maxProvenanceRequired,
+    )
+
+    fun acceptsVitality(provenance: Double?): Boolean = AgeMetricProfile.accepts(
+        provenance, vitalityProfileToken, vitalityProvenanceRequired,
+    )
+
+    fun confirmAgeInput() {
+        prefs.edit()
+            .putBoolean(KEY_AGE_CONFIRMED, true)
+            .putBoolean(KEY_FITNESS_AGE_PROVENANCE_REQUIRED, true)
+            .putBoolean(KEY_VO2MAX_PROVENANCE_REQUIRED, true)
+            .putBoolean(KEY_VITALITY_PROVENANCE_REQUIRED, true)
+            .apply()
+        signalAgeMetricProfileChange()
+    }
+    fun confirmSexInput() {
+        prefs.edit()
+            .putBoolean(KEY_SEX_CONFIRMED, true)
+            .putBoolean(KEY_FITNESS_AGE_PROVENANCE_REQUIRED, true)
+            .putBoolean(KEY_VO2MAX_PROVENANCE_REQUIRED, true)
+            .apply()
+        signalAgeMetricProfileChange()
+    }
+    fun confirmFitnessInputs() {
+        prefs.edit()
+            .putBoolean(KEY_AGE_CONFIRMED, true)
+            .putBoolean(KEY_SEX_CONFIRMED, true)
+            .putBoolean(KEY_FITNESS_AGE_PROVENANCE_REQUIRED, true)
+            .putBoolean(KEY_VO2MAX_PROVENANCE_REQUIRED, true)
+            .putBoolean(KEY_VITALITY_PROVENANCE_REQUIRED, true)
+            .apply()
+        signalAgeMetricProfileChange()
+    }
 
     var weightKg: Double
         get() = prefs.getFloat(KEY_WEIGHT, 75f).toDouble().coerceIn(WEIGHT_MIN, WEIGHT_MAX)
@@ -202,7 +280,13 @@ class ProfileStore(private val prefs: SharedPreferences) {
      */
     var waistCm: Double
         get() = prefs.getFloat(KEY_WAIST, 0f).toDouble().coerceIn(0.0, WAIST_MAX)
-        set(v) = prefs.edit().putFloat(KEY_WAIST, v.coerceIn(0.0, WAIST_MAX).toFloat()).apply()
+        set(v) {
+            prefs.edit()
+                .putFloat(KEY_WAIST, v.coerceIn(0.0, WAIST_MAX).toFloat())
+                .putBoolean(KEY_VO2MAX_PROVENANCE_REQUIRED, true)
+                .apply()
+            signalAgeMetricProfileChange()
+        }
 
     /** Manual max-heart-rate override in bpm; 0 = automatic (Tanaka). */
     var hrMaxOverride: Int
@@ -307,6 +391,11 @@ class ProfileStore(private val prefs: SharedPreferences) {
          *  keeps round-tripping unchanged. */
         private const val KEY_AGE = "age"
         private const val KEY_SEX = "sex"
+        private const val KEY_AGE_CONFIRMED = "age_input_confirmed"
+        private const val KEY_SEX_CONFIRMED = "sex_input_confirmed"
+        private const val KEY_FITNESS_AGE_PROVENANCE_REQUIRED = "fitness_age_provenance_required"
+        private const val KEY_VO2MAX_PROVENANCE_REQUIRED = "vo2max_provenance_required"
+        private const val KEY_VITALITY_PROVENANCE_REQUIRED = "vitality_provenance_required"
         private const val KEY_WEIGHT = "weight_kg"
         private const val KEY_HEIGHT = "height_cm"
         private const val KEY_WAIST = "waist_cm"
@@ -327,6 +416,10 @@ class ProfileStore(private val prefs: SharedPreferences) {
         private const val WAIST_MAX = 200.0
         private const val STEP_SCALE_MIN = 0.5
         private const val STEP_SCALE_MAX = 30.0
+
+        private val _ageMetricProfileChanges = MutableStateFlow(0L)
+        val ageMetricProfileChanges: StateFlow<Long> = _ageMetricProfileChanges.asStateFlow()
+        private fun signalAgeMetricProfileChange() { _ageMetricProfileChanges.value += 1 }
 
         /**
          * Variable step for the calibration stepper so high values stay reachable: fine near the
@@ -372,8 +465,28 @@ class ProfileStore(private val prefs: SharedPreferences) {
             return next.coerceIn(STEP_SCALE_MIN, STEP_SCALE_MAX)
         }
 
-        fun from(context: Context): ProfileStore =
-            ProfileStore(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE))
+        /** Existing users passed through the old Profile page before these explicit markers existed. */
+        fun from(context: Context): ProfileStore {
+            val store = ProfileStore(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE))
+            if (NoopPrefs.of(context).getBoolean(NoopPrefs.KEY_ONBOARDED, false) &&
+                !store.fitnessInputsConfirmed
+            ) {
+                // Migration only: accepting the pre-provenance rows preserves an existing user's current
+                // score. A later real profile edit goes through the public setters and requires a token.
+                store.prefs.edit()
+                    .putBoolean(KEY_AGE_CONFIRMED, true)
+                    .putBoolean(KEY_SEX_CONFIRMED, true)
+                    .apply()
+            }
+            return store
+        }
+
+        /** Pure parity guard used by JVM tests. */
+        fun fitnessInputsAreConfirmed(
+            ageConfirmed: Boolean,
+            sexConfirmed: Boolean,
+            onboardingCompleted: Boolean,
+        ): Boolean = (ageConfirmed || onboardingCompleted) && (sexConfirmed || onboardingCompleted)
     }
 }
 
@@ -396,6 +509,9 @@ fun SettingsScreen(
     fun mutate(block: () -> Unit) { block(); rev++ }
 
     var backupBusy by remember { mutableStateOf(false) }
+    var strapLogBusy by remember { mutableStateOf(false) }
+    var whoop5CaptureBusy by remember { mutableStateOf(false) }
+    var rawAndLogBusy by remember { mutableStateOf(false) }
 
     // Re-scan must request the runtime Bluetooth permission before scanning — without this the
     // button calls connect() directly and silently no-ops on Android 12+ when the permission was
@@ -497,7 +613,7 @@ fun SettingsScreen(
     var stressAutoNudge by remember { mutableStateOf(BiofeedbackPrefs.autoNudge(context)) }
     var rhythmEnabled by remember { mutableStateOf(RhythmConsent.isEnabled(context)) }
     var coachSignals by remember { mutableStateOf(NoopPrefs.coachSignals(context)) }
-    var autoDetectWorkouts by remember { mutableStateOf(NoopPrefs.autoDetectWorkouts(context)) }
+    var autoWorkoutMode by remember { mutableStateOf(NoopPrefs.autoWorkoutMode(context)) }
     var journalReminder by remember { mutableStateOf(NoopPrefs.journalReminderEnabled(context)) }
     // Keep the screen on during a manual workout recording (#703), default OFF. The live-workout
     // screen reads this same "workoutKeepScreenOn" key. String shared verbatim with the iOS/Mac twin
@@ -509,11 +625,11 @@ fun SettingsScreen(
     // BETA feature flag, default ON (`live_sessions_beta`, see LiveSessionPrefs); off hides the entry.
     var liveSessionsBeta by remember { mutableStateOf(LiveSessionPrefs.enabled(context)) }
 
-    // Imperial/Metric display preference (D#103). Display-only — stored data stays SI. The system drives
-    // the profile fields below (imperial entry) too, so it's local state the whole screen reads.
-    // `temperatureRaw` is "" (match the system) or a TemperatureUnit raw value. SharedPreferences isn't
-    // reactive, so these mirror into local state like the toggles above.
+    // Independent display preferences. Profile/imported values remain SI; weight and height are migrated
+    // once from the former combined system and can then be mixed freely (for example kg + ft/in).
     var unitSystem by remember { mutableStateOf(UnitPrefs.system(context)) }
+    var massUnit by remember { mutableStateOf(UnitPrefs.mass(context)) }
+    var heightUnit by remember { mutableStateOf(UnitPrefs.height(context)) }
     var temperatureRaw by remember {
         mutableStateOf(NoopPrefs.of(context).getString(NoopPrefs.KEY_TEMPERATURE_UNIT, "") ?: "")
     }
@@ -728,9 +844,9 @@ fun SettingsScreen(
                 }
                 RowDivider()
                 FormRow(label = uiString(R.string.l10n_settings_screen_weight_69c0b815)) {
-                    // Imperial mode steps in whole pounds and stores the kg equivalent; metric steps in
+                    // Pounds mode steps in whole pounds and stores the kg equivalent; kg mode steps in
                     // 0.5 kg. The profile is always SI — only the entry unit changes.
-                    if (unitSystem == UnitSystem.IMPERIAL) {
+                    if (massUnit == MassUnit.POUNDS) {
                         val lb = UnitFormatter.kgToPounds(profile.weightKg)
                         StepperField(
                             value = "%.0f".format(lb),
@@ -751,8 +867,8 @@ fun SettingsScreen(
                 }
                 RowDivider()
                 FormRow(label = uiString(R.string.l10n_settings_screen_height_3f608b49)) {
-                    // Imperial mode steps in whole inches and stores the cm equivalent; metric steps in cm.
-                    if (unitSystem == UnitSystem.IMPERIAL) {
+                    // Feet/inches mode steps in whole inches and stores the cm equivalent; cm steps in cm.
+                    if (heightUnit == HeightUnit.FEET_INCHES) {
                         val (ft, inch) = UnitFormatter.cmToFeetInches(profile.heightCm)
                         val totalInches = UnitFormatter.cmToInches(profile.heightCm).roundToInt()
                         StepperField(
@@ -779,7 +895,7 @@ fun SettingsScreen(
                 FormRow(label = uiString(R.string.l10n_settings_screen_waist_optional_d5356703)) {
                     Column(horizontalAlignment = Alignment.End) {
                         val hasWaist = profile.waistCm > 0.0
-                        if (unitSystem == UnitSystem.IMPERIAL) {
+                        if (heightUnit == HeightUnit.FEET_INCHES) {
                             val totalInches = UnitFormatter.cmToInches(profile.waistCm).roundToInt()
                             StepperField(
                                 value = if (hasWaist) "%d″".format(totalInches) else "Add",
@@ -912,20 +1028,19 @@ fun SettingsScreen(
         }
 
         // --- Units ---
-        // Imperial/Metric display toggle + a separate temperature override. Display-only — nothing
-        // stored changes; NOOP keeps everything in SI and converts at the point of display. Mirrors the
-        // macOS Settings → Units card.
+        // Independent display toggles. Nothing stored changes; NOOP keeps canonical SI values and
+        // converts only at presentation/entry boundaries.
         SettingsSection(
             icon = Icons.Filled.Straighten,
             title = uiString(R.string.l10n_settings_screen_units_12748281),
             blurb = "Choose how distances, weights, heights, temperatures and Effort are shown. Your data is always stored the same way. This only changes the display.",
         ) {
             Column {
-                FormRow(label = uiString(R.string.l10n_settings_screen_measurement_system_701d765d)) {
+                FormRow(label = "Distance") {
                     SegmentedPillControl(
                         items = listOf(UnitSystem.METRIC, UnitSystem.IMPERIAL),
                         selection = unitSystem,
-                        label = { if (it == UnitSystem.METRIC) "Metric" else "Imperial" },
+                        label = { if (it == UnitSystem.METRIC) "km" else "mi" },
                         onSelect = {
                             unitSystem = it
                             NoopPrefs.setUnitSystem(context, it)
@@ -933,8 +1048,32 @@ fun SettingsScreen(
                     )
                 }
                 RowDivider()
+                FormRow(label = "Weight") {
+                    SegmentedPillControl(
+                        items = listOf(MassUnit.KILOGRAMS, MassUnit.POUNDS),
+                        selection = massUnit,
+                        label = { if (it == MassUnit.KILOGRAMS) "kg" else "lb" },
+                        onSelect = {
+                            massUnit = it
+                            NoopPrefs.setMassUnit(context, it)
+                        },
+                    )
+                }
+                RowDivider()
+                FormRow(label = "Height") {
+                    SegmentedPillControl(
+                        items = listOf(HeightUnit.CENTIMETERS, HeightUnit.FEET_INCHES),
+                        selection = heightUnit,
+                        label = { if (it == HeightUnit.CENTIMETERS) "cm" else "ft / in" },
+                        onSelect = {
+                            heightUnit = it
+                            NoopPrefs.setHeightUnit(context, it)
+                        },
+                    )
+                }
+                RowDivider()
                 FormRow(label = uiString(R.string.l10n_settings_screen_temperature_0a9062a9)) {
-                    // Three-way: "Match" follows the system above; °C / °F pin it explicitly. Stored as an
+                    // Three-way: "Match" follows the distance choice; °C / °F pin it explicitly. Stored as an
                     // empty string ("match") or the TemperatureUnit raw value.
                     SegmentedPillControl(
                         items = listOf("", TemperatureUnit.CELSIUS.raw, TemperatureUnit.FAHRENHEIT.raw),
@@ -1566,7 +1705,7 @@ fun SettingsScreen(
                             vm.syncNow()
                             Toast.makeText(
                                 context,
-                                "Re-scoring your recent nights over the ${if (it == HrvWindow.DEEP_SLEEP) "deep-sleep" else "whole-night"} window. Charge updates as soon as it's done.",
+                                "Re-scoring your recent nights over the ${if (it == HrvWindow.DEEP_SLEEP) "deep-sleep" else "whole-night"} window. Recovery updates as soon as it's done.",
                                 Toast.LENGTH_LONG,
                             ).show()
                         },
@@ -1584,8 +1723,19 @@ fun SettingsScreen(
                     leadingIcon = Icons.Filled.Upload,
                     kind = NoopButtonKind.Secondary,
                     fullWidth = true,
-                    onClick = { scope.launch { LogExport.shareStrapLog(context, vm.ble.exportLogText()) } },
+                    enabled = !strapLogBusy,
+                    onClick = {
+                        strapLogBusy = true
+                        scope.launch {
+                            try {
+                                LogExport.shareStrapLog(context, vm.ble.exportLogText())
+                            } finally {
+                                strapLogBusy = false
+                            }
+                        }
+                    },
                 )
+                if (strapLogBusy) NoopBusyRow()
 
                 // "WHOOP 4.0 vs 5.0/MG — what each can read and why" (FI-2 / #490). Shown to BOTH model
                 // owners, so a 4.0 user understands their strap is fully supported (and why the firmware
@@ -1928,8 +2078,19 @@ fun SettingsScreen(
                     leadingIcon = Icons.Filled.Upload,
                     kind = NoopButtonKind.Secondary,
                     fullWidth = true,
-                    onClick = { LogExport.shareWhoop5Capture(context, live.whoop5Detected) },
+                    enabled = !whoop5CaptureBusy,
+                    onClick = {
+                        whoop5CaptureBusy = true
+                        scope.launch {
+                            try {
+                                LogExport.shareWhoop5Capture(context, live.whoop5Detected)
+                            } finally {
+                                whoop5CaptureBusy = false
+                            }
+                        }
+                    },
                 )
+                if (whoop5CaptureBusy) NoopBusyRow()
 
                 // One-tap "matched pair" export (#510): hands a reporter BOTH the raw capture file and
                 // the strap log together (timestamped, same minute) so a protocol-mapping issue arrives
@@ -1939,8 +2100,19 @@ fun SettingsScreen(
                     leadingIcon = Icons.Filled.IosShare,
                     kind = NoopButtonKind.Secondary,
                     fullWidth = true,
-                    onClick = { scope.launch { LogExport.shareRawAndLog(context, vm.ble.exportLogText(), live.whoop5Detected) } },
+                    enabled = !rawAndLogBusy,
+                    onClick = {
+                        rawAndLogBusy = true
+                        scope.launch {
+                            try {
+                                LogExport.shareRawAndLog(context, vm.ble.exportLogText(), live.whoop5Detected)
+                            } finally {
+                                rawAndLogBusy = false
+                            }
+                        }
+                    },
                 )
+                if (rawAndLogBusy) NoopBusyRow()
             }
         }
         } // end if (showFiveMGControls)
@@ -2081,7 +2253,7 @@ fun SettingsScreen(
         SettingsSection(
             icon = Icons.Filled.Science,
             title = uiString(R.string.l10n_settings_screen_health_wellness_93475778),
-            blurb = "Optional, on-device wellness signals. Each is off by default, computed only on this phone from data you already have, and never a medical diagnosis.",
+            blurb = "Optional on-device wellness signals and automations. Each control explains its behavior; calculations stay on this phone and are never a medical diagnosis.",
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 ToggleRow(
@@ -2121,14 +2293,29 @@ fun SettingsScreen(
                     },
                 )
                 RowDivider()
-                ToggleRow(
-                    title = uiString(R.string.l10n_settings_screen_auto_detect_workouts_bed4cf2a),
-                    detail = "After a sync, NOOP looks over your recent heart rate for a sustained, raised stretch that looks like exercise and offers to save it. It only ever suggests. Nothing is saved until you tap Save, and you can dismiss any suggestion. Deliberately conservative, so the odd workout may be missed. On this phone only.",
-                    checked = autoDetectWorkouts,
-                    onCheckedChange = {
-                        autoDetectWorkouts = it
-                        NoopPrefs.setAutoDetectWorkouts(context, it)
-                    },
+                FormRow(label = "Automatic activity") {
+                    SegmentedPillControl(
+                        items = listOf(AutoWorkoutMode.OFF, AutoWorkoutMode.ASK, AutoWorkoutMode.AUTO_SAVE),
+                        selection = autoWorkoutMode,
+                        label = {
+                            when (it) {
+                                AutoWorkoutMode.OFF -> "Off"
+                                AutoWorkoutMode.ASK -> "Ask"
+                                AutoWorkoutMode.AUTO_SAVE -> "Auto-save"
+                            }
+                        },
+                        onSelect = {
+                            autoWorkoutMode = it
+                            NoopPrefs.setAutoWorkoutMode(context, it)
+                        },
+                        adaptsToAvailableWidth = true,
+                    )
+                }
+                Text(
+                    "After a sync, NOOP looks for a finalized, sustained rise in heart rate with sufficient signal coverage and motion confirmation when available. Ask always waits for you. Auto-save writes only stronger 15+ minute candidates as Detected, then lets you keep, edit or dismiss them. This is a conservative on-device heuristic, not WHOOP's proprietary detector, so it can miss or misread activities. On this phone only.",
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
                 )
                 RowDivider()
                 ToggleRow(
@@ -2243,7 +2430,7 @@ fun SettingsScreen(
         SettingsSection(
             icon = Icons.Filled.Favorite,
             title = uiString(R.string.l10n_settings_screen_charge_d4e1aee4),
-            blurb = "Charge is NOOP's daily readiness score, learned from your own HRV, resting heart rate and more over time. Your history stays.",
+            blurb = "Recovery is NOOP's daily readiness score, learned from your own HRV, resting heart rate and more over time. Your history stays.",
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -2297,7 +2484,7 @@ fun SettingsScreen(
                             vm.syncNow()
                             Toast.makeText(
                                 context,
-                                "Charge baseline reset. NOOP will re-learn it from tonight. Your history stays, and it takes a few nights to settle.",
+                                "Recovery baseline reset. NOOP will re-learn it from tonight. Your history stays, and it takes a few nights to settle.",
                                 Toast.LENGTH_LONG,
                             ).show()
                         },
@@ -2359,17 +2546,7 @@ fun SettingsScreen(
                 }
 
                 if (backupBusy) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        CircularProgressIndicator(
-                            color = Palette.accent,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Text(uiString(R.string.l10n_settings_screen_working_13b7bfca), style = NoopType.footnote, color = Palette.textSecondary)
-                    }
+                    NoopBusyRow()
                 }
 
                 NoteRow(

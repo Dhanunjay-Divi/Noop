@@ -65,6 +65,7 @@ import com.noop.ble.WhoopModel
 import com.noop.data.DeviceStatus
 import com.noop.data.PairedDeviceRow
 import com.noop.data.SourceKind
+import com.noop.data.WhoopLiveCapabilities
 import com.noop.oura.OuraRingGen
 import kotlinx.coroutines.launch
 
@@ -289,7 +290,7 @@ fun AddDeviceWizard(
                     nickname = confirmName,
                     peripheralId = pw.address,
                     sourceKind = SourceKind.liveBLE.name,
-                    capabilities = "hr,hrv,spo2,skinTemp,sleep,strainLoad",
+                    capabilities = WhoopLiveCapabilities.encoded(modelLabel),
                     status = DeviceStatus.paired.name,
                     addedAt = now,
                     lastSeenAt = now,
@@ -1120,7 +1121,7 @@ private fun OuraGateStep(
                     "Live heart rate, and HRV when the ring can measure it.",
                     "Overnight sleep staging, resting heart rate, skin-temperature trend, motion and " +
                         "battery, read straight off the ring.",
-                    "NOOP's own Charge, Effort and Rest, computed on your device from published methods.",
+                    "NOOP's own Recovery, Effort and Sleep Score, computed on your device from published methods.",
                 ),
             )
             Overline("What you lose")

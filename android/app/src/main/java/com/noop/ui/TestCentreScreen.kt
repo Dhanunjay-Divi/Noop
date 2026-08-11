@@ -85,6 +85,7 @@ fun TestCentreScreen(vm: AppViewModel) {
     // A report awaiting the mandatory review-before-share gate (spec section 12). Non-null shows the
     // review dialog; confirming runs TestReportFlow.run.
     var pendingReport by remember { mutableStateOf<PendingReport?>(null) }
+    var reportShareBusy by remember { mutableStateOf(false) }
 
     // The Display frame monitor follows the screen: if the Display mode was already on when the screen
     // appears, (re)start it; always tear it down when the screen leaves so no Choreographer callback
@@ -180,17 +181,25 @@ fun TestCentreScreen(vm: AppViewModel) {
             modeInactive = p.modeInactive,
             onCancel = { pendingReport = null },
             onShare = {
+                if (reportShareBusy) return@ReportReviewDialog
+                reportShareBusy = true
                 p.gate.confirm()
-                TestReportFlow.run(
-                    context = context,
-                    profile = p.profile,
-                    title = p.title,
-                    version = BuildConfig.VERSION_NAME,
-                    platform = "Android",
-                    osVersion = android.os.Build.VERSION.RELEASE ?: "?",
-                    gate = p.gate,
-                    entries = p.entries,
-                )
+                scope.launch {
+                    try {
+                        TestReportFlow.run(
+                            context = context,
+                            profile = p.profile,
+                            title = p.title,
+                            version = BuildConfig.VERSION_NAME,
+                            platform = "Android",
+                            osVersion = android.os.Build.VERSION.RELEASE ?: "?",
+                            gate = p.gate,
+                            entries = p.entries,
+                        )
+                    } finally {
+                        reportShareBusy = false
+                    }
+                }
                 pendingReport = null
             },
         )
@@ -323,12 +332,13 @@ private fun DiagnosticToolsCard(vm: AppViewModel) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showRecalibrate by remember { mutableStateOf(false) }
+    var strapLogBusy by remember { mutableStateOf(false) }
     // "Debug logging" moved here from Settings: dev-only, mirrors the strap log to logcat over adb.
     var debugLogging by remember { mutableStateOf(NoopPrefs.debugLogging(context)) }
     SettingsSectionTC(
         icon = Icons.Filled.Info,
         title = uiString(R.string.l10n_test_centre_screen_diagnostic_tools_04ba4d3f),
-        blurb = "Your strap log, a Charge recalibrate, and the device environment. Nothing leaves the phone unless you share it.",
+        blurb = "Your strap log, a Recovery recalibration, and the device environment. Nothing leaves the phone unless you share it.",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             // Strap log, the same exportLogText share the Settings Diagnostics button uses.
@@ -337,8 +347,19 @@ private fun DiagnosticToolsCard(vm: AppViewModel) {
                 leadingIcon = Icons.Filled.Upload,
                 kind = NoopButtonKind.Secondary,
                 fullWidth = true,
-                onClick = { scope.launch { LogExport.shareStrapLog(context, vm.ble.exportLogText()) } },
+                enabled = !strapLogBusy,
+                onClick = {
+                    strapLogBusy = true
+                    scope.launch {
+                        try {
+                            LogExport.shareStrapLog(context, vm.ble.exportLogText())
+                        } finally {
+                            strapLogBusy = false
+                        }
+                    }
+                },
             )
+            if (strapLogBusy) NoopBusyRow()
             // Recalibrate Charge baseline, the same Baselines.recalibrateRecoveryBaselines call.
             NoopButton(
                 text = uiString(R.string.l10n_test_centre_screen_recalibrate_charge_baseline_52a05a26),
@@ -494,7 +515,7 @@ private fun ExperimentalAlgorithmsCard(vm: AppViewModel) {
                 title = uiString(R.string.l10n_test_centre_screen_hrv_readiness_plews_altini_bce6578f),
                 description = "A read-only Plews/Altini smallest-worthwhile-change reading of your nightly HRV: " +
                     "it shows whether your 7-night HRV baseline sits above, inside, or below your personal " +
-                    "normal band. It changes nothing else - the Charge ring is identical whether this is on or " +
+                    "normal band. It changes nothing else - the Recovery ring is identical whether this is on or " +
                     "off. This is rough / early testing, not yet validated against varying real data (n=1).",
                 checked = hrvReadiness,
                 onCheckedChange = { hrvReadiness = it; puffin.hrvReadiness = it },

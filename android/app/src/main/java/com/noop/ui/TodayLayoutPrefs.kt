@@ -23,7 +23,7 @@ import android.content.Context
  * the macOS `TodaySection` enum so a backup/restore reads the same layout on either OS.
  */
 enum class TodaySection(val raw: String, val title: String) {
-    HERO("hero", "Charge / Effort / Rest"),
+    HERO("hero", "Recovery / Effort / Sleep"),
     LIVE_SESSION("liveSession", "Start session"),
     SYNTHESIS("synthesis", "Synthesis"),
     KEY_METRICS("keyMetrics", "Key Metrics"),

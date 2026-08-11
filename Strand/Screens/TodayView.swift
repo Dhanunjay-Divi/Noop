@@ -136,11 +136,22 @@ private struct ActiveWorkoutIndicatorCard: View {
     }
 
     private var sportLabel: some View {
-        Text(model.sport)
-            .font(StrandFont.headline)
-            .foregroundStyle(StrandPalette.textPrimary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
+        HStack(spacing: NoopMetrics.space3) {
+            // A workout is the one dashboard state where continuous motion communicates real
+            // activity. The runner stops the instant this card leaves the tree; Reduce Motion
+            // receives the same dimensional illustration as a static frame.
+            SemanticBodyIllustration(
+                .workout(systemImage: sportSymbol(model.sport)),
+                size: 46,
+                tint: StrandPalette.effortColor,
+                isActive: true
+            )
+            Text(model.sport)
+                .font(StrandFont.headline)
+                .foregroundStyle(StrandPalette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
     }
 }
 
@@ -201,7 +212,9 @@ struct TodayView: View {
 
     // Imperial/Metric display preference (D#103). Only the Weight tile carries a convertible unit here.
     @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    @AppStorage(UnitPrefs.massKey) private var massUnitRaw = ""
     private var unitSystem: UnitSystem { UnitSystem(rawValue: unitSystemRaw) ?? .metric }
+    private var massUnit: MassUnit { UnitPrefs.resolveMass(system: unitSystem, override: massUnitRaw) }
     // Day-cycle scene backdrop (#698). Default ON. When the user turns it off in Settings → Appearance,
     // Today drops the SceneScreenBackground and falls back to the plain dark surfaceBase canvas. The
     // cards already sit on an opaque canvas, so readability is unchanged either way.
@@ -261,6 +274,7 @@ struct TodayView: View {
     @State private var stressToday: Double?
     @State private var fitnessAgeToday: Double?
     @State private var vitalityToday: Double?
+    @State private var ageMetricsLoadedProfileState: String?
     /// Distinct days + sleep sessions imported from a Mi Band (Mi Fitness), for the Data Sources row.
     @State private var xiaomiDays = 0
     @State private var xiaomiSleeps = 0
@@ -743,7 +757,8 @@ struct TodayView: View {
         if live.connected && live.historySyncExperimental { return .historyExperimental }
         return RecordingState.resolve(connected: live.connected,
                                       heartRate: live.heartRate,
-                                      lastSyncedAt: live.lastSyncedAt)
+                                      lastSyncedAt: live.lastSyncedAt,
+                                      sustainedEmptyOffload: live.sustainedEmptyOffload)
     }
 
     // MARK: Component 4, provenance badge (the real per-day merge winner)
@@ -1243,7 +1258,10 @@ struct TodayView: View {
                        // body re-eval (the masked image is itself one offscreen pass). That was a v7.0.2
                        // lag regression; removing the flatten restores native layer caching.
                        topBackground: showDayCycleBackground
-                           ? AnyView(SceneScreenBackground(hour: demoSceneHour)) : nil) {
+                           ? AnyView(SceneScreenBackground(hour: demoSceneHour)) : nil,
+                       // Unlike the adaptive pearl/obsidian scaffold field, this photographic scene
+                       // carries its own dark header scrim in both appearances.
+                       topBackgroundUsesDarkHeader: true) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 #if os(iOS)
                 // Compact top bar: profile/settings (left) · ‹ Today › day-nav (centre, bold) · strap
@@ -1272,7 +1290,7 @@ struct TodayView: View {
                     if !scoresBuildingDismissed {
                         DataPendingNote(
                             title: "Live now. Your scores are building.",
-                            message: "Your live heart rate is working from the strap, and charge, effort and rest build from it over your next few nights of wear, sharpening as it learns your baseline. Want your full history instantly? Import your WHOOP export in Data Sources and it backfills in about a minute."
+                            message: "Your live heart rate is working from the strap, and Recovery, Effort and Sleep Score build from it over your next few nights of wear, sharpening as NOOP learns your baseline. Want your full history instantly? Import your WHOOP export in Data Sources and it backfills in about a minute."
                         )
                         // A small × dismisses the card INTO the Updates inbox (restorable from there).
                         .overlay(alignment: .topTrailing) {
@@ -1280,7 +1298,7 @@ struct TodayView: View {
                                 dismissTodayCard(
                                     id: "scoresBuilding",
                                     title: String(localized: "Live now. Your scores are building."),
-                                    message: String(localized: "Charge, Effort and Rest build over your next few nights of wear.")
+                                    message: String(localized: "Recovery, Effort and Sleep Score build over your next few nights of wear.")
                                 )
                             }
                         }
@@ -1329,8 +1347,8 @@ struct TodayView: View {
                 workoutsSection.staggeredAppear(index: 3)
                 heartRateTrendSection.staggeredAppear(index: 4)
                 yourCardsSection.staggeredAppear(index: 5)
-                // Opt-in "looks like a workout?" suggestion (default OFF). Renders only when the
-                // Settings toggle is on AND the detector finds a recent unsaved, un-dismissed window.
+                // Off / Ask / Auto-save automatic-activity surface. Renders only when the
+                // mode is active and a candidate or pending auto-save review exists.
                 AutoWorkoutCard()
                 // #627: the persistent journal widget (last-7-days strip + tap-through to the journal).
                 // Today only; self-hides when the reminder toggle is off. Twin of Android JournalReminderCard.
@@ -1361,7 +1379,8 @@ struct TodayView: View {
         }
         // Reload when the data refreshes OR the selected day changes, the HR trend and Rest score are
         // day-scoped, so navigating must re-fetch them for the newly selected window.
-        .task(id: TodayLoadKey(seq: repo.refreshSeq, offset: selectedDayOffset)) { await loadAll() }
+        .task(id: TodayLoadKey(seq: repo.refreshSeq, offset: selectedDayOffset,
+                               ageMetricState: profile.ageMetricStateToken)) { await loadAll() }
         // #989: hydration writes don't bump refreshSeq, so the card needs its own triggers, a logged /
         // edited / deleted drink (hydrationSeq) and the Settings feature toggle both re-read just the two
         // hydration fields. Cheap (one metricSeries row), never re-runs the heavy loads.
@@ -1490,7 +1509,7 @@ struct TodayView: View {
                     Text("New here?")
                         .font(StrandFont.headline)
                         .foregroundStyle(StrandPalette.textPrimary)
-                    Text("See how Charge, Effort and Rest are calculated, and how they differ from WHOOP.")
+                    Text("See how Recovery, Effort and Sleep Score are calculated, and how they differ from WHOOP.")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1512,7 +1531,7 @@ struct TodayView: View {
                         dismissTodayCard(
                             id: "newHere",
                             title: String(localized: "New here?"),
-                            message: String(localized: "How Charge, Effort and Rest are calculated, and how they differ from WHOOP.")
+                            message: String(localized: "How Recovery, Effort and Sleep Score are calculated, and how they differ from WHOOP.")
                         )
                     }
                 } label: {
@@ -1704,7 +1723,7 @@ struct TodayView: View {
                             dismissTodayCard(
                                 id: "calibratingBaseline",
                                 title: String(localized: "Building your baseline"),
-                                message: String(localized: "Charge, Effort and Rest become personal after a few nights of wear.")
+                                message: String(localized: "Recovery, Effort and Sleep Score become personal after a few nights of wear.")
                             )
                         }
                     }
@@ -1755,7 +1774,7 @@ struct TodayView: View {
     private func chargeCalibrationCountdown(banked: Int) -> some View {
         let remaining = max(1, Baselines.minNightsSeed - banked)
         let countdown = ChargeBreakdownFormat.calibrationCountdown(nightsRemaining: remaining)
-        let unlock = ChargeBreakdownFormat.calibrationUnlockCopy(scoreName: String(localized: "Charge"))
+        let unlock = ChargeBreakdownFormat.calibrationUnlockCopy(scoreName: String(localized: "Recovery"))
         let progress = ChargeBreakdownFormat.calibrationProgress(banked: banked, seed: Baselines.minNightsSeed)
         NoopCard(padding: 14, tint: StrandPalette.chargeColor) {
             HStack(alignment: .top, spacing: 12) {
@@ -1782,7 +1801,7 @@ struct TodayView: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Charge baseline calibrating. \(countdown), \(unlock). \(progress).")
+        .accessibilityLabel("Recovery baseline calibrating. \(countdown), \(unlock). \(progress).")
     }
 
     // MARK: A1/S4 Charge breakdown sheet (the Charge-ring tap target)
@@ -1834,7 +1853,7 @@ struct TodayView: View {
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(StrandPalette.chargeColor)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text("How Charge is calculated")
+                                Text("How Recovery is calculated")
                                     .font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
                                 Text("The method behind the score, not today's values.")
                                     .font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
@@ -1849,13 +1868,13 @@ struct TodayView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("How Charge is calculated. The method behind the score.")
+                    .accessibilityLabel("How Recovery is calculated. The method behind the score.")
                 }
                 .padding(NoopMetrics.screenPadding)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(StrandPalette.surfaceBase.ignoresSafeArea())
-            .navigationTitle("What shaped your Charge")
+            .navigationTitle("What shaped your Recovery")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -1880,7 +1899,7 @@ struct TodayView: View {
     private var chargeBreakdownEmptyNote: some View {
         NoopCard(padding: 18, tint: StrandPalette.chargeColor) {
             VStack(alignment: .leading, spacing: NoopMetrics.space2) {
-                Text("No Charge breakdown yet")
+                Text("No Recovery breakdown yet")
                     .font(StrandFont.headline)
                     .foregroundStyle(StrandPalette.textPrimary)
                 Text(Self.needsStrapCaption)
@@ -2200,9 +2219,11 @@ struct TodayView: View {
             // copy and the owner's reply on #706.
             return stressToday.map { "\(Int($0.rounded()))" } ?? Self.calibratingPlaceholder
         case .fitnessAge:
-            return withUnit(fitnessAgeToday.map { "\(Int($0.rounded()))" } ?? "—")
+            let value = ageMetricsLoadedProfileState == profile.ageMetricStateToken ? fitnessAgeToday : nil
+            return withUnit(value.map { "\(Int($0.rounded()))" } ?? "—")
         case .vitality:
-            return vitalityToday.map { "\(Int($0.rounded()))" } ?? "—"
+            let value = ageMetricsLoadedProfileState == profile.ageMetricStateToken ? vitalityToday : nil
+            return value.map { "\(Int($0.rounded()))" } ?? "—"
         case .hydration:
             // "<total> / <goal> L" in litres to 1 dp (the string bakes in the " L" itself). Always shows a
             // value (a fresh day reads "0.0 / 3.2 L"); the goal is always derivable from the profile.
@@ -2596,9 +2617,9 @@ struct TodayView: View {
     /// Kotlin (the Android hero already reads its label from a localized resource, not the enum name).
     private static func domainLabel(_ domain: DomainTheme) -> LocalizedStringKey {
         switch domain {
-        case .charge: return "Charge"
+        case .charge: return "Recovery"
         case .effort: return "Effort"
-        case .rest:   return "Rest"
+        case .rest:   return "Sleep"
         case .stress: return "Stress"
         }
     }
@@ -2607,9 +2628,9 @@ struct TodayView: View {
     /// interpolated from a localized literal (so the spoken sentence is translated, not half-English).
     private static func domainGuideAccessibilityLabel(_ domain: DomainTheme) -> LocalizedStringKey {
         switch domain {
-        case .charge: return "How Charge is calculated"
+        case .charge: return "How Recovery is calculated"
         case .effort: return "How Effort is calculated"
-        case .rest:   return "How Rest is calculated"
+        case .rest:   return "How Sleep is calculated"
         case .stress: return "How Stress is calculated"
         }
     }
@@ -2635,7 +2656,7 @@ struct TodayView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Self.domainLabel(domain))
-                .accessibilityHint("See what shaped your Charge")
+                .accessibilityHint("See what shaped your Recovery")
                 .accessibilityAddTraits(.isButton)
             } else {
                 ring()
@@ -2672,7 +2693,7 @@ struct TodayView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(onRingTap == nil ? Self.domainGuideAccessibilityLabel(domain)
-                                                  : "See what shaped your Charge")
+                                                  : "See what shaped your Recovery")
             // Component 4, the real per-day source under the ring (only when this score has a value for
             // the day AND we resolved its winner; a calibrating / empty ring shows no provenance badge).
             // Apple Watch (M1): a watch-sourced score reads "Apple Watch" with its confidence bound to the
@@ -2795,17 +2816,8 @@ struct TodayView: View {
         // `--demo-hour` frame is active. Charge/Rest are intentionally left at their seeded values.
         if let f = DemoDayHarness.active { return f.effort }
         #endif
-        if selectedDayOffset == 0, let live = liveTodayStrain {
-            // Effort accrues over a day and must never visibly DROP. The in-progress recompute (raw day
-            // HR, midnight→now) can UNDER-read when today's HR is sparse or a logged workout's load isn't
-            // in the raw stream, e.g. a 5/MG user who trained this morning saw today's real 38.3 get
-            // replaced by a live 0 (#489/#506). Floor at the day's already-earned Effort. `d` (displayDay)
-            // for today is ALWAYS today's row or nil, never a prior day, so this can't resurrect a stale
-            // day; it only stops the gauge dropping below what's already been counted today.
-            if let stored = d?.strain { return Swift.max(live, stored) }
-            return live
-        }
-        return d?.strain
+        return StrainScorer.effectiveEffort(live: selectedDayOffset == 0 ? liveTodayStrain : nil,
+                                            stored: d?.strain)
     }
 
     /// When TODAY's Effort scores a genuine near-zero, there's enough HR to score, but it never
@@ -3052,7 +3064,7 @@ struct TodayView: View {
         let at = sleepToday.map { Date(timeIntervalSince1970: TimeInterval($0.endTs)) }
             ?? hrPoints.first?.date
         guard let date = at else { return nil }
-        return .init(date: date, label: String(localized: "\(Int(rec.rounded()))% Charge"),
+        return .init(date: date, label: String(localized: "\(Int(rec.rounded()))% Recovery"),
                      color: StrandPalette.recoveryColor(rec), alignment: .leading)
     }
 
@@ -3061,7 +3073,7 @@ struct TodayView: View {
     /// preference (#268) and reads identically, the stored strain is on the 0–100 axis, so a morning
     /// "21.2" is 21.2-of-100, not WHOOP's near-max 21-of-21.
     private var effortMarker: OverviewHRChart.EdgeMarker? {
-        guard let strain = displayDay?.strain, let date = hrPoints.last?.date else { return nil }
+        guard let strain = effortStrain(displayDay), let date = hrPoints.last?.date else { return nil }
         return .init(date: date,
                      label: String(localized: "\(UnitFormatter.effortDisplay(strain, scale: effortScale)) Effort"),
                      color: StrandPalette.effortTint(fraction: strain / StrainScorer.maxStrain), alignment: .trailing)
@@ -3191,6 +3203,7 @@ struct TodayView: View {
     private func keyMetricTile(_ metric: KeyMetric) -> some View {
         let d = displayDay
         let aLatest = appleDays.last
+        let systemImage = metric.icon
         switch metric {
         case .charge:
             // Order of precedence: today's own scored recovery → mid-calibration "N of 4" → the last
@@ -3200,10 +3213,11 @@ struct TodayView: View {
             // value labelled as prior, it never fabricates a number for the new day.
             let carried = lastScoredCharge
             StatTile(
-                label: "Charge",
+                label: "Recovery",
                 value: d?.recovery.map { "\(Int($0.rounded()))%" }
                     ?? recoveryCalibration.map { "\($0)/\(Baselines.minNightsSeed)" }
                     ?? carried.map { "\(Int($0.value.rounded()))%" } ?? "—",
+                systemImage: systemImage,
                 // Component 2: never a bare blank, when there's no number, no calibration count and
                 // nothing to carry, the caption states the honest "Needs the strap" rather than nothing.
                 caption: d?.recovery.map { StrandPalette.recoveryState($0).capitalized }
@@ -3218,12 +3232,14 @@ struct TodayView: View {
         case .effort:
             // Unscored TODAY → a short "building" hint instead of the "of N" axis caption, so a
             // fresh user reads "coming" not "broken" (#527); a scored day keeps "of N".
+            let effort = effortStrain(d)
             StatTile(
                 label: "Effort",
-                value: d?.strain.map { UnitFormatter.effortDisplay($0, scale: effortScale) } ?? "—",
-                caption: d?.strain != nil ? String(localized: "of \(UnitFormatter.effortScaleMax(effortScale))")
+                value: effort.map { UnitFormatter.effortDisplay($0, scale: effortScale) } ?? "—",
+                systemImage: systemImage,
+                caption: effort != nil ? String(localized: "of \(UnitFormatter.effortScaleMax(effortScale))")
                                           : (buildingHint(.effort) ?? String(localized: "of \(UnitFormatter.effortScaleMax(effortScale))")),
-                accent: d?.strain.map { StrandPalette.effortTint(fraction: $0 / StrainScorer.maxStrain) } ?? StrandPalette.textPrimary,
+                accent: effort.map { StrandPalette.effortTint(fraction: $0 / StrainScorer.maxStrain) } ?? StrandPalette.textPrimary,
                 sparkline: sparks["strain"],
                 sparkColor: StrandPalette.strain066,
                 // Inline ⓘ in the tile header (not a corner overlay) so it never sits over the value (#495).
@@ -3233,8 +3249,9 @@ struct TodayView: View {
             // Unscored TODAY → "building, wear it tonight" instead of a lone ", " caption (#527);
             // a scored day keeps its sleep-duration / efficiency caption.
             StatTile(
-                label: "Rest",
+                label: "Sleep Score",
                 value: restScore.map { "\(Int($0.rounded()))%" } ?? "—",
+                systemImage: systemImage,
                 // Component 2: a scored day shows its duration/efficiency caption; an unscored TODAY shows
                 // the "building" hint; a past day with no Rest falls to the honest "Needs the strap" rather
                 // than a bare blank, so the tile always carries a state.
@@ -3255,6 +3272,7 @@ struct TodayView: View {
             StatTile(
                 label: "HRV",
                 value: hrv.value,
+                systemImage: systemImage,
                 caption: hrv.caption,
                 accent: hrv.value == "—" ? StrandPalette.textPrimary : StrandPalette.metricPurple,
                 sparkline: sparks["hrv"],
@@ -3266,6 +3284,7 @@ struct TodayView: View {
             StatTile(
                 label: "Resting HR",
                 value: rhr.value,
+                systemImage: systemImage,
                 caption: rhr.caption,
                 accent: rhr.value == "—" ? StrandPalette.textPrimary : StrandPalette.metricRose,
                 sparkline: sparks["rhr"],
@@ -3281,6 +3300,7 @@ struct TodayView: View {
             StatTile(
                 label: "Blood Oxygen",
                 value: spo2.value,
+                systemImage: systemImage,
                 caption: spo2.caption,
                 accent: spo2.value == "—" ? StrandPalette.textPrimary : StrandPalette.metricCyan,
                 sparkline: sparks["spo2"],
@@ -3296,6 +3316,7 @@ struct TodayView: View {
             StatTile(
                 label: "Respiratory",
                 value: respValue,
+                systemImage: systemImage,
                 // When the sparkline-tail fallback surfaces a real value (respValue ≠ ", " while respCarry
                 // was empty), use the plain "rpm" caption, not carriedVital's empty "After tonight's sleep"
                 // state, so the caption matches the shown number (H10 mustn't mislabel a real value).
@@ -3329,6 +3350,7 @@ struct TodayView: View {
             StatTile(
                 label: "Steps",
                 value: realSteps ?? estSteps.map { intString(Double($0)) } ?? "—",
+                systemImage: systemImage,
                 // An estimated day reads "est." plus the calibration STATUS (k / days / confidence) so a
                 // frozen-looking estimate self-explains (#760/#792); a not-yet-calibrated day says how many
                 // more phone-counted days are needed (so a blank tile is never silently unexplained, #589).
@@ -3357,6 +3379,7 @@ struct TodayView: View {
             StatTile(
                 label: "Weight",
                 value: weightTile(aLatest?.weightKg).value,
+                systemImage: systemImage,
                 caption: weightTile(aLatest?.weightKg).caption,
                 accent: StrandPalette.accent,
                 sparkline: sparks["weight"],
@@ -3366,6 +3389,7 @@ struct TodayView: View {
             StatTile(
                 label: "Calories",
                 value: caloriesValue(aLatest),
+                systemImage: systemImage,
                 caption: String(localized: "active"),
                 accent: StrandPalette.metricAmber,
                 sparkline: sparks["active_kcal"],
@@ -3650,7 +3674,8 @@ struct TodayView: View {
         // rather than re-querying, otherwise the dashboard would flash empty. This wins over the
         // first-load-this-mount path below, which would otherwise treat the re-mount as a cold launch and
         // reload identical data. If the cache is somehow absent (defensive), fall through and reload.
-        if repo.todayHistoryWideLoadedSeq == currentSeq, let cached = repo.todayHistoryWideCache {
+        if repo.todayHistoryWideLoadedSeq == currentSeq, let cached = repo.todayHistoryWideCache,
+           cached.ageMetricStateToken == profile.ageMetricStateToken {
             restoreHistoryWide(cached)
             // #989: hydration is excluded from the snapshot (a drink logged since would be stale), so a
             // restore re-reads it live, one cheap row.
@@ -3739,6 +3764,10 @@ struct TodayView: View {
         async let stressStoredA      = repo.series(key: "stress", source: "my-whoop")
         async let fitnessAgeSeriesA  = repo.exploreSeries(key: "fitness_age", source: "my-whoop")
         async let vitalitySeriesA    = repo.exploreSeries(key: "vitality", source: "my-whoop")
+        async let fitnessAgeProfileA = repo.exploreSeries(
+            key: AgeMetricProfile.fitnessAgeKey, source: "my-whoop")
+        async let vitalityProfileA   = repo.exploreSeries(
+            key: AgeMetricProfile.vitalityKey, source: "my-whoop")
 
         // Steps ESTIMATE per day (WHOOP 4.0 motion → calibrated steps). exploreSeries reads the computed
         // "-noop" metricSeries the IntelligenceEngine writes, exactly like the Explore "steps_est" metric.
@@ -3760,8 +3789,13 @@ struct TodayView: View {
         // page on a day with no banked stress row. nil (no usable signal) keeps the honest "Calibrating"
         // placeholder, matching StressView's empty state. Fitness age / Vitality keep their merged reads.
         stressToday = StressModel(days: repo.days, stored: await stressStoredA)?.score
-        fitnessAgeToday = (await fitnessAgeSeriesA).last?.value
-        vitalityToday = (await vitalitySeriesA).last?.value
+        let fitnessProfileToken = (await fitnessAgeProfileA).last?.value
+        let vitalityProfileToken = (await vitalityProfileA).last?.value
+        fitnessAgeToday = profile.acceptsFitnessAge(provenance: fitnessProfileToken)
+            ? (await fitnessAgeSeriesA).last?.value : nil
+        vitalityToday = profile.acceptsVitality(provenance: vitalityProfileToken)
+            ? (await vitalitySeriesA).last?.value : nil
+        ageMetricsLoadedProfileState = profile.ageMetricStateToken
         // Hydration card (opt-in): today's stored total + the sex/Effort goal. Only loaded when the
         // feature is on, so a disabled feature does zero work and the card stays hidden.
         await reloadHydration()
@@ -3787,7 +3821,8 @@ struct TodayView: View {
             xiaomiSleeps: xiaomiSleeps,
             stressToday: stressToday,
             fitnessAgeToday: fitnessAgeToday,
-            vitalityToday: vitalityToday
+            vitalityToday: vitalityToday,
+            ageMetricStateToken: profile.ageMetricStateToken
         )
     }
 
@@ -3806,6 +3841,7 @@ struct TodayView: View {
         stressToday = c.stressToday
         fitnessAgeToday = c.fitnessAgeToday
         vitalityToday = c.vitalityToday
+        ageMetricsLoadedProfileState = c.ageMetricStateToken
         // Hydration is deliberately NOT part of the snapshot (#989): logging a drink never bumps
         // refreshSeq, so a restored total could be stale. It is re-read live instead (see loadAll).
     }
@@ -4117,9 +4153,9 @@ struct TodayView: View {
     /// `UnitFormatter` so the Imperial/Metric toggle reaches this tile. Mirrors Android's `weightTile`.
     private func weightTile(_ appleWeightKg: Double?) -> (value: String, caption: String) {
         if let kg = appleWeightKg ?? sparks["weight"]?.last {
-            return (UnitFormatter.massFromKilograms(kg, system: unitSystem), String(localized: "latest"))
+            return (UnitFormatter.massFromKilograms(kg, unit: massUnit), String(localized: "latest"))
         }
-        return (UnitFormatter.massFromKilograms(profile.weightKg, system: unitSystem), String(localized: "from profile"))
+        return (UnitFormatter.massFromKilograms(profile.weightKg, unit: massUnit), String(localized: "from profile"))
     }
 
     // MARK: - Derived text
@@ -4199,21 +4235,21 @@ struct TodayView: View {
         switch rec {
         case ..<50:
             switch sleptWell {
-            case true?:  return String(localized: "Charge is low and sleep was consistent.")
-            case false?: return String(localized: "Charge is low but sleep ran short.")
-            case nil:    return String(localized: "Charge is low.")
+            case true?:  return String(localized: "Recovery is low and sleep was consistent.")
+            case false?: return String(localized: "Recovery is low but sleep ran short.")
+            case nil:    return String(localized: "Recovery is low.")
             }
         case ..<70:
             switch sleptWell {
-            case true?:  return String(localized: "Charge is steady and sleep was consistent.")
-            case false?: return String(localized: "Charge is steady but sleep ran short.")
-            case nil:    return String(localized: "Charge is steady.")
+            case true?:  return String(localized: "Recovery is steady and sleep was consistent.")
+            case false?: return String(localized: "Recovery is steady but sleep ran short.")
+            case nil:    return String(localized: "Recovery is steady.")
             }
         default:
             switch sleptWell {
-            case true?:  return String(localized: "Charge is strong and sleep was consistent.")
-            case false?: return String(localized: "Charge is strong but sleep ran short.")
-            case nil:    return String(localized: "Charge is strong.")
+            case true?:  return String(localized: "Recovery is strong and sleep was consistent.")
+            case false?: return String(localized: "Recovery is strong but sleep ran short.")
+            case nil:    return String(localized: "Recovery is strong.")
             }
         }
     }
@@ -4366,6 +4402,7 @@ struct TodayView: View {
 private struct TodayLoadKey: Equatable {
     let seq: Int
     let offset: Int
+    let ageMetricState: String
 }
 
 /// #849: an in-memory snapshot of everything `loadHistoryWide()` computes: the ~40 history-wide reads +
@@ -4385,6 +4422,7 @@ struct TodayHistoryWideCache {
     let stressToday: Double?
     let fitnessAgeToday: Double?
     let vitalityToday: Double?
+    let ageMetricStateToken: String
     // Hydration total/goal intentionally absent (#989): mutations don't bump refreshSeq, so a cached
     // value could restore stale. TodayView re-reads hydration live on restore instead.
 }
@@ -4482,6 +4520,8 @@ private struct RecordingStatusLight: View {
 
     /// Drives the syncing pulse; toggled in `.task` while an offload runs (never during body eval).
     @State private var pulsing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var motion = NoopMotionState.shared
 
     /// Colour for the light: green recording, amber last-synced, red not recording, accent for
     /// experimental history. Mirrors the prior `TodayView.recordingHue` semantics verbatim.
@@ -4491,6 +4531,7 @@ private struct RecordingStatusLight: View {
         case .lastSynced:          return StrandPalette.statusWarning
         case .notRecording:        return Color(red: 0.98, green: 0.27, blue: 0.23)
         case .historyExperimental: return StrandPalette.accent
+        case .connectedNoData:     return StrandPalette.accent
         }
     }
 
@@ -4529,10 +4570,10 @@ private struct RecordingStatusLight: View {
         .disabled(state == nil && !syncing)
         .accessibilityLabel(syncing ? syncingAccessibilityLabel
             : (state?.accessibilityText ?? String(localized: "Recording status, not shown for a past day")))
-        // Run the repeating pulse only while syncing; the `.task(id:)` auto-cancels when the flag flips,
-        // so there is no timer left running once the offload ends (or Today goes away).
-        .task(id: syncing) {
-            guard syncing else { pulsing = false; return }
+        // Run the repeating pulse only while syncing and decorative motion is allowed. The steady
+        // accent dot still conveys synchronization in Low Power/Reduce Motion modes.
+        .task(id: "\(syncing)-\(motion.poseStill(reduceMotion))") {
+            guard syncing, !motion.poseStill(reduceMotion) else { pulsing = false; return }
             withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false)) { pulsing = true }
         }
     }
@@ -4803,6 +4844,8 @@ enum RecordingState: Equatable {
     /// offload yet. NOT the WHOOP-4 "not recording" failure: the link is live, history sync is just
     /// experimental on 5.0. Surfaced from `LiveState.historySyncExperimental`, overriding the mapper.
     case historyExperimental
+    /// Link is up, but no live HR or usable history has arrived yet.
+    case connectedNoData
 
     /// The chip's short label. Verbatim spec copy; the dynamic "Xm" goes into the LocalizedStringKey slot.
     var label: LocalizedStringKey {
@@ -4811,6 +4854,7 @@ enum RecordingState: Equatable {
         case .lastSynced(let mins):      return "Last synced \(mins)m ago"
         case .notRecording:              return "Not recording"
         case .historyExperimental:       return "Connected"
+        case .connectedNoData:           return "Connected"
         }
     }
 
@@ -4821,6 +4865,7 @@ enum RecordingState: Equatable {
         case .lastSynced:          return "Reconnect to pull the latest."
         case .notRecording:        return "Strap not connected. Tap to connect."
         case .historyExperimental: return "History sync is experimental on 5.0."
+        case .connectedNoData:     return "No live heart rate or synced history yet this session."
         }
     }
 
@@ -4835,6 +4880,8 @@ enum RecordingState: Equatable {
             return String(localized: "Not recording. Strap not connected. Tap to connect.")
         case .historyExperimental:
             return String(localized: "Connected. History sync is experimental on 5.0.")
+        case .connectedNoData:
+            return String(localized: "Connected. No live heart rate or synced history yet this session.")
         }
     }
 
@@ -4847,8 +4894,10 @@ enum RecordingState: Equatable {
     static func resolve(connected: Bool,
                         heartRate: Int?,
                         lastSyncedAt: TimeInterval?,
+                        sustainedEmptyOffload: Bool = false,
                         now: TimeInterval = Date().timeIntervalSince1970) -> RecordingState {
         if connected && heartRate != nil { return .recording }
+        if connected && (lastSyncedAt == nil || sustainedEmptyOffload) { return .connectedNoData }
         if let at = lastSyncedAt {
             let secs = max(0, now - at)
             let mins = Int((secs / 60).rounded(.up))

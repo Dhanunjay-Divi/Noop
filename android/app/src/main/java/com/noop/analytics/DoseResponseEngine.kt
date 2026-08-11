@@ -152,7 +152,9 @@ object DoseResponseEngine {
         }
 
         return DoseResponse(
-            behavior = behavior, outcome = outcome, perUnit = perUnit,
+            // The prior owns the canonical display label. This keeps accepting a legacy "Charge"
+            // request without letting that retired product term escape into Insights copy.
+            behavior = behavior, outcome = prior.outcome, perUnit = perUnit,
             userSlope = userSlope, priorSlope = prior.slopePerUnit, weight = w, nUser = nUser,
             priorDominated = priorDominated, contradictsPrior = contradicts,
             confidence = confidence, curve = curve,

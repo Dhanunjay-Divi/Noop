@@ -48,7 +48,25 @@ enum PuffinExperiment {
     /// `NoopPrefs.KEY_CONTINUOUS_HRV_OVERNIGHT`.
     static let continuousHrvOvernightOnlyKey = "noopContinuousHrvOvernightOnly"
 
-    static var continuousHrvOvernightOnlyEnabled: Bool { UserDefaults.standard.bool(forKey: continuousHrvOvernightOnlyKey) }
+    static var continuousHrvOvernightOnlyEnabled: Bool {
+        UserDefaults.standard.object(forKey: continuousHrvOvernightOnlyKey) as? Bool ?? true
+    }
+
+    /// Preserve the former 24/7 behavior for an existing user who had already touched Continuous HRV,
+    /// while fresh installs take the safer, lower-power overnight-only default.
+    static func migrateContinuousHrvOvernightDefault() {
+        let defaults = UserDefaults.standard
+        guard shouldPinLegacyOvernightDefault(
+            hasOvernightChoice: defaults.object(forKey: continuousHrvOvernightOnlyKey) != nil,
+            hasUsedContinuousHrv: defaults.object(forKey: keepRealtimeForDataKey) != nil
+        ) else { return }
+        defaults.set(false, forKey: continuousHrvOvernightOnlyKey)
+    }
+
+    static func shouldPinLegacyOvernightDefault(hasOvernightChoice: Bool,
+                                                hasUsedContinuousHrv: Bool) -> Bool {
+        !hasOvernightChoice && hasUsedContinuousHrv
+    }
 
     // MARK: - Power saving (#477), parity with Android NoopPrefs
 
@@ -104,14 +122,59 @@ enum PuffinExperiment {
     /// Test Centre view via @AppStorage on this key. Mirrors the Android `PuffinExperiment.KEY_HRV_READINESS`.
     static let hrvReadinessKey = "noopHrvReadiness"
 
-    /// Opt-in "Auto-detect workouts": after a sync / on Today appear, scan the last day or two of HR for a
-    /// SUSTAINED-ELEVATED window (resting HR + 30 bpm held ≥ 12 min) that doesn't overlap a saved workout,
-    /// and surface ONE dismissible Today card offering to save it as a manual-style workout. Pure read +
-    /// suggestion: nothing is ever created without the user tapping Save, and turning this OFF stops all
-    /// detection and hides the card. Default OFF. Mirrors the Android `NoopPrefs.KEY_AUTO_DETECT_WORKOUTS`.
+    /// Legacy Boolean for the former on/off suggestion feature. Keep reading it during migration so an
+    /// existing user's explicit choice is never silently changed by the richer mode picker below.
     static let autoDetectWorkoutsKey = "noopAutoDetectWorkouts"
 
-    static var autoDetectWorkoutsEnabled: Bool { UserDefaults.standard.bool(forKey: autoDetectWorkoutsKey) }
+    /// Three-way automatic-activity preference. Fresh installs use confidence-gated auto-save; an upgrade
+    /// with the old Boolean set to true stays in the old ask-before-saving behavior, and false stays off.
+    /// Mirrors Android `NoopPrefs.KEY_AUTO_WORKOUT_MODE`.
+    static let autoWorkoutModeKey = "noopAutoWorkoutMode"
+
+    enum AutoWorkoutMode: String, CaseIterable, Identifiable {
+        case off
+        case ask
+        case autoSave
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .off: return String(localized: "Off")
+            case .ask: return String(localized: "Ask")
+            case .autoSave: return String(localized: "Auto-save")
+            }
+        }
+    }
+
+    /// Pure migration seam, kept testable without mutating process-global defaults.
+    static func resolvedAutoWorkoutMode(storedRaw: String?, legacyEnabled: Bool?) -> AutoWorkoutMode {
+        if let storedRaw, let stored = AutoWorkoutMode(rawValue: storedRaw) { return stored }
+        if let legacyEnabled { return legacyEnabled ? .ask : .off }
+        return .autoSave
+    }
+
+    static var autoWorkoutMode: AutoWorkoutMode {
+        let defaults = UserDefaults.standard
+        return resolvedAutoWorkoutMode(
+            storedRaw: defaults.string(forKey: autoWorkoutModeKey),
+            legacyEnabled: defaults.object(forKey: autoDetectWorkoutsKey) == nil
+                ? nil
+                : defaults.bool(forKey: autoDetectWorkoutsKey)
+        )
+    }
+
+    static func setAutoWorkoutMode(_ mode: AutoWorkoutMode) {
+        let defaults = UserDefaults.standard
+        defaults.set(mode.rawValue, forKey: autoWorkoutModeKey)
+        // Keep older app builds safe if a user rolls back: non-off modes remain enabled there and retain
+        // their historical ask-before-saving semantics rather than unexpectedly auto-saving.
+        defaults.set(mode != .off, forKey: autoDetectWorkoutsKey)
+    }
+
+    static var autoDetectWorkoutsEnabled: Bool {
+        autoWorkoutMode != .off
+    }
 
     /// "Journal reminder" (#627). When ON, Today shows a persistent journal widget (a last-7-days
     /// completion strip that taps through to the journal) and nudges when today isn't logged yet.
@@ -140,4 +203,10 @@ enum PuffinExperiment {
     static let motionAwareWakeKey = "noopMotionAwareWake"
 
     static var motionAwareWakeEnabled: Bool { UserDefaults.standard.bool(forKey: motionAwareWakeKey) }
+
+    /// Opt-in WHOOP MG ECG ("Labrador") research probe. Default off; BLEManager additionally requires
+    /// a positively identified MG before any ECG command can leave the app.
+    static let ecgKey = "noopWhoop5Ecg"
+
+    static var ecgEnabled: Bool { UserDefaults.standard.bool(forKey: ecgKey) }
 }

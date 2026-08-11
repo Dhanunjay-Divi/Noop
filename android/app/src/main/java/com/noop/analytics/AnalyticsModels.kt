@@ -52,6 +52,13 @@ data class UserProfile(
      * (the body term cancels out of the age formula). Default param so existing call-sites compile.
      */
     val waistCm: Double = 0.0,
+    /** Explicit profile-input gates for age-shaped estimates; defaults true for headless/test callers. */
+    val ageInputConfirmed: Boolean = true,
+    val sexInputConfirmed: Boolean = true,
+    /** Once a relevant profile field changes, legacy rows without a matching provenance token are stale. */
+    val fitnessAgeProvenanceRequired: Boolean = false,
+    val vo2maxProvenanceRequired: Boolean = false,
+    val vitalityProvenanceRequired: Boolean = false,
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

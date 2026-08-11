@@ -354,6 +354,13 @@ fun SleepScreen(
             .map { (_, blocks) -> blocks.sortedBy { it.effectiveStartTs } }
     }
 
+    // Debt credit is the canonical main-night DailyMetric total PLUS actual asleep minutes from blocks
+    // outside that main-night group. Keep the nap sum separate: Rest, the hero and daily total deliberately
+    // remain main-night-only. Stage-less naps add no guessed in-bed time. Mirrors Swift SleepView. (#525)
+    val napSleepMinByDay = remember(sleeps, habitualMidsleep) {
+        napSleepMinutesByDay(sleeps, habitualMidsleep)
+    }
+
     // The navigated night, decoded once per (offset, data) change — chevron taps re-pick
     // instantly without re-parsing stagesJSON on every recomposition. The offset now indexes
     // DAYS (navDays), so a day with a detected night always resolves to that night. (#160, #59)
@@ -365,9 +372,10 @@ fun SleepScreen(
     // at-a-glance TILES, the debt ledger, the personal need and the trend stay full-history /
     // latest-anchored, matching iOS SleepView. `selectedDay` re-points only the hero. Model is null
     // when the selected day has no stage minutes. (#5)
-    val model = remember(days, night, imported) {
+    val model = remember(days, night, imported, napSleepMinByDay) {
         buildSleepModel(days, night?.session, imported, selectedDay = night?.dayKey,
-            heroStages = night?.groupStages, heroSegments = night?.groupSegments)
+            heroStages = night?.groupStages, heroSegments = night?.groupSegments,
+            napSleepMinByDay = napSleepMinByDay)
     }
     val display = remember(model, night) { heroDisplay(model, night) }
 
@@ -378,7 +386,9 @@ fun SleepScreen(
     // newest stage-bearing day instead of vanishing. The HERO stays on `model`/`display` (an
     // honest no-stage-data fallback for the bad day, edit pencil reachable). Null only when NO day
     // has stage data: the true first-run empty state.
-    val tilesModel = remember(model, days, imported) { model ?: fallbackSleepModel(days, imported) }
+    val tilesModel = remember(model, days, imported, napSleepMinByDay) {
+        model ?: fallbackSleepModel(days, imported, napSleepMinByDay)
+    }
 
     // Jump straight to a night by its (local) wake-day — the center date block opens a picker.
     // navDays is newest-day-first, so the day's index IS its offset (0 = last night). (#160, #59)
@@ -843,7 +853,7 @@ private val LIQUID_HERO_RADIUS: Dp = 26.dp
 @Composable
 private fun RestHero(score: Double?, asleepMin: Double?, source: String, overline: String) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader("Sleep performance", overline = overline, trailing = "Rest")
+        SectionHeader("Sleep performance", overline = overline, trailing = "Sleep Score")
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2023,24 +2033,45 @@ private fun NightNavHeader(
         }
     }
 
-    // Wake-up picker also mutates only the draft. Its calendar day is derived from the DRAFT bedtime,
-    // so editing bedtime first and wake second produces one coherent cross-midnight window (#515/#406).
+    // Wake-up date and time are explicit; the selected instant is preserved instead of re-derived.
     val draftForWake = sleepEditDraft
     if (editingWake && session != null && draftForWake != null) {
         val endCal = Calendar.getInstance().apply { timeInMillis = draftForWake.endTs * 1000L }
         DisposableEffect(Unit) {
-            val dialog = TimePickerDialog(
+            var dateChosen = false
+            val dialog = DatePickerDialog(
                 context,
-                { _, h, m ->
-                    sleepEditDraft = draftForWake.withWakeTime(hour = h, minute = m)
+                { _, year, month, day ->
+                    dateChosen = true
+                    val selected = Calendar.getInstance().apply {
+                        timeInMillis = draftForWake.endTs * 1000L
+                        set(Calendar.YEAR, year); set(Calendar.MONTH, month); set(Calendar.DAY_OF_MONTH, day)
+                    }
+                    val timeDialog = TimePickerDialog(
+                        context,
+                        { _, hour, minute ->
+                            selected.set(Calendar.HOUR_OF_DAY, hour); selected.set(Calendar.MINUTE, minute)
+                            selected.set(Calendar.SECOND, 0); selected.set(Calendar.MILLISECOND, 0)
+                            sleepEditDraft = draftForWake.withWakeCandidate(selected.timeInMillis / 1000L)
+                        },
+                        endCal.get(Calendar.HOUR_OF_DAY), endCal.get(Calendar.MINUTE), true,
+                    ).apply { setTitle("Wake-up time") }
+                    timeDialog.setOnDismissListener {
+                        editingWake = false
+                        if (sleepEditDraft != null) showTimeChoice = true
+                    }
+                    timeDialog.show()
                 },
-                endCal.get(Calendar.HOUR_OF_DAY),
-                endCal.get(Calendar.MINUTE),
-                true,
-            ).apply { setTitle("Wake-up time") }
-            dialog.setOnDismissListener {
-                editingWake = false
-                if (sleepEditDraft != null) showTimeChoice = true
+                endCal.get(Calendar.YEAR), endCal.get(Calendar.MONTH), endCal.get(Calendar.DAY_OF_MONTH),
+            ).apply {
+                datePicker.maxDate = System.currentTimeMillis()
+                setTitle("Wake-up date")
+                setOnDismissListener {
+                    if (editingWake && !dateChosen) {
+                        editingWake = false
+                        if (sleepEditDraft != null) showTimeChoice = true
+                    }
+                }
             }
             dialog.show()
             onDispose { runCatching { dialog.dismiss() } }
@@ -2303,7 +2334,7 @@ private fun MetricGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
     val tiles = listOf<@Composable (Modifier) -> Unit>(
         { mod ->
             SparkTile(
-                mod, "Rest",
+                mod, "Sleep Score",
                 value = pctValue(m.performance.latest),
                 caption = vsTypical(m.performance.latest, m.performance.typical, "%"),
                 accent = m.performance.latest?.let { Palette.recoveryColor(it) } ?: Palette.textPrimary,

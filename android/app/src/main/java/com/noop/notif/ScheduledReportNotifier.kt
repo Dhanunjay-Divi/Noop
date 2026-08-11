@@ -16,8 +16,8 @@ import kotlin.math.roundToInt
 // MARK: - Scheduled report notifications (#517)
 //
 // Two opt-in, default-OFF system notifications, no AI involved:
-//   1. A MORNING RECAP (Charge + Rest) once a fresh night has been processed.
-//   2. A POST-WORKOUT SUMMARY (Effort + duration + avg HR) when a newly synced workout is first seen.
+//   1. A MORNING RECAP once a fresh night has been processed.
+//   2. A POST-WORKOUT REMINDER when a newly synced workout is first seen.
 //
 // Neither is alarm-precise: NOOP reads the strap over BLE and scores on a ~15-minute analytics pass, so a
 // report lands when the next sync + pass completes — NOT the instant you wake or finish a session. The copy
@@ -53,38 +53,29 @@ object ScheduledReportPolicy {
         lastWorkoutTs: Long,
     ): Boolean = enabled && newestWorkoutTs != null && newestWorkoutTs > lastWorkoutTs
 
-    /** Title + body for the morning recap. Charge and Rest are each optional (a night can produce one
-     *  without the other); absent ones are simply omitted — never shown as 0 or a guess. Returns null when
-     *  neither is present (the caller shouldn't have been asked to build copy, but stay honest). */
+    /** Privacy-safe title + body for the morning recap. The score arguments are used only as the honest
+     *  availability gate: lock-screen copy never includes biometric values. Returns null when neither
+     *  Recovery nor Sleep Score is present. */
     fun morningCopy(chargePct: Int?, restPct: Int?): Pair<String, String>? {
-        val parts = ArrayList<String>(2)
-        chargePct?.let { parts.add("Charge $it") }
-        restPct?.let { parts.add("Rest $it") }
-        if (parts.isEmpty()) return null
-        val title = "Good morning: last night's recap"
-        val body = parts.joinToString(" · ") +
-            ". Recovery from your strap, scored after it synced this morning."
-        return title to body
+        if (chargePct == null && restPct == null) return null
+        return "Your morning recap is ready" to
+            "Open NOOP to review your Recovery and Sleep Score."
     }
 
-    /** Title + body for the post-workout summary. [effortDisplay] is already formatted on the user's
-     *  chosen scale ("0–100" or "0–21"); [durationLabel] is e.g. "42 min". avgHr is optional — a session
-     *  with no usable HR omits it rather than inventing one. */
+    /** Privacy-safe title + body for the post-workout summary. Detailed inputs stay available to the
+     *  in-app report, but none are rendered in notification text. */
+    @Suppress("UNUSED_PARAMETER")
     fun workoutCopy(
         sportLabel: String,
         effortDisplay: String,
         effortMaxLabel: String,
         durationLabel: String,
         avgHr: Int?,
-    ): Pair<String, String> {
-        val title = "Workout logged: $sportLabel"
-        val pieces = ArrayList<String>(3)
-        pieces.add("Effort $effortDisplay/$effortMaxLabel")
-        pieces.add(durationLabel)
-        avgHr?.let { pieces.add("avg $it bpm") }
-        val body = pieces.joinToString(" · ") + ". Summarised after your strap synced."
-        return title to body
-    }
+    ): Pair<String, String> = workoutReminderCopy()
+
+    internal fun workoutReminderCopy(): Pair<String, String> =
+        "Your workout summary is ready" to
+            "Open NOOP to review your Effort, duration and heart-rate summary."
 
     /** "42 min" / "1 h 8 min" from a whole-minute duration; clamps a 0/negative span to "under a minute"
      *  so a mis-timed session never reads as "0 min". */
@@ -105,8 +96,8 @@ object ScheduledReportNotifier {
 
     /**
      * Post the morning recap if enabled and not already posted today. [chargePct]/[restPct] are the
-     * just-computed Charge/Rest for the night (either may be null). No-op on every path that fails the
-     * policy, so the caller can fire it freely each time the days collector republishes.
+     * just-computed Recovery/Sleep Score for the night (either may be null). They gate availability but
+     * are never placed in notification text. No-op on every path that fails the policy.
      */
     @SuppressLint("MissingPermission") // guarded by areNotificationsEnabled() + runCatching
     fun onMorning(context: Context, reportDay: String, chargePct: Int?, restPct: Int?) {
@@ -132,11 +123,12 @@ object ScheduledReportNotifier {
     }
 
     /**
-     * Post the post-workout summary for [newestWorkoutTs] if it's strictly newer than the last summarised.
-     * The copy fields are pre-resolved by the caller (it owns the profile + Effort-scale + repo), so this
-     * stays Android-only plumbing. No-op when disabled or the workout isn't new.
+     * Post a privacy-safe workout reminder for [newestWorkoutTs] if it's strictly newer than the last
+     * summarised. Legacy [title]/[body] parameters remain for source compatibility, but the final posting
+     * boundary deliberately replaces them with generic copy. No-op when disabled or the workout isn't new.
      */
     @SuppressLint("MissingPermission")
+    @Suppress("UNUSED_PARAMETER")
     fun onWorkout(
         context: Context,
         newestWorkoutTs: Long?,
@@ -152,7 +144,11 @@ object ScheduledReportNotifier {
         runCatching {
             if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
             ensureChannel(context)
-            post(context, WORKOUT_NOTIF_ID, title, body)
+            // Enforce redaction at the final posting boundary too. One caller can produce a lean
+            // no-Effort summary without going through workoutCopy(); it must not leak duration, HR,
+            // sport, or another health detail onto the lock screen.
+            val privateCopy = ScheduledReportPolicy.workoutReminderCopy()
+            post(context, WORKOUT_NOTIF_ID, privateCopy.first, privateCopy.second)
             newestWorkoutTs?.let { NoopPrefs.setReportLastWorkoutTs(context, it) }
         }
     }
@@ -183,6 +179,7 @@ object ScheduledReportNotifier {
             .setContentIntent(openApp)
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
         NotificationManagerCompat.from(context).notify(id, n)

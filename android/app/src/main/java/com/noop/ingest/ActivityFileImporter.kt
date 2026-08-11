@@ -11,8 +11,6 @@ import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
 import org.xmlpull.v1.XmlPullParser
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import java.io.InputStream
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.Locale
@@ -214,6 +212,7 @@ object ActivityFileImporter {
             notes = activity.importNote(),
             routePolyline = activity.route.takeIf { it.size >= 2 }
                 ?.let { RouteMath.encode(it.map { p -> RouteMath.LatLng(p.lat, p.lon) }) },
+            steps = activity.steps,
         )
 
         repo.upsertDevice(deviceId, name = "Workout files")
@@ -227,14 +226,23 @@ object ActivityFileImporter {
         if (activity.hrSamples.isNotEmpty()) {
             repo.insertHr(activity.hrSamples.map { HrSample(deviceId = deviceId, ts = it.ts, bpm = it.bpm) })
         }
+        var dayStepsWritten = false
         if (activity.steps != null && activity.steps > 0) {
-            repo.upsertDailyMetrics(
-                listOf(DailyMetric(deviceId = deviceId, day = localDayString(activity.startTs), steps = activity.steps)),
-            )
+            val zone = java.time.ZoneId.systemDefault()
+            val localDate = Instant.ofEpochSecond(activity.startTs).atZone(zone).toLocalDate()
+            val dayStart = localDate.atStartOfDay(zone).toEpochSecond()
+            val dayEnd = localDate.plusDays(1).atStartOfDay(zone).toEpochSecond()
+            val daySteps = repo.sumWorkoutSteps(deviceId, dayStart, dayEnd)
+            if (daySteps > 0) {
+                repo.upsertDailyMetrics(
+                    listOf(DailyMetric(deviceId = deviceId, day = localDayString(activity.startTs), steps = daySteps)),
+                )
+                dayStepsWritten = true
+            }
         }
 
         val counts = linkedMapOf("workouts" to 1)
-        if (activity.steps != null && activity.steps > 0) counts["dailyMetric"] = 1
+        if (dayStepsWritten) counts["dailyMetric"] = 1
         return ImportSummary(
             source = SOURCE_LABEL,
             counts = counts,
@@ -864,19 +872,4 @@ internal class FitDecoder(raw: ByteArray) {
         )
         return ActivityFileImporter.Result(activity, ActivityFileImporter.Kind.FIT, skipped)
     }
-}
-
-// Stream helper (file-private; the twins in other importers are not visible here).
-private fun InputStream.readCapped(cap: Long): ByteArray {
-    val buffer = ByteArrayOutputStream(64 * 1024)
-    val chunk = ByteArray(64 * 1024)
-    var total = 0L
-    while (true) {
-        val n = read(chunk)
-        if (n < 0) break
-        total += n
-        if (total > cap) throw IllegalStateException("Input exceeds $cap bytes")
-        buffer.write(chunk, 0, n)
-    }
-    return buffer.toByteArray()
 }

@@ -2,6 +2,7 @@ package com.noop.ingest
 
 import android.content.Context
 import android.net.Uri
+import com.noop.analytics.SleepStageVocabulary
 import com.noop.data.DailyMetric
 import com.noop.data.ImportSummary
 import com.noop.data.MetricSeriesRow
@@ -9,7 +10,6 @@ import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.time.Instant
 import java.time.LocalDateTime
@@ -305,7 +305,8 @@ object WearableExportImporter {
                     (nested ?: flat)?.let { d.spo2Pct = d.spo2Pct ?: it }
                 }
             }
-            // VO2max → mL/kg/min (Oura key `vo2_max`). Feeds Fitness Age, same as Apple Health VO2max.
+            // VO2max → mL/kg/min (Oura key `vo2_max`). Keep it as a separate device-reported
+            // series; Fitness Age deliberately retains the provenance of its non-exercise model.
             (categoryArray(root, "vo2max") ?: categoryArray(root, "vo2_max"))?.let { arr ->
                 for (i in 0 until arr.length()) {
                     val v = arr.optJSONObject(i) ?: continue
@@ -374,7 +375,8 @@ object WearableExportImporter {
                 // SpO2: the real `dailyspo2` CSV column is `spo2_percentage` (the average %); keep the older
                 // flat aliases too for a combined-summary CSV (#862).
                 cells.double("spo2_percentage", "spo2", "blood_oxygen", "average_spo2")?.takeIf { it > 0 }?.let { d.spo2Pct = d.spo2Pct ?: it }
-                // VO2max: the real `vo2max` CSV column is `vo2_max` (mL/kg/min) → feeds Fitness Age.
+                // VO2max: the real `vo2max` CSV column is `vo2_max` (mL/kg/min). Store it separately;
+                // do not mix a device estimate into Fitness Age's non-exercise model.
                 cells.double("vo2_max", "vo2max")?.takeIf { it > 0 }?.let { d.vo2max = d.vo2max ?: it }
                 cells.double("steps")?.takeIf { it >= 0 }?.let { d.steps = d.steps ?: it.toInt() }
                 cells.double("active_calories", "activity_burn", "active_burn")?.takeIf { it > 0 }?.let { d.activeKcal = d.activeKcal ?: it }
@@ -719,7 +721,7 @@ object WearableExportImporter {
         var asleep = 0L
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
-            if (o.optString("stage") == "wake") continue
+            if (SleepStageVocabulary.isWake(o.optString("stage"))) continue
             asleep += (o.optLong("end") - o.optLong("start")).coerceAtLeast(0)
         }
         return minOf(100.0, asleep.toDouble() / (end - start) * 100.0)
@@ -737,7 +739,9 @@ object WearableExportImporter {
         val isZip = head.size >= 2 && head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte()
 
         if (!isZip) {
-            val bytes = context.contentResolver.openInputStream(uri)?.use { readCapped(it, MAX_ENTRY_BYTES) }
+            val bytes = context.contentResolver.openInputStream(uri)?.use {
+                it.readCapped(MAX_ENTRY_BYTES, what = "Entry")
+            }
                 ?: throw IllegalStateException("Couldn't open the selected file.")
             val name = displayName(context, uri)?.lowercase() ?: "export.json"
             // A single file is one entry — the aggregate budget can't trip here.
@@ -767,7 +771,9 @@ object WearableExportImporter {
                 val path = entry.name.lowercase()
                 val base = last(path)
                 if (!entry.isDirectory && (base.endsWith(".json") || base.endsWith(".csv"))) {
-                    val bytes = runCatching { readCapped(zin, MAX_ENTRY_BYTES) }.getOrNull()
+                    val bytes = runCatching {
+                        zin.readCapped(MAX_ENTRY_BYTES, what = "Entry")
+                    }.getOrNull()
                     // First-wins dedup (was last-wins overwrite) so the running `total` matches the retained
                     // bytes exactly; mirrors the Swift zip loader's `if result[path] == nil` guard.
                     if (bytes != null && bytes.isNotEmpty() && isWellnessFile(base, bytes) && !out.containsKey(path)) {
@@ -795,20 +801,6 @@ object WearableExportImporter {
         val hints = listOf("sleep", "heart", "rate", "step", "stress", "activit", "readiness", "wellness",
             "rhr", "oura", "calorie", "spo2", "respiration", "temperature", "biometric", "summarizedactivities", "di_connect")
         return hints.any { name.contains(it) }
-    }
-
-    private fun readCapped(input: InputStream, cap: Long): ByteArray {
-        val buffer = ByteArrayOutputStream(64 * 1024)
-        val chunk = ByteArray(64 * 1024)
-        var total = 0L
-        while (true) {
-            val n = input.read(chunk)
-            if (n < 0) break
-            total += n
-            if (total > cap) throw IllegalStateException("Entry exceeds $cap bytes")
-            buffer.write(chunk, 0, n)
-        }
-        return buffer.toByteArray()
     }
 
     // ------------------------------------------------------------------------

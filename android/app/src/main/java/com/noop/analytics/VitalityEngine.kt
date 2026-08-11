@@ -2,11 +2,10 @@ package com.noop.analytics
 
 import kotlin.math.abs
 
-// VitalityEngine.kt — 0–100 "Vitality" wellness score + optional "Body Age in years".
+// VitalityEngine.kt — experimental 0–100 wellness composite + compatibility age-shaped readout.
 // Byte-for-byte mirror of Strand/Packages/StrandAnalytics/Sources/StrandAnalytics/VitalityEngine.swift.
 //
-// INDEPENDENT implementation of the published method WHOOP's "Healthspan / WHOOP Age" also uses (NOT
-// medical advice; a wellness comparison, never a clinical biological age): map each wearable input to its
+// This is NOT WHOOP Age, a biological clock, or a validated multivariable clinical model. It maps inputs to
 // published all-cause-mortality hazard ratio vs a population reference, sum the log-hazards with an
 // overlap correction (correlated inputs), and convert to a "years of aging" offset via the Gompertz
 // mortality-rate doubling time (~8 years per doubling). Body Age = chronological age + Δage; average =
@@ -19,7 +18,8 @@ object VitalityEngine {
     const val maxBodyAge = 90.0
     private const val vitalityPerYear = 2.5
     const val minFactors = 3
-    const val bandYears = 5.0
+    const val minDomains = 3
+    const val bandYears = 0.0 // no validated individual interval exists for this experimental composite
 
     data class Inputs(
         val chronoAge: Double,
@@ -88,7 +88,7 @@ object VitalityEngine {
             out.add(Contribution("sleep", "Sleep duration", dev.coerceIn(0.0, 3.0) * 0.110))
         }
         inputs.sleepConsistency?.let {
-            out.add(Contribution("consistency", "Sleep regularity", (0.75 - it.coerceIn(0.0, 1.0)) * 0.450))
+            out.add(Contribution("consistency", "Sleep-duration consistency", (0.75 - it.coerceIn(0.0, 1.0)) * 0.450))
         }
         val h = inputs.rmssd; val norm = inputs.rmssdNorm
         if (h != null && norm != null && norm > 0) {
@@ -101,11 +101,20 @@ object VitalityEngine {
         return out
     }
 
-    /** Full Vitality + Body Age. Returns null until at least [minFactors] inputs are present. */
+    private fun domain(key: String): String = when (key) {
+        "rhr", "vo2max" -> "cardiorespiratory"
+        "hrv" -> "autonomic"
+        "sleep", "consistency" -> "sleep"
+        "steps" -> "activity"
+        else -> key
+    }
+
+    /** Full Vitality + compatibility age readout. Requires enough independent domains. */
     fun compute(inputs: Inputs): Result? {
-        if (inputs.chronoAge <= 0) return null
+        if (inputs.chronoAge !in 20.0..80.0) return null
         val contribs = contributions(inputs)
         if (contribs.size < minFactors) return null
+        if (contribs.map { domain(it.key) }.toSet().size < minDomains) return null
         val sumLn = contribs.sumOf { it.lnHazard } * overlapShrink
         val deltaAge = sumLn / lnHazardPerYear
         val bodyAge = (inputs.chronoAge + deltaAge).coerceIn(minBodyAge, maxBodyAge)

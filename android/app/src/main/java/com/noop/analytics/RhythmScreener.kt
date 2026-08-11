@@ -166,6 +166,23 @@ object RhythmScreener {
             return WindowResult.unreadable(nBeats = clean.size, confidence = confidence(clean.size))
         }
 
+        // Gate 4: every statistic below is a spread over the interval cloud. Refuse duplicated
+        // over-coverage and banked records whose individual values do not line up with their timestamps.
+        // Empty or mismatched timestamps stay readable because no timing conclusion can be measured.
+        if (input.ts.size == input.rrMs.size && input.ts.isNotEmpty()) {
+            val tsLong = input.ts.map { it.toLong() }
+            val coverage = HrvAnalyzer.rrCoverage(tsLong, input.rrMs)
+            val collapsed = HrvAnalyzer.collapsedCoverage(tsLong, input.rrMs)
+            val verdict = HrvAnalyzer.classifyCoverage(coverage, collapsed)
+            if (!HrvAnalyzer.beatSpreadIsTrustworthy(verdict)) {
+                return WindowResult.unreadable(nBeats = clean.size, confidence = confidence(clean.size))
+            }
+            val accurate = HrvAnalyzer.beatAccurateFraction(tsLong, input.rrMs)
+            if (!HrvAnalyzer.beatValuesAreTrustworthy(accurate)) {
+                return WindowResult.unreadable(nBeats = clean.size, confidence = confidence(clean.size))
+            }
+        }
+
         // Core descriptive statistics over the clean (range-filtered, ectopy-kept) series.
         val stats = computeStats(clean)
         val rrLabel = classify(stats)

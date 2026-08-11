@@ -27,6 +27,7 @@ that covers it. "Builds and unit tests pass" alone is not enough for BLE work.
 - [ ] No hardcoded hex frame bytes; protocol facts live in the schema / decoders
 - [ ] Follows the conventions in [`docs/CONTRIBUTING.md`](../docs/CONTRIBUTING.md)
 - [ ] I did not commit generated output (`Strand.xcodeproj/`) or any secrets/keystores
+- [ ] I did not commit personal health exports, raw captures, databases, backups, routes, journal notes, or other participant data; any fixture is minimized synthetic data
 
 ## Related issues
 

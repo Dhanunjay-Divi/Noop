@@ -25,7 +25,7 @@ import Foundation
 //     card can say "based mostly on typical patterns, not yet yours" and show the prior.
 //   - Once the user has enough data, the PERSON overrides the population: if the personal slope
 //     contradicts the prior (e.g. your drink-nights show no dip), β follows the user, and
-//     `contradictsPrior` flags the "in your data so far, this doesn't move your Charge" copy.
+//     `contradictsPrior` flags the "in your data so far, this doesn't move your Recovery" copy.
 //   - Caffeine "dose" is a TIMING proxy (later = stronger), never mg — the priors table & UI say so.
 // Nothing here is a causal/clinical claim; it is association on the user's own logged days.
 //
@@ -39,7 +39,7 @@ import Foundation
 public struct DoseResponse: Equatable, Sendable {
     /// The dosed behaviour this estimate is for.
     public let behavior: DosedBehavior
-    /// The outcome label the slope is expressed in (e.g. "Charge", "HRV").
+    /// The product-facing outcome label the slope is expressed in (e.g. "Recovery", "HRV").
     public let outcome: String
     /// The SHRUNK, clamped effect per ONE extra unit of dose (signed). This is the headline
     /// "each extra drink ≈ Δ for you" number.
@@ -187,7 +187,7 @@ public enum DoseResponseEngine {
 
         let priorDominated = nUser < minDoseDays
         // Person overrides population only once they have enough data AND the signs disagree
-        // (e.g. prior says drinking lowers Charge but your slope is ≥ 0). A flat personal slope
+        // (e.g. prior says drinking lowers Recovery but your slope is ≥ 0). A flat personal slope
         // counts as "doesn't move it the way it typically does."
         let contradicts: Bool
         if let us = userSlope, nUser >= minDoseDays {
@@ -204,7 +204,10 @@ public enum DoseResponseEngine {
             curve.append(DoseCurvePoint(dose: dose, outcomeDelta: Double(dose) * perUnit + 0.0)) // +0.0 normalises -0.0 → 0.0
         }
 
-        return DoseResponse(behavior: behavior, outcome: outcome, perUnit: perUnit,
+        // `prior.outcome` is canonical product terminology. A legacy caller may still pass
+        // `Charge` (accepted by DoseResponsePriors as a compatibility alias), but user-facing
+        // sentences and cards must consistently say `Recovery`.
+        return DoseResponse(behavior: behavior, outcome: prior.outcome, perUnit: perUnit,
                             userSlope: userSlope, priorSlope: prior.slopePerUnit,
                             weight: w, nUser: nUser, priorDominated: priorDominated,
                             contradictsPrior: contradicts, confidence: confidence, curve: curve)

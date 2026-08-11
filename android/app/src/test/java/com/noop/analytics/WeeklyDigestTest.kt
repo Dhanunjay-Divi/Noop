@@ -164,7 +164,7 @@ class WeeklyDigestTest {
         val d = WeeklyDigestEngine.build(mapOf(WeeklyMetric.CHARGE to charge), "2026-06-13")
         assertFalse(d.focalPoints.isEmpty())
         val top = d.focalPoints[0]
-        assertTrue(top, top.contains("Charge"))
+        assertTrue(top, top.contains("Recovery"))
         assertTrue(top, top.contains("up"))
         assertTrue(top, top.contains("good sign"))
     }
@@ -188,6 +188,8 @@ class WeeklyDigestTest {
         )
         assertEquals(1, d.focalPoints.size)
         assertTrue(d.focalPoints[0], d.focalPoints[0].lowercase().contains("steady"))
+        assertTrue(d.focalPoints[0], d.focalPoints[0].contains("Sleep Score"))
+        assertFalse(d.focalPoints[0], d.focalPoints[0].contains("Rest held"))
     }
 
     @Test fun sparseWeekSaysTooEarlyNotSteady() {

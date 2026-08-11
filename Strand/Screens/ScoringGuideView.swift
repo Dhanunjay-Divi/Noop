@@ -61,9 +61,9 @@ enum ScoreSection: String, CaseIterable, Identifiable {
     /// Localized display name for the section (the raw value stays the stable anchor id).
     var displayName: String {
         switch self {
-        case .charge: return String(localized: "Charge")
+        case .charge: return String(localized: "Recovery")
         case .effort: return String(localized: "Effort")
-        case .rest:   return String(localized: "Rest")
+        case .rest:   return String(localized: "Sleep")
         }
     }
 }
@@ -89,15 +89,15 @@ struct ScoringGuideView: View {
                     VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                         introCard
                         scoreCard(.charge,
-                                  headline: String(localized: "Charge: how recovered are you?"),
-                                  body: String(localized: "Led by your heart-rate variability (HRV) measured against your own personal baseline, plus resting heart rate, last night's Rest, breathing rate, and a skin-temperature signal (an early illness or overreach flag). Higher HRV versus your baseline means more Charge. NOOP needs a few nights to learn your baseline first. Until then you'll see “Calibrating”."),
+                                  headline: String(localized: "Recovery: how recovered are you?"),
+                                  body: String(localized: "Led by your heart-rate variability (HRV) measured against your own personal baseline, plus resting heart rate, last night's Sleep Score, breathing rate, and a skin-temperature signal (an early illness or overreach flag). Higher HRV versus your baseline means higher Recovery. NOOP needs a few nights to learn your baseline first. Until then you'll see “Calibrating”."),
                                   vsWhoop: String(localized: "Same core idea as WHOOP's Recovery % (HRV-led recovery), but our weighting and baseline maths are our own, and openly documented."))
                         scoreCard(.effort,
                                   headline: String(localized: "Effort: how hard did your heart work?"),
                                   body: String(localized: "Your cardiovascular load. NOOP turns every second of heart rate into a training-impulse using heart-rate-reserve zones (Karvonen), weights time in harder zones more heavily (Edwards / Banister), and places it on a logarithmic 0-100 scale, so easy days sit low and an all-out day approaches 100, which stays genuinely rare. A long walk with little cardio still counts, through a steps / active-energy floor."),
                                   vsWhoop: String(localized: "Same cardiovascular-load idea as WHOOP's Day Strain (0-21). We rescaled the top of the ladder from 21 to 100 so all three scores share one scale. The rungs didn't move, so a 100 is as rare as a 21.0 was."))
                         scoreCard(.rest,
-                                  headline: String(localized: "Rest: how restorative was your sleep?"),
+                                  headline: String(localized: "Sleep Score: how restorative was your sleep?"),
                                   body: String(localized: "A blend of how long you slept versus your personal need (the biggest factor), how efficiently (asleep versus in bed), how much was restorative (deep + REM sleep), and how consistent your sleep and wake timing is."),
                                   vsWhoop: String(localized: "Similar in spirit to WHOOP's Sleep Performance %; our composite is our own."))
                         confidenceCard
@@ -132,7 +132,7 @@ struct ScoringGuideView: View {
                     .foregroundStyle(StrandPalette.textTertiary)
                 Text("How your scores work").font(StrandFont.rounded(26, weight: .bold))
                     .foregroundStyle(StrandPalette.textPrimary)
-                Text("Charge · Effort · Rest").font(StrandFont.caption)
+                Text("Recovery · Effort · Sleep Score").font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textSecondary)
             }
             Spacer()
@@ -168,15 +168,15 @@ struct ScoringGuideView: View {
                 Text("THE THREE SCORES").font(StrandFont.overline)
                     .tracking(StrandFont.overlineTracking)
                     .foregroundStyle(StrandPalette.textSecondary)
-                Text("NOOP gives you three daily scores (Charge, Effort and Rest), each on a 0-100 scale. They're built from your strap's raw signals using published, peer-reviewed sport science, and computed entirely on your device. They are NOT WHOOP's scores: we don't have WHOOP's private algorithms and don't pretend to. They aim at the same three questions using open science, so they'll usually track WHOOP's in direction, but won't match number-for-number. And that's the point.")
+                Text("NOOP gives you three daily scores (Recovery, Effort and Sleep Score), each on a 0-100 scale. They're built from available wearable signals using published methods and computed on your device. They are not WHOOP's proprietary scores and won't match number-for-number; source and confidence stay visible so you can compare them honestly.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 // The three accents as a quick legend, echoing the section colours below.
                 HStack(spacing: 16) {
-                    legendDot(.charge, String(localized: "Charge"))
+                    legendDot(.charge, String(localized: "Recovery"))
                     legendDot(.effort, String(localized: "Effort"))
-                    legendDot(.rest, String(localized: "Rest"))
+                    legendDot(.rest, String(localized: "Sleep"))
                 }
                 .padding(.top, 2)
             }

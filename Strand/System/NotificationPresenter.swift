@@ -24,4 +24,19 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
     ) {
         completionHandler([.banner, .sound, .list])
     }
+
+    /// Route a tapped review reminder into the relevant top-level screen. The bridge persists first,
+    /// which is essential during a cold launch: SwiftUI may not have mounted RootView/RootTabView yet.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        if let route = NotificationRouteBridge.route(
+            from: response.notification.request.content.userInfo
+        ) {
+            NotificationRouteBridge.recordPending(route)
+        }
+        completionHandler()
+    }
 }

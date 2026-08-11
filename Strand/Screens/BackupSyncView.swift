@@ -422,8 +422,8 @@ struct BackupSyncView: View {
                 busy = false
                 switch result {
                 case .imported:
-                    alertTitle = String(localized: "Restored")
-                    alertMessage = String(localized: "Fully quit and reopen NOOP to load it.")
+                    alertTitle = String(localized: "Backup ready")
+                    alertMessage = String(localized: "Quit NOOP completely and reopen it. Your current database will be preserved and the restore applied before NOOP opens it.")
                 case .failure(let m):
                     alertTitle = String(localized: "Restore problem"); alertMessage = m
                 case .cancelled, .exported:

@@ -84,4 +84,33 @@ extension WhoopStore {
             return (earliest, latest)
         }
     }
+
+    // MARK: - User-owned series deletion
+
+    /// Physically delete one point identified by the metric-series natural key.
+    ///
+    /// Sensitive local series (for example a user-entered period start) must support a real delete
+    /// rather than retaining a zero-valued tombstone that still reveals the original date.
+    @discardableResult
+    public func deleteMetricSeriesPoint(deviceId: String, day: String, key: String) async throws -> Int {
+        try syncWrite { db in
+            try db.execute(sql: """
+                DELETE FROM metricSeries
+                WHERE deviceId = ? AND day = ? AND key = ?
+                """, arguments: [deviceId, day, key])
+            return db.changesCount
+        }
+    }
+
+    /// Physically delete every point for one source/key pair after explicit user confirmation.
+    @discardableResult
+    public func deleteMetricSeries(deviceId: String, key: String) async throws -> Int {
+        try syncWrite { db in
+            try db.execute(sql: """
+                DELETE FROM metricSeries
+                WHERE deviceId = ? AND key = ?
+                """, arguments: [deviceId, key])
+            return db.changesCount
+        }
+    }
 }

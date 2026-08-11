@@ -5,6 +5,100 @@ import WhoopProtocol
 import StrandAnalytics
 import StrandDesign   // TrendPoint , the shared chart point type the Deep Timeline series uses
 
+/// Stable identity for one suggestion. The endpoint is deliberately excluded: a later sync can extend
+/// the same bout or merge a nearby finalized span, but it must not create a second prompt/notification.
+/// Legacy `start:end` values remain readable so existing dismissals survive the migration.
+enum AutoWorkoutSuggestionIdentity {
+    private static let prefix = "start:"
+
+    static func token(startSec: Int, endSec: Int) -> String {
+        _ = endSec
+        return prefix + String(startSec)
+    }
+
+    static func startSec(from token: String) -> Int? {
+        if token.hasPrefix(prefix) { return Int(token.dropFirst(prefix.count)) }
+        let parts = token.split(separator: ":")
+        guard parts.count == 2 else { return nil }
+        return Int(parts[0])
+    }
+
+    static func referenceSec(from token: String) -> Int? {
+        if token.hasPrefix(prefix) { return startSec(from: token) }
+        guard let colon = token.lastIndex(of: ":") else { return nil }
+        return Int(token[token.index(after: colon)...])
+    }
+
+    static func matches(_ token: String, startSec: Int) -> Bool {
+        self.startSec(from: token) == startSec
+    }
+}
+
+/// A deliberately stricter gate for unattended saves than for a visible suggestion. The detector has
+/// already required a finalized elevated-HR window, dense HR coverage, no saved overlap, and motion
+/// confirmation whenever enough motion exists. Auto-save adds a 15-minute floor so the least certain
+/// 10-14 minute edge candidates still ask instead of being written silently.
+enum AutoWorkoutAutomationPolicy {
+    static let minimumAutoSaveMinutes = 15
+
+    static func shouldAutoSave(_ candidate: DetectedWorkout) -> Bool {
+        guard candidate.startSec > 0,
+              candidate.endSec > candidate.startSec,
+              candidate.durationMin >= minimumAutoSaveMinutes,
+              (30...220).contains(candidate.avgBpm),
+              (candidate.avgBpm...250).contains(candidate.peakBpm) else { return false }
+        if candidate.suggestedClass != nil {
+            guard let confidence = candidate.suggestionConfidence,
+                  confidence.isFinite,
+                  confidence >= WorkoutTypeClassifier.minAdvisoryConfidence else { return false }
+        }
+        return true
+    }
+}
+
+/// The latest unattended save waiting for a quick Keep / Not a workout review on Today. This contains
+/// only local workout metadata and lives in UserDefaults beside the mode preference; it never leaves the
+/// device. A newer auto-save replaces the review card, while all older rows remain editable in Workouts.
+struct AutoWorkoutReview: Codable, Equatable {
+    let startSec: Int
+    let endSec: Int
+    let sport: String
+    let source: String
+    let avgBpm: Int
+    let peakBpm: Int
+
+    var row: WorkoutRow {
+        WorkoutRow(startTs: startSec, endTs: endSec, sport: sport, source: source,
+                   durationS: Double(endSec - startSec), energyKcal: nil,
+                   avgHr: avgBpm, maxHr: peakBpm, strain: nil, distanceM: nil,
+                   zonesJSON: nil, notes: nil)
+    }
+
+    var candidate: DetectedWorkout {
+        DetectedWorkout(startSec: startSec, endSec: endSec, avgBpm: avgBpm,
+                        peakBpm: peakBpm, durationMin: max(1, (endSec - startSec) / 60))
+    }
+}
+
+enum AutoWorkoutReviewStore {
+    static let key = "autoWorkout.pendingReview"
+
+    static var current: AutoWorkoutReview? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(AutoWorkoutReview.self, from: data)
+    }
+
+    static func record(_ review: AutoWorkoutReview) {
+        guard let data = try? JSONEncoder().encode(review) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    static func clear(startSec: Int? = nil) {
+        if let startSec, current?.startSec != startSec { return }
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+}
+
 /// Per-day sleep figures the WHOOP export carried verbatim (metricSeries rows written by
 /// WhoopImporter under the imported deviceId). SleepView prefers these over its on-device
 /// APPROXIMATE recomputations.
@@ -182,6 +276,11 @@ final class Repository: ObservableObject {
     @Published private(set) var hydrationSeq = 0
     func noteHydrationChanged() { hydrationSeq += 1 }
 
+    /// Bumped whenever a period-start row is logged or removed. Cycle surfaces can refresh the
+    /// sensitive local series without forcing an unrelated full strap-data reload.
+    @Published private(set) var cycleTrackingSeq = 0
+    func noteCycleTrackingChanged() { cycleTrackingSeq += 1 }
+
     /// Workouts & GPS test mode (Test Centre): the tagged sink for the `.workouts` diagnostic lines
     /// (auto-detect inputs/thresholds/why, cross-source dedup decisions). Default nil (inert) so tests +
     /// non-prod inits get the byte-identical untraced path; AppModel wires it to `live.append(log:domain:)`.
@@ -248,12 +347,44 @@ final class Repository: ObservableObject {
     /// single returned row per day feeds the existing imported-vs-computed `mergeDaily` unchanged.
     private func unionDailyMetrics(store: WhoopStore, from: String, to: String) async -> [DailyMetric] {
         var byDay: [String: DailyMetric] = [:]
-        for id in importedReadIds {   // active strap FIRST → it claims each day, canonical only fills gaps
-            for m in (try? await store.dailyMetrics(deviceId: id, from: from, to: to)) ?? [] where byDay[m.day] == nil {
-                byDay[m.day] = m
+        for id in importedReadIds {   // active strap FIRST → it claims each column, canonical fills its gaps
+            for m in (try? await store.dailyMetrics(deviceId: id, from: from, to: to)) ?? [] {
+                byDay[m.day] = byDay[m.day].map { Self.coalesceDay($0, m) } ?? m
             }
         }
         return byDay.values.sorted { $0.day < $1.day }
+    }
+
+    /// Fold two rows for the same day inside one source bucket without discarding useful columns.
+    /// The earlier/high-precedence row keeps every value it actually carries (including a measured
+    /// zero); the later row only fills nils. Sleep and raw SpO2 channels move as atomic groups so a
+    /// total from one device can never be paired with stage/optical components from another device.
+    nonisolated static func coalesceDay(_ winner: DailyMetric, _ filler: DailyMetric) -> DailyMetric {
+        let sleepFromFiller = winner.totalSleepMin == nil && winner.efficiency == nil &&
+            winner.deepMin == nil && winner.remMin == nil && winner.lightMin == nil &&
+            winner.disturbances == nil
+        let rawSpo2FromFiller = winner.spo2Red == nil && winner.spo2Ir == nil
+        return DailyMetric(
+            day: winner.day,
+            totalSleepMin: sleepFromFiller ? filler.totalSleepMin : winner.totalSleepMin,
+            efficiency: sleepFromFiller ? filler.efficiency : winner.efficiency,
+            deepMin: sleepFromFiller ? filler.deepMin : winner.deepMin,
+            remMin: sleepFromFiller ? filler.remMin : winner.remMin,
+            lightMin: sleepFromFiller ? filler.lightMin : winner.lightMin,
+            disturbances: sleepFromFiller ? filler.disturbances : winner.disturbances,
+            restingHr: winner.restingHr ?? filler.restingHr,
+            avgHrv: winner.avgHrv ?? filler.avgHrv,
+            recovery: winner.recovery ?? filler.recovery,
+            strain: winner.strain ?? filler.strain,
+            exerciseCount: winner.exerciseCount ?? filler.exerciseCount,
+            spo2Pct: winner.spo2Pct ?? filler.spo2Pct,
+            skinTempDevC: winner.skinTempDevC ?? filler.skinTempDevC,
+            respRateBpm: winner.respRateBpm ?? filler.respRateBpm,
+            steps: winner.steps ?? filler.steps,
+            activeKcalEst: winner.activeKcalEst ?? filler.activeKcalEst,
+            spo2Red: rawSpo2FromFiller ? filler.spo2Red : winner.spo2Red,
+            spo2Ir: rawSpo2FromFiller ? filler.spo2Ir : winner.spo2Ir
+        )
     }
 
     /// metricSeries points across the imported union for a key + day range, DEDUPED per day with the active
@@ -280,8 +411,8 @@ final class Repository: ObservableObject {
     private func unionComputedDailyMetrics(store: WhoopStore, from: String, to: String) async -> [DailyMetric] {
         var byDay: [String: DailyMetric] = [:]
         for id in computedReadIds {
-            for m in (try? await store.dailyMetrics(deviceId: id, from: from, to: to)) ?? [] where byDay[m.day] == nil {
-                byDay[m.day] = m
+            for m in (try? await store.dailyMetrics(deviceId: id, from: from, to: to)) ?? [] {
+                byDay[m.day] = byDay[m.day].map { Self.coalesceDay($0, m) } ?? m
             }
         }
         return byDay.values.sorted { $0.day < $1.day }
@@ -912,6 +1043,22 @@ final class Repository: ObservableObject {
         return byTs.values.sorted { $0.ts < $1.ts }
     }
 
+    /// Raw motion over the active-strap/canonical union, de-duplicated by timestamp with the active
+    /// device winning. Auto-workout confirmation uses this when the device actually banks motion;
+    /// HR-only devices simply return an empty list and retain the conservative HR fallback.
+    func gravitySamples(from: Int, to: Int, limit: Int = 200_000) async -> [GravitySample] {
+        guard let store = await ensureStore() else { return [] }
+        guard deviceId != canonicalDeviceId else {
+            return (try? await store.gravitySamples(deviceId: deviceId, from: from, to: to, limit: limit)) ?? []
+        }
+        var byTs: [Int: GravitySample] = [:]
+        for id in importedReadIds {
+            let rows = (try? await store.gravitySamples(deviceId: id, from: from, to: to, limit: limit)) ?? []
+            for row in rows where byTs[row.ts] == nil { byTs[row.ts] = row }
+        }
+        return byTs.values.sorted { $0.ts < $1.ts }
+    }
+
     /// Logical day-start of the most recent day the active device has HR data for, or nil when the store is
     /// empty. Lets the Deep Timeline open on a day that actually has data instead of a possibly-empty today
     /// right after a history sync , the #597 root cause (the timeline was today-only with no way back).
@@ -954,6 +1101,19 @@ final class Repository: ObservableObject {
             perId.append((try? await store.stepSamples(deviceId: id, from: from, to: to, limit: 200_000)) ?? [])
         }
         return Self.latestActivityClass(perId)
+    }
+
+    /// Full step/activity-class series over the same active/canonical union used by HR and gravity.
+    /// Auto-workout type hints need the window composition, not just the latest class. Active wins a
+    /// timestamp tie; a single-device install remains a single indexed read.
+    func stepSamplesUnion(from: Int, to: Int, limit: Int = 200_000) async -> [StepSample] {
+        guard let store = await ensureStore() else { return [] }
+        var byTs: [Int: StepSample] = [:]
+        for id in importedReadIds {
+            let rows = (try? await store.stepSamples(deviceId: id, from: from, to: to, limit: limit)) ?? []
+            for row in rows where byTs[row.ts] == nil { byTs[row.ts] = row }
+        }
+        return byTs.values.sorted { $0.ts < $1.ts }
     }
 
     /// Raw strap step TICKS over `[from, to]` for a manual-workout summary (#398): the wrap-aware
@@ -2248,8 +2408,19 @@ final class Repository: ObservableObject {
     ///    first (the (deviceId, startTs, sport) PK upsert would otherwise orphan it);
     ///  - an IMPORTED row is never passed here as `replacing` (duplicating one is a pure add), so its
     ///    history is never touched.
-    func saveManualWorkout(_ row: WorkoutRow, replacing old: WorkoutRow? = nil) async {
-        guard let store = await ensureStore() else { return }
+    @discardableResult
+    func saveManualWorkout(_ row: WorkoutRow, replacing old: WorkoutRow? = nil) async -> Bool {
+        guard let store = await ensureStore() else { return false }
+
+        // Commit the replacement before retiring the old row. A database failure must never make an edit
+        // destructive, and callers such as the auto-detect card need a truthful success value so they keep
+        // the candidate visible when persistence fails.
+        do {
+            try await store.upsertWorkouts([row], deviceId: deviceId)
+        } catch {
+            return false
+        }
+
         if let old, WorkoutSource.classify(old.source) == .detected {
             await dismissDetected(old)
         } else if let old, old.startTs != row.startTs || old.sport != row.sport {
@@ -2264,7 +2435,7 @@ final class Repository: ObservableObject {
                 RouteStore.remove(startTs: old.startTs, sport: old.sport)
             }
         }
-        _ = try? await store.upsertWorkouts([row], deviceId: deviceId)
+        return true
     }
 
     /// Re-label a detected bout: copy it to a manual strap row with the chosen sport, then delete the
@@ -2279,9 +2450,11 @@ final class Repository: ObservableObject {
                                 durationS: row.durationS, energyKcal: row.energyKcal,
                                 avgHr: row.avgHr, maxHr: row.maxHr, strain: row.strain,
                                 distanceM: row.distanceM, zonesJSON: row.zonesJSON, notes: row.notes)
-        _ = try? await store.upsertWorkouts([manual], deviceId: deviceId)
-        _ = try? await store.deleteWorkouts(deviceId: computedDeviceId, sport: "detected",
+        let recordingDeviceId = Self.workoutHrDeviceId(source: row.source, activeStrapId: deviceId)
+        _ = try? await store.upsertWorkouts([manual], deviceId: recordingDeviceId)
+        _ = try? await store.deleteWorkouts(deviceId: row.source, sport: row.sport,
                                             from: row.startTs, to: row.startTs)
+        AutoWorkoutReviewStore.clear(startSec: row.startTs)
     }
 
     /// Dismiss a DETECTED bout the user says isn't a workout. Records its span in the durable dismissed
@@ -2289,12 +2462,21 @@ final class Repository: ObservableObject {
     /// disappears immediately. Idempotent: a span already present isn't duplicated. (#107)
     func dismissDetected(_ row: WorkoutRow) async {
         guard WorkoutSource.classify(row.source) == .detected else { return }
+        // The app has two detector pipelines with separate durable dismissal stores. Mark the canonical
+        // automatic-activity identity too, or removing an auto-saved row would let the suggestion scan
+        // recreate the same workout immediately after its database row disappeared.
+        dismissDetectedSuggestion(DetectedWorkout(
+            startSec: row.startTs, endSec: row.endTs,
+            avgBpm: row.avgHr ?? 60, peakBpm: row.maxHr ?? row.avgHr ?? 60,
+            durationMin: max(1, (row.endTs - row.startTs) / 60)
+        ))
         let token = WorkoutSource.dismissedToken(for: row)
         var spans = dismissedDetectedSpans
         if !spans.contains(token) { spans.append(token); dismissedDetectedSpans = spans }
         guard let store = await ensureStore() else { return }
-        _ = try? await store.deleteWorkouts(deviceId: computedDeviceId, sport: row.sport,
+        _ = try? await store.deleteWorkouts(deviceId: row.source, sport: row.sport,
                                             from: row.startTs, to: row.startTs)
+        AutoWorkoutReviewStore.clear(startSec: row.startTs)
     }
 
     /// Delete ONE workout by natural key. The read model has no deviceId, so reconstruct it from the
@@ -2379,7 +2561,8 @@ final class Repository: ObservableObject {
     // is remembered in its OWN durable span list (distinct key from `dismissedDetected`) so it never
     // re-prompts. The detector + thresholds are byte-mirrored in the Android twin.
 
-    /// Dismissed AUTO-DETECT spans ("startSec:endSec"), kept apart from the gravity detector's
+    /// Dismissed AUTO-DETECT identities (`start:<startSec>`; legacy `start:end` is still accepted),
+    /// kept apart from the gravity detector's
     /// `dismissedDetected` list so the two features never cross-suppress each other.
     private static let autoDetectDismissedKey = "workouts.autoDetectDismissed"
     private var autoDetectDismissedSpans: [String] {
@@ -2387,8 +2570,10 @@ final class Repository: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: Self.autoDetectDismissedKey) }
     }
 
-    /// Token for one auto-detect span (matches the detector's integer seconds).
-    private func autoDetectToken(_ w: DetectedWorkout) -> String { "\(w.startSec):\(w.endSec)" }
+    /// Stable token for one auto-detect bout. Endpoint changes do not create a new identity.
+    private func autoDetectToken(_ w: DetectedWorkout) -> String {
+        AutoWorkoutSuggestionIdentity.token(startSec: w.startSec, endSec: w.endSec)
+    }
 
     /// Hard cap on the dismissed-span list , a backstop so the UserDefaults array can't grow without
     /// bound even in pathological use. 200 most-recent (by span END) is far more than detection's ~2-day
@@ -2398,13 +2583,7 @@ final class Repository: ObservableObject {
     /// the last ~2 days), so we drop them. 30 days, matching the Android twin byte-for-byte.
     private static let autoDetectDismissedMaxAgeSec = 30 * 86_400
 
-    /// Parse the END time (seconds) out of a "startSec:endSec" token; nil if malformed.
-    private func autoDetectTokenEnd(_ token: String) -> Int? {
-        guard let colon = token.lastIndex(of: ":") else { return nil }
-        return Int(token[token.index(after: colon)...])
-    }
-
-    /// Prune the dismissed-span list: drop spans whose END is older than ~30 days (they can never be
+    /// Prune the dismissed list: drop identities whose reference time is older than ~30 days (they can never be
     /// re-suggested anyway), then hard-cap to the `autoDetectDismissedMax` most-recent (by END) as a
     /// backstop. Malformed tokens are kept (treated as newest) so we never silently lose data on a
     /// parse miss. Byte-mirrored in the Android `AutoWorkoutPrefs.prune`.
@@ -2412,16 +2591,41 @@ final class Repository: ObservableObject {
         let cutoff = now - Self.autoDetectDismissedMaxAgeSec
         // Drop anything that aged out; an unparseable token survives the age filter.
         let fresh = spans.filter { token in
-            guard let end = autoDetectTokenEnd(token) else { return true }
-            return end >= cutoff
+            guard let reference = AutoWorkoutSuggestionIdentity.referenceSec(from: token) else { return true }
+            return reference >= cutoff
         }
         guard fresh.count > Self.autoDetectDismissedMax else { return fresh }
         // Over the cap , keep the most-recent by END (unparseable sort as newest). Sort indices so we
         // preserve the original list order among the kept entries and never collapse equal tokens.
         let keepIdx = Set(fresh.indices
-            .sorted { (autoDetectTokenEnd(fresh[$0]) ?? .max) > (autoDetectTokenEnd(fresh[$1]) ?? .max) }
+            .sorted {
+                (AutoWorkoutSuggestionIdentity.referenceSec(from: fresh[$0]) ?? .max)
+                    > (AutoWorkoutSuggestionIdentity.referenceSec(from: fresh[$1]) ?? .max)
+            }
             .prefix(Self.autoDetectDismissedMax))
         return fresh.indices.filter { keepIdx.contains($0) }.map { fresh[$0] }
+    }
+
+    /// Bounded, span-only overlap read for the suggestion detector. The ordinary `workoutRows()` path is
+    /// a display projection over ~11 years and may reconcile hundreds of rows against HR traces; the
+    /// detector only needs timestamps around its two-day scan. One maximum-workout day of look-behind
+    /// catches a saved session that starts before the scan boundary but overlaps it.
+    private func autoDetectSavedSpans(from: Int, to: Int) async -> [SavedWorkoutSpan] {
+        guard let store = await ensureStore() else { return [] }
+        let queryFrom = max(0, from - 86_400)
+        var rows: [WorkoutRow] = []
+        for id in importedReadIds {
+            rows += (try? await store.workouts(deviceId: id, from: queryFrom, to: to, limit: 5000)) ?? []
+        }
+        for id in computedReadIds {
+            rows += (try? await store.workouts(deviceId: id, from: queryFrom, to: to, limit: 5000)) ?? []
+        }
+        for id in ["apple-health", "lifting", "activity-file"] {
+            rows += (try? await store.workouts(deviceId: id, from: queryFrom, to: to, limit: 5000)) ?? []
+        }
+        return rows
+            .filter { $0.endTs >= from && $0.startTs <= to }
+            .map { SavedWorkoutSpan(startSec: $0.startTs, endSec: $0.endTs) }
     }
 
     /// Run the opt-in detector over the last `daysBack` days of HR and return the single best
@@ -2435,13 +2639,14 @@ final class Repository: ObservableObject {
         let samples = await hrSamples(from: from, to: now, limit: 200_000)
         guard samples.count >= 2 else { return nil }
         let hr = samples.map { (ts: $0.ts, bpm: $0.bpm) }
+        let gravity = await gravitySamples(from: from, to: now, limit: 200_000)
+        let motion = gravity.isEmpty ? nil : AutoWorkoutDetector.motionPoints(gravity)
 
         // Resting HR: most recent nightly RHR in range, else the detector's own default (60).
         let restingBpm = days.last(where: { $0.restingHr != nil })?.restingHr
 
         // Exclude every already-saved workout window (any source , strap, manual, imported, detected).
-        let saved = await workoutRows()
-        let savedSpans = saved.map { SavedWorkoutSpan(startSec: $0.startTs, endSec: $0.endTs) }
+        let savedSpans = await autoDetectSavedSpans(from: from, to: now)
 
         // Workouts & GPS test mode: when on, run the diagnostic twin which returns the SAME candidates
         // detect(...) does (it reuses detect verbatim) plus the inputs / thresholds / per-window why trace,
@@ -2450,33 +2655,92 @@ final class Repository: ObservableObject {
         let candidates: [DetectedWorkout]
         if TestCentre.active(.workouts), workoutsLog != nil {
             let (results, trace) = AutoWorkoutDetector.detectTrace(
-                hr: hr, restingBpm: restingBpm, motion: nil, savedSpans: savedSpans, path: "autoDetect")
+                hr: hr, restingBpm: restingBpm, motion: motion,
+                savedSpans: savedSpans, path: "autoDetect")
             for line in trace { emitWorkouts(line) }
             candidates = results
         } else {
             candidates = AutoWorkoutDetector.detect(hr: hr, restingBpm: restingBpm,
-                                                    motion: nil, savedSpans: savedSpans)
+                                                    motion: motion, savedSpans: savedSpans)
         }
         // Drop anything the user already dismissed, then take the most recent.
-        let dismissed = Set(autoDetectDismissedSpans)
-        return candidates
-            .filter { !dismissed.contains(autoDetectToken($0)) }
-            .max(by: { $0.startSec < $1.startSec })
+        let dismissed = autoDetectDismissedSpans
+        let visibleCandidates = candidates.filter { candidate in
+            !dismissed.contains {
+                AutoWorkoutSuggestionIdentity.matches($0, startSec: candidate.startSec)
+            }
+        }
+        guard let candidate = visibleCandidates.max(by: { $0.startSec < $1.startSec }) else { return nil }
+
+        // Wire the existing broad-type classifier into the actual suggestion path. A type appears only
+        // when the strap supplied decoded activity-class ticks across the window and the heuristic clears
+        // its confidence floor; otherwise the candidate remains the honest generic "Workout". It is still
+        // advisory: the card names it experimental and saving is an explicit acceptance.
+        let steps = await stepSamplesUnion(from: candidate.startSec, to: candidate.endSec)
+        guard let features = WorkoutTypeFeatureExtractor.extract(
+            hr: samples, gravity: gravity, steps: steps,
+            start: candidate.startSec, end: candidate.endSec,
+            restingHR: restingBpm.map(Double.init)),
+              features.tickCoverage >= WorkoutTypeClassifier.minTickCoverage else { return candidate }
+        let prediction = WorkoutTypeClassifier.classify(features)
+        guard prediction.predictedClass != .other,
+              prediction.confidence >= WorkoutTypeClassifier.minAdvisoryConfidence else { return candidate }
+        return DetectedWorkout(
+            startSec: candidate.startSec, endSec: candidate.endSec,
+            avgBpm: candidate.avgBpm, peakBpm: candidate.peakBpm,
+            durationMin: candidate.durationMin,
+            suggestedClass: prediction.predictedClass,
+            suggestionConfidence: prediction.confidence)
     }
 
-    /// SAVE a suggested window as a manual-style "Workout" (generic sport , we don't claim a sport we
-    /// didn't classify). Built through the same `WorkoutSource.buildManualRow` the manual sheet uses, so
-    /// it persists exactly like a hand-entered session under the strap source. After saving, the screen
-    /// re-queries (the new saved span now excludes this window from re-suggestion).
+    /// Persist a detector-qualified window under the computed `<strap>-noop` source so it is honestly
+    /// classified as Detected rather than Manual. Both an explicitly accepted suggestion and an
+    /// unattended confidence-gated save use this path; the latter also leaves a durable Today review.
     @discardableResult
-    func saveDetectedWorkout(_ w: DetectedWorkout) async -> Bool {
-        let durationMin = max(1, w.durationMin)
-        let start = Date(timeIntervalSince1970: TimeInterval(w.startSec))
-        guard let row = WorkoutSource.buildManualRow(start: start, durationMin: durationMin,
-                                                     sport: "Workout", avgHr: w.avgBpm,
-                                                     energyKcal: nil) else { return false }
-        await saveManualWorkout(row)
+    func saveDetectedWorkout(_ w: DetectedWorkout, markForReview: Bool = false) async -> Bool {
+        guard let store = await ensureStore() else { return false }
+        let sport = Self.acceptedAutoDetectSport(w.suggestedClass)
+        guard let row = WorkoutSource.buildDetectedSuggestionRow(
+            startSec: w.startSec,
+            endSec: w.endSec,
+            sport: sport,
+            avgHr: w.avgBpm,
+            source: computedDeviceId
+        ) else { return false }
+        do {
+            try await store.upsertWorkouts([row], deviceId: computedDeviceId)
+        } catch {
+            return false
+        }
+        if markForReview {
+            AutoWorkoutReviewStore.record(AutoWorkoutReview(
+                startSec: w.startSec, endSec: w.endSec, sport: sport,
+                source: computedDeviceId, avgBpm: w.avgBpm, peakBpm: w.peakBpm
+            ))
+        }
         return true
+    }
+
+    /// Validate the persisted review against the database before showing it. Editing/dismissing the row
+    /// elsewhere clears a stale review instead of presenting an action for a workout that no longer exists.
+    func pendingAutoWorkoutReview() async -> AutoWorkoutReview? {
+        guard let review = AutoWorkoutReviewStore.current else { return nil }
+        let exists = await workoutRows(days: 35).contains {
+            $0.startTs == review.startSec && $0.sport == review.sport && $0.source == review.source
+        }
+        if !exists { AutoWorkoutReviewStore.clear(startSec: review.startSec); return nil }
+        return review
+    }
+
+    nonisolated static func acceptedAutoDetectSport(_ hint: CoarseWorkoutClass?) -> String {
+        switch hint {
+        case .walk: return "Walking"
+        case .run: return "Running"
+        case .strength: return "Strength Training"
+        case .cycle: return "Cycling"
+        case .ski: return "Skiing"
+        case .other, .none: return "Workout"
+        }
     }
 
     /// DISMISS a suggested window: record its span durably so it never re-prompts. Idempotent.
@@ -2485,7 +2749,9 @@ final class Repository: ObservableObject {
     func dismissDetectedSuggestion(_ w: DetectedWorkout) {
         let token = autoDetectToken(w)
         var spans = autoDetectDismissedSpans
-        guard !spans.contains(token) else { return }
+        guard !spans.contains(where: {
+            AutoWorkoutSuggestionIdentity.matches($0, startSec: w.startSec)
+        }) else { return }
         spans.append(token)
         autoDetectDismissedSpans = prunedAutoDetectSpans(spans, now: Int(Date().timeIntervalSince1970))
     }

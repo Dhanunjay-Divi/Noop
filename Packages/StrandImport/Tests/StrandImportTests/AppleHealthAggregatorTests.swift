@@ -541,6 +541,36 @@ final class AppleHealthAggregatorTests: XCTestCase {
         XCTAssertFalse(keys.contains("bmi"))
     }
 
+    // MARK: - Temperature (absolute and source-distinct)
+
+    func testBodyAndSleepingWristTemperatureStayDistinctAndUseLatestOfDay() {
+        let early = Fixtures.utc(2024, 4, 11, 7, 0, 0)
+        let late = Fixtures.utc(2024, 4, 11, 19, 0, 0)
+        let samples = [
+            sample("BodyTemperature", 36.4, at: early, unit: "degC", end: early),
+            sample("HKQuantityTypeIdentifierBodyTemperature", 98.6, at: late, unit: "degF", end: late),
+            sample("AppleSleepingWristTemperature", 34.2, at: late, unit: "degC", end: late),
+        ]
+
+        let daily = AppleHealthAggregator.daily(samples: samples)
+        let a = try! XCTUnwrap(agg(daily, "2024-04-11"))
+        XCTAssertEqual(a.bodyTemperatureC!, 37.0, accuracy: 0.000_001)
+        XCTAssertEqual(a.wristTemperatureC!, 34.2, accuracy: 0.000_001)
+
+        let points = Dictionary(uniqueKeysWithValues:
+            AppleHealthAggregator.metricPoints(daily).map { ($0.key, $0.value) })
+        XCTAssertEqual(points["body_temp"]!, 37.0, accuracy: 0.000_001)
+        XCTAssertEqual(points["wrist_temp"]!, 34.2, accuracy: 0.000_001)
+        XCTAssertNil(points["skin_temp"], "Apple body/wrist temperature must never populate WHOOP skin temp.")
+    }
+
+    func testTemperatureUnitNormalizationHandlesKelvinWithoutGuessing() {
+        XCTAssertEqual(AppleHealthAggregator.temperatureCelsius(310.15, unit: "K"),
+                       37.0, accuracy: 0.000_001)
+        XCTAssertEqual(AppleHealthAggregator.temperatureCelsius(36.8, unit: nil),
+                       36.8, accuracy: 0.000_001)
+    }
+
     // MARK: - localDay direct
 
     func testLocalDayDirect() {

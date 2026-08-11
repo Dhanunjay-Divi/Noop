@@ -4,6 +4,7 @@ import com.noop.oura.OuraEvent
 import com.noop.oura.OuraHR
 import com.noop.oura.OuraHRV
 import com.noop.oura.OuraIBI
+import com.noop.oura.OuraIbiChannel
 import com.noop.oura.OuraSleepPhase
 import com.noop.oura.OuraSleepStage
 import com.noop.oura.OuraSpO2
@@ -45,21 +46,32 @@ class OuraStreamMappingTest {
     }
 
     @Test
-    fun hrvBecomesOuraHrvEventWithRawFieldsNotRmssd() {
+    fun hrvBecomesOuraHrvEventWithValidatedFields() {
         val s = OuraStreamMapping.streams(
-            listOf(OuraEvent.Hrv(OuraHRV(ringTimestamp = 5, timeMs = 1000, b1 = 7, b2 = -3))),
+            listOf(OuraEvent.Hrv(OuraHRV(ringTimestamp = 5, index = 0, hrBpm = 52, rmssdMs = 47))),
             anchor,
         )
         assertEquals(1, s.events.size)
         val ev = s.events.first()
         assertEquals(OuraStreamMapping.EVENT_HRV, ev.kind)
         assertEquals("OURA_HRV", ev.kind)
-        assertEquals(base + 5, ev.ts)
-        // HONEST: the ring's OWN raw tag fields only; NEVER a fabricated rmssd_ms.
-        assertEquals(1000, ev.payload["time_ms"])
-        assertEquals(7, ev.payload["b1"])
-        assertEquals(-3, ev.payload["b2"])
-        assertTrue("must not fabricate rmssd_ms", !ev.payload.containsKey("rmssd_ms"))
+        assertEquals(base + 5 - 300, ev.ts)
+        assertEquals(0, ev.payload["pair_index"])
+        assertEquals(52, ev.payload["hr_bpm"])
+        assertEquals(47, ev.payload["rmssd_ms"])
+    }
+
+    @Test
+    fun hrvBucketsAreOldestFirstAndPaddingKeepsItsSlot() {
+        val s = OuraStreamMapping.streams(
+            listOf(
+                OuraEvent.Hrv(OuraHRV(5, index = 0, hrBpm = 52, rmssdMs = 47, count = 4)),
+                OuraEvent.Hrv(OuraHRV(5, index = 2, hrBpm = 55, rmssdMs = 41, count = 4)),
+                OuraEvent.Hrv(OuraHRV(5, index = 3, hrBpm = 56, rmssdMs = 39, count = 4)),
+            ),
+            anchor,
+        )
+        assertEquals(listOf(base + 5 - 1200, base + 5 - 600, base + 5 - 300), s.events.map { it.ts })
     }
 
     @Test
@@ -75,9 +87,9 @@ class OuraStreamMappingTest {
         val deep = s.events[0]
         assertEquals(OuraStreamMapping.EVENT_SLEEP_PHASE, deep.kind)
         assertEquals("OURA_SLEEP_PHASE", deep.kind)
-        assertEquals(2, deep.payload["phase"])           // OuraSleepStage.DEEP.raw == 2
+        assertEquals(0, deep.payload["phase"])           // OuraSleepStage.DEEP.raw == 0
         assertEquals(0, deep.payload["index"])
-        assertEquals(3, s.events[1].payload["phase"])     // REM.raw == 3
+        assertEquals(2, s.events[1].payload["phase"])     // REM.raw == 2
         // PARITY: the payload is exactly { phase, index } - the Swift twin emits no phase_name, so neither
         // does Kotlin. Pin it so a re-added phase_name key breaks this test.
         assertNull(deep.payload["phase_name"])
@@ -93,6 +105,39 @@ class OuraStreamMappingTest {
         assertEquals(97, s.spo2.first().red)
         assertEquals(0, s.spo2.first().ir) // unread channel, never a fabricated second reading
         assertEquals(base + 1, s.spo2.first().ts)
+    }
+
+    @Test
+    fun spo2RecordSamplesGetDistinctOneSecondTimestamps() {
+        val s = OuraStreamMapping.streams(
+            listOf(
+                OuraEvent.Spo2(OuraSpO2(10, value = 95, index = 0, count = 3)),
+                OuraEvent.Spo2(OuraSpO2(10, value = 96, index = 1, count = 3)),
+                OuraEvent.Spo2(OuraSpO2(10, value = 97, index = 2, count = 3)),
+            ),
+            anchor,
+        )
+        assertEquals(listOf(base + 8, base + 9, base + 10), s.spo2.map { it.ts })
+    }
+
+    @Test
+    fun ibiChannelMapsToDurableProtocolChannel() {
+        val s = OuraStreamMapping.streams(
+            listOf(OuraEvent.Ibi(OuraIBI(10, 833, channel = OuraIbiChannel.GREEN_QUALITY))),
+            anchor,
+        )
+        assertEquals(com.noop.protocol.RrSourceChannel.GREEN_QUALITY, s.rr.single().srcChannel)
+    }
+
+    @Test
+    fun batchedPreservesRecordBeatOrderForOnePersist() {
+        val stamped = listOf(812, 795, 840).map { ms ->
+            OuraEvent.Ibi(OuraIBI(10, ms)) as OuraEvent to base
+        }
+        val batch = OuraStreamMapping.batched(stamped).single()
+        val rows = StreamPersistence.toBatch(OuraStreamMapping.streams(batch.second) { batch.first }).rr
+        assertEquals(listOf(812, 795, 840), rows.map { it.rrMs })
+        assertEquals(listOf(0, 1, 2), assignRrSeq("ring", rows).map { it.ord })
     }
 
     @Test

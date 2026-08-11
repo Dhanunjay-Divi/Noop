@@ -59,21 +59,49 @@ final class DecoderGoldenTests: XCTestCase {
         let rec = record("6e0a02000100000a141e2832")
         let ibis = OuraDecoders.decodeSpO2IBI(rec)
         XCTAssertEqual(ibis, [
-            OuraIBI(ringTimestamp: rt, ibiMs: 400),
-            OuraIBI(ringTimestamp: rt, ibiMs: 320),
-            OuraIBI(ringTimestamp: rt, ibiMs: 240),
-            OuraIBI(ringTimestamp: rt, ibiMs: 160),
-            OuraIBI(ringTimestamp: rt, ibiMs: 80),
+            OuraIBI(ringTimestamp: rt, ibiMs: 400, channel: .spo2Ibi),
+            OuraIBI(ringTimestamp: rt, ibiMs: 320, channel: .spo2Ibi),
+            OuraIBI(ringTimestamp: rt, ibiMs: 240, channel: .spo2Ibi),
+            OuraIBI(ringTimestamp: rt, ibiMs: 160, channel: .spo2Ibi),
+            OuraIBI(ringTimestamp: rt, ibiMs: 80, channel: .spo2Ibi),
         ])
     }
 
     // MARK: - 0x5D HRV / RMSSD
 
     func testHRV0x5D() {
-        // time 5000, b1=10, b2=-5
-        let rec = record("5d080200010088130afb")
+        // (u8 hr, u8 rmssd) pairs — real overnight bytes: 32 84 32 83 -> (50,132),(50,131).
+        let rec = record("5d080200010032843283")
         let hrv = OuraDecoders.decodeHRV(rec)
-        XCTAssertEqual(hrv, [OuraHRV(ringTimestamp: rt, timeMs: 5000, b1: 10, b2: -5)])
+        XCTAssertEqual(hrv, [
+            OuraHRV(ringTimestamp: rt, index: 0, hrBpm: 50, rmssdMs: 132, count: 2),
+            OuraHRV(ringTimestamp: rt, index: 1, hrBpm: 50, rmssdMs: 131, count: 2),
+        ])
+    }
+
+    func testHRV0x5DOddLengthIsNil() {
+        XCTAssertNil(OuraDecoders.decodeHRV(record("5d0702000100328432")))
+    }
+
+    func testHRV0x5DDropsPaddingWithoutRenumbering() {
+        // The dropped `00 00` middle pair still consumes index 1 and remains in the original count.
+        let hrv = OuraDecoders.decodeHRV(record("5d0a02000100328400003182"))
+        XCTAssertEqual(hrv, [
+            OuraHRV(ringTimestamp: rt, index: 0, hrBpm: 50, rmssdMs: 132, count: 3),
+            OuraHRV(ringTimestamp: rt, index: 2, hrBpm: 49, rmssdMs: 130, count: 3),
+        ])
+    }
+
+    func testHRV0x5DAllPaddingIsNil() {
+        XCTAssertNil(OuraDecoders.decodeHRV(record("5d06020001000000")))
+    }
+
+    func testHRV0x5DLoneZeroByteIsNotPadding() {
+        let hrv = OuraDecoders.decodeHRV(record("5d080200010032000083"))
+        XCTAssertEqual(hrv, [
+            OuraHRV(ringTimestamp: rt, index: 0, hrBpm: 50, rmssdMs: 0, count: 2),
+            OuraHRV(ringTimestamp: rt, index: 1, hrBpm: 0, rmssdMs: 131, count: 2),
+        ])
     }
 
     // MARK: - 0x6F SpO2 per-sample (byte6 high nibble is a base/status field, DISCARDED; samples are
@@ -84,8 +112,8 @@ final class DecoderGoldenTests: XCTestCase {
         let rec = record("6f0802000100105f60ff")
         let s = OuraDecoders.decodeSpO2PerSample(rec)
         XCTAssertEqual(s, [
-            OuraSpO2(ringTimestamp: rt, value: 95),
-            OuraSpO2(ringTimestamp: rt, value: 96),
+            OuraSpO2(ringTimestamp: rt, value: 95, index: 0, count: 2),
+            OuraSpO2(ringTimestamp: rt, value: 96, index: 1, count: 2),
         ])
     }
 
@@ -122,14 +150,14 @@ final class DecoderGoldenTests: XCTestCase {
     // MARK: - 0x4E sleep phase (2-bit codes MSB-first; header byte skipped)
 
     func testSleepPhase0x4E() {
-        // header 0x00, phase byte 0x6C = bits 01 10 11 00 -> light, deep, rem, awake.
+        // header 0x00, phase byte 0x6C = bits 01 10 11 00 -> light, REM, awake, deep.
         let rec = record("4e0602000100006c")
         let phases = OuraDecoders.decodeSleepPhase(rec)
         XCTAssertEqual(phases, [
             OuraSleepPhase(ringTimestamp: rt, index: 0, stage: .light),
-            OuraSleepPhase(ringTimestamp: rt, index: 1, stage: .deep),
-            OuraSleepPhase(ringTimestamp: rt, index: 2, stage: .rem),
-            OuraSleepPhase(ringTimestamp: rt, index: 3, stage: .awake),
+            OuraSleepPhase(ringTimestamp: rt, index: 1, stage: .rem),
+            OuraSleepPhase(ringTimestamp: rt, index: 2, stage: .awake),
+            OuraSleepPhase(ringTimestamp: rt, index: 3, stage: .deep),
         ])
     }
 

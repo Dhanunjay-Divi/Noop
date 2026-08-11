@@ -1,5 +1,6 @@
 package com.noop.ble
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -89,5 +90,21 @@ class BackfillPolicyTest {
         assertTrue(BackfillPolicy.shouldRun(BackfillTrigger.CONNECT, 1090.0, 1000.0, clockUntrusted = true))
         assertTrue(BackfillPolicy.shouldRun(BackfillTrigger.FOREGROUND, 1090.0, 1000.0, clockUntrusted = true))
         assertTrue(BackfillPolicy.shouldRun(BackfillTrigger.MANUAL, 1001.0, 1000.0, clockUntrusted = true))
+    }
+
+    /** #1123: zero-row timeout stalls count toward backoff, productive burst tails are neutral, and the
+     * next session that persists rows immediately resets the cadence. */
+    @Test
+    fun emptyOffloadBookkeeping_countsStallsAndResetsOnRows() {
+        var streak = EmptyOffloadBackoff.nextStreak(2, rowsPersisted = 0, productiveBurstTail = false)
+        assertEquals(3, streak)
+
+        streak = EmptyOffloadBackoff.nextStreak(streak, rowsPersisted = 0, productiveBurstTail = true)
+        assertEquals(3, streak)
+
+        streak = EmptyOffloadBackoff.nextStreak(streak, rowsPersisted = 12, productiveBurstTail = false)
+        assertEquals(0, streak)
+        assertEquals(4, EmptyOffloadBackoff.effectiveStreak(consoleOnlyStreak = 4, emptyOffloadStreak = 2))
+        assertEquals(5, EmptyOffloadBackoff.effectiveStreak(consoleOnlyStreak = 1, emptyOffloadStreak = 5))
     }
 }

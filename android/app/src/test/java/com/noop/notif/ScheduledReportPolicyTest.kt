@@ -9,8 +9,9 @@ import org.junit.Test
 /**
  * Pins the pure gate + copy of the #517 scheduled report notifications (the CallAlertPolicy/IllnessAlertPolicy
  * idiom). The Android notifier just wires these to a channel + the persisted dedupe markers, so all the
- * decision logic is verified here without android.*. The HONESTY contract: an absent score is omitted, never
- * shown as 0; both reports fire at most once per logical event, never twice.
+ * decision logic is verified here without android.*. The PRIVACY contract: notification copy is a generic
+ * invitation to open NOOP and never includes a score, sport, duration, or heart-rate value. Both reports
+ * still fire at most once per logical event, never twice.
  */
 class ScheduledReportPolicyTest {
 
@@ -86,19 +87,27 @@ class ScheduledReportPolicyTest {
         assertTrue(ScheduledReportPolicy.shouldNotifyWorkout(enabled = true, newestWorkoutTs = 1L, lastWorkoutTs = 0L))
     }
 
-    // MARK: - morningCopy (honest omission)
+    // MARK: - morningCopy (privacy-safe lock-screen reminder)
 
-    @Test fun morningCopyShowsBothScores() {
+    @Test fun morningCopyNeverShowsScores() {
         val (title, body) = ScheduledReportPolicy.morningCopy(chargePct = 72, restPct = 88)!!
-        assertTrue(title.contains("recap"))
-        assertTrue(body.contains("Charge 72"))
-        assertTrue(body.contains("Rest 88"))
+        val copy = "$title $body"
+        assertEquals("Your morning recap is ready", title)
+        assertTrue(body.contains("Recovery"))
+        assertTrue(body.contains("Sleep Score"))
+        assertFalse(copy.contains("72"))
+        assertFalse(copy.contains("88"))
+        assertFalse(copy.contains("Charge"))
     }
 
-    @Test fun morningCopyOmitsAbsentRestNeverShowsZero() {
-        val (_, body) = ScheduledReportPolicy.morningCopy(chargePct = 60, restPct = null)!!
-        assertTrue(body.contains("Charge 60"))
-        assertFalse(body.contains("Rest"))
+    @Test fun morningCopyStaysGenericWhenOnlyOneScoreExists() {
+        val copy = ScheduledReportPolicy.morningCopy(chargePct = 60, restPct = null)!!
+        assertEquals(
+            ScheduledReportPolicy.morningCopy(chargePct = null, restPct = 91),
+            copy,
+        )
+        assertFalse("${copy.first} ${copy.second}".contains("60"))
+        assertFalse("${copy.first} ${copy.second}".contains("91"))
     }
 
     @Test fun morningCopyNullWhenNeitherPresent() {
@@ -107,24 +116,29 @@ class ScheduledReportPolicyTest {
 
     // MARK: - workoutCopy
 
-    @Test fun workoutCopyIncludesEffortDurationAndHr() {
+    @Test fun workoutCopyNeverShowsSportEffortDurationOrHr() {
         val (title, body) = ScheduledReportPolicy.workoutCopy(
             sportLabel = "Running", effortDisplay = "14.2", effortMaxLabel = "21",
             durationLabel = "42 min", avgHr = 148,
         )
-        assertTrue(title.contains("Running"))
-        assertTrue(body.contains("Effort 14.2/21"))
-        assertTrue(body.contains("42 min"))
-        assertTrue(body.contains("avg 148 bpm"))
+        val copy = "$title $body"
+        assertEquals("Your workout summary is ready", title)
+        assertTrue(body.contains("Effort"))
+        listOf("Running", "14.2", "21", "42", "148", "bpm").forEach {
+            assertFalse(copy.contains(it))
+        }
     }
 
-    @Test fun workoutCopyOmitsHrWhenAbsent() {
-        val (_, body) = ScheduledReportPolicy.workoutCopy(
+    @Test fun workoutCopyIsStableAcrossDetailedInputs() {
+        val a = ScheduledReportPolicy.workoutCopy(
             sportLabel = "Cycling", effortDisplay = "60", effortMaxLabel = "100",
             durationLabel = "1 h", avgHr = null,
         )
-        assertFalse(body.contains("bpm"))
-        assertTrue(body.contains("Effort 60/100"))
+        val b = ScheduledReportPolicy.workoutCopy(
+            sportLabel = "Running", effortDisplay = "14.2", effortMaxLabel = "21",
+            durationLabel = "42 min", avgHr = 148,
+        )
+        assertEquals(a, b)
     }
 
     // MARK: - durationLabel

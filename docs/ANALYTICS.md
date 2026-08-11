@@ -2,15 +2,15 @@
 
 On-device analytics for **NOOP** — a standalone, local-first companion app for WHOOP straps (4.0 and 5.0/MG). NOOP talks to *your own* strap over Bluetooth, stores everything locally in SQLite, and computes its three daily scores plus HRV and sleep staging on-device. No cloud or account is involved in the math described here; an optional self-hosted sync can copy results to a server you control.
 
-## NOOP's three daily scores — Charge / Effort / Rest
+## NOOP's three daily scores — Recovery / Effort / Sleep Score
 
 NOOP gives you **three daily scores, each on a 0–100 scale**:
 
 | Score | Answers | Engine | Internal key | Was called |
 |---|---|---|---|---|
-| **Charge** | How recovered are you? | `RecoveryScorer` | `recovery` | Recovery |
+| **Recovery** | How recovered are you? | `RecoveryScorer` | `recovery` | Charge |
 | **Effort** | How hard did your heart work? | `StrainScorer` | `strain` | Strain (0–21) |
-| **Rest** | How restorative was your sleep? | Rest composite (`AnalyticsEngine`) | `sleep_performance` | Sleep Performance |
+| **Sleep Score** | How restorative was your sleep? | Rest composite (`AnalyticsEngine`) | `sleep_performance` | Rest |
 
 Each score is built from your strap's raw signals using **published, peer-reviewed sport science** (Task Force 1996 HRV, Karvonen %HRR, Edwards/Banister TRIMP, Tanaka HRmax — all cited in full below) and computed **entirely on your device**.
 
@@ -18,7 +18,7 @@ They are **NOT WHOOP's scores.** We don't have WHOOP's private algorithms and do
 
 Every score also carries a small **confidence tier — Solid / Building / Calibrating** (`ScoreConfidence`) so a sparse day reads truthfully instead of faking a number. When NOOP can't compute a score honestly, it shows nothing rather than a fabricated value.
 
-> **Naming & continuity.** The *display* names changed (Recovery→Charge, Strain→Effort, Sleep Performance→Rest) and Effort was **rescaled from 0–21 to 0–100**, but the **internal data keys are unchanged** (`recovery`, `strain`, `sleep_performance`) so years of stored history, imports, and the metric-series substrate keep working. You'll still see the old engine names (`RecoveryScorer`, `StrainScorer`) and internal keys throughout the source and in this document — they back the new scores.
+> **Naming & continuity.** The display names are **Recovery**, **Effort**, and **Sleep Score**. Stable internal keys and compatibility types still use `recovery`, `strain`, `sleep_performance`, and some older `charge`/`rest` identifiers so existing history, backups, widgets, and imports remain readable. Effort is displayed on a 0–100 scale.
 
 > **Not affiliated with WHOOP.** NOOP interoperates with hardware and data you already own. The scores and metrics below are **independent approximations** of common exercise-physiology and HRV methods, derived from published literature — they are **not** reproductions of any proprietary scoring model, and they are **not a medical device**. Nothing here is medical advice.
 
@@ -37,18 +37,18 @@ The package contains more analytics than the app currently surfaces. This sectio
 | Engine | File | Status in the app |
 |---|---|---|
 | `HRVAnalyzer` | `HRVAnalyzer.swift` | **Library-only** as a type. Live stress check-ins use the dedicated `StressOnsetDetector`. |
-| `RecoveryScorer` | `RecoveryScorer.swift` | **Live.** Computes the **Charge** score. Runs inside `AnalyticsEngine.analyzeDay` via `Strand/Data/IntelligenceEngine.swift`; computed values are persisted under the `"<deviceId>-noop"` source and merged **under** any imported `recovery_score_pct` (imports always win). APPROXIMATE. |
+| `RecoveryScorer` | `RecoveryScorer.swift` | **Live.** Computes the **Recovery** score. Runs inside `AnalyticsEngine.analyzeDay` via `Strand/Data/IntelligenceEngine.swift`; computed values are persisted under the `"<deviceId>-noop"` source and merged **under** any imported `recovery_score_pct` (imports always win). APPROXIMATE. |
 | `StrainScorer` | `StrainScorer.swift` | **Live.** Computes the **Effort** score (0–100). Day load is computed on-device for nights the strap offloaded; the imported `day_strain` column still wins for imported days. APPROXIMATE. |
-| `SleepStager` | `SleepStager.swift` | **Live.** Stages each offloaded night inside `analyzeDay`; the per-night stages feed the **Rest** composite. Computed sessions are persisted under the `"-noop"` source, with imported sleeps taking precedence. APPROXIMATE. |
+| `SleepStager` | `SleepStager.swift` | **Live.** Stages each offloaded night inside `analyzeDay`; the per-night stages feed the **Sleep Score** composite. Computed sessions are persisted under the `"-noop"` source, with imported sleeps taking precedence. APPROXIMATE. |
 | `Baselines` | `Baselines.swift` | **Live.** Seeds the recovery baseline in `IntelligenceEngine.analyzeRecent` (two-pass cold-start). The illness early-warning in `AppModel` still uses its own trailing-window baseline math inline (see below). |
-| `WorkoutDetector` / `Calories` | `WorkoutDetector.swift` | **Live.** Runs inside `AnalyticsEngine.analyzeDay`; detected bouts are persisted as `workout` rows under the computed `"<deviceId>-noop"` source (sport `"detected"`), de-duplicated against imported WHOOP workouts. All intensity/calorie fields are APPROXIMATE. Not yet surfaced in the Workouts screen. |
+| `WorkoutDetector` / `Calories` | `WorkoutDetector.swift` | **Live and surfaced.** Runs inside `AnalyticsEngine.analyzeDay`; detected bouts are persisted as `workout` rows under the computed `"<deviceId>-noop"` source (sport `"detected"`), de-duplicated against imported WHOOP workouts, and shown in Workouts for review, relabeling, editing or dismissal. All intensity/calorie fields are APPROXIMATE. |
 | `AnalyticsEngine` | `AnalyticsEngine.swift` | **Live orchestrator.** `analyzeDay(...)` is called by `Strand/Data/IntelligenceEngine.swift` — every 15 minutes while connected, and from the Intelligence screen — and its `DailyMetric`, sleep sessions and detected workouts are persisted under the `"-noop"` source. |
 | `HRZones` | `HRZones.swift` | **Library-only** (display zone model). The app's live zone coaching computes `%HRmax` inline in `AppModel.coachZone(_:)`. |
 | `CorrelationEngine` | `CorrelationEngine.swift` | **Live.** Used by `InsightsView`, `CompareView`, `MetricExplorerView`. |
 | `BehaviorInsights` | `BehaviorInsights.swift` | **Live.** Used by `InsightsView` (`rank` + `sentence`). |
 | `ComparisonEngine` | `ComparisonEngine.swift` | **Live.** Used by `MetricExplorerView`. |
 
-**In short:** the *interactive data-interrogation* engines (correlation, behavior effects, period comparison) are wired into screens, and the *recompute-from-raw-streams* engines that produce the three daily scores — Charge (recovery), Effort (strain), Rest (sleep), plus workout detection — run live too: `IntelligenceEngine` calls `analyzeDay` for every night the strap offloaded and persists the APPROXIMATE results under the `"-noop"` source, merged under any imported rows — a WHOOP export still wins wherever it covers a day. The live BLE app additionally runs four small inline analytics in `AppModel`: HR smoothing, RMSSD, HR-zone coaching, an illness/strain early-warning, and a resting-stress nudge.
+**In short:** the *interactive data-interrogation* engines (correlation, behavior effects, period comparison) are wired into screens, and the *recompute-from-raw-streams* engines that produce the three daily scores — Recovery, Effort, Sleep Score, plus workout detection — run live too: `IntelligenceEngine` calls `analyzeDay` for every night the strap offloaded and persists the APPROXIMATE results under the `"-noop"` source, merged under any imported rows — a WHOOP export still wins wherever it covers a day. The live BLE app additionally runs four small inline analytics in `AppModel`: HR smoothing, RMSSD, HR-zone coaching, an illness/strain early-warning, and a resting-stress nudge.
 
 ---
 
@@ -140,19 +140,19 @@ HRVAnalyzer.analyze(rawRR: [Double]) -> HRVResult
 
 ---
 
-## `RecoveryScorer` — the **Charge** score (transparent 0–100 recovery composite)
+## `RecoveryScorer` — the **Recovery** score (transparent 0–100 composite)
 
-Source: `RecoveryScorer.swift`. Produces **Charge** — *"how recovered are you?"* A **z-score + logistic** composite, **led by your heart-rate variability (HRV) measured against your own personal baseline**, plus resting heart rate, last night's Rest, breathing rate, and a skin-temperature signal (an early illness / overreach flag). It is explicitly **approximate** and makes no claim to reproduce WHOOP's proprietary Recovery % model — same core idea (HRV-led recovery), but our weighting and baseline maths are our own and openly documented here.
+Source: `RecoveryScorer.swift`. Produces **Recovery** — *"how recovered are you?"* A **z-score + logistic** composite, **led by your heart-rate variability (HRV) measured against your own personal baseline**, plus resting heart rate, last night's Sleep Score, breathing rate, and a skin-temperature signal (an early illness / overreach flag). It is explicitly **approximate** and makes no claim to reproduce WHOOP's proprietary Recovery % model — same core idea (HRV-led recovery), but our weighting and baseline maths are our own and openly documented here.
 
 ### Weighting
 
-Higher HRV versus your baseline means more Charge. Skin-temp folds in as a symmetric penalty: the further from baseline (in either direction), the less Charge, since a large deviation flags possible illness or overreach.
+Higher HRV versus your baseline means a higher Recovery estimate. Skin-temp folds in as a symmetric penalty: the further from baseline (in either direction), the lower the estimate, since a large deviation flags possible illness or overreach.
 
 | Driver | Direction | Weight |
 |---|---|---|
-| HRV vs baseline | higher → more Charge | `wHRV = 0.55` (dominant) |
+| HRV vs baseline | higher → more Recovery | `wHRV = 0.55` (dominant) |
 | Resting HR vs baseline | lower → more | `wRHR = 0.20` |
-| Rest quality (sleep) | higher → more | `wSleep = 0.15` |
+| Sleep Score | higher → more | `wSleep = 0.15` |
 | Respiration vs baseline | lower → more | `wResp = 0.05` |
 | Skin-temp deviation | further from baseline → less | `wSkinTemp = 0.05` |
 
@@ -236,9 +236,9 @@ Given `(TRIMP, reference_strain)` pairs, fits `D` via a through-origin least-squ
 
 ---
 
-## `SleepStager` — sleep/wake detection + approximate 4-class staging (feeds **Rest**)
+## `SleepStager` — sleep/wake detection + approximate 4-class staging (feeds **Sleep Score**)
 
-Source: `SleepStager.swift`. Detects in-bed sessions from gravity/HR/RR/respiration and produces a 30-second hypnogram of `{wake, light, deep, rem}`. These stages and the AASM roll-up below are the raw material the **Rest** score composite consumes (see *The Rest score composite* immediately after this section).
+Source: `SleepStager.swift`. Detects in-bed sessions from gravity/HR/RR/respiration and produces a 30-second hypnogram of `{wake, light, deep, rem}`. These stages and the AASM roll-up below are the raw material the **Sleep Score** composite consumes (see *The Sleep Score composite* immediately after this section).
 
 > **Honest hedging.** These stages are **approximations**, not PSG-validated, not medical advice. The EEG-free 4-class ceiling is ~65–73% epoch agreement (Walch 2019). **Light/deep separation is the weakest link — deep-minute estimates are the least reliable output.**
 
@@ -288,7 +288,7 @@ Consecutive same-stage epochs are merged into `StageSegment`s tiling `[start, en
 
 ### Motion-corroborated wake — elevated-but-motionless HR is not wake (default ON)
 
-Both stagers (`SleepStager` V1 and the default `SleepStagerV2`) and the HR-led session confirmation (`confirmSleepWithHR`) previously called **wake** primarily off HR / HR-variability with no motion or posture cross-check. On a night whose resting HR is held elevated **without the wearer getting up** — a supplement protocol, a fever, a hot room, alcohol — that logic scored hot-but-motionless sleep as wake, over-calling WASO, mis-placing onset, and tanking efficiency and Rest. Two confirmed nights required manual relabeling (2026-07-13: 194 min WAKE vs ~67; 2026-07-14: onset 1:41 vs ~1:29 plus a 44-min WAKE block).
+Both stagers (`SleepStager` V1 and the default `SleepStagerV2`) and the HR-led session confirmation (`confirmSleepWithHR`) previously called **wake** primarily off HR / HR-variability with no motion or posture cross-check. On a night whose resting HR is held elevated **without the wearer getting up** — a supplement protocol, a fever, a hot room, alcohol — that logic scored hot-but-motionless sleep as wake, over-calling WASO, mis-placing onset, and lowering efficiency and Sleep Score. Two confirmed nights required manual relabeling (2026-07-13: 194 min WAKE vs ~67; 2026-07-14: onset 1:41 vs ~1:29 plus a 44-min WAKE block).
 
 The rule: **elevated HR alone is insufficient to call wake.** An epoch or run at the night's quiescent **motion** floor with **unchanged posture** cannot be scored WAKE on cardiac evidence alone; corroboration comes from the **gravity posture/jerk** signal both stagers already consume (always present), not step ticks. This acts where the mis-scoring is produced, and is **on by default** — distinct from the prior default-OFF post-pass over an already-staged hypnogram (upstream #402).
 
@@ -305,9 +305,9 @@ Fix: an **absolute floor** `preOnsetStubMinorAsleepFloorMin = 20` (min) under th
 
 ---
 
-## The **Rest** score composite — *"how restorative was your sleep?"*
+## The **Sleep Score** composite — *"how restorative was your sleep?"*
 
-Source: assembled in `AnalyticsEngine` from the `SleepStager` outputs above. Rest is a 0–100 composite that **replaces the older bare-efficiency proxy** for the `sleep_performance` key. It blends four components:
+Source: assembled in `AnalyticsEngine` from the `SleepStager` outputs above. Sleep Score is a 0–100 composite stored under the stable `sleep_performance` key. It blends four components:
 
 | Component | Weight | What it measures |
 |---|---|---|
@@ -317,8 +317,8 @@ Source: assembled in `AnalyticsEngine` from the `SleepStager` outputs above. Res
 | Consistency (sleep/wake regularity) | 0.10 | how consistent your sleep and wake timing is |
 
 - **Personal sleep need:** 8 h default, refined by your recent average; the hours-vs-need term clamps at 100.
-- Rest consumes whatever stages each device provides (v25 motion on 4.0; PPG/IMU on 5/MG as it unlocks) — the sleep-staging algorithm itself is unchanged.
-- The `sleep_performance` key now stores this 0–100 composite. The **Charge** "Rest quality" driver reads it (÷100) instead of raw efficiency.
+- Sleep Score consumes whatever stages each device provides (v25 motion on 4.0; PPG/IMU on 5/MG as it unlocks) — the sleep-staging algorithm itself is unchanged.
+- The `sleep_performance` key stores this 0–100 composite. The **Recovery** sleep-quality driver reads it (÷100) instead of raw efficiency.
 
 This composite is similar *in spirit* to WHOOP's Sleep Performance %, but the blend is our own.
 
@@ -421,7 +421,7 @@ t  = (m1 − m2) / sqrt(s1²/n1 + s2²/n2)
 
 - `significant` requires `p < 0.05` **and** `min(nWith, nWithout) ≥ 5` (guards against spurious "significance" from a handful of days).
 - `rank(...)` orders effects by `|d|` descending, significant first.
-- `sentence(_:)` renders plain English, e.g. *"On days you logged 'Alcohol', Charge was 12% lower (avg 61 vs 69, n=140 vs 498)."*
+- `sentence(_:)` renders plain English, e.g. *"On days you logged 'Alcohol', Recovery was 12% lower (avg 61 vs 69, n=140 vs 498)."*
 
 ### `ComparisonEngine`
 
@@ -435,15 +435,15 @@ Source: `ComparisonEngine.swift`. Period-over-period comparison of one daily met
 
 ## The library orchestrator: `AnalyticsEngine`
 
-Source: `AnalyticsEngine.swift`. A pure function that ties the recompute engines together for one day, producing the three daily scores — **Charge** (recovery), **Effort** (strain), **Rest** (sleep). **Live:** `analyzeDay` is wired in via `Strand/Data/IntelligenceEngine.swift` — it runs every ~15 minutes while connected and on demand from the Intelligence screen, persisting the computed Charge/Effort/Rest/workouts under the `"<deviceId>-noop"` source and **merged under** imports. Where a WHOOP export covers a day, its own per-day numbers still win; the recompute fills in the days the strap offloaded but no export covers.
+Source: `AnalyticsEngine.swift`. A pure function that ties the recompute engines together for one day, producing the three daily scores — **Recovery**, **Effort**, and **Sleep Score**. **Live:** `analyzeDay` is wired in via `Strand/Data/IntelligenceEngine.swift` — it runs every ~15 minutes while connected and on demand from the Intelligence screen, persisting the computed scores and workouts under the `"<deviceId>-noop"` source and **merged under** imports. Where a WHOOP export covers a day, its own per-day numbers still win; the recompute fills in the days the strap offloaded but no export covers.
 
 `analyzeDay(day:hr:rr:resp:gravity:profile:baselines:maxHROverride:)` runs, in order:
 
 1. `SleepStager.detectSleep` → keep sessions whose `end` falls on `day` (UTC) — a night ending that morning.
 2. Daily sleep aggregates (in-bed-weighted efficiency; deep/REM/light minutes; disturbances) via `hypnogramMetrics`.
 3. Daily resting HR = lowest per-session resting HR; daily avg HRV = in-bed-weighted mean of per-session HRV.
-4. **Rest** — the four-component sleep composite (duration vs need / efficiency / restorative share / consistency), stored under `sleep_performance`.
-5. **Charge** — `RecoveryScorer.recovery(...)` with the personal HRV/RHR/resp/skin-temp baselines and the Rest score as the sleep input, stored under `recovery`.
+4. **Sleep Score** — the four-component sleep composite (duration vs need / efficiency / restorative share / consistency), stored under `sleep_performance`.
+5. **Recovery** — `RecoveryScorer.recovery(...)` with the personal HRV/RHR/resp/skin-temp baselines and Sleep Score as the sleep input, stored under `recovery`.
 6. **Effort** — `StrainScorer.strain(...)` over the full day's HR window (Tanaka HRmax from age unless overridden), on the 0–100 scale, stored under `strain`.
 7. `WorkoutDetector.detect(...)`.
 
@@ -455,7 +455,7 @@ Each score carries a small honesty label so a sparse day reads truthfully:
 
 | Tier | Meaning |
 |---|---|
-| **Calibrating** | NOOP is still learning your baseline, or doesn't have enough data yet (baseline not usable for Charge; no in-bed data for Rest; no HR window for Effort). |
+| **Calibrating** | NOOP is still learning your baseline, or doesn't have enough data yet (baseline not usable for Recovery; no in-bed data for Sleep Score; no HR window for Effort). |
 | **Building** | Enough to show, but thin (e.g. fewer than ~7 nights of baseline, or a 5/MG day backed mostly by PPG-derived HR). |
 | **Solid** | Full inputs present. |
 
@@ -480,7 +480,7 @@ Apple Health XML ──┘                                         │
                           ┌──────────────────────────────────┤
                           ▼                                   ▼
    IntelligenceEngine ─► AnalyticsEngine.analyzeDay   Repository.days ─► TodayView,
-   (live recompute: HRV + Charge/Effort/Rest +        InsightsView (CorrelationEngine,
+   (live recompute: HRV + Recovery/Effort/Sleep +     InsightsView (CorrelationEngine,
    workouts from raw streams, every ~15 min +         BehaviorInsights), CompareView,
    Intelligence screen; persisted under the           MetricExplorerView (ComparisonEngine)
    "<deviceId>-noop" source, merged UNDER imports)
@@ -493,7 +493,7 @@ Apple Health XML ──┘                                         │
 
 ## Conventions & honesty notes
 
-- **Approximate by design.** Charge, Effort, Rest (and sleep stages, workout intensity, calories) are transparent approximations of published methods — not reproductions of any proprietary algorithm. They're **independent approximations from a consumer strap, built on open science — not medical advice, and not WHOOP's official scores.** Each engine's source header states exactly where it approximates (e.g. Malik instead of Kubios; RMSSD-only parasympathetic tone; normal-approx p-values).
+- **Approximate by design.** Recovery, Effort, and Sleep Score (plus sleep stages, workout intensity, and calories) are transparent approximations of published methods — not reproductions of any proprietary algorithm. They're **independent approximations from a consumer strap, built on open science — not medical advice, and not WHOOP's official scores.** Each engine's source header states exactly where it approximates (e.g. Malik instead of Kubios; RMSSD-only parasympathetic tone; normal-approx p-values).
 - **One scale, honest about certainty.** All three scores are 0–100 and each rides a Solid / Building / Calibrating confidence tier; a score that can't be computed honestly shows nothing rather than a number.
 - **Deterministic.** No randomness, no wall-clock dependence inside the math, no DB/network access. Same inputs → same outputs, which makes the package unit-testable against fixed vectors.
 - **Robust statistics.** z-scores use EWMA mean-absolute-deviation (`× 1.253` to a Gaussian σ); resting HR uses 5-minute bin minima; HR display uses windowed medians — all chosen to resist single-sample outliers.

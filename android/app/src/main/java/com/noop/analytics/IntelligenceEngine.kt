@@ -607,13 +607,22 @@ object IntelligenceEngine {
                 // R-R) + exact-duplicate beat count, so a "reads ~2x too high" report is self-diagnosing
                 // from the always-on log instead of hand-computing beat density.
                 val ts = sleepRrRows.map { it.ts }
-                val cov = String.format(java.util.Locale.US, "%.2f", HrvAnalyzer.rrCoverage(ts, sleepRr))
+                val covVal = HrvAnalyzer.rrCoverage(ts, sleepRr)
+                val cov = String.format(java.util.Locale.US, "%.2f", covVal)
                 // #550: collapsedCov previews a same-second R-R de-dup — well below `coverage` ⇒ the
                 // over-count is same-second (a dedup fix would work); still high ⇒ cross-second overlap.
-                val colCov = String.format(java.util.Locale.US, "%.2f", HrvAnalyzer.collapsedCoverage(ts, sleepRr))
+                val colCovVal = HrvAnalyzer.collapsedCoverage(ts, sleepRr)
+                val colCov = String.format(java.util.Locale.US, "%.2f", colCovVal)
                 val dup = HrvAnalyzer.duplicateBeatCount(ts, sleepRr)
-                diag("hrv diag day=${res.daily.day} rmssd=${ms(h.rmssd)}ms sdnn=${ms(h.sdnn)}ms meanNN=${ms(h.meanNN)}ms " +
-                    "rr=${h.nInput}/${h.nClean} rejected=$rej% coverage=$cov collapsedCov=$colCov dupBeats=$dup")
+                val verdict = HrvAnalyzer.classifyCoverage(covVal, colCovVal)
+                val accVal = HrvAnalyzer.beatAccurateFraction(ts, sleepRr)
+                val acc = String.format(java.util.Locale.US, "%.2f", accVal)
+                val sdnnField =
+                    if (HrvAnalyzer.beatSpreadIsTrustworthy(verdict) &&
+                        HrvAnalyzer.beatValuesAreTrustworthy(accVal)) "${ms(h.sdnn)}ms" else "withheld"
+                diag("hrv diag day=${res.daily.day} rmssd=${ms(h.rmssd)}ms sdnn=$sdnnField meanNN=${ms(h.meanNN)}ms " +
+                    "rr=${h.nInput}/${h.nClean} rejected=$rej% coverage=$cov collapsedCov=$colCov dupBeats=$dup " +
+                    "beatAccurate=$acc rrIntegrity=${verdict.raw}")
             }
 
             // Steps test mode: emit the 5/MG raw-counter trace for this day (cumulative @57 series +
@@ -724,16 +733,7 @@ object IntelligenceEngine {
             hrv = hrvBase2, restingHR = rhrBase2, resp = respBase2, skinTemp = skinBase2,
         )
 
-        // Real (non-detected) workouts in the scored window, used to de-duplicate detected bouts so a
-        // user who BOTH has real sessions AND wears the strap doesn't see the same session twice (the
-        // per-day mergeDaily precedence does not cover the workout table). Covers BOTH directions of
-        // the cross-source duplicate (#107): the strap source carries imported WHOOP rows AND manual /
-        // re-labelled rows (both under [importedDeviceId]); apple-health / health-connect carry Health
-        // imports , a detected bout overlapping ANY of them is skipped below.
         val windowStart = nowSeconds - maxDays.toLong() * SECONDS_PER_DAY - 30 * 3_600L
-        val realWorkouts = repo.workouts(importedDeviceId, windowStart, nowSeconds) +
-            repo.workouts("apple-health", windowStart, nowSeconds) +
-            repo.workouts("health-connect", windowStart, nowSeconds)
 
         // ── Pass 2: re-score every offloaded night against the now-seeded baseline. Only the
         // recovery composite is recomputed (cheap, baseline-dependent); every other field was
@@ -743,7 +743,6 @@ object IntelligenceEngine {
         val out = ArrayList<Computed>()
         val dailies = ArrayList<DailyMetric>()
         val sleepRows = ArrayList<SleepSession>()
-        val workoutRows = ArrayList<WorkoutRow>()
         // Rest composite (0–100) per night → persisted as the sleep_performance metric series so the
         // dashboard Rest score reflects the new composite, not raw efficiency. Swift parity.
         val restRows = ArrayList<MetricSeriesRow>()
@@ -897,54 +896,13 @@ object IntelligenceEngine {
                     ),
                 )
             }
-            // Persist the detected workouts the pipeline already computes (previously discarded).
-            // Skip any bout overlapping a real imported/manual workout so import+wear users don't
-            // double-count. sport="detected"; energyKcal is the APPROXIMATE Keytel/BMR total.
+            // Keep analytics detection diagnostic-only. The canonical AutoWorkoutNudge path de-duplicates
+            // every saved source and writes only after the user explicitly accepts the suggestion.
             for (s in res.workouts) {
                 val durMin = maxOf(0L, (s.end - s.start) / 60L).toInt()
                 val avgBpm = s.avgHR.toInt()
-                // Bare time overlap (any source), so a detected bout collapses against a manual session even
-                // though their sports differ , the #975 "two workouts, one vanished" seam. Name the collider.
-                val collider = realWorkouts.firstOrNull { w -> s.start < w.endTs && w.startTs < s.end }
-                if (collider != null) {
-                    // #510: the detected bout's own avgHR/calories/maxHR/strain come from the SAME
-                    // motion+HR trace the detector used to find this activity's actual boundaries —
-                    // often a tighter match than the colliding row's own [startTs,endTs] (e.g. a manual
-                    // entry typed in afterward, whose guessed boundaries can clip most of the real
-                    // HR-rich period and leave WhoopRepository.fillWorkoutHrFromStrap's raw window read
-                    // too thin, silently showing no HR/calories). Same natural key (deviceId, startTs,
-                    // sport), so the upsert below updates the existing row in place rather than
-                    // duplicating it.
-                    val backfilled = backfillWorkoutFromDetectedBout(
-                        collider, avgBpm = avgBpm, peakHR = s.peakHR, caloriesKcal = s.caloriesKcal, strain = s.strain,
-                    )
-                    val didBackfill = backfilled != collider
-                    if (didBackfill) workoutRows.add(backfilled)
-                    workoutsTraceSink?.invoke(
-                        WorkoutsTrace.detectedBoutLine(
-                            verdict = if (didBackfill) "droppedOverlapBackfilled" else "droppedOverlap",
-                            durMin = durMin, avgBpm = avgBpm,
-                            overlapSource = colliderSourceLabel(collider.source),
-                        ),
-                    )
-                    continue
-                }
-                workoutRows.add(
-                    WorkoutRow(
-                        deviceId = computedId,
-                        startTs = s.start,
-                        endTs = s.end,
-                        sport = "detected",
-                        source = computedId,
-                        durationS = s.durationS,
-                        energyKcal = s.caloriesKcal,
-                        avgHr = avgBpm,
-                        maxHr = s.peakHR,
-                        strain = s.strain,
-                    ),
-                )
                 workoutsTraceSink?.invoke(
-                    WorkoutsTrace.detectedBoutLine(verdict = "persisted", durMin = durMin, avgBpm = avgBpm),
+                    WorkoutsTrace.detectedBoutLine(verdict = "suggestionOnly", durMin = durMin, avgBpm = avgBpm),
                 )
             }
         }
@@ -1018,54 +976,128 @@ object IntelligenceEngine {
         // it stays bounded (daysMerged is full-history) and can't drag in stale nights older than the window.
         val faPriorDaily = repo.daysMerged(importedDeviceId).filter { it.day in oldestDay..newestDay }
 
-        repo.deleteComputedDailyInRange(computedId, oldestDay, newestDay)
+        // #1196: a transient empty scoring pass is not an instruction to erase the persisted window.
+        // This can occur while an offload/reconnect is incomplete or the active source briefly resolves
+        // empty. Keep the last complete scores until a non-empty pass can replace them.
+        if (dailies.isNotEmpty()) {
+            repo.deleteComputedDailyInRange(computedId, oldestDay, newestDay)
 
-        // Persist the computed scores under the dedicated "-noop" source so the WHOLE
-        // dashboard (Today / Recovery / Strain / Sleep / Trends) reads them. The repository
-        // merges these UNDER any imported "my-whoop" rows, so a real WHOOP import always wins;
-        // this only fills the days the strap collected but no import covered.
-        if (dailies.isNotEmpty()) repo.upsertDailyMetrics(dailies)
-        if (restRows.isNotEmpty()) repo.upsertMetricSeries(restRows)
+            // Persist the computed scores under the dedicated "-noop" source so the WHOLE
+            // dashboard (Today / Recovery / Strain / Sleep / Trends) reads them. The repository
+            // merges these UNDER any imported "my-whoop" rows, so a real WHOOP import always wins;
+            // this only fills the days the strap collected but no import covered.
+            repo.upsertDailyMetrics(dailies)
+            if (restRows.isNotEmpty()) repo.upsertMetricSeries(restRows)
+        }
 
         // ── Fitness Age (Phase 2) , weekly, keyed to the week's Saturday ──
-        val fa7 = dailies.sortedBy { it.day }.takeLast(7)
-        val faRHRs = fa7.mapNotNull { it.restingHr }.map { it.toDouble() }
         // Gate + compute Fitness Age on the UNION of the pre-rewrite persisted history and THIS pass's
         // fresh scores (by day, fresh wins) , so an RHR night counts whether it survives in the store OR was
         // just scored, whether it sits under this id or a re-added strap's sibling id, or came from an
-        // import. Kept SEPARATE from `fa7` so Vitality (below), which already computes, is untouched. The
+        // import. This merged gate is also reused by the longer-window wellness model below. The
         // gate + compute live in [fitnessAgeRows] so the manual "refresh Fitness Age" button applies the
         // SAME rule (no drift).
         val faGateByDay = LinkedHashMap<String, DailyMetric>()
         for (d in faPriorDaily) faGateByDay[d.day] = d
         for (d in dailies) faGateByDay[d.day] = d
         val faGate7 = faGateByDay.values.sortedBy { it.day }.takeLast(7)
-        val faPts = fitnessAgeRows(faGate7, profile, computedId, saturdayKeyOnOrBefore(newestDay))
+        val storedFitnessToken = repo.latestMetricComputedUnion(
+            importedDeviceId, AgeMetricProfile.FITNESS_AGE_KEY,
+        )?.value
+        val storedVo2Token = repo.latestMetricComputedUnion(
+            importedDeviceId, AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
+        )?.value
+        if (!AgeMetricProfile.accepts(
+                storedFitnessToken, AgeMetricProfile.fitnessAgeToken(profile.age, profile.sex),
+                profile.fitnessAgeProvenanceRequired,
+            )
+        ) purgeComputedMetricKeys(
+            repo, importedDeviceId, computedId,
+            listOf("fitness_age", AgeMetricProfile.FITNESS_AGE_KEY),
+        )
+        if (!AgeMetricProfile.accepts(
+                storedVo2Token,
+                AgeMetricProfile.vo2maxEstimateToken(profile.age, profile.sex, profile.waistCm),
+                profile.vo2maxProvenanceRequired,
+            )
+        ) purgeComputedMetricKeys(
+            repo, importedDeviceId, computedId,
+            listOf("vo2max_est", AgeMetricProfile.VO2MAX_ESTIMATE_KEY),
+        )
+
+        val faSatKey = saturdayKeyOnOrBefore(newestDay)
+        val faPts = fitnessAgeRows(faGate7, profile, computedId, faSatKey).toMutableList()
         // Strap-log proof: the RHR-night count the engine sees for the gate , should equal the "N of last 7
         // nights" the readiness card shows; `computed` says whether the value was (re)written this pass.
         diag("fitnessAge gate day=$newestDay rhrNights=${faGate7.mapNotNull { it.restingHr }.size} activityDays=${faGate7.mapNotNull { it.strain }.size} computed=${faPts.isNotEmpty()}")
+        if (faPts.any { it.key == "fitness_age" }) {
+            AgeMetricProfile.fitnessAgeToken(profile.age, profile.sex)?.let { token ->
+                faPts += MetricSeriesRow(computedId, faSatKey, AgeMetricProfile.FITNESS_AGE_KEY, token)
+            }
+        }
+        if (faPts.any { it.key == "vo2max_est" }) {
+            AgeMetricProfile.vo2maxEstimateToken(profile.age, profile.sex, profile.waistCm)?.let { token ->
+                faPts += MetricSeriesRow(computedId, faSatKey, AgeMetricProfile.VO2MAX_ESTIMATE_KEY, token)
+            }
+        } else {
+            // An omitted optional row is not an upsert deletion. Removing/invalidating waist must clear
+            // the old estimate while leaving a measured `vo2max` import untouched.
+            purgeComputedMetricKeys(
+                repo, importedDeviceId, computedId,
+                listOf("vo2max_est", AgeMetricProfile.VO2MAX_ESTIMATE_KEY),
+            )
+        }
         if (faPts.isNotEmpty()) repo.upsertMetricSeries(faPts)
 
-        // ── Vitality / Body Age (Phase 7) , weekly, keyed to the week's Saturday ──
-        // Roll the last 7 days' wearable signals into the mortality-hazard model; VitalityEngine gates on
-        // ≥3 inputs. VO₂max is omitted (fitness is Fitness Age's headline); Vitality leans on resting HR,
-        // sleep duration + regularity, HRV-vs-age-norm, and steps.
-        val vNights = fa7.mapNotNull { it.totalSleepMin }.map { it / 60.0 }.filter { it > 0 }
-        val vHRVs = fa7.mapNotNull { it.avgHrv }
-        val vSteps = fa7.mapNotNull { it.steps }.map { it.toDouble() }
+        val fitnessInputsUsable = profile.ageInputConfirmed && profile.sexInputConfirmed &&
+            FitnessAgeEngine.supportsAge(profile.age) && FitnessAgeEngine.supportsSex(profile.sex)
+        if (!fitnessInputsUsable) {
+            purgeComputedMetricKeys(repo, importedDeviceId, computedId, listOf(
+                "fitness_age", "vo2max_est", AgeMetricProfile.FITNESS_AGE_KEY,
+                AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
+            ))
+        }
+
+        // Vitality/Wellness Age uses chronological age but no sex coefficient. Keep non-binary users
+        // eligible while refusing the untouched age-30 seed and the model's unsupported age range.
+        val wellnessInputsUsable = profile.ageInputConfirmed && profile.age in 20.0..80.0
+        val storedVitalityToken = repo.latestMetricComputedUnion(
+            importedDeviceId, AgeMetricProfile.VITALITY_KEY,
+        )?.value
+        if (!wellnessInputsUsable || !AgeMetricProfile.accepts(
+                storedVitalityToken, AgeMetricProfile.vitalityToken(profile.age),
+                profile.vitalityProvenanceRequired,
+            )
+        ) purgeComputedMetricKeys(
+            repo, importedDeviceId, computedId,
+            listOf("vitality", "body_age", AgeMetricProfile.VITALITY_KEY),
+        )
+
+        // ── Vitality / Wellness Age (Phase 7), weekly from trailing 21 days ──
+        // Experimental lifestyle-risk composite, not WHOOP Age/biological age. Each factor needs 14
+        // observed days; missing data remains unavailable. VitalityEngine also requires three domains.
+        val v21 = faGateByDay.values.sortedBy { it.day }.takeLast(21)
+        val vMinCoverage = 14
+        val vRhrs = v21.mapNotNull { it.restingHr }.map { it.toDouble() }
+        val vNights = v21.mapNotNull { it.totalSleepMin }.map { it / 60.0 }.filter { it > 0 }
+        val vHRVs = v21.mapNotNull { it.avgHrv }
+        val vSteps = v21.mapNotNull { it.steps }.map { it.toDouble() }
         val vInputs = VitalityEngine.Inputs(
             chronoAge = profile.age,
-            restingHR = if (faRHRs.isEmpty()) null else medianOfDoubles(faRHRs),
-            sleepHours = if (vNights.isEmpty()) null else vNights.average(),
-            sleepConsistency = VitalityEngine.sleepConsistency(vNights),
-            rmssd = if (vHRVs.isEmpty()) null else medianOfDoubles(vHRVs),
+            restingHR = if (vRhrs.size >= vMinCoverage) medianOfDoubles(vRhrs) else null,
+            sleepHours = if (vNights.size >= vMinCoverage) vNights.average() else null,
+            sleepConsistency = if (vNights.size >= vMinCoverage) VitalityEngine.sleepConsistency(vNights) else null,
+            rmssd = if (vHRVs.size >= vMinCoverage) medianOfDoubles(vHRVs) else null,
             rmssdNorm = VitalityEngine.rmssdNorm(profile.age),
-            steps = if (vSteps.isEmpty()) null else vSteps.average())
-        VitalityEngine.compute(vInputs)?.let { vRes ->
+            steps = if (vSteps.size >= vMinCoverage) vSteps.average() else null)
+        if (wellnessInputsUsable) VitalityEngine.compute(vInputs)?.let { vRes ->
             val satKey = saturdayKeyOnOrBefore(newestDay)
             repo.upsertMetricSeries(listOf(
                 MetricSeriesRow(deviceId = computedId, day = satKey, key = "vitality", value = vRes.vitality),
-                MetricSeriesRow(deviceId = computedId, day = satKey, key = "body_age", value = vRes.bodyAge)))
+                MetricSeriesRow(deviceId = computedId, day = satKey, key = "body_age", value = vRes.bodyAge),
+                MetricSeriesRow(deviceId = computedId, day = satKey,
+                    key = AgeMetricProfile.VITALITY_KEY,
+                    value = AgeMetricProfile.vitalityToken(profile.age))))
         }
 
         // ── Steps ESTIMATE (WHOOP 4.0) , DAILY, keyed to each strap-only day ──
@@ -1221,11 +1253,9 @@ object IntelligenceEngine {
                     "session(s) re-banked under a shifted strap timebase; re-scoring the affected days.",
             )
         }
-        // Make re-detection idempotent across runs: clear the prior computed detected workouts
-        // in the scored window (a bout's startTs can drift as more HR arrives, which would
-        // otherwise orphan stale rows under the (deviceId,startTs,sport) key), then re-insert.
+        // Migration/repair: clear rows silently inferred by older builds. Confirmed manual/imported rows
+        // use different sources and are not touched; no inference is re-inserted here.
         repo.deleteComputedWorkouts(computedId, "detected", windowStart, nowSeconds)
-        if (workoutRows.isNotEmpty()) repo.upsertWorkouts(workoutRows)
 
         // #137: a manually-started workout is scored from sparse live HR at save time , near-zero
         // calories/strain on a 5/MG. Now that offloaded HR may cover the window, re-score the
@@ -1562,9 +1592,10 @@ object IntelligenceEngine {
         val meanStrain = if (strains.isEmpty()) 0.0 else strains.average()
         val waist = if (profile.waistCm > 0) profile.waistCm else null
         val ready = FitnessAgeEngine.assessReadiness(
-            hasAge = profile.age > 0, hasSex = profile.sex.isNotEmpty(),
+            hasAge = profile.ageInputConfirmed && FitnessAgeEngine.supportsAge(profile.age),
+            hasSex = profile.sexInputConfirmed && FitnessAgeEngine.supportsSex(profile.sex),
             rhrDays = rhrs.size, activityDays = gateDays.mapNotNull { it.strain }.size,
-            hasHeightWeight = profile.heightCm > 0 && profile.weightKg > 0, hasWaist = waist != null)
+            hasWaist = waist != null)
         if (!ready.canCompute) return emptyList()
         val res = FitnessAgeEngine.compute(
             age = profile.age, sex = profile.sex,
@@ -1574,6 +1605,14 @@ object IntelligenceEngine {
         val rows = mutableListOf(MetricSeriesRow(deviceId = computedId, day = satKey, key = "fitness_age", value = res.fitnessAge))
         res.vo2max?.let { rows.add(MetricSeriesRow(deviceId = computedId, day = satKey, key = "vo2max_est", value = it)) }
         return rows
+    }
+
+    /** Delete every active∪canonical computed copy, including the explicit write id defensively. */
+    private suspend fun purgeComputedMetricKeys(
+        repo: WhoopRepository, activeDeviceId: String, computedId: String, keys: List<String>,
+    ) {
+        val ids = (repo.computedSourceIds(activeDeviceId) + computedId).distinct()
+        for (id in ids) for (key in keys) repo.deleteMetricSeries(id, key)
     }
 
     /** Manual "refresh Fitness Age" (the button on the not-ready card): recompute the weekly Fitness Age
@@ -1592,9 +1631,55 @@ object IntelligenceEngine {
         val oldestDay = AnalyticsEngine.dayString(nowLocalMidnight - (maxDays - 1) * SECONDS_PER_DAY, tzOffsetSeconds)
         val gate7 = repo.daysMerged(importedDeviceId)
             .filter { it.day in oldestDay..newestDay }.sortedBy { it.day }.takeLast(7)
-        val rows = fitnessAgeRows(gate7, profile, computedId, saturdayKeyOnOrBefore(newestDay))
+        val storedFitnessToken = repo.latestMetricComputedUnion(
+            importedDeviceId, AgeMetricProfile.FITNESS_AGE_KEY,
+        )?.value
+        val storedVo2Token = repo.latestMetricComputedUnion(
+            importedDeviceId, AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
+        )?.value
+        if (!AgeMetricProfile.accepts(
+                storedFitnessToken, AgeMetricProfile.fitnessAgeToken(profile.age, profile.sex),
+                profile.fitnessAgeProvenanceRequired,
+            )
+        ) purgeComputedMetricKeys(
+            repo, importedDeviceId, computedId,
+            listOf("fitness_age", AgeMetricProfile.FITNESS_AGE_KEY),
+        )
+        if (!AgeMetricProfile.accepts(
+                storedVo2Token,
+                AgeMetricProfile.vo2maxEstimateToken(profile.age, profile.sex, profile.waistCm),
+                profile.vo2maxProvenanceRequired,
+            )
+        ) purgeComputedMetricKeys(
+            repo, importedDeviceId, computedId,
+            listOf("vo2max_est", AgeMetricProfile.VO2MAX_ESTIMATE_KEY),
+        )
+
+        val satKey = saturdayKeyOnOrBefore(newestDay)
+        val rows = fitnessAgeRows(gate7, profile, computedId, satKey).toMutableList()
+        if (rows.any { it.key == "fitness_age" }) {
+            AgeMetricProfile.fitnessAgeToken(profile.age, profile.sex)?.let { token ->
+                rows += MetricSeriesRow(computedId, satKey, AgeMetricProfile.FITNESS_AGE_KEY, token)
+            }
+        }
+        if (rows.any { it.key == "vo2max_est" }) {
+            AgeMetricProfile.vo2maxEstimateToken(profile.age, profile.sex, profile.waistCm)?.let { token ->
+                rows += MetricSeriesRow(computedId, satKey, AgeMetricProfile.VO2MAX_ESTIMATE_KEY, token)
+            }
+        } else purgeComputedMetricKeys(
+            repo, importedDeviceId, computedId,
+            listOf("vo2max_est", AgeMetricProfile.VO2MAX_ESTIMATE_KEY),
+        )
         if (rows.isNotEmpty()) repo.upsertMetricSeries(rows)
-        return rows.isNotEmpty()
+        if (!profile.ageInputConfirmed || !profile.sexInputConfirmed ||
+            !FitnessAgeEngine.supportsAge(profile.age) || !FitnessAgeEngine.supportsSex(profile.sex)
+        ) {
+            purgeComputedMetricKeys(repo, importedDeviceId, computedId, listOf(
+                "fitness_age", "vo2max_est", AgeMetricProfile.FITNESS_AGE_KEY,
+                AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
+            ))
+        }
+        return rows.any { it.key == "fitness_age" }
     }
 
     private fun recomputeSkinTempDev(nightly: Double?, base: BaselineState?): Double? {

@@ -1,11 +1,10 @@
 import SwiftUI
 
-// MARK: - Frosted card surface (Titanium & Gold) + StrandCard
+// MARK: - Obsidian dimensional card surface + StrandCard
 //
-// The card surface: a flat `surfaceRaised` fill, continuous rounded corners and a
-// single 1px `hairline` border — NO shadow (the Titanium look reads off the hairline
-// + tint, not a drop shadow). The TINTED variant deepens into a navy bevel
-// (150° #15243C → #0B1424) under a faint per-domain hue wash + a hue-biased border.
+// Content stays on a solid surface for contrast; depth comes from a restrained
+// specular top edge, a low bevel and a soft ambient shadow. True Liquid Glass is
+// reserved for navigation and controls, following Apple's hierarchy guidance.
 // `.frostedCardSurface(tint:…)` is the one place the look lives so StrandCard /
 // NoopCard / ad-hoc surfaces all share it. Pass a domain tint (or nil for the neutral
 // flat raised surface).
@@ -30,6 +29,8 @@ public struct FrostedCardSurface: View {
     public var cornerRadius: CGFloat
     public var washStrength: Double
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var accessibilityContrast
     // "Card transparency" setting (reactive): fades the whole glass surface toward the background. 100 =
     // solid (default). Reading it here makes every card update live when the Settings slider moves.
     @AppStorage(CardAppearancePrefs.opacityKey) private var cardOpacityPercent = CardAppearancePrefs.defaultPercent
@@ -43,37 +44,89 @@ public struct FrostedCardSurface: View {
     public var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         let op = max(0.0, min(1.0, Double(cardOpacityPercent) / 100.0))
-        // Base fill: tinted cards deepen into the 150° navy bevel (#15243C → #0B1424,
-        // = surfaceOverlay → cardFillBottom); neutral cards sit on the flat raised
-        // surface. The 150° axis ≈ top-trailing → bottom-leading.
-        // Design Reset: a flat raised fill reads cleaner than the navy bevel gradient. Tinted and
-        // neutral cards now share the same flat surface; tint identity is carried by the softened
-        // hue wash + the tinted hairline below, not a gradient, so cards stay familiar but flatten.
-        let baseFill = AnyShapeStyle(StrandPalette.surfaceRaised)
+        let increasedContrast = accessibilityContrast == .increased
+        let baseFill = reduceTransparency
+            ? AnyShapeStyle(StrandPalette.surfaceRaised)
+            : AnyShapeStyle(.ultraThinMaterial)
         shape
             .fill(baseFill)
+            .overlay(
+                // Material supplies real background refraction; the scrim keeps dense
+                // health data readable. Reduced Transparency gets an opaque surface.
+                shape.fill(
+                    StrandPalette.surfaceRaised.opacity(
+                        reduceTransparency ? 1 : (scheme == .dark ? 0.76 : 0.84)
+                    )
+                )
+            )
+            .overlay(
+                shape.fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(
+                                scheme == .dark
+                                    ? (increasedContrast ? 0.10 : 0.065)
+                                    : (increasedContrast ? 0.50 : 0.38)
+                            ),
+                            .clear,
+                            Color.black.opacity(scheme == .dark ? 0.22 : 0.035)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            )
             .overlay(
                 // A faint per-domain hue wash — only on tinted cards; neutral stays flat.
                 shape.fill(
                     LinearGradient(
                         colors: [
-                            (tint ?? .clear).opacity(0.05 * washStrength),
-                            (tint ?? .clear).opacity(0.015 * washStrength),
+                            (tint ?? .clear).opacity(0.035 * washStrength),
+                            (tint ?? .clear).opacity(0.010 * washStrength),
                             .clear
                         ],
                         startPoint: .topLeading, endPoint: .bottomTrailing
                     )
                 )
             )
-            // Liquid redesign (2026-07-02): a 1px resting hairline in BOTH themes so every card
-            // matches the liquid home card's edge (LiquidTodayView.card), not just fill contrast.
-            .overlay(shape.strokeBorder(StrandPalette.hairline, lineWidth: 1))
-            // LIGHT raises white cards off the warm-paper canvas with a soft resting drop shadow; DARK
-            // stays flat (the hairline + fill carry the edge, matching the home card which has no shadow).
+            .overlay(
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(
+                                scheme == .dark
+                                    ? (increasedContrast ? 0.34 : 0.20)
+                                    : 0.90
+                            ),
+                            StrandPalette.bevelSide.opacity(increasedContrast ? 0.78 : 0.52),
+                            StrandPalette.bevelBottom.opacity(scheme == .dark ? 0.88 : 0.28)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 0.85
+                )
+            )
+            .overlay(
+                shape
+                    .inset(by: 1.1)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(scheme == .dark ? 0.055 : 0.38),
+                                .clear,
+                                Color.black.opacity(scheme == .dark ? 0.24 : 0.035),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.65
+                    )
+            )
             .shadow(
-                color: scheme == .light ? Color(hex: "#1A2230").opacity(0.11) : .clear,
-                radius: scheme == .light ? 10 : 0,
-                x: 0, y: scheme == .light ? 3 : 0
+                color: Color.black.opacity(scheme == .light ? 0.10 : 0.30),
+                radius: scheme == .light ? 12 : 20,
+                x: 0, y: scheme == .light ? 4 : 9
             )
             // "Card transparency": fade the whole glass surface. The card's content sits above this
             // background, so it stays fully readable regardless.

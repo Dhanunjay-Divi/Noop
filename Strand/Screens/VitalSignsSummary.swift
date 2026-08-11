@@ -26,6 +26,19 @@ struct BodyVitalReading: Identifiable {
 
     var id: String { key }
 
+    /// Semantic glyph paired with the visible vital name on every tile.
+    var systemImage: String {
+        switch key {
+        case "resp":    return "lungs.fill"
+        case "spo2":    return "drop.fill"
+        case "spo2raw": return "waveform.path.ecg"
+        case "rhr":     return "heart.text.square.fill"
+        case "hrv":     return "waveform.path.ecg"
+        case "skin":    return "thermometer.medium"
+        default:        return "waveform.path"
+        }
+    }
+
     var formattedValue: String? {
         value.map { "\(format($0)) \(unit)" }
     }

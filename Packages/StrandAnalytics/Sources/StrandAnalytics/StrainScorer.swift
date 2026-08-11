@@ -132,6 +132,15 @@ public enum StrainScorer {
 
     // MARK: - TRIMP accumulation
 
+    /// Resolve the one Effort value every Today read-out must show. Today's live recompute can lead a
+    /// stale daily row, but it can also under-read sparse HR; Effort accrues, so never drop below the
+    /// value already stored for the day. Past days pass `nil` for `live`.
+    public static func effectiveEffort(live: Double?, stored: Double?) -> Double? {
+        guard let live else { return stored }
+        guard let stored else { return live }
+        return Swift.max(live, stored)
+    }
+
     /// Infer per-sample duration (minutes) from the first two timestamps. Falls
     /// back to 1 s when fewer than two samples or coincident timestamps.
     static func sampleDurationMinutes(_ hr: [HRSample]) -> Double {

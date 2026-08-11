@@ -2,6 +2,74 @@ import Foundation
 import Combine
 import SwiftUI
 
+/// Profile provenance carried beside age-shaped computed metrics. These compact numeric tokens fit
+/// exactly in a SQLite `REAL` and let every read reject a value produced from a different profile
+/// without adding columns or changing the backup schema.
+enum AgeMetricProfile {
+    static let fitnessAgeKey = "fitness_age_profile_v1"
+    static let vo2maxEstimateKey = "vo2max_est_profile_v1"
+    static let vitalityKey = "vitality_profile_v1"
+
+    static func fitnessAgeToken(age: Int, sex: String) -> Double? {
+        guard let sexCode = sexCode(sex) else { return nil }
+        return Double(age * 10 + sexCode)
+    }
+
+    static func vo2maxEstimateToken(age: Int, sex: String, waistCm: Double) -> Double? {
+        guard let fitness = fitnessAgeToken(age: age, sex: sex),
+              waistCm.isFinite, (50...200).contains(waistCm) else { return nil }
+        return fitness * 100_000 + Double(Int((waistCm * 100).rounded()))
+    }
+
+    static func vitalityToken(age: Int) -> Double { Double(age) }
+
+    static func accepts(stored: Double?, current: Double?, provenanceRequired: Bool) -> Bool {
+        guard let current else { return false }
+        if let stored { return stored == current }
+        return !provenanceRequired
+    }
+
+    private static func sexCode(_ sex: String) -> Int? {
+        switch sex.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "male": return 1
+        case "female": return 2
+        default: return nil
+        }
+    }
+}
+
+/// Provenance for the external measurement currently reflected by `ProfileStore.weightKg`.
+/// The canonical measurement itself lives in SQLite; this compact pointer prevents an older HealthKit
+/// or Bluetooth backlog row from rolling the profile backwards.
+struct ExternalWeightProvenance: Equatable, Sendable {
+    let measuredAt: Date
+    let source: String
+}
+
+/// Pure freshness/validity gate shared by the live ProfileStore boundary and its tests.
+enum ExternalWeightUpdatePolicy {
+    /// Deliberately wider than onboarding's ordinary adult stepper, while still rejecting zero,
+    /// negative, NaN, infinity, and corrupt outliers before they can affect zones/calorie estimates.
+    static let validWeightKg = 20.0...400.0
+    static let futureTolerance: TimeInterval = 5 * 60
+
+    static func accepts(weightKg: Double,
+                        measuredAt: Date,
+                        receivedAt: Date,
+                        previousExternalAt: Date?,
+                        manualOverrideAt: Date?) -> Bool {
+        guard weightKg.isFinite, validWeightKg.contains(weightKg),
+              measuredAt.timeIntervalSince1970.isFinite,
+              receivedAt.timeIntervalSince1970.isFinite,
+              measuredAt <= receivedAt.addingTimeInterval(futureTolerance) else { return false }
+        if let previousExternalAt, measuredAt <= previousExternalAt { return false }
+        // Once an external source has populated weight, an explicit user edit wins over any cached
+        // measurement older than that edit. A genuinely new weigh-in after the edit can still update it.
+        if let manualOverrideAt, measuredAt <= manualOverrideAt { return false }
+        return true
+    }
+}
+
 /// User profile (age/sex/body metrics/HR-max) persisted in UserDefaults.
 /// Powers HR zones, calories and recovery baselines.
 @MainActor
@@ -16,14 +84,37 @@ final class ProfileStore: ObservableObject {
             // change to the cross-platform backup contract. `BackupSettings.apply` clears
             // `profile.dateOfBirth` on restore so a restored Int age re-derives the DOB here.
             d.set(age, forKey: K.legacyAge)
+            requireAgeMetricProvenance(age: true, sex: false, waist: false)
+            confirmAgeInput()
         }
     }
-    @Published var sex: String { didSet { d.set(sex, forKey: K.sex) } }          // "male" | "female" | "nonbinary"
-    @Published var weightKg: Double { didSet { d.set(weightKg, forKey: K.weight) } }
+    @Published var sex: String {
+        didSet {
+            d.set(sex, forKey: K.sex)
+            requireAgeMetricProvenance(age: false, sex: true, waist: false)
+            confirmSexInput()
+        }
+    } // "male" | "female" | "nonbinary"
+    @Published var weightKg: Double {
+        didSet {
+            d.set(weightKg, forKey: K.weight)
+            // Direct setters are user/profile edits. Only create a manual-precedence marker after an
+            // external value has existed; otherwise the harmless onboarding seed/first manual entry
+            // would prevent a user's older-but-latest HealthKit history from bootstrapping the profile.
+            if !applyingExternalWeight, d.object(forKey: K.externalWeightAt) != nil {
+                d.set(Date().timeIntervalSince1970, forKey: K.manualWeightOverrideAt)
+            }
+        }
+    }
     @Published var heightCm: Double { didSet { d.set(heightCm, forKey: K.height) } }
     /// Optional waist circumference (cm); 0 = not set. Only used to ALSO show an estimated VO₂max
     /// alongside Fitness Age — the Fitness Age itself does not need it (the body term cancels).
-    @Published var waistCm: Double { didSet { d.set(waistCm, forKey: K.waist) } }
+    @Published var waistCm: Double {
+        didSet {
+            d.set(waistCm, forKey: K.waist)
+            requireAgeMetricProvenance(age: false, sex: false, waist: true)
+        }
+    }
     /// 0 = auto-estimate from age.
     @Published var hrMaxOverride: Int { didSet { d.set(hrMaxOverride, forKey: K.hrMax) } }
     /// Step-calibration divisor (#139/#132): counter ticks per real step for the @57 motion
@@ -61,7 +152,8 @@ final class ProfileStore: ObservableObject {
         }
     }
 
-    private let d = UserDefaults.standard
+    private let d: UserDefaults
+    private var applyingExternalWeight = false
     private enum K {
         static let dateOfBirth = "profile.dateOfBirth"
         /// Pre-#146 age key. No longer the source of truth; kept mirrored from `dateOfBirth` so the
@@ -77,9 +169,21 @@ final class ProfileStore: ObservableObject {
         static let stepsManualFlag = "profile.stepsCalibrationManual"
         static let stepsManualCoeff = "profile.stepsManualCoefficient"
         static let avatar = "profile.avatarImageData"
+        /// Explicit confirmation gates for age-shaped estimates. Defaults seeded in `init` are useful
+        /// for ordinary UI previews but must never masquerade as user-supplied Fitness Age inputs.
+        static let ageConfirmed = "profile.ageInputConfirmed"
+        static let sexConfirmed = "profile.sexInputConfirmed"
+        static let onboarded = "noop.onboarded"
+        static let fitnessAgeProvenanceRequired = "profile.fitnessAgeProvenanceRequired"
+        static let vo2maxProvenanceRequired = "profile.vo2maxProvenanceRequired"
+        static let vitalityProvenanceRequired = "profile.vitalityProvenanceRequired"
+        static let externalWeightAt = "profile.externalWeightMeasuredAt"
+        static let externalWeightSource = "profile.externalWeightSource"
+        static let manualWeightOverrideAt = "profile.manualWeightOverrideAt"
     }
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        d = defaults
         // #146 age migration. `dateOfBirth` is authoritative whenever it exists, so age advances on
         // its own. A pre-#146 install — or a `.noopbak` restore, which writes only the legacy Int age
         // and clears any stale DOB (see `BackupSettings.apply`) — has no DOB yet, so derive one from
@@ -115,6 +219,51 @@ final class ProfileStore: ObservableObject {
         avatarImageData = d.data(forKey: K.avatar)
     }
 
+    // MARK: - External weight provenance
+
+    /// The external measurement currently allowed to drive profile weight, if any. Device-specific
+    /// provenance intentionally stays in local UserDefaults (the weight measurement history itself is
+    /// in the backed-up SQLite store).
+    var externalWeightProvenance: ExternalWeightProvenance? {
+        guard let source = d.string(forKey: K.externalWeightSource), !source.isEmpty,
+              let seconds = d.object(forKey: K.externalWeightAt) as? Double,
+              seconds.isFinite else { return nil }
+        return ExternalWeightProvenance(measuredAt: Date(timeIntervalSince1970: seconds), source: source)
+    }
+
+    /// Accept a measured weight from a trusted external adapter (HealthKit, Bluetooth SIG WSS, etc.).
+    /// Returns true only when it changed the profile. The caller must persist the actual measurement in
+    /// its canonical source store independently; this method owns only the profile projection.
+    ///
+    /// Freshness rules:
+    /// - the measurement must be a plausible finite human weight and no more than five minutes ahead;
+    /// - it must be newer than the last accepted external measurement;
+    /// - after an external value exists, a direct/manual profile edit wins until a later measurement.
+    @discardableResult
+    func acceptExternalWeight(weightKg: Double,
+                              measuredAt: Date,
+                              source: String,
+                              receivedAt: Date = Date()) -> Bool {
+        let cleanSource = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanSource.isEmpty else { return false }
+        let previous = externalWeightProvenance?.measuredAt
+        let manualAt = (d.object(forKey: K.manualWeightOverrideAt) as? Double)
+            .flatMap { $0.isFinite ? Date(timeIntervalSince1970: $0) : nil }
+        guard ExternalWeightUpdatePolicy.accepts(weightKg: weightKg,
+                                                 measuredAt: measuredAt,
+                                                 receivedAt: receivedAt,
+                                                 previousExternalAt: previous,
+                                                 manualOverrideAt: manualAt) else { return false }
+
+        applyingExternalWeight = true
+        self.weightKg = weightKg
+        applyingExternalWeight = false
+        d.set(measuredAt.timeIntervalSince1970, forKey: K.externalWeightAt)
+        d.set(String(cleanSource.prefix(160)), forKey: K.externalWeightSource)
+        d.removeObject(forKey: K.manualWeightOverrideAt)
+        return true
+    }
+
     // MARK: - Profile picture
 
     /// The profile photo as a SwiftUI `Image`, or nil when none is set (callers fall back to the
@@ -147,9 +296,88 @@ final class ProfileStore: ObservableObject {
     var stepsManualOverride: Double? { stepsManualCoefficient > 0 ? stepsManualCoefficient : nil }
 
     /// Current age in whole years, derived from `dateOfBirth` (#146) rather than a number the user has
-    /// to remember to update. Every existing caller (HR zones, calories, Fitness/Body Age) reads this
-    /// unchanged.
+    /// to remember to update. Every existing caller (HR zones, calories, Fitness/Wellness Age) reads this
+    /// unchanged (including the experimental Wellness Age compatibility calculation).
     var age: Int { Self.years(from: dateOfBirth, to: Date()) }
+
+    /// Whether the user explicitly accepted the two profile inputs required by the published
+    /// Fitness-Age model. Existing users who completed the old onboarding flow migrate as confirmed;
+    /// a fresh install remains unconfirmed even though the editor displays harmless seed values.
+    var ageInputConfirmed: Bool { d.bool(forKey: K.ageConfirmed) || d.bool(forKey: K.onboarded) }
+    var sexInputConfirmed: Bool { d.bool(forKey: K.sexConfirmed) || d.bool(forKey: K.onboarded) }
+    var fitnessInputsConfirmed: Bool { ageInputConfirmed && sexInputConfirmed }
+
+    var fitnessAgeProvenanceRequired: Bool { d.bool(forKey: K.fitnessAgeProvenanceRequired) }
+    var vo2maxProvenanceRequired: Bool { d.bool(forKey: K.vo2maxProvenanceRequired) }
+    var vitalityProvenanceRequired: Bool { d.bool(forKey: K.vitalityProvenanceRequired) }
+    var fitnessAgeProfileToken: Double? { AgeMetricProfile.fitnessAgeToken(age: age, sex: sex) }
+    var vo2maxProfileToken: Double? {
+        AgeMetricProfile.vo2maxEstimateToken(age: age, sex: sex, waistCm: waistCm)
+    }
+    var vitalityProfileToken: Double { AgeMetricProfile.vitalityToken(age: age) }
+
+    /// Included in view task/cache identities so returning from a profile editor cannot restore values
+    /// computed from the previous age, sex, or waist.
+    var ageMetricStateToken: String {
+        let fitness = fitnessAgeProfileToken.map { String($0) } ?? "nil"
+        let vo2 = vo2maxProfileToken.map { String($0) } ?? "nil"
+        return [fitness, vo2, String(vitalityProfileToken),
+                String(fitnessAgeProvenanceRequired), String(vo2maxProvenanceRequired),
+                String(vitalityProvenanceRequired)].joined(separator: "|")
+    }
+
+    func acceptsFitnessAge(provenance: Double?) -> Bool {
+        AgeMetricProfile.accepts(stored: provenance, current: fitnessAgeProfileToken,
+                                 provenanceRequired: fitnessAgeProvenanceRequired)
+    }
+
+    func acceptsVO2maxEstimate(provenance: Double?) -> Bool {
+        AgeMetricProfile.accepts(stored: provenance, current: vo2maxProfileToken,
+                                 provenanceRequired: vo2maxProvenanceRequired)
+    }
+
+    func acceptsVitality(provenance: Double?) -> Bool {
+        AgeMetricProfile.accepts(stored: provenance, current: vitalityProfileToken,
+                                 provenanceRequired: vitalityProvenanceRequired)
+    }
+
+    private func requireAgeMetricProvenance(age: Bool, sex: Bool, waist: Bool) {
+        if age || sex { d.set(true, forKey: K.fitnessAgeProvenanceRequired) }
+        if age || sex || waist { d.set(true, forKey: K.vo2maxProvenanceRequired) }
+        if age { d.set(true, forKey: K.vitalityProvenanceRequired) }
+    }
+
+    func confirmAgeInput() {
+        d.set(true, forKey: K.ageConfirmed)
+        requireAgeMetricProvenance(age: true, sex: false, waist: false)
+    }
+    func confirmSexInput() {
+        d.set(true, forKey: K.sexConfirmed)
+        requireAgeMetricProvenance(age: false, sex: true, waist: false)
+    }
+    func confirmFitnessInputs() {
+        confirmAgeInput()
+        confirmSexInput()
+    }
+
+    /// The onboarding shell intentionally does not observe `ProfileStore` (live profile updates used
+    /// to restart its animations). This narrow static boundary lets the Profile CTA record acceptance
+    /// without subscribing that shell to the store; the computed confirmation properties read through
+    /// UserDefaults, so the existing environment object sees the new state immediately.
+    static func confirmFitnessInputsInDefaults(_ defaults: UserDefaults = .standard) {
+        defaults.set(true, forKey: K.ageConfirmed)
+        defaults.set(true, forKey: K.sexConfirmed)
+        defaults.set(true, forKey: K.fitnessAgeProvenanceRequired)
+        defaults.set(true, forKey: K.vo2maxProvenanceRequired)
+        defaults.set(true, forKey: K.vitalityProvenanceRequired)
+    }
+
+    /// Pure decision used by platform tests and migrations.
+    nonisolated static func fitnessInputsAreConfirmed(
+        ageConfirmed: Bool, sexConfirmed: Bool, onboardingCompleted: Bool
+    ) -> Bool {
+        (ageConfirmed || onboardingCompleted) && (sexConfirmed || onboardingCompleted)
+    }
 
     /// Whole years elapsed `from`→`to` (floor — a birthday not yet reached this year doesn't count).
     nonisolated static func years(from: Date, to: Date) -> Int {

@@ -274,7 +274,7 @@ class WearableExportImporterTest {
         assertEquals(2450.0, d.totalKcal!!, 1e-6)
         assertEquals(6200.0, d.distanceM!!, 1e-6)        // equivalent_walking_distance (m)
         assertEquals(97.4, d.spo2Pct!!, 1e-6)            // dailyspo2 spo2_percentage
-        assertEquals(44.6, d.vo2max!!, 1e-6)             // vo2max vo2_max → Fitness Age
+        assertEquals(44.6, d.vo2max!!, 1e-6)             // vo2max vo2_max → device VO2max series
     }
 
     @Test

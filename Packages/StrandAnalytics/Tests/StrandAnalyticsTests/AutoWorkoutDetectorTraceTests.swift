@@ -43,6 +43,7 @@ final class AutoWorkoutDetectorTraceTests: XCTestCase {
         let start = 1_000_000
         let durS = 20 * 60
         let hr = block(start, durS, 120)
+            + block(start + durS, AutoWorkoutDetector.maxDipS + 2, 65)
         let saved = [SavedWorkoutSpan(startSec: start - 60, endSec: start + durS + 60)]
         let plain = AutoWorkoutDetector.detect(hr: hr, restingBpm: 60, savedSpans: saved)
         let (traced, lines) = AutoWorkoutDetector.detectTrace(hr: hr, restingBpm: 60, savedSpans: saved)
@@ -56,6 +57,7 @@ final class AutoWorkoutDetectorTraceTests: XCTestCase {
         let start = 1_000_000
         let durS = 20 * 60
         let hr = block(start, durS, 120)
+            + block(start + durS, AutoWorkoutDetector.maxDipS + 2, 65)
         let motion = (0..<durS).map { AutoWorkoutDetector.MotionPoint(ts: start + $0, intensity: 0.0) }
         let plain = AutoWorkoutDetector.detect(hr: hr, restingBpm: 60, motion: motion)
         let (traced, lines) = AutoWorkoutDetector.detectTrace(hr: hr, restingBpm: 60, motion: motion)

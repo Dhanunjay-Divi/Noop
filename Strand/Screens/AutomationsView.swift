@@ -1,11 +1,19 @@
 import SwiftUI
 import StrandDesign
+import UserNotifications
+#if os(iOS)
+import UIKit
+#endif
 
 /// Automations — turn the strap's physical inputs (double-tap, wrist on/off) and live biometrics
 /// into actions (Shortcuts, and Mac-only screen lock) and haptic coaching. All on-device.
 struct AutomationsView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var behavior: BehaviorStore
+    #if os(iOS)
+    @EnvironmentObject private var health: HealthKitBridge
+    #endif
+    @Environment(\.openURL) private var openURL
     // PERF: this screen does NOT observe `LiveState`. Its only live-dependent pixel is the "Strap
     // bonded / not connected" pill inside the double-tap card, which is now the `BondStatePill` leaf
     // that owns its own `@EnvironmentObject live`. Observing `live` at this level would re-render the
@@ -23,6 +31,13 @@ struct AutomationsView: View {
     private var cycleOptInApplies: Bool { model.profile.cycleAwarenessApplies }
     /// v5 Rhythm experimental gate (the screen still shows its own consent clickwrap when opened).
     @AppStorage(RhythmConsent.enabledKey) private var rhythmEnabled = false
+    /// Daily phone reminders are separate from wrist alerts and default OFF. State is mirrored only
+    /// after the authorization outcome so a denied system permission never leaves an inert ON switch.
+    @State private var dailyReviewEnabled = DailyReviewNotifications.isEnabled
+    @AppStorage(DailyReviewNotifications.morningMinutesKey) private var morningReviewMinutes = 8 * 60
+    @AppStorage(DailyReviewNotifications.eveningMinutesKey) private var eveningReviewMinutes = 19 * 60
+    @State private var notificationPermissionDenied = false
+    @State private var showNotificationPermissionAlert = false
     /// Inactivity reminder (#419) — UI-local store, persisted in UserDefaults. The buzz itself fires
     /// from the BLE offload path (BLEManager.maybeBuzzInactivity → the shipped SedentaryDetector); this
     /// screen only edits the prefs the engine reads.
@@ -42,6 +57,7 @@ struct AutomationsView: View {
                        // path (byte-identical layout) genuinely builds the off-screen cards on demand
                        // instead of constructing all eight/nine + their toggle subtrees up-front.
                        lazy: true) {
+            dailyReviewCard
             #if os(iOS)
             wristAlertsCard
             #endif
@@ -57,6 +73,156 @@ struct AutomationsView: View {
             batteryCard
             strainTargetCard
         }
+        .onAppear {
+            dailyReviewEnabled = DailyReviewNotifications.isEnabled
+            refreshNotificationPermissionState()
+        }
+        .alert("Notifications are off", isPresented: $showNotificationPermissionAlert) {
+            Button("Open Settings") { openNotificationSettings() }
+            Button("Not now", role: .cancel) {}
+        } message: {
+            Text("Allow notifications in Settings to use morning and evening review reminders. NOOP still works normally without them.")
+        }
+    }
+
+    // MARK: - Daily review reminders
+
+    private var dailyReviewCard: some View {
+        Section2(
+            icon: "sun.horizon.fill",
+            title: String(localized: "Daily review"),
+            blurb: String(localized: "Optional phone reminders to review Sleep in the morning and Today in the evening. Scores appear only after your latest device sync."),
+            active: dailyReviewEnabled
+        ) {
+            VStack(spacing: 0) {
+                ToggleRow(
+                    label: String(localized: "Morning & evening reminders"),
+                    help: String(localized: "Off by default. Turning this on asks for notification access once; declining never blocks NOOP."),
+                    isOn: dailyReviewToggle
+                )
+
+                if dailyReviewEnabled {
+                    rowDivider
+                    reviewTimeRow(
+                        label: String(localized: "Morning · opens Sleep"),
+                        minutes: morningTimeBinding
+                    )
+                    rowDivider
+                    reviewTimeRow(
+                        label: String(localized: "Evening · opens Today"),
+                        minutes: eveningTimeBinding
+                    )
+                    rowDivider
+                    Text("Reminder banners never include scores or health values. They only invite you to open NOOP after a sync.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                }
+
+                if notificationPermissionDenied {
+                    rowDivider
+                    HStack(alignment: .center, spacing: 12) {
+                        Text("Notifications are disabled in Settings.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.statusWarning)
+                        Spacer()
+                        Button("Open Settings") { openNotificationSettings() }
+                            .buttonStyle(.bordered)
+                            .tint(StrandPalette.accent)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+    }
+
+    private var dailyReviewToggle: Binding<Bool> {
+        Binding(
+            get: { dailyReviewEnabled },
+            set: { on in
+                if !on {
+                    dailyReviewEnabled = false
+                    notificationPermissionDenied = false
+                    DailyReviewNotifications.setEnabled(false)
+                    return
+                }
+
+                // The explanatory row is visible before this call, so the OS prompt happens only at
+                // the predictable moment the user explicitly turns the feature on.
+                dailyReviewEnabled = true
+                DailyReviewNotifications.setEnabled(true) { outcome in
+                    switch outcome {
+                    case .scheduled:
+                        dailyReviewEnabled = true
+                        notificationPermissionDenied = false
+                    case .denied:
+                        dailyReviewEnabled = false
+                        notificationPermissionDenied = true
+                        showNotificationPermissionAlert = true
+                    case .off:
+                        dailyReviewEnabled = false
+                    }
+                }
+            }
+        )
+    }
+
+    private var morningTimeBinding: Binding<Date> {
+        Binding(
+            get: { Self.date(fromMinutes: morningReviewMinutes) },
+            set: { date in
+                let minutes = Self.minutes(from: date)
+                morningReviewMinutes = minutes
+                DailyReviewNotifications.setMorningMinutes(minutes)
+            }
+        )
+    }
+
+    private var eveningTimeBinding: Binding<Date> {
+        Binding(
+            get: { Self.date(fromMinutes: eveningReviewMinutes) },
+            set: { date in
+                let minutes = Self.minutes(from: date)
+                eveningReviewMinutes = minutes
+                DailyReviewNotifications.setEveningMinutes(minutes)
+            }
+        )
+    }
+
+    private func reviewTimeRow(label: String, minutes: Binding<Date>) -> some View {
+        HStack(spacing: 16) {
+            Text(label)
+                .font(StrandFont.body)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Spacer()
+            DatePicker("", selection: minutes, displayedComponents: .hourAndMinute)
+                .labelsHidden()
+                .datePickerStyle(.compact)
+                .accessibilityLabel(label)
+        }
+        .frame(minHeight: 42)
+        .padding(.vertical, 4)
+    }
+
+    private func refreshNotificationPermissionState() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            Task { @MainActor in
+                notificationPermissionDenied = settings.authorizationStatus == .denied
+            }
+        }
+    }
+
+    private func openNotificationSettings() {
+        #if os(iOS)
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        #else
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension"
+        ) else { return }
+        #endif
+        openURL(url)
     }
 
     // MARK: - Wrist alerts master (iOS only — PR #572)
@@ -314,11 +480,20 @@ struct AutomationsView: View {
                 // see the Health card can't enable the feature from here either.
                 if cycleOptInApplies {
                     ToggleRow(label: String(localized: "Cycle awareness"),
-                              help: String(localized: "Reads a coarse menstrual-cycle phase from your nightly skin temperature, entirely on \(Platform.deviceNounPhrase). Awareness only: not contraception, not a fertility predictor, not a medical service. The card appears in Health."),
+                              help: String(localized: "Reads a coarse menstrual-cycle phase from your nightly skin temperature, entirely on \(Platform.deviceNounPhrase). On iPhone, turning this on can ask to import cycle-start dates from Apple Health; you can decline and log dates manually. Awareness only: not contraception, not a fertility predictor, not a medical service. The card appears in Health."),
                               isOn: $cycleAwareness)
                         .onChangeCompat(of: cycleAwareness) { on in
                             model.cycleAwarenessEnabled = on
-                            Task { await model.refreshV5Signals() }
+                            Task {
+                                #if os(iOS)
+                                if on {
+                                    await health.requestCycleDataAccessAndImport()
+                                } else {
+                                    await health.disableCycleDataImport()
+                                }
+                                #endif
+                                await model.refreshV5Signals()
+                            }
                         }
                     rowDivider
                 }

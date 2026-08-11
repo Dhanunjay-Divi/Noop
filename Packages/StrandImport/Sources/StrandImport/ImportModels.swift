@@ -621,7 +621,7 @@ public struct WearableDailyRow: Sendable, Equatable {
     public var skinTempDevC: Double?  // Oura "temperature_deviation" (°C from baseline)
     public var spo2Pct: Double?
     public var avgStress: Int?        // Garmin daily average stress (0..100), reference
-    public var vo2max: Double?        // Oura "vo2_max" (mL/kg/min); feeds Fitness Age, same as Apple Health VO2max
+    public var vo2max: Double?        // Device-reported VO2max (mL/kg/min), kept separate from Fitness Age's model
 
     // Sleep rollup (mirrors the night's session, for the daily metric)
     public var totalSleepMin: Double?

@@ -77,6 +77,8 @@ public struct ConnectionDot: View {
 
     @State private var animate = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var motion = NoopMotionState.shared
+    private var poseStill: Bool { motion.poseStill(reduceMotion) }
     @Environment(\.colorScheme) private var scheme
 
     public init(tone: StrandTone = .positive, pulsing: Bool = false, size: CGFloat = 9) {
@@ -109,8 +111,8 @@ public struct ConnectionDot: View {
         .frame(width: size, height: size)
         // Honour Reduce Motion: don't kick off the looping pulse (settles at the
         // resting dot) and never attach the repeatForever breathe animation.
-        .onAppear { if pulsing && !reduceMotion { animate = true } }
-        .animation(pulsing && !reduceMotion ? StrandMotion.breathe : nil, value: animate)
+        .onAppear { if pulsing && !poseStill { animate = true } }
+        .animation(pulsing && !poseStill ? StrandMotion.breathe : nil, value: animate)
         .accessibilityHidden(true)
     }
 }

@@ -8,7 +8,7 @@ import org.junit.Test
 /**
  * #510: `fillWorkoutHrFromStrap` used to read every workout's HR window under a hardcoded "my-whoop",
  * so a workout recorded on a SECOND WHOOP (id "whoop-<mac>", its HR banked under that id) read an empty
- * window and lost its Avg HR / calories / Effort. [WhoopRepository.workoutHrDeviceId] now resolves the
+ * window and lost its Avg HR / calories / Effort. [WhoopRepository.workoutHrDeviceIds] now resolves the
  * correct read key per row; this pins that resolution and the strap-native classification it rides on.
  */
 class WorkoutHrDeviceKeyTest {
@@ -34,19 +34,35 @@ class WorkoutHrDeviceKeyTest {
         // "whoop-aabbcc". The active strap being something else must NOT redirect the read.
         assertEquals(
             "whoop-aabbcc",
-            WhoopRepository.workoutHrDeviceId("whoop-aabbcc-noop", "whoop-aabbcc-noop", activeStrapId = "my-whoop"),
+            WhoopRepository.workoutHrDeviceIds(
+                "whoop-aabbcc-noop", "whoop-aabbcc-noop", activeStrapId = "my-whoop",
+            ).first(),
         )
         // Canonical single-WHOOP detected row is unchanged from the old "my-whoop" behaviour.
         assertEquals(
             "my-whoop",
-            WhoopRepository.workoutHrDeviceId("my-whoop-noop", "my-whoop-noop", activeStrapId = "my-whoop"),
+            WhoopRepository.workoutHrDeviceIds(
+                "my-whoop-noop", "my-whoop-noop", activeStrapId = "my-whoop",
+            ).first(),
         )
     }
 
-    @Test fun `manual row reads HR under its own strap id`() {
+    @Test fun `manual row reads HR under the active union instead of its stored id`() {
         assertEquals(
-            "whoop-aabbcc",
-            WhoopRepository.workoutHrDeviceId("manual", "whoop-aabbcc", activeStrapId = "my-whoop"),
+            listOf("whoop-ddeeff", "my-whoop"),
+            WhoopRepository.workoutHrDeviceIds(
+                "manual", rowDeviceId = "whoop-aabbcc", activeStrapId = "whoop-ddeeff",
+            ),
+        )
+    }
+
+    @Test fun `manual placeholder row reaches HR and active-strain data under a re-added strap`() {
+        // Both the aggregate HR query and the raw-sample Effort fill consume this exact list.
+        assertEquals(
+            listOf("whoop-aabbcc", "my-whoop"),
+            WhoopRepository.workoutHrDeviceIds(
+                "manual", rowDeviceId = "my-whoop", activeStrapId = "whoop-aabbcc",
+            ),
         )
     }
 
@@ -54,19 +70,34 @@ class WorkoutHrDeviceKeyTest {
         // An Apple/HC/activity-file row carries no strap HR; #77 fills it from the worn strap = active strap.
         assertEquals(
             "whoop-aabbcc",
-            WhoopRepository.workoutHrDeviceId("apple-health", "apple-health", activeStrapId = "whoop-aabbcc"),
+            WhoopRepository.workoutHrDeviceIds(
+                "apple-health", "apple-health", activeStrapId = "whoop-aabbcc",
+            ).first(),
         )
         assertEquals(
             "my-whoop",
-            WhoopRepository.workoutHrDeviceId("activity-file", "activity-file", activeStrapId = "my-whoop"),
+            WhoopRepository.workoutHrDeviceIds(
+                "activity-file", "activity-file", activeStrapId = "my-whoop",
+            ).first(),
         )
     }
 
     @Test fun `a bare strap id with no -noop suffix is returned unchanged`() {
-        // removeSuffix is a no-op when the suffix is absent — a manual/base id must not be truncated.
+        // removeSuffix is a no-op when a detected row already carries its bare recording id.
         assertEquals(
             "whoop-aabbcc",
-            WhoopRepository.workoutHrDeviceId("manual", "whoop-aabbcc", activeStrapId = "ignored"),
+            WhoopRepository.workoutHrDeviceIds(
+                "whoop-aabbcc-noop", "whoop-aabbcc", activeStrapId = "ignored",
+            ).first(),
         )
+    }
+
+    @Test fun `read plan never exceeds the two ids consumed by the aggregate query`() {
+        for (source in listOf("manual", "apple-health", "activity-file", "whoop-aabbcc-noop")) {
+            for (active in listOf("my-whoop", "whoop-aabbcc")) {
+                val ids = WhoopRepository.workoutHrDeviceIds(source, "whoop-ddeeff", active)
+                assertTrue("$source/$active produced ${ids.size} ids", ids.isNotEmpty() && ids.size <= 2)
+            }
+        }
     }
 }

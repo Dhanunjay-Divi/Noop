@@ -67,4 +67,18 @@ final class RespRateRsaTests: XCTestCase {
         XCTAssertTrue(SleepStager.respRateFromRR(rows, start: start, end: start + 10).isNaN)
         XCTAssertTrue(SleepStager.respRateFromRR([], start: start, end: start + 10).isNaN)
     }
+
+    func testRespRateFromRRBatchedTimestampsIsNaN() {
+        let start = 1_700_000_000
+        var rows: [RRInterval] = []
+        for second in 0..<80 {
+            for beat in 0..<6 {
+                rows.append(RRInterval(ts: start + second, rrMs: 940 + (beat * 13) % 70))
+            }
+        }
+        let fraction = HRVAnalyzer.beatAccurateFraction(
+            tsSec: rows.map(\.ts), rrMs: rows.map { Double($0.rrMs) })
+        XCTAssertFalse(HRVAnalyzer.beatValuesAreTrustworthy(beatAccurateFraction: fraction))
+        XCTAssertTrue(SleepStager.respRateFromRR(rows, start: start, end: start + 90).isNaN)
+    }
 }

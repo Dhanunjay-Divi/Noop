@@ -250,6 +250,41 @@ class OuraDriverTest {
     }
 
     @Test
+    fun testSampleConvertingToFutureIsRejected() {
+        val anchorSeconds = 1_700_000_000L
+        val anchorRt = 1_000_000L
+        val d = OuraDriver(
+            ringGen = OuraRingGen.GEN3,
+            authKey = key,
+            nowMsProvider = { anchorSeconds * 1_000 },
+        )
+        val payload = le8(anchorSeconds) + intArrayOf(0x00)
+        d.ingest(OuraRecord(type = OuraEventTag.TIME_SYNC.raw, ringTimestamp = anchorRt, payload = payload))
+
+        assertEquals(anchorSeconds - 10, d.unixSeconds(forRingTimestamp = anchorRt - 100))
+        assertEquals(anchorSeconds, d.unixSeconds(forRingTimestamp = anchorRt))
+        assertEquals(anchorSeconds + 200, d.unixSeconds(forRingTimestamp = anchorRt + 2_000))
+        assertNull(d.unixSeconds(forRingTimestamp = anchorRt + 3_010))
+        assertNull(d.unixSeconds(forRingTimestamp = anchorRt + 315_360_000))
+    }
+
+    @Test
+    fun testAnchorAdoptionWindowRemainsIndependentOfNow() {
+        val futureAnchorSeconds = 2_020_000_000L
+        val anchorRt = 500L
+        val d = OuraDriver(
+            ringGen = OuraRingGen.GEN3,
+            authKey = key,
+            nowMsProvider = { 1_700_000_000L * 1_000 },
+        )
+        assertTrue(d.isPlausibleAnchorEpoch(futureAnchorSeconds))
+        val payload = le8(futureAnchorSeconds) + intArrayOf(0x00)
+        d.ingest(OuraRecord(type = OuraEventTag.TIME_SYNC.raw, ringTimestamp = anchorRt, payload = payload))
+
+        assertNull(d.unixSeconds(forRingTimestamp = anchorRt))
+    }
+
+    @Test
     fun testRtcBeaconOnlyAnchorsWhenNoTimeSyncSeenYet() {
         val d = OuraDriver(ringGen = OuraRingGen.GEN3, authKey = key)
         val beaconRt = 5_000L

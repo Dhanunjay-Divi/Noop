@@ -31,23 +31,39 @@ final class OuraStreamMappingTests: XCTestCase {
         XCTAssertTrue(s.hr.isEmpty)
     }
 
-    // MARK: - HRV 0x5D -> events[OURA_HRV] with RAW, units-neutral payload (no fabricated rmssd_ms)
+    // MARK: - HRV 0x5D -> events[OURA_HRV] with validated HR/RMSSD units
 
-    func testHRVMapsToEventWithRawNeutralPayload() {
+    func testHRVMapsToEventWithHrAndRmssd() {
         let s = OuraStreamMapping.streams(from: [
-            .hrv(OuraHRV(ringTimestamp: 100, timeMs: 5000, b1: 47, b2: 3)),
+            .hrv(OuraHRV(ringTimestamp: 100, index: 0, hrBpm: 52, rmssdMs: 47)),
         ], at: ts)
         XCTAssertEqual(s.events.count, 1)
         let ev = s.events[0]
         XCTAssertEqual(ev.kind, OuraStreamMapping.hrvEventKind)
         XCTAssertEqual(ev.kind, "OURA_HRV")
-        XCTAssertEqual(ev.ts, ts)
-        // HONEST: the ring's OWN raw tag fields only; the b1/b2 byte -> ms scale is not Tier-A, so we
-        // NEVER surface a fabricated rmssd_ms. Keys + values match the Kotlin twin exactly.
-        XCTAssertNil(ev.payload["rmssd_ms"], "must not fabricate rmssd_ms")
-        XCTAssertEqual(ev.payload["time_ms"], .int(5000))
-        XCTAssertEqual(ev.payload["b1"], .int(47))
-        XCTAssertEqual(ev.payload["b2"], .int(3))
+        XCTAssertEqual(ev.ts, ts - 300)
+        XCTAssertEqual(ev.payload["pair_index"], .int(0))
+        XCTAssertEqual(ev.payload["hr_bpm"], .int(52))
+        XCTAssertEqual(ev.payload["rmssd_ms"], .int(47))
+    }
+
+    func testHRVMultiBucketUsesOldestFirstFiveMinuteSlots() {
+        let s = OuraStreamMapping.streams(from: [
+            .hrv(OuraHRV(ringTimestamp: 100, index: 0, hrBpm: 52, rmssdMs: 47, count: 3)),
+            .hrv(OuraHRV(ringTimestamp: 100, index: 1, hrBpm: 54, rmssdMs: 44, count: 3)),
+            .hrv(OuraHRV(ringTimestamp: 100, index: 2, hrBpm: 55, rmssdMs: 41, count: 3)),
+        ], at: ts)
+        XCTAssertEqual(s.events.map(\.ts), [ts - 900, ts - 600, ts - 300])
+        XCTAssertEqual(Set(s.events.map(\.ts)).count, 3)
+    }
+
+    func testHRVDroppedPaddingStillConsumesItsTimestampSlot() {
+        let s = OuraStreamMapping.streams(from: [
+            .hrv(OuraHRV(ringTimestamp: 100, index: 0, hrBpm: 52, rmssdMs: 47, count: 4)),
+            .hrv(OuraHRV(ringTimestamp: 100, index: 2, hrBpm: 55, rmssdMs: 41, count: 4)),
+            .hrv(OuraHRV(ringTimestamp: 100, index: 3, hrBpm: 56, rmssdMs: 39, count: 4)),
+        ], at: ts)
+        XCTAssertEqual(s.events.map(\.ts), [ts - 1200, ts - 600, ts - 300])
     }
 
     // MARK: - SpO2 -> spo2:[SpO2Sample]
@@ -61,6 +77,15 @@ final class OuraStreamMappingTests: XCTestCase {
         XCTAssertEqual(s.spo2.map { $0.ir }, [0, 0])
         XCTAssertEqual(s.spo2.map { $0.unit }, ["raw", "dc_raw"])
         XCTAssertEqual(s.spo2.map { $0.ts }, [ts, ts])
+    }
+
+    func testSpO2SamplesReceiveDistinctOneSecondTimestamps() {
+        let s = OuraStreamMapping.streams(from: [
+            .spo2(OuraSpO2(ringTimestamp: 100, value: 95, index: 0, count: 3)),
+            .spo2(OuraSpO2(ringTimestamp: 100, value: 96, index: 1, count: 3)),
+            .spo2(OuraSpO2(ringTimestamp: 100, value: 97, index: 2, count: 3)),
+        ], at: ts)
+        XCTAssertEqual(s.spo2.map(\.ts), [ts - 2, ts - 1, ts])
     }
 
     // MARK: - Temp 0x46/0x75 -> skinTemp:[SkinTempSample] (centi-degree-C, parity with Kotlin)
@@ -86,7 +111,7 @@ final class OuraStreamMappingTests: XCTestCase {
         ], at: ts)
         XCTAssertEqual(s.events.count, 2)
         XCTAssertTrue(s.events.allSatisfy { $0.kind == OuraStreamMapping.sleepPhaseEventKind })
-        XCTAssertEqual(s.events.map { $0.payload["phase"] }, [.int(2), .int(3)])
+        XCTAssertEqual(s.events.map { $0.payload["phase"] }, [.int(0), .int(2)])
         XCTAssertEqual(s.events.map { $0.payload["index"] }, [.int(0), .int(1)])
         XCTAssertEqual(s.events.map { $0.ts }, [ts, ts])
     }
@@ -141,7 +166,7 @@ final class OuraStreamMappingTests: XCTestCase {
         let s = OuraStreamMapping.streams(from: [
             .hr(OuraHR(ringTimestamp: 1, bpm: 55, ibiMs: 1090)),
             .ibi(OuraIBI(ringTimestamp: 1, ibiMs: 1090)),
-            .hrv(OuraHRV(ringTimestamp: 1, timeMs: 0, b1: 40, b2: 1)),
+            .hrv(OuraHRV(ringTimestamp: 1, index: 0, hrBpm: 40, rmssdMs: 1)),
             .spo2(OuraSpO2(ringTimestamp: 1, value: 965)),
             .temp(OuraTemp(ringTimestamp: 1, celsius: 34.0)),
             .sleepPhase(OuraSleepPhase(ringTimestamp: 1, index: 0, stage: .light)),

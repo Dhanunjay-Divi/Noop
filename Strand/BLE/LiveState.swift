@@ -244,6 +244,15 @@ public final class LiveState: ObservableObject {
     /// #690: the body-location probe result (or the waiting sentinel), shown + copied in the Devices dialog.
     /// Cleared on disconnect and on dialog dismiss. Twin of the Android WhoopBleClient.bodyLocationProbe flow.
     @Published public var bodyLocationProbe: String? = nil
+
+    /// Result of the opt-in, user-initiated WHOOP MG ECG protocol probe. This is research instrumentation,
+    /// never a medical interpretation; nil outside a run or after dismissal.
+    @Published public var ecgProbe: String? = nil
+
+    /// Hardware variant resolved from the Device Information Service. Unknown stays nil until the strap
+    /// attests its immutable identity, which keeps MG-only controls locked on ordinary WHOOP 5 hardware.
+    @Published public var whoop5Variant: String? = nil
+
     /// Wrist-wear state from WRIST_ON/WRIST_OFF events. Defaults true so wear-gated features work
     /// before the first event arrives; flipped by FrameRouter on a real event.
     @Published public var worn: Bool = true
@@ -252,6 +261,10 @@ public final class LiveState: ObservableObject {
     /// offload (consecutive empty backfills). Lets the home state read "connected, history sync is
     /// experimental on 5.0" instead of a WHOOP-4-style "not recording"/sync-error. Reset on connect/disconnect.
     @Published public var historySyncExperimental: Bool = false
+
+    /// True after a sustained streak of completed-but-empty offloads. Kept separate from connection
+    /// state so the UI can say “connected, no data” instead of falsely saying the strap is disconnected.
+    @Published public var sustainedEmptyOffload: Bool = false
 
     // MARK: - Standard fitness-sensor live metrics (RSC / CSC / CPS — additive, never HR)
     //

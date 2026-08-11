@@ -72,9 +72,9 @@ struct InsightsView: View {
         /// Short segment label.
         var label: String {
             switch self {
-            case .recovery: return String(localized: "Charge")
+            case .recovery: return String(localized: "Recovery")
             case .hrv:      return "HRV"
-            case .sleep:    return String(localized: "Rest")
+            case .sleep:    return String(localized: "Sleep Score")
             case .rhr:      return "RHR"
             }
         }
@@ -90,9 +90,9 @@ struct InsightsView: View {
         /// The human outcome name used by BehaviorInsights.sentence.
         var outcomeName: String {
             switch self {
-            case .recovery: return String(localized: "Charge")
+            case .recovery: return String(localized: "Recovery")
             case .hrv:      return "HRV"
-            case .sleep:    return String(localized: "Rest")
+            case .sleep:    return String(localized: "Sleep Score")
             case .rhr:      return String(localized: "Resting HR")
             }
         }
@@ -304,7 +304,7 @@ struct InsightsView: View {
                         Text("WHAT MOVES YOU \u{203A}")
                             .font(StrandFont.overline).tracking(StrandFont.overlineTracking)
                             .foregroundStyle(StrandPalette.textPrimary)
-                        Text("Ranked, lag-aware: which of your habits actually move your Charge, plus your personal alcohol/caffeine dose-response.")
+                        Text("Ranked, lag-aware: which of your habits move your Recovery, plus your personal alcohol/caffeine dose-response.")
                             .font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -1190,9 +1190,9 @@ struct InsightsView: View {
                           alignment: .leading, spacing: NoopMetrics.gap) {
                     StatTile(label: "Next morning",
                              value: "\(Int(cost.meanNextMorning.rounded()))",
-                             caption: String(localized: "Charge · \(pointsLabel) pts"),
+                             caption: String(localized: "Recovery · \(pointsLabel) pts"),
                              accent: accent)
-                    StatTile(label: "Rest baseline",
+                    StatTile(label: "Recovery baseline",
                              value: "\(Int(cost.baselineMean.rounded()))",
                              caption: String(localized: "untouched days"),
                              accent: StrandPalette.textPrimary)
@@ -1256,7 +1256,7 @@ struct InsightsView: View {
         if let c = CorrelationEngine.pearson(
             CorrelationEngine.alignByDay(series("sleep_performance"), series("recovery"))) {
             out.append(.init(id: "sleep-rec",
-                             title: String(localized: "Rest ↔ Charge"),
+                             title: String(localized: "Sleep Score ↔ Recovery"),
                              blurb: String(localized: "How closely a good night tracks next-morning charge."),
                              corr: c))
         }
@@ -1264,7 +1264,7 @@ struct InsightsView: View {
         if let c = CorrelationEngine.pearson(
             CorrelationEngine.alignByDay(series("hrv"), series("recovery"))) {
             out.append(.init(id: "hrv-rec",
-                             title: String(localized: "HRV ↔ Charge"),
+                             title: String(localized: "HRV ↔ Recovery"),
                              blurb: String(localized: "Heart-rate variability as the engine behind your charge score."),
                              corr: c))
         }
@@ -1272,7 +1272,7 @@ struct InsightsView: View {
         if let c = CorrelationEngine.pearson(
             CorrelationEngine.alignByDay(series("rhr"), series("recovery"))) {
             out.append(.init(id: "rhr-rec",
-                             title: String(localized: "Resting HR ↔ Charge"),
+                             title: String(localized: "Resting HR ↔ Recovery"),
                              blurb: String(localized: "A lower resting heart rate usually means a higher charge."),
                              corr: c))
         }
@@ -1281,7 +1281,7 @@ struct InsightsView: View {
         //  how much yesterday carries into today.)
         if let c = CorrelationEngine.lagged(x: series("recovery"), y: series("recovery"), lagDays: 1) {
             out.append(.init(id: "rec-lag",
-                             title: String(localized: "Charge → Next-day charge"),
+                             title: String(localized: "Recovery → Next-day recovery"),
                              blurb: String(localized: "How much one day's charge carries into the next."),
                              corr: c))
         }

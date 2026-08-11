@@ -390,13 +390,15 @@ public enum AnalyticsEngine {
 
         // ── The day's MAIN night (#525) ───────────────────────────────────────
         // A day can hold an overnight AND a daytime nap (both end on `day`, so both are in `matched`).
-        // The sleep-DURATION figures (total sleep / stage minutes / efficiency / disturbances, hence the
-        // Rest composite, the debt ledger, and the dashboard card) describe the MAIN night — the SAME
-        // block the Sleep tab's hero shows (longest, preferring an overnight-anchored onset). They must
-        // NOT silently sum the nap in, or the "your night" number disagrees across screens (the #525
-        // report). Naps stay their OWN session rows in `sleepSessions` / `cachedSleep`, where the Sleep
-        // tab lists and labels them separately. `SleepStageTotals.mainNightIndex` is the single shared
-        // selector so the analytics rollup and the Sleep tab resolve to the identical block.
+        // The canonical sleep-DURATION figures (total sleep / stage minutes / efficiency / disturbances,
+        // hence the Rest composite and dashboard card) describe the MAIN night — the SAME block the Sleep
+        // tab's hero shows (longest, preferring an overnight-anchored onset). They must NOT silently sum the
+        // nap in, or the "your night" number disagrees across screens (the #525 report). Naps stay their OWN
+        // session rows in `sleepSessions` / `cachedSleep`, where the Sleep tab lists and labels them
+        // separately. The Sleep tab's debt calculation adds only those rows' decoded asleep minutes as
+        // repayment credit; it does not mutate this canonical main-night aggregate.
+        // `SleepStageTotals.mainNightIndex` is the single shared selector so the analytics rollup and the
+        // Sleep tab classify the same blocks.
         // Pick by the LEARNED-TIMING score, threading the user's learned habitual midsleep so a
         // late/shift sleeper's real night out-scores a daytime nap (nil = cold-start overnight band).
         // BIPHASIC GAP-BRIDGE (#561): a main sleep briefly interrupted by a short wake (a fragment the
@@ -406,8 +408,8 @@ public enum AnalyticsEngine {
         // winning group. The AASM aggregate below then SUMS the group's stages — in-bed is the SUM of each
         // fragment's own in-bed span (the inter-fragment wake gap is NOT part of any fragment, so it is
         // excluded and we do NOT invent WASO for it). A day with no bridgeable gap collapses to the single
-        // block the bare `mainNightIndex` would pick. Intelligence / the Ledger / the Sleep tab all read
-        // this SAME group (the seam below passes the same `gapBridgeMaxMin`), so #525 does not regress.
+        // block the bare `mainNightIndex` would pick. Intelligence and the Sleep headline read this SAME
+        // group; the debt ledger starts with it and separately credits naps, so #525 does not regress.
         let mainGroupIdx = SleepStageTotals.mainNightGroupIndices(
             matched.map { SleepStageTotals.NightBlock(start: $0.start, end: $0.end) },
             offsetSec: tzOffsetSeconds, habitualMidsleepSec: habitualMidsleepSec) ?? []
@@ -520,7 +522,7 @@ public enum AnalyticsEngine {
                 // from, so the displayed value equals the `deepOnly` figure the trace logs. rr sorted (RMSSD
                 // = successive diffs). nil when no deep sleep is detected (WHOOP-4.0 staging can be sparse) —
                 // the caller shows calibrating, never a fabricated number.
-                let rrSorted = rr.sorted { $0.ts < $1.ts }
+                let rrSorted = rr.sortedByTsStable()
                 let deep = matched.flatMap { s in
                     SleepStager.sessionHrvWindows(start: s.start, end: s.end, rr: rrSorted, stages: s.stages)
                         .filter { $0.stage == "deep" }.compactMap { $0.rmssd }
@@ -546,7 +548,7 @@ public enum AnalyticsEngine {
             func r2(_ x: Double) -> Double { (x * 100).rounded() / 100 }
             // sessionHrvWindows requires ts-sorted rr (RMSSD = successive diffs); the value path passes the
             // stager's pre-sorted rrS, so sort our own copy of the day's raw rr once here for the re-window.
-            let rrSorted = rr.sorted { $0.ts < $1.ts }
+            let rrSorted = rr.sortedByTsStable()
             var allWin: [SleepStager.HrvWindow] = []
             for s in matched {
                 let wins = SleepStager.sessionHrvWindows(start: s.start, end: s.end, rr: rrSorted, stages: s.stages)

@@ -1,19 +1,17 @@
 import XCTest
 @testable import Strand
 
-/// Guards the onboarding Units control (#781). The ProfileStep wizard step now carries a Metric/Imperial
-/// segmented Picker so US users can pick their units during setup, instead of being locked to kg/cm until
-/// they later found Settings. That Picker is bound to `@AppStorage(UnitPrefs.systemKey)` and tags its
-/// segments with the `UnitSystem` rawValues, exactly like the Settings -> Units card.
+/// Guards the onboarding measurement controls. Weight and height now have independent choices so kg +
+/// ft/in (or lb + cm) works, and their numeric values are direct-entry TextFields backed by SI storage.
 ///
 /// These tests pin that wiring contract so a rename of the key or a rawValue can't silently leave the
 /// onboarding picker writing one place while the formatter reads another (which is the bug #781 fixed).
 final class OnboardingUnitsPickerTests: XCTestCase {
 
-    /// The onboarding picker and the Settings card and the formatter must all read/write the SAME key,
-    /// or the choice made in onboarding wouldn't reach the Weight/Height display.
-    func testUnitSystemKeyIsTheSharedAppStorageKey() {
+    func testUnitPreferenceKeysAreStable() {
         XCTAssertEqual(UnitPrefs.systemKey, "units.system")
+        XCTAssertEqual(UnitPrefs.massKey, "units.mass")
+        XCTAssertEqual(UnitPrefs.heightKey, "units.height")
     }
 
     /// The picker tags are the `UnitSystem` rawValues; they must round-trip through the same initializer
@@ -42,5 +40,24 @@ final class OnboardingUnitsPickerTests: XCTestCase {
         XCTAssertEqual(UnitFormatter.heightFromCentimeters(cm, system: .metric), "178 cm")
         XCTAssertNotEqual(UnitFormatter.heightFromCentimeters(cm, system: .imperial),
                           UnitFormatter.heightFromCentimeters(cm, system: .metric))
+    }
+
+    func testMixedUnitChoicesResolveIndependently() {
+        XCTAssertEqual(UnitPrefs.resolveMass(system: .imperial, override: MassUnit.kilograms.rawValue),
+                       .kilograms)
+        XCTAssertEqual(UnitPrefs.resolveHeight(system: .metric, override: HeightUnit.feetInches.rawValue),
+                       .feetInches)
+        XCTAssertEqual(UnitFormatter.massFromKilograms(74.5, unit: .kilograms), "74.5 kg")
+        XCTAssertEqual(UnitFormatter.heightFromCentimeters(178, unit: .feetInches), "5′ 10″")
+    }
+
+    func testOnboardingUsesDirectEntryAndContrastInk() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent("Strand/Onboarding/OnboardingWizard.swift"))
+        XCTAssertTrue(source.contains("TextField(\"Weight\", value: displayedWeight"))
+        XCTAssertTrue(source.contains("TextField(\"Feet\", value: displayedFeet"))
+        XCTAssertTrue(source.contains("TextField(\"Inches\", value: displayedRemainingInches"))
+        XCTAssertTrue(source.contains("foregroundStyle(StrandPalette.accentInk)"),
+                      "The dark-mode near-white CTA must use dark contrast ink, not hard-coded white.")
     }
 }

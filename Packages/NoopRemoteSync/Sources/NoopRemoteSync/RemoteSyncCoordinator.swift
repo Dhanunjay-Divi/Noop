@@ -37,6 +37,13 @@ public enum RemoteDerivedMetricProvenance: Sendable {
 /// Low-volume derived rows are replayed over a bounded history window because the server upserts
 /// their natural keys; this also propagates local edits without inventing a fragile second outbox.
 public actor RemoteSyncCoordinator {
+    /// The persisted, cross-platform key for Noop's 0...100 Rest composite.
+    ///
+    /// Rest intentionally stays in `metricSeries` locally rather than the legacy wide `DailyMetric`
+    /// row. Remote sync allowlists this one series for the `noop_computed` namespace instead of
+    /// widening the replication boundary to arbitrary metric-series rows.
+    static let restMetricKey = "sleep_performance"
+
     private let store: WhoopStore
     private let uploader: any RemoteSyncUploading
     private let identityStore: any RemoteBatchIdentityStoring
@@ -243,6 +250,21 @@ public actor RemoteSyncCoordinator {
         let platformRows = cursor.dailySent
             ? []
             : try await store.appleDaily(deviceId: deviceId, from: fromDay, to: toDay)
+        // Rest is the one daily score whose source of truth lives in the tall metric-series table.
+        // Read it only for Noop-computed producer namespaces: copying the same local key into an
+        // official-reference or generic import namespace would misstate its provenance. The query is
+        // bounded by the exact fixed day window used by every other derived daily field.
+        let restRows: [MetricPoint]
+        if !cursor.dailySent, case .noopComputed = metricProvenance {
+            restRows = try await store.metricSeries(
+                deviceId: deviceId,
+                key: Self.restMetricKey,
+                from: fromDay,
+                to: toDay
+            )
+        } else {
+            restRows = []
+        }
         let fetchedSleep = try await store.remoteSyncSleepSessions(
             deviceId: deviceId, from: fromTs, to: toTs,
             limit: sleepPageSize + 1, afterStartTs: cursor.sleepStartTs
@@ -282,6 +304,11 @@ public actor RemoteSyncCoordinator {
         for row in platformRows {
             var metrics = daily[row.day] ?? [:]
             Self.mapPlatformDaily(row, to: &metrics)
+            daily[row.day] = metrics
+        }
+        for row in restRows where row.value.isFinite && (0...100).contains(row.value) {
+            var metrics = daily[row.day] ?? [:]
+            metrics[Self.restMetricKey] = row.value
             daily[row.day] = metrics
         }
         return DerivedPayload(

@@ -8,7 +8,7 @@ struct MetricDescriptor: Identifiable, Hashable {
     let title: String
     let category: String
     let unit: String
-    let source: String       // "my-whoop" or "apple-health"
+    let source: String       // "my-whoop", an import partition, or another explicit producer
     let icon: String
     let decimals: Int
     let higherIsBetter: Bool?
@@ -24,7 +24,16 @@ struct MetricDescriptor: Identifiable, Hashable {
         case "xiaomi-band":  return "Mi Band"
         case "nutrition-csv": return String(localized: "Nutrition")
         case "noop-mood":    return String(localized: "Mood")
-        default:             return "Whoop"   // "my-whoop" + on-device computed sources
+        // `my-whoop` is the local strap namespace. Its series can resolve to directly measured
+        // strap rows OR to a sibling `-noop` series calculated on-device; calling the whole namespace
+        // "Whoop" made independent Charge/Effort/Rest values look official. Keep that boundary visible.
+        case "my-whoop":     return String(localized: "NOOP / strap")
+        case let s where s.hasSuffix("-noop"):
+            return "NOOP"
+        case "whoop", "whoop-official-reference":
+            return String(localized: "WHOOP import")
+        default:
+            return source
         }
     }
 
@@ -32,6 +41,10 @@ struct MetricDescriptor: Identifiable, Hashable {
     /// the DISPLAYED number + unit onto WHOOP's 0–21 axis. Mirrors the Android `MetricSpec.whoopEffort`
     /// gate (`key == "strain"`) — the only value-converting metric in the catalog.
     private var isEffort: Bool { key == "strain" }
+    /// The database convention for sleep efficiency is a 0–1 fraction, while the catalog presents it
+    /// as a percentage. Keep conversion at the descriptor boundary so charts, tables and stat tiles all
+    /// say 90% for a stored 0.90 (rather than the misleading 1% produced by plain rounding).
+    private var isFractionPercent: Bool { key == "sleep_efficiency" }
 
     /// #111: the skin_temp metric's stored value is EITHER an absolute skin temperature (WHOOP export gives
     /// absolute °C) OR a signed DEVIATION from the personal baseline (±°C, the live/computed pipeline) —
@@ -43,7 +56,10 @@ struct MetricDescriptor: Identifiable, Hashable {
     private var isSkinTemp: Bool { key == "skin_temp" }
 
     func format(_ v: Double) -> String {
-        let n = decimals == 0 ? String(Int(v.rounded())) : String(format: "%.\(decimals)f", v)
+        let displayValue = isFractionPercent ? v * 100 : v
+        let n = decimals == 0
+            ? String(Int(displayValue.rounded()))
+            : String(format: "%.\(decimals)f", displayValue)
         return unit.isEmpty ? n : "\(n) \(unit)"
     }
 
@@ -62,9 +78,11 @@ struct MetricDescriptor: Identifiable, Hashable {
     /// scale-agnostic and falls through to the plain `format` above, so each toggle only ever touches
     /// the values that actually have a converted form.
     func format(_ v: Double, system: UnitSystem, temperature: TemperatureUnit,
-                effortScale: EffortScale = .hundred) -> String {
+                effortScale: EffortScale = .hundred, mass: MassUnit? = nil) -> String {
         switch unit {
-        case "kg":  return UnitFormatter.massFromKilograms(v, system: system)
+        case "kg":  return UnitFormatter.massFromKilograms(
+            v, unit: mass ?? (system == .imperial ? .pounds : .kilograms)
+        )
         case "°C":
             // #111: a skin-temp DEVIATION (v < 20 °C) scales without the +32 offset; an absolute reading
             // (WHOOP export, v >= 20 °C) keeps the full C→F. Every other °C metric is absolute.
@@ -81,11 +99,18 @@ struct MetricDescriptor: Identifiable, Hashable {
     /// Effort delta rescales 0–100→0–21 on the WHOOP scale (#268, no offset — it's a magnitude). The
     /// caller supplies the magnitude (sign is rendered separately).
     func formatDelta(_ v: Double, system: UnitSystem, temperature: TemperatureUnit,
-                     effortScale: EffortScale = .hundred) -> String {
+                     effortScale: EffortScale = .hundred, mass: MassUnit? = nil) -> String {
         switch unit {
-        case "kg":  return UnitFormatter.massFromKilograms(v, system: system)
+        case "kg":  return UnitFormatter.massFromKilograms(
+            v, unit: mass ?? (system == .imperial ? .pounds : .kilograms)
+        )
         case "°C":  return UnitFormatter.temperatureDeltaFromCelsius(v, unit: temperature, decimals: decimals)
         default:
+            if isFractionPercent {
+                let pct = v * 100
+                let n = decimals == 0 ? String(Int(pct.rounded())) : String(format: "%.\(decimals)f", pct)
+                return "\(n) \(unit)"
+            }
             guard isEffort else { return format(v) }
             // A delta on the 0–100 axis rescales by the same ×21/100 factor (the offset-free `effortValue`).
             let n = UnitFormatter.effortDisplay(v, scale: effortScale)
@@ -96,9 +121,11 @@ struct MetricDescriptor: Identifiable, Hashable {
     /// The unit LABEL as displayed (e.g. the trailing chip in the Metric Explorer list), mapped to the
     /// active system. Only the convertible units change; everything else returns its stored label.
     func displayUnit(system: UnitSystem, temperature: TemperatureUnit,
-                     effortScale: EffortScale = .hundred) -> String {
+                     effortScale: EffortScale = .hundred, mass: MassUnit? = nil) -> String {
         switch unit {
-        case "kg":  return UnitFormatter.massUnit(system)
+        case "kg":  return UnitFormatter.massUnit(
+            mass ?? (system == .imperial ? .pounds : .kilograms)
+        )
         case "°C":  return UnitFormatter.temperatureUnit(temperature)
         default:    return isEffort ? displayUnit(effortScale: effortScale) : unit
         }
@@ -126,10 +153,10 @@ enum MetricCatalog {
         d("fitness_age", String(localized: "Fitness Age"), "Heart", "yrs", "my-whoop", "figure.run", 0, false),
         d("vo2max_est", String(localized: "VO₂ Max (estimated)"), "Heart", "", "my-whoop", "lungs", 1, true),
         d("vitality", String(localized: "Vitality"), "Heart", "", "my-whoop", "sparkles", 0, true),
-        d("body_age", String(localized: "Body Age"), "Heart", "yrs", "my-whoop", "figure.stand", 0, false),
+        d("body_age", String(localized: "Wellness Age"), "Heart", "yrs", "my-whoop", "figure.stand", 0, false),
 
         // ── Charge (was Recovery)
-        d("recovery", String(localized: "Charge"), "Charge", "%", "my-whoop", "heart.circle", 0, true,
+        d("recovery", String(localized: "Recovery"), "Charge", "%", "my-whoop", "heart.circle", 0, true,
           String(localized: "How recovered you are, led by HRV versus your personal baseline.")),
         d("hrv", String(localized: "Heart Rate Variability"), "Charge", "ms", "my-whoop", "waveform.path.ecg", 0, true),
         d("rhr", String(localized: "Resting Heart Rate"), "Charge", "bpm", "my-whoop", "heart", 0, false),
@@ -138,7 +165,7 @@ enum MetricCatalog {
         d("skin_temp", String(localized: "Skin Temperature"), "Charge", "°C", "my-whoop", "thermometer", 1, nil),
 
         // ── Rest (was Sleep)
-        d("sleep_performance", String(localized: "Rest"), "Rest", "%", "my-whoop", "moon.stars", 0, true,
+        d("sleep_performance", String(localized: "Sleep Score"), "Rest", "%", "my-whoop", "moon.stars", 0, true,
           String(localized: "How restorative your sleep was: duration, efficiency, deep+REM, timing.")),
         d("in_bed_min", String(localized: "Time in Bed"), "Rest", "min", "my-whoop", "bed.double", 0, nil),
         d("sleep_total_min", String(localized: "Asleep Time"), "Rest", "min", "my-whoop", "moon.zzz", 0, true),
@@ -180,6 +207,10 @@ enum MetricCatalog {
         d("body_fat", String(localized: "Body Fat"), "Health", "%", "apple-health", "percent", 1, false),
         d("lean_mass", String(localized: "Lean Body Mass"), "Health", "kg", "apple-health", "figure.arms.open", 1, true),
         d("bmi", "BMI", "Health", "", "apple-health", "figure", 1, nil),
+        d("body_temp", String(localized: "Body Temperature"), "Health", "°C", "apple-health", "thermometer.medium", 1, nil,
+          String(localized: "An absolute body-temperature reading imported from Apple Health; not wrist skin-temperature deviation.")),
+        d("wrist_temp", String(localized: "Sleeping Wrist Temperature"), "Health", "°C", "apple-health", "applewatch", 1, nil,
+          String(localized: "An absolute sleeping wrist-temperature reading from Apple Health, kept separate from body temperature and WHOOP skin-temperature deviation.")),
         d("stress", String(localized: "Day Stress"), "Health", "/3", "my-whoop", "gauge.with.dots.needle.50percent", 1, false),
 
         // ── Nutrition (imported from a food-tracker CSV: calories-in alongside calories-out)
@@ -245,8 +276,11 @@ enum MetricCatalog {
     static func categoryDisplayName(_ category: String) -> String {
         switch category {
         case "Heart":     return String(localized: "Heart")
-        case "Charge":    return String(localized: "Charge")
-        case "Rest":      return String(localized: "Rest")
+        // "Charge" and "Rest" remain stable internal grouping keys. The UI uses
+        // familiar health language so a battery term is never mistaken for a
+        // physiological metric and a sleep score is not confused with an action.
+        case "Charge":    return String(localized: "Recovery")
+        case "Rest":      return String(localized: "Sleep")
         case "Effort":    return String(localized: "Effort")
         case "Health":    return String(localized: "Health")
         case "Nutrition": return String(localized: "Nutrition")

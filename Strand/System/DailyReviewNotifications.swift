@@ -1,0 +1,298 @@
+import Foundation
+import UserNotifications
+
+/// A destination carried by a NOOP notification. The route is deliberately small: notifications
+/// open a trusted top-level screen, never a URL or arbitrary stored navigation value.
+enum NoopNotificationRoute: String, Equatable {
+    case today
+    case sleep
+}
+
+/// Durable hand-off between `UNUserNotificationCenterDelegate` and the SwiftUI app shells.
+///
+/// A notification response can arrive before the root view exists during a cold launch. Persisting
+/// one pending route first, then posting an in-process wake-up, covers both cases:
+/// - cold launch: RootTabView / RootView consumes the stored route on appear;
+/// - warm launch: the live notification wakes the already-mounted shell.
+///
+/// Consumption removes the value before returning it, so a reminder tap never re-opens the same
+/// screen on a later foreground or relaunch.
+enum NotificationRouteBridge {
+    static let userInfoKey = "noop.notification.route"
+    static let pendingRouteKey = "noop.notification.pendingRoute"
+    static let routeRequested = Notification.Name("noop.notification.routeRequested")
+
+    static func route(from userInfo: [AnyHashable: Any]) -> NoopNotificationRoute? {
+        guard let raw = userInfo[userInfoKey] as? String else { return nil }
+        return NoopNotificationRoute(rawValue: raw)
+    }
+
+    static func recordPending(_ route: NoopNotificationRoute) {
+        UserDefaults.standard.set(route.rawValue, forKey: pendingRouteKey)
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: routeRequested, object: nil)
+        }
+    }
+
+    static func consumePending() -> NoopNotificationRoute? {
+        guard let raw = UserDefaults.standard.string(forKey: pendingRouteKey) else { return nil }
+        UserDefaults.standard.removeObject(forKey: pendingRouteKey)
+        return NoopNotificationRoute(rawValue: raw)
+    }
+}
+
+/// Two privacy-safe local reminders that help users review data already stored on their device.
+///
+/// This is a true opt-in automation:
+/// - default OFF;
+/// - notification permission is requested only from `setEnabled(true)`, after the explanatory UI;
+/// - no health value is embedded in notification content;
+/// - schedules live in the OS notification center and work while NOOP is not running.
+@MainActor
+enum DailyReviewNotifications {
+    static let enabledKey = "dailyReview.enabled"
+    static let morningMinutesKey = "dailyReview.morningMinutes"
+    static let eveningMinutesKey = "dailyReview.eveningMinutes"
+
+    private static let morningRequestID = "daily-review-morning"
+    private static let eveningRequestID = "daily-review-evening"
+    private static let requestIDs = [morningRequestID, eveningRequestID]
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.bool(forKey: enabledKey)
+    }
+
+    static var morningMinutes: Int {
+        let value = UserDefaults.standard.object(forKey: morningMinutesKey) as? Int ?? 8 * 60
+        return clampMinute(value)
+    }
+
+    static var eveningMinutes: Int {
+        let value = UserDefaults.standard.object(forKey: eveningMinutesKey) as? Int ?? 19 * 60
+        return clampMinute(value)
+    }
+
+    enum EnableOutcome: Equatable {
+        case scheduled
+        case denied
+        case off
+    }
+
+    struct ReminderSpec: Equatable {
+        let identifier: String
+        let minuteOfDay: Int
+        let title: String
+        let body: String
+        let route: NoopNotificationRoute
+    }
+
+    /// Enable/disable the pair. A denied permission never leaves a misleading ON preference behind.
+    static func setEnabled(
+        _ on: Bool,
+        completion: (@MainActor (EnableOutcome) -> Void)? = nil
+    ) {
+        guard on else {
+            UserDefaults.standard.set(false, forKey: enabledKey)
+            UNUserNotificationCenter.current()
+                .removePendingNotificationRequests(withIdentifiers: requestIDs)
+            completion?(.off)
+            return
+        }
+
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            Task { @MainActor in
+                switch settings.authorizationStatus {
+                case .authorized, .provisional, .ephemeral:
+                    UserDefaults.standard.set(true, forKey: enabledKey)
+                    schedule()
+                    completion?(.scheduled)
+                case .notDetermined:
+                    UNUserNotificationCenter.current()
+                        .requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                            Task { @MainActor in
+                                if granted {
+                                    UserDefaults.standard.set(true, forKey: enabledKey)
+                                    schedule()
+                                    completion?(.scheduled)
+                                } else {
+                                    UserDefaults.standard.set(false, forKey: enabledKey)
+                                    completion?(.denied)
+                                }
+                            }
+                        }
+                default:
+                    UserDefaults.standard.set(false, forKey: enabledKey)
+                    completion?(.denied)
+                }
+            }
+        }
+    }
+
+    static func setMorningMinutes(_ minutes: Int) {
+        UserDefaults.standard.set(clampMinute(minutes), forKey: morningMinutesKey)
+        if isEnabled { schedule() }
+    }
+
+    static func setEveningMinutes(_ minutes: Int) {
+        UserDefaults.standard.set(clampMinute(minutes), forKey: eveningMinutesKey)
+        if isEnabled { schedule() }
+    }
+
+    /// Reconcile persisted opt-in state after an upgrade or reinstall of pending notification requests.
+    /// This never asks for permission; it only restores requests when authorization already exists.
+    static func restoreScheduleIfAuthorized() {
+        guard isEnabled else { return }
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            Task { @MainActor in
+                switch settings.authorizationStatus {
+                case .authorized, .provisional, .ephemeral:
+                    schedule()
+                default:
+                    break
+                }
+            }
+        }
+    }
+
+    static func reminderSpecs(morning: Int, evening: Int) -> [ReminderSpec] {
+        [
+            ReminderSpec(
+                identifier: morningRequestID,
+                minuteOfDay: clampMinute(morning),
+                title: String(localized: "Morning check-in"),
+                body: String(localized: "After your latest sync, review last night’s Sleep and today’s Recovery in NOOP."),
+                route: .sleep
+            ),
+            ReminderSpec(
+                identifier: eveningRequestID,
+                minuteOfDay: clampMinute(evening),
+                title: String(localized: "Evening check-in"),
+                body: String(localized: "After your latest sync, review today’s Effort and prepare for tonight’s recovery."),
+                route: .today
+            ),
+        ]
+    }
+
+    static func clampMinute(_ minutes: Int) -> Int {
+        min(max(minutes, 0), 24 * 60 - 1)
+    }
+
+    private static func schedule() {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: requestIDs)
+
+        for spec in reminderSpecs(morning: morningMinutes, evening: eveningMinutes) {
+            let content = UNMutableNotificationContent()
+            content.title = spec.title
+            content.body = spec.body
+            content.sound = .default
+            content.userInfo = [NotificationRouteBridge.userInfoKey: spec.route.rawValue]
+
+            var components = DateComponents()
+            components.hour = spec.minuteOfDay / 60
+            components.minute = spec.minuteOfDay % 60
+            let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+            center.add(
+                UNNotificationRequest(
+                    identifier: spec.identifier,
+                    content: content,
+                    trigger: trigger
+                )
+            )
+        }
+    }
+}
+
+/// Privacy-safe alerts for a candidate that needs approval or a confidence-gated workout that NOOP just
+/// auto-saved. Both open Today: Ask mode offers Save/dismiss, while Auto-save mode offers Keep/Not a
+/// workout. This helper never asks for permission and never embeds a health value in notification copy.
+@MainActor
+enum AutoWorkoutNotifications {
+    private static let requestID = "auto-workout-candidate"
+    private static let lastTokenKey = "autoWorkout.lastNotifiedToken"
+
+    static func token(startSec: Int, endSec: Int) -> String {
+        AutoWorkoutSuggestionIdentity.token(startSec: startSec, endSec: endSec)
+    }
+
+    static func postIfAuthorized(startSec: Int, endSec: Int) async {
+        guard PuffinExperiment.autoDetectWorkoutsEnabled else { return }
+        await post(kind: .candidate, startSec: startSec, endSec: endSec)
+    }
+
+    static func postAutoSavedIfAuthorized(startSec: Int, endSec: Int) async {
+        guard PuffinExperiment.autoWorkoutMode == .autoSave else { return }
+        await post(kind: .autoSaved, startSec: startSec, endSec: endSec)
+    }
+
+    private enum Kind: String {
+        case candidate
+        case autoSaved
+
+        var title: String {
+            switch self {
+            case .candidate: return String(localized: "Possible workout found")
+            case .autoSaved: return String(localized: "Workout saved automatically")
+            }
+        }
+
+        var body: String {
+            switch self {
+            case .candidate:
+                return String(localized: "Open NOOP to review the activity and choose whether to save it.")
+            case .autoSaved:
+                return String(localized: "Open NOOP to keep it or mark it as not a workout.")
+            }
+        }
+    }
+
+    private static func post(kind: Kind, startSec: Int, endSec: Int) async {
+        let candidateToken = token(startSec: startSec, endSec: endSec)
+        let deliveryToken = kind.rawValue + ":" + candidateToken
+        if let previous = UserDefaults.standard.string(forKey: lastTokenKey) {
+            if previous == deliveryToken { return }
+            // Pre-mode builds stored only `start:<ts>` for candidate prompts. Honor that identity so an
+            // upgrade never re-alerts an already reviewed suggestion.
+            if kind == .candidate,
+               AutoWorkoutSuggestionIdentity.matches(previous, startSec: startSec) { return }
+        }
+
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard canPost(using: settings.authorizationStatus) else { return }
+        let content = UNMutableNotificationContent()
+        content.title = kind.title
+        content.body = kind.body
+        content.sound = .default
+        content.userInfo = [NotificationRouteBridge.userInfoKey: NoopNotificationRoute.today.rawValue]
+        do {
+            try await center.add(UNNotificationRequest(identifier: requestID, content: content, trigger: nil))
+            UserDefaults.standard.set(deliveryToken, forKey: lastTokenKey)
+        } catch {
+            // Keep the token unset so a later completed sync can retry delivery.
+        }
+    }
+
+    /// Remove a handled suggestion from Notification Center. The stable last-token stays persisted so a
+    /// later scan of the same bout cannot post it again.
+    static func removeHandled() {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [requestID])
+        center.removeDeliveredNotifications(withIdentifiers: [requestID])
+    }
+
+    /// `ephemeral` is an iOS-only authorization state. Keep the shared macOS target compiling while
+    /// accepting every state in which Apple permits a notification without another permission prompt.
+    private static func canPost(using status: UNAuthorizationStatus) -> Bool {
+        switch status {
+        case .authorized, .provisional:
+            return true
+#if os(iOS)
+        case .ephemeral:
+            return true
+#endif
+        default:
+            return false
+        }
+    }
+}

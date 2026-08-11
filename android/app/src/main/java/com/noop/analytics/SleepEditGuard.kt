@@ -73,6 +73,8 @@ object SleepEditGuard {
     fun isDisjoint(newStart: Long, newEnd: Long, coverageStart: Long, coverageEnd: Long): Boolean =
         newEnd <= coverageStart || newStart >= coverageEnd
 
+    const val MAX_EDIT_WINDOW_SEC: Long = 24L * 3600L
+
     /**
      * Rule 3: the persistence belt-and-braces. Caps the corrected wake at `nowTs + slackSec` (a
      * sleep cannot END in the future; the slack absorbs clock skew) and refuses (null) any window
@@ -82,7 +84,7 @@ object SleepEditGuard {
      */
     fun clampedEditWindow(start: Long, end: Long, nowTs: Long, slackSec: Long = 300L): Pair<Long, Long>? {
         val cappedEnd = minOf(end, nowTs + slackSec)
-        if (cappedEnd <= start) return null
+        if (cappedEnd <= start || cappedEnd - start > MAX_EDIT_WINDOW_SEC) return null
         return start to cappedEnd
     }
 }

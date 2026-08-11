@@ -110,11 +110,17 @@ extension WhoopStore {
     public func rrIntervals(deviceId: String, from: Int, to: Int, limit: Int) async throws -> [RRInterval] {
         try syncRead { db in
             try Row.fetchAll(db, sql: """
-                SELECT ts, rrMs FROM rrInterval
+                SELECT ts, rrMs, srcChannel FROM rrInterval
                 WHERE deviceId = ? AND ts >= ? AND ts <= ?
-                ORDER BY ts ASC, rrMs ASC, seq ASC LIMIT ?
-                """, arguments: [deviceId, from, to, limit])
-                .map { RRInterval(ts: $0["ts"], rrMs: $0["rrMs"]) }
+                AND (tsSuspect IS NULL OR tsSuspect <> 1)
+                AND (srcChannel IS NULL OR srcChannel <> ?)
+                ORDER BY ts ASC, ord ASC, rrMs ASC, seq ASC LIMIT ?
+                """, arguments: [deviceId, from, to, RRSourceChannel.spo2Ibi.rawValue, limit])
+                .map { row in
+                    RRInterval(ts: row["ts"], rrMs: row["rrMs"],
+                               srcChannel: (row["srcChannel"] as Int?)
+                                .flatMap(RRSourceChannel.init(rawValue:)))
+                }
         }
     }
 

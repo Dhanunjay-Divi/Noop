@@ -3,6 +3,7 @@ import StrandDesign
 import StrandAnalytics   // ConnectionReadout - the #987 clock-latch / RTC-epoch readout parsers
 import WhoopStore
 import OuraProtocol
+import WhoopProtocol
 
 // MARK: - Devices
 //
@@ -48,6 +49,7 @@ private struct DevicesContent: View {
     @ObservedObject var registry: DeviceRegistry
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var live: LiveState
+    @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
 
     // Sheets / alerts
     @State private var showAddWizard = false
@@ -63,6 +65,9 @@ private struct DevicesContent: View {
     @State private var batteryProbeTarget: PairedDevice?
     /// #690 body-location probe (Test Centre → Connection) — the device whose confirm dialog is open.
     @State private var bodyLocationProbeTarget: PairedDevice?
+    @State private var ecgProbeTarget: PairedDevice?
+    @State private var ecgWristTarget: PairedDevice?
+    @AppStorage(PuffinExperiment.ecgKey) private var ecgEnabled = false
     /// After removing the ACTIVE device with other devices still paired, prompt to pick a new active one.
     @State private var pickNewActive = false
 
@@ -97,13 +102,15 @@ private struct DevicesContent: View {
             // multi-WHOOP reality reads at a glance.
             sectionHead("YOUR BANDS", trailing: activeDevices.count == 1
                         ? String(localized: "1 paired")
-                        : String(localized: "\(activeDevices.count) paired"))
+                        : String(localized: "\(activeDevices.count) paired"),
+                        onDark: showDayCycleBackground)
             ForEach(Array(activeDevices.enumerated()), id: \.element.id) { idx, device in
                 // Shared read-only probe gate (Test Centre → Connection + a live WHOOP), hoisted so the two
                 // probe closures below don't each re-inline a 4-term && chain — which tips the iOS Swift
                 // type-checker over its budget ("unable to type-check this expression in reasonable time").
                 let probeGate = device.status == .active && live.connected
                     && SourceCoordinator.isWhoop(device) && TestCentre.active(.connection)
+                let ecgGate = probeGate && (ecgEnabled || model.ecgMayBeRunning) && model.isWhoop5MG
                 DeviceCard(
                     device: device,
                     isActive: device.status == .active,
@@ -153,7 +160,8 @@ private struct DevicesContent: View {
                     // Same Test Centre → Connection gate as the reboot probe, minus the 4.0-only clause.
                     onExtendedBatteryProbe: probeGate ? { batteryProbeTarget = device } : nil,
                     // #690 body-location probe: read-only, both families. Same Test Centre → Connection gate.
-                    onBodyLocationProbe: probeGate ? { bodyLocationProbeTarget = device } : nil)
+                    onBodyLocationProbe: probeGate ? { bodyLocationProbeTarget = device } : nil,
+                    onEcgProbe: ecgGate ? { ecgProbeTarget = device } : nil)
                     .staggeredAppear(index: idx)
             }
 
@@ -256,6 +264,7 @@ private struct DevicesContent: View {
         // iOS Swift type-checker's budget, and inlining a 6th/7th modifier here tips it over ("unable to
         // type-check in reasonable time"). macOS tolerates the inline form; iOS's type-inference is stricter.
         .modifier(BodyLocationProbeSheets(target: $bodyLocationProbeTarget))
+        .modifier(EcgProbeSheets(target: $ecgProbeTarget, wristTarget: $ecgWristTarget))
         // Second, strongly-worded delete-data confirm (reached from the Remove card's secondary control)
         .alert("Delete all of this device's data?",
                isPresented: Binding(get: { deleteDataTarget != nil },
@@ -321,22 +330,24 @@ private struct DevicesContent: View {
     private var whoopFirstFooter: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "info.circle")
-                .foregroundStyle(StrandPalette.textTertiary)
+                .foregroundStyle(StrandPalette.textSecondary)
                 .accessibilityHidden(true)
             Text("WHOOP is NOOP's primary, fully-supported band. Other heart-rate straps are an early, in-development addition: they stream live heart rate and HRV, but not WHOOP's deeper sleep and recovery data.")
                 .font(StrandFont.footnote)
-                .foregroundStyle(StrandPalette.textTertiary)
+                .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     /// UPPERCASE overline section header with tracking + a muted trailing note, matching the liquid Today's
     /// `sectionHead`. Keeps every page's section chrome identical.
-    private func sectionHead(_ title: LocalizedStringKey, trailing: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title).font(StrandFont.overline).tracking(1.6).foregroundStyle(StrandPalette.textTertiary)
+    private func sectionHead(_ title: LocalizedStringKey, trailing: String,
+                             onDark: Bool = false) -> some View {
+        let color = onDark ? StrandPalette.onDarkSecondary : StrandPalette.textTertiary
+        return HStack(alignment: .firstTextBaseline) {
+            Text(title).font(StrandFont.overline).tracking(1.6).foregroundStyle(color)
             Spacer()
-            Text(trailing).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
+            Text(trailing).font(StrandFont.caption).foregroundStyle(color)
         }
         .padding(.horizontal, 2)
     }
@@ -442,6 +453,8 @@ private struct DeviceCard: View {
     /// #592 extended-battery opcode probe (Test Centre → Connection, both WHOOP families). Read-only.
     var onExtendedBatteryProbe: (() -> Void)? = nil
     var onBodyLocationProbe: (() -> Void)? = nil
+    /// WHOOP MG ECG protocol probe. Non-nil only after opt-in and positive MG identification.
+    var onEcgProbe: (() -> Void)? = nil
     /// Removed-section affordances (re-add as active / delete its data).
     var onReAdd: (() -> Void)? = nil
     var onDeleteData: (() -> Void)? = nil
@@ -693,6 +706,11 @@ private struct DeviceCard: View {
                 if let onBodyLocationProbe {
                     Button { onBodyLocationProbe() } label: { Label("Body-location probe (#690 RE)…", systemImage: "ladybug") }
                 }
+                if let onEcgProbe {
+                    Button { onEcgProbe() } label: {
+                        Label("ECG capture (MG, experimental)…", systemImage: "waveform.path.ecg")
+                    }
+                }
                 if let onRemove {
                     Divider()
                     Button(role: .destructive) { onRemove() } label: {
@@ -810,7 +828,7 @@ struct DeviceCapabilityProfile {
             return DeviceCapabilityProfile(
                 displayModel: String(localized: "\(d.brand) (experimental)"),
                 captures: String(localized: "Heart rate (live, best-effort)"),
-                powers: String(localized: "Powers the live console + Effort. No Charge, Rest or Sleep"),
+                powers: String(localized: "Powers the live console + Effort. No Recovery or Sleep Score"),
                 footnote: String(localized: "Experimental: live heart rate where the band exposes it. Some bands need a pairing we can't do yet. NOOP will say so honestly and never show a made-up number. No sleep, recovery, skin temp, SpO₂ or steps."))
         }
         // EXPERIMENTAL locally-adopted Oura ring (gen 3/4/5). The gen is carried on `model` ("Oura Ring
@@ -827,8 +845,8 @@ struct DeviceCapabilityProfile {
                 ? String(localized: "Heart rate* · HRV* · Sleep* · Resting HR* · Skin temp* · Battery*")
                 : String(localized: "Heart rate · HRV* · Sleep · Resting HR · Skin temp* · Battery")
             let powers = newer
-                ? String(localized: "Powers Effort now; Charge and Rest once enough nights and decode are confirmed")
-                : String(localized: "Powers Charge, Effort, Rest and Sleep")
+                ? String(localized: "Powers Effort now; Recovery and Sleep once enough nights and decode are confirmed")
+                : String(localized: "Powers Recovery, Effort, Sleep Score and sleep details")
             return DeviceCapabilityProfile(
                 displayModel: String(localized: "\(gen.displayName) (Beta)"),
                 captures: captures,
@@ -849,7 +867,7 @@ struct DeviceCapabilityProfile {
             return DeviceCapabilityProfile(
                 displayModel: "Apple Watch",
                 captures: captures.isEmpty ? String(localized: "Calibrating, no data yet") : captures,
-                powers: String(localized: "Powers Rest, Effort, Fitness Age and steps, plus Charge once recovery calibrates"),
+                powers: String(localized: "Powers Sleep, Effort, Fitness Age and steps, plus Recovery once its baseline calibrates"),
                 footnote: String(localized: "Computed live from your Apple Watch via Health. Recovery needs about a week of nights to calibrate, and every watch-derived score is labelled with its confidence. Only the metrics your watch actually records are listed above."))
         }
         // Generic heart-rate strap: live HR + R-R only; drives the live console + Effort, nothing nightly.
@@ -859,10 +877,10 @@ struct DeviceCapabilityProfile {
             return DeviceCapabilityProfile(
                 displayModel: String(localized: "Heart-rate strap"),
                 captures: String(localized: "Heart rate · HRV (live)* · Strain"),
-                powers: String(localized: "Powers the live console + Effort. No Charge, Rest or Sleep"),
+                powers: String(localized: "Powers the live console + Effort. No Recovery or Sleep Score"),
                 footnote: String(localized: "Live HR + R-R only · no sleep, recovery, skin temp, SpO₂, steps or battery (those are WHOOP-only)."))
         }
-        let whoopPowers = String(localized: "Powers Charge, Effort, Rest, Sleep + Health Monitor")
+        let whoopPowers = String(localized: "Powers Recovery, Effort, Sleep Score, sleep details + Health Monitor")
         let model = d.model.lowercased()
         // WHOOP 5.0 / MG — adds a (raw) step count the 4.0 can't read over BLE.
         if model.contains("5") || model.contains("mg") {
@@ -1022,6 +1040,122 @@ private struct BodyLocationProbeResultView: View {
                 if !waiting {
                     Button("Copy") { PlatformPasteboard.copy(text) }
                 }
+                Spacer()
+                Button("Close") { onClose() }
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 340, minHeight: 260)
+        .background(StrandPalette.surfaceOverlay)
+    }
+}
+
+// MARK: - WHOOP MG ECG research probe
+
+/// Keeps the multi-step, explicitly user-started MG protocol probe isolated from the already-heavy
+/// Devices view modifier chain. The BLE layer repeats every gate before it writes a byte.
+private struct EcgProbeSheets: ViewModifier {
+    @EnvironmentObject var model: AppModel
+    @EnvironmentObject var live: LiveState
+    @Binding var target: PairedDevice?
+    @Binding var wristTarget: PairedDevice?
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(
+                "WHOOP MG ECG capture (experimental)",
+                isPresented: Binding(get: { target != nil }, set: { if !$0 { target = nil } }),
+                titleVisibility: .visible,
+                presenting: target
+            ) { device in
+                Button("Start 30-second protocol capture") {
+                    model.ecgStartCapture()
+                    target = nil
+                }
+                Button("Stop ECG capture") {
+                    model.ecgStopCapture()
+                    target = nil
+                }
+                Button("Set wrist…") {
+                    target = nil
+                    wristTarget = device
+                }
+                Button("Cancel", role: .cancel) { target = nil }
+            } message: { _ in
+                Text("Research instrumentation only — not a medical ECG, measurement, or diagnosis. Hold the two clasp indents with the opposite hand during capture. The commands are unvalidated on real MG hardware and may do nothing; Stop reverses the stream controls.")
+            }
+            .sheet(isPresented: Binding(get: { wristTarget != nil },
+                                        set: { if !$0 { wristTarget = nil } })) {
+                EcgWristSheet(
+                    onPick: { wrist in
+                        model.ecgSelectWrist(wrist)
+                        wristTarget = nil
+                    },
+                    onCancel: { wristTarget = nil })
+            }
+            .sheet(isPresented: Binding(get: { live.ecgProbe != nil },
+                                        set: { if !$0 { model.clearEcgProbe() } })) {
+                EcgProbeResultView(
+                    text: live.ecgProbe ?? "",
+                    onClose: { model.clearEcgProbe() })
+            }
+    }
+}
+
+/// Wrist selection is a persistent strap setting, so it gets a separate, deliberate confirmation.
+private struct EcgWristSheet: View {
+    let onPick: (Whoop5Ecg.WristSelection) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Which wrist do you wear it on?")
+                .font(StrandFont.title2)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Text("This choice is written to the strap and persists after disconnecting. The left/right wire mapping is inferred, not yet hardware-validated; selecting the other wrist reverses it.")
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.statusWarning)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: NoopMetrics.space3) {
+                Button("Left wrist") { onPick(.left) }
+                Button("Right wrist") { onPick(.right) }
+                Spacer()
+                Button("Cancel", role: .cancel) { onCancel() }
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 340, minHeight: 220)
+        .background(StrandPalette.surfaceOverlay)
+    }
+}
+
+private struct EcgProbeResultView: View {
+    let text: String
+    let onClose: () -> Void
+    private var waiting: Bool { text == BLEManager.ecgProbeWaiting }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("ECG protocol probe")
+                .font(StrandFont.title2)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Text("Unvalidated research instrumentation — not a medical measurement or diagnosis.")
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.statusWarning)
+                .fixedSize(horizontal: false, vertical: true)
+            if waiting {
+                ProgressView("Listening for the strap for 30 seconds…")
+            } else {
+                ScrollView {
+                    Text(text)
+                        .font(StrandFont.mono)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            HStack {
+                if !waiting { Button("Copy") { PlatformPasteboard.copy(text) } }
                 Spacer()
                 Button("Close") { onClose() }
             }

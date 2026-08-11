@@ -35,15 +35,32 @@ public enum FitnessAgeEngine {
     /// Population-reference PA-index (0–15): ≈ "moderately active, a few sessions a week".
     public static let paiReference = 5.0
 
-    /// Displayed uncertainty band (years) — a presentation constant; the per-reading Nes SEE (≈5–6
-    /// ml/kg/min over the ~0.3/yr age slope) is far wider, so we compute on rolling 7-day medians and
-    /// show a conservative fixed ±band with a "fitness comparison, not a biological age" disclaimer.
-    public static let displayBandYears = 5.0
     public static let minAge = 20.0, maxAge = 80.0
 
-    private static func isFemale(_ sex: String) -> Bool { sex.lowercased() == "female" }
+    private static func isFemale(_ sex: String) -> Bool {
+        sex.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "female"
+    }
 
-    /// Coefficient tuple for the user's sex (intercept, ageC, wcC, rhrC, paiC). Non-binary uses men's.
+    /// The published equations are binary-sex and were validated for adults aged 20–80. Returning no
+    /// result outside that population is more honest than silently routing an unsupported value through
+    /// the men's coefficients or clamping a teenager/older adult onto an endpoint.
+    public static func supports(sex: String) -> Bool {
+        let token = sex.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return token == "male" || token == "female"
+    }
+
+    public static func supports(age: Double) -> Bool { (minAge...maxAge).contains(age) }
+
+    /// Approximate age-axis uncertainty implied by the published VO₂max SEE. This is a model-level
+    /// communication aid, not an individual confidence interval.
+    public static func uncertaintyBandYears(sex: String) -> Double? {
+        guard supports(sex: sex) else { return nil }
+        let (_, ageCoefficient, _, _, _) = coeffs(sex)
+        return (isFemale(sex) ? seeWomen : seeMen) / ageCoefficient
+    }
+
+    /// Coefficient tuple for a supported sex (intercept, ageC, wcC, rhrC, paiC). Callers must gate with
+    /// `supports(sex:)`; this private fallback is never user-visible.
     private static func coeffs(_ sex: String) -> (Double, Double, Double, Double, Double) {
         isFemale(sex)
             ? (womenIntercept, womenAge, womenWC, womenRHR, womenPAI)
@@ -127,33 +144,36 @@ public enum FitnessAgeEngine {
         return frequency * intensityDuration
     }
 
-    /// Full Fitness Age from already-aggregated weekly inputs. Returns nil only if RHR or age is
-    /// missing (the headline number needs nothing else). `vo2max` is filled only when a waist
-    /// measurement is supplied; callers gate data-coverage (≥4 of 7 days) separately.
+    /// Full Fitness Age from already-aggregated weekly inputs. Returns nil when age/sex are outside the
+    /// published model population or RHR is absent. `vo2max` is filled only when a waist measurement is
+    /// supplied; callers gate data coverage (≥4 observed RHR AND activity days) separately.
     public static func compute(age: Double, sex: String, restingHR: Double, paIndex: Double,
                                waistCm: Double? = nil, lowerConfidence: Bool = false) -> FitnessAgeResult? {
-        guard age > 0, restingHR > 0 else { return nil }
+        guard supports(age: age), supports(sex: sex), restingHR.isFinite,
+              (30...220).contains(restingHR), paIndex.isFinite, (0...15).contains(paIndex) else { return nil }
         let fa = fitnessAge(age: age, sex: sex, restingHR: restingHR, paIndex: paIndex)
         let vo2: Double?
-        if let w = waistCm, w > 0 {
+        if let w = waistCm, w.isFinite, (50...200).contains(w) {
             vo2 = estimateVO2max(age: age, sex: sex, waistCm: w, restingHR: restingHR, paIndex: paIndex)
         } else {
             vo2 = nil
         }
-        let nb = sex.lowercased() != "male" && sex.lowercased() != "female"
+        // Translate the published VO₂max standard error onto the equation's age axis. This is deliberately
+        // wide (~19–21 years): a made-up ±5 band materially overstates precision.
+        let bandYears = uncertaintyBandYears(sex: sex)!
         return FitnessAgeResult(
             vo2max: vo2, fitnessAge: fa, chronoAge: age, deltaYears: age - fa,
-            bandYears: displayBandYears, lowerConfidence: lowerConfidence || nb)
+            bandYears: bandYears, lowerConfidence: lowerConfidence)
     }
 }
 
 // MARK: - Readiness checklist
 //
 // Transparency over a black-box number: show the user exactly which inputs we have, grouped by what
-// each one unlocks, and a single confidence verdict. Weight/height/waist deliberately sit under "your
-// VO₂max number" — NOT under the Fitness Age — because the body term cancels out of the age (see the
-// engine doc); claiming weight sharpens the age would be dishonest. The age is driven by age, sex, and
-// the COVERAGE of resting-HR + activity over the last 7 days.
+// each one unlocks, and a single confidence verdict. The published waist-variant equation needs a waist
+// measurement for the optional VO₂max number; height and weight do not enter this variant and must not be
+// presented as inputs. The age is driven by age, sex, and the COVERAGE of resting-HR + activity over the
+// last 7 days.
 
 public enum FitnessReadinessStatus: String, Sendable { case satisfied, partial, missing }
 
@@ -214,29 +234,26 @@ extension FitnessAgeEngine {
     /// passes profile-completeness flags and the 7-day coverage counts.
     public static func assessReadiness(hasAge: Bool, hasSex: Bool,
                                        rhrDays: Int, activityDays: Int,
-                                       hasHeightWeight: Bool, hasWaist: Bool) -> FitnessAgeReadiness {
+                                       hasWaist: Bool) -> FitnessAgeReadiness {
         let items: [FitnessReadinessItem] = [
-            FitnessReadinessItem(key: "age", label: "Your age",
+            FitnessReadinessItem(key: "age", label: "Age in model range (20–80)",
                 status: hasAge ? .satisfied : .missing, required: true, role: .drivesAge,
-                detail: hasAge ? "Set" : "Add it in Settings"),
-            FitnessReadinessItem(key: "sex", label: "Biological sex",
+                detail: hasAge ? "Supported" : "Outside the published model range"),
+            FitnessReadinessItem(key: "sex", label: "Model coefficient",
                 status: hasSex ? .satisfied : .missing, required: true, role: .drivesAge,
-                detail: hasSex ? "Set" : "Add it in Settings"),
+                detail: hasSex ? "Supported" : "Published equations provide male/female coefficients only"),
             FitnessReadinessItem(key: "rhr", label: "Resting heart rate",
                 status: coverageStatus(rhrDays, floor: minCoverageDays), required: true, role: .drivesAge,
                 detail: "\(rhrDays) of last 7 nights"),
             FitnessReadinessItem(key: "activity", label: "Recent activity",
-                status: coverageStatus(activityDays, floor: minCoverageDays), required: false, role: .drivesAge,
+                status: coverageStatus(activityDays, floor: minCoverageDays), required: true, role: .drivesAge,
                 detail: "\(activityDays) of last 7 days"),
-            FitnessReadinessItem(key: "bodyMetrics", label: "Height & weight",
-                status: hasHeightWeight ? .satisfied : .missing, required: false, role: .unlocksVO2max,
-                detail: hasHeightWeight ? "Unlocks your VO₂max" : "Add to also see VO₂max"),
-            FitnessReadinessItem(key: "waist", label: "Waist (optional)",
+            FitnessReadinessItem(key: "waist", label: "Waist measurement (optional)",
                 status: hasWaist ? .satisfied : .missing, required: false, role: .unlocksVO2max,
-                detail: hasWaist ? "Sharpens VO₂max" : "Optional - sharpens VO₂max"),
+                detail: hasWaist ? "VO₂max estimate available" : "Add waist to estimate VO₂max"),
         ]
         let confidence: FitnessAgeConfidence
-        if !hasAge || !hasSex || rhrDays < minCoverageDays {
+        if !hasAge || !hasSex || rhrDays < minCoverageDays || activityDays < minCoverageDays {
             confidence = .notReady
         } else if rhrDays >= goodCoverageDays && activityDays >= goodCoverageDays {
             confidence = .ready

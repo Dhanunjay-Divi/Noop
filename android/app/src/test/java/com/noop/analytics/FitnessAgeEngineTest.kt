@@ -1,5 +1,6 @@
 package com.noop.analytics
 
+import com.noop.data.DailyMetric
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotNull
@@ -10,11 +11,35 @@ import org.junit.Test
 /** Mirror of the Swift FitnessAgeEngineTests — identical inputs and expected numbers (parity guard). */
 class FitnessAgeEngineTest {
 
+    @Test fun orchestratorRejectsUnconfirmedSeedProfile() {
+        val days = (1..4).map { i ->
+            DailyMetric(
+                deviceId = "test", day = "2026-08-0$i", totalSleepMin = 420.0,
+                efficiency = 0.9, deepMin = 80.0, remMin = 100.0, lightMin = 240.0,
+                disturbances = 1, restingHr = 60, avgHrv = 55.0,
+                recovery = null, strain = 55.0, exerciseCount = 1,
+            )
+        }
+        val profile = UserProfile(
+            age = 30.0, sex = "male", ageInputConfirmed = false, sexInputConfirmed = false,
+        )
+        assertTrue(IntelligenceEngine.fitnessAgeRows(
+            days, profile, "test-noop", "2026-08-08",
+        ).isEmpty())
+    }
+
     @Test fun vo2maxMen() =
         assertEquals(46.275, FitnessAgeEngine.estimateVO2max(40.0, "male", 90.0, 65.0, 5.0), 1e-3)
 
     @Test fun vo2maxWomen() =
         assertEquals(37.72, FitnessAgeEngine.estimateVO2max(40.0, "female", 80.0, 65.0, 5.0), 1e-3)
+
+    @Test fun supportedSexNormalizationUsesTheSameCoefficients() {
+        assertEquals(
+            FitnessAgeEngine.compute(40.0, "female", 65.0, 5.0, 80.0),
+            FitnessAgeEngine.compute(40.0, "  FEMALE\n", 65.0, 5.0, 80.0),
+        )
+    }
 
     @Test fun bmiHelper() =
         assertEquals(25.249, FitnessAgeEngine.bmi(80.0, 178.0), 1e-3)
@@ -58,46 +83,71 @@ class FitnessAgeEngineTest {
         assertEquals(46.275, r!!.vo2max!!, 1e-3)
     }
 
-    @Test fun computeNonBinaryLowerConfidence() {
-        val r = FitnessAgeEngine.compute(40.0, "nonbinary", 60.0, 6.0)
-        assertTrue(r!!.lowerConfidence)
+    @Test fun computeUnsupportedSexUnavailable() =
+        assertNull(FitnessAgeEngine.compute(40.0, "nonbinary", 60.0, 6.0))
+
+    @Test fun computeOutsideValidatedAgeRangeUnavailable() {
+        assertNull(FitnessAgeEngine.compute(19.0, "male", 60.0, 6.0))
+        assertNull(FitnessAgeEngine.compute(81.0, "female", 60.0, 6.0))
     }
 
     @Test fun computeNilNoRhr() = assertNull(FitnessAgeEngine.compute(40.0, "male", 0.0, 7.5))
 
+    @Test fun computeRejectsCorruptPhysiologyAndActivityInputs() {
+        assertNull(FitnessAgeEngine.compute(40.0, "male", 1.0, 7.5))
+        assertNull(FitnessAgeEngine.compute(40.0, "male", Double.NaN, 7.5))
+        assertNull(FitnessAgeEngine.compute(40.0, "male", 60.0, -1.0))
+        assertNull(FitnessAgeEngine.compute(40.0, "male", 60.0, Double.POSITIVE_INFINITY))
+    }
+
+    @Test fun invalidWaistDoesNotBlockHeadlineOrProduceVo2max() {
+        val result = FitnessAgeEngine.compute(40.0, "male", 60.0, 5.0, 1.0)
+        assertNotNull(result)
+        assertNull(result?.vo2max)
+    }
+
     // Readiness checklist
     @Test fun readinessAllPresentIsReady() {
-        val r = FitnessAgeEngine.assessReadiness(true, true, 7, 7, true, true)
+        val r = FitnessAgeEngine.assessReadiness(true, true, 7, 7, true)
         assertEquals(FitnessAgeConfidence.READY, r.confidence)
         assertTrue(r.canCompute)
         assertTrue(r.items.all { it.status == FitnessReadinessStatus.SATISFIED })
-        assertEquals(6, r.items.size)
+        assertEquals(5, r.items.size)
     }
 
     @Test fun readinessMissingRhrIsNotReady() {
-        val r = FitnessAgeEngine.assessReadiness(true, true, 0, 7, true, true)
+        val r = FitnessAgeEngine.assessReadiness(true, true, 0, 7, true)
         assertEquals(FitnessAgeConfidence.NOT_READY, r.confidence)
         assertFalse(r.canCompute)
         assertEquals(FitnessReadinessStatus.MISSING, r.items.first { it.key == "rhr" }.status)
     }
 
     @Test fun readinessPartialIsEstimate() {
-        val r = FitnessAgeEngine.assessReadiness(true, true, 5, 3, false, false)
+        val r = FitnessAgeEngine.assessReadiness(true, true, 5, 4, false)
         assertEquals(FitnessAgeConfidence.ESTIMATE, r.confidence)
         assertTrue(r.canCompute)
-        val body = r.items.first { it.key == "bodyMetrics" }
-        assertEquals(FitnessReadinessStatus.MISSING, body.status)
-        assertEquals(FitnessReadinessRole.UNLOCKS_VO2MAX, body.role)
-        assertFalse(body.required)
+        val waist = r.items.first { it.key == "waist" }
+        assertEquals(FitnessReadinessStatus.MISSING, waist.status)
+        assertEquals(FitnessReadinessRole.UNLOCKS_VO2MAX, waist.role)
+        assertFalse(waist.required)
+    }
+
+    @Test fun readinessMissingActivityIsNotReady() {
+        val r = FitnessAgeEngine.assessReadiness(true, true, 7, 0, true)
+        assertEquals(FitnessAgeConfidence.NOT_READY, r.confidence)
+        assertFalse(r.canCompute)
+        val activity = r.items.first { it.key == "activity" }
+        assertTrue(activity.required)
+        assertEquals(FitnessReadinessStatus.MISSING, activity.status)
     }
 
     @Test fun readinessMissingAgeIsNotReady() {
         assertEquals(FitnessAgeConfidence.NOT_READY,
-            FitnessAgeEngine.assessReadiness(false, true, 7, 7, true, true).confidence)
+            FitnessAgeEngine.assessReadiness(false, true, 7, 7, true).confidence)
     }
 
     @Test fun readinessNoBodyMetricsStillReady() {
         assertEquals(FitnessAgeConfidence.READY,
-            FitnessAgeEngine.assessReadiness(true, true, 7, 6, false, false).confidence)
+            FitnessAgeEngine.assessReadiness(true, true, 7, 6, false).confidence)
     }
 }

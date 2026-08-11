@@ -103,6 +103,10 @@ public enum BackupSettings {
         // whitelist to keep the cross-platform JSON contract unchanged.
         if values["profile.age"] != nil {
             defaults.removeObject(forKey: dobDefaultsKey)
+            defaults.set(true, forKey: ageConfirmedDefaultsKey)
+        }
+        if values["profile.sex"] != nil {
+            defaults.set(true, forKey: sexConfirmedDefaultsKey)
         }
     }
 
@@ -110,6 +114,8 @@ public enum BackupSettings {
     /// key (a Date can't ride the Int/Double/String JSON contract) — only cleared on restore so the
     /// restored Int age re-derives it. Must match `ProfileStore.K.dateOfBirth`.
     static let dobDefaultsKey = "profile.dateOfBirth"
+    static let ageConfirmedDefaultsKey = "profile.ageInputConfirmed"
+    static let sexConfirmedDefaultsKey = "profile.sexInputConfirmed"
 
     // MARK: - JSON codec
 

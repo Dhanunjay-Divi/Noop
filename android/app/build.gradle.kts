@@ -26,7 +26,7 @@ android {
         applicationId = "com.noop.whoop"
         minSdk = 26
         targetSdk = 34
-        versionCode = 299
+        versionCode = 300
         versionName = "9.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -142,6 +142,48 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+}
+
+// Room<->GRDB parity oracle. KSP exports Room's exact generated schema into the build tree; unit tests
+// compare a stable snapshot of it with the shared fixture used by the Swift GRDB tests.
+val roomSchemaDir = layout.buildDirectory.dir("generated/roomSchemas")
+ksp {
+    arg("room.schemaLocation", roomSchemaDir.get().asFile.absolutePath)
+}
+
+fun isMainSourceSetKspTask(name: String) =
+    name.startsWith("ksp") && name.endsWith("Kotlin") &&
+        !name.contains("UnitTest") && !name.contains("AndroidTest")
+
+tasks.matching { isMainSourceSetKspTask(it.name) }.configureEach {
+    outputs.dir(roomSchemaDir).withPropertyName("roomSchemaExport")
+    outputs.upToDateWhen {
+        roomSchemaDir.get().asFile.walkTopDown().any { it.isFile && it.extension == "json" }
+    }
+}
+
+val roomSchemaSnapshotDir = layout.buildDirectory.dir("roomSchemaOracle")
+val syncRoomSchemaSnapshot = tasks.register<Sync>("syncRoomSchemaSnapshot") {
+    from(roomSchemaDir)
+    into(roomSchemaSnapshotDir)
+    dependsOn(tasks.matching { it.name == "kspFullDebugKotlin" })
+    // Gradle validates Test task directory inputs before the test action runs. When Room has no
+    // schema JSON to copy (for example after a clean incremental KSP pass), Sync may legitimately
+    // leave its destination absent, which makes every focused unit-test invocation fail during
+    // validation even though the schema oracle itself is not selected. Keep an empty destination as
+    // a valid optional snapshot; SchemaOracleTest still reports a useful failure when its JSON is
+    // actually required and missing.
+    doLast { roomSchemaSnapshotDir.get().asFile.mkdirs() }
+}
+
+tasks.withType<Test>().configureEach {
+    dependsOn(syncRoomSchemaSnapshot)
+    systemProperty("room.schemaLocation", roomSchemaSnapshotDir.get().asFile.absolutePath)
+    // Do not register the copied directory as a Test input. Android/KSP is free to clean generated
+    // build directories while preparing the unit-test variant, and Gradle validates task inputs
+    // before the test action; that race made otherwise unrelated focused tests fail before JUnit ran.
+    // The Sync dependency remains the producer contract, and SchemaOracleTest itself fails with a
+    // precise message if its snapshot is unavailable or stale.
 }
 
 // Resolve every external module to the exact version recorded in app/gradle.lockfile. Direct

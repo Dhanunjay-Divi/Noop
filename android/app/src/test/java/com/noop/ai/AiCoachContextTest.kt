@@ -62,14 +62,14 @@ class AiCoachContextTest {
         val ctx = coach().buildContext(merged)
 
         // Real figures, exactly as buildContext formats them.
-        assertTrue("daily recovery", ctx.contains("charge 67%"))
+        assertTrue("daily recovery", ctx.contains("recovery 67%"))
         assertTrue("daily strain", ctx.contains("effort 12.3"))
-        assertTrue("daily sleep", ctx.contains("rest 7.5h"))
+        assertTrue("daily sleep", ctx.contains("sleep 7.5h"))
         assertTrue("daily HRV", ctx.contains("HRV 65ms"))
         assertTrue("daily RHR", ctx.contains("RHR 52bpm"))
         assertTrue(
             "latest snapshot",
-            ctx.contains("Most recent day (${june(14)}): charge 67%, effort 12.3."),
+            ctx.contains("Most recent day (${june(14)}): recovery 67%, effort 12.3."),
         )
         // The #124 symptom: with data present the no-data sentinel must NOT appear.
         assertFalse("no-data sentinel leaked", ctx.contains("No wearable data is available yet"))
@@ -91,12 +91,22 @@ class AiCoachContextTest {
         val ctx = coach().buildContext(merged)
 
         // Sleep is real; everything unrecorded is a dash on every daily line.
-        assertTrue("daily dashes", ctx.contains("charge -, effort -, rest 7h, HRV -, RHR -"))
-        assertTrue("latest snapshot n/a", ctx.contains("charge n/a, effort n/a"))
+        assertTrue("daily dashes", ctx.contains("recovery -, effort -, sleep 7h, HRV -, RHR -"))
+        assertTrue("latest snapshot n/a", ctx.contains("recovery n/a, effort n/a"))
         // Never an invented score: no digit ever follows "recovery " or "HRV ".
-        assertFalse("invented charge", Regex("charge \\d").containsMatchIn(ctx))
+        assertFalse("invented recovery", Regex("recovery \\d").containsMatchIn(ctx))
         assertFalse("invented HRV", Regex("HRV \\d").containsMatchIn(ctx))
         // Data exists (sleep), so the no-data sentinel is still wrong here.
         assertFalse("no-data sentinel leaked", ctx.contains("No wearable data is available yet"))
+    }
+
+    @Test
+    fun defaultPromptUsesCurrentScoreNames() {
+        val prompt = AiCoach.DEFAULT_SYSTEM_PROMPT
+        assertTrue(prompt.contains("Recovery"))
+        assertTrue(prompt.contains("Effort"))
+        assertTrue(prompt.contains("Sleep Score"))
+        assertFalse(prompt.contains("Charge"))
+        assertFalse(Regex("\\brest/sleep\\b", RegexOption.IGNORE_CASE).containsMatchIn(prompt))
     }
 }

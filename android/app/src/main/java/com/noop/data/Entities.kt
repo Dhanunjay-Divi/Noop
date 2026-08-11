@@ -105,6 +105,13 @@ data class RrInterval(
     val rrMs: Int,
     val seq: Int = 0,
     val synced: Int = 0,
+    /** #1073 (Room v23): 1 when this beat's timestamp is in the future; null otherwise.
+     *  Suspect rows remain on disk for recovery, while [WhoopDao.rrIntervals] excludes them from scoring. */
+    val tsSuspect: Int? = null,
+    /** Beat emission order within this second; null for rows created before Room v24. */
+    val ord: Int? = null,
+    /** Durable optical-channel code; null for WHOOP and rows created before Room v25. */
+    val srcChannel: Int? = null,
 )
 
 /**
@@ -426,6 +433,8 @@ data class WorkoutRow(
     val zonesJSON: String? = null,
     val notes: String? = null,
     val routePolyline: String? = null, // Encoded GPS route (RouteMath polyline); null = no GPS.
+    /** Per-session steps for activity-file foot sports; null for sources that do not report them. */
+    val steps: Int? = null,
 )
 
 /**

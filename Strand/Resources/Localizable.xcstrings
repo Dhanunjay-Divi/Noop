@@ -3,290 +3,1010 @@
   "strings": {
     "%@ to %@ · error is Noop minus official · RMSE %@": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "%1$@ bis %2$@ · Fehler ist Noop minus offiziell · RMSE %3$@"}},
-        "es": {"stringUnit": {"state": "translated", "value": "%1$@ a %2$@ · el error es Noop menos el valor oficial · RMSE %3$@"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Du %1$@ au %2$@ · l’erreur est Noop moins la valeur officielle · RMSE %3$@"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "%1$@ a %2$@ · o erro é Noop menos o valor oficial · RMSE %3$@"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ bis %2$@ · Fehler ist Noop minus offiziell · RMSE %3$@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ a %2$@ · el error es Noop menos el valor oficial · RMSE %3$@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Du %1$@ au %2$@ · l’erreur est Noop moins la valeur officielle · RMSE %3$@"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ a %2$@ · o erro é Noop menos o valor oficial · RMSE %3$@"
+          }
+        }
       }
     },
     "%@ · saved presentation estimate · official and raw values remain unchanged": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "%@ · gespeicherte Darstellungsschätzung · offizielle und Rohwerte bleiben unverändert"}},
-        "es": {"stringUnit": {"state": "translated", "value": "%@ · estimación de presentación guardada · los valores oficiales y sin procesar no cambian"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "%@ · estimation de présentation enregistrée · les valeurs officielles et brutes restent inchangées"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "%@ · estimativa de apresentação guardada · os valores oficiais e brutos permanecem inalterados"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · gespeicherte Darstellungsschätzung · offizielle und Rohwerte bleiben unverändert"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · estimación de presentación guardada · los valores oficiales y sin procesar no cambian"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · estimation de présentation enregistrée · les valeurs officielles et brutes restent inchangées"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ · estimativa de apresentação guardada · os valores oficiais e brutos permanecem inalterados"
+          }
+        }
       }
     },
     "%lld older reference rows lack the provenance stamp. Re-import your official WHOOP CSV once with this version to verify them safely.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "%lld ältere Referenzzeilen haben keinen Herkunftsstempel. Importiere deine offizielle WHOOP-CSV mit dieser Version einmal erneut, um sie sicher zu überprüfen."}},
-        "es": {"stringUnit": {"state": "translated", "value": "%lld filas de referencia anteriores no tienen el sello de procedencia. Vuelve a importar una vez tu CSV oficial de WHOOP con esta versión para verificarlas de forma segura."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "%lld anciennes lignes de référence ne comportent pas le marquage de provenance. Réimportez une fois votre CSV WHOOP officiel avec cette version pour les vérifier en toute sécurité."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "%lld linhas de referência antigas não têm o carimbo de proveniência. Volta a importar uma vez o teu CSV oficial da WHOOP com esta versão para as verificares em segurança."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld ältere Referenzzeilen haben keinen Herkunftsstempel. Importiere deine offizielle WHOOP-CSV mit dieser Version einmal erneut, um sie sicher zu überprüfen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld filas de referencia anteriores no tienen el sello de procedencia. Vuelve a importar una vez tu CSV oficial de WHOOP con esta versión para verificarlas de forma segura."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld anciennes lignes de référence ne comportent pas le marquage de provenance. Réimportez une fois votre CSV WHOOP officiel avec cette version pour les vérifier en toute sécurité."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld linhas de referência antigas não têm o carimbo de proveniência. Volta a importar uma vez o teu CSV oficial da WHOOP com esta versão para as verificares em segurança."
+          }
+        }
       }
     },
     "1 older reference row lacks the provenance stamp. Re-import your official WHOOP CSV once with this version to verify it safely.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "1 ältere Referenzzeile hat keinen Herkunftsstempel. Importiere deine offizielle WHOOP-CSV mit dieser Version einmal erneut, um sie sicher zu überprüfen."}},
-        "es": {"stringUnit": {"state": "translated", "value": "1 fila de referencia anterior no tiene el sello de procedencia. Vuelve a importar una vez tu CSV oficial de WHOOP con esta versión para verificarla de forma segura."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Une ancienne ligne de référence ne comporte pas le marquage de provenance. Réimportez une fois votre CSV WHOOP officiel avec cette version pour la vérifier en toute sécurité."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Uma linha de referência antiga não tem o carimbo de proveniência. Volta a importar uma vez o teu CSV oficial da WHOOP com esta versão para a verificares em segurança."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 ältere Referenzzeile hat keinen Herkunftsstempel. Importiere deine offizielle WHOOP-CSV mit dieser Version einmal erneut, um sie sicher zu überprüfen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 fila de referencia anterior no tiene el sello de procedencia. Vuelve a importar una vez tu CSV oficial de WHOOP con esta versión para verificarla de forma segura."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une ancienne ligne de référence ne comporte pas le marquage de provenance. Réimportez une fois votre CSV WHOOP officiel avec cette version pour la vérifier en toute sécurité."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uma linha de referência antiga não tem o carimbo de proveniência. Volta a importar uma vez o teu CSV oficial da WHOOP com esta versão para a verificares em segurança."
+          }
+        }
       }
     },
     "A standalone companion for your WHOOP. Your history, live stream, and numbers stay on this device by default. Data leaves only through features you explicitly enable, such as your own self-hosted sync. NOOP is an independent, experimental project, not the WHOOP app.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Ein eigenständiger Begleiter für dein WHOOP. Dein Verlauf, Live-Stream und deine Werte bleiben standardmäßig auf diesem Gerät. Daten verlassen es nur über Funktionen, die du ausdrücklich aktivierst, etwa deine eigene selbst gehostete Synchronisierung. NOOP ist ein unabhängiges experimentelles Projekt und nicht die WHOOP-App."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Un complemento independiente para tu WHOOP. De forma predeterminada, tu historial, transmisión en directo y métricas permanecen en este dispositivo. Los datos solo salen mediante funciones que activas expresamente, como tu propia sincronización autohospedada. NOOP es un proyecto experimental e independiente, no la aplicación WHOOP."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Un compagnon autonome pour votre WHOOP. Par défaut, votre historique, votre flux en direct et vos mesures restent sur cet appareil. Les données ne le quittent qu’au moyen de fonctionnalités que vous activez explicitement, comme votre propre synchronisation auto-hébergée. NOOP est un projet expérimental indépendant, et non l’application WHOOP."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Um complemento autónomo para o teu WHOOP. Por predefinição, o teu histórico, a transmissão em direto e os valores permanecem neste dispositivo. Os dados só saem através de funcionalidades que ativares explicitamente, como a tua própria sincronização autoalojada. O NOOP é um projeto experimental independente, não é a aplicação WHOOP."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein eigenständiger Begleiter für dein WHOOP. Dein Verlauf, Live-Stream und deine Werte bleiben standardmäßig auf diesem Gerät. Daten verlassen es nur über Funktionen, die du ausdrücklich aktivierst, etwa deine eigene selbst gehostete Synchronisierung. NOOP ist ein unabhängiges experimentelles Projekt und nicht die WHOOP-App."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un complemento independiente para tu WHOOP. De forma predeterminada, tu historial, transmisión en directo y métricas permanecen en este dispositivo. Los datos solo salen mediante funciones que activas expresamente, como tu propia sincronización autohospedada. NOOP es un proyecto experimental e independiente, no la aplicación WHOOP."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un compagnon autonome pour votre WHOOP. Par défaut, votre historique, votre flux en direct et vos mesures restent sur cet appareil. Les données ne le quittent qu’au moyen de fonctionnalités que vous activez explicitement, comme votre propre synchronisation auto-hébergée. NOOP est un projet expérimental indépendant, et non l’application WHOOP."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Um complemento autónomo para o teu WHOOP. Por predefinição, o teu histórico, a transmissão em direto e os valores permanecem neste dispositivo. Os dados só saem através de funcionalidades que ativares explicitamente, como a tua própria sincronização autoalojada. O NOOP é um projeto experimental independente, não é a aplicação WHOOP."
+          }
+        }
       }
     },
     "A validated calibration is only a per-user presentation transform. It does not recover or claim to reproduce WHOOP's proprietary model.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Eine validierte Kalibrierung ist lediglich eine benutzerspezifische Darstellungstransformation. Sie stellt das proprietäre Modell von WHOOP weder wieder her noch behauptet sie, es nachzubilden."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Una calibración validada solo es una transformación de presentación por usuario. No recupera ni afirma reproducir el modelo propietario de WHOOP."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Une calibration validée est uniquement une transformation de présentation propre à l’utilisateur. Elle ne récupère pas le modèle propriétaire de WHOOP et ne prétend pas le reproduire."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Uma calibração validada é apenas uma transformação de apresentação por utilizador. Não recupera nem afirma reproduzir o modelo proprietário da WHOOP."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eine validierte Kalibrierung ist lediglich eine benutzerspezifische Darstellungstransformation. Sie stellt das proprietäre Modell von WHOOP weder wieder her noch behauptet sie, es nachzubilden."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Una calibración validada solo es una transformación de presentación por usuario. No recupera ni afirma reproducir el modelo propietario de WHOOP."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une calibration validée est uniquement une transformation de présentation propre à l’utilisateur. Elle ne récupère pas le modèle propriétaire de WHOOP et ne prétend pas le reproduire."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uma calibração validada é apenas uma transformação de apresentação por utilizador. Não recupera nem afirma reproduzir o modelo proprietário da WHOOP."
+          }
+        }
       }
     },
     "Any OpenAI-compatible server: Ollama, LM Studio, llama.cpp, or your own gateway. The request goes only to the endpoint you choose; use an on-device endpoint when it must stay on %@.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Jeder OpenAI-kompatible Server: Ollama, LM Studio, llama.cpp oder dein eigenes Gateway. Die Anfrage geht nur an den von dir gewählten Endpunkt; verwende einen Endpunkt auf dem Gerät, wenn sie auf %@ bleiben muss."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Cualquier servidor compatible con OpenAI: Ollama, LM Studio, llama.cpp o tu propia pasarela. La solicitud solo va al endpoint que elijas; usa un endpoint en el dispositivo cuando deba permanecer en %@."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "N’importe quel serveur compatible OpenAI : Ollama, LM Studio, llama.cpp ou votre propre passerelle. La requête va uniquement vers le point de terminaison que vous choisissez ; utilisez-en un sur l’appareil lorsqu’elle doit rester sur %@."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Qualquer servidor compatível com OpenAI: Ollama, LM Studio, llama.cpp ou o teu próprio gateway. O pedido vai apenas para o endpoint que escolheres; usa um endpoint no dispositivo quando tiver de permanecer em %@."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jeder OpenAI-kompatible Server: Ollama, LM Studio, llama.cpp oder dein eigenes Gateway. Die Anfrage geht nur an den von dir gewählten Endpunkt; verwende einen Endpunkt auf dem Gerät, wenn sie auf %@ bleiben muss."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cualquier servidor compatible con OpenAI: Ollama, LM Studio, llama.cpp o tu propia pasarela. La solicitud solo va al endpoint que elijas; usa un endpoint en el dispositivo cuando deba permanecer en %@."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "N’importe quel serveur compatible OpenAI : Ollama, LM Studio, llama.cpp ou votre propre passerelle. La requête va uniquement vers le point de terminaison que vous choisissez ; utilisez-en un sur l’appareil lorsqu’elle doit rester sur %@."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Qualquer servidor compatível com OpenAI: Ollama, LM Studio, llama.cpp ou o teu próprio gateway. O pedido vai apenas para o endpoint que escolheres; usa um endpoint no dispositivo quando tiver de permanecer em %@."
+          }
+        }
       }
     },
     "Automatic upload": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Automatischer Upload"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Carga automática"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Téléversement automatique"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Carregamento automático"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatischer Upload"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carga automática"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléversement automatique"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carregamento automático"
+          }
+        }
       }
     },
     "Catches up on launch and after local data refreshes. Failed rows remain pending.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Holt beim Start und nach lokalen Datenaktualisierungen auf. Fehlgeschlagene Zeilen bleiben ausstehend."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Se pone al día al iniciar y después de actualizar los datos locales. Las filas fallidas permanecen pendientes."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Rattrape le retard au lancement et après l’actualisation des données locales. Les lignes ayant échoué restent en attente."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Atualiza ao iniciar e depois de os dados locais serem atualizados. As linhas que falharam permanecem pendentes."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Holt beim Start und nach lokalen Datenaktualisierungen auf. Fehlgeschlagene Zeilen bleiben ausstehend."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se pone al día al iniciar y después de actualizar los datos locales. Las filas fallidas permanecen pendientes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rattrape le retard au lancement et après l’actualisation des données locales. Les lignes ayant échoué restent en attente."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atualiza ao iniciar e depois de os dados locais serem atualizados. As linhas que falharam permanecem pendentes."
+          }
+        }
       }
     },
     "Chronological holdout: %lld training + %lld untouched days · MAE improvement %lld%%": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Chronologischer Holdout: %1$lld Trainingstage + %2$lld unberührte Tage · MAE-Verbesserung %3$lld%%"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Reserva cronológica: %1$lld días de entrenamiento + %2$lld días intactos · mejora del MAE: %3$lld%%"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Jeu de validation chronologique : %1$lld jours d’entraînement + %2$lld jours non utilisés · amélioration de la MAE %3$lld%%"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Validação cronológica: %1$lld dias de treino + %2$lld dias não usados · melhoria do MAE %3$lld%%"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chronologischer Holdout: %1$lld Trainingstage + %2$lld unberührte Tage · MAE-Verbesserung %3$lld%%"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reserva cronológica: %1$lld días de entrenamiento + %2$lld días intactos · mejora del MAE: %3$lld%%"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jeu de validation chronologique : %1$lld jours d’entraînement + %2$lld jours non utilisés · amélioration de la MAE %3$lld%%"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Validação cronológica: %1$lld dias de treino + %2$lld dias não usados · melhoria do MAE %3$lld%%"
+          }
+        }
       }
     },
     "Disconnect and forget credentials…": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Trennen und Zugangsdaten vergessen…"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Desconectar y olvidar las credenciales…"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Déconnecter et oublier les identifiants…"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Desligar e esquecer as credenciais…"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trennen und Zugangsdaten vergessen…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desconectar y olvidar las credenciales…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Déconnecter et oublier les identifiants…"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desligar e esquecer as credenciais…"
+          }
+        }
       }
     },
     "Disconnect self-hosted sync?": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Selbst gehostete Synchronisierung trennen?"}},
-        "es": {"stringUnit": {"state": "translated", "value": "¿Desconectar la sincronización autohospedada?"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Déconnecter la synchronisation auto-hébergée ?"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Desligar a sincronização autoalojada?"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selbst gehostete Synchronisierung trennen?"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Desconectar la sincronización autohospedada?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Déconnecter la synchronisation auto-hébergée ?"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desligar a sincronização autoalojada?"
+          }
+        }
       }
     },
     "Last server sync: %@": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Letzte Serversynchronisierung: %@"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Última sincronización con el servidor: %@"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Dernière synchronisation avec le serveur : %@"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Última sincronização com o servidor: %@"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Letzte Serversynchronisierung: %@"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Última sincronización con el servidor: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dernière synchronisation avec le serveur : %@"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Última sincronização com o servidor: %@"
+          }
+        }
       }
     },
     "No paired days yet. Import your official WHOOP CSV in Data Sources, then let Noop compute the same days locally.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Noch keine übereinstimmenden Tage. Importiere deine offizielle WHOOP-CSV unter Datenquellen und lass Noop dann dieselben Tage lokal berechnen."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Aún no hay días emparejados. Importa tu CSV oficial de WHOOP en Fuentes de datos y deja que Noop calcule localmente los mismos días."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Aucun jour apparié pour le moment. Importez votre CSV WHOOP officiel dans Sources de données, puis laissez Noop calculer localement les mêmes jours."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Ainda não há dias emparelhados. Importa o teu CSV oficial da WHOOP em Fontes de dados e deixa o Noop calcular localmente os mesmos dias."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noch keine übereinstimmenden Tage. Importiere deine offizielle WHOOP-CSV unter Datenquellen und lass Noop dann dieselben Tage lokal berechnen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aún no hay días emparejados. Importa tu CSV oficial de WHOOP en Fuentes de datos y deja que Noop calcule localmente los mismos días."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun jour apparié pour le moment. Importez votre CSV WHOOP officiel dans Sources de données, puis laissez Noop calculer localement les mêmes jours."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ainda não há dias emparelhados. Importa o teu CSV oficial da WHOOP em Fontes de dados e deixa o Noop calcular localmente os mesmos dias."
+          }
+        }
       }
     },
     "No server sync yet.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Noch keine Serversynchronisierung."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Aún no se ha sincronizado con el servidor."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Aucune synchronisation avec le serveur pour le moment."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Ainda não houve sincronização com o servidor."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noch keine Serversynchronisierung."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aún no se ha sincronizado con el servidor."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucune synchronisation avec le serveur pour le moment."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ainda não houve sincronização com o servidor."
+          }
+        }
       }
     },
     "Noop keeps official outcomes and local scores in separate namespaces, then pairs only days freshly recomputed from your WHOOP strap streams. WHOOP Recovery, Strain, and Sleep Performance never enter the raw Noop formulas; imported physiology or sleep timing can seed personal baseline context.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Noop hält offizielle Ergebnisse und lokale Bewertungen in getrennten Namensräumen und ordnet nur Tage zu, die frisch aus den Datenströmen deines WHOOP-Armbands neu berechnet wurden. WHOOP Recovery, Strain und Sleep Performance fließen niemals in die Noop-Rohformeln ein; importierte physiologische Daten oder Schlafzeiten können den Kontext für deine persönliche Basislinie liefern."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Noop mantiene los resultados oficiales y las puntuaciones locales en espacios de nombres separados, y solo empareja días recién recalculados a partir de los flujos de tu correa WHOOP. WHOOP Recovery, Strain y Sleep Performance nunca entran en las fórmulas brutas de Noop; la fisiología o los horarios de sueño importados pueden aportar contexto a tu referencia personal."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Noop conserve les résultats officiels et les scores locaux dans des espaces de noms distincts, puis apparie uniquement les jours fraîchement recalculés à partir des flux de votre bracelet WHOOP. WHOOP Recovery, Strain et Sleep Performance n’entrent jamais dans les formules brutes de Noop ; les données physiologiques ou les horaires de sommeil importés peuvent alimenter le contexte de votre référence personnelle."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "O Noop mantém os resultados oficiais e as pontuações locais em espaços de nomes separados, e só emparelha dias recalculados de novo a partir dos fluxos da tua bracelete WHOOP. WHOOP Recovery, Strain e Sleep Performance nunca entram nas fórmulas brutas do Noop; a fisiologia ou os horários de sono importados podem fornecer contexto à tua referência pessoal."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noop hält offizielle Ergebnisse und lokale Bewertungen in getrennten Namensräumen und ordnet nur Tage zu, die frisch aus den Datenströmen deines WHOOP-Armbands neu berechnet wurden. WHOOP Recovery, Strain und Sleep Performance fließen niemals in die Noop-Rohformeln ein; importierte physiologische Daten oder Schlafzeiten können den Kontext für deine persönliche Basislinie liefern."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noop mantiene los resultados oficiales y las puntuaciones locales en espacios de nombres separados, y solo empareja días recién recalculados a partir de los flujos de tu correa WHOOP. WHOOP Recovery, Strain y Sleep Performance nunca entran en las fórmulas brutas de Noop; la fisiología o los horarios de sueño importados pueden aportar contexto a tu referencia personal."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noop conserve les résultats officiels et les scores locaux dans des espaces de noms distincts, puis apparie uniquement les jours fraîchement recalculés à partir des flux de votre bracelet WHOOP. WHOOP Recovery, Strain et Sleep Performance n’entrent jamais dans les formules brutes de Noop ; les données physiologiques ou les horaires de sommeil importés peuvent alimenter le contexte de votre référence personnelle."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Noop mantém os resultados oficiais e as pontuações locais em espaços de nomes separados, e só emparelha dias recalculados de novo a partir dos fluxos da tua bracelete WHOOP. WHOOP Recovery, Strain e Sleep Performance nunca entram nas fórmulas brutas do Noop; a fisiologia ou os horários de sono importados podem fornecer contexto à tua referência pessoal."
+          }
+        }
       }
     },
     "Noop keeps imported official values and independently computed values in separate namespaces, then pairs exact calendar days. It never overwrites either source.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Noop hält importierte offizielle Werte und unabhängig berechnete Werte in getrennten Namensräumen und ordnet dann exakt gleiche Kalendertage zu. Keine der beiden Quellen wird überschrieben."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Noop mantiene los valores oficiales importados y los calculados de forma independiente en espacios de nombres separados, y después empareja los días naturales exactos. Nunca sobrescribe ninguna de las fuentes."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Noop conserve les valeurs officielles importées et les valeurs calculées indépendamment dans des espaces de noms distincts, puis apparie les jours calendaires exacts. Aucune source n’est jamais écrasée."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "O Noop mantém os valores oficiais importados e os valores calculados de forma independente em espaços de nomes separados, e depois emparelha dias de calendário exatos. Nunca substitui nenhuma das fontes."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noop hält importierte offizielle Werte und unabhängig berechnete Werte in getrennten Namensräumen und ordnet dann exakt gleiche Kalendertage zu. Keine der beiden Quellen wird überschrieben."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noop mantiene los valores oficiales importados y los calculados de forma independiente en espacios de nombres separados, y después empareja los días naturales exactos. Nunca sobrescribe ninguna de las fuentes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noop conserve les valeurs officielles importées et les valeurs calculées indépendamment dans des espaces de noms distincts, puis apparie les jours calendaires exacts. Aucune source n’est jamais écrasée."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Noop mantém os valores oficiais importados e os valores calculados de forma independente em espaços de nomes separados, e depois emparelha dias de calendário exatos. Nunca substitui nenhuma das fontes."
+          }
+        }
       }
     },
     "Noop server API key": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "API-Schlüssel des Noop-Servers"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Clave de API del servidor Noop"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Clé API du serveur Noop"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Chave de API do servidor Noop"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API-Schlüssel des Noop-Servers"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clave de API del servidor Noop"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clé API du serveur Noop"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chave de API do servidor Noop"
+          }
+        }
       }
     },
     "Noop server URL": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "URL des Noop-Servers"}},
-        "es": {"stringUnit": {"state": "translated", "value": "URL del servidor Noop"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "URL du serveur Noop"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "URL do servidor Noop"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "URL des Noop-Servers"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "URL del servidor Noop"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "URL du serveur Noop"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "URL do servidor Noop"
+          }
+        }
       }
     },
     "Noop will replay every locally stored decoded row to this server. Existing server rows are updated idempotently, but this may transfer a large history.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Noop überträgt jede lokal gespeicherte decodierte Zeile erneut an diesen Server. Vorhandene Serverzeilen werden idempotent aktualisiert, dabei kann jedoch eine umfangreiche Historie übertragen werden."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Noop volverá a enviar a este servidor cada fila decodificada almacenada localmente. Las filas existentes del servidor se actualizan de forma idempotente, pero esto puede transferir un historial considerable."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Noop renverra vers ce serveur chaque ligne décodée stockée localement. Les lignes existantes du serveur sont mises à jour de façon idempotente, mais cette opération peut transférer un historique important."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "O Noop vai reenviar para este servidor todas as linhas descodificadas guardadas localmente. As linhas existentes no servidor são atualizadas de forma idempotente, mas esta operação pode transferir um histórico considerável."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noop überträgt jede lokal gespeicherte decodierte Zeile erneut an diesen Server. Vorhandene Serverzeilen werden idempotent aktualisiert, dabei kann jedoch eine umfangreiche Historie übertragen werden."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noop volverá a enviar a este servidor cada fila decodificada almacenada localmente. Las filas existentes del servidor se actualizan de forma idempotente, pero esto puede transferir un historial considerable."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noop renverra vers ce serveur chaque ligne décodée stockée localement. Les lignes existantes du serveur sont mises à jour de façon idempotente, mais cette opération peut transférer un historique important."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Noop vai reenviar para este servidor todas as linhas descodificadas guardadas localmente. As linhas existentes no servidor são atualizadas de forma idempotente, mas esta operação pode transferir um histórico considerável."
+          }
+        }
       }
     },
     "Official reference": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Offizielle Referenz"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Referencia oficial"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Référence officielle"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Referência oficial"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offizielle Referenz"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Referencia oficial"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Référence officielle"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Referência oficial"
+          }
+        }
       }
     },
     "Official values require importer stamp %@; Noop revision %@ is accepted only with a completed WHOOP raw-stream score receipt in this %lld-day window. Excluded: %lld unstamped official, %lld old, imported-only, or unverified Noop.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Offizielle Werte benötigen den Importstempel %1$@; die Noop-Version %2$@ wird in diesem %3$lld-Tage-Fenster nur mit einem abgeschlossenen Bewertungsnachweis aus WHOOP-Rohdatenströmen akzeptiert. Ausgeschlossen: %4$lld offizielle Werte ohne Stempel, %5$lld alte, nur importierte oder ungeprüfte Noop-Werte."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Los valores oficiales requieren el sello del importador %1$@; la revisión de Noop %2$@ solo se acepta con un comprobante completo de puntuación de los flujos sin procesar de WHOOP en esta ventana de %3$lld días. Excluidos: %4$lld oficiales sin sello, %5$lld de Noop antiguos, solo importados o sin verificar."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Les valeurs officielles nécessitent le marquage d’importation %1$@ ; la révision Noop %2$@ n’est acceptée qu’avec une preuve complète de calcul à partir des flux bruts WHOOP dans cette fenêtre de %3$lld jours. Exclus : %4$lld officiels non marqués, %5$lld Noop anciens, uniquement importés ou non vérifiés."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Os valores oficiais requerem o carimbo de importação %1$@; a revisão do Noop %2$@ só é aceite com um comprovativo completo de pontuação dos fluxos brutos da WHOOP nesta janela de %3$lld dias. Excluídos: %4$lld oficiais sem carimbo, %5$lld do Noop antigos, apenas importados ou não verificados."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offizielle Werte benötigen den Importstempel %1$@; die Noop-Version %2$@ wird in diesem %3$lld-Tage-Fenster nur mit einem abgeschlossenen Bewertungsnachweis aus WHOOP-Rohdatenströmen akzeptiert. Ausgeschlossen: %4$lld offizielle Werte ohne Stempel, %5$lld alte, nur importierte oder ungeprüfte Noop-Werte."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los valores oficiales requieren el sello del importador %1$@; la revisión de Noop %2$@ solo se acepta con un comprobante completo de puntuación de los flujos sin procesar de WHOOP en esta ventana de %3$lld días. Excluidos: %4$lld oficiales sin sello, %5$lld de Noop antiguos, solo importados o sin verificar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les valeurs officielles nécessitent le marquage d’importation %1$@ ; la révision Noop %2$@ n’est acceptée qu’avec une preuve complète de calcul à partir des flux bruts WHOOP dans cette fenêtre de %3$lld jours. Exclus : %4$lld officiels non marqués, %5$lld Noop anciens, uniquement importés ou non vérifiés."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os valores oficiais requerem o carimbo de importação %1$@; a revisão do Noop %2$@ só é aceite com um comprovativo completo de pontuação dos fluxos brutos da WHOOP nesta janela de %3$lld dias. Excluídos: %4$lld oficiais sem carimbo, %5$lld do Noop antigos, apenas importados ou não verificados."
+          }
+        }
       }
     },
     "Official values require importer stamp %@; Noop revision %@ is accepted only for days freshly rescored in this %lld-day window. Excluded: %lld unstamped official, %lld old or unverified Noop.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Offizielle Werte benötigen den Importstempel %1$@; die Noop-Version %2$@ wird nur für Tage akzeptiert, die in diesem %3$lld-Tage-Fenster neu berechnet wurden. Ausgeschlossen: %4$lld offizielle Werte ohne Stempel, %5$lld alte oder ungeprüfte Noop-Werte."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Los valores oficiales requieren el sello del importador %1$@; la revisión de Noop %2$@ solo se acepta para los días recalculados en esta ventana de %3$lld días. Excluidos: %4$lld oficiales sin sello, %5$lld de Noop antiguos o sin verificar."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Les valeurs officielles nécessitent le marquage d’importation %1$@ ; la révision Noop %2$@ n’est acceptée que pour les jours recalculés dans cette fenêtre de %3$lld jours. Exclus : %4$lld officiels non marqués, %5$lld Noop anciens ou non vérifiés."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Os valores oficiais requerem o carimbo de importação %1$@; a revisão do Noop %2$@ só é aceite para dias recalculados nesta janela de %3$lld dias. Excluídos: %4$lld oficiais sem carimbo, %5$lld do Noop antigos ou não verificados."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offizielle Werte benötigen den Importstempel %1$@; die Noop-Version %2$@ wird nur für Tage akzeptiert, die in diesem %3$lld-Tage-Fenster neu berechnet wurden. Ausgeschlossen: %4$lld offizielle Werte ohne Stempel, %5$lld alte oder ungeprüfte Noop-Werte."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los valores oficiales requieren el sello del importador %1$@; la revisión de Noop %2$@ solo se acepta para los días recalculados en esta ventana de %3$lld días. Excluidos: %4$lld oficiales sin sello, %5$lld de Noop antiguos o sin verificar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les valeurs officielles nécessitent le marquage d’importation %1$@ ; la révision Noop %2$@ n’est acceptée que pour les jours recalculés dans cette fenêtre de %3$lld jours. Exclus : %4$lld officiels non marqués, %5$lld Noop anciens ou non vérifiés."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os valores oficiais requerem o carimbo de importação %1$@; a revisão do Noop %2$@ só é aceite para dias recalculados nesta janela de %3$lld dias. Excluídos: %4$lld oficiais sem carimbo, %5$lld do Noop antigos ou não verificados."
+          }
+        }
       }
     },
     "Only %lld paired days are available. Comparison starts immediately; personal calibration needs at least 28, including 7 untouched validation days.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Es sind nur %lld übereinstimmende Tage verfügbar. Der Vergleich beginnt sofort; für die persönliche Kalibrierung sind mindestens 28 nötig, darunter 7 unberührte Validierungstage."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Solo hay %lld días emparejados disponibles. La comparación comienza de inmediato; la calibración personal necesita al menos 28, incluidos 7 días de validación intactos."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Seuls %lld jours appariés sont disponibles. La comparaison commence immédiatement ; la calibration personnelle en exige au moins 28, dont 7 jours de validation non utilisés."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Só estão disponíveis %lld dias emparelhados. A comparação começa de imediato; a calibração pessoal precisa de pelo menos 28, incluindo 7 dias de validação não usados."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Es sind nur %lld übereinstimmende Tage verfügbar. Der Vergleich beginnt sofort; für die persönliche Kalibrierung sind mindestens 28 nötig, darunter 7 unberührte Validierungstage."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Solo hay %lld días emparejados disponibles. La comparación comienza de inmediato; la calibración personal necesita al menos 28, incluidos 7 días de validación intactos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seuls %lld jours appariés sont disponibles. La comparaison commence immédiatement ; la calibration personnelle en exige au moins 28, dont 7 jours de validation non utilisés."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Só estão disponíveis %lld dias emparelhados. A comparação começa de imediato; a calibração pessoal precisa de pelo menos 28, incluindo 7 dias de validação não usados."
+          }
+        }
       }
     },
     "Optional and off by default. When enabled, decoded sensor streams, sleep, workouts, daily metrics, and journal answers go only to the server you choose. The API key stays in Keychain.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Optional und standardmäßig aus. Wenn aktiviert, werden decodierte Sensorströme, Schlaf, Workouts, Tageswerte und Journalantworten ausschließlich an den von dir gewählten Server gesendet. Der API-Schlüssel bleibt im Schlüsselbund."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Opcional y desactivada de forma predeterminada. Al activarla, los flujos de sensores decodificados, el sueño, los entrenamientos, las métricas diarias y las respuestas del diario van únicamente al servidor que elijas. La clave de API permanece en el llavero."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Facultatif et désactivé par défaut. Lorsque cette option est activée, les flux de capteurs décodés, le sommeil, les entraînements, les métriques quotidiennes et les réponses du journal sont envoyés uniquement au serveur que vous choisissez. La clé API reste dans le trousseau."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Opcional e desativado por predefinição. Quando ativado, os fluxos de sensores descodificados, o sono, os treinos, as métricas diárias e as respostas do diário vão apenas para o servidor que escolheres. A chave de API permanece no Porta-chaves."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Optional und standardmäßig aus. Wenn aktiviert, werden decodierte Sensorströme, Schlaf, Workouts, Tageswerte und Journalantworten ausschließlich an den von dir gewählten Server gesendet. Der API-Schlüssel bleibt im Schlüsselbund."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opcional y desactivada de forma predeterminada. Al activarla, los flujos de sensores decodificados, el sueño, los entrenamientos, las métricas diarias y las respuestas del diario van únicamente al servidor que elijas. La clave de API permanece en el llavero."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Facultatif et désactivé par défaut. Lorsque cette option est activée, les flux de capteurs décodés, le sommeil, les entraînements, les métriques quotidiennes et les réponses du journal sont envoyés uniquement au serveur que vous choisissez. La clé API reste dans le trousseau."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opcional e desativado por predefinição. Quando ativado, os fluxos de sensores descodificados, o sono, os treinos, as métricas diárias e as respostas do diário vão apenas para o servidor que escolheres. A chave de API permanece no Porta-chaves."
+          }
+        }
       }
     },
     "Personal calibration not applied": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Persönliche Kalibrierung nicht angewendet"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Calibración personal no aplicada"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Calibration personnelle non appliquée"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Calibração pessoal não aplicada"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persönliche Kalibrierung nicht angewendet"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calibración personal no aplicada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calibration personnelle non appliquée"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calibração pessoal não aplicada"
+          }
+        }
       }
     },
     "Personal calibration validated": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Persönliche Kalibrierung validiert"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Calibración personal validada"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Calibration personnelle validée"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Calibração pessoal validada"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Persönliche Kalibrierung validiert"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calibración personal validada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calibration personnelle validée"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calibração pessoal validada"
+          }
+        }
       }
     },
     "Public servers require HTTPS. Plain HTTP is accepted only for localhost or a private LAN. Noop never sends data to a project-operated cloud.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Öffentliche Server erfordern HTTPS. Unverschlüsseltes HTTP wird nur für localhost oder ein privates LAN akzeptiert. Noop sendet niemals Daten an eine vom Projekt betriebene Cloud."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Los servidores públicos requieren HTTPS. HTTP sin cifrar solo se acepta para localhost o una LAN privada. Noop nunca envía datos a una nube operada por el proyecto."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Les serveurs publics nécessitent HTTPS. Le protocole HTTP non chiffré n’est accepté que pour localhost ou un réseau local privé. Noop n’envoie jamais de données vers un cloud exploité par le projet."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Os servidores públicos requerem HTTPS. O HTTP sem encriptação só é aceite para localhost ou uma LAN privada. O Noop nunca envia dados para uma nuvem operada pelo projeto."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öffentliche Server erfordern HTTPS. Unverschlüsseltes HTTP wird nur für localhost oder ein privates LAN akzeptiert. Noop sendet niemals Daten an eine vom Projekt betriebene Cloud."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los servidores públicos requieren HTTPS. HTTP sin cifrar solo se acepta para localhost o una LAN privada. Noop nunca envía datos a una nube operada por el proyecto."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les serveurs publics nécessitent HTTPS. Le protocole HTTP non chiffré n’est accepté que pour localhost ou un réseau local privé. Noop n’envoie jamais de données vers un cloud exploité par le projet."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os servidores públicos requerem HTTPS. O HTTP sem encriptação só é aceite para localhost ou uma LAN privada. O Noop nunca envia dados para uma nuvem operada pelo projeto."
+          }
+        }
       }
     },
     "Reference metric": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Referenzmetrik"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Métrica de referencia"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Métrique de référence"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Métrica de referência"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Referenzmetrik"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Métrica de referencia"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Métrique de référence"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Métrica de referência"
+          }
+        }
       }
     },
     "Re-upload": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Erneut hochladen"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Volver a cargar"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Retéléverser"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Voltar a carregar"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erneut hochladen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Volver a cargar"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retéléverser"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voltar a carregar"
+          }
+        }
       }
     },
     "Re-upload all local data?": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Alle lokalen Daten erneut hochladen?"}},
-        "es": {"stringUnit": {"state": "translated", "value": "¿Volver a cargar todos los datos locales?"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Retéléverser toutes les données locales ?"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Voltar a carregar todos os dados locais?"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alle lokalen Daten erneut hochladen?"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Volver a cargar todos los datos locales?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retéléverser toutes les données locales ?"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voltar a carregar todos os dados locais?"
+          }
+        }
       }
     },
     "Re-upload all local history…": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Gesamten lokalen Verlauf erneut hochladen…"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Volver a cargar todo el historial local…"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Retéléverser tout l’historique local…"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Voltar a carregar todo o histórico local…"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gesamten lokalen Verlauf erneut hochladen…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Volver a cargar todo el historial local…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retéléverser tout l’historique local…"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voltar a carregar todo o histórico local…"
+          }
+        }
       }
     },
     "This removes the server address and API key from this device and stops automatic uploads. It does not delete local data or data already stored on your server.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Dadurch werden Serveradresse und API-Schlüssel von diesem Gerät entfernt und automatische Uploads beendet. Lokale Daten oder bereits auf deinem Server gespeicherte Daten werden nicht gelöscht."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Esto elimina de este dispositivo la dirección del servidor y la clave de API, y detiene las cargas automáticas. No elimina los datos locales ni los que ya están almacenados en tu servidor."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Cette action supprime l’adresse du serveur et la clé API de cet appareil, et arrête les téléversements automatiques. Elle ne supprime ni les données locales ni celles déjà stockées sur votre serveur."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Isto remove o endereço do servidor e a chave de API deste dispositivo e interrompe os carregamentos automáticos. Não elimina dados locais nem dados que já estejam guardados no teu servidor."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dadurch werden Serveradresse und API-Schlüssel von diesem Gerät entfernt und automatische Uploads beendet. Lokale Daten oder bereits auf deinem Server gespeicherte Daten werden nicht gelöscht."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esto elimina de este dispositivo la dirección del servidor y la clave de API, y detiene las cargas automáticas. No elimina los datos locales ni los que ya están almacenados en tu servidor."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette action supprime l’adresse du serveur et la clé API de cet appareil, et arrête les téléversements automatiques. Elle ne supprime ni les données locales ni celles déjà stockées sur votre serveur."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Isto remove o endereço do servidor e a chave de API deste dispositivo e interrompe os carregamentos automáticos. Não elimina dados locais nem dados que já estejam guardados no teu servidor."
+          }
+        }
       }
     },
     "Verifying current Noop score revision…": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Aktuelle Version der Noop-Bewertung wird überprüft…"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Verificando la revisión actual de la puntuación de Noop…"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Vérification de la révision actuelle du score Noop…"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "A verificar a revisão atual da pontuação do Noop…"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktuelle Version der Noop-Bewertung wird überprüft…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verificando la revisión actual de la puntuación de Noop…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérification de la révision actuelle du score Noop…"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A verificar a revisão atual da pontuação do Noop…"
+          }
+        }
       }
     },
     "When enabled, Coach sends a summary of your metrics to %@ using your own key. Nothing is sent until you ask.": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Wenn aktiviert, sendet Coach mit deinem eigenen Schlüssel eine Zusammenfassung deiner Messwerte an %@. Nichts wird gesendet, bis du fragst."}},
-        "es": {"stringUnit": {"state": "translated", "value": "Al activarlo, Coach envía un resumen de tus métricas a %@ usando tu propia clave. No se envía nada hasta que preguntas."}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Lorsqu’il est activé, Coach envoie un résumé de vos métriques à %@ au moyen de votre propre clé. Rien n’est envoyé avant votre demande."}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "Quando ativado, o Coach envia um resumo das tuas métricas para %@ através da tua própria chave. Nada é enviado até fazeres uma pergunta."}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wenn aktiviert, sendet Coach mit deinem eigenen Schlüssel eine Zusammenfassung deiner Messwerte an %@. Nichts wird gesendet, bis du fragst."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Al activarlo, Coach envía un resumen de tus métricas a %@ usando tu propia clave. No se envía nada hasta que preguntas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lorsqu’il est activé, Coach envoie un résumé de vos métriques à %@ au moyen de votre propre clé. Rien n’est envoyé avant votre demande."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quando ativado, o Coach envia um resumo das tuas métricas para %@ através da tua própria chave. Nada é enviado até fazeres uma pergunta."
+          }
+        }
       }
     },
     "Your self-hosted Noop server": {
       "localizations": {
-        "de": {"stringUnit": {"state": "translated", "value": "Dein selbst gehosteter Noop-Server"}},
-        "es": {"stringUnit": {"state": "translated", "value": "Tu servidor Noop autohospedado"}},
-        "fr": {"stringUnit": {"state": "translated", "value": "Votre serveur Noop auto-hébergé"}},
-        "pt-PT": {"stringUnit": {"state": "translated", "value": "O teu servidor Noop autoalojado"}}
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dein selbst gehosteter Noop-Server"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tu servidor Noop autohospedado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Votre serveur Noop auto-hébergé"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O teu servidor Noop autoalojado"
+          }
+        }
       }
     },
     "Body-location probe (#690 RE)…": {
@@ -169345,6 +170065,354 @@
           "stringUnit": {
             "state": "translated",
             "value": "Toque num dia para atualizar"
+          }
+        }
+      }
+    },
+    "Recovery %lld%%": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erholung %lld%%"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recovery %lld%%"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recuperación %lld%%"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Récupération %lld%%"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recupero %lld%%"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recuperação %lld%%"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Восстановление %lld%%"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复 %lld%%"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢復 %lld%%"
+          }
+        }
+      }
+    },
+    "Recovery %@%%": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erholung %@%%"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recovery %@%%"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recuperación %@%%"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Récupération %@%%"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recupero %@%%"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recuperação %@%%"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Восстановление %@%%"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复 %@%%"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢復 %@%%"
+          }
+        }
+      }
+    },
+    "NOOP Recovery": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "NOOP Erholung"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "NOOP Recovery"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recuperación de NOOP"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Récupération NOOP"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recupero NOOP"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recuperação NOOP"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Восстановление NOOP"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "NOOP 恢复"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "NOOP 恢復"
+          }
+        }
+      }
+    },
+    "Recovery, Effort, Sleep Score, HRV, resting and live heart rate, and strap battery at a glance.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erholung, Anstrengung, Schlafwert, HRV, Ruhe- und Live-Herzfrequenz sowie Bandakku auf einen Blick."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recovery, Effort, Sleep Score, HRV, resting and live heart rate, and strap battery at a glance."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recuperación, Esfuerzo, Puntuación de sueño, VFC, frecuencia cardiaca en reposo y en directo, y batería de la pulsera de un vistazo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Récupération, Effort, Score de sommeil, VFC, fréquence cardiaque au repos et en direct, et batterie du bracelet en un coup d’œil."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recupero, Sforzo, Punteggio del sonno, HRV, frequenza cardiaca a riposo e in tempo reale e batteria del cinturino a colpo d’occhio."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recuperação, Esforço, Pontuação do sono, VFC, frequência cardíaca em repouso e em direto e bateria da pulseira num relance."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Восстановление, усилие, оценка сна, ВСР, пульс в покое и в реальном времени, а также заряд браслета — одним взглядом."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一览恢复、消耗、睡眠评分、HRV、静息与实时心率以及腕带电量。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一覽恢復、消耗、睡眠評分、HRV、靜息與即時心率以及腕帶電量。"
+          }
+        }
+      }
+    },
+    "Recovery / Effort / Sleep": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erholung / Anstrengung / Schlaf"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recovery / Effort / Sleep"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recuperación / Esfuerzo / Sueño"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Récupération / Effort / Sommeil"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recupero / Sforzo / Sonno"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recuperação / Esforço / Sono"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Восстановление / Усилие / Сон"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复 / 消耗 / 睡眠"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢復 / 消耗 / 睡眠"
+          }
+        }
+      }
+    },
+    "After your latest sync, review last night’s Sleep and today’s Recovery in NOOP.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prüfe nach der letzten Synchronisierung den Schlaf der vergangenen Nacht und die heutige Erholung in NOOP."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "After your latest sync, review last night’s Sleep and today’s Recovery in NOOP."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Después de la última sincronización, revisa el Sueño de anoche y la Recuperación de hoy en NOOP."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Après la dernière synchronisation, consultez le Sommeil de la nuit dernière et la Récupération du jour dans NOOP."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dopo l’ultima sincronizzazione, controlla il Sonno della notte scorsa e il Recupero di oggi in NOOP."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Após a última sincronização, revê o Sono da noite passada e a Recuperação de hoje no NOOP."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "После последней синхронизации проверьте в NOOP сон за прошлую ночь и сегодняшнее восстановление."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完成最近一次同步后，在 NOOP 中查看昨晚的睡眠和今天的恢复。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完成最近一次同步後，在 NOOP 中查看昨晚的睡眠和今天的恢復。"
           }
         }
       }

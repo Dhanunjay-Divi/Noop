@@ -3,6 +3,12 @@ import XCTest
 
 final class WeeklyDigestTests: XCTestCase {
 
+    func testProductLabelsKeepLegacyEnumKeysOutOfCopy() {
+        XCTAssertEqual(WeeklyMetric.charge.label, "Recovery")
+        XCTAssertEqual(WeeklyMetric.effort.label, "Effort")
+        XCTAssertEqual(WeeklyMetric.rest.label, "Sleep Score")
+    }
+
     // MARK: - Pure week math
 
     func testMondayOfWeek() {
@@ -161,9 +167,9 @@ final class WeeklyDigestTests: XCTestCase {
         let d = WeeklyDigestEngine.build(byMetric: [.charge: charge], anchorDay: "2026-06-13")
         XCTAssertFalse(d.focalPoints.isEmpty)
         let top = d.focalPoints[0]
-        XCTAssertTrue(top.contains("Charge"), "Expected Charge in: \(top)")
+        XCTAssertTrue(top.contains("Recovery"), "Expected Recovery in: \(top)")
         XCTAssertTrue(top.contains("up"), "Expected an upward move in: \(top)")
-        XCTAssertTrue(top.contains("good sign"), "Charge rising should read positively: \(top)")
+        XCTAssertTrue(top.contains("good sign"), "Recovery rising should read positively: \(top)")
     }
 
     func testRestingHRRiseReadsAsWorthALook() {
@@ -189,6 +195,8 @@ final class WeeklyDigestTests: XCTestCase {
         XCTAssertEqual(d.focalPoints.count, 1)
         XCTAssertTrue(d.focalPoints[0].lowercased().contains("steady"),
                       "Expected a steady-week line: \(d.focalPoints[0])")
+        XCTAssertTrue(d.focalPoints[0].contains("Sleep Score"))
+        XCTAssertFalse(d.focalPoints[0].contains("Rest held"))
     }
 
     func testSparseWeekSaysTooEarlyNotSteady() {

@@ -39,7 +39,7 @@
 		<true/>
 	</dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>NOOP connects directly to your WHOOP strap to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server.</string>
+	<string>NOOP connects directly to your wearable and standards-compatible Bluetooth health devices, including an explicitly paired weight scale, to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>NOOP connects to a self-hosted server on your local network only when you configure and enable that optional sync.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

@@ -17,6 +17,14 @@ final class FitnessAgeEngineTests: XCTestCase {
         XCTAssertEqual(v, 37.72, accuracy: 1e-3)
     }
 
+    func testSupportedSexNormalizationUsesTheSameCoefficients() {
+        let canonical = FitnessAgeEngine.compute(
+            age: 40, sex: "female", restingHR: 65, paIndex: 5, waistCm: 80)
+        let normalized = FitnessAgeEngine.compute(
+            age: 40, sex: "  FEMALE\n", restingHR: 65, paIndex: 5, waistCm: 80)
+        XCTAssertEqual(normalized, canonical)
+    }
+
     func testBMIHelper() {
         XCTAssertEqual(FitnessAgeEngine.bmi(weightKg: 80, heightCm: 178), 25.249, accuracy: 1e-3)
     }
@@ -92,7 +100,7 @@ final class FitnessAgeEngineTests: XCTestCase {
         XCTAssertEqual(r!.fitnessAge, 40.0, accuracy: 1e-9)
         XCTAssertEqual(r!.deltaYears, 0.0, accuracy: 1e-9)
         XCTAssertNil(r!.vo2max)               // no waist → no VO₂max display
-        XCTAssertEqual(r!.bandYears, 5.0, accuracy: 1e-9)
+        XCTAssertEqual(r!.bandYears, FitnessAgeEngine.seeMen / 0.296, accuracy: 1e-9)
         XCTAssertFalse(r!.lowerConfidence)
     }
 
@@ -101,59 +109,87 @@ final class FitnessAgeEngineTests: XCTestCase {
         XCTAssertEqual(r!.vo2max!, 46.275, accuracy: 1e-3)
     }
 
-    func testComputeNonBinaryFlagsLowerConfidence() {
-        let r = FitnessAgeEngine.compute(age: 40, sex: "nonbinary", restingHR: 60, paIndex: 6)
-        XCTAssertTrue(r!.lowerConfidence)
+    func testComputeUnsupportedSexIsUnavailable() {
+        XCTAssertNil(FitnessAgeEngine.compute(age: 40, sex: "nonbinary", restingHR: 60, paIndex: 6))
+    }
+
+    func testComputeOutsideValidatedAgeRangeIsUnavailable() {
+        XCTAssertNil(FitnessAgeEngine.compute(age: 19, sex: "male", restingHR: 60, paIndex: 6))
+        XCTAssertNil(FitnessAgeEngine.compute(age: 81, sex: "female", restingHR: 60, paIndex: 6))
     }
 
     func testComputeNilWhenNoRHR() {
         XCTAssertNil(FitnessAgeEngine.compute(age: 40, sex: "male", restingHR: 0, paIndex: 7.5))
     }
 
+    func testComputeRejectsCorruptPhysiologyAndActivityInputs() {
+        XCTAssertNil(FitnessAgeEngine.compute(age: 40, sex: "male", restingHR: 1, paIndex: 7.5))
+        XCTAssertNil(FitnessAgeEngine.compute(age: 40, sex: "male", restingHR: .nan, paIndex: 7.5))
+        XCTAssertNil(FitnessAgeEngine.compute(age: 40, sex: "male", restingHR: 60, paIndex: -1))
+        XCTAssertNil(FitnessAgeEngine.compute(age: 40, sex: "male", restingHR: 60, paIndex: .infinity))
+    }
+
+    func testInvalidWaistDoesNotBlockHeadlineOrProduceVO2max() {
+        let result = FitnessAgeEngine.compute(
+            age: 40, sex: "male", restingHR: 60, paIndex: 5, waistCm: 1)
+        XCTAssertNotNil(result)
+        XCTAssertNil(result?.vo2max)
+    }
+
     // MARK: - Readiness checklist
 
     func testReadinessAllPresentIsReady() {
         let r = FitnessAgeEngine.assessReadiness(hasAge: true, hasSex: true, rhrDays: 7, activityDays: 7,
-                                                 hasHeightWeight: true, hasWaist: true)
+                                                 hasWaist: true)
         XCTAssertEqual(r.confidence, .ready)
         XCTAssertTrue(r.canCompute)
         XCTAssertTrue(r.items.allSatisfy { $0.status == .satisfied })
-        XCTAssertEqual(r.items.count, 6)
+        XCTAssertEqual(r.items.count, 5)
     }
 
     func testReadinessMissingRHRIsNotReady() {
         let r = FitnessAgeEngine.assessReadiness(hasAge: true, hasSex: true, rhrDays: 0, activityDays: 7,
-                                                 hasHeightWeight: true, hasWaist: true)
+                                                 hasWaist: true)
         XCTAssertEqual(r.confidence, .notReady)
         XCTAssertFalse(r.canCompute)
         XCTAssertEqual(r.items.first { $0.key == "rhr" }!.status, .missing)
     }
 
     func testReadinessPartialCoverageIsEstimate() {
-        // age+sex set, 5 nights RHR (≥ min 4 but < good 6), sparse activity → computes, but "estimate".
-        let r = FitnessAgeEngine.assessReadiness(hasAge: true, hasSex: true, rhrDays: 5, activityDays: 3,
-                                                 hasHeightWeight: false, hasWaist: false)
+        // Both required signals meet the four-day floor, but remain below good coverage.
+        let r = FitnessAgeEngine.assessReadiness(hasAge: true, hasSex: true, rhrDays: 5, activityDays: 4,
+                                                 hasWaist: false)
         XCTAssertEqual(r.confidence, .estimate)
         XCTAssertTrue(r.canCompute)
         XCTAssertEqual(r.items.first { $0.key == "rhr" }!.status, .partial)
         XCTAssertEqual(r.items.first { $0.key == "activity" }!.status, .partial)
-        // Missing body metrics never blocks the headline — they sit under the VO₂max role.
-        let body = r.items.first { $0.key == "bodyMetrics" }!
-        XCTAssertEqual(body.status, .missing)
-        XCTAssertEqual(body.role, .unlocksVO2max)
-        XCTAssertFalse(body.required)
+        // Missing waist never blocks the headline; it only gates the separate VO₂max estimate.
+        let waist = r.items.first { $0.key == "waist" }!
+        XCTAssertEqual(waist.status, .missing)
+        XCTAssertEqual(waist.role, .unlocksVO2max)
+        XCTAssertFalse(waist.required)
+    }
+
+    func testReadinessMissingActivityIsNotReady() {
+        let r = FitnessAgeEngine.assessReadiness(hasAge: true, hasSex: true, rhrDays: 7, activityDays: 0,
+                                                 hasWaist: true)
+        XCTAssertEqual(r.confidence, .notReady)
+        XCTAssertFalse(r.canCompute)
+        let activity = r.items.first { $0.key == "activity" }!
+        XCTAssertTrue(activity.required)
+        XCTAssertEqual(activity.status, .missing)
     }
 
     func testReadinessMissingAgeIsNotReady() {
         let r = FitnessAgeEngine.assessReadiness(hasAge: false, hasSex: true, rhrDays: 7, activityDays: 7,
-                                                 hasHeightWeight: true, hasWaist: true)
+                                                 hasWaist: true)
         XCTAssertEqual(r.confidence, .notReady)
     }
 
     func testReadinessGoodCoverageNoBodyMetricsStillReady() {
-        // Headline only needs age/sex/coverage; missing height/weight (VO₂max-only) doesn't drop it.
+        // Headline only needs age/sex/coverage; missing waist (VO₂max-only) doesn't drop it.
         let r = FitnessAgeEngine.assessReadiness(hasAge: true, hasSex: true, rhrDays: 7, activityDays: 6,
-                                                 hasHeightWeight: false, hasWaist: false)
+                                                 hasWaist: false)
         XCTAssertEqual(r.confidence, .ready)
     }
 

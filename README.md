@@ -6,13 +6,13 @@
 
 <p align="center"><b>Your strap. Your data. Your machine. Local first; self-host when you choose.</b></p>
 
-<p align="center"><sub>Now in the all-new <b>Liquid Metal</b> design: one living look across iPhone, Android and Mac.</sub></p>
+<p align="center"><sub>Local biometric ownership, with an optional private circle on a server you control.</sub></p>
 
 <p align="center">
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Android%20%C2%B7%20iOS-E8B84B?style=flat-square">
   <img alt="Local first" src="https://img.shields.io/badge/local-first-E8B84B?style=flat-square">
   <img alt="Account free" src="https://img.shields.io/badge/account-free-C8902F?style=flat-square">
-  <img alt="WHOOP 4 and 5" src="https://img.shields.io/badge/works%20with-WHOOP%204.0%20%26%205.0-6B737B?style=flat-square">
+  <img alt="WHOOP 4 supported; WHOOP 5 and MG experimental" src="https://img.shields.io/badge/WHOOP%204-supported%20%C2%B7%205%2FMG%20experimental-6B737B?style=flat-square">
   <a href="LICENSE"><img alt="License: PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-6B737B?style=flat-square"></a>
   <a href="https://www.reddit.com/r/NoopBand/"><img alt="Community: r/NoopBand" src="https://img.shields.io/badge/community-r%2FNoopBand-E8B84B?style=flat-square&logo=reddit&logoColor=white"></a>
   <a href="https://discord.com/invite/wKgyqVdjrP"><img alt="Chat: Discord" src="https://img.shields.io/badge/chat-Discord-5865F2?style=flat-square&logo=discord&logoColor=white"></a>
@@ -34,7 +34,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Dhanunjay-Divi/Noop"><img src="docs/assets/hero-v8.jpg" alt="NOOP in the new Liquid Metal design, on iPhone, Mac and Android" width="820"></a>
+  <a href="https://github.com/Dhanunjay-Divi/Noop"><img src="docs/assets/hero-v8.jpg" alt="NOOP on iPhone, Mac and Android" width="820"></a>
 </p>
 
 <p align="center">
@@ -44,7 +44,7 @@
   &nbsp;&nbsp;
   <img src="docs/assets/shot-android-trend.png" alt="A metric's own trend on Android" width="218">
 </p>
-<p align="center"><sub>The all-new <b>Liquid Metal</b> look: living liquid scores, a sky that moves with your day, rebuilt on every screen. The same Today on iPhone and Android, and a metric&rsquo;s own trend. One design across iPhone, Android &amp; Mac.</sub></p>
+<p align="center"><sub>Today on iPhone and Android, plus a metric&rsquo;s own trend. Platform-native clients, one transparent scoring model.</sub></p>
 
 ---
 
@@ -77,8 +77,9 @@ channel, but those artifacts are upstream builds and are not this fork.
 Collection and analysis work **offline**. Data-bearing network features are
 separate opt-ins: the **AI Coach** uses your own provider/key, **Oura cloud
 import** talks only to Oura when configured, and **Self-hosted Sync** sends data
-only to a server and API key you configure. None is required for strap collection
-or local analysis.
+only to a server and API key you configure. **Friends** is an optional,
+least-privilege view of daily summaries on that same self-hosted server. None is
+required for strap collection or local analysis.
 
 ---
 
@@ -113,6 +114,7 @@ from **their own device**, on a machine **they** control.
 - [Quickstart (macOS)](#quickstart-macos)
 - [How your data flows](#how-your-data-flows)
 - [Self-hosted sync](#self-hosted-sync)
+- [Private Friends](#private-friends)
 - [Privacy](#privacy)
 - [Attribution](#attribution)
 - [Disclaimer](#disclaimer)
@@ -152,11 +154,19 @@ The macOS reference app organizes everything behind a single sidebar
 native Kotlin implementation. Screens and OS integrations are not identical on
 every platform—see [the capability map](docs/FEATURE_PARITY.md) for the gaps.
 
+The iPhone and Mac shell now uses the **Obsidian** visual system: monochrome
+black/pearl chrome, dimensional system-symbol plates, solid high-contrast content
+cards, and restrained glass for navigation and controls. Physiological colors
+remain reserved for Recovery, Effort, Sleep Score, heart-rate zones, and alerts. On iPhone,
+the private **Circle** stays visible at the top of More, while Devices and **Live
+HR** are separate destinations; Mac exposes the same Circle in its sidebar.
+
 | Screen | What it does |
 |---|---|
 | **Today** (Control Center) | Home dashboard: recovery ring, a "today's synthesis" insight, a grid of stat tiles (recovery, strain, sleep, HRV, RHR, SpO₂, respiratory, steps, weight, calories) each with a 14-day sparkline, live strap **battery %** and HR trend, recent workouts, and a data-sources footer. |
+| **Friends** (Circle; iPhone and Mac) | Invitation-only sharing through a server the circle operates. Accepted friends can see the latest daily Recovery, Effort, and Sleep Score values; sleep duration, HRV, and resting HR are separate per-friend opt-ins. There is no public profile, discovery, follower count, team ranking, or raw-data view. |
 | **Readiness** | An on-device "should you push today?" read that synthesizes established sports-science signals from your own history — HRV vs your baseline (Plews/Buchheit), resting-HR drift (Lamberts), sleeping respiratory-rate drift, training-load balance (acute:chronic workload ratio, Gabbett) and training monotony (Foster) — into a single headline (Primed / Balanced / Strained / Run down) with the drivers behind it. Pure local math, not medical advice. |
-| **Live** | Real-time view of the connected strap — heart rate and frame stream as they arrive (~1 Hz). |
+| **Live HR** | Real-time view of the connected strap — heart rate and beat-to-beat signal as they arrive. Pairing and band switching live in the separate Devices screen. |
 | **Breathe** | **HRV haptic breathing biofeedback.** The strap both *measures* HRV (R-R intervals) and *buzzes* its haptic motor, so NOOP paces your breath with felt cues (one buzz inhale, two exhale) and shows live HR + rolling RMSSD responding as the session deepens. Presets: Relax 4-6, Coherence 5.5, Box 4-4. Each session reports a **pre/post HRV outcome** so you can see how much you settled. |
 | **Intervals** | **Silent haptic HIIT timer.** The strap buzzes every transition (triple-buzz into WORK, single into REST, 3-2-1 tick at phase ends, long buzz on finish) so you train hands-free. Falls back to a glanceable visual timer with no strap. |
 | **Explore** (Metric Explorer) | Interrogate any single metric over time, built from the metric catalog (`Strand/Data/MetricCatalog.swift`). |
@@ -288,7 +298,8 @@ The app always tells you what's live now versus still building, both in onboardi
 NOOP computes your scores on your own device, so like any recovery wearable it
 needs a little data before everything fills in:
 
-- **Live heart rate** shows the moment the strap connects.
+- **Live Tracking** is available once the strap connects. Tap **Start Live Tracking** for the
+  high-rate, beat-by-beat view; it is foreground-only and uses more strap and phone battery.
 - **Strain and sleep** appear after you've worn it and synced — the strap's last
   ~14 days offload automatically over the first few minutes.
 - **Recovery** needs a few nights for the app to learn your personal baseline,
@@ -443,13 +454,17 @@ Nutrition CSV┘                                            │
                                        ▼                                     ▼ opt-in
                          StrandAnalytics (recovery/strain/          Your Noop server
                          HRV/sleep + reference validation)          FastAPI + TimescaleDB
-                                       │
-                                       ▼
-                         Strand (SwiftUI) + StrandDesign
+                                       │                           ┌───────────┴───────────┐
+                                       ▼                           ▼                       ▼
+                         Strand (SwiftUI) + StrandDesign      Archive/API       Friends allowlist
+                                                                                  │ accepted
+                                                                                  ▼
+                                                                         Apple Circle clients
 ```
 
-The local path always works by itself. The server branch appears only after you
-enter an endpoint and token and enable it.
+The local path always works by itself. Archive sync appears only after you enter
+an endpoint/token and enable it; Friends appears only after an explicit profile
+bootstrap or invite join.
 
 ---
 
@@ -499,17 +514,70 @@ law, and breach response.
 
 ---
 
+## Private Friends
+
+Friends is a small-group sharing layer on the self-hosted server, currently
+available in the iPhone and Mac clients. It is deliberately not a public social
+network:
+
+- A server owner bootstraps a local profile once with `NOOP_API_TOKEN`. The app
+  stores the separately issued member token in this-device-only Keychain storage;
+  the administrator token is never placed in an invitation.
+- An invitation is shared as plain text: the full server address plus a
+  short-lived, single-use code. The recipient reviews and enters both values
+  manually. NOOP deliberately does not put this bearer capability in a custom
+  app URL, avoiding custom-scheme interception.
+- On a first join, the recipient's app generates an enrollment UUID and a
+  256-bit member token, saves the token in this-device-only Keychain storage
+  before contacting the server, and reuses that enrollment for a safe retry if
+  the response is lost. The server stores only the token digest.
+- Visibility is directional and per friend. Recovery, Effort, and Sleep Score start
+  enabled after acceptance; sleep duration, HRV, and resting HR start disabled.
+  Either person can change what they expose or remove the friendship.
+- No biometric summary value is uploaded while every relationship is still
+  pending. Empty replacement maps may be sent to clear a previously shared
+  Friends window. After acceptance, the app uploads only the union of fields
+  currently enabled for its accepted friends, from at most six range-checked
+  `noop_computed` daily values. Each friend still receives only their own
+  directional projection.
+- Friends uses a dedicated logical `*-noop-friends` producer, separate from the
+  full self-hosted backup. A feed begins on the friendship's acceptance date and
+  never exposes earlier history. Member tokens cannot read raw streams, exports,
+  workouts, journals, sleep stages, routes, device identifiers, or server
+  administration.
+- Friends is **not end-to-end encrypted**. HTTPS protects transport, but the
+  self-hosted server operator can inspect the summary fields the app sends.
+  Share the server address and code only with the intended recipient, and join
+  only a server whose operator you trust.
+- Foreground activation performs a best-effort catch-up, throttled to one
+  automatic attempt per 15 minutes. iOS does not guarantee background delivery;
+  opening Friends provides the reliable manual refresh path.
+- **Leave & delete profile** removes the member profile, credential, social
+  relationships, and dedicated Friends summary copy from the server. It leaves
+  local health data and any separately configured full self-hosted backup intact.
+- There is no federation yet: a profile belongs to one configured server, and the
+  client refuses to silently switch an existing profile to a different invite
+  origin.
+
+The server API also supports token rotation, profile disable, invite revocation,
+and blocking. See [`server/FRIENDS.md`](server/FRIENDS.md) for the complete
+authorization and projection contract. Android does not yet expose the Friends
+UI.
+
+---
+
 ## Privacy
 
-**Local by default.** Noop has no telemetry and no Noop account. Your strap data,
-imports, and computed metrics live in local SQLite. Data-bearing network access
-occurs only through a feature you explicitly configure: your AI provider, Oura
-cloud import, or your self-hosted server. A user-tapped update check reads public
-release metadata without sending biometric data. Server upload is off by default,
-credentials stay in platform secure storage. A destination change schedules a
-resumable, idempotent replay of pending raw rows and up to ten years of the
-supported derived-history subset; records outside the v1 boundary still require
-a local backup/export.
+**Local by default.** Noop has no telemetry and no Noop-operated account. Your
+strap data, imports, and computed metrics live in local SQLite. Data-bearing
+network access occurs only through a feature you explicitly configure: your AI
+provider, Oura cloud import, or your self-hosted server (including its optional
+Friends projection). A user-tapped update check reads public release metadata
+without sending biometric data. Server upload is off by default, credentials
+stay in platform secure storage. A destination change schedules a resumable,
+idempotent replay of pending raw rows and up to ten years of the supported
+derived-history subset; records outside the v1 boundary still require a local
+backup/export.
 
 ---
 
@@ -598,6 +666,7 @@ That's it — copy away.
 - [`ATTRIBUTION.md`](ATTRIBUTION.md) — full credits and licensing notes.
 - [`docs/FEATURE_PARITY.md`](docs/FEATURE_PARITY.md) — honest WHOOP capability comparison, gaps, and parallel-reference workflow.
 - [`server/README.md`](server/README.md) — deploy, secure, back up, export, and operate the optional self-hosted service.
+- [`server/FRIENDS.md`](server/FRIENDS.md) — invitation, member-token, per-friend visibility, and feed projection contract.
 - [`project.yml`](project.yml) — XcodeGen project definition (source of `Strand.xcodeproj`).
 
 ---

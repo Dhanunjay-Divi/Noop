@@ -90,7 +90,14 @@ struct TermsGateView: View {
                 .keyboardShortcut(.defaultAction)
                 .padding(26)
             }
+            // The desktop gate stays compact, but an iPhone should use its full safe-area height.
+            // Sharing the 720pt desktop cap left a large empty band around the column and needlessly
+            // shortened the legal-copy viewport, so an attestation appeared clipped by the footer.
+            #if os(iOS)
+            .frame(maxWidth: 560, maxHeight: .infinity)
+            #else
             .frame(maxWidth: 560, maxHeight: 720)
+            #endif
         }
     }
 }

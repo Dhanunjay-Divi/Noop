@@ -139,6 +139,7 @@ import android.view.HapticFeedbackConstants
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.R
 import com.noop.analytics.Baselines
+import com.noop.analytics.AgeMetricProfile
 import com.noop.analytics.BatteryEstimator
 import com.noop.analytics.ChargeDriver
 import com.noop.analytics.HydrationGoal
@@ -229,6 +230,7 @@ private data class TodayLiveSnapshot(
     val backfilling: Boolean,
     val syncChunksThisSession: Int,
     val historySyncExperimental: Boolean,
+    val sustainedEmptyOffload: Boolean,
     val batteryPct: Double?,
     /** True once a WHOOP 5/MG strap has been seen this session, picks the 5/MG rated-life fallback for the
      *  battery runtime estimate (#713). Changes at most once per connection, so it doesn't reintroduce the
@@ -299,6 +301,7 @@ fun TodayScreen(
                 backfilling = s.backfilling,
                 syncChunksThisSession = s.syncChunksThisSession,
                 historySyncExperimental = s.historySyncExperimental,
+                sustainedEmptyOffload = s.sustainedEmptyOffload,
                 batteryPct = s.batteryPct,
                 whoop5 = s.whoop5Detected,
                 charging = s.charging,
@@ -372,16 +375,18 @@ fun TodayScreen(
             else -> date
         }
     }
-    // Display-only unit system + the SI profile weight, read once like every other Settings-backed
+    // Display-only units + the SI profile weight, read once like every other Settings-backed
     // preference (SharedPreferences isn't reactive, a Settings write triggers recomposition).
     val context = LocalContext.current
-    val unitSystem = UnitPrefs.system(context)
+    val massUnit = UnitPrefs.mass(context)
     // Effort display scale (#268), drives the Effort tile's value + caption. Display-only.
     val effortScale = UnitPrefs.effortScale(context)
     val profileWeightKg = remember { ProfileStore.from(context).weightKg }
     // Body profile for the live Effort computation below, age/sex/HR-max-override drive the same
     // StrainScorer call the daily pass uses. Read once like every other Settings-backed value. (#402)
     val profileStore = remember { ProfileStore.from(context) }
+    val ageMetricProfileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
+    val ageMetricState = remember(ageMetricProfileVersion) { profileStore.ageMetricStateToken }
 
     // Editable Key-Metrics layout (#251), an ordered list of the enabled tiles, persisted display-only.
     // SharedPreferences isn't reactive, so it's mirrored into local state and re-read when the editor saves.
@@ -446,15 +451,28 @@ fun TodayScreen(
     // thread; re-read as the data grows.
     // #849: seed from the ViewModel cache so a re-mount restores the pinned-card numbers instead of flashing
     // dashes while the heavy history-wide read is (now) skipped for unchanged data.
+    val cardsSig = days.hashCode()
     var stressToday by remember { mutableStateOf(viewModel.todayStressCache) }
-    var fitnessAgeToday by remember { mutableStateOf(viewModel.todayFitnessAgeCache) }
-    var vitalityToday by remember { mutableStateOf(viewModel.todayVitalityCache) }
-    LaunchedEffect(days) {
+    var fitnessAgeToday by remember(ageMetricState) {
+        mutableStateOf(viewModel.todayFitnessAgeCache.takeIf {
+            viewModel.todayCardsLoadedSig == cardsSig &&
+                viewModel.todayCardsLoadedProfileSig == ageMetricState
+        })
+    }
+    var vitalityToday by remember(ageMetricState) {
+        mutableStateOf(viewModel.todayVitalityCache.takeIf {
+            viewModel.todayCardsLoadedSig == cardsSig &&
+                viewModel.todayCardsLoadedProfileSig == ageMetricState
+        })
+    }
+    LaunchedEffect(days, ageMetricProfileVersion) {
         // #849 re-mount guard: skip the whole-history scan when `days` is content-identical to the last load
         // (data class hashCode is a stable structural signature). The marker + cached values live on the
         // long-lived ViewModel, so a tab-return / post-import re-mount restores the numbers without re-reading.
-        val sig = days.hashCode()
-        if (viewModel.todayCardsLoadedSig == sig) return@LaunchedEffect
+        val sig = cardsSig
+        if (viewModel.todayCardsLoadedSig == sig &&
+            viewModel.todayCardsLoadedProfileSig == ageMetricState
+        ) return@LaunchedEffect
         // Read each pinned card from the SAME source its own detail screen reads, the proven path that
         // already shows real numbers there (and the resolution iOS's exploreSeries uses). Stress is derived
         // from the imported strap data (StressScreen reads "my-whoop"); Fitness age + Vitality are
@@ -475,18 +493,31 @@ fun TodayScreen(
                 .associate { it.day to it.value.coerceIn(0.0, 3.0) }
             StressModel.build(days, stored)?.score
         }.getOrNull()
-        fitnessAgeToday = runCatching {
+        val newFitnessAge = runCatching {
             viewModel.repo.latestMetricComputedUnion(viewModel.activeStrapId, "fitness_age")?.value
         }.getOrNull()
-        vitalityToday = runCatching {
+        val newVitality = runCatching {
             viewModel.repo.latestMetricComputedUnion(viewModel.activeStrapId, "vitality")?.value
         }.getOrNull()
+        val fitnessProfile = runCatching {
+            viewModel.repo.latestMetricComputedUnion(
+                viewModel.activeStrapId, AgeMetricProfile.FITNESS_AGE_KEY,
+            )?.value
+        }.getOrNull()
+        val vitalityProfile = runCatching {
+            viewModel.repo.latestMetricComputedUnion(
+                viewModel.activeStrapId, AgeMetricProfile.VITALITY_KEY,
+            )?.value
+        }.getOrNull()
+        fitnessAgeToday = newFitnessAge.takeIf { profileStore.acceptsFitnessAge(fitnessProfile) }
+        vitalityToday = newVitality.takeIf { profileStore.acceptsVitality(vitalityProfile) }
         // Cache the computed triple + signature so a later re-mount with unchanged data restores them and
         // short-circuits the history-wide read above.
         viewModel.todayStressCache = stressToday
         viewModel.todayFitnessAgeCache = fitnessAgeToday
         viewModel.todayVitalityCache = vitalityToday
         viewModel.todayCardsLoadedSig = sig
+        viewModel.todayCardsLoadedProfileSig = ageMetricState
     }
 
     // #713, strap battery runtime estimate ("~X left") for the Data-sources battery row. The battery lane
@@ -885,6 +916,13 @@ fun TodayScreen(
         }
     }
 
+    // Resolve once for every read-out: today's live value may lead the daily row, while the stored row
+    // remains the never-decreasing floor when sparse live HR under-reads.
+    val effortForDay = StrainScorer.effectiveEffort(
+        live = if (selectedDayOffset == 0) liveTodayStrain else null,
+        stored = displayMetric?.strain,
+    )
+
     // Recovery cold-start: recovery is null until the HRV baseline crosses the seed gate
     // (Baselines.minNightsSeed valid nights). Show honest "calibrating, N of 4 nights" progress
     // instead of a bare "No Data" so a new BLE-only user knows scores are coming, not broken. (PR #85)
@@ -1260,7 +1298,7 @@ fun TodayScreen(
                                 dismissTodayCard(
                                     CARD_CALIBRATING,
                                     "Building your baseline",
-                                    "Charge, Effort and Rest become personal after a few nights of wear.",
+                                    "Recovery, Effort and Sleep become personal after a few nights of wear.",
                                 )
                             },
                         )
@@ -1284,7 +1322,7 @@ fun TodayScreen(
                                 dismissTodayCard(
                                     CARD_SCORES_BUILDING,
                                     "Live now. Your scores are building.",
-                                    "Charge, Effort and Rest build over your next few nights of wear.",
+                                    "Recovery, Effort and Sleep build over your next few nights of wear.",
                                 )
                             },
                         )
@@ -1377,11 +1415,7 @@ fun TodayScreen(
                             // near-zero (HR present but never crossed the cardio zone). Effort accrues over
                             // a day and must never visibly drop: floor the in-progress value at the day's
                             // already-earned strain (#489/#506).
-                            val todayEffort = if (selectedDayOffset == 0) {
-                                val liveStrain = liveTodayStrain
-                                val stored = displayMetric?.strain
-                                if (liveStrain != null && stored != null) maxOf(liveStrain, stored) else (liveStrain ?: stored)
-                            } else null
+                            val todayEffort = if (selectedDayOffset == 0) effortForDay else null
                             if (todayEffort != null && todayEffort < 1.0) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 2.dp),
@@ -1458,8 +1492,9 @@ fun TodayScreen(
                                     lastScoredCharge = lastScoredCharge,
                                     carriedDay = lastScoredRecoveryDay,
                                     spo2CarryDay = lastSpo2Day,
-                                    unitSystem = unitSystem,
+                                    massUnit = massUnit,
                                     effortScale = effortScale,
+                                    effortForDay = effortForDay,
                                     latestWeightKg = weightKg,
                                     profileWeightKg = profileWeightKg,
                                     importedStepsForDay = importedStepsForDay,
@@ -1492,7 +1527,7 @@ fun TodayScreen(
                             modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            HeartRateTrendCard(viewModel, days, selectedDay, todayDate, displayMetric, effortScale)
+                            HeartRateTrendCard(viewModel, days, selectedDay, todayDate, displayMetric, effortScale, effortForDay)
                         }
                         // The three hero vitals, HRV / Resting HR / Respiratory. Carried day (#543).
                         TodaySection.RECOVERY_VITALS -> Box(modifier = Modifier.fillMaxWidth().staggeredAppear(stagger)) {
@@ -2327,10 +2362,7 @@ private fun ScoreHeroRow(
     // (#489/#506: a live under-read replaced today's real Effort with 0). The effective value drives the
     // gauge number AND the has-data / "No Data" branch, so the ring only reads "No Data" when neither
     // exists. Mirrors the iOS live-Effort gauge. (#402)
-    val strain = run {
-        val live = liveTodayStrain; val stored = day?.strain
-        if (live != null && stored != null) maxOf(live, stored) else (live ?: stored)
-    }
+    val strain = StrainScorer.effectiveEffort(live = liveTodayStrain, stored = day?.strain)
     // Effort honours the 0–100 / WHOOP-0–21 toggle (#313). The stored strain is on NOOP's 0–100 Effort
     // axis; render it on the user's selected scale so the arc and centre number match the app's Effort.
     val effortOutOf = if (effortScale == EffortScale.WHOOP) 21.0 else 100.0
@@ -3869,7 +3901,7 @@ internal fun ChargeBreakdownSheet(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
                         .clickable(
-                            onClickLabel = "How Charge is calculated",
+                            onClickLabel = "How Recovery is calculated",
                             onClick = onHowCalculated,
                         )
                         .background(Palette.surfaceInset)
@@ -3936,7 +3968,7 @@ private fun RecoveryDriversSection(
     if (drivers.isEmpty()) return
 
     val tier = remember(days, readDay) { chargeConfidenceTier(days, readDay) }
-    val overline = carriedDay?.let { "Charge · ${carriedCaption(it.day)}" } ?: "Charge"
+    val overline = carriedDay?.let { "Recovery · ${carriedCaption(it.day)}" } ?: "Recovery"
 
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         // Header row: section title + the SURFACED confidence pill (dot + tier tag) on the right.
@@ -4048,7 +4080,7 @@ private fun RecoveryContributorsSection(day: DailyMetric?, carriedDay: DailyMetr
     if (hrv == null && rhr == null && sleepMin == null && resp == null) return
 
     val overline = carriedDay?.let { "Recovery · ${carriedCaption(it.day)}" } ?: "Recovery"
-    SectionHeader("Contributors", overline = overline, trailing = "What drove Charge")
+    SectionHeader("Contributors", overline = overline, trailing = "What drove Recovery")
     NoopCard {
         Column(verticalArrangement = Arrangement.spacedBy(Metrics.space16)) {
             // HRV, higher is better; map a typical 20–120 ms span. Teal (its biometric hue; iOS metricCyan).
@@ -4235,8 +4267,9 @@ private fun MetricGrid(
     // spo2Pct is null (computed rows never carry one), so the Blood Oxygen tile falls through to the
     // last row that actually has a reading. Mirrors iOS TodayView.lastSpo2Day (carriedVital's per-field fallback).
     spo2CarryDay: DailyMetric? = null,
-    unitSystem: UnitSystem = UnitSystem.METRIC,
+    massUnit: MassUnit = MassUnit.KILOGRAMS,
     effortScale: EffortScale = EffortScale.HUNDRED,
+    effortForDay: Double? = null,
     latestWeightKg: Double? = null,
     profileWeightKg: Double = 75.0,
     importedStepsForDay: Int? = null,
@@ -4295,13 +4328,13 @@ private fun MetricGrid(
         },
         KeyMetric.EFFORT to KeyTileData(
             label = uiString(R.string.l10n_today_screen_strain_79fe380e),
-            value = d?.strain?.let { UnitFormatter.effortDisplay(it, effortScale) } ?: NO_DATA,
+            value = (effortForDay ?: d?.strain)?.let { UnitFormatter.effortDisplay(it, effortScale) } ?: NO_DATA,
             // #492: Strain/Effort is a load index (0–21 WHOOP / 0–100 NOOP), NOT a percentage — the "%"
             // was wrong (esp. on the 0–21 scale). Recovery/Rest ARE 0–100 % and keep it. iOS shows the
             // strain axis as an "of 21"/"of 100" caption with no % (TodayView effort tile); match that.
             unit = "",
-            tint = d?.strain?.let { Palette.effortTint(it / StrainScorer.maxStrain) } ?: Palette.effortColor,
-            frac = d?.strain?.let { (it / 100.0).coerceIn(0.0, 1.0) },
+            tint = (effortForDay ?: d?.strain)?.let { Palette.effortTint(it / StrainScorer.maxStrain) } ?: Palette.effortColor,
+            frac = (effortForDay ?: d?.strain)?.let { (it / 100.0).coerceIn(0.0, 1.0) },
             spark = w.strain,
         ),
         KeyMetric.REST to KeyTileData(
@@ -4370,7 +4403,7 @@ private fun MetricGrid(
             )
         },
         KeyMetric.WEIGHT to run {
-            val weight = weightTile(latestWeightKg, profileWeightKg, unitSystem)
+            val weight = weightTile(latestWeightKg, profileWeightKg, massUnit)
             KeyTileData(
                 label = uiString(R.string.l10n_today_screen_weight_69c0b815),
                 value = weight.value,
@@ -4619,6 +4652,7 @@ private fun HeartRateTrendCard(
     today: LocalDate,
     displayMetric: DailyMetric? = null,
     effortScale: EffortScale = EffortScale.HUNDRED,
+    effortForDay: Double? = null,
 ) {
     // "Today" here is the LOGICAL day (rolls at 04:00 local), so in the small hours after midnight the
     // trend keeps the evening's curve, window start at the logical day's own midnight, "since midnight"
@@ -4831,7 +4865,7 @@ private fun HeartRateTrendCard(
                         sleep = sleepToday,
                         workouts = workoutsToday,
                         recovery = displayMetric?.recovery,
-                        strain = displayMetric?.strain,
+                        strain = effortForDay ?: displayMetric?.strain,
                         effortScale = effortScale,
                         timeTicks = timeTicks,
                         modifier = Modifier
@@ -5136,7 +5170,7 @@ private fun OverviewHRChart(
         buildList {
             add("24-hour heart rate")
             if (sleep != null) add("sleep band ${hrHoursMinutes((sleep.endTs - sleep.effectiveStartTs).toInt())}")
-            if (recovery != null) add("${recovery.roundToInt()} percent Charge at wake")
+            if (recovery != null) add("${recovery.roundToInt()} percent Recovery at wake")
             if (strain != null) add("${UnitFormatter.effortDisplay(strain, effortScale)} Effort now")
             if (workouts.isNotEmpty()) add("${workouts.size} workout${if (workouts.size == 1) "" else "s"} marked")
         }.joinToString(", ")
@@ -5884,9 +5918,9 @@ private fun synthesisDetail(d: DailyMetric?): String {
     val rec = d?.recovery
         ?: return "No metrics yet. Import your WHOOP export or wear the strap to begin."
     val recPart = when {
-        rec < 50 -> "Charge is low"
-        rec < 70 -> "Charge is steady"
-        else -> "Charge is strong"
+        rec < 50 -> "Recovery is low"
+        rec < 70 -> "Recovery is steady"
+        else -> "Recovery is strong"
     }
     val sleepPart = d.totalSleepMin?.let { mins ->
         if (mins / 60.0 >= 7) " and sleep was consistent" else " but sleep ran short"

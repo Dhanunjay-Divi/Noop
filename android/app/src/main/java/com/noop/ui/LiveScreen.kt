@@ -80,8 +80,8 @@ import com.noop.ble.WhoopModel
 /**
  * Live — the real-time strap view + hardware-test surface. A big smoothed HR number,
  * a connection pill, a battery/last-event status grid, and connect/disconnect/buzz
- * controls. Ports LiveView.swift to Compose. Toggles the strap's real-time HR stream
- * on/off as the screen enters/leaves composition.
+ * controls. Ports LiveView.swift to Compose. High-rate Live Tracking is explicitly user-started and
+ * scoped to this visible composition; opening the screen alone never arms it.
  */
 
 // MARK: - Liquid hero tokens (the liquid Live restyle)
@@ -92,6 +92,12 @@ import com.noop.ble.WhoopModel
 // LIQUID_HERO_FILL / LIQUID_HERO_RADIUS, redeclared here since those are file-private to TodayScreen.)
 private val LIVE_HERO_FILL: Color = Color(red = 13f / 255f, green = 14f / 255f, blue = 20f / 255f, alpha = 0.80f)
 private val LIVE_HERO_RADIUS: Dp = 26.dp
+internal const val LIVE_TRACKING_BATTERY_COPY =
+    "High-rate, beat-by-beat tracking uses more strap and phone battery. " +
+        "It runs only while this Live screen and NOOP are in the foreground."
+internal const val LIVE_TRACKING_SEPARATION_COPY =
+    "Connection and history sync continue when it is off. " +
+        "Continuous HRV capture is a separate option in Settings."
 
 @Composable
 fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
@@ -105,6 +111,11 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
     val activeDeviceName by viewModel.activeDeviceName.collectAsStateWithLifecycle()
     val activeWorkout by viewModel.activeWorkout.collectAsStateWithLifecycle()
     val lastWorkout by viewModel.lastWorkout.collectAsStateWithLifecycle()
+
+    // Session-scoped by design: leaving Live clears the explicit opt-in. An Activity background/return
+    // keeps this composition/state, while AppViewModel's foreground gate disarms/re-arms the physical
+    // transport without losing the user's choice.
+    var liveTrackingOptedIn by remember { mutableStateOf(false) }
 
     // Imperial/Metric display preference (D#103). Live distance/pace are computed from metres + sec/km
     // and re-labelled here. Display-only.
@@ -122,11 +133,12 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
     // Settings → Re-scan via rememberRequestScan so no entry point can forget the gate (issue #1).
     val requestConnect = rememberRequestScan { viewModel.connect() }
 
-    // Keep the realtime HR stream on while this screen is visible (ref-counted in the ViewModel, so
-    // navigating to Health Monitor — which also wants it — doesn't stop it). Refresh battery on bond.
-    DisposableEffect(Unit) {
-        viewModel.requestRealtimeHr()
-        onDispose { viewModel.releaseRealtimeHr() }
+    // Acquire exactly one logical lease only after the explicit Start tap. Disposal (leaving Live) or a
+    // Stop tap releases it; Activity background is handled centrally so the same visible opted-in
+    // session resumes on foreground without ref-count churn.
+    DisposableEffect(liveTrackingOptedIn) {
+        if (liveTrackingOptedIn) viewModel.requestRealtimeHr()
+        onDispose { if (liveTrackingOptedIn) viewModel.releaseRealtimeHr() }
     }
     LaunchedEffect(live.bonded) {
         if (live.bonded) viewModel.getBattery()
@@ -232,6 +244,14 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
         ConsoleHeader(live = live, activeConnection = activeConnection, ouraWear = ouraWear)
         }
 
+        item {
+        LiveTrackingControl(
+            enabled = activeConnection,
+            tracking = liveTrackingOptedIn,
+            onToggle = { liveTrackingOptedIn = !liveTrackingOptedIn },
+        )
+        }
+
         // Primary Connect affordance, surfaced ABOVE the fold whenever there's no link — the real
         // Connect control otherwise lives far below, past the Signal Trust grid, so an offline user
         // saw only inert copy up top. Gated purely on `!live.connected`, so it disappears the instant
@@ -332,14 +352,16 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
         }
         }
 
-        // Body console — focal live HR VESSEL + live physiology (R-R thread, rolling RMSSD, frame/event).
-        item {
-        BodyConsole(live = live, bpm = bpm, activeConnection = activeConnection, zone = liveZone, hrMax = profile.hrMax)
-        }
+        if (liveTrackingOptedIn) {
+            // Body console — focal live HR VESSEL + live physiology (R-R thread, rolling RMSSD, frame/event).
+            item {
+            BodyConsole(live = live, bpm = bpm, activeConnection = activeConnection, zone = liveZone, hrMax = profile.hrMax)
+            }
 
-        // Signal Trust rail — one tile per signal that has to be current for the console to be trusted.
-        item {
-        SignalTrustRail(live = live, bpm = bpm, activeConnection = activeConnection)
+            // Signal Trust rail — one tile per signal that has to be current for the console to be trusted.
+            item {
+            SignalTrustRail(live = live, bpm = bpm, activeConnection = activeConnection)
+            }
         }
 
         // Max HR + the top-zone entry threshold (read-only; manage coaching in Automations).
@@ -658,6 +680,57 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
 }
 
 // MARK: - Console header
+
+/** Explicit high-rate stream control. Opening Live remains low-power until this is tapped. */
+@Composable
+private fun LiveTrackingControl(
+    enabled: Boolean,
+    tracking: Boolean,
+    onToggle: () -> Unit,
+) {
+    NoopCard(tint = if (tracking) Palette.accent else null) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    Icons.Filled.GraphicEq,
+                    contentDescription = null,
+                    tint = if (tracking) Palette.accent else Palette.textSecondary,
+                    modifier = Modifier.size(28.dp),
+                )
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        if (tracking) "Live Tracking is on" else "Live Tracking",
+                        style = NoopType.headline,
+                        color = Palette.textPrimary,
+                    )
+                    Text(LIVE_TRACKING_BATTERY_COPY, style = NoopType.subhead, color = Palette.textSecondary)
+                    Text(LIVE_TRACKING_SEPARATION_COPY, style = NoopType.footnote, color = Palette.textTertiary)
+                }
+            }
+            Button(
+                onClick = onToggle,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(vertical = 12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (tracking) Palette.surfaceRaised else Palette.accent,
+                    contentColor = if (tracking) Palette.textPrimary else Palette.surfaceBase,
+                ),
+            ) {
+                Icon(
+                    if (tracking) Icons.Filled.Close else Icons.Filled.Bolt,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp).padding(end = 4.dp),
+                )
+                Text(if (tracking) "Stop Live Tracking" else "Start Live Tracking", style = NoopType.headline)
+            }
+        }
+    }
+}
 
 /**
  * Read-only Max-HR + top-zone card. Max HR is the age-based value from Settings; the Zone 5 entry

@@ -48,7 +48,8 @@ class AutoWorkoutDetectorTraceTest {
     @Test fun traceNamesSavedOverlapDrop() {
         val start = 1_000_000L
         val durS = 20 * 60
-        val hr = block(start, durS, 120)
+        val hr = block(start, durS, 120) +
+            block(start + durS, AutoWorkoutDetector.maxDipS.toInt() + 2, 65)
         val saved = listOf((start - 60) to (start + durS + 60))
         val plain = AutoWorkoutDetector.detect(hr, restingHR = 60, savedWorkouts = saved)
         val (traced, lines) = AutoWorkoutDetectorTrace.detectTrace(hr, restingHR = 60, savedWorkouts = saved)
@@ -60,7 +61,8 @@ class AutoWorkoutDetectorTraceTest {
     @Test fun traceNamesMotionNotConfirmed() {
         val start = 1_000_000L
         val durS = 20 * 60
-        val hr = block(start, durS, 120)
+        val hr = block(start, durS, 120) +
+            block(start + durS, AutoWorkoutDetector.maxDipS.toInt() + 2, 65)
         // A flat (no-motion) gravity series → motion-confirm gate drops the window.
         val gravity = (0 until durS).map { grav(start + it, 0.0) }
         val plain = AutoWorkoutDetector.detect(hr, restingHR = 60, gravity = gravity)

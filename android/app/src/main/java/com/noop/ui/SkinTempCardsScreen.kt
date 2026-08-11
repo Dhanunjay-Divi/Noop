@@ -1,5 +1,6 @@
 package com.noop.ui
 
+import android.app.DatePickerDialog
 import com.noop.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
@@ -13,27 +14,45 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,6 +66,10 @@ import com.noop.analytics.CircadianEngine
 import com.noop.analytics.CyclePhaseEngine
 import com.noop.analytics.IllnessDistance
 import com.noop.analytics.IllnessSignalEngine
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -114,6 +137,7 @@ private fun WhyChip(label: String, tint: Color) {
  * renders this only after the user enables cycle awareness (default OFF). Awareness only;
  * never contraception / fertility / diagnosis. Calm Rest indigo world — no valence, no red.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CycleAwarenessCard(
     result: CyclePhaseEngine.Result,
@@ -170,7 +194,10 @@ fun CycleAwarenessCard(
 
             // Actions.
             if (onLogPeriod != null || onOpenDetail != null || onTurnOff != null) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Metrics.gap),
+                    verticalArrangement = Arrangement.spacedBy(Metrics.gap),
+                ) {
                     if (onLogPeriod != null) {
                         OutlinedButton(onClick = onLogPeriod) { Text(uiString(R.string.l10n_skin_temp_cards_screen_log_period_start_c97241d0)) }
                     }
@@ -218,6 +245,227 @@ fun CycleAwarenessOptInCard(onEnable: () -> Unit) {
             PrivacyNote()
             OutlinedButton(onClick = onEnable) { Text(uiString(R.string.l10n_skin_temp_cards_screen_turn_on_cycle_awareness_7c2d328f)) }
         }
+    }
+}
+
+// MARK: - Private cycle tracker
+
+/**
+ * On-device period-start history used only to anchor [CyclePhaseEngine]. This intentionally records one
+ * date per cycle—not flow, symptoms, fertility, contraception, or a diagnosis. All mutations are suspend
+ * callbacks so the host can persist first and only then republish the visible history.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun CycleTrackerSheet(
+    result: CyclePhaseEngine.Result,
+    periodStarts: List<String>,
+    onLogPeriodStart: suspend (String) -> Boolean,
+    onDeletePeriodStart: suspend (String) -> Boolean,
+    onDeleteAllPeriodStarts: suspend () -> Boolean,
+    onDismiss: () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var selectedDay by rememberSaveable { mutableStateOf(LocalDate.now().toString()) }
+    var operationInFlight by remember { mutableStateOf(false) }
+    var operationFailed by remember { mutableStateOf(false) }
+    var confirmDeleteAll by remember { mutableStateOf(false) }
+    val starts = remember(periodStarts) { periodStarts.distinct().sortedDescending() }
+    val alreadyLogged = selectedDay in starts
+
+    fun runMutation(block: suspend () -> Boolean) {
+        if (operationInFlight) return
+        scope.launch {
+            operationInFlight = true
+            val succeeded = runCatching { block() }.getOrDefault(false)
+            operationInFlight = false
+            if (!succeeded) operationFailed = true
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Palette.surfaceBase,
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(Metrics.sectionGap),
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(horizontal = Metrics.screenPadding, vertical = Metrics.gap),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Cycle tracker", style = NoopType.title2, color = Palette.textPrimary)
+                    Text("Private period-start dates", style = NoopType.footnote, color = Palette.textTertiary)
+                }
+                TextButton(onClick = onDismiss) { Text("Done") }
+            }
+
+            NoopCard(tint = Palette.restColor) {
+                Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+                    Overline("Current estimate")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
+                        Text(cyclePhaseTitle(result.phase), style = NoopType.title2, color = Palette.textPrimary)
+                        Spacer(Modifier.weight(1f))
+                        cycleDayText(result)?.let {
+                            Text(it.removePrefix("· "), style = NoopType.bodyNumber, color = Palette.textSecondary)
+                        }
+                    }
+                    Text(result.note, style = NoopType.subhead, color = Palette.textSecondary)
+                }
+            }
+
+            NoopCard(tint = Palette.restColor) {
+                Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+                    Overline("Log a period start")
+                    OutlinedButton(
+                        enabled = !operationInFlight,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            val selected = LocalDate.parse(selectedDay)
+                            DatePickerDialog(
+                                context,
+                                { _, year, month, dayOfMonth ->
+                                    selectedDay = LocalDate.of(year, month + 1, dayOfMonth).toString()
+                                },
+                                selected.year,
+                                selected.monthValue - 1,
+                                selected.dayOfMonth,
+                            ).apply {
+                                datePicker.maxDate = System.currentTimeMillis()
+                            }.show()
+                        },
+                    ) {
+                        Icon(Icons.Filled.CalendarMonth, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(prettyPeriodStartDay(selectedDay))
+                    }
+                    Button(
+                        enabled = !operationInFlight && !alreadyLogged,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Palette.restColor,
+                            contentColor = Palette.surfaceBase,
+                        ),
+                        onClick = { runMutation { onLogPeriodStart(selectedDay) } },
+                    ) {
+                        if (operationInFlight) {
+                            CircularProgressIndicator(
+                                color = Palette.surfaceBase,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text(if (alreadyLogged) "Already logged" else "Log period start")
+                    }
+                    Text(
+                        "This optional date anchors cycle day 1 and is checked against your nightly temperature pattern.",
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                }
+            }
+
+            NoopCard {
+                Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Overline("Logged starts")
+                        Spacer(Modifier.weight(1f))
+                        if (starts.isNotEmpty()) {
+                            TextButton(
+                                enabled = !operationInFlight,
+                                onClick = { confirmDeleteAll = true },
+                            ) { Text("Delete all", color = Palette.statusCritical) }
+                        }
+                    }
+
+                    if (starts.isEmpty()) {
+                        Text("No period starts logged yet.", style = NoopType.subhead, color = Palette.textSecondary)
+                    } else {
+                        starts.forEachIndexed { index, day ->
+                            if (index > 0) HorizontalDivider(color = Palette.hairline)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.WaterDrop,
+                                    contentDescription = null,
+                                    tint = Palette.restColor,
+                                    modifier = Modifier.size(17.dp),
+                                )
+                                Text(
+                                    prettyPeriodStartDay(day),
+                                    style = NoopType.bodyNumber,
+                                    color = Palette.textPrimary,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                IconButton(
+                                    enabled = !operationInFlight,
+                                    onClick = { runMutation { onDeletePeriodStart(day) } },
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Delete,
+                                        contentDescription = "Delete ${prettyPeriodStartDay(day)}",
+                                        tint = Palette.statusCritical,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(CyclePhaseEngine.awarenessLine, style = NoopType.footnote, color = Palette.textTertiary)
+                PrivacyNote(
+                    "Period-start dates stay in NOOP's local database on this phone unless you explicitly export your data."
+                )
+            }
+        }
+    }
+
+    if (confirmDeleteAll) {
+        AlertDialog(
+            onDismissRequest = { if (!operationInFlight) confirmDeleteAll = false },
+            title = { Text("Delete all logged period starts?") },
+            text = { Text("This permanently removes period-start history. Sensor history is unchanged.") },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteAll = false }) { Text("Cancel") }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDeleteAll = false
+                        runMutation { onDeleteAllPeriodStarts() }
+                    },
+                ) { Text("Delete all", color = Palette.statusCritical) }
+            },
+        )
+    }
+
+    if (operationFailed) {
+        AlertDialog(
+            onDismissRequest = { operationFailed = false },
+            title = { Text("Couldn’t update cycle history") },
+            text = { Text("Nothing was changed. Please try again after the local database finishes opening.") },
+            confirmButton = {
+                TextButton(onClick = { operationFailed = false }) { Text("OK") }
+            },
+        )
     }
 }
 
@@ -481,3 +729,8 @@ private fun prettyDay(key: String): String {
     val months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
     return "$d ${months[m - 1]}"
 }
+
+/** Full date for period-start history, where entries can span multiple years. */
+internal fun prettyPeriodStartDay(key: String): String = runCatching {
+    LocalDate.parse(key).format(DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.getDefault()))
+}.getOrDefault(key)

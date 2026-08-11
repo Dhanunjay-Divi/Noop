@@ -109,11 +109,8 @@ struct KeyMetricsEditorSheet: View {
         let accent = accent(for: item.metric)
         return NoopCard(padding: 12, tint: item.enabled ? accent : nil) {
             HStack(spacing: 12) {
-                // A per-metric accent dot ties the row to its Today tile; dims when the tile is off.
-                Circle()
-                    .fill(item.enabled ? accent : StrandPalette.textTertiary)
-                    .frame(width: 8, height: 8)
-                    .accessibilityHidden(true)
+                MetricGlyph(item.metric.icon, size: 30)
+                    .opacity(item.enabled ? 1 : 0.42)
                 // Show/hide toggle — an off tile is dimmed but stays listed so it can be re-enabled.
                 Toggle(isOn: enabledBinding(at: index)) {
                     Text(item.metric.title)

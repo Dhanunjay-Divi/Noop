@@ -30,6 +30,10 @@ final class AICoachPromptAndStressTests: XCTestCase {
         let engine = makeEngine()
         XCTAssertEqual(engine.systemPrompt, AICoachEngine.defaultSystemPrompt)
         XCTAssertFalse(engine.hasCustomSystemPrompt)
+        XCTAssertTrue(engine.systemPrompt.contains("Recovery 0-100"))
+        XCTAssertTrue(engine.systemPrompt.contains("Effort 0-100"))
+        XCTAssertFalse(engine.systemPrompt.contains("charge 0-100"))
+        XCTAssertFalse(engine.systemPrompt.contains("rest 0-100"))
     }
 
     func testEditPersistsAndIsReadFreshOnNextSend() {

@@ -48,6 +48,7 @@ import com.noop.R
 import com.noop.data.DailyMetric
 import com.noop.data.MoodStore
 import com.noop.data.WhoopRepository
+import com.noop.ingest.HealthConnectImporter
 import com.noop.ingest.NutritionCsvImporter
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -209,6 +210,24 @@ private val knownSeriesMetrics: Map<String, MetricSpec> = mapOf(
         Palette.metricCyan, null, 0),
     "mood" to MetricSpec("mood", uiString(R.string.explore_metric_mood), "/5", uiString(R.string.explore_category_mind),
         Palette.metricPurple, true, 0),
+    HealthConnectImporter.BODY_TEMPERATURE_KEY to MetricSpec(
+        HealthConnectImporter.BODY_TEMPERATURE_KEY,
+        "Body Temperature",
+        "°C",
+        uiString(R.string.explore_category_health),
+        Palette.metricAmber,
+        null,
+        1,
+    ),
+    HealthConnectImporter.BASAL_BODY_TEMPERATURE_KEY to MetricSpec(
+        HealthConnectImporter.BASAL_BODY_TEMPERATURE_KEY,
+        "Basal Body Temperature",
+        "°C",
+        uiString(R.string.explore_category_health),
+        Palette.metricAmber,
+        null,
+        2,
+    ),
 )
 
 // MARK: - A loaded series point (day string + value), oldest first.
@@ -277,7 +296,11 @@ fun TrendsExploreScreen(vm: AppViewModel) {
             .flatMap { id -> runCatching { vm.repo.metricKeys(id) }.getOrDefault(emptyList()) }
             .distinct()
             .map { it to null as String? }
-        val sourced = listOf(NutritionCsvImporter.SOURCE_ID, MoodStore.MOOD_DEVICE_ID).flatMap { src ->
+        val sourced = listOf(
+            NutritionCsvImporter.SOURCE_ID,
+            MoodStore.MOOD_DEVICE_ID,
+            HealthConnectImporter.DEVICE_ID,
+        ).flatMap { src ->
             runCatching { vm.repo.metricKeys(src) }.getOrDefault(emptyList()).map { it to (src as String?) }
         }
         extraKeys = strap + sourced

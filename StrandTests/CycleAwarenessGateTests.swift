@@ -1,4 +1,6 @@
 import XCTest
+import WhoopStore
+import StrandAnalytics
 @testable import Strand
 
 /// Guards the #801 cycle-awareness profile gate. Cycle phase is read from the MENSTRUAL skin-temperature
@@ -44,5 +46,43 @@ final class CycleAwarenessGateTests: XCTestCase {
         XCTAssertFalse(store.cycleAwarenessApplies)
         store.sex = "female"
         XCTAssertTrue(store.cycleAwarenessApplies)
+    }
+}
+
+/// Seed profile values are presentation defaults, not consent to use them in age-shaped estimates.
+/// This pure gate also pins the legacy-onboarding migration without mutating global UserDefaults.
+final class ProfileAgeInputConfirmationTests: XCTestCase {
+    func testFreshSeedProfileIsNotConfirmed() {
+        XCTAssertFalse(ProfileStore.fitnessInputsAreConfirmed(
+            ageConfirmed: false, sexConfirmed: false, onboardingCompleted: false))
+    }
+
+    func testBothInputsMustBeConfirmed() {
+        XCTAssertFalse(ProfileStore.fitnessInputsAreConfirmed(
+            ageConfirmed: true, sexConfirmed: false, onboardingCompleted: false))
+        XCTAssertFalse(ProfileStore.fitnessInputsAreConfirmed(
+            ageConfirmed: false, sexConfirmed: true, onboardingCompleted: false))
+        XCTAssertTrue(ProfileStore.fitnessInputsAreConfirmed(
+            ageConfirmed: true, sexConfirmed: true, onboardingCompleted: false))
+    }
+
+    func testCompletedLegacyOnboardingMigratesAsConfirmed() {
+        XCTAssertTrue(ProfileStore.fitnessInputsAreConfirmed(
+            ageConfirmed: false, sexConfirmed: false, onboardingCompleted: true))
+    }
+
+    @MainActor
+    func testFitnessAgeRowsRejectUnconfirmedSeedProfile() {
+        let days = (1...4).map { i in
+            DailyMetric(day: "2026-08-0\(i)", totalSleepMin: 420, efficiency: 0.9,
+                        deepMin: 80, remMin: 100, lightMin: 240, disturbances: 1,
+                        restingHr: 60, avgHrv: 55, recovery: nil, strain: 55,
+                        exerciseCount: 1)
+        }
+        let rows = IntelligenceEngine.fitnessAgeRows(
+            gateDays: days, age: 30, sex: "male", waistCm: 0,
+            computedId: "test-noop", satKey: "2026-08-08",
+            ageConfirmed: false, sexConfirmed: false)
+        XCTAssertTrue(rows.isEmpty)
     }
 }

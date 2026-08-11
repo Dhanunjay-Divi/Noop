@@ -30,6 +30,7 @@ struct StrandiOSApp: App {
     @AppStorage(ChartStyle.storageKey) private var chartStyleRaw = ChartStyle.titanium.rawValue
 
     init() {
+        PuffinExperiment.migrateContinuousHrvOvernightDefault()
         #if DEBUG
         // DEBUG-only promo-screenshot harness: when launched with `--demo-hour <Int>`, pin Today to that
         // hour's day-cycle scene + a per-hour stat frame. No-op (active stays nil) when the arg is absent.
@@ -52,17 +53,26 @@ struct StrandiOSApp: App {
         UNUserNotificationCenter.current().delegate = NotificationPresenter.shared
         let model = AppModel()
         _model = StateObject(wrappedValue: model)
-        _health = StateObject(wrappedValue: HealthKitBridge(
+        let bridge = HealthKitBridge(
             repo: model.repo,
+            profile: model.profile,
             appleDeviceId: model.appleDeviceId,
             noopDeviceId: model.deviceId
-        ))
+        )
+        _health = StateObject(wrappedValue: bridge)
+        model.healthWriteBack = { [weak bridge] in
+            await bridge?.writeBackAfterNewData()
+        }
+        bridge.cycleAnchorsChanged = { [weak model] in
+            await model?.refreshV5Signals()
+        }
     }
 
     var body: some Scene {
         WindowGroup {
             iOSRootView()
                 .environmentObject(model)
+                .onAppear { model.setRealtimeForeground(scenePhase == .active) }
                 .environmentObject(model.ble)   // #334: Today pull-to-sync reads BLEManager (no HR churn)
                 .environmentObject(model.live)
                 .environmentObject(model.repo)
@@ -191,10 +201,15 @@ struct StrandiOSApp: App {
         // sees the prompt before any context. It is requested from an explicit user action instead:
         // the "Enable Apple Health" affordance in AppleHealthView (More → Data → Apple Health).
         // Below, `refreshAuthIfPreviouslyGranted` re-primes `auth` for users who already granted
-        // access (it only reads write/share status, never prompts) so background syncs resume; and
+        // access (it consults only local prior-request state/share status, never prompts) so observer
+        // registration and foreground catch-up resume; and
         // HealthKitBridge.sync guards on `auth == .authorized`, so the scenePhase trigger stays a
         // safe no-op until the user opts in.
         .onChange(of: scenePhase) { _, phase in
+            // Dense Live/workout/session streaming is foreground-only. Logical leases survive so the
+            // same visible opted-in session resumes on return; connection/history sync and the separate
+            // Continuous HRV background preference are intentionally unaffected.
+            model.setRealtimeForeground(phase == .active)
             if phase == .active {
                 model.drainPendingIntents()
                 // Re-arm the strap's smart alarm on foreground: the firmware alarm is a single instant
@@ -206,13 +221,14 @@ struct StrandiOSApp: App {
                 model.ble.requestSync(.foreground)
                 Task {
                     health.refreshAuthIfPreviouslyGranted()
-                    await health.sync()
+                    await health.foregroundCatchUp()
                     await WidgetSnapshot.publish(from: model)
                     // Push the wrist on the SAME refresh as the Home-screen widget so the watch, the
                     // widget and Today never disagree about which day they describe. Without this the
                     // watch only ever holds placeholder data on a real device.
                     await watch.pushLatest(from: model)
                 }
+                Task { await FriendsService.catchUpIfDue(repo: model.repo) }
             } else if phase == .background {
                 // #114: capture the LAST in-app live state on the way out so the Home widget matches what
                 // the user just saw — its battery/HR/score otherwise lag to the last FOREGROUND refreshSeq
@@ -238,6 +254,9 @@ private struct iOSRootView: View {
     @AppStorage("noop.onboarded") private var onboarded = false
     @AppStorage("noop.lastSeenChangelogVersion") private var lastSeenChangelog = ""
     @AppStorage("noop.acceptedTermsVersion") private var acceptedTerms = ""
+    /// Intentionally process-scoped: the trial disclosure appears on every cold launch,
+    /// without creating an account or persisting another consent identifier.
+    @State private var trialNoticeAcknowledgedThisLaunch = false
     @State private var showWhatsNew = false
 
     var body: some View {
@@ -280,9 +299,22 @@ private struct iOSRootView: View {
                     .transition(.opacity)
                     .zIndex(2)
             }
+            // Trial disclosure sits above Terms/onboarding so it is the first thing a tester sees
+            // on every cold launch. The DEBUG demo harness bypasses it for deterministic captures.
+            if TrialNoticePolicy.shouldPresent(
+                acknowledgedThisLaunch: trialNoticeAcknowledgedThisLaunch,
+                demoBypass: demoBypass
+            ) {
+                TrialNoticeView(onContinue: {
+                    trialNoticeAcknowledgedThisLaunch = true
+                })
+                .transition(.opacity)
+                .zIndex(3)
+            }
         }
         .animation(.easeInOut(duration: 0.35), value: onboarded)
         .animation(.easeInOut(duration: 0.35), value: acceptedTerms)
+        .animation(.easeInOut(duration: 0.35), value: trialNoticeAcknowledgedThisLaunch)
         .sheet(isPresented: $showWhatsNew) {
             WhatsNewView(onClose: {
                 lastSeenChangelog = AppChangelog.currentVersion
@@ -299,6 +331,7 @@ private struct iOSRootView: View {
             UpdateStore.shared.seedWhatsNewIfNeeded()
         }
         .onChange(of: acceptedTerms) { _, _ in showWhatsNewIfDue() }
+        .onChange(of: trialNoticeAcknowledgedThisLaunch) { _, _ in showWhatsNewIfDue() }
     }
 
     /// DEBUG: launched with --demo-seed, skip the first-run gates (onboarding / terms / What's New) so the
@@ -314,7 +347,8 @@ private struct iOSRootView: View {
     private func showWhatsNewIfDue() {
         if demoBypass { return }
         // Existing users who updated: their last-seen version is behind the current one.
-        if onboarded && acceptedTerms == Terms.currentVersion
+        if trialNoticeAcknowledgedThisLaunch
+            && onboarded && acceptedTerms == Terms.currentVersion
             && lastSeenChangelog != AppChangelog.currentVersion {
             showWhatsNew = true
         }
@@ -341,13 +375,35 @@ enum DemoScreens {
         case "live":     return AnyView(LiveView())
         case "stress":   return AnyView(StressView())
         case "workouts": return AnyView(WorkoutsView())
+        case "startworkout": return AnyView(StartWorkoutSheet { _ in })
         case "health":   return AnyView(HealthView())
         case "insights": return AnyView(InsightsView())
         case "explore":  return AnyView(MetricExplorerView())
+        case "metricdetail":
+            // Direct, deterministic metric-dossier render target. Example:
+            // `--demo-screen metricdetail --demo-metric fitness_age`.
+            let metricKey: String = {
+                guard let j = args.firstIndex(of: "--demo-metric"), j + 1 < args.count else {
+                    return "fitness_age"
+                }
+                return args[j + 1]
+            }()
+            let metricSource: String? = {
+                guard let j = args.firstIndex(of: "--demo-source"), j + 1 < args.count else {
+                    return nil
+                }
+                return args[j + 1]
+            }()
+            let metric = MetricCatalog.all.first {
+                $0.key == metricKey && (metricSource == nil || $0.source == metricSource)
+            } ?? MetricCatalog.all.first { $0.key == "fitness_age" }!
+            return AnyView(MetricDetailView(metric: metric))
         case "compare":  return AnyView(CompareView())
         case "settings": return AnyView(SettingsView())
+        case "onboarding": return AnyView(OnboardingWizard(onFinished: {}))
         case "chargebreakdown": return AnyView(ChargeBreakdownDemoHost())
         case "devices":  return AnyView(DevicesView())
+        case "friends":  return AnyView(FriendsView())
         case "devicescatalog": return AnyView(DeviceCardCatalog())
         case "fitnessage": return AnyView(FitnessAgeDemoScreen())
         case "vitality": return AnyView(VitalityDemoScreen())

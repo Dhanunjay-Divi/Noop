@@ -86,6 +86,8 @@ class OuraDriver(
      * Per OURA_PROTOCOL.md s3.2 (the 0x24 SetAuthKey is a DANGEROUS, one-time provisioning write).
      */
     val allowKeyInstall: Boolean = false,
+    /** Injectable wall clock for deterministic future-sample gating tests. */
+    private val nowMsProvider: () -> Long = { System.currentTimeMillis() },
 ) {
     var phase: OuraDriverPhase = OuraDriverPhase.Idle
         private set
@@ -295,12 +297,14 @@ class OuraDriver(
         val anchorRt = anchorRingTime ?: return null
         val deltaTicks = forRingTimestamp - anchorRt
         val ms = anchorMs + deltaTicks * 100   // default 100 ms/tick (s5.5); bounded input, no overflow
-        // #968: a corrupt/misaligned ring timestamp (seen on a full cursor=0 history dump) can convert to
-        // an implausible epoch. Gate the RESULT to the same 2020-2035 plausible window used for anchoring
-        // (was a weak `ms <= 0`), so the caller honestly falls back to arrival time instead of banking a
-        // 1970 or far-future sample. Byte-identical to the Swift twin.
+        // A corrupt/misaligned ring timestamp can convert a real banked sample years into the future.
+        // Anchor adoption deliberately keeps its broad 2020-2035 plausibility window, but converted
+        // samples are bounded by the current wall clock so the caller falls back to arrival time instead
+        // of poisoning a future scoring window.
         val seconds = ms / 1000
-        if (seconds < MIN_PLAUSIBLE_EPOCH_SECONDS || seconds > MAX_PLAUSIBLE_EPOCH_SECONDS) return null
+        val nowSeconds = nowMsProvider() / 1000
+        if (seconds < MIN_PLAUSIBLE_EPOCH_SECONDS ||
+            seconds > nowSeconds + SAMPLE_FUTURE_TOLERANCE_SECONDS) return null
         return seconds
     }
 
@@ -363,7 +367,8 @@ class OuraDriver(
                 (OuraDecoders.decodeSpO2IBI(record) ?: emptyList()).map { OuraEvent.Ibi(it) }
             OuraEventTag.IBI ->
                 // The bare 0x44 IBI tag shares the bit-packed layout family; route through the same decoder.
-                (OuraDecoders.decodeIBIAmplitude(record) ?: emptyList()).map { OuraEvent.Ibi(it) }
+                (OuraDecoders.decodeIBIAmplitude(record, OuraIbiChannel.IBI_BARE) ?: emptyList())
+                    .map { OuraEvent.Ibi(it) }
 
             // --- Tier A: HRV ---
             OuraEventTag.HRV_RMSSD ->
@@ -585,5 +590,8 @@ class OuraDriver(
          */
         private const val MIN_PLAUSIBLE_EPOCH_SECONDS = 1_577_836_800L
         private const val MAX_PLAUSIBLE_EPOCH_SECONDS = 2_051_222_400L
+
+        /** Allows ordinary clock skew and anchor rounding without accepting samples banked far ahead. */
+        private const val SAMPLE_FUTURE_TOLERANCE_SECONDS = 300L
     }
 }

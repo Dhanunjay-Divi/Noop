@@ -259,6 +259,52 @@ final class JournalWorkoutAppleCacheTests: XCTestCase {
         XCTAssertEqual(other.count, 1, "other device untouched")
     }
 
+    func testWorkoutStepsRoundTripAndSameDaySumIsIdempotent() async throws {
+        let store = try await WhoopStore.inMemory()
+        let morning = WorkoutRow(startTs: 10_000, endTs: 12_000, sport: "walk",
+                                 source: "activity-file", durationS: nil, energyKcal: nil,
+                                 avgHr: nil, maxHr: nil, strain: nil, distanceM: nil,
+                                 zonesJSON: nil, notes: nil, steps: 3_000)
+        let evening = WorkoutRow(startTs: 60_000, endTs: 63_000, sport: "run",
+                                 source: "activity-file", durationS: nil, energyKcal: nil,
+                                 avgHr: nil, maxHr: nil, strain: nil, distanceM: nil,
+                                 zonesJSON: nil, notes: nil, steps: 8_834)
+
+        try await store.upsertWorkouts([morning, evening], deviceId: "activity-file")
+        var total = try await store.sumWorkoutSteps(
+            deviceId: "activity-file", from: 0, to: 86_400)
+        XCTAssertEqual(total, 11_834)
+
+        // Same natural key replaces the prior session and does not add a duplicate.
+        try await store.upsertWorkouts([morning], deviceId: "activity-file")
+        total = try await store.sumWorkoutSteps(
+            deviceId: "activity-file", from: 0, to: 86_400)
+        XCTAssertEqual(total, 11_834)
+
+        let rows = try await store.workouts(
+            deviceId: "activity-file", from: 0, to: 86_400, limit: 100)
+        XCTAssertEqual(rows.map(\.steps), [3_000, 8_834])
+    }
+
+    func testWorkoutStepSumIsScopedByDayAndSource() async throws {
+        let store = try await WhoopStore.inMemory()
+        func workout(_ start: Int, steps: Int?) -> WorkoutRow {
+            WorkoutRow(startTs: start, endTs: start + 600, sport: "walk",
+                       source: "activity-file", durationS: nil, energyKcal: nil,
+                       avgHr: nil, maxHr: nil, strain: nil, distanceM: nil,
+                       zonesJSON: nil, notes: nil, steps: steps)
+        }
+        try await store.upsertWorkouts(
+            [workout(20_000, steps: nil), workout(30_000, steps: 5_000),
+             workout(90_000, steps: 9_999)],
+            deviceId: "activity-file")
+        try await store.upsertWorkouts([workout(40_000, steps: 7_777)], deviceId: "other")
+
+        let total = try await store.sumWorkoutSteps(
+            deviceId: "activity-file", from: 0, to: 86_400)
+        XCTAssertEqual(total, 5_000)
+    }
+
     // MARK: - appleDaily
 
     func testAppleDailyUpsertReadAndIdempotency() async throws {

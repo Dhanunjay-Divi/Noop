@@ -20,6 +20,10 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
     /// Optional full-bleed view drawn behind the scroll content at the TOP of the screen (e.g. Today's
     /// day-cycle scene). Defaults to nil so other screens stay on the flat canvas; nil renders nothing.
     var topBackground: AnyView? = nil
+    /// Override whether the header needs scheme-independent light text. The default is dynamic ink:
+    /// `liquidScaffoldSky()` is dark obsidian in Dark mode but a pearl relief in Light mode. Only a
+    /// genuinely fixed-dark backdrop (for example Live's console field) should pass `true`.
+    var topBackgroundUsesDarkHeader: Bool? = nil
     /// Optional element pinned to the header's trailing edge (e.g. the strap-battery badge on Today).
     /// Defaults to `EmptyView` via the convenience init below, so other screens are unaffected.
     @ViewBuilder var trailing: () -> Trailing
@@ -50,18 +54,25 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
             // to the same edges (2026-07-02); macOS keeps the classic 28 in the #else branch.
             .padding(.horizontal, 16)
             .padding(.top, 24)
-            // The tab bar floats over the scroll content, so the last card sat hidden behind it.
-            // Reserve extra bottom scroll room so every screen's final card clears the floating bar.
-            .padding(.bottom, NoopMetrics.tabBarClearance)
-            // iPad: cap the readable column, then centre it in the full-width scroll viewport.
-            // iPhone (.compact): the inner frame is .infinity/.leading, identical to before.
-            .frame(maxWidth: hSizeClass == .regular ? 700 : .infinity,
-                   alignment: hSizeClass == .regular ? .center : .leading)
+            .padding(.bottom, NoopMetrics.space4)
+            // A vertical ScrollView accepts a child's ideal horizontal size. Several full-width cards
+            // can therefore claim the whole viewport BEFORE this 16pt padding is added, making the
+            // padded column viewport+32pt wide; SwiftUI centres that overflow and crops the page's
+            // title/cards by 16pt on both sides. Size the complete padded column from the scroll
+            // container instead, so the gutter is included in (not added beyond) the viewport.
+            // Regular-width iPad keeps the existing 700pt readable-column cap.
+            .containerRelativeFrame(.horizontal, alignment: .center) { width, _ in
+                hSizeClass == .regular ? min(width, 700) : width
+            }
             .frame(maxWidth: .infinity, alignment: .center)
             #else
             .padding(28)
             .frame(maxWidth: .infinity, alignment: .leading)
             #endif
+            // A deterministic end marker is useful both to scroll-to-end accessibility actions and to
+            // DEBUG layout captures. It has no visual height; the tab shell's measured bottom reservation
+            // determines where this endpoint can settle relative to the floating bar.
+            Color.clear.frame(height: 0).id(screenScaffoldBottomAnchorID)
         }
         #if os(iOS)
         // #697: stop a vertical scroll from drifting/bouncing the screen left-right. `.basedOnSize` only
@@ -81,6 +92,17 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
             .ignoresSafeArea()
         }
         .modifier(RefreshableIfNeeded(onRefresh: onRefresh))
+        #if DEBUG
+        // Screenshot/layout QA only. Launching with `--demo-scroll-bottom` proves the REAL final item can
+        // settle above the custom tab bar; unlike a source-level spacer assertion this exercises the
+        // TabView → NavigationStack → ScrollView layout chain on the simulator. Absent from Release.
+        .task {
+            if CommandLine.arguments.contains("--demo-scroll-bottom") {
+                try? await Task.sleep(nanoseconds: 650_000_000)
+                proxy.scrollTo(screenScaffoldBottomAnchorID, anchor: .bottom)
+            }
+        }
+        #endif
         #if os(macOS)
         // The mac window toolbar's default vibrant material washed the top of the liquid day-of-sky WHITE
         // (the scroll-under-titlebar blend). Hide it so the sky reads edge-to-edge and dark, like iOS.
@@ -115,14 +137,13 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
     }
 
     private var header: some View {
-        // When a `topBackground` (the day-cycle liquid sky) sits behind the header, that band is dark in
-        // BOTH themes — so the title/subtitle must use the scheme-invariant on-dark tokens. The regular
-        // text tokens flip to dark ink in Light mode and went dark-on-dark over the sky, exactly the #1013
-        // pattern the Liquid Today hero hit (osifaind's Trends-tab sibling report). Flat-canvas screens
-        // (no topBackground) keep the theme tokens so the header reads on the light/dark surfaceBase.
-        let overSky = topBackground != nil
-        let titleColor = overSky ? StrandPalette.onDarkPrimary : StrandPalette.textPrimary
-        let subtitleColor = overSky ? StrandPalette.onDarkSecondary : StrandPalette.textSecondary
+        // A backdrop's PRESENCE says nothing about its luminance. ObsidianFlowBackground intentionally
+        // becomes a light pearl relief in Light mode, so the default must remain the dynamic text tokens.
+        // Fixed-dark scenes opt in explicitly; requiring a non-nil background prevents a stale override
+        // from forcing white text over the flat Light-mode canvas when that scene is disabled.
+        let overFixedDarkBackdrop = topBackground != nil && (topBackgroundUsesDarkHeader ?? false)
+        let titleColor = overFixedDarkBackdrop ? StrandPalette.onDarkPrimary : StrandPalette.textPrimary
+        let subtitleColor = overFixedDarkBackdrop ? StrandPalette.onDarkSecondary : StrandPalette.textSecondary
         return HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 if let title {
@@ -145,9 +166,12 @@ extension ScreenScaffold where Trailing == EmptyView {
     /// call site (which never passed `trailing`) source-compatible.
     init(title: LocalizedStringKey?, subtitle: LocalizedStringKey? = nil,
          onRefresh: (() async -> Void)? = nil, lazy: Bool = false, topBackground: AnyView? = nil,
+         topBackgroundUsesDarkHeader: Bool? = nil,
          @ViewBuilder content: @escaping () -> Content) {
         self.init(title: title, subtitle: subtitle, onRefresh: onRefresh, lazy: lazy,
-                  topBackground: topBackground, trailing: { EmptyView() }, content: content)
+                  topBackground: topBackground,
+                  topBackgroundUsesDarkHeader: topBackgroundUsesDarkHeader,
+                  trailing: { EmptyView() }, content: content)
     }
 }
 
@@ -263,6 +287,7 @@ struct DataPendingNote: View {
 /// Zero-height scroll-to-top target id. File scope, not a `static` on `ScreenScaffold` — the latter is
 /// generic (`<Content, Trailing>`) and Swift forbids stored static properties on generic types.
 private let screenScaffoldTopAnchorID = "screenScaffold.top"
+private let screenScaffoldBottomAnchorID = "screenScaffold.bottom"
 
 private struct ScrollToTopSignalKey: EnvironmentKey {
     static let defaultValue: Int = 0

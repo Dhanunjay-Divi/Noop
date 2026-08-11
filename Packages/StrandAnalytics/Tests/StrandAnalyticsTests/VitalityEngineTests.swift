@@ -37,8 +37,10 @@ final class VitalityEngineTests: XCTestCase {
     /// Below the minimum-factor honesty gate → nil (don't show a number on too little data).
     func testNilBelowMinFactors() {
         XCTAssertNil(VitalityEngine.compute(.init(chronoAge: 40, restingHR: 65, sleepHours: 7.5))) // 2 factors
+        XCTAssertNil(VitalityEngine.compute(.init(chronoAge: 40, restingHR: 65, sleepHours: 7.5,
+                                                  sleepConsistency: 0.75))) // 3 factors, only 2 domains
         XCTAssertNotNil(VitalityEngine.compute(.init(chronoAge: 40, restingHR: 65, sleepHours: 7.5,
-                                                     sleepConsistency: 0.75)))                     // 3 factors
+                                                     rmssd: 40, rmssdNorm: 40))) // 3 domains
     }
 
     /// Body Age + Vitality stay within their clamped ranges at the extremes.
@@ -51,7 +53,7 @@ final class VitalityEngineTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(young.vitality, 0)
 
         let old = VitalityEngine.compute(.init(
-            chronoAge: 85, restingHR: 110, vo2max: 12, expectedVO2max: 35,
+            chronoAge: 80, restingHR: 110, vo2max: 12, expectedVO2max: 35,
             sleepHours: 3, sleepConsistency: 0.1, rmssd: 8, rmssdNorm: 30, steps: 200))!
         XCTAssertLessThanOrEqual(old.bodyAge, VitalityEngine.maxBodyAge)
         XCTAssertGreaterThanOrEqual(old.vitality, 0)

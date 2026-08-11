@@ -1,15 +1,15 @@
 import Foundation
 
-// VitalityEngine.swift — a transparent 0–100 "Vitality" wellness score + an optional "Body Age in years".
+// VitalityEngine.swift — an experimental, transparent 0–100 wellness composite plus an age-shaped
+// "Wellness Age" readout. The persisted `body_age` key/result property remain for database compatibility.
 //
-// INDEPENDENT implementation of the published, peer-reviewed method WHOOP's "Healthspan / WHOOP Age" also
-// uses (NOT medical advice; a wellness comparison, never a clinical biological age): map each wearable-
-// measurable input to its published ALL-CAUSE-MORTALITY hazard ratio relative to a population reference,
+// This is NOT WHOOP Age, a biological clock, or a validated multivariable clinical model. It maps each
+// wearable-measurable input to a literature-inspired all-cause-mortality hazard ratio relative to a reference,
 // sum the log-hazards with an overlap correction (the inputs are correlated, so the naive sum overstates),
 // and convert that combined hazard into a "years of aging" offset using the Gompertz mortality-rate
 // doubling time (mortality roughly doubles every ~8 years, so 1 doubling of hazard ≈ 8 years of age).
 //
-// Body Age = chronological age + Δage. An average-for-their-age person nets ~0 and reads at their own age;
+// Wellness Age = chronological age + Δage. An average-for-their-age person nets ~0 and reads at their own age;
 // healthier-than-average reads younger, less healthy reads older. Presented with a ±band and a hard
 // "wellness trend, not a biological/clinical age" disclaimer, gated on a minimum number of inputs.
 //
@@ -76,9 +76,12 @@ public enum VitalityEngine {
         }
     }
 
-    /// Minimum distinct factors before we'll show a number (honesty gate).
+    /// Minimum distinct factors and physiological domains before we'll show a number. Duration and
+    /// duration-consistency are one sleep domain; they cannot manufacture readiness by themselves.
     public static let minFactors = 3
-    public static let bandYears = 5.0
+    public static let minDomains = 3
+    /// No validated individual confidence interval exists for this experimental composite.
+    public static let bandYears = 0.0
 
     private static func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(hi, max(lo, v)) }
 
@@ -134,7 +137,7 @@ public enum VitalityEngine {
                                     lnHazard: clamp(dev, 0, 3) * 0.110))
         }
         if let c = inputs.sleepConsistency {
-            out.append(Contribution(key: "consistency", label: "Sleep regularity",
+            out.append(Contribution(key: "consistency", label: "Sleep-duration consistency",
                                     lnHazard: (0.75 - clamp(c, 0, 1)) * 0.450))
         }
         if let h = inputs.rmssd, let norm = inputs.rmssdNorm, norm > 0 {
@@ -150,11 +153,23 @@ public enum VitalityEngine {
         return out
     }
 
-    /// Full Vitality + Body Age. Returns nil until at least `minFactors` inputs are present.
+    private static func domain(for key: String) -> String {
+        switch key {
+        case "rhr", "vo2max": return "cardiorespiratory"
+        case "hrv": return "autonomic"
+        case "sleep", "consistency": return "sleep"
+        case "steps": return "activity"
+        default: return key
+        }
+    }
+
+    /// Full Vitality + compatibility age readout. Returns nil until there are enough factors across
+    /// independent domains; callers also enforce long-window coverage before constructing inputs.
     public static func compute(_ inputs: Inputs) -> Result? {
-        guard inputs.chronoAge > 0 else { return nil }
+        guard (20...80).contains(inputs.chronoAge) else { return nil }
         let contribs = contributions(inputs)
         guard contribs.count >= minFactors else { return nil }
+        guard Set(contribs.map { domain(for: $0.key) }).count >= minDomains else { return nil }
         let sumLn = contribs.reduce(0) { $0 + $1.lnHazard } * overlapShrink
         let deltaAge = sumLn / lnHazardPerYear              // +ve = ages you
         let bodyAge = clamp(inputs.chronoAge + deltaAge, minBodyAge, maxBodyAge)

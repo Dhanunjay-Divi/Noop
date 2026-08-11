@@ -82,7 +82,7 @@ struct DataSourcesView: View {
                        subtitle: "Everything stays on \(Platform.deviceNounPhrase). Bring your history in once, then it's yours.",
                        onRefresh: { await repo.refresh() },
                        // PERF: a ten-card import/source column (WHOOP, Apple Health, Xiaomi, nutrition,
-                       // lifting, activity files, wearables, Oura cloud, broadcast-out, live strap). The LazyVStack
+                       // scale, lifting, activity files, wearables, Oura cloud, broadcast-out, live strap). The LazyVStack
                        // path is byte-identical layout. The cards stay in their inner VStack(sectionSpacing)
                        // for pixel-identical spacing, so the lazy win is partial until they're promoted to
                        // direct children. NOTE: this screen still observes `LiveState` for the broadcaster
@@ -92,16 +92,17 @@ struct DataSourcesView: View {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
                 whoopCard.staggeredAppear(index: 0)
                 appleHealthCard.staggeredAppear(index: 1)
-                xiaomiCard.staggeredAppear(index: 2)
-                nutritionCard.staggeredAppear(index: 3)
-                liftingCard.staggeredAppear(index: 4)
-                activityFileCard.staggeredAppear(index: 5)
-                wearableCard.staggeredAppear(index: 6)
+                WeightScaleDataSourceCard(source: model.weightScaleSource).staggeredAppear(index: 2)
+                xiaomiCard.staggeredAppear(index: 3)
+                nutritionCard.staggeredAppear(index: 4)
+                liftingCard.staggeredAppear(index: 5)
+                activityFileCard.staggeredAppear(index: 6)
+                wearableCard.staggeredAppear(index: 7)
                 #if OURA_CLOUD_IMPORT
-                ouraCloudCard.staggeredAppear(index: 7)
+                ouraCloudCard.staggeredAppear(index: 8)
                 #endif
-                broadcastHrCard.staggeredAppear(index: 8)
-                liveCard.staggeredAppear(index: 9)
+                broadcastHrCard.staggeredAppear(index: 9)
+                liveCard.staggeredAppear(index: 10)
             }
         }
         .onAppear {
@@ -561,7 +562,8 @@ struct DataSourcesView: View {
                     strain: nil,                         // never a fabricated cardiovascular strain
                     distanceM: activity.distanceM,
                     zonesJSON: nil,
-                    notes: activity.importNote()
+                    notes: activity.importNote(),
+                    steps: activity.steps
                 )
                 try await store.upsertWorkouts([row], deviceId: ActivityFileImporter.sourceId)
 
@@ -573,24 +575,32 @@ struct DataSourcesView: View {
                     let hr = activity.hrSamples.map { HRSample(ts: $0.ts, bpm: $0.bpm) }
                     _ = try? await store.insert(Streams(hr: hr), deviceId: ActivityFileImporter.sourceId)
                 }
-                if let steps = activity.steps, steps > 0 {
-                    let day = Repository.localDayKey(activity.start)
-                    let metric = DailyMetric(
-                        day: day,
-                        totalSleepMin: nil,
-                        efficiency: nil,
-                        deepMin: nil,
-                        remMin: nil,
-                        lightMin: nil,
-                        disturbances: nil,
-                        restingHr: nil,
-                        avgHrv: nil,
-                        recovery: nil,
-                        strain: nil,
-                        exerciseCount: nil,
-                        steps: steps
-                    )
-                    try? await store.upsertDailyMetrics([metric], deviceId: ActivityFileImporter.sourceId)
+                if (activity.steps ?? 0) > 0 {
+                    let dayStart = Calendar.current.startOfDay(for: activity.start)
+                    let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart)
+                        ?? dayStart.addingTimeInterval(86_400)
+                    let daySteps = (try? await store.sumWorkoutSteps(
+                        deviceId: ActivityFileImporter.sourceId,
+                        from: Int(dayStart.timeIntervalSince1970),
+                        to: Int(dayEnd.timeIntervalSince1970))) ?? 0
+                    if daySteps > 0 {
+                        let metric = DailyMetric(
+                            day: Repository.localDayKey(activity.start),
+                            totalSleepMin: nil,
+                            efficiency: nil,
+                            deepMin: nil,
+                            remMin: nil,
+                            lightMin: nil,
+                            disturbances: nil,
+                            restingHr: nil,
+                            avgHrv: nil,
+                            recovery: nil,
+                            strain: nil,
+                            exerciseCount: nil,
+                            steps: daySteps
+                        )
+                        try? await store.upsertDailyMetrics([metric], deviceId: ActivityFileImporter.sourceId)
+                    }
                 }
 
                 // #137 (B1): register `activity-file` as an `.activityFile` device so the per-day owner
@@ -938,6 +948,197 @@ struct DataSourcesView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 content()
             }
+        }
+    }
+}
+
+/// Explicit pairing surface for standards-compliant Bluetooth weight scales. This is intentionally a
+/// Data Source rather than an "active wearable": it contributes timestamped body measurements and can
+/// never take over the live HR/WHOOP source coordinator.
+private struct WeightScaleDataSourceCard: View {
+    @ObservedObject var source: WeightScaleSource
+    @State private var confirmForget = false
+
+    private var statusPill: StatePill {
+        switch source.phase {
+        case .listening:
+            return StatePill("Listening", tone: .positive)
+        case .scanning:
+            return StatePill("Scanning", tone: .warning, pulsing: true)
+        case .connecting, .discovering:
+            return StatePill("Connecting", tone: .warning, pulsing: true)
+        case .waitingToReconnect:
+            return StatePill("Waiting", tone: .neutral, pulsing: true)
+        case .bluetoothUnavailable, .unsupported:
+            return StatePill("Needs attention", tone: .critical)
+        case .idle:
+            return StatePill(source.hasPairedScale ? "Paired" : "Not paired", tone: .neutral,
+                             showsDot: false)
+        }
+    }
+
+    var body: some View {
+        NoopCard(padding: 18, tint: StrandPalette.metricCyan) {
+            VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
+                HStack(spacing: NoopMetrics.space2 + 2) {
+                    Image(systemName: "scalemass.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(StrandPalette.metricCyan)
+                        .frame(width: 30, height: 30)
+                        .background(StrandPalette.metricCyan.opacity(0.14),
+                                    in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .accessibilityHidden(true)
+                    Text("Bluetooth weight scale")
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Spacer(minLength: 8)
+                    statusPill
+                }
+
+                Text("Pair a scale that implements the Bluetooth SIG Weight Scale Service (0x181D). A valid reading is stored locally with its source and measurement time, then your profile weight updates only from newer readings for your selected user.")
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: NoopMetrics.space2) {
+                    Button {
+                        source.isScanning ? source.stopScan() : source.scan()
+                    } label: {
+                        Label(source.isScanning ? "Stop scan" : "Scan for scales",
+                              systemImage: source.isScanning ? "stop.fill" : "dot.radiowaves.left.and.right")
+                    }
+                    .buttonStyle(NoopButtonStyle(.primary))
+
+                    if source.hasPairedScale {
+                        if source.phase == .listening || source.phase == .connecting || source.phase == .discovering {
+                            Button("Pause") { source.stopListening() }
+                                .buttonStyle(NoopButtonStyle(.secondary))
+                        } else {
+                            Button("Listen now") { source.resumePairedScale() }
+                                .buttonStyle(NoopButtonStyle(.secondary))
+                        }
+                    }
+                }
+
+                Text(source.statusText)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(source.phase == .unsupported || source.phase == .bluetoothUnavailable
+                                     ? StrandPalette.statusWarning : StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if !source.discovered.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(source.discovered, id: \.id) { (scale: WeightScaleSource.DiscoveredScale) in
+                            HStack(spacing: NoopMetrics.space2) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(scale.name)
+                                        .font(StrandFont.subhead.weight(.semibold))
+                                        .foregroundStyle(StrandPalette.textPrimary)
+                                    Text("Signal \(scale.rssi) dBm")
+                                        .font(StrandFont.footnote)
+                                        .foregroundStyle(StrandPalette.textTertiary)
+                                }
+                                Spacer(minLength: 8)
+                                Button(source.pairedPeripheralID == scale.id ? "Reconnect" : "Pair") {
+                                    source.connect(scale.id)
+                                }
+                                .buttonStyle(NoopButtonStyle(.secondary))
+                            }
+                            .padding(.vertical, 10)
+                            if scale.id != source.discovered.last?.id {
+                                Divider().overlay(StrandPalette.hairline)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .background(StrandPalette.surfaceRaised.opacity(0.48),
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+
+                if let capture = source.latestCapture {
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack {
+                            Text(String(format: "%.1f kg", capture.measurement.weightKg))
+                                .font(StrandFont.title2.weight(.bold))
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Spacer()
+                            Text((capture.measurement.timestamp ?? capture.receivedAt)
+                                .formatted(date: .abbreviated, time: .shortened))
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                        if let bmi = capture.measurement.bmi {
+                            Text(String(format: "BMI %.1f", bmi))
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                        }
+                        userSelection(for: capture.measurement)
+                    }
+                    .padding(12)
+                    .background(StrandPalette.metricCyan.opacity(0.08),
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+
+                if let features = source.features {
+                    let labels = [
+                        features.supportsTimestamp ? "stored timestamps" : nil,
+                        features.supportsMultipleUsers ? "multiple users" : nil,
+                        features.supportsBMI ? "BMI + height" : nil,
+                    ].compactMap { $0 }
+                    Text(labels.isEmpty
+                         ? "The scale reports weight only."
+                         : "Scale reports: " + labels.joined(separator: ", ") + ".")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+
+                Text("Some scales use vendor-private Bluetooth instead of 0x181D. NOOP will not guess those packets. If that scale syncs to Apple Health, connect Apple Health above; otherwise its vendor protocol is not supported yet.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if source.hasPairedScale {
+                    Button(role: .destructive) { confirmForget = true } label: {
+                        Label("Forget this scale", systemImage: "trash")
+                    }
+                    .buttonStyle(NoopButtonStyle(.destructive))
+                }
+            }
+        }
+        .alert("Forget Bluetooth scale?", isPresented: $confirmForget) {
+            Button("Cancel", role: .cancel) { }
+            Button("Forget", role: .destructive) { source.forgetPairedScale() }
+        } message: {
+            Text("This removes the Bluetooth pairing from NOOP. Measurements already stored on this iPhone are kept.")
+        }
+    }
+
+    @ViewBuilder
+    private func userSelection(for measurement: WeightScaleMeasurement) -> some View {
+        if let userID = measurement.userID {
+            if userID == 0xFF {
+                Label("Scale could not identify the user. Stored, but profile weight was not changed.",
+                      systemImage: "person.crop.circle.badge.questionmark")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.statusWarning)
+            } else if source.profileUserID == userID {
+                Label("Scale user \(userID) updates your profile", systemImage: "person.crop.circle.badge.checkmark")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.statusPositive)
+            } else {
+                HStack(spacing: NoopMetrics.space2) {
+                    Text("Scale user \(userID) is stored but not assigned to you.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    Spacer(minLength: 8)
+                    Button("Use for me") { source.chooseProfileUserID(userID) }
+                        .buttonStyle(NoopButtonStyle(.secondary))
+                }
+            }
+        } else {
+            Label("Single-user reading · eligible to update your profile", systemImage: "checkmark.circle.fill")
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.statusPositive)
         }
     }
 }

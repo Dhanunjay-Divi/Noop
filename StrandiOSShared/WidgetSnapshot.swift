@@ -39,10 +39,27 @@ public struct WidgetSnapshot: Codable, Equatable {
     /// key is somehow absent (each process reads its OWN bundle, so the app and the widget extension
     /// each carry the key in their generated Info.plist).
     public static let suiteName: String = {
-        Bundle.main.object(forInfoDictionaryKey: "AppGroupIdentifier") as? String
-            ?? "group.com.noopapp.noop"
+        resolveSuiteName(infoDictionary: Bundle.main.infoDictionary ?? [:])
     }()
     public static let storageKey = "noop.widget.snapshot"
+
+    /// AltStore/SideStore append the signing team to requested App Groups and expose the actually
+    /// provisioned identifiers in `ALTAppGroups`. Prefer that runtime value so host and widget share
+    /// a real container after re-signing; ordinary Xcode builds retain the configured group.
+    static func resolveSuiteName(infoDictionary: [String: Any]) -> String {
+        let configured = (infoDictionary["AppGroupIdentifier"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let provisioned = (infoDictionary["ALTAppGroups"] as? [String])?
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.hasPrefix("group.") && !$0.isEmpty } ?? []
+        if let configured, !configured.isEmpty,
+           let match = provisioned.first(where: { $0 == configured || $0.hasPrefix(configured + ".") }) {
+            return match
+        }
+        if provisioned.count == 1, let only = provisioned.first { return only }
+        if let configured, !configured.isEmpty { return configured }
+        return "group.com.noopapp.noop"
+    }
 
     /// Debug-only canary: trips on the first run after a misprovisioning so the silent no-op gets
     /// caught immediately rather than masquerading as "widget shows nothing yet." Release builds do
@@ -55,6 +72,11 @@ public struct WidgetSnapshot: Codable, Equatable {
     public static var placeholder: WidgetSnapshot {
         WidgetSnapshot(recovery: 72, bpm: 58, batteryPct: 84, bonded: true, updated: Date(),
                        effort: 8, rest: 81, hrv: 64, restingHr: 52)
+    }
+
+    /// Honest runtime fallback; sample numbers are reserved for gallery previews.
+    static var unavailable: WidgetSnapshot {
+        WidgetSnapshot(recovery: nil, bpm: nil, batteryPct: nil, bonded: false, updated: .distantPast)
     }
 
     /// Read the last-published snapshot from the shared suite, if any.

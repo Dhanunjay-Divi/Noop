@@ -254,7 +254,7 @@ struct CycleAwarenessOptInCard: View {
                         .foregroundStyle(StrandPalette.textPrimary)
                     Spacer()
                 }
-                Text("NOOP can read a coarse menstrual-cycle phase from your nightly skin temperature, entirely on your device. It is awareness only: not contraception, not a fertility predictor, not a medical service.")
+                Text("NOOP can estimate a coarse menstrual-cycle phase from nightly skin temperature. On iPhone, turning this on can ask to read cycle-start dates from Apple Health; you can decline and log dates manually. Only start dates are kept locally—never flow intensity, symptoms, fertility or contraception data. Awareness only: not contraception, not a fertility predictor, not a medical service.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -265,6 +265,223 @@ struct CycleAwarenessOptInCard: View {
             }
         }
         .accessibilityElement(children: .contain)
+    }
+}
+
+// MARK: - Cycle tracker detail
+
+/// Local period-start history used only to anchor the awareness engine. This deliberately records one
+/// date per cycle—not symptoms, flow, fertility, contraception, or diagnoses—and shows whether an
+/// anchor was entered in NOOP or imported from Apple Health. Manual and imported sources are isolated.
+struct CycleTrackerView: View {
+    @EnvironmentObject private var repo: Repository
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    let result: CyclePhaseEngine.Result
+    var curve: [Double] = []
+
+    @State private var selectedDate = Date()
+    @State private var entries: [CycleTrackingStore.Entry] = []
+    @State private var confirmDeleteAll = false
+    @State private var operationFailed = false
+
+    private var currentResult: CyclePhaseEngine.Result { model.cyclePhase ?? result }
+    private var selectedDay: String { Repository.localDayKey(selectedDate) }
+    private var alreadyLogged: Bool { entries.contains { $0.day == selectedDay } }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
+                    statusCard
+                    logCard
+                    historyCard
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(CyclePhaseEngine.awarenessLine)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                        PrivacyNote()
+                    }
+                }
+                .padding(NoopMetrics.screenPadding)
+            }
+            .background(StrandPalette.surfaceBase)
+            .navigationTitle("Cycle tracker")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .task(id: repo.cycleTrackingSeq) { entries = await repo.periodStartEntries() }
+            .confirmationDialog("Delete all manually logged period starts?",
+                                isPresented: $confirmDeleteAll,
+                                titleVisibility: .visible) {
+                Button("Delete all manual period history", role: .destructive) {
+                    Task { await deleteAll() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently removes dates entered in NOOP. Apple Health-imported dates and sensor history are unchanged.")
+            }
+            .alert("Couldn’t update cycle history", isPresented: $operationFailed) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Nothing was changed. Please try again after the local database finishes opening.")
+            }
+        }
+    }
+
+    private var statusCard: some View {
+        NoopCard(tint: StrandPalette.restColor) {
+            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                Text("Current estimate").strandOverline()
+                HStack(alignment: .firstTextBaseline) {
+                    Text(phaseTitle(currentResult.phase))
+                        .font(StrandFont.title2)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Spacer()
+                    if let lo = currentResult.cycleDayLow, let hi = currentResult.cycleDayHigh {
+                        Text(lo == hi ? "~day \(lo)" : "~day \(lo)–\(hi)")
+                            .font(StrandFont.bodyNumber)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                    }
+                }
+                if curve.count > 1 {
+                    Sparkline(values: curve,
+                              gradient: Gradient(colors: [StrandPalette.restColor.opacity(0.4),
+                                                          StrandPalette.restBright]),
+                              showsHover: false)
+                        .frame(height: 40)
+                        .accessibilityHidden(true)
+                }
+                Text(currentResult.note)
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let window = currentResult.nextPeriodWindow {
+                    Text("Likely period window: \(prettyDay(window.earliestDay))–\(prettyDay(window.latestDay)). This is a range, not a fixed date.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private var logCard: some View {
+        NoopCard(tint: StrandPalette.restColor) {
+            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                Text("Log a period start").strandOverline()
+                DatePicker("Period started on", selection: $selectedDate, in: ...Date(),
+                           displayedComponents: .date)
+                    .font(StrandFont.body)
+                Button(alreadyLogged ? "Already logged" : "Log period start") {
+                    Task { await logSelectedDay() }
+                }
+                .buttonStyle(.noopSecondary)
+                .disabled(alreadyLogged)
+                Text("This optional date anchors cycle day 1 and is checked against your nightly temperature pattern.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var historyCard: some View {
+        NoopCard {
+            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                HStack {
+                    Text("Logged starts").strandOverline()
+                    Spacer()
+                    if entries.contains(where: { $0.source == .manual }) {
+                        Button("Delete all") { confirmDeleteAll = true }
+                            .buttonStyle(.noopGhost)
+                            .foregroundStyle(StrandPalette.statusCritical)
+                    }
+                }
+
+                if entries.isEmpty {
+                    Text("No period starts logged yet.")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                } else {
+                    ForEach(Array(entries.reversed()), id: \.day) { entry in
+                        HStack {
+                            Image(systemName: "drop.fill")
+                                .foregroundStyle(StrandPalette.restColor)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(prettyDay(entry.day))
+                                    .font(StrandFont.bodyNumber)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                Text(entry.source == .manual ? "Entered in NOOP" : "Apple Health")
+                                    .font(StrandFont.caption)
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                            Spacer()
+                            if entry.source == .manual {
+                                Button {
+                                    Task { await delete(entry.day) }
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .accessibilityLabel("Delete \(prettyDay(entry.day))")
+                                }
+                                .buttonStyle(.noopGhost)
+                                .foregroundStyle(StrandPalette.statusCritical)
+                            } else {
+                                Image(systemName: "heart.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                                    .accessibilityLabel("Managed in Apple Health")
+                            }
+                        }
+                    }
+                    if entries.contains(where: { $0.source == .appleHealth }) {
+                        Text("Edit or delete Apple Health dates in the Health app. NOOP reconciles them automatically while cycle awareness is on.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+    }
+
+    private func logSelectedDay() async {
+        guard await repo.logPeriodStart(day: selectedDay) else { operationFailed = true; return }
+        await model.refreshV5Signals()
+    }
+
+    private func delete(_ day: String) async {
+        guard await repo.deletePeriodStart(day: day) else { operationFailed = true; return }
+        await model.refreshV5Signals()
+    }
+
+    private func deleteAll() async {
+        guard await repo.deleteAllPeriodStarts() else { operationFailed = true; return }
+        await model.refreshV5Signals()
+    }
+
+    private func phaseTitle(_ phase: CyclePhaseEngine.Phase) -> String {
+        switch phase {
+        case .follicular: return String(localized: "Follicular")
+        case .periOvulatory: return String(localized: "Mid-cycle shift")
+        case .luteal: return String(localized: "Luteal")
+        case .unknown: return String(localized: "No clear pattern")
+        case .learning: return String(localized: "Learning your pattern")
+        }
+    }
+
+    private func prettyDay(_ day: String) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let date = formatter.date(from: day) else { return day }
+        return date.formatted(date: .abbreviated, time: .omitted)
     }
 }
 

@@ -58,8 +58,8 @@ final class DeviceBrandCatalogTests: XCTestCase {
         XCTAssertEqual(spec("Oura").idPrefix, "oura")
         XCTAssertEqual(spec("Garmin").idPrefix, "garmin")
         XCTAssertEqual(spec("Polar").idPrefix, "strap")
-        // Honest capability: Oura has no open live stream; everyone else here does.
-        XCTAssertFalse(spec("Oura").canStreamLiveHR)
+        // Honest capability: Oura uses NOOP's experimental authenticated source; the others also stream.
+        XCTAssertTrue(spec("Oura").canStreamLiveHR)
         XCTAssertTrue(spec("Amazfit").canStreamLiveHR)
         XCTAssertTrue(spec("Garmin").canStreamLiveHR)
         XCTAssertTrue(spec("Polar").canStreamLiveHR)

@@ -49,7 +49,7 @@ final class AutoWorkoutDetectorTests: XCTestCase {
     }
 
     func testShortSpanIsRejected() {
-        // 8 min at 120 (< 12 min minimum) → nothing.
+        // 8 min at 120 (< 10 min minimum) → nothing.
         let start = 3_000_000
         let hr = block(start - 300, 300, 65) + block(start, 8 * 60, 120) + block(start + 480, 300, 65)
         XCTAssertTrue(AutoWorkoutDetector.detect(hr: hr, restingBpm: 60).isEmpty)
@@ -63,13 +63,13 @@ final class AutoWorkoutDetectorTests: XCTestCase {
     }
 
     func testNearWindowsAreMerged() {
-        // Two 15 min bouts at 120 separated by a 3 min true rest at 65 (< 5 min merge gap, but the rest
+        // Two 16 min bouts at 120 separated by a 3 min true rest at 65 (< 60 min merge gap, but the rest
         // is > 90 s so it CLOSES each span). The two closed spans are then MERGED into one (gap < 5 min).
         let start = 5_000_000
-        let a = block(start, 15 * 60, 120)
-        let gap = block(start + 900, 3 * 60, 65)   // 180 s rest > maxDipS → span closes
-        let b = block(start + 1080, 15 * 60, 120)
-        let hr = block(start - 300, 300, 65) + a + gap + b + block(start + 1980, 300, 65)
+        let a = block(start, 16 * 60, 120)
+        let gap = block(start + 960, 3 * 60, 65)   // 180 s rest > maxDipS → span closes
+        let b = block(start + 1140, 16 * 60, 120)
+        let hr = block(start - 300, 300, 65) + a + gap + b + block(start + 2100, 300, 65)
         let out = AutoWorkoutDetector.detect(hr: hr, restingBpm: 60)
         XCTAssertEqual(out.count, 1, "near windows not merged: \(out.count)")
         // Merged span runs from the first bout's start to the second bout's end (~33 min).
@@ -77,14 +77,26 @@ final class AutoWorkoutDetectorTests: XCTestCase {
     }
 
     func testFarWindowsStaySeparate() {
-        // Two 15 min bouts at 120 separated by a 10 min rest (>= 5 min merge gap) → two workouts.
+        // Two 16 min bouts at 120 separated by a 70 min rest (>= 60 min merge gap) → two workouts.
         let start = 6_000_000
-        let a = block(start, 15 * 60, 120)
-        let gap = block(start + 900, 10 * 60, 65)
-        let b = block(start + 1500, 15 * 60, 120)
-        let hr = block(start - 300, 300, 65) + a + gap + b + block(start + 2400, 300, 65)
+        let a = block(start, 16 * 60, 120)
+        let gap = block(start + 960, 70 * 60, 65)
+        let b = block(start + 5160, 16 * 60, 120)
+        let hr = block(start - 300, 300, 65) + a + gap + b + block(start + 6120, 300, 65)
         let out = AutoWorkoutDetector.detect(hr: hr, restingBpm: 60)
         XCTAssertEqual(out.count, 2)
+    }
+
+    func testFragmentsExactlySixtyMinutesApartAreMerged() {
+        let start = 6_500_000
+        let first = block(start, 20 * 60, 120)
+        // First end is start+1199; second starts exactly 3600 seconds after that endpoint.
+        let rest = block(start + 1200, 3599, 65)
+        let secondStart = start + 4799
+        let second = block(secondStart, 20 * 60, 120)
+        let hr = block(start - 300, 300, 65) + first + rest + second
+            + block(secondStart + 20 * 60, 300, 65)
+        XCTAssertEqual(AutoWorkoutDetector.detect(hr: hr, restingBpm: 60).count, 1)
     }
 
     func testWindowOverlappingSavedWorkoutIsExcluded() {
@@ -112,14 +124,62 @@ final class AutoWorkoutDetectorTests: XCTestCase {
                                                   motion: AutoWorkoutDetector.motionPoints(moving)).count, 1)
     }
 
+    func testSparseMotionCannotVetoAnHrCandidate() {
+        let start = 8_500_000
+        let hr = block(start - 300, 300, 65) + block(start, 20 * 60, 120) + block(start + 1200, 300, 65)
+        // Ten still points cover too little of the candidate to establish that the wearer was stationary.
+        let sparseStill = stride(from: start, to: start + 1200, by: 120).map { grav($0, 0.0) }
+        let points = AutoWorkoutDetector.motionPoints(sparseStill)
+
+        XCTAssertEqual(AutoWorkoutDetector.motionConfirmation(points, start: start, end: start + 1199),
+                       .unavailable)
+        XCTAssertEqual(AutoWorkoutDetector.detect(hr: hr, restingBpm: 60, motion: points).count, 1)
+    }
+
     func testEmptyInputIsEmpty() {
         XCTAssertTrue(AutoWorkoutDetector.detect(hr: [], restingBpm: nil).isEmpty)
     }
 
     func testDefaultRestingHrIsUsedWhenNull() {
-        // No restingBpm → default 60 → floor 90. 20 min at 120 is detected.
+        // No restingBpm → lower-decile baseline (65 here) with a 60 bpm floor. Workout is detected.
         let start = 9_000_000
         let hr = block(start - 300, 300, 65) + block(start, 20 * 60, 120) + block(start + 1200, 300, 65)
         XCTAssertEqual(AutoWorkoutDetector.detect(hr: hr, restingBpm: nil).count, 1)
+    }
+
+    func testSparseSamplesCannotFakeSustainedActivity() {
+        let start = 10_000_000
+        let sparse = stride(from: start, through: start + 20 * 60, by: 120)
+            .map { (ts: $0, bpm: 130) }
+        XCTAssertTrue(AutoWorkoutDetector.detect(hr: sparse, restingBpm: 60).isEmpty)
+    }
+
+    func testMissingRHRUsesConservativeObservedBaseline() {
+        let hr = block(11_000_000, 20 * 60, 120)
+        XCTAssertEqual(AutoWorkoutDetector.effectiveRestingBPM(nil, hr: hr), 100)
+        // Floor becomes 130, so a data set containing only high-HR samples cannot bootstrap itself into
+        // a workout merely because the generic 60-bpm fallback was too low.
+        XCTAssertTrue(AutoWorkoutDetector.detect(hr: hr, restingBpm: nil).isEmpty)
+    }
+
+    func testThresholdAndFragmentMergeAreWhoop2026Aligned() {
+        XCTAssertEqual(AutoWorkoutDetector.minSustainedMin, 10.0)
+        XCTAssertEqual(AutoWorkoutDetector.mergeGapS, 60 * 60)
+        let start = 12_000_000
+        let nineMinutes = block(start, 9 * 60, 120) + block(start + 9 * 60, 300, 65)
+        XCTAssertTrue(AutoWorkoutDetector.detect(hr: nineMinutes, restingBpm: 60).isEmpty)
+    }
+
+    func testOngoingSpanWaitsForPostSessionQuietTail() {
+        let start = 13_000_000
+        let elevated = block(start, 20 * 60, 120)
+        XCTAssertTrue(AutoWorkoutDetector.detect(hr: elevated, restingBpm: 60).isEmpty,
+                      "an elevated EOF span is still in progress")
+
+        let finalized = elevated + block(start + 20 * 60, AutoWorkoutDetector.maxDipS + 2, 65)
+        let out = AutoWorkoutDetector.detect(hr: finalized, restingBpm: 60)
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out[0].startSec, start)
+        XCTAssertEqual(out[0].endSec, start + 20 * 60 - 1)
     }
 }

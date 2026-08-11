@@ -92,7 +92,7 @@ public enum HRVFreqDomain {
     /// (`HRVAnalyzer.cleanRR`) before the tachogram is built, so an artifact beat cannot inject spurious
     /// power. Returns nil when there are too few clean beats or the R-R span is under `minSpanForHFSec`.
     public static func freqDomain(rr: [RRInterval]) -> Bands? {
-        let raw = rr.sorted { $0.ts < $1.ts }.map { Double($0.rrMs) }
+        let raw = rr.sortedByTsStable().map { Double($0.rrMs) }
         return freqDomain(rawRR: raw)
     }
 

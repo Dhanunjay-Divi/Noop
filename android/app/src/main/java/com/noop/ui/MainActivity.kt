@@ -29,6 +29,7 @@ import com.noop.NoopApplication
 import com.noop.ble.WhoopModel
 import com.noop.data.DemoSeeder
 import com.noop.data.WhoopRepository
+import com.noop.ingest.HealthConnectSyncScheduler
 import com.noop.sync.RemoteSyncScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -48,6 +49,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A notification tap can cold-launch the activity before the Compose shell exists. Persist the
+        // trusted route now; AppRoot consumes it once its navigation host mounts.
+        NotificationRouteBridge.recordFromIntent(applicationContext, intent)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         // Load the saved "Card transparency" so every frosted card renders at the chosen opacity from launch.
         CardAppearance.init(this)
@@ -94,6 +98,11 @@ class MainActivity : ComponentActivity() {
         runCatching { RemoteSyncScheduler.reschedule(applicationContext) }
         runCatching { RemoteSyncScheduler.enqueueCatchUpIfDue(applicationContext) }
 
+        // Health Connect Auto-sync is a separate, explicit opt-in. Android 15+ (or Android 14 with U
+        // extension 13) can grant the dedicated background-health permission; older releases stay
+        // foreground/on-open only and reconcile() cancels any stale periodic work.
+        runCatching { HealthConnectSyncScheduler.reconcile(applicationContext) }
+
         // Load the Light/Dark/System + chart-colour preferences before first composition so the theme
         // and chart ramps are correct from the very first frame (no flash).
         AppearancePrefs.load(this)
@@ -107,6 +116,14 @@ class MainActivity : ComponentActivity() {
                 NoopRoot()
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // FLAG_ACTIVITY_SINGLE_TOP routes a warm notification tap here. The bridge wakes the mounted
+        // NavHost and also persists the request in case an onboarding/terms gate currently hides it.
+        NotificationRouteBridge.recordFromIntent(applicationContext, intent)
     }
 
     /** Request the BLE permissions appropriate to the running OS version. */
@@ -165,6 +182,16 @@ internal fun appLaunchIntent(context: Context): Intent =
 //
 // SharedPreferences isn't reactive, so each value is read once into a remembered
 // mutableState and writes go through .edit().apply() + a state update to recompose.
+
+enum class AutoWorkoutMode(val storedValue: String) {
+    OFF("off"),
+    ASK("ask"),
+    AUTO_SAVE("autoSave");
+
+    companion object {
+        fun fromStored(raw: String?): AutoWorkoutMode? = entries.firstOrNull { it.storedValue == raw }
+    }
+}
 
 /** Shared accessor for the onboarding / changelog flags (the macOS @AppStorage equivalent). */
 object NoopPrefs {
@@ -325,7 +352,23 @@ object NoopPrefs {
     /** Whether Continuous HRV capture arms the stream only inside the nightly window (#927). Default
      *  false = always-on, the pre-#927 behaviour. */
     fun continuousHrvOvernight(context: Context): Boolean =
-        of(context).getBoolean(KEY_CONTINUOUS_HRV_OVERNIGHT, false)
+        of(context).getBoolean(KEY_CONTINUOUS_HRV_OVERNIGHT, true)
+
+    fun migrateContinuousHrvOvernightDefault(context: Context) {
+        val prefs = of(context)
+        if (shouldPinLegacyOvernightDefault(
+                hasOvernightChoice = prefs.contains(KEY_CONTINUOUS_HRV_OVERNIGHT),
+                hasUsedContinuousHrv = prefs.contains(KEY_CONTINUOUS_HRV),
+            )
+        ) {
+            prefs.edit().putBoolean(KEY_CONTINUOUS_HRV_OVERNIGHT, false).apply()
+        }
+    }
+
+    internal fun shouldPinLegacyOvernightDefault(
+        hasOvernightChoice: Boolean,
+        hasUsedContinuousHrv: Boolean,
+    ): Boolean = !hasOvernightChoice && hasUsedContinuousHrv
 
     fun setContinuousHrvOvernight(context: Context, enabled: Boolean) {
         of(context).edit().putBoolean(KEY_CONTINUOUS_HRV_OVERNIGHT, enabled).apply()
@@ -370,14 +413,23 @@ object NoopPrefs {
         of(context).edit().putBoolean(KEY_APP_ICON_NAVY, navy).apply()
     }
 
-    /** Imperial/Metric display preference (D#103). Display-only, stored data stays SI. The length/mass
-     *  system is read by [UnitPrefs.system]; the temperature override (empty = "match the system") by
-     *  [UnitPrefs.temperature]. Mirrors macOS @AppStorage("units.system" / "units.temperature"). */
+    /** Display-only unit preferences. Stored data stays SI. `units.system` is retained as the distance
+     *  and legacy migration preference; weight and height now have independent keys. */
     const val KEY_UNIT_SYSTEM = "units.system"
+    const val KEY_MASS_UNIT = "units.mass"
+    const val KEY_HEIGHT_UNIT = "units.height"
     const val KEY_TEMPERATURE_UNIT = "units.temperature"
 
     fun setUnitSystem(context: Context, system: UnitSystem) {
         of(context).edit().putString(KEY_UNIT_SYSTEM, system.raw).apply()
+    }
+
+    fun setMassUnit(context: Context, unit: MassUnit) {
+        of(context).edit().putString(KEY_MASS_UNIT, unit.raw).apply()
+    }
+
+    fun setHeightUnit(context: Context, unit: HeightUnit) {
+        of(context).edit().putString(KEY_HEIGHT_UNIT, unit.raw).apply()
     }
 
     /** Persist the temperature override, or pass null to clear it back to "match the system". */
@@ -642,17 +694,38 @@ object NoopPrefs {
         else of(context).edit().putString(KEY_COACH_SYSTEM_PROMPT, prompt).apply()
     }
 
-    /** "Auto-detect workouts" (MVP, opt-in, on-device, NON-DESTRUCTIVE). When ON, NOOP scans the last
-     *  day or two of strap HR for a sustained-elevated bout and surfaces ONE dismissible Today card
-     *  suggesting you save it, it NEVER creates a workout on its own (the user taps Save). Default OFF;
-     *  when off no detection runs and no card shows. Mirrors macOS/iOS @AppStorage("autoDetectWorkouts"). */
+    /** Legacy Boolean retained so upgrades and older rollback builds preserve the user's prior choice. */
     const val KEY_AUTO_DETECT_WORKOUTS = "noop.autoDetectWorkouts"
 
+    /** Three-way mode. Fresh → Auto-save; legacy true → Ask; legacy false → Off. */
+    const val KEY_AUTO_WORKOUT_MODE = "noop.autoWorkoutMode"
+
+    internal fun resolveAutoWorkoutMode(storedRaw: String?, legacyEnabled: Boolean?): AutoWorkoutMode =
+        AutoWorkoutMode.fromStored(storedRaw)
+            ?: legacyEnabled?.let { if (it) AutoWorkoutMode.ASK else AutoWorkoutMode.OFF }
+            ?: AutoWorkoutMode.AUTO_SAVE
+
+    fun autoWorkoutMode(context: Context): AutoWorkoutMode {
+        val prefs = of(context)
+        val legacy = if (prefs.contains(KEY_AUTO_DETECT_WORKOUTS)) {
+            prefs.getBoolean(KEY_AUTO_DETECT_WORKOUTS, true)
+        } else null
+        return resolveAutoWorkoutMode(prefs.getString(KEY_AUTO_WORKOUT_MODE, null), legacy)
+    }
+
+    fun setAutoWorkoutMode(context: Context, mode: AutoWorkoutMode) {
+        of(context).edit()
+            .putString(KEY_AUTO_WORKOUT_MODE, mode.storedValue)
+            // Rollback safety: an older build treats either active mode as its historical Ask behavior.
+            .putBoolean(KEY_AUTO_DETECT_WORKOUTS, mode != AutoWorkoutMode.OFF)
+            .apply()
+    }
+
     fun autoDetectWorkouts(context: Context): Boolean =
-        of(context).getBoolean(KEY_AUTO_DETECT_WORKOUTS, false)
+        autoWorkoutMode(context) != AutoWorkoutMode.OFF
 
     fun setAutoDetectWorkouts(context: Context, enabled: Boolean) {
-        of(context).edit().putBoolean(KEY_AUTO_DETECT_WORKOUTS, enabled).apply()
+        setAutoWorkoutMode(context, if (enabled) AutoWorkoutMode.ASK else AutoWorkoutMode.OFF)
     }
 
     fun journalReminderEnabled(context: Context): Boolean =
@@ -916,9 +989,23 @@ fun NoopRoot() {
     // onboarding), so this is placed above the onboarding/terms gates rather than duplicated below them.
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(lifecycleOwner, appViewModel) {
+        // Observe from a conservative state immediately; an observer added after an already-delivered
+        // event is not guaranteed to receive that old event on every Lifecycle implementation.
+        appViewModel.setRealtimeForeground(
+            lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED),
+        )
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                appViewModel.ble.onForeground()
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
+                    appViewModel.setRealtimeForeground(true)
+                    appViewModel.ble.onForeground()
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> {
+                    // Release only the high-rate UI/session lease. The lightweight connection,
+                    // historical sync, and separate Continuous HRV opt-in remain independently owned.
+                    appViewModel.setRealtimeForeground(false)
+                }
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)

@@ -39,19 +39,23 @@ extension AutoWorkoutDetector {
         let results = detect(hr: hr, restingBpm: restingBpm, motion: motion, savedSpans: savedSpans)
 
         var lines: [String] = []
-        let floor = (restingBpm ?? defaultRestingHR) + elevatedMarginBPM
+        let effectiveResting = effectiveRestingBPM(restingBpm, hr: hr)
+        let floor = effectiveResting + elevatedMarginBPM
         let hasMotion = !(motion?.isEmpty ?? true)
+        let restingLabel = restingBpm.map(String.init) ?? "observedLowerDecile(\(effectiveResting))"
 
         // Inputs the detector saw.
         lines.append("autoDetect path=\(path) hrSamples=\(hr.count) "
-            + "restingBpm=\(restingBpm.map(String.init) ?? "default(\(defaultRestingHR))") "
+            + "restingBpm=\(restingLabel) "
             + "elevatedFloor=\(floor)bpm motion=\(hasMotion ? "supplied" : "hrOnly") savedSpans=\(savedSpans.count)")
 
         // Thresholds applied (the autoDetectThresholds capture). Stated once so a report carries the
         // calibration the windows were judged against.
         lines.append("autoDetect thresholds elevatedMargin=\(elevatedMarginBPM)bpm "
-            + "minSustainedMin=\(minSustainedMin) maxDipS=\(maxDipS) mergeGapS=\(mergeGapS) "
-            + "motionConfirmMean=\(motionConfirmMean)")
+            + "minSustainedMin=\(minSustainedMin) maxDipS=\(maxDipS) finalizationQuietS=>\(maxDipS) "
+            + "mergeGapS=\(mergeGapS) "
+            + "motionConfirmMean=\(motionConfirmMean) maxHrGapS=\(maxHRSampleGapS) "
+            + "maxSecondsPerHrSample=\(maxSecondsPerHRSample)")
 
         // Rebuild the SAME merged windows the detector forms (sustained spans tolerating dips, then merge),
         // so we can name why each survived or dropped WITHOUT changing the returned `results`. This mirrors
@@ -81,22 +85,23 @@ extension AutoWorkoutDetector {
                 if let d = dipStart, sample.ts - d > maxDipS { closeSpan() }
             }
         }
-        closeSpan()
+        // Match detect(...): an open EOF span is still in progress, not a finalized candidate.
 
         if spans.isEmpty {
-            lines.append("autoDetect why=noSustainedSpan "
-                + "(no contiguous run held >=\(minSustainedMin)min above \(floor)bpm)")
+            let reason = spanStart == nil ? "noSustainedSpan" : "awaitingQuietTail"
+            lines.append("autoDetect why=\(reason) "
+                + "(requires >=\(minSustainedMin)min above \(floor)bpm then >\(maxDipS)s below it)")
             lines.append("autoDetect result windows=0")
             return (results, lines)
         }
 
-        // Merge spans whose gap is strictly < mergeGapS (same as detect step 4).
+        // Merge spans whose gap is <= mergeGapS (same as detect step 4).
         var merged: [(start: Int, end: Int)] = []
         var curStart = spans[0].start
         var curEnd = spans[0].end
         for k in 1..<spans.count {
             let next = spans[k]
-            if next.start - curEnd < mergeGapS {
+            if next.start - curEnd <= mergeGapS {
                 curEnd = max(curEnd, next.end)
             } else {
                 merged.append((curStart, curEnd))
@@ -114,13 +119,21 @@ extension AutoWorkoutDetector {
                 lines.append("autoDetect window durMin=\(durMin) verdict=dropped why=overlapsSavedWorkout")
                 continue
             }
+            let window = seg.filter { $0.ts >= start && $0.ts <= end }
+            if !hasSufficientHRCoverage(window, start: start, end: end) {
+                lines.append("autoDetect window durMin=\(durMin) verdict=dropped why=insufficientHrCoverage")
+                continue
+            }
             if let motionSeries {
-                let inWin = motionSeries.filter { $0.ts >= start && $0.ts <= end }.map { $0.intensity }
-                let meanMotion = inWin.isEmpty ? 0.0 : inWin.reduce(0.0, +) / Double(inWin.count)
-                if meanMotion < motionConfirmMean {
+                switch motionConfirmation(motionSeries, start: start, end: end) {
+                case .rejected(let meanMotion):
                     lines.append("autoDetect window durMin=\(durMin) verdict=dropped why=motionNotConfirmed "
                         + "(mean=\((meanMotion * 1000).rounded() / 1000) < \(motionConfirmMean))")
                     continue
+                case .unavailable:
+                    lines.append("autoDetect window durMin=\(durMin) motion=unavailable (sparse; HR-only fallback)")
+                case .confirmed:
+                    break
                 }
             }
             lines.append("autoDetect window durMin=\(durMin) verdict=offered")

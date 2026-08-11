@@ -4,15 +4,15 @@ import StrandDesign
 
 // MARK: - NOOP watch-face complication
 //
-// The headline feature of M3: Charge (recovery) on the wrist. The iPhone is the brain
-// (M1 computes Charge / Effort / Rest with confidence + provenance); this complication ONLY
+// The headline feature of M3: Recovery on the wrist. The iPhone is the brain
+// (M1 computes Recovery / Effort / Sleep with confidence + provenance); this complication ONLY
 // displays the latest `WatchScoreSnapshot` the phone pushed into the shared app group. It never
 // recomputes a score.
 //
 // The honesty rule carries through from M1: a CALIBRATING score has a nil number plus its
 // Calibrating flag set, and we render a dash with a subtle "cal" marker, never a fabricated
 // number. When there is no snapshot at all we show a NEUTRAL placeholder (a dash + the NOOP
-// glyph), not a zero, so an empty face never reads as "your Charge is 0".
+// glyph), not a zero, so an empty face never reads as "your Recovery is 0".
 //
 // Families: accessoryCircular (ring + number), accessoryCorner, accessoryInline (text), and
 // accessoryRectangular (a compact card with all three scores).
@@ -53,7 +53,7 @@ struct ChargeEntry: TimelineEntry {
 }
 
 struct ChargeProvider: TimelineProvider {
-    /// A friendly stand-in for the gallery / first paint. Shows a real-looking Charge so the
+    /// A friendly stand-in for the gallery / first paint. Shows a real-looking Recovery score so the
     /// complication previews well, but it is never persisted and the live view falls back to the
     /// neutral placeholder when there is genuinely no snapshot.
     func placeholder(in context: Context) -> ChargeEntry {
@@ -80,8 +80,8 @@ struct ChargeProvider: TimelineProvider {
 // MARK: - Preview snapshot
 
 private extension WatchScoreSnapshot {
-    /// A representative snapshot for the widget gallery: a primed Charge, a mid Effort, a calibrating
-    /// Rest (so the gallery also shows the cal marker), a live HR and a short sleep line.
+    /// A representative snapshot for the widget gallery: a primed Recovery, a mid Effort, a calibrating
+    /// Sleep score (so the gallery also shows the cal marker), a live HR and a short sleep line.
     static var preview: WatchScoreSnapshot {
         WatchScoreSnapshot(
             charge: 74, chargeCalibrating: false,
@@ -196,22 +196,22 @@ struct NOOPChargeView: View {
         }
     }
 
-    // MARK: Charge tint
+    // MARK: Recovery tint
     //
-    // Tinted to the Charge colour world only when we have a real number. A calibrating or missing
-    // Charge stays neutral so the empty ring never borrows a "good"/"bad" colour it did not earn.
+    // Tinted to the Recovery colour world only when we have a real number. A calibrating or missing
+    // Recovery stays neutral so the empty ring never borrows a "good"/"bad" colour it did not earn.
 
     private var chargeTint: Color {
         if case let .value(v) = charge { return StrandPalette.recoveryColor(Double(v)) }
         return StrandPalette.textTertiary
     }
 
-    // MARK: accessoryCircular — a ring + the Charge number
+    // MARK: accessoryCircular — a ring + the Recovery number
     //
     // The clean NOOP ring, scaled to the watch face. WidgetKit tints accessory complications with the
     // face's vibrant colour by default; we use a Gauge so the system renders a crisp circular ring,
-    // and tint it to the Charge colour where we have a real value. A small "cal" marker replaces the
-    // number when Charge is calibrating.
+    // and tint it to the Recovery colour where we have a real value. A small "cal" marker replaces the
+    // number when Recovery is calibrating.
 
     private var circular: some View {
         Gauge(value: charge.fraction, in: 0...1) {
@@ -229,24 +229,24 @@ struct NOOPChargeView: View {
         }
         .gaugeStyle(.accessoryCircular)
         .tint(chargeTint)
-        // The curved label carries the recency so even the tiny circle is honest: "Charge · 2h ago"
-        // when aging, plain "Charge" when fresh, a sync hint when nothing has synced.
+        // The curved label carries the recency so even the tiny circle is honest: "Recovery · 2h ago"
+        // when aging, plain "Recovery" when fresh, a sync hint when nothing has synced.
         .widgetLabel(circularLabel)
         .widgetAccentable()
         .accessibilityLabel(accessibilityCharge)
     }
 
     /// The circular family's curved widgetLabel. Appends the freshness once a snapshot starts aging so
-    /// the number above it is never read as live; stays "Charge" while it is fresh.
+    /// the number above it is never read as live; stays "Recovery" while it is fresh.
     private var circularLabel: String {
-        guard let fresh = freshness else { return String(localized: "Charge") }
-        if isStale { return String(localized: "Charge · \(fresh)") }
+        guard let fresh = freshness else { return String(localized: "Recovery") }
+        if isStale { return String(localized: "Recovery · \(fresh)") }
         // A current snapshot's label adds no information next to a live-looking ring, so keep it clean.
-        if isFreshToday { return String(localized: "Charge") }
-        return String(localized: "Charge · \(fresh)")
+        if isFreshToday { return String(localized: "Recovery") }
+        return String(localized: "Recovery · \(fresh)")
     }
 
-    // MARK: accessoryCorner — number hugging the corner, "Charge" curved along the bezel
+    // MARK: accessoryCorner — number hugging the corner, "Recovery" curved along the bezel
 
     private var corner: some View {
         Text(charge.numberText)
@@ -266,18 +266,18 @@ struct NOOPChargeView: View {
         case .value:
             // Real number: ride the bezel with the recency so an aging score stays honest. A current
             // snapshot keeps the plain label (semantic flag, not a display-text comparison).
-            guard let fresh = freshness, !isFreshToday else { return String(localized: "Charge") }
-            return String(localized: "Charge · \(fresh)")
+            guard let fresh = freshness, !isFreshToday else { return String(localized: "Recovery") }
+            return String(localized: "Recovery · \(fresh)")
         case .calibrating:
             // When the dash is here because the whole snapshot went stale, say so plainly rather than
             // "cal" (which means "needs more data", a different thing).
             if isStale {
                 let fresh = freshness ?? String(localized: "stale")
-                return String(localized: "Charge · \(fresh)")
+                return String(localized: "Recovery · \(fresh)")
             }
-            return String(localized: "Charge · cal")
+            return String(localized: "Recovery · cal")
         case .missing:
-            return noSnapshot ? String(localized: "Open NOOP") : String(localized: "Charge")
+            return noSnapshot ? String(localized: "Open NOOP") : String(localized: "Recovery")
         }
     }
 
@@ -288,18 +288,18 @@ struct NOOPChargeView: View {
         // When the snapshot has aged out we never print the old number; we say it is stale and how old.
         if isStale {
             let fresh = freshness ?? String(localized: "old")
-            return String(localized: "Charge stale · \(fresh)")
+            return String(localized: "Recovery stale · \(fresh)")
         }
         switch charge {
         case .value(let v):
             // A fresh number reads as live, so append the recency once it starts to age.
             let suffix = inlineFreshnessSuffix
-            if let hr = entry.snapshot?.hr { return String(localized: "Charge \(v) · \(hr) bpm\(suffix)") }
-            return String(localized: "Charge \(v)\(suffix)")
+            if let hr = entry.snapshot?.hr { return String(localized: "Recovery \(v) · \(hr) bpm\(suffix)") }
+            return String(localized: "Recovery \(v)\(suffix)")
         case .calibrating:
-            return String(localized: "Charge calibrating")
+            return String(localized: "Recovery calibrating")
         case .missing:
-            return String(localized: "Charge –")
+            return String(localized: "Recovery –")
         }
     }
 
@@ -312,7 +312,7 @@ struct NOOPChargeView: View {
 
     // MARK: accessoryRectangular — a compact card showing all three scores
     //
-    // The richest family: a small NOOP header line plus the Charge / Effort / Rest triplet, each a
+    // The richest family: a small NOOP header line plus the Recovery / Effort / Sleep triplet, each a
     // number (or a dash + cal marker) over its label. This is the only place all three scores live, so
     // it doubles as the "everything at a glance" face.
 
@@ -331,9 +331,9 @@ struct NOOPChargeView: View {
             }
             // The three scores, equal-width.
             HStack(alignment: .top, spacing: 0) {
-                scoreCell(String(localized: "Charge"), readout: charge, tint: chargeTint)
+                scoreCell(String(localized: "Recovery"), readout: charge, tint: chargeTint)
                 scoreCell(String(localized: "Effort"), readout: effort, tint: effortTint)
-                scoreCell(String(localized: "Rest"), readout: rest, tint: restTint)
+                scoreCell(String(localized: "Sleep"), readout: rest, tint: restTint)
             }
         }
         .widgetAccentable()
@@ -380,7 +380,7 @@ struct NOOPChargeView: View {
         return false
     }
 
-    // MARK: Effort / Rest tints (rectangular only)
+    // MARK: Effort / Sleep tints (rectangular only)
 
     private var effortTint: Color {
         if case let .value(v) = effort { return StrandPalette.effortTint(fraction: Double(v) / 100) }
@@ -409,13 +409,13 @@ struct NOOPChargeView: View {
         // is a dash plainly so it is never mistaken for "still calibrating".
         if isStale {
             let fresh = freshness ?? String(localized: "a while ago")
-            return String(localized: "Charge out of date, last synced \(fresh). Open NOOP on iPhone.")
+            return String(localized: "Recovery out of date, last synced \(fresh). Open NOOP on iPhone.")
         }
         switch charge {
-        case .value(let v):    return String(localized: "Charge \(v) out of 100")
-        case .calibrating:     return String(localized: "Charge calibrating, needs more data")
+        case .value(let v):    return String(localized: "Recovery \(v) out of 100")
+        case .calibrating:     return String(localized: "Recovery calibrating, needs more data")
         case .missing:         return noSnapshot ? String(localized: "No data, open NOOP on iPhone")
-                                                 : String(localized: "Charge unavailable")
+                                                 : String(localized: "Recovery unavailable")
         }
     }
 
@@ -432,9 +432,9 @@ struct NOOPChargeView: View {
             case .missing:       return String(localized: "\(label) unavailable")
             }
         }
-        let chargePhrase = phrase(String(localized: "Charge"), charge)
+        let chargePhrase = phrase(String(localized: "Recovery"), charge)
         let effortPhrase = phrase(String(localized: "Effort"), effort)
-        let restPhrase = phrase(String(localized: "Rest"), rest)
+        let restPhrase = phrase(String(localized: "Sleep"), rest)
         return String(localized: "NOOP. \(chargePhrase), \(effortPhrase), \(restPhrase).")
     }
 
@@ -453,8 +453,8 @@ struct NOOPChargeComplication: Widget {
             NOOPChargeView(entry: entry)
                 .containerBackground(StrandPalette.surfaceBase, for: .widget)
         }
-        .configurationDisplayName("NOOP Charge")
-        .description("Your Charge (recovery) on the watch face, with Effort and Rest in the rectangular card.")
+        .configurationDisplayName("NOOP Recovery")
+        .description("Your Recovery on the watch face, with Effort and Sleep Score in the rectangular card.")
         .supportedFamilies([
             .accessoryCircular,
             .accessoryCorner,

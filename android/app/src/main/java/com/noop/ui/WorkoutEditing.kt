@@ -365,14 +365,52 @@ object WorkoutEditing {
         if (trimmed.isEmpty() || startSeconds > nowSeconds || startSeconds <= 0) return null
         if (avgHr != null && avgHr !in 25..250) return null
         if (energyKcal != null && (energyKcal < 0 || energyKcal > 20_000)) return null
+        val durationSeconds = durationMin.toLong() * 60L
+        if (durationSeconds > Long.MAX_VALUE - startSeconds) return null
+        val endSeconds = startSeconds + durationSeconds
+        if (endSeconds > nowSeconds) return null
         return WorkoutRow(
             deviceId = deviceId,
             startTs = startSeconds,
-            endTs = startSeconds + durationMin * 60L,
+            endTs = endSeconds,
             sport = trimmed,
             source = "manual",
-            durationS = durationMin * 60.0,
+            durationS = durationSeconds.toDouble(),
             energyKcal = energyKcal,
+            avgHr = avgHr,
+            maxHr = null,
+            strain = null,
+            distanceM = null,
+            zonesJSON = null,
+            notes = null,
+            routePolyline = null,
+        )
+    }
+
+    /** Build an explicitly accepted detector suggestion without rounding the measured end to minutes. */
+    fun buildDetectedSuggestionRow(
+        deviceId: String,
+        startSeconds: Long,
+        endSeconds: Long,
+        sport: String,
+        avgHr: Int?,
+        source: String = "manual",
+        nowSeconds: Long = System.currentTimeMillis() / 1000L,
+    ): WorkoutRow? {
+        val durationSeconds = endSeconds - startSeconds
+        if (startSeconds <= 0L || durationSeconds <= 0L || durationSeconds > 24L * 60L * 60L) return null
+        val trimmed = sport.trim()
+        val trimmedSource = source.trim()
+        if (trimmed.isEmpty() || trimmedSource.isEmpty() || startSeconds > nowSeconds) return null
+        if (avgHr != null && avgHr !in 25..250) return null
+        return WorkoutRow(
+            deviceId = deviceId,
+            startTs = startSeconds,
+            endTs = endSeconds,
+            sport = trimmed,
+            source = trimmedSource,
+            durationS = durationSeconds.toDouble(),
+            energyKcal = null,
             avgHr = avgHr,
             maxHr = null,
             strain = null,

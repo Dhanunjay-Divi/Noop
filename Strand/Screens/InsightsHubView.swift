@@ -9,7 +9,7 @@ import WhoopStore
 // The headline n-of-1 "what actually moves YOUR recovery" surface. Two halves, both
 // pure association on the user's own logged days — never advice, diagnosis, or cause:
 //
-//  1. WHAT MOVES YOUR CHARGE — the unified, LAG-AWARE EffectRanker feed. For each
+//  1. WHAT MOVES YOUR RECOVERY — the unified, LAG-AWARE EffectRanker feed. For each
 //     journal behaviour × the selected outcome it keeps the strongest honest lag
 //     ({0,+1,+2} days), so each row reads "shows up the next morning" rather than
 //     pretending everything is same-day. Each card carries the sign-aware sentence,
@@ -21,7 +21,7 @@ import WhoopStore
 //     nights accrue. The card plots the shrunk curve, states "each extra drink ≈ −N
 //     for you" (honest when still prior-dominated, or when YOUR data contradicts the
 //     prior), and an evening "damage forecast" preview — "a 2nd drink tonight ≈ −X
-//     Charge tomorrow" — composed from the curve's per-unit Δ on the latest Charge.
+//     Recovery tomorrow" — composed from the curve's per-unit Δ on the latest Recovery.
 //
 // SELF-CONTAINED: this screen owns its own load/derive (InsightsHubViewModel) and takes
 // the Repository via @EnvironmentObject — it does NOT edit AppModel / the central nav.
@@ -34,7 +34,7 @@ struct InsightsHubView: View {
     @EnvironmentObject private var repo: Repository
     @StateObject private var model = InsightsHubViewModel()
 
-    /// The currently-selected outcome for the ranked feed (Charge / HRV / Rest / RHR).
+    /// The currently-selected outcome for the ranked feed (Recovery / HRV / Sleep Score / RHR).
     @State private var outcome: InsightsHubViewModel.Outcome = .recovery
 
     var body: some View {
@@ -58,7 +58,7 @@ struct InsightsHubView: View {
         .onChangeCompat(of: outcome) { model.rankFor($0) }
     }
 
-    // MARK: - What moves your Charge (ranked, lag-aware)
+    // MARK: - What moves your Recovery (ranked, lag-aware)
 
     private var moversSection: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
@@ -249,7 +249,7 @@ private extension ScoreState {
 // The headline alcohol/caffeine surface: the prior-shrunk curve, the per-unit read,
 // the confidence pill, the honesty banner, and an evening "damage forecast" preview
 // driven by a tiny dose stepper. The forecast is a what-if on the user's own latest
-// Charge — "a 2nd drink tonight tends to line up with about −7 on tomorrow's Charge
+// Recovery — "a 2nd drink tonight tends to line up with about −7 on tomorrow's Recovery
 // for you" — never a recommendation to drink or abstain.
 
 private struct DoseResponseCardView: View {
@@ -319,7 +319,7 @@ private struct DoseResponseCardView: View {
         }
     }
 
-    // MARK: Evening damage forecast (what-if on the user's latest Charge)
+    // MARK: Evening damage forecast (what-if on the user's latest Recovery)
 
     @ViewBuilder private func damageForecast(_ r: DoseResponse) -> some View {
         // The Δ of going from the typical starting dose (1) to the previewed dose, applied
@@ -396,7 +396,7 @@ private struct DoseResponseCardView: View {
         let mag = abs(v)
         let rounded = (mag * 10).rounded() / 10
         let sign = v < 0 ? "−" : (v > 0 ? "+" : "")
-        // Show whole numbers without a trailing .0 for the small Charge magnitudes.
+        // Show whole numbers without a trailing .0 for small score magnitudes.
         let body = rounded == rounded.rounded() ? "\(Int(rounded))" : String(format: "%.1f", rounded)
         return "\(sign)\(body)\(suffix)"
     }
@@ -496,9 +496,9 @@ final class InsightsHubViewModel: ObservableObject {
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .recovery: return String(localized: "Charge")
+            case .recovery: return String(localized: "Recovery")
             case .hrv:      return "HRV"
-            case .sleep:    return String(localized: "Rest")
+            case .sleep:    return String(localized: "Sleep Score")
             case .rhr:      return "RHR"
             }
         }
@@ -514,9 +514,9 @@ final class InsightsHubViewModel: ObservableObject {
         /// The engine's outcome label (carried onto each RankedEffect).
         var outcomeName: String {
             switch self {
-            case .recovery: return String(localized: "Charge")
+            case .recovery: return String(localized: "Recovery")
             case .hrv:      return "HRV"
-            case .sleep:    return String(localized: "Rest")
+            case .sleep:    return String(localized: "Sleep Score")
             case .rhr:      return String(localized: "Resting HR")
             }
         }
@@ -639,12 +639,13 @@ final class InsightsHubViewModel: ObservableObject {
         }
     }
 
-    /// The metricSeries key a DoseResponsePriors outcome NAME maps to ("Charge"→recovery, "HRV"→hrv).
+    /// The metricSeries key a DoseResponsePriors outcome NAME maps to. Keep the
+    /// legacy engine labels as aliases while presenting the clearer product names.
     static func outcomeKey(forEngineName name: String) -> String {
         switch name {
-        case "Charge": return "recovery"
+        case "Charge", "Recovery": return "recovery"
         case "HRV":    return "hrv"
-        case "Rest":   return "sleep_performance"
+        case "Rest", "Sleep Score": return "sleep_performance"
         case "Resting HR": return "rhr"
         default:       return "recovery"
         }
@@ -703,7 +704,7 @@ final class InsightsHubViewModel: ObservableObject {
 
         /// Outcome units suffix for the forecast tiles.
         var outcomeSuffix: String { outcomeName == "HRV" ? " ms" : "%" }
-        /// Clamp ceiling for the projected outcome (Charge/Rest are 0–100; HRV uncapped-ish).
+        /// Clamp ceiling for projected 0–100 scores (Recovery/Sleep Score; HRV is uncapped-ish).
         var outcomeCeiling: Double { outcomeName == "HRV" ? 400 : 100 }
 
         var forecastOverline: String {

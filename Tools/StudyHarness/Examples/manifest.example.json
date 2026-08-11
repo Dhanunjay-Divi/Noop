@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "studyID": "noop-whoop-reference-v1",
+  "subjects": [
+    {
+      "subjectID": "P-7K4M",
+      "cohort": "discovery",
+      "whoopExport": "subjects/P-7K4M/whoop-export.zip",
+      "noopDailyOutput": "subjects/P-7K4M/noop-daily.json"
+    },
+    {
+      "subjectID": "P-9R2Q",
+      "cohort": "validation",
+      "whoopExport": "subjects/P-9R2Q/whoop-export.zip"
+    }
+  ]
+}

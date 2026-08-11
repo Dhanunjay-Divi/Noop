@@ -268,7 +268,15 @@ public struct WhoopExportImporter {
             r.recoveryScore    = row.double("recovery_score_pct")
             r.restingHeartRate = row.double("resting_heart_rate_bpm", "resting_heart_rate")
             r.hrvMs            = row.double("heart_rate_variability_ms", "heart_rate_variability_rmssd_ms")
-            r.skinTempCelsius  = row.double("skin_temp_celsius", "skin_temp_f")
+            // WHOOP schemas seen in the wild use either an explicit Celsius or Fahrenheit
+            // header. Keep the normalized model genuinely Celsius: accepting `skin_temp_f`
+            // verbatim made a 95 °F reading look like 95 °C downstream. Prefer Celsius if a
+            // future export happens to carry both columns.
+            if let celsius = row.double("skin_temp_celsius") {
+                r.skinTempCelsius = celsius
+            } else if let fahrenheit = row.double("skin_temp_f") {
+                r.skinTempCelsius = (fahrenheit - 32.0) * 5.0 / 9.0
+            }
             r.bloodOxygenPct   = row.double("blood_oxygen_pct", "blood_oxygen_pct_pct")
             r.dayStrain        = row.double("day_strain")
             r.energyKcal       = row.double("energy_burned_cal")  // CSV "(cal)" == kcal

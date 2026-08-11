@@ -419,14 +419,16 @@ struct StartWorkoutSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.space4) {
-            HStack(alignment: .top, spacing: NoopMetrics.space3) {
-                Image(systemName: "figure.run")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(StrandPalette.effortColor)
-                    .frame(width: 30, height: 30)
-                    .background(StrandPalette.effortColor.opacity(0.14),
-                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .accessibilityHidden(true)
+            HStack(alignment: .center, spacing: NoopMetrics.space3) {
+                // A selected-sport body illustration, not a generic static runner. It performs one
+                // short stride whenever the sport changes, then settles. The active workout screen
+                // is where the same figure is allowed to keep moving.
+                SemanticBodyIllustration(
+                    .workout(systemImage: sportSymbol(selected)),
+                    size: 58,
+                    tint: StrandPalette.effortColor,
+                    eventToken: selected.hashValue
+                )
                 VStack(alignment: .leading, spacing: 2) {
                     Text(heading)
                         .font(StrandFont.title2)
@@ -471,7 +473,7 @@ struct StartWorkoutSheet: View {
             HStack(spacing: NoopMetrics.space3) {
                 NoopButton("Cancel", kind: .tertiary) { dismiss() }
                 Spacer()
-                NoopButton("\(actionVerb) \(selected)", systemImage: "figure.run", kind: .primary) {
+                NoopButton("\(actionVerb) \(selected)", systemImage: sportSymbol(selected), kind: .primary) {
                     // #297: a confirmed start (or merge-name) is a real selection — fold it into the recents.
                     RecentSportsPrefs.recordSelection(selected)
                     onStart(selected)

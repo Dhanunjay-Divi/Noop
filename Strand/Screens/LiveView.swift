@@ -75,54 +75,63 @@ struct LiveView: View {
     @State private var showLiveWorkout = false
     @State private var showStartSport = false
 
+    /// Dense Live Tracking is an explicit, session-scoped choice. It is deliberately not persisted:
+    /// leaving Live ends this high-rate lease, while a background/foreground round trip of the same
+    /// visible screen keeps the opt-in and lets AppModel's lifecycle gate resume it safely.
+    @State private var liveTrackingOptedIn = false
+
     /// Manual HRV snapshot (#127) — presents the "Take an HRV reading" screen as a sheet. Entry sits in
     /// the Session console and is only enabled while bonded (the reading needs the live R-R stream).
     @State private var showHRVSnapshot = false
 
     var body: some View {
-        ScreenScaffold(title: "Live Body Console",
-                       subtitle: "Current physiology, strap trust, and session controls in one working view.",
-                       topBackground: liquidScaffoldSky()) {
+        ScreenScaffold(title: screenTitle,
+                       subtitle: screenSubtitle,
+                       topBackground: liveScaffoldBackdrop,
+                       topBackgroundUsesDarkHeader: true) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
-                consoleHeader
-                // Can't-connect-at-all guidance: the strap wiped its bond (firmware update / WHOOP app
-                // re-bond), so connects loop on "Peer removed pairing information". Show the re-pair steps
-                // right here instead of silently retrying. (5/MG firmware reset, 2026-06)
-                if let guide = live.reconnectGuide { reconnectGuideBanner(guide) }
-                // Bond-refused guidance, shown right here on Live where people actually connect (it
-                // also appears in Settings). A 5/MG strap still bonded to the WHOOP app refuses pairing
-                // with "Encryption is insufficient" — this tells the user to free it and re-pair.
-                if let hint = live.pairingHint { pairingHintBanner(hint) }
-                // Primary Connect affordance, surfaced ABOVE the fold whenever there's no link. The real
-                // Scan & Connect control otherwise lives in `controls` (below the Signal Trust grid), so
-                // an offline user saw only inert copy up top. Gated purely on `!live.connected`, so it
-                // disappears the instant the radio connects. Shared with macOS — it reuses `scanButton`,
-                // which the wide layout already renders in `controls`.
-                if !live.connected { offlineConnectCallout }
-                bodyConsole
-                // Low-bandwidth fallback note (#80): the radio couldn't sustain the WHOOP 4 R10/R11 raw
-                // realtime burst, so live HR is riding the standard BLE Heart-Rate profile instead. Live HR
-                // still works — this is informational, not an error — so it sits right under the readout in
-                // a calm accent treatment rather than the amber warning banners above.
-                if Self.shouldShowStandardHRNote(live.standardHRMode) {
-                    standardHRNote(live.standardHRMode ?? "")
+                if live.connected {
+                    consoleHeader
+                    liveTrackingCard
+                    // Can't-connect-at-all guidance: the strap wiped its bond (firmware update / WHOOP app
+                    // re-bond), so connects loop on "Peer removed pairing information". Show the re-pair steps
+                    // right here instead of silently retrying. (5/MG firmware reset, 2026-06)
+                    if let guide = live.reconnectGuide { reconnectGuideBanner(guide) }
+                    // Bond-refused guidance, shown right here on Live where people actually connect (it
+                    // also appears in Settings). A 5/MG strap still bonded to the WHOOP app refuses pairing
+                    // with "Encryption is insufficient" — this tells the user to free it and re-pair.
+                    if let hint = live.pairingHint { pairingHintBanner(hint) }
+                    if liveTrackingOptedIn {
+                        bodyConsole
+                        // Low-bandwidth fallback note (#80): the radio couldn't sustain the WHOOP 4 R10/R11 raw
+                        // realtime burst, so live HR is riding the standard BLE Heart-Rate profile instead.
+                        if Self.shouldShowStandardHRNote(live.standardHRMode) {
+                            standardHRNote(live.standardHRMode ?? "")
+                        }
+                        signalTrustRail
+                    }
+                    sessionConsole
+                    if !activeConnection { modelPicker }
+                    controls
+                    manageDevicesRow
+                    // Diagnostics remain available while a stream exists, but no longer dominate the
+                    // disconnected first impression. Test Centre remains the durable diagnostics home.
+                    LiveLogCard()
+                } else {
+                    // Offline is a device state, not an empty diagnostics console. Give the band room to
+                    // breathe, keep one obvious action, and fold model/device setup into one quiet panel.
+                    offlineDeviceHero
+                    if let guide = live.reconnectGuide { reconnectGuideBanner(guide) }
+                    if let hint = live.pairingHint { pairingHintBanner(hint) }
+                    offlineConnectionOptions
                 }
-                signalTrustRail
-                sessionConsole
-                // Show the strap picker whenever we're not actively streaming, so a user with both a
-                // WHOOP 4 and a 5/MG can switch between them. (It used to hide once `bonded`, which is
-                // sticky across disconnects — so after the first pairing the picker vanished for good.)
-                if !activeConnection { modelPicker }
-                controls
-                manageDevicesRow
-                LiveLogCard()
             }
         }
-        .onAppear { refreshLiveSession(); consumeActiveWorkoutRequest() }
-        .onDisappear { model.stopRealtimeHR() }
+        .onAppear { refreshConnectionSnapshot(); consumeActiveWorkoutRequest() }
+        .onDisappear { stopLiveTracking() }
         // A fresh bond/connection re-arms the BLE stream (Apple must re-send startRealtime on a new
-        // connection) WITHOUT bumping the ref-count — `refreshLiveSession`'s `startRealtimeHR` already
-        // counted this screen once on `.onAppear`, balanced by the single `stopRealtimeHR` above.
+        // connection) WITHOUT bumping the ref-count. A connection event never opts the user in; it only
+        // re-arms when this visible Live session already holds its one explicit lease.
         // Re-counting here (multiple bonded/connected events per appearance, one disappear) would leave
         // the stream stuck armed after leaving Live (#681 ref-count balance).
         .onChangeCompat(of: live.bonded) { _ in reconnectLiveSession() }
@@ -148,6 +157,77 @@ struct LiveView: View {
                 .environmentObject(model)
                 .environmentObject(live)
         }
+    }
+
+    /// Disconnected is fundamentally a device-status state; calling it "Live HR" before a stream exists
+    /// made a setup page sound like an engineering console. Once the band is connected, the screen earns
+    /// the live title and the copy pivots to the real-time signal.
+    private var screenTitle: LocalizedStringKey {
+        live.connected ? "Live heart rate" : "Band status"
+    }
+
+    private var screenSubtitle: LocalizedStringKey {
+        live.connected ? "Your band, beat by beat." : "Connection, battery and sync at a glance."
+    }
+
+    /// Live deliberately avoids the vivid day-cycle scene used by the daily dashboard. This is a
+    /// focused sensor surface: graphite at the top, fading into the app canvas. The restraint is
+    /// deliberate — large decorative light blobs made this utilitarian screen look unfinished.
+    private var liveScaffoldBackdrop: AnyView {
+        AnyView(
+            LinearGradient(
+                colors: [
+                    Color.black,
+                    Color(red: 0.075, green: 0.075, blue: 0.08),
+                    Color.black.opacity(0.74),
+                    Color.clear
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 350)
+        )
+    }
+
+    /// Explicit control for the high-rate stream. Connection/history sync remain available with this
+    /// off, and the advanced Continuous HRV background option remains a separate Settings choice.
+    private var liveTrackingCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: liveTrackingOptedIn ? "waveform.path.ecg.rectangle.fill" : "waveform.path.ecg.rectangle")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(liveTrackingOptedIn ? StrandPalette.accent : StrandPalette.textSecondary)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(liveTrackingOptedIn ? "Live Tracking is on" : "Live Tracking")
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text("High-rate, beat-by-beat tracking uses more strap and phone battery. It runs only while this Live screen and NOOP are in the foreground.")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Connection and history sync continue when it is off. Continuous HRV capture is a separate option in Settings.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                NoopButton(liveTrackingOptedIn ? "Stop Live Tracking" : "Start Live Tracking",
+                           systemImage: liveTrackingOptedIn ? "stop.fill" : "play.fill",
+                           kind: liveTrackingOptedIn ? .secondary : .primary,
+                           fullWidth: true) {
+                    liveTrackingOptedIn ? stopLiveTracking() : startLiveTracking()
+                }
+                .disabled(!activeConnection)
+                .help(liveTrackingOptedIn
+                      ? "Stop the high-rate foreground stream. Connection and history sync continue."
+                      : "Start high-rate tracking for this foreground Live session.")
+            }
+        }
+        .accessibilityElement(children: .contain)
     }
 
     // MARK: - Frosted card helper (matches LiquidTodayView.card: rounded 22 + resting hairline)
@@ -491,7 +571,8 @@ struct LiveView: View {
     private var modelPicker: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Text("Strap").font(StrandFont.caption).foregroundStyle(StrandPalette.textSecondary)
+                // This control sits directly on the scheme-invariant dark scene, not inside a card.
+                Text("Strap").font(StrandFont.caption).foregroundStyle(StrandPalette.onDarkSecondary)
                 SegmentedPillControl(
                     WhoopModel.allCases,
                     selection: Binding(
@@ -517,46 +598,214 @@ struct LiveView: View {
 
     private var whoop5PairingNote: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "info.circle").foregroundStyle(StrandPalette.accent)
+            Image(systemName: "info.circle").foregroundStyle(StrandPalette.onDarkPrimary)
             Text("WHOOP 5.0/MG pairs with one app at a time. If a scan finds nothing, unpair it in the official WHOOP app and fully close that app, then Scan again.")
                 .font(StrandFont.footnote)
-                .foregroundStyle(StrandPalette.textSecondary)
+                .foregroundStyle(StrandPalette.onDarkSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    // MARK: - Offline connect callout
+    // MARK: - Offline device experience
 
-    /// The above-the-fold primary Connect affordance, shown only while `!live.connected`. Promotes the
-    /// formerly-inert "Scan and connect…" caption into a frosted card with a real, full-width
-    /// `scanButton` (the same one `controls` renders below), so the offline state has an obvious action
-    /// up top instead of burying it past the Signal Trust grid. Shared with macOS — the wide layout
-    /// shows it stacked above the console, and `scanButton` already styles full-width.
-    @ViewBuilder private var offlineConnectCallout: some View {
-        card {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 10) {
+    /// A single, calm device page while the radio is offline. The permanent obsidian surface keeps the
+    /// visual hierarchy stable in both app themes; the code-native band silhouette is intentionally
+    /// generic (screenless sensor + fabric loop), so it communicates "your wearable" without borrowing
+    /// a vendor render or pretending to know the user's exact band colour.
+    private var offlineDeviceHero: some View {
+        let heroShape = RoundedRectangle(cornerRadius: 30, style: .continuous)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 7) {
+                        Circle()
+                            .fill(Color.white.opacity(0.48))
+                            .frame(width: 7, height: 7)
+                        Text("NOT CONNECTED")
+                            .font(StrandFont.overline)
+                            .tracking(StrandFont.overlineTracking)
+                            .foregroundStyle(StrandPalette.onDarkSecondary)
+                    }
+                    Text(activeDeviceName)
+                        .font(StrandFont.rounded(31, weight: .semibold))
+                        .foregroundStyle(StrandPalette.onDarkPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    Text(selectedModel.displayName)
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.onDarkTertiary)
+                }
+
+                Spacer(minLength: 8)
+
+                offlineBatteryBadge
+            }
+
+            LiveBandSilhouette()
+                .scaleEffect(0.74)
+                .frame(maxWidth: .infinity)
+                .frame(height: 126)
+                .accessibilityHidden(true)
+
+            HStack(spacing: 0) {
+                offlineHeroMetric("Worn", "—")
+                offlineMetricDivider
+                offlineHeroMetric("Last sync", LiveSyncFormat.lastSyncLabel(live.lastSyncedAt))
+            }
+            .padding(.bottom, 13)
+
+            Button {
+                model.scan(model: selectedModel)
+            } label: {
+                HStack(spacing: 9) {
                     Image(systemName: "antenna.radiowaves.left.and.right")
-                        .foregroundStyle(StrandPalette.accent)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Start a live stream")
+                        .font(.system(size: 16, weight: .semibold))
+                    Text("Connect band")
+                        .font(StrandFont.headline)
+                }
+                .foregroundStyle(Color.black)
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(Color.white, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
+            }
+            .buttonStyle(LiquidPressStyle())
+            .accessibilityHint("Scans for the selected band and connects to it.")
+        }
+        .padding(18)
+        .background {
+            heroShape
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.105, green: 0.105, blue: 0.115),
+                            Color(red: 0.035, green: 0.035, blue: 0.04)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        }
+        .overlay {
+            heroShape.strokeBorder(
+                LinearGradient(
+                    colors: [Color.white.opacity(0.16), Color.white.opacity(0.035)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                lineWidth: 1
+            )
+        }
+        .shadow(color: Color.black.opacity(0.18), radius: 18, y: 10)
+    }
+
+    /// Battery remains useful while disconnected because the last cached value helps explain a band
+    /// that will not wake. "Cached" is explicit so a stale BLE reading can never look live.
+    private var offlineBatteryBadge: some View {
+        VStack(alignment: .trailing, spacing: 5) {
+            Text("BATTERY")
+                .font(StrandFont.overline)
+                .tracking(StrandFont.overlineTracking)
+                .foregroundStyle(StrandPalette.onDarkTertiary)
+            HStack(spacing: 6) {
+                LiveBatteryGlyph(level: live.batteryPct)
+                    .frame(width: 25, height: 12)
+                Text(live.batteryPct.map { "\(Int($0.rounded()))%" } ?? "—")
+                    .font(StrandFont.captionNumber)
+                    .foregroundStyle(StrandPalette.onDarkPrimary)
+            }
+            Text("last seen")
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.onDarkTertiary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            live.batteryPct.map { "Last seen battery \(Int($0.rounded())) percent" }
+                ?? "Battery not available"
+        )
+    }
+
+    private func offlineHeroMetric(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label.uppercased())
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.onDarkTertiary)
+            Text(value)
+                .font(StrandFont.captionNumber)
+                .foregroundStyle(StrandPalette.onDarkSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var offlineMetricDivider: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.11))
+            .frame(width: 1, height: 34)
+            .padding(.horizontal, 12)
+            .accessibilityHidden(true)
+    }
+
+    /// Secondary setup stays together in one ordinary card, below the device hero. It is intentionally
+    /// less prominent than Connect: most people choose a band family once, and device management is an
+    /// escape hatch rather than a competing primary action.
+    private var offlineConnectionOptions: some View {
+        card {
+            VStack(alignment: .leading, spacing: 15) {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Band model")
                             .font(StrandFont.headline)
                             .foregroundStyle(StrandPalette.textPrimary)
-                        // Name the band Scan will connect to, and point pairing/switching at Devices — so
-                        // an offline user knows both what this button does and where to add a different band.
-                        Text("Scan connects to \(activeDeviceName). To pair or switch bands, open Devices.")
-                            .font(StrandFont.subhead)
+                        Text("Choose the family NOOP should look for.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                    }
+                    Spacer(minLength: 8)
+                    Button { router.openDevices() } label: {
+                        HStack(spacing: 5) {
+                            Text("Devices")
+                            Image(systemName: "chevron.right")
+                        }
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .padding(.horizontal, 12)
+                        .frame(height: 36)
+                        .background(StrandPalette.surfaceInset, in: Capsule())
+                        .overlay(Capsule().strokeBorder(StrandPalette.hairline, lineWidth: 1))
+                    }
+                    .buttonStyle(LiquidPressStyle())
+                    .accessibilityHint("Pair or switch bands.")
+                }
+
+                SegmentedPillControl(
+                    WhoopModel.allCases,
+                    selection: Binding(
+                        get: { selectedModel },
+                        set: { newModel in
+                            guard newModel.rawValue != selectedModelRaw else { return }
+                            selectedModelRaw = newModel.rawValue
+                            model.prepareStrapSwitch()
+                        }
+                    ),
+                    label: { $0.displayName }
+                )
+
+                if selectedModel == .whoop5mg {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .accessibilityHidden(true)
+                        Text("WHOOP 5.0/MG can pair with one app at a time. If it is not found, unpair it from the WHOOP app and close that app before trying again.")
+                            .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    Spacer(minLength: 0)
                 }
-                scanButton
             }
         }
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .strokeBorder(StrandPalette.accent.opacity(0.30), lineWidth: 1))
     }
 
     // MARK: - Manage devices link
@@ -568,9 +817,7 @@ struct LiveView: View {
     private var manageDevicesRow: some View {
         Button { router.openDevices() } label: {
             HStack(spacing: 12) {
-                Image(systemName: "badge.plus.radiowaves.right")
-                    .font(StrandFont.headline)
-                    .foregroundStyle(StrandPalette.accent)
+                DepthGlyph("badge.plus.radiowaves.right", size: 38)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Manage devices")
@@ -661,12 +908,22 @@ struct LiveView: View {
         .disabled(!live.connected)
     }
 
-    /// Live tab appeared: take a ref-count on the realtime stream (arms it on the 0→1 edge) and pull a
-    /// battery reading. Balanced by the single `stopRealtimeHR()` on `.onDisappear`.
-    private func refreshLiveSession() {
-        guard activeConnection else { return }
+    /// Opening Live is read-only until the user taps Start Live Tracking. A low-rate battery/status
+    /// refresh is safe and does not acquire the high-rate lease.
+    private func refreshConnectionSnapshot() {
+        if activeConnection { model.getBattery() }
+    }
+
+    private func startLiveTracking() {
+        guard activeConnection, !liveTrackingOptedIn else { return }
+        liveTrackingOptedIn = true
         model.startRealtimeHR()
-        model.getBattery()
+    }
+
+    private func stopLiveTracking() {
+        guard liveTrackingOptedIn else { return }
+        liveTrackingOptedIn = false
+        model.stopRealtimeHR()
     }
 
     /// Honour a one-shot "Return to workout" from the Today indicator card: present the in-exercise screen
@@ -685,8 +942,154 @@ struct LiveView: View {
     /// these events can fire several times per appearance against the single `.onDisappear` release.
     private func reconnectLiveSession() {
         guard activeConnection else { return }
-        model.rearmRealtimeIfWanted()
+        if liveTrackingOptedIn { model.rearmRealtimeIfWanted() }
         model.getBattery()
+    }
+}
+
+// MARK: - Offline device artwork
+
+/// A tiny, code-native battery glyph for the permanently-dark offline hero. It intentionally shows the
+/// last cached percentage in neutral white rather than a health/status colour: disconnected data is
+/// context, not a live success or warning state.
+private struct LiveBatteryGlyph: View {
+    let level: Double?
+
+    private var fraction: CGFloat {
+        CGFloat(max(0, min(100, level ?? 0)) / 100)
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let bodyWidth = proxy.size.width - 3
+            let batteryShape = RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+            ZStack(alignment: .leading) {
+                batteryShape
+                    .strokeBorder(Color.white.opacity(0.62), lineWidth: 1)
+                    .frame(width: bodyWidth, height: proxy.size.height)
+                batteryShape
+                    .fill(Color.white.opacity(level == nil ? 0.15 : 0.88))
+                    .frame(
+                        width: max(level == nil ? 0 : 2, (bodyWidth - 4) * fraction),
+                        height: max(0, proxy.size.height - 4)
+                    )
+                    .padding(.leading, 2)
+                Capsule()
+                    .fill(Color.white.opacity(0.48))
+                    .frame(width: 2, height: proxy.size.height * 0.42)
+                    .offset(x: bodyWidth + 1)
+            }
+        }
+    }
+}
+
+/// Original screenless-band silhouette built entirely from SwiftUI shapes. The fabric loop, polished
+/// sensor pod, edge reflection and grounding shadow provide a product-render feel without bundling or
+/// imitating a vendor photograph.
+private struct LiveBandSilhouette: View {
+    var body: some View {
+        ZStack {
+            Ellipse()
+                .fill(Color.black.opacity(0.58))
+                .frame(width: 190, height: 28)
+                .blur(radius: 9)
+                .offset(y: 58)
+
+            ZStack {
+                Capsule()
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.10, green: 0.10, blue: 0.11),
+                                Color(red: 0.34, green: 0.34, blue: 0.36),
+                                Color(red: 0.07, green: 0.07, blue: 0.075)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        style: StrokeStyle(lineWidth: 32, lineCap: .round)
+                    )
+                    .frame(width: 220, height: 100)
+
+                Capsule()
+                    .stroke(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.38), Color.clear, Color.white.opacity(0.11)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+                    .frame(width: 220, height: 100)
+
+                // Quiet weave ridges, masked to the loop so the open centre stays physically empty.
+                ZStack {
+                    ForEach(-7...7, id: \.self) { index in
+                        Capsule()
+                            .fill(Color.white.opacity(index.isMultiple(of: 2) ? 0.07 : 0.035))
+                            .frame(width: 250, height: 1)
+                            .rotationEffect(.degrees(28))
+                            .offset(y: CGFloat(index) * 8)
+                    }
+                }
+                .frame(width: 220, height: 100)
+                .mask {
+                    Capsule()
+                        .stroke(style: StrokeStyle(lineWidth: 29, lineCap: .round))
+                }
+            }
+            .rotationEffect(.degrees(-13))
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 25, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.42, green: 0.42, blue: 0.44),
+                                Color(red: 0.11, green: 0.11, blue: 0.12),
+                                Color.black
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+
+                RoundedRectangle(cornerRadius: 25, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.70),
+                                Color.white.opacity(0.14),
+                                Color.black.opacity(0.9)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.62), Color.white.opacity(0.02)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 3, height: 74)
+                    .offset(x: -23, y: -8)
+
+                VStack(spacing: 5) {
+                    Capsule().fill(Color.white.opacity(0.20)).frame(width: 18, height: 2)
+                    Capsule().fill(Color.white.opacity(0.12)).frame(width: 12, height: 2)
+                }
+                .offset(y: 37)
+            }
+            .frame(width: 64, height: 122)
+            .rotationEffect(.degrees(11))
+            .offset(x: 28, y: -2)
+            .shadow(color: Color.black.opacity(0.68), radius: 10, x: 7, y: 8)
+        }
     }
 }
 
@@ -794,11 +1197,12 @@ private struct LiveHeartReadout: View {
                     } else {
                         Text("—")
                             .font(StrandFont.rounded(88, weight: .semibold))
-                            .foregroundStyle(StrandPalette.textTertiary)
+                            // The vessel well is permanently dark in every app theme.
+                            .foregroundStyle(StrandPalette.onDarkPrimary)
                     }
                     Text("bpm")
                         .font(StrandFont.caption)
-                        .foregroundStyle(StrandPalette.textSecondary)
+                        .foregroundStyle(StrandPalette.onDarkSecondary)
                     if liveZone >= 1 {
                         Text("ZONE \(liveZone)")
                             .font(StrandFont.overline)
