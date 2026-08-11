@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
+import logging
+import math
 import re
 import secrets
-from contextlib import asynccontextmanager
+import time
+from collections import deque
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
@@ -53,6 +58,7 @@ from app.repository import (
     PostgresRepository,
     Repository,
     SyncConflictError,
+    SyncRetiredError,
 )
 
 RAW_NOTICE = (
@@ -71,6 +77,204 @@ SOCIAL_SYNC_DAILY_RANGES: dict[str, tuple[float, float]] = {
 SOCIAL_SYNC_DAILY_METRICS = frozenset(SOCIAL_SYNC_DAILY_RANGES)
 DEVICE_RE = re.compile(IDENTIFIER_PATTERN)
 security = HTTPBearer(auto_error=False)
+logger = logging.getLogger("noop.retention")
+
+
+class RequestSizeLimitMiddleware:
+    """Reject oversized HTTP bodies before FastAPI/Pydantic parses public or private routes."""
+
+    def __init__(self, app: Any, *, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = {key.lower(): value for key, value in scope.get("headers", ())}
+        declared = headers.get(b"content-length")
+        if declared is not None:
+            try:
+                declared_length = int(declared.decode("ascii"))
+            except (UnicodeDecodeError, ValueError):
+                await JSONResponse(
+                    status_code=400, content={"detail": "invalid Content-Length"}
+                )(scope, receive, send)
+                return
+            if declared_length < 0:
+                await JSONResponse(
+                    status_code=400, content={"detail": "invalid Content-Length"}
+                )(scope, receive, send)
+                return
+            if declared_length > self.max_bytes:
+                await JSONResponse(
+                    status_code=413,
+                    content={"detail": "request body is too large"},
+                )(scope, receive, send)
+                return
+
+        received = 0
+
+        async def limited_receive() -> dict[str, Any]:
+            nonlocal received
+            message = await receive()
+            if message.get("type") == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    # FastAPI preserves an HTTPException raised by receive(), while it maps an
+                    # arbitrary exception during body parsing to a generic 400 response.
+                    raise HTTPException(
+                        status_code=413,
+                        detail="request body is too large",
+                    )
+            return message
+
+        await self.app(scope, limited_receive, send)
+
+
+class SlidingWindowRateLimiter:
+    """Bounded, process-local sliding-window limiter with no plaintext secrets."""
+
+    def __init__(
+        self,
+        *,
+        limit: int,
+        window_seconds: float,
+        max_keys: int,
+    ) -> None:
+        self.limit = limit
+        self.window_seconds = window_seconds
+        self.max_keys = max_keys
+        self._buckets: dict[str, deque[float]] = {}
+        self._lock = asyncio.Lock()
+        self._last_full_cleanup = 0.0
+
+    async def consume(self, key: str) -> tuple[bool, int]:
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+        async with self._lock:
+            if now - self._last_full_cleanup >= self.window_seconds:
+                empty_keys: list[str] = []
+                for stored_key, stored_bucket in self._buckets.items():
+                    while stored_bucket and stored_bucket[0] <= cutoff:
+                        stored_bucket.popleft()
+                    if not stored_bucket:
+                        empty_keys.append(stored_key)
+                for empty_key in empty_keys:
+                    del self._buckets[empty_key]
+                self._last_full_cleanup = now
+
+            # Collapse excess unique credentials into one fail-closed bucket.
+            # This bounds memory and prevents a token-spray attack from creating
+            # an unbounded dictionary or bypassing the direct-origin bucket.
+            if key not in self._buckets and len(self._buckets) >= self.max_keys:
+                key = "overflow"
+            bucket = self._buckets.setdefault(key, deque())
+            while bucket and bucket[0] <= cutoff:
+                bucket.popleft()
+            if len(bucket) >= self.limit:
+                retry_after = max(
+                    1,
+                    math.ceil(bucket[0] + self.window_seconds - now),
+                )
+                return False, retry_after
+            bucket.append(now)
+            return True, 0
+
+
+class RateLimitMiddleware:
+    """Limit every API request by direct peer and bearer credential digest."""
+
+    def __init__(
+        self,
+        app: Any,
+        *,
+        credential_limit: int,
+        origin_limit: int,
+        max_keys: int,
+    ) -> None:
+        self.app = app
+        self._credential = SlidingWindowRateLimiter(
+            limit=credential_limit,
+            window_seconds=60,
+            max_keys=max_keys,
+        )
+        self._origin = SlidingWindowRateLimiter(
+            limit=origin_limit,
+            window_seconds=60,
+            max_keys=max_keys,
+        )
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http" or not scope.get("path", "").startswith("/v1"):
+            await self.app(scope, receive, send)
+            return
+
+        client = scope.get("client")
+        direct_peer = str(client[0]) if client else "unknown"
+        origin_key = "origin:" + hashlib.sha256(direct_peer.encode("utf-8")).hexdigest()
+        allowed, retry_after = await self._origin.consume(origin_key)
+        if not allowed:
+            await self._reject(scope, receive, send, retry_after, "origin")
+            return
+
+        headers = {key.lower(): value for key, value in scope.get("headers", ())}
+        authorization = headers.get(b"authorization", b"")
+        bearer_credential = (
+            authorization[7:].strip()
+            if authorization.lower().startswith(b"bearer ")
+            else b""
+        )
+        if bearer_credential:
+            credential_key = (
+                "credential:" + hashlib.sha256(bearer_credential).hexdigest()
+            )
+            allowed, retry_after = await self._credential.consume(credential_key)
+            if not allowed:
+                await self._reject(
+                    scope,
+                    receive,
+                    send,
+                    retry_after,
+                    "credential",
+                )
+                return
+
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _reject(
+        scope: dict[str, Any],
+        receive: Any,
+        send: Any,
+        retry_after: int,
+        limiter_scope: str,
+    ) -> None:
+        await JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            content={"detail": "request rate limit exceeded"},
+            headers={
+                "Retry-After": str(retry_after),
+                "Cache-Control": "no-store",
+                "X-Noop-RateLimit-Scope": limiter_scope,
+            },
+        )(scope, receive, send)
+
+
+def _validation_errors_without_inputs(
+    errors: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep useful validation locations/messages without reflecting request values."""
+
+    def strip(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: strip(item) for key, item in value.items() if key != "input"}
+        if isinstance(value, (list, tuple)):
+            return [strip(item) for item in value]
+        return value
+
+    return [strip(error) for error in errors]
 
 
 class RetentionRunRequest(StrictModel):
@@ -120,6 +324,45 @@ def _new_invite_code() -> tuple[str, str]:
         (compact[:4], compact[4:10], compact[10:16], compact[16:22], compact[22:])
     )
     return display, compact
+
+
+async def _run_retention_once(
+    repository: Repository,
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+) -> dict[str, int]:
+    """Apply the configured global retention window exactly once.
+
+    Keeping one cycle separate from the scheduler makes the destructive policy
+    deterministic and testable. A disabled policy is always a no-op.
+    """
+
+    if settings.retention_days is None:
+        return {}
+    reference = (now or datetime.now(UTC)).astimezone(UTC)
+    cutoff = reference - timedelta(days=settings.retention_days)
+    replay_guard_until = reference + timedelta(
+        days=settings.idempotency_replay_guard_days
+    )
+    return await repository.purge_before(cutoff, None, replay_guard_until)
+
+
+async def _retention_worker(repository: Repository, settings: Settings) -> None:
+    """Run retention periodically without making API availability depend on it."""
+
+    interval_seconds = settings.retention_interval_hours * 60 * 60
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            counts = await _run_retention_once(repository, settings)
+            logger.info("scheduled retention completed: %s", counts)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # A transient database failure must be visible to operators, but it
+            # must not take down ingestion. The next bounded cycle retries.
+            logger.exception("scheduled retention failed")
 
 
 async def require_friend_profile(
@@ -187,9 +430,19 @@ def create_app(
             or repository is None
         )
         await runtime_repository.startup()
+        retention_task: asyncio.Task[None] | None = None
+        if runtime_settings.retention_days is not None:
+            retention_task = asyncio.create_task(
+                _retention_worker(runtime_repository, runtime_settings),
+                name="noop-retention",
+            )
         try:
             yield
         finally:
+            if retention_task is not None:
+                retention_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await retention_task
             await runtime_repository.shutdown()
 
     app = FastAPI(
@@ -200,20 +453,26 @@ def create_app(
     )
     app.state.settings = runtime_settings
     app.state.repository = runtime_repository
+    app.add_middleware(
+        RequestSizeLimitMiddleware,
+        max_bytes=runtime_settings.max_request_bytes,
+    )
+    app.add_middleware(
+        RateLimitMiddleware,
+        credential_limit=runtime_settings.rate_limit_requests_per_minute,
+        origin_limit=runtime_settings.rate_limit_origin_requests_per_minute,
+        max_keys=runtime_settings.rate_limit_max_keys,
+    )
 
     @app.exception_handler(RequestValidationError)
     async def redact_request_validation_secrets(
         _: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        errors = []
-        for validation_error in exc.errors():
-            redacted = dict(validation_error)
-            if "member_token" in redacted.get("loc", ()):
-                redacted["input"] = "[redacted]"
-            errors.append(redacted)
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            content=jsonable_encoder({"detail": errors}),
+            content=jsonable_encoder(
+                {"detail": _validation_errors_without_inputs(exc.errors())}
+            ),
         )
 
     @app.middleware("http")
@@ -276,6 +535,25 @@ def create_app(
         # Public and intentionally contains no database/user information.
         return {"status": "ok"}
 
+    @app.get("/readyz", tags=["operations"])
+    async def readiness() -> Response:
+        # Keep the public response intentionally generic while making an
+        # orchestrator's traffic decision depend on an actual database query.
+        try:
+            ready = await runtime_repository.ready()
+        except Exception:
+            ready = False
+        if not ready:
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={"status": "not_ready"},
+                headers={"Cache-Control": "no-store"},
+            )
+        return JSONResponse(
+            content={"status": "ready"},
+            headers={"Cache-Control": "no-store"},
+        )
+
     router = APIRouter(
         prefix="/v1",
         dependencies=[Depends(require_api_token)],
@@ -298,6 +576,11 @@ def create_app(
             "status": "ok",
             "version": __version__,
             "retention_days": runtime_settings.retention_days,
+            "retention_interval_hours": (
+                runtime_settings.retention_interval_hours
+                if runtime_settings.retention_days is not None
+                else None
+            ),
             "stats": stats,
             "notice": RAW_NOTICE,
         }
@@ -711,7 +994,11 @@ def create_app(
         except ValidationError as exc:
             return JSONResponse(
                 status_code=422,
-                content={"detail": jsonable_encoder(exc.errors())},
+                content={
+                    "detail": jsonable_encoder(
+                        _validation_errors_without_inputs(exc.errors())
+                    )
+                },
             )
         if getattr(request.state, "auth_scope", None) == "social_member":
             member = request.state.friend_profile
@@ -775,6 +1062,8 @@ def create_app(
             )
         except SyncConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except SyncRetiredError as exc:
+            raise HTTPException(status_code=410, detail=str(exc)) from exc
         except FriendForbiddenError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
 
@@ -971,7 +1260,11 @@ def create_app(
                 status_code=412,
                 detail=f"set X-Noop-Confirm to {expected!r}",
             )
-        counts = await runtime_repository.delete_device(device_id)
+        counts = await runtime_repository.delete_device(
+            device_id,
+            datetime.now(UTC)
+            + timedelta(days=runtime_settings.idempotency_replay_guard_days),
+        )
         return {"status": "deleted", "device_id": device_id, "counts": counts}
 
     @router.post("/admin/retention/run", tags=["data-control"])
@@ -992,7 +1285,12 @@ def create_app(
         if body.device_id is not None:
             _device_id(body.device_id)
         cutoff = datetime.now(UTC) - timedelta(days=runtime_settings.retention_days)
-        counts = await runtime_repository.purge_before(cutoff, body.device_id)
+        counts = await runtime_repository.purge_before(
+            cutoff,
+            body.device_id,
+            datetime.now(UTC)
+            + timedelta(days=runtime_settings.idempotency_replay_guard_days),
+        )
         return {
             "status": "purged",
             "cutoff": cutoff,

@@ -25,7 +25,7 @@ import kotlin.math.roundToInt
 //
 // The pure [ScheduledReportPolicy] + the copy builders are JVM-testable (the CallAlertPolicy idiom); the
 // notifier wires them to a real channel + the persisted dedupe markers in NoopPrefs. Call sites:
-//   - morning recap: the AppViewModel days collector, when a new local-day row with a banked night appears.
+//   - morning recap: the BLE post-offload scorer, only after its database transaction succeeds.
 //   - post-workout: after loadWorkouts(), when the newest workout start-ts is newer than the last fired.
 // Both gates survive process death, so the app-open and (future) background call sites can't double-post.
 
@@ -40,10 +40,11 @@ object ScheduledReportPolicy {
      *  night is banked (#567). */
     fun shouldNotifyMorning(
         enabled: Boolean,
+        materializedAfterSync: Boolean,
         chargeOrRestPresent: Boolean,
         lastNotifiedDay: String?,
         reportDay: String,
-    ): Boolean = enabled && chargeOrRestPresent && lastNotifiedDay != reportDay
+    ): Boolean = enabled && materializedAfterSync && chargeOrRestPresent && lastNotifiedDay != reportDay
 
     /** Fire the post-workout summary only for a workout STRICTLY newer than the last one summarised, so a
      *  re-sync of the same backlog never re-notifies. [lastWorkoutTs] is 0 before the first ever. */
@@ -100,12 +101,19 @@ object ScheduledReportNotifier {
      * are never placed in notification text. No-op on every path that fails the policy.
      */
     @SuppressLint("MissingPermission") // guarded by areNotificationsEnabled() + runCatching
-    fun onMorning(context: Context, reportDay: String, chargePct: Int?, restPct: Int?) {
+    fun onMorning(
+        context: Context,
+        reportDay: String,
+        chargePct: Int?,
+        restPct: Int?,
+        materializedAfterSync: Boolean,
+    ) {
         // reportDay is the banked night's day (the resolved today-row's `day`), NOT LocalDate.now() — the
         // calendar day rolls at midnight while the row still resolves to last night's until a new night is
         // banked, which re-fired the recap at the start of a new day for late-nighters (#567).
         if (!ScheduledReportPolicy.shouldNotifyMorning(
                 enabled = NoopPrefs.morningReportEnabled(context),
+                materializedAfterSync = materializedAfterSync,
                 chargeOrRestPresent = chargePct != null || restPct != null,
                 lastNotifiedDay = NoopPrefs.reportMorningDay(context),
                 reportDay = reportDay,

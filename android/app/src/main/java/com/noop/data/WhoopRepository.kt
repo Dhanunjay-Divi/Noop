@@ -326,6 +326,58 @@ class WhoopRepository(private val dao: WhoopDao) {
 
     suspend fun upsertDailyMetrics(days: List<DailyMetric>) = dao.upsertDailyMetrics(days)
     suspend fun upsertSleepSessions(sessions: List<SleepSession>) = dao.upsertSleepSessions(sessions)
+    suspend fun insertHealthConnectSleepSessions(sessions: List<SleepSession>) {
+        if (sessions.isNotEmpty()) dao.insertSleepSessionsIgnoringConflicts(sessions)
+    }
+
+    suspend fun healthConnectSyncStates(recordTypes: List<String>): List<HealthConnectSyncStateRow> =
+        if (recordTypes.isEmpty()) emptyList() else dao.healthConnectSyncStates(recordTypes)
+
+    suspend fun upsertHealthConnectSyncStates(rows: List<HealthConnectSyncStateRow>) {
+        if (rows.isNotEmpty()) dao.upsertHealthConnectSyncStates(rows)
+    }
+
+    suspend fun replaceHealthConnectProjection(
+        fromDay: String,
+        toDay: String,
+        fromTs: Long,
+        toTs: Long,
+        scope: HealthConnectProjectionScope,
+        appleRows: List<AppleDaily>,
+        dailyRows: List<DailyMetric>,
+        metricRows: List<MetricSeriesRow>,
+        sleepRows: List<SleepSession>,
+        workoutRows: List<WorkoutRow>,
+    ) = dao.replaceHealthConnectProjection(
+        source = HEALTH_CONNECT_SOURCE,
+        workoutSource = HEALTH_CONNECT_SOURCE,
+        fromDay = fromDay,
+        toDay = toDay,
+        fromTs = fromTs,
+        toTs = toTs,
+        scope = scope,
+        appleRows = appleRows,
+        dailyRows = dailyRows,
+        metricRows = metricRows,
+        sleepRows = sleepRows,
+        workoutRows = workoutRows,
+    )
+
+    suspend fun mergeHealthConnectProjectionAdditive(
+        appleRows: List<AppleDaily>,
+        dailyRows: List<DailyMetric>,
+        metricRows: List<MetricSeriesRow>,
+        sleepRows: List<SleepSession>,
+        workoutRows: List<WorkoutRow>,
+    ) = dao.mergeHealthConnectProjectionAdditive(
+        source = HEALTH_CONNECT_SOURCE,
+        workoutSource = HEALTH_CONNECT_SOURCE,
+        appleRows = appleRows,
+        dailyRows = dailyRows,
+        metricRows = metricRows,
+        sleepRows = sleepRows,
+        workoutRows = workoutRows,
+    )
 
     /** Delete the computed source's cached daily rows whose day-key is in [from, to] (inclusive,
      *  yyyy-MM-dd). The #277 local-day re-bucketing migration clears the computed UTC-keyed rows over
@@ -1270,15 +1322,18 @@ class WhoopRepository(private val dao: WhoopDao) {
     suspend fun daysMerged(deviceId: String): List<DailyMetric> {
         val imported = unionByDay(importedSourceIds(deviceId).map { dao.days(it) })
         val computed = unionByDay(computedSourceIds(deviceId).map { dao.days(it) })
+        val healthConnect = dao.days(HEALTH_CONNECT_SOURCE)
         val activityFile = dao.days(ACTIVITY_FILE_SOURCE)
         // H5 (#509): days the user hand-edited the sleep of (the edit lives under the computed source); on
         // those days the computed sleep fields win over a re-imported night. Pool the edited sessions across
         // every computed source in the union so a re-add doesn't lose an earlier-id edit's precedence.
         val editedSessions = computedSourceIds(deviceId).flatMap { dao.editedSleepSessions(it) }
-        return mergeActivityFileSteps(
-            mergeDaily(imported = imported, computed = computed, userEditedDays = userEditedDays(editedSessions)),
-            activityFile,
+        val strap = mergeDaily(
+            imported = imported,
+            computed = computed,
+            userEditedDays = userEditedDays(editedSessions),
         )
+        return mergeActivityFileSteps(mergeDaily(imported = strap, computed = healthConnect), activityFile)
     }
 
     /**
@@ -1307,13 +1362,12 @@ class WhoopRepository(private val dao: WhoopDao) {
         combine(
             unionDaysFlow(importedSourceIds(deviceId).map { dao.daysFlow(it) }),
             unionDaysFlow(computedSourceIds(deviceId).map { dao.daysFlow(it) }),
+            dao.daysFlow(HEALTH_CONNECT_SOURCE),
             dao.daysFlow(ACTIVITY_FILE_SOURCE),
             editedSleepSessionsFlow(deviceId),
-        ) { imported, computed, activityFile, edited ->
-            mergeActivityFileSteps(
-                mergeDaily(imported = imported, computed = computed, userEditedDays = userEditedDays(edited)),
-                activityFile,
-            )
+        ) { imported, computed, healthConnect, activityFile, edited ->
+            val strap = mergeDaily(imported, computed, userEditedDays(edited))
+            mergeActivityFileSteps(mergeDaily(strap, healthConnect), activityFile)
         }
 
     /**
@@ -1335,15 +1389,14 @@ class WhoopRepository(private val dao: WhoopDao) {
         combine(
             unionDaysFlow(importedSourceIds(deviceId).map { dao.recentDaysFlow(it, RECENT_DAYS_CAP) }),
             unionDaysFlow(computedSourceIds(deviceId).map { dao.recentDaysFlow(it, RECENT_DAYS_CAP) }),
+            dao.recentDaysFlow(HEALTH_CONNECT_SOURCE, RECENT_DAYS_CAP),
             dao.recentDaysFlow(ACTIVITY_FILE_SOURCE, RECENT_DAYS_CAP),
             editedSleepSessionsFlow(deviceId),
-        ) { imported, computed, activityFile, edited ->
+        ) { imported, computed, healthConnect, activityFile, edited ->
             // recentDaysFlow returns newest-first (DESC LIMIT); mergeDaily re-sorts ascending by day, so the
             // emitted order matches daysMergedFlow exactly.
-            mergeActivityFileSteps(
-                mergeDaily(imported = imported, computed = computed, userEditedDays = userEditedDays(edited)),
-                activityFile,
-            )
+            val strap = mergeDaily(imported, computed, userEditedDays(edited))
+            mergeActivityFileSteps(mergeDaily(strap, healthConnect), activityFile)
         }
 
     /** Pooled user-edited sleep sessions across every computed source in the active∪canonical union, so a
@@ -1373,10 +1426,15 @@ class WhoopRepository(private val dao: WhoopDao) {
         from: Long,
         to: Long,
         limit: Int = DEFAULT_LIMIT,
-    ): List<SleepSession> = mergeSleep(
-        imported = importedSourceIds(deviceId).reversed().flatMap { dao.sleepSessions(it, from, to, limit) },
-        computed = computedSourceIds(deviceId).reversed().flatMap { dao.sleepSessions(it, from, to, limit) },
-    )
+    ): List<SleepSession> {
+        val imported = importedSourceIds(deviceId).reversed()
+            .flatMap { dao.sleepSessions(it, from, to, limit) }
+        val healthConnect = dao.sleepSessions(HEALTH_CONNECT_SOURCE, from, to, limit)
+        val external = mergeSleep(imported = imported, computed = healthConnect)
+        val computed = computedSourceIds(deviceId).reversed()
+            .flatMap { dao.sleepSessions(it, from, to, limit) }
+        return mergeSleep(imported = external, computed = computed)
+    }
 
     /** ALL imported sleep BLOCKS across the active∪canonical union (#814/#1008), keeping every session
      *  per day (a nap + a main night both survive) and dropping only EXACT-duplicate (startTs, endTs)
@@ -1385,8 +1443,13 @@ class WhoopRepository(private val dao: WhoopDao) {
      *  a re-added strap's fresh id still surfaces (the downstream per-day imported-wins split is the
      *  caller's, exactly as before). Mirrors Swift Repository.unionSleepSessions. */
     suspend fun sleepSessionsUnion(deviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT):
-        List<SleepSession> =
-        dedupSleepBlocks(importedSourceIds(deviceId).flatMap { dao.sleepSessions(it, from, to, limit) })
+        List<SleepSession> {
+        val imported = dedupSleepBlocks(
+            importedSourceIds(deviceId).flatMap { dao.sleepSessions(it, from, to, limit) },
+        )
+        val healthConnect = dao.sleepSessions(HEALTH_CONNECT_SOURCE, from, to, limit)
+        return mergeSleep(imported = imported, computed = healthConnect)
+    }
 
     /** The COMPUTED ("-noop") twin of [sleepSessionsUnion]: all computed sleep blocks across the computed
      *  union ids, exact-duplicate blocks dropped (active's computed sibling first). Mirrors Swift
@@ -1767,6 +1830,7 @@ class WhoopRepository(private val dao: WhoopDao) {
                 )
                 appleCompatibleKey(key)?.let {
                     candidates.add(MetricSourceCandidate(APPLE_HEALTH_SOURCE, it))
+                    candidates.add(MetricSourceCandidate(HEALTH_CONNECT_SOURCE, it))
                 }
                 return uniqued(candidates)
             }

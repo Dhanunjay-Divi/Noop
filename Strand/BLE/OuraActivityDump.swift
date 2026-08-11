@@ -24,11 +24,11 @@ final class OuraActivityDump {
     /// research corpus is bounded to ~2× this on disk instead of growing forever. Matches Kotlin `MAX_BYTES`.
     private static let maxBytes = 25 * 1024 * 1024
 
-    private static let iso: ISO8601DateFormatter = {
+    private static var iso: ISO8601DateFormatter {
         let f = ISO8601DateFormatter()
         f.timeZone = TimeZone(identifier: "UTC")
         return f
-    }()
+    }
 
     init(deviceId: String, log: @escaping (String) -> Void) {
         self.deviceId = deviceId

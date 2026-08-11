@@ -3,8 +3,9 @@ import StrandDesign
 
 /// Backup & Sync (folder destination). The Apple mirror of the Android `BackupSyncScreen`: pick a
 /// folder, turn on daily auto-backup (an on-launch catch-up), back up now, or restore from a snapshot
-/// already in that folder. Snapshots are the existing `.noopbak` whole-DB format. Point the folder at
-/// Google Drive / iCloud / Dropbox for off-device sync with no in-app cloud account.
+/// already in that folder. Automatic snapshots remain the existing unencrypted `.noopbak` ZIP format
+/// because NOOP never persists a passphrase. Point the folder at Google Drive / iCloud / Dropbox for
+/// off-device sync with no in-app cloud account, and rely on that storage provider's encryption.
 struct BackupSyncView: View {
     @EnvironmentObject var model: AppModel
 
@@ -32,11 +33,12 @@ struct BackupSyncView: View {
     @State private var snapshots: [FolderBackup.Snapshot] = []
     @State private var pendingRestore: FolderBackup.Snapshot?
     @State private var confirmRestore = false
+    @State private var showRestorePassphrase = false
 
     var body: some View {
         ScreenScaffold(
             title: "Backup & Sync",
-            subtitle: "Save a full backup to a folder you choose - point it at Google Drive, iCloud or Dropbox for off-device sync."
+            subtitle: "Save full automatic backups to a folder you choose. They are not passphrase-encrypted, so use storage you trust."
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 serverCard
@@ -59,13 +61,27 @@ struct BackupSyncView: View {
         }
         // Explicit in-app destructive confirmation BEFORE any overwrite (must-fix #2).
         .alert("Restore this backup?", isPresented: $confirmRestore, presenting: pendingRestore) { snap in
-            Button("Replace all data", role: .destructive) { runRestore(snap) }
+            Button("Replace all data", role: .destructive) { requestRestorePassphrase() }
             Button("Cancel", role: .cancel) { pendingRestore = nil }
         } message: { snap in
             // A hand-named file with no resolved date (timeMs 0) confirms by NAME, not "1 Jan 1970".
             Text(snap.timeMs > 0
                 ? "Replace all current data with the backup from \(absoluteTime(snap.timeMs))? This cannot be undone."
                 : "Replace all current data with the backup \(snap.name)? This cannot be undone.")
+        }
+        .sheet(isPresented: $showRestorePassphrase) {
+            BackupPassphraseSheet(
+                mode: .unlockFolderBackup,
+                onCancel: {
+                    showRestorePassphrase = false
+                    pendingRestore = nil
+                },
+                onSubmit: { passphrase in
+                    showRestorePassphrase = false
+                    guard let snapshot = pendingRestore else { return }
+                    runRestore(snapshot, passphrase: passphrase)
+                }
+            )
         }
         .alert("Re-upload all local data?", isPresented: $confirmServerReplay) {
             Button("Re-upload", role: .destructive) { syncServer(fullReplay: true) }
@@ -208,6 +224,9 @@ struct BackupSyncView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Text("Tip: choose a folder in iCloud Drive and your backups sync to all your Apple devices automatically, no account setup needed.")
                     .font(StrandFont.caption).foregroundStyle(StrandPalette.accent)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Folder snapshots are standard unencrypted .noopbak ZIP files for compatibility with older NOOP and Android. Use Settings → Export encrypted backup when sharing a sensitive copy; NOOP never stores that passphrase, so unattended backups cannot use it.")
+                    .font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
                 NoopButton(folderLabel == nil ? "Choose folder" : "Change folder",
                            systemImage: "folder", kind: .secondary) { chooseFolder() }
@@ -409,14 +428,27 @@ struct BackupSyncView: View {
         }
     }
 
-    private func runRestore(_ snap: FolderBackup.Snapshot) {
+    private func requestRestorePassphrase() {
+        // Dismiss the destructive alert before presenting SecureFields. Asking even for a plaintext
+        // snapshot keeps one predictable flow; the sheet explicitly says legacy/automatic backups can
+        // leave the field blank.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            showRestorePassphrase = true
+        }
+    }
+
+    private func runRestore(_ snap: FolderBackup.Snapshot, passphrase: String) {
         pendingRestore = nil
         busy = true
         Task {
             // The restore is synchronous file I/O; run it off the main actor so the UI stays responsive
             // for a large store, then report on the main actor.
             let result = await Task.detached(priority: .userInitiated) {
-                FolderBackup.restore(snapshotNamed: snap.name)
+                FolderBackup.restore(
+                    snapshotNamed: snap.name,
+                    passphrase: passphrase.isEmpty ? nil : passphrase
+                )
             }.value
             await MainActor.run {
                 busy = false
@@ -486,6 +518,11 @@ private struct RestorePickerSheet: View {
                 }
             }
         }
+        #if os(macOS)
+        // A List has no useful intrinsic sheet height on macOS; without this the picker can collapse to
+        // its title and Cancel button even when snapshots exist. The list remains scrollable at this size.
+        .frame(width: 460, height: 420)
+        #endif
     }
 
     /// The row's headline: a friendly date when we resolved one, else the filename (never the epoch date).

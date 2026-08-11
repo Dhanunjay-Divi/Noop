@@ -5,17 +5,15 @@
 import Foundation
 import AuthenticationServices
 
-/// BYO-app OAuth2 authorization-code AuthProvider. Runs ASWebAuthenticationSession for the interactive
-/// consent, exchanges the code for tokens (Keychain), and refreshes on demand. The `session` is injected
-/// so the token exchange/refresh POSTs are URLProtocol-testable; the interactive step is integration-only.
+/// Oura's documented client-side-only OAuth provider. It uses a public client id and receives a bearer
+/// token through ASWebAuthenticationSession; no confidential secret is compiled into the app. Oura does
+/// not issue refresh tokens for this flow, so expiry or a 401 requires an explicit reauthorization.
 final class OuraOAuthProvider: NSObject, AuthProvider, ASWebAuthenticationPresentationContextProviding {
     private let credentials: OuraCredentials
-    private let session: URLSession
     private var anchor: ASPresentationAnchor?
 
-    init(credentials: OuraCredentials, session: URLSession = .shared) {
+    init(credentials: OuraCredentials) {
         self.credentials = credentials
-        self.session = session
     }
 
     var isConnected: Bool { OuraTokenStore.isConnected }
@@ -24,15 +22,14 @@ final class OuraOAuthProvider: NSObject, AuthProvider, ASWebAuthenticationPresen
     func validAccessToken() async throws -> String {
         guard let tokens = OuraTokenStore.load() else { throw OuraError.notConnected }
         if !tokens.isExpired { return tokens.accessToken }
-        return try await refreshedAccessToken()
+        OuraTokenStore.clear()
+        throw OuraError.reauthorizationRequired
     }
 
     /// Unconditionally refresh, regardless of the stored token's expiry state.
     func refreshedAccessToken() async throws -> String {
-        guard let refresh = OuraTokenStore.load()?.refreshToken else { throw OuraError.notConnected }
-        let refreshed = try await exchange(OuraOAuth.refreshRequest(credentials: credentials, refreshToken: refresh))
-        guard OuraTokenStore.save(refreshed) else { throw OuraError.tokenExchangeFailed("keychain write failed") }
-        return refreshed.accessToken
+        OuraTokenStore.clear()
+        throw OuraError.reauthorizationRequired
     }
 
     @MainActor
@@ -52,25 +49,8 @@ final class OuraOAuthProvider: NSObject, AuthProvider, ASWebAuthenticationPresen
             if !webSession.start() { cont.resume(throwing: OuraError.authFailed("couldn't start web session")) }
         }
 
-        let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        let q = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
-        guard q["state"] == state else { throw OuraError.authFailed("state mismatch") }
-        guard let code = q["code"], !code.isEmpty else { throw OuraError.authFailed(q["error"] ?? "no code") }
-
-        let tokens = try await exchange(OuraOAuth.tokenExchangeRequest(credentials: credentials, code: code))
+        let tokens = try OuraOAuth.parseCallback(callback, expectedState: state, now: Date())
         guard OuraTokenStore.save(tokens) else { throw OuraError.tokenExchangeFailed("keychain write failed") }
-    }
-
-    /// POST a token request and parse the response (shared by exchange + refresh).
-    private func exchange(_ req: URLRequest) async throws -> OuraTokens {
-        let (data, resp): (Data, URLResponse)
-        do { (data, resp) = try await session.data(for: req) }
-        catch { throw OuraError.network(error.localizedDescription) }
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(code) else {
-            throw OuraError.tokenExchangeFailed("HTTP \(code): \(String(data: data, encoding: .utf8) ?? "")")
-        }
-        return try OuraOAuth.parseTokenResponse(data, now: Date())
     }
 
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {

@@ -228,6 +228,10 @@ interface WhoopDao : DeviceRegistryDao {
     @Upsert
     suspend fun upsertSleepSessions(rows: List<SleepSession>)
 
+    /** Reconciliation insert that cannot overwrite a hand-edited Health Connect night. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSleepSessionsIgnoringConflicts(rows: List<SleepSession>): List<Long>
+
     /** Remove one sleep session by its full primary key (deviceId, startTs) — used by the
      *  bed/wake-time edit, which deletes then re-inserts because startTs is part of the PK. Returns the
      *  number of rows changed so repair callers never report a candidate as deleted when it was not. */
@@ -306,6 +310,131 @@ interface WhoopDao : DeviceRegistryDao {
 
     @Upsert
     suspend fun upsertAppleDaily(rows: List<AppleDaily>)
+
+    // MARK: - Health Connect incremental reconciliation
+
+    @Query("SELECT * FROM healthConnectSyncState WHERE recordType IN (:recordTypes)")
+    suspend fun healthConnectSyncStates(recordTypes: List<String>): List<HealthConnectSyncStateRow>
+
+    @Upsert
+    suspend fun upsertHealthConnectSyncStates(rows: List<HealthConnectSyncStateRow>)
+
+    @Query(
+        "DELETE FROM appleDaily WHERE deviceId = :source AND day >= :fromDay AND day <= :toDay"
+    )
+    suspend fun deleteAppleDailyProjection(source: String, fromDay: String, toDay: String)
+
+    @Query(
+        "DELETE FROM metricSeries WHERE deviceId = :source AND day >= :fromDay AND day <= :toDay " +
+            "AND `key` IN (:keys)"
+    )
+    suspend fun deleteMetricSeriesProjection(
+        source: String,
+        fromDay: String,
+        toDay: String,
+        keys: List<String>,
+    )
+
+    @Query(
+        "DELETE FROM sleepSession WHERE deviceId = :source AND userEdited = 0 " +
+            "AND startTs <= :toTs AND endTs >= :fromTs"
+    )
+    suspend fun deleteUneditedSleepProjection(source: String, fromTs: Long, toTs: Long)
+
+    @Query(
+        "DELETE FROM workout WHERE deviceId = :source AND source = :workoutSource " +
+            "AND startTs <= :toTs AND endTs >= :fromTs"
+    )
+    suspend fun deleteWorkoutProjection(
+        source: String,
+        workoutSource: String,
+        fromTs: Long,
+        toTs: Long,
+    )
+
+    /**
+     * Atomically replace only the Health Connect-owned part of the bounded projection. Values for
+     * record types whose permission is absent are merged back from the old rows. Other source ids are
+     * never named by any delete. An edited Health Connect sleep row survives via delete(userEdited=0)
+     * plus INSERT IGNORE.
+     */
+    @Transaction
+    suspend fun replaceHealthConnectProjection(
+        source: String,
+        workoutSource: String,
+        fromDay: String,
+        toDay: String,
+        fromTs: Long,
+        toTs: Long,
+        scope: HealthConnectProjectionScope,
+        appleRows: List<AppleDaily>,
+        dailyRows: List<DailyMetric>,
+        metricRows: List<MetricSeriesRow>,
+        sleepRows: List<SleepSession>,
+        workoutRows: List<WorkoutRow>,
+    ) {
+        val oldApple = appleDaily(source, fromDay, toDay)
+        val oldDaily = dailyMetricsRange(source, fromDay, toDay)
+        val oldWorkouts = workouts(source, fromTs, toTs, Int.MAX_VALUE)
+            .filter { it.source == workoutSource }
+        val mergedApple = HealthConnectProjectionMerge.appleDaily(source, oldApple, appleRows, scope)
+        val mergedDaily = HealthConnectProjectionMerge.dailyMetrics(source, oldDaily, dailyRows, scope)
+        val mergedWorkouts = HealthConnectProjectionMerge.workouts(oldWorkouts, workoutRows, scope)
+
+        deleteAppleDailyProjection(source, fromDay, toDay)
+        deleteDailyMetricsInRange(source, fromDay, toDay)
+        if (scope.seriesKeys.isNotEmpty()) {
+            deleteMetricSeriesProjection(source, fromDay, toDay, scope.seriesKeys.toList())
+        }
+        if (scope.sleep) deleteUneditedSleepProjection(source, fromTs, toTs)
+        if (scope.exercise) deleteWorkoutProjection(source, workoutSource, fromTs, toTs)
+
+        if (mergedApple.isNotEmpty()) upsertAppleDaily(mergedApple)
+        if (mergedDaily.isNotEmpty()) upsertDailyMetrics(mergedDaily)
+        if (metricRows.isNotEmpty()) upsertMetricSeries(metricRows)
+        if (sleepRows.isNotEmpty()) insertSleepSessionsIgnoringConflicts(sleepRows)
+        if (mergedWorkouts.isNotEmpty()) upsertWorkouts(mergedWorkouts)
+    }
+
+    /**
+     * Manual Health Connect import is additive: it updates rows returned by this read without treating
+     * an absent record/permission as a deletion. Sparse Room upserts would otherwise replace an entire
+     * aggregate row and null signals imported on an earlier pass.
+     */
+    @Transaction
+    suspend fun mergeHealthConnectProjectionAdditive(
+        source: String,
+        workoutSource: String,
+        appleRows: List<AppleDaily>,
+        dailyRows: List<DailyMetric>,
+        metricRows: List<MetricSeriesRow>,
+        sleepRows: List<SleepSession>,
+        workoutRows: List<WorkoutRow>,
+    ) {
+        val oldApple = if (appleRows.isEmpty()) emptyList() else {
+            appleDaily(source, appleRows.minOf { it.day }, appleRows.maxOf { it.day })
+        }
+        val oldDaily = if (dailyRows.isEmpty()) emptyList() else {
+            dailyMetricsRange(source, dailyRows.minOf { it.day }, dailyRows.maxOf { it.day })
+        }
+        val oldWorkouts = if (workoutRows.isEmpty()) emptyList() else {
+            workouts(
+                source,
+                workoutRows.minOf { it.startTs },
+                workoutRows.maxOf { it.startTs },
+                Int.MAX_VALUE,
+            ).filter { it.source == workoutSource }
+        }
+
+        val mergedApple = HealthConnectProjectionMerge.appleDailyAdditive(oldApple, appleRows)
+        val mergedDaily = HealthConnectProjectionMerge.dailyMetricsAdditive(oldDaily, dailyRows)
+        val mergedWorkouts = HealthConnectProjectionMerge.workoutsAdditive(oldWorkouts, workoutRows)
+        if (mergedApple.isNotEmpty()) upsertAppleDaily(mergedApple)
+        if (mergedDaily.isNotEmpty()) upsertDailyMetrics(mergedDaily)
+        if (metricRows.isNotEmpty()) upsertMetricSeries(metricRows)
+        if (sleepRows.isNotEmpty()) insertSleepSessionsIgnoringConflicts(sleepRows)
+        if (mergedWorkouts.isNotEmpty()) upsertWorkouts(mergedWorkouts)
+    }
 
     // MARK: - Range reads (ORDER BY ts ASC, inclusive [from, to], limited)
 

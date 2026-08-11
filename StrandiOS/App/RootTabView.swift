@@ -638,7 +638,7 @@ private enum MoreDestination: Hashable {
     case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport
     case alarms, automations, testCentre, siriShortcuts, settings
 
-    @ViewBuilder var destination: some View {
+    @MainActor @ViewBuilder var destination: some View {
         switch self {
         case .friends:         FriendsView()
         case .insightsHub:     InsightsHubView()
@@ -830,7 +830,7 @@ private struct QuickActionSheet: View {
 /// Reports the bar's real post-layout height to the shell. Using a preference keeps the bar as the
 /// single source of truth for its clearance, including Dynamic Type and future style adjustments.
 private struct FloatingTabBarHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
+    static let defaultValue: CGFloat = 0
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())

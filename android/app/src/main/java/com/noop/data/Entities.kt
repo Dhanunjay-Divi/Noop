@@ -3,6 +3,7 @@ package com.noop.data
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
+import androidx.room.PrimaryKey
 
 /*
  * Room entities mirroring the verified GRDB schema in
@@ -490,6 +491,21 @@ data class AppleDaily(
     val maxHr: Int? = null,
     val walkingHr: Int? = null,
     val weightKg: Double? = null,
+)
+
+/**
+ * Durable Health Connect change cursor, one row per Health Connect record type.
+ *
+ * Health Connect deletion events expose only an opaque record id. Keeping a token per record type
+ * preserves the missing type context and lets the reconciler replay a page after process death: a
+ * token is advanced only after the corresponding local projection has been rebuilt successfully.
+ * [updatedAt] is wall-clock unix milliseconds for diagnostics only; ordering never depends on it.
+ */
+@Entity(tableName = "healthConnectSyncState")
+data class HealthConnectSyncStateRow(
+    @PrimaryKey val recordType: String,
+    val changesToken: String,
+    val updatedAt: Long,
 )
 
 /**

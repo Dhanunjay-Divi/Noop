@@ -903,7 +903,7 @@ enum FriendsSummaryReplacement {
 }
 
 private enum FriendsPreferences {
-    private static let defaults = UserDefaults.standard
+    private static var defaults: UserDefaults { .standard }
     private static let prefix = "friends."
 
     static var endpoint: String {

@@ -1105,7 +1105,7 @@
     <string name="l10n_app_changelog_toggle_the_live_hr_dynamic_island_d3bd70cb">Toggle the live-HR Dynamic Island</string>
     <string name="l10n_app_changelog_track_a_workout_manually_2eb43402">Realizar un entrenamiento manualmente</string>
     <string name="l10n_app_changelog_trends_report_explains_its_scores_e338d1ee">Informe de tendencias explica sus resultados</string>
-    <string name="l10n_app_changelog_true_battery_a_sync_indicator_and_89037fc3">Porcentaje de batería verdadera, un indicador de sincronización y RRH sobre ejercicios importados</string>
+    <string name="l10n_app_changelog_true_battery_a_sync_indicator_and_89037fc3" formatted="false">Porcentaje de batería verdadera, un indicador de sincronización y RRH sobre ejercicios importados</string>
     <string name="l10n_app_changelog_two_quick_fixes_the_blue_titanium_4c021d78">Dos correcciones rápidas: el icono de Titanio Azul, y Mac "Tus tarjetas"</string>
     <string name="l10n_app_changelog_under_the_hood_current_api_migration_672da037">Under-the-hood: current-API migration (no behaviour change)</string>
     <string name="l10n_app_changelog_universal_mac_build_iphone_import_fix_363425a0">Construcción universal de Mac + solución de importación de iPhone</string>
@@ -1513,7 +1513,6 @@
     <string name="today_load_ratio">proporción %1$s</string>
 
     <!-- #453 base-catalog locale completion -->
-    <string name="app_name">NOOP</string>
     <string name="widget_description">Recuperación, Esfuerzo y Sueño de hoy, con frecuencia cardíaca en directo y batería de la pulsera de un vistazo.</string>
     <string name="widget_compact_name">NOOP Compacto</string>
     <string name="widget_compact_description">Widget compacto de Recuperación, Esfuerzo y Sueño, con frecuencia cardíaca en directo y batería de la pulsera.</string>
@@ -1789,4 +1788,39 @@
     <string name="sleep_stages_oura_provenance">Fases de Oura Ring · estimación del anillo, sin ajustes de la app Oura</string>
     <string name="sleep_stages_on_device_provenance">Fases aproximadas (en el dispositivo)</string>
     <string name="sleep_stage_summary">%1$s en cama · %2$s de eficiencia</string>
+    <string name="l10n_app_changelog_safer_upgrades_trustworthy_signals_9c1f2a7b">Actualizaciones más seguras, señales fiables y refuerzo para producción</string>
+    <string name="noop_backup_encryption_title">Cifrado de copias de seguridad</string>
+    <string name="noop_backup_encryption_configured_help">Hay una frase de recuperación guardada en Android Keystore para las copias automáticas. Nunca se muestra ni se sube. Vuelve a introducirla al restaurar. Sustituirla no cambia las copias anteriores.</string>
+    <string name="noop_backup_encryption_required_help">Define una frase de recuperación antes de activar las copias automáticas. Si la pierdes, no podrás recuperar las copias cifradas.</string>
+    <string name="noop_backup_new_passphrase">Nueva frase de contraseña</string>
+    <string name="noop_backup_recovery_passphrase">Frase de recuperación</string>
+    <string name="noop_backup_confirm_passphrase">Confirmar frase de contraseña</string>
+    <string name="noop_backup_replace_recovery_passphrase">Sustituir frase de recuperación</string>
+    <string name="noop_backup_secure_automatic_backups">Proteger copias automáticas</string>
+    <string name="noop_backup_passphrase_saved">Frase de recuperación guardada de forma segura. Conserva tu propia copia; NOOP no puede recuperarla.</string>
+    <string name="noop_backup_passphrase_save_failed">No se pudo guardar la frase de contraseña de forma segura.</string>
+    <string name="noop_backup_forget_stored_passphrase">Olvidar la frase guardada</string>
+    <string name="noop_backup_passphrase_removed">Se eliminó la frase guardada. Las copias existentes siguen necesitando su frase original.</string>
+    <string name="noop_backup_passphrase_remove_failed">No se pudo eliminar la frase guardada.</string>
+    <string name="noop_backup_passphrase_mismatch">Las frases de contraseña no coinciden.</string>
+    <string name="noop_backup_passphrase_minimum_error">La frase de la copia debe tener al menos 12 caracteres.</string>
+    <string name="noop_backup_unlock_title">Desbloquear copia</string>
+    <string name="noop_backup_unlock_folder_help">Introduce la frase de recuperación de esta copia. Se vuelve a solicitar al restaurar; déjala en blanco solo para una copia antigua sin cifrar.</string>
+    <string name="noop_backup_passphrase_label">Frase de contraseña</string>
+    <string name="noop_backup_verify_restore">Verificar y restaurar</string>
+    <string name="noop_backup_encrypt_title">Cifrar copia</string>
+    <string name="noop_backup_export_passphrase_help">Elige al menos 12 caracteres. NOOP no puede recuperar esta frase si la pierdes.</string>
+    <string name="noop_backup_import_passphrase_help">Introduce la frase usada al crear esta copia. Se siguen aceptando las copias antiguas sin cifrar.</string>
+    <string name="noop_backup_choose_destination">Elegir destino</string>
+    <string name="noop_backup_restart_apply">Copia verificada: NOOP se reiniciará para aplicarla de forma segura…</string>
+    <string name="noop_backup_platform_portability_help">Los archivos .noopbak cifrados se restauran sin pérdidas en la plataforma que los creó. El envoltorio es compartido, pero las bases de datos Room (Android) y GRDB (Apple) no son intercambiables. La exportación CSV es la vía portátil para transferir datos entre Android y Apple.</string>
+    <string name="noop_legal_title">Avisos legales y agradecimientos</string>
+    <string name="noop_legal_accessibility">Avisos legales y agradecimientos</string>
+    <string name="noop_legal_description">Términos, licencia del código fuente, avisos de terceros y procedencia, disponibles sin conexión.</string>
+    <string name="noop_legal_subtitle">Los documentos exactos incluidos en esta compilación.</string>
+    <string name="noop_legal_terms">Términos</string>
+    <string name="noop_legal_license">Licencia</string>
+    <string name="noop_legal_notices">Avisos</string>
+    <string name="noop_legal_attribution">Atribución</string>
+    <string name="noop_legal_document_error">No se pudo abrir este documento incluido. Reinstala esta compilación e inténtalo de nuevo.</string>
 </resources>

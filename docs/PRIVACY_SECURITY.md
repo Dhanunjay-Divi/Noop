@@ -122,11 +122,11 @@ API — a one-time, foreground backfill you trigger yourself, not an ongoing bac
   and any plain `xcodegen && xcodebuild` from a clean checkout contain **zero Oura network
   code**, provably, at the byte level. The condition is set only by the untracked
   `Strand/Oura/OuraSecrets.xcconfig` you create yourself from the example template, which
-  also carries your own Oura developer app's client ID/secret — so the code and the
-  credentials arrive in the same deliberate act. Then the import runs only when you tap
+  carries only your Oura developer app's public client ID and redirect URI. A native binary
+  cannot keep a client secret, so NOOP never accepts or embeds one. Then the import runs only when you tap
   **"Import your Oura history"** in Data Sources. (Belt-and-braces, the runtime guard
   remains too: absent/blank credentials disable the lane — `OuraCredentials.fromBundle`.)
-- **What is sent.** An OAuth authorization-code handshake — you sign into Oura's own
+- **What is sent.** Oura's documented client-side-only OAuth flow — you sign into Oura's own
   consent page (`cloud.ouraring.com`) through Apple's system `ASWebAuthenticationSession`,
   not an in-app WebView NOOP controls — followed by bearer-token `GET` requests to
   `api.ouraring.com/v2/usercollection/*` carrying only your access token and the
@@ -144,10 +144,11 @@ API — a one-time, foreground backfill you trigger yourself, not an ongoing bac
   account settings, or tap **Forget Oura access** in NOOP, which signs out locally and
   deletes the stored tokens plus every row this lane wrote — including the raw archive
   (`ouraRaw` table, see `docs/DATA_MODEL.md`).
-- **Tokens in the Keychain, not a plist.** The access/refresh tokens are stored via
+- **Tokens in the Keychain, not a plist.** The access token is stored via
   `OuraTokenStore` as a single Keychain item (`kSecAttrAccessibleAfterFirstUnlock`), the
   same pattern as the AI Coach's API key (`AIKeyStore`) — never UserDefaults, never on
-  disk in the clear.
+  disk in the clear. Oura does not issue a refresh token in this flow; the grant currently lasts
+  about 30 days, after which NOOP asks you to connect again.
 
 If you never build the lane in, your binary cannot call `ouraring.com` — the code is not there.
 
@@ -403,6 +404,41 @@ data on disk relies on the platform:
 What this does **not** protect against: an attacker with your unlocked, logged-in
 session, or a backup/Time Machine copy of the container made while FileVault is
 unlocked. The data is plaintext SQLite once the volume is mounted.
+
+Manual **Export encrypted backup** on iPhone and Mac is a separate boundary. It first
+creates a consistent standalone SQLite/ZIP snapshot, then streams that ZIP through the
+versioned Apple `.noopbak` envelope in `Strand/Data/DataBackup.swift`:
+
+- PBKDF2-HMAC-SHA256 derives a 256-bit key from a user-entered passphrase and a fresh
+  random 16-byte salt (310,000 iterations in format v1).
+- AES-256-GCM authenticates fixed-size chunks. The versioned header, plaintext length,
+  chunk index, and chunk length are authenticated as associated data, so a wrong
+  passphrase, bit flip, truncation, append, or reordered chunk fails before restore is
+  staged.
+- Export writes ciphertext to a hidden sibling first, synchronizes it, and publishes it
+  with a same-volume atomic rename. If encryption or publishing fails, an existing backup
+  at the chosen destination remains intact.
+- Decryption writes only to a private unique temporary `.partial`; the plaintext ZIP is
+  atomically published inside that staging directory after every tag verifies. The
+  existing SQLite-origin, migration, and integrity gates then run before the cold-launch
+  restore marker is created.
+- The passphrase is never saved to UserDefaults, Keychain, analytics, or logs. NOOP
+  cannot recover it.
+
+Android manual export uses the same cryptographic `NOOPBAK` v1 envelope and golden
+vectors in `BackupEnvelope.kt`. Android first completes and synchronizes the encrypted
+file in private cache, then copies ciphertext to the user-selected Storage Access
+Framework document; plaintext never reaches that provider. Its manual passphrase is not
+stored in SharedPreferences, Keystore, analytics, or logs.
+
+The encrypted outer envelope is shared across Apple and Android; the embedded native
+database is not (GRDB versus Room), so WHOOP-format CSV is the portable cross-platform
+transfer. Older plaintext `.noopbak` ZIP and SQLite files remain import-compatible but
+new Android exports are never plaintext. Android's opt-in unattended folder backup asks
+the user to choose a recovery passphrase and stores it only in Keystore-backed encrypted
+preferences; it fails closed if the secret cannot be retrieved and always requires
+re-entry on restore. Losing that passphrase makes the folder backups unrecoverable.
+Apple folder/automatic backups retain their separately documented platform behavior.
 
 > **Option: SQLCipher.** GRDB supports SQLCipher (an encrypted SQLite build) as a
 > drop-in. Wiring NOOP's `DatabaseQueue` to a SQLCipher build with a

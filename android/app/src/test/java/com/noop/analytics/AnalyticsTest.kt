@@ -220,4 +220,21 @@ class AnalyticsTest {
         assertNotNull(hrv)
         assertTrue("ectopic spikes must be rejected before rMSSD", hrv!! < 50.0)
     }
+
+    @Test
+    fun sessionAvgHrv_withholdsCrossSecondOverCount() {
+        val start = 2_000L
+        val end = start + 300
+        val rr = (0 until 300).flatMap { i ->
+            listOf(
+                RrInterval(deviceId = "d", ts = start + i, rrMs = 800),
+                RrInterval(deviceId = "d", ts = start + i, rrMs = 1_000),
+            )
+        }
+        val windows = SleepStager.sessionHrvWindows(start, end, rr, emptyList())
+        assertEquals(HrvAnalyzer.RrCoverageVerdict.CROSS_SECOND_OVER_COUNT,
+            windows.first().coverageVerdict)
+        assertNull(windows.first().rmssd)
+        assertNull(SleepStager.sessionAvgHRV(start, end, rr))
+    }
 }

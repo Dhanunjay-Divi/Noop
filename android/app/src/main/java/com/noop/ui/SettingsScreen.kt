@@ -92,6 +92,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -111,6 +112,8 @@ import com.noop.ingest.RawSensorExport
 import com.noop.ingest.WhoopCsvExporter
 import com.noop.update.UpdateCheck
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -492,6 +495,8 @@ class ProfileStore(private val prefs: SharedPreferences) {
 
 // MARK: - Screen
 
+private enum class BackupSecretPrompt { EXPORT, IMPORT }
+
 @Composable
 fun SettingsScreen(
     vm: AppViewModel,
@@ -509,6 +514,11 @@ fun SettingsScreen(
     fun mutate(block: () -> Unit) { block(); rev++ }
 
     var backupBusy by remember { mutableStateOf(false) }
+    var backupSecretPrompt by remember { mutableStateOf<BackupSecretPrompt?>(null) }
+    var backupPassphrase by remember { mutableStateOf("") }
+    var backupPassphraseConfirm by remember { mutableStateOf("") }
+    var activeBackupPassphrase by remember { mutableStateOf("") }
+    var pendingBackupImportUri by remember { mutableStateOf<Uri?>(null) }
     var strapLogBusy by remember { mutableStateOf(false) }
     var whoop5CaptureBusy by remember { mutableStateOf(false) }
     var rawAndLogBusy by remember { mutableStateOf(false) }
@@ -529,6 +539,9 @@ fun SettingsScreen(
     // "How NOOP works" primer sheet (COMPONENT 5 of the explainability layer), reachable any time
     // from About — the plain-English tour of sleep sorting, scores, recording and provenance.
     var showHowNoopWorks by remember { mutableStateOf(false) }
+
+    // Complete offline legal bundle: terms, source license, dependency notices and provenance.
+    var showLegalDocuments by remember { mutableStateOf(false) }
 
     // "WHOOP 4.0 vs 5.0/MG: what each can read and why" explainer (FI-2 / #490), reachable from the
     // Strap section by BOTH model owners. Clears up which features each strap supports — e.g. why the
@@ -664,13 +677,19 @@ fun SettingsScreen(
 
     // SAF launchers — CreateDocument for export, OpenDocument for import.
     val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/zip"),
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri ->
-        if (uri == null) { backupBusy = false; return@rememberLauncherForActivityResult }
+        if (uri == null) {
+            activeBackupPassphrase = ""
+            backupBusy = false
+            return@rememberLauncherForActivityResult
+        }
+        val exportSecret = activeBackupPassphrase
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { DataBackup.exportTo(context, uri) }
+                runCatching { DataBackup.exportTo(context, uri, exportSecret) }
             }
+            activeBackupPassphrase = ""
             backupBusy = false
             result.fold(
                 onSuccess = {
@@ -718,22 +737,143 @@ fun SettingsScreen(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri == null) { backupBusy = false; return@rememberLauncherForActivityResult }
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                DataBackup.importFrom(context, uri)
-            }
-            backupBusy = false
-            when (result) {
-                is DataBackup.ImportResult.NeedsRestart -> Toast.makeText(
-                    context,
-                    "Backup imported. Fully close and reopen NOOP for it to take effect.",
-                    Toast.LENGTH_LONG,
-                ).show()
-                is DataBackup.ImportResult.Failed -> Toast.makeText(
-                    context, result.message, Toast.LENGTH_LONG,
-                ).show()
-            }
-        }
+        pendingBackupImportUri = uri
+        backupPassphrase = ""
+        backupPassphraseConfirm = ""
+        backupSecretPrompt = BackupSecretPrompt.IMPORT
+    }
+
+    if (backupSecretPrompt != null) {
+        val exporting = backupSecretPrompt == BackupSecretPrompt.EXPORT
+        val problem = if (exporting || backupPassphrase.isNotEmpty()) {
+            com.noop.data.BackupEnvelope.passphraseProblem(backupPassphrase)
+        } else null
+        val mismatch = exporting && backupPassphrase != backupPassphraseConfirm
+        AlertDialog(
+            onDismissRequest = {
+                backupSecretPrompt = null
+                pendingBackupImportUri = null
+                backupPassphrase = ""
+                backupPassphraseConfirm = ""
+                backupBusy = false
+            },
+            containerColor = Palette.surfaceOverlay,
+            title = {
+                Text(
+                    uiString(
+                        if (exporting) R.string.noop_backup_encrypt_title
+                        else R.string.noop_backup_unlock_title,
+                    ),
+                    style = NoopType.title2,
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        if (exporting) {
+                            uiString(R.string.noop_backup_export_passphrase_help)
+                        } else {
+                            uiString(R.string.noop_backup_import_passphrase_help)
+                        },
+                        style = NoopType.footnote,
+                        color = Palette.textSecondary,
+                    )
+                    OutlinedTextField(
+                        value = backupPassphrase,
+                        onValueChange = { backupPassphrase = it },
+                        label = { Text(uiString(R.string.noop_backup_passphrase_label)) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                    )
+                    if (exporting) {
+                        OutlinedTextField(
+                            value = backupPassphraseConfirm,
+                            onValueChange = { backupPassphraseConfirm = it },
+                            label = { Text(uiString(R.string.noop_backup_confirm_passphrase)) },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                        )
+                    }
+                    if (problem != null || mismatch) {
+                        Text(
+                            if (problem != null) {
+                                uiString(R.string.noop_backup_passphrase_minimum_error)
+                            } else {
+                                uiString(R.string.noop_backup_passphrase_mismatch)
+                            },
+                            style = NoopType.caption,
+                            color = Palette.statusCritical,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = problem == null && !mismatch,
+                    onClick = {
+                        activeBackupPassphrase = backupPassphrase
+                        backupSecretPrompt = null
+                        backupPassphrase = ""
+                        backupPassphraseConfirm = ""
+                        backupBusy = true
+                        if (exporting) {
+                            exportLauncher.launch("noop-backup-${java.time.LocalDate.now()}.noopbak")
+                        } else {
+                            val selected = pendingBackupImportUri
+                            pendingBackupImportUri = null
+                            if (selected == null) {
+                                backupBusy = false
+                            } else {
+                                val importSecret = activeBackupPassphrase
+                                scope.launch {
+                                    val result = withContext(Dispatchers.IO) {
+                                        DataBackup.importFrom(context, selected, importSecret)
+                                    }
+                                    activeBackupPassphrase = ""
+                                    backupBusy = false
+                                    when (result) {
+                                        is DataBackup.ImportResult.NeedsRestart -> {
+                                            Toast.makeText(
+                                                context,
+                                                uiString(R.string.noop_backup_restart_apply),
+                                                Toast.LENGTH_LONG,
+                                            ).show()
+                                            withContext(NonCancellable) {
+                                                delay(800)
+                                                val app = context.applicationContext
+                                                app.packageManager.getLaunchIntentForPackage(app.packageName)
+                                                    ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                                                    ?.let(app::startActivity)
+                                                Runtime.getRuntime().exit(0)
+                                            }
+                                        }
+                                        is DataBackup.ImportResult.Failed -> Toast.makeText(
+                                            context, result.message, Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+                                }
+                            }
+                        }
+                    },
+                ) {
+                    Text(
+                        uiString(
+                            if (exporting) R.string.noop_backup_choose_destination
+                            else R.string.noop_backup_verify_restore,
+                        ),
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    backupSecretPrompt = null
+                    pendingBackupImportUri = null
+                    backupPassphrase = ""
+                    backupPassphraseConfirm = ""
+                    backupBusy = false
+                }) { Text(uiString(R.string.l10n_backup_sync_screen_cancel_77dfd213)) }
+            },
+        )
     }
 
     // Modern Photo Picker for the optional profile photo (no READ_EXTERNAL_STORAGE permission needed).
@@ -2517,8 +2657,9 @@ fun SettingsScreen(
                         enabled = !backupBusy,
                         modifier = Modifier.weight(1f),
                         onClick = {
-                            backupBusy = true
-                            exportLauncher.launch("noop-backup-${java.time.LocalDate.now()}.noopbak")
+                            backupPassphrase = ""
+                            backupPassphraseConfirm = ""
+                            backupSecretPrompt = BackupSecretPrompt.EXPORT
                         },
                     )
 
@@ -2529,7 +2670,7 @@ fun SettingsScreen(
                         modifier = Modifier.weight(1f),
                         onClick = {
                             backupBusy = true
-                            importLauncher.launch(arrayOf("*/*"))
+                            importLauncher.launch(arrayOf("application/octet-stream", "application/zip", "application/x-sqlite3"))
                         },
                     )
 
@@ -2553,7 +2694,7 @@ fun SettingsScreen(
                     icon = Icons.Filled.Info,
                     iconTint = Palette.textTertiary,
                     text = uiString(R.string.l10n_settings_screen_importing_overwrites_everything_currently_on_this_297b76ae) +
-                        "Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into NOOP on Android or Mac. On-device computed rows are marked APPROXIMATE in its Source column; the .noopbak backup stays the lossless restore path.",
+                        uiString(R.string.noop_backup_platform_portability_help),
                 )
             }
         }
@@ -2851,6 +2992,50 @@ fun SettingsScreen(
                     }
                 }
 
+                val legalInteraction = remember { MutableInteractionSource() }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .liquidPress(legalInteraction)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Palette.surfaceInset)
+                        .border(1.dp, Palette.hairline, RoundedCornerShape(10.dp))
+                        .clickable(
+                            interactionSource = legalInteraction,
+                            indication = null,
+                        ) { showLegalDocuments = true }
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                        .semantics {
+                            contentDescription = uiString(R.string.noop_legal_accessibility)
+                        },
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.MenuBook,
+                            contentDescription = null,
+                            tint = Palette.accent,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                uiString(R.string.noop_legal_title),
+                                style = NoopType.headline,
+                                color = Palette.textPrimary,
+                            )
+                            Text(
+                                uiString(R.string.noop_legal_description),
+                                style = NoopType.footnote,
+                                color = Palette.textSecondary,
+                            )
+                        }
+                        Text("›", style = NoopType.title2, color = Palette.accent)
+                    }
+                }
+
                 // Medical disclaimer — inset well with a warning-tinted hairline.
                 Row(
                     modifier = Modifier
@@ -2973,6 +3158,17 @@ fun SettingsScreen(
             ) {
                 Surface(modifier = Modifier.fillMaxSize(), color = Palette.surfaceBase) {
                     HowNoopWorksScreen(onClose = { showHowNoopWorks = false })
+                }
+            }
+        }
+
+        if (showLegalDocuments) {
+            Dialog(
+                onDismissRequest = { showLegalDocuments = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                Surface(modifier = Modifier.fillMaxSize(), color = Palette.surfaceBase) {
+                    LegalDocumentsScreen(onClose = { showLegalDocuments = false })
                 }
             }
         }

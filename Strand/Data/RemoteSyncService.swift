@@ -6,7 +6,7 @@ import WhoopStore
 
 /// Non-secret preferences for the optional self-hosted destination. Upload is OFF by default.
 enum RemoteSyncPreferences {
-    private static let defaults = UserDefaults.standard
+    private static var defaults: UserDefaults { .standard }
     private static let endpointKey = "remoteSync.endpoint"
     private static let automaticKey = "remoteSync.automatic"
     private static let lastAttemptKey = "remoteSync.lastAttemptMs"

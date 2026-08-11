@@ -22,8 +22,13 @@ import OuraProtocol
 
 struct AddDeviceWizard: View {
     @EnvironmentObject var model: AppModel
-    @EnvironmentObject var live: LiveState
     let onClose: () -> Void
+    /// Captured explicitly instead of resolving the environment during scanner construction. The wizard
+    /// keeps no discovery source alive until a user-initiated Scan action calls one of the `ensure*Scanner`
+    /// helpers below; merely presenting this sheet must not create a `CBCentralManager` or prompt for
+    /// Bluetooth access.
+    private let scannerLive: LiveState
+    private let wizardLog: (String) -> Void
 
     // MARK: Flow
 
@@ -123,20 +128,23 @@ struct AddDeviceWizard: View {
     /// The 32-hex-character ring key typed on the Advanced path. Validated to 16 bytes before scan.
     @State private var ouraKeyDraft = ""
 
-    /// Discovery-only HR source for the strap path. Never persists (no-op closure) and is never asked
-    /// to `connect` — we only read its `@Published discovered` / `scanning` while scanning. Built once.
-    @StateObject private var hrScanner: StandardHRSource
+    /// Discovery-only sources are optional by design. Each concrete source constructs its own
+    /// `CBCentralManager`, so eagerly creating these while the sheet opens would let CoreBluetooth show its
+    /// permission prompt before the user has chosen a device and tapped Scan. The matching `ensure*Scanner`
+    /// helper creates one exactly once, from an explicit scan path; `@State` retains that reference for the
+    /// life of this wizard and each pick-list observes the source after it exists.
+    @State private var hrScanner: StandardHRSource?
     /// Discovery-only FTMS source for the gym-equipment path. `feedsLive: false` so it never writes
-    /// LiveState; we only read its `discovered` / `scanning` while scanning. Built once.
-    @StateObject private var ftmsScanner: FTMSSource
+    /// LiveState; we only read its `discovered` / `scanning` while scanning.
+    @State private var ftmsScanner: FTMSSource?
     /// Discovery-only EXPERIMENTAL Huami scanner (Amazfit / Zepp / Mi Band). `feedsLive: false`, never
-    /// persists; the wizard only reads its `discovered` / `scanning`. Built once.
-    @StateObject private var huamiScanner: HuamiHRSource
+    /// persists; the wizard only reads its `discovered` / `scanning`.
+    @State private var huamiScanner: HuamiHRSource?
     /// Discovery-only EXPERIMENTAL Oura scanner. A real `OuraLiveSource` built in discovery-only mode
     /// (`feedsLive: false`, deviceId "scan-preview", no-op persist, no install key), so the wizard only reads
     /// its `@Published discovered` / `scanning` / `needsPairing` while scanning. The chosen ring is adopted
-    /// for real on `finishAdd`, where the registered `PairedDevice` carries the ring generation. Built once.
-    @StateObject private var ouraScanner: OuraLiveSource
+    /// for real on `finishAdd`, where the registered `PairedDevice` carries the ring generation.
+    @State private var ouraScanner: OuraLiveSource?
 
     /// - Parameter startAt: DEBUG-only deep-link into a specific (type, step) so a seeded simulator build
     ///   can screenshot one wizard step deterministically (e.g. the Oura onboarding gate) without tapping
@@ -145,6 +153,7 @@ struct AddDeviceWizard: View {
     init(live: LiveState, onClose: @escaping () -> Void,
          startAt: (type: DeviceType, step: Step)? = nil) {
         self.onClose = onClose
+        self.scannerLive = live
         if let startAt {
             _type = State(initialValue: startAt.type)
             _step = State(initialValue: startAt.step)
@@ -156,22 +165,11 @@ struct AddDeviceWizard: View {
         // "[HH:mm:ss]" stamp AppModel's `straplog` uses so wizard lines read identically. Each source is
         // @MainActor and only calls this from the main actor, so the forward into @MainActor LiveState is
         // safe. Privacy-safe: statuses / service UUIDs / counts only, never a device address.
-        let wizardLog: (String) -> Void = { line in
+        self.wizardLog = { line in
             MainActor.assumeIsolated {
                 live.append(log: "[\(AppModel.logTimeFormatter.string(from: Date()))] \(line)")
             }
         }
-        _hrScanner = StateObject(wrappedValue: StandardHRSource(
-            live: live, deviceId: "scan-preview", persist: { _ in }, log: wizardLog))
-        _ftmsScanner = StateObject(wrappedValue: FTMSSource(live: live, log: wizardLog, feedsLive: false))
-        _huamiScanner = StateObject(wrappedValue: HuamiHRSource(
-            live: live, deviceId: "scan-preview", log: wizardLog, feedsLive: false))
-        // Discovery-only Oura source: gen defaults to gen3 for the scan-preview command clamp (the real
-        // gen is fixed once the user picks), no install key (we never auth during discovery), and
-        // `feedsLive: false` so it never writes LiveState or persists. Same shared strap-log sink (#421).
-        _ouraScanner = StateObject(wrappedValue: OuraLiveSource(
-            live: live, deviceId: "scan-preview", ringGen: .gen3, authKey: { nil },
-            log: wizardLog, feedsLive: false))
     }
 
     var body: some View {
@@ -222,7 +220,7 @@ struct AddDeviceWizard: View {
         // Drive the Adopting step to success (the live source reached streaming -> close the wizard) or to a
         // REACHABLE honest Failed step (the live source announced needs-pairing). Only acts while Adopting,
         // so a later steady-state needs-pairing on the device card never reopens this.
-        .onChange(of: model.ouraAdoptPhase) { phase in
+        .onChangeCompat(of: model.ouraAdoptPhase) { phase in
             guard type == .oura, ouraStep == .adopting else { return }
             switch phase {
             case .streaming:        stopAllScans(); onClose()   // adoption complete: the ring is the live source now
@@ -230,7 +228,7 @@ struct AddDeviceWizard: View {
             case .idle, .installingKey: break
             }
         }
-        .onChange(of: model.ouraNeedsPairing) { msg in
+        .onChangeCompat(of: model.ouraNeedsPairing) { msg in
             // A needs-pairing message during the Adopting step is an honest failure too (covers the no-ack /
             // ack!=OK paths that surface via needsPairing rather than a phase flip alone).
             guard type == .oura, ouraStep == .adopting, msg != nil else { return }
@@ -772,20 +770,24 @@ struct AddDeviceWizard: View {
     /// best-effort generation and advances to the capability/confirm face. An honest needs-pairing fallback
     /// (the ring is still Oura-owned / not reset) routes to file import. Mirrors the Android `OuraPickStep`.
     @ViewBuilder private var ouraPickFace: some View {
-        OuraPickList(scanner: ouraScanner,
-                     onSelect: { ring in
-                         let gen = ring.detectedGen ?? .gen3
-                         pickedOura = (ring: ring, gen: gen)
-                         clearOtherPicks(except: .oura)
-                         nameDraft = String(localized: "Oura ring")
-                         ouraScanner.stopScan()
-                         ouraStep = .confirm
-                     },
-                     onRescan: { ouraScanner.scan() },
-                     onUseImport: {
-                         ouraScanner.stop()
-                         onClose()   // honest non-destructive fallback: head to file import
-                     })
+        if let ouraScanner {
+            OuraPickList(scanner: ouraScanner,
+                         onSelect: { ring in
+                             let gen = ring.detectedGen ?? .gen3
+                             pickedOura = (ring: ring, gen: gen)
+                             clearOtherPicks(except: .oura)
+                             nameDraft = String(localized: "Oura ring")
+                             ouraScanner.stopScan()
+                             ouraStep = .confirm
+                         },
+                         onRescan: { startScan(for: .oura) },
+                         onUseImport: {
+                             ouraScanner.stop()
+                             onClose()   // honest non-destructive fallback: head to file import
+                         })
+        } else {
+            scanNotStarted(for: .oura)
+        }
     }
 
     // MARK: Step 4 (Oura) - confirm: detected gen + per-gen capability checklist + the SECOND gate
@@ -917,7 +919,7 @@ struct AddDeviceWizard: View {
             HStack(spacing: 10) {
                 Button {
                     pickedOura = nil
-                    ouraScanner.scan()
+                    startScan(for: .oura)
                     ouraStep = .pick
                 } label: {
                     Text("Try again")
@@ -930,7 +932,7 @@ struct AddDeviceWizard: View {
                 .accessibilityLabel("Try again")
 
                 Button {
-                    ouraScanner.stop()
+                    ouraScanner?.stop()
                     onClose()   // honest non-destructive fallback: head to file import
                 } label: {
                     Text("Use file import")
@@ -1056,7 +1058,7 @@ struct AddDeviceWizard: View {
                 } onRescan: {
                     model.presentWhoopScan(model: type.whoopModel ?? .whoop4)
                 }
-            } else if type == .gymEquipment {
+            } else if type == .gymEquipment, let ftmsScanner {
                 FTMSPickList(scanner: ftmsScanner) { machine in
                     pickedMachine = machine
                     clearOtherPicks(except: .gymEquipment)
@@ -1064,9 +1066,9 @@ struct AddDeviceWizard: View {
                     ftmsScanner.stopScan()
                     step = .confirm
                 } onRescan: {
-                    ftmsScanner.scan()
+                    startScan(for: .gymEquipment)
                 }
-            } else if type == .amazfit || type == .miBand {
+            } else if (type == .amazfit || type == .miBand), let huamiScanner {
                 // EXPERIMENTAL Huami pick list (Amazfit / Zepp / Mi Band).
                 HuamiPickList(scanner: huamiScanner) { dev in
                     pickedHuami = dev
@@ -1075,19 +1077,49 @@ struct AddDeviceWizard: View {
                     huamiScanner.stopScan()
                     step = .confirm
                 } onRescan: {
-                    huamiScanner.scan()
+                    startScan(for: type)
                 }
-            } else {
+            } else if let hrScanner {
                 // Heart-rate strap AND Garmin (Broadcast HR is the standard 0x180D path).
                 HRPickList(scanner: hrScanner) { strap in
                     pickedStrap = strap
-                    clearOtherPicks(except: type ?? .hrStrap)
+                    clearOtherPicks(except: type)
                     nameDraft = strap.name
                     hrScanner.stopScan()
                     step = .confirm
                 } onRescan: {
-                    hrScanner.scan()
+                    startScan(for: type)
                 }
+            } else {
+                // Defensive fallback for DEBUG deep-links or restored UI state that enters `.pick`
+                // without the preceding button action. Construction still waits for this explicit tap.
+                scanNotStarted(for: type)
+            }
+        }
+    }
+
+    /// A defensive, honest fallback for a pick state with no scanner (normally reachable only from a
+    /// DEBUG deep-link). It deliberately requires a tap instead of constructing Bluetooth from `body`.
+    @ViewBuilder private func scanNotStarted(for type: DeviceType) -> some View {
+        StrandCard(padding: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Ready to search")
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text("Scanning starts only when you ask, and may show the system Bluetooth permission prompt.")
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    startScan(for: type)
+                } label: {
+                    Label("Scan", systemImage: "dot.radiowaves.left.and.right")
+                        .font(StrandFont.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(StrandPalette.accent)
             }
         }
     }
@@ -1210,15 +1242,15 @@ struct AddDeviceWizard: View {
         case .prep:
             ouraStep = .gate
         case .pick:
-            ouraScanner.stop()
+            ouraScanner?.stop()
             pickedOura = nil
             ouraStep = ouraAdvancedKeyMode ? .gate : .prep
         case .confirm:
-            ouraScanner.scan()
+            startScan(for: .oura)
             pickedOura = nil
             ouraStep = .pick
         case .adopting, .failed:
-            ouraScanner.scan()
+            startScan(for: .oura)
             pickedOura = nil
             ouraStep = .pick
         }
@@ -1227,20 +1259,59 @@ struct AddDeviceWizard: View {
     private func startScan(for type: DeviceType) {
         switch type {
         case .whoop4, .whoop5mg: model.presentWhoopScan(model: type.whoopModel ?? .whoop4)
-        case .gymEquipment:      ftmsScanner.scan()
-        case .amazfit, .miBand:  huamiScanner.scan()
-        case .oura:              ouraScanner.scan()
+        case .gymEquipment:      ensureFTMSScanner().scan()
+        case .amazfit, .miBand:  ensureHuamiScanner().scan()
+        case .oura:              ensureOuraScanner().scan()
         // Heart-rate strap AND Garmin both use the standard 0x180D scanner (Garmin Broadcast HR).
-        case .hrStrap, .garmin:  hrScanner.scan()
+        case .hrStrap, .garmin:  ensureHRScanner().scan()
         }
+    }
+
+    /// These are the only construction points for the wizard's four discovery-only sources. Since each
+    /// source creates its private `CBCentralManager` in `init`, keeping the constructors behind
+    /// `startScan(for:)` is the consent boundary: opening Add Device is inert; an explicit Scan creates only
+    /// the manager needed for the selected device family. Active/persisted sources remain owned by
+    /// `SourceCoordinator` and are intentionally unaffected.
+    private func ensureHRScanner() -> StandardHRSource {
+        if let hrScanner { return hrScanner }
+        let scanner = StandardHRSource(
+            live: scannerLive, deviceId: "scan-preview", persist: { _ in }, log: wizardLog)
+        hrScanner = scanner
+        return scanner
+    }
+
+    private func ensureFTMSScanner() -> FTMSSource {
+        if let ftmsScanner { return ftmsScanner }
+        let scanner = FTMSSource(live: scannerLive, log: wizardLog, feedsLive: false)
+        ftmsScanner = scanner
+        return scanner
+    }
+
+    private func ensureHuamiScanner() -> HuamiHRSource {
+        if let huamiScanner { return huamiScanner }
+        let scanner = HuamiHRSource(
+            live: scannerLive, deviceId: "scan-preview", log: wizardLog, feedsLive: false)
+        huamiScanner = scanner
+        return scanner
+    }
+
+    private func ensureOuraScanner() -> OuraLiveSource {
+        if let ouraScanner { return ouraScanner }
+        // Gen defaults to gen3 for the scan-preview command clamp (the real gen is fixed once picked),
+        // with no install key and no live/persistence writes in discovery-only mode.
+        let scanner = OuraLiveSource(
+            live: scannerLive, deviceId: "scan-preview", ringGen: .gen3, authKey: { nil },
+            log: wizardLog, feedsLive: false)
+        ouraScanner = scanner
+        return scanner
     }
 
     private func stopAllScans() {
         model.stopWhoopScan()
-        hrScanner.stopScan()
-        ftmsScanner.stopScan()
-        huamiScanner.stopScan()
-        ouraScanner.stop()
+        hrScanner?.stopScan()
+        ftmsScanner?.stopScan()
+        huamiScanner?.stopScan()
+        ouraScanner?.stop()
     }
 
     /// Build the right `PairedDevice` for the chosen path, register it, optionally activate, then close.

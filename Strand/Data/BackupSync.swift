@@ -336,7 +336,10 @@ enum FolderBackup {
     /// hardened safety (magic-byte + GRDB-origin validation, sidecar snapshot, rollback) still applies.
     /// The destructive confirmation is the screen's responsibility (must-fix #2); this is the final
     /// step it calls only AFTER the user confirms.
-    static func restore(snapshotNamed name: String) -> DataBackup.BackupResult {
+    static func restore(
+        snapshotNamed name: String,
+        passphrase: String? = nil
+    ) -> DataBackup.BackupResult {
         guard let folder = resolveFolder() else {
             return .failure("Couldn't open your backup folder - re-pick it and try again.")
         }
@@ -364,7 +367,7 @@ enum FolderBackup {
                 ? "That backup is still downloading from iCloud - wait a moment and try again."
                 : "That backup is no longer in your folder.")
         }
-        return DataBackup.restore(from: source)
+        return DataBackup.restore(from: source, passphrase: passphrase)
     }
 
     // MARK: - Folder picker

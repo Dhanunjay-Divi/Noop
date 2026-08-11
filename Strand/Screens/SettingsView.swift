@@ -26,6 +26,9 @@ struct SettingsView: View {
     @State private var backupAlertTitle = ""
     @State private var backupAlertMessage = ""
     @State private var showBackupAlert = false
+    /// Ephemeral only. The sheet owns its SecureField strings and clears them before dismissal; this
+    /// enum stores which flow is open, never the passphrase itself.
+    @State private var backupPassphraseMode: BackupPassphraseSheet.Mode?
 
     /// Opt-in WHOOP 5/MG protocol experiments (off by default). See [PuffinExperiment].
     @AppStorage(PuffinExperiment.defaultsKey) private var puffinExperiments = false
@@ -238,6 +241,29 @@ struct SettingsView: View {
         } message: {
             Text(backupAlertMessage)
         }
+        .sheet(item: $backupPassphraseMode) { mode in
+            BackupPassphraseSheet(
+                mode: mode,
+                onCancel: { backupPassphraseMode = nil },
+                onSubmit: { passphrase in
+                    backupPassphraseMode = nil
+                    // Let SwiftUI finish dismissing the passphrase sheet before a save/open document
+                    // picker is presented. The submitted String is captured only by this one operation;
+                    // it is never written to UserDefaults, Keychain, analytics, or logs.
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 250_000_000)
+                        switch mode {
+                        case .createEncrypted:
+                            runExport(passphrase: passphrase)
+                        case .importBackup:
+                            runImport(passphrase: passphrase)
+                        case .unlockFolderBackup:
+                            break
+                        }
+                    }
+                }
+            )
+        }
         .confirmationDialog("Recalibrate your Recovery baseline?",
                             isPresented: $showRecalibrateConfirm, titleVisibility: .visible) {
             Button("Recalibrate") { recalibrateHrvBaseline() }
@@ -286,6 +312,9 @@ struct SettingsView: View {
         // clipped to the card edge instead of wrapping inside the card padding. The localization key is
         // unchanged (`…Stored only on %@…`), so the existing translations still apply.
         let blurbText = String(localized: "Optional. Add a photo for the avatar in the top-left. Stored only on \(Platform.deviceNounPhrase); profile photos are never included in Self-hosted Sync.")
+        let photoActionTitle = profile.hasAvatar
+            ? String(localized: "Change photo")
+            : String(localized: "Choose photo")
         return SettingsSection(
             icon: "person.crop.circle",
             title: "Profile photo",
@@ -297,7 +326,7 @@ struct SettingsView: View {
 
                 VStack(alignment: .leading, spacing: NoopMetrics.space2) {
                     PhotosPicker(selection: $avatarPickerItem, matching: .images) {
-                        Text(profile.hasAvatar ? "Change photo" : "Choose photo")
+                        Text(photoActionTitle)
                     }
                     .buttonStyle(NoopButtonStyle(.secondary, fullWidth: true))
 
@@ -311,7 +340,7 @@ struct SettingsView: View {
         }
         // Load the picked photo's bytes, then hand them to the store (which downscales + persists).
         // Clearing the selection afterwards lets the user re-pick the same photo if they want.
-        .onChange(of: avatarPickerItem) { newItem in
+        .onChangeCompat(of: avatarPickerItem) { newItem in
             guard let newItem else { return }
             Task {
                 let data = try? await newItem.loadTransferable(type: Data.self)
@@ -1733,7 +1762,7 @@ struct SettingsView: View {
         SettingsSection(
             icon: "externaldrive.fill",
             title: "Backup & restore",
-            blurb: "Move your NOOP database history and selected profile/display settings to another machine in one file. Routes and other local-only auxiliary state are not yet included; import stages a replacement for the next launch."
+            blurb: "Move your NOOP database history and selected profile/display settings in one passphrase-encrypted file. Routes and other local-only auxiliary state are not yet included; import stages a replacement for the next launch."
         ) {
             VStack(alignment: .leading, spacing: NoopMetrics.space4) {
                 // Three labelled buttons must share a narrow iPhone row without wrapping mid-word
@@ -1744,15 +1773,15 @@ struct SettingsView: View {
                 // inside this HStack — either would steal a share of the equal-width row. (#188)
                 HStack(spacing: NoopMetrics.space3) {
                     Button {
-                        runExport()
+                        backupPassphraseMode = .createEncrypted
                     } label: {
-                        backupButtonLabel(String(localized: "Export…"), systemImage: "square.and.arrow.up")
+                        backupButtonLabel(String(localized: "Export encrypted…"), systemImage: "lock.doc")
                     }
                     .buttonStyle(NoopButtonStyle(.primary, fullWidth: true))
                     .disabled(backupBusy)
 
                     Button {
-                        runImport()
+                        backupPassphraseMode = .importBackup
                     } label: {
                         backupButtonLabel(String(localized: "Import…"), systemImage: "square.and.arrow.down")
                     }
@@ -1782,7 +1811,7 @@ struct SettingsView: View {
                         .foregroundStyle(StrandPalette.textTertiary)
                         .font(.system(size: 13))
                         .accessibilityHidden(true)
-                    Text("Import validates and stages a backup without touching the open database. Fully quit and reopen NOOP to apply it; the complete current database is preserved in a side file first. Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into NOOP on Mac, iPhone, or Android. On-device computed rows are marked APPROXIMATE in its Source column. A full backup is the most complete database restore path, but routes and other local-only auxiliary state are not yet included.")
+                    Text("Encrypted export protects the full backup with a passphrase using AES-256-GCM. The passphrase is never saved and cannot be recovered; this encrypted envelope currently imports only in NOOP on iPhone or Mac. Import also keeps compatibility with older unencrypted .noopbak, ZIP, and SQLite backups. It validates and stages without touching the open database; fully quit and reopen NOOP to apply it. Export CSV remains the portable Mac, iPhone, and Android data-transfer path. Folder and automatic backups are unencrypted because NOOP does not store their passphrase, so protect that folder with the storage provider's encryption.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1827,18 +1856,22 @@ struct SettingsView: View {
         #endif
     }
 
-    private func runExport() {
+    private func runExport(passphrase: String) {
         backupBusy = true
         Task {
-            let result = await DataBackup.runExport(checkpoint: { await model.repo.checkpointForBackup() })
+            let result = await DataBackup.runExport(
+                checkpoint: { await model.repo.checkpointForBackup() },
+                passphrase: passphrase
+            )
             handleBackup(result)
         }
     }
 
-    private func runImport() {
+    private func runImport(passphrase: String) {
         backupBusy = true
         Task {
-            let result = await DataBackup.runImport()
+            let result = await DataBackup.runImport(
+                passphrase: passphrase.isEmpty ? nil : passphrase)
             handleBackup(result)
         }
     }
@@ -1871,7 +1904,7 @@ struct SettingsView: View {
             return
         case .exported(let url):
             backupAlertTitle = String(localized: "Backup exported")
-            backupAlertMessage = String(localized: "Saved to \(url.lastPathComponent). Copy this file to your other \(Platform.deviceNoun) and use Import there to restore your database history and selected profile/display settings.")
+            backupAlertMessage = String(localized: "Saved an encrypted backup to \(url.lastPathComponent). Keep its passphrase separately: NOOP never saves it and cannot recover it. This encrypted format currently restores in NOOP on iPhone and Mac.")
             showBackupAlert = true
         case .imported:
             backupAlertTitle = String(localized: "Backup ready")
@@ -2952,6 +2985,183 @@ struct StepsCalibrationSheet: View {
         guard let d = inF.date(from: key) else { return key }
         let outF = DateFormatter(); outF.dateFormat = "EEE d MMM"
         return outF.string(from: d)
+    }
+}
+
+// MARK: - Backup passphrase
+
+/// Shared passphrase surface for manual export/import and folder restore. SecureField state lives only
+/// for the sheet's lifetime and is cleared before either callback. NOOP deliberately offers no
+/// "remember" switch: persisting this secret would silently turn folder backups into recoverable keys.
+struct BackupPassphraseSheet: View {
+    enum Mode: String, Identifiable {
+        case createEncrypted
+        case importBackup
+        case unlockFolderBackup
+
+        var id: String { rawValue }
+    }
+
+    let mode: Mode
+    let onCancel: () -> Void
+    let onSubmit: (String) -> Void
+
+    @State private var passphrase = ""
+    @State private var confirmation = ""
+    @FocusState private var focusedField: Field?
+
+    private enum Field { case passphrase, confirmation }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: NoopMetrics.space5) {
+                Image(systemName: mode == .createEncrypted ? "lock.shield.fill" : "lock.open.fill")
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundStyle(StrandPalette.accent)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                    Text(title)
+                        .font(StrandFont.title2)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text(explanation)
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                    SecureField(mode == .createEncrypted ? "Create passphrase" : "Backup passphrase",
+                                text: $passphrase)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($focusedField, equals: .passphrase)
+                        .submitLabel(mode == .createEncrypted ? .next : .done)
+                        .onSubmit {
+                            if mode == .createEncrypted {
+                                focusedField = .confirmation
+                            } else {
+                                submit()
+                            }
+                        }
+                        .accessibilityLabel(mode == .createEncrypted
+                                            ? "Create backup passphrase"
+                                            : "Backup passphrase")
+
+                    if mode == .createEncrypted {
+                        SecureField("Confirm passphrase", text: $confirmation)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($focusedField, equals: .confirmation)
+                            .submitLabel(.done)
+                            .onSubmit { submit() }
+                            .accessibilityLabel("Confirm backup passphrase")
+
+                        HStack(spacing: NoopMetrics.space2) {
+                            Image(systemName: validationSymbol)
+                                .accessibilityHidden(true)
+                            Text(validationMessage)
+                        }
+                        .font(StrandFont.caption)
+                        .foregroundStyle(canSubmit ? StrandPalette.accent : StrandPalette.textTertiary)
+                    } else {
+                        Text("Leave this blank for an older or automatic unencrypted backup.")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                NoopButton(submitTitle, systemImage: submitSymbol, kind: .primary, fullWidth: true) {
+                    submit()
+                }
+                .disabled(!canSubmit)
+            }
+            .padding(NoopMetrics.space6)
+            .background(StrandPalette.surfaceBase.ignoresSafeArea())
+            .navigationTitle("")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { cancel() }
+                }
+            }
+        }
+        #if os(iOS)
+        .presentationDetents([.medium, .large])
+        #endif
+        .onAppear { focusedField = .passphrase }
+        .onDisappear { clearSecrets() }
+    }
+
+    private var title: LocalizedStringKey {
+        switch mode {
+        case .createEncrypted: return "Protect this backup"
+        case .importBackup: return "Open a backup"
+        case .unlockFolderBackup: return "Unlock this backup"
+        }
+    }
+
+    private var explanation: LocalizedStringKey {
+        switch mode {
+        case .createEncrypted:
+            return "Create at least 12 characters and enter them twice. NOOP encrypts the backup with AES-256-GCM, never saves the passphrase, and cannot recover it. The encrypted format currently restores only in NOOP on iPhone or Mac."
+        case .importBackup:
+            return "Enter the passphrase if this is an encrypted Apple backup. Older unencrypted NOOP backups still import without one."
+        case .unlockFolderBackup:
+            return "Enter the passphrase if you placed an encrypted Apple export in this folder. Automatic folder snapshots are unencrypted and need no passphrase."
+        }
+    }
+
+    private var canSubmit: Bool {
+        switch mode {
+        case .createEncrypted:
+            return passphrase.count >= 12 && passphrase == confirmation
+        case .importBackup, .unlockFolderBackup:
+            return true
+        }
+    }
+
+    private var validationMessage: LocalizedStringKey {
+        if passphrase.count < 12 { return "At least 12 characters" }
+        if confirmation.isEmpty { return "Enter it again to confirm" }
+        if passphrase != confirmation { return "Passphrases do not match" }
+        return "Passphrases match"
+    }
+
+    private var validationSymbol: String {
+        canSubmit ? "checkmark.circle.fill" : "info.circle"
+    }
+
+    private var submitTitle: LocalizedStringKey {
+        switch mode {
+        case .createEncrypted: return "Choose where to save"
+        case .importBackup: return "Choose backup file"
+        case .unlockFolderBackup: return "Continue restore"
+        }
+    }
+
+    private var submitSymbol: String {
+        switch mode {
+        case .createEncrypted: return "lock.doc"
+        case .importBackup: return "doc.badge.arrow.up"
+        case .unlockFolderBackup: return "lock.open"
+        }
+    }
+
+    private func submit() {
+        guard canSubmit else { return }
+        let submitted = passphrase
+        clearSecrets()
+        onSubmit(submitted)
+    }
+
+    private func cancel() {
+        clearSecrets()
+        onCancel()
+    }
+
+    private func clearSecrets() {
+        passphrase.removeAll(keepingCapacity: false)
+        confirmation.removeAll(keepingCapacity: false)
     }
 }
 

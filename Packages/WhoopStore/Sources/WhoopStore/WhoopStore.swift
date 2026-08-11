@@ -6,7 +6,7 @@ import WhoopProtocol
 /// transient, compressed, prunable outbox. Built on GRDB/SQLite.
 public enum WhoopStoreInfo {
     /// Bumped whenever the migrator gains a new migration.
-    public static let schemaVersion = 36
+    public static let schemaVersion = 37
 }
 
 /// Serializes `DatabasePool` creation + migration so two concurrent opens of the SAME file can never
@@ -115,9 +115,13 @@ public actor WhoopStore {
 
     /// Move aside a database file that has our data tables but no GRDB migration bookkeeping — the
     /// signature of a foreign (Android/Room) DB dropped over ours by a bad restore (#222). Opening it
-    /// would make the migrator re-run v1 and throw `table "device" already exists` forever. Moving it
-    /// to a `.incompatible-<ts>` sidecar lets the next open create a clean store. A valid GRDB DB
-    /// (has `grdb_migrations`) and a fresh/empty file are both left untouched. Best-effort + silent.
+    /// would make the migrator re-run v1 and throw `table "device" already exists` forever. A logical
+    /// SQLite online backup is written to a `.incompatible-<ts>` sidecar before the live triplet is
+    /// removed. This is intentionally not a plain move of only the main file: committed rows may still
+    /// exist solely in `-wal`, and separating that WAL from its main database destroys the only readable
+    /// copy. A valid GRDB DB (has `grdb_migrations`) and a fresh/empty file are both left untouched.
+    /// If the backup cannot be completed and quick-checked, fail closed and leave the live triplet in
+    /// place; a failed open is recoverable, silent data loss is not.
     static func quarantineIncompatibleDatabase(at path: String) {
         let fm = FileManager.default
         guard fm.fileExists(atPath: path) else { return }
@@ -135,11 +139,54 @@ public actor WhoopStore {
             && (names.contains("device") || names.contains("hrSample"))
         guard isForeign else { return }
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
-        let quarantine = "\(path).incompatible-\(stamp)"
-        try? fm.removeItem(atPath: quarantine)
-        do { try fm.moveItem(atPath: path, toPath: quarantine) } catch { return }
-        // Drop the now-orphaned WAL/SHM sidecars so the fresh DB starts clean.
-        for suffix in ["-wal", "-shm"] { try? fm.removeItem(atPath: path + suffix) }
+        let quarantine = "\(path).incompatible-\(stamp)-\(UUID().uuidString.prefix(8))"
+
+        // `DatabaseQueue.backup(to:)` uses SQLite's online-backup API, so the destination includes every
+        // committed page visible through the source connection, including pages still resident in WAL.
+        // Flatten the destination to DELETE mode so the quarantine is one standalone, inspectable file.
+        do {
+            let source = try DatabaseQueue(path: path)
+            let destination = try DatabaseQueue(path: quarantine)
+            try source.backup(to: destination)
+            try destination.writeWithoutTransaction { db in
+                guard let checkpoint = try Row.fetchOne(db, sql: "PRAGMA wal_checkpoint(TRUNCATE)") else {
+                    throw NSError(domain: "WhoopStore.Quarantine", code: 1,
+                                  userInfo: [NSLocalizedDescriptionKey: "SQLite returned no checkpoint result"])
+                }
+                let busy: Int = checkpoint[0]
+                let log: Int = checkpoint[1]
+                let checkpointed: Int = checkpoint[2]
+                guard busy == 0, log == checkpointed else {
+                    throw NSError(domain: "WhoopStore.Quarantine", code: 2,
+                                  userInfo: [NSLocalizedDescriptionKey:
+                                                "SQLite could not flatten quarantine WAL"])
+                }
+                let mode = try String.fetchOne(db, sql: "PRAGMA journal_mode=DELETE") ?? ""
+                guard mode.lowercased() == "delete" else {
+                    throw NSError(domain: "WhoopStore.Quarantine", code: 3,
+                                  userInfo: [NSLocalizedDescriptionKey:
+                                                "SQLite could not make quarantine standalone"])
+                }
+                let quickCheck = try String.fetchOne(db, sql: "PRAGMA quick_check") ?? ""
+                guard quickCheck.lowercased() == "ok" else {
+                    throw NSError(domain: "WhoopStore.Quarantine", code: 4,
+                                  userInfo: [NSLocalizedDescriptionKey:
+                                                "SQLite quarantine quick_check failed: \(quickCheck)"])
+                }
+            }
+        } catch {
+            for suffix in ["", "-wal", "-shm", "-journal"] {
+                try? fm.removeItem(atPath: quarantine + suffix)
+            }
+            NSLog("WhoopStore: incompatible database kept in place because safe quarantine failed: \(error.localizedDescription)")
+            return
+        }
+
+        // The verified standalone backup is now the recovery copy. Remove the complete live journal set
+        // before DatabasePool creates the fresh database; no old WAL may attach to that new main file.
+        for suffix in ["-wal", "-shm", "-journal", ""] {
+            try? fm.removeItem(atPath: path + suffix)
+        }
     }
 
     /// An in-memory store (migrations applied). For tests.

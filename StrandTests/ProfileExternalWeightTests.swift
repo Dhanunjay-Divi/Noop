@@ -62,6 +62,51 @@ final class ProfileExternalWeightTests: XCTestCase {
         XCTAssertEqual(profile.weightKg, 88.5, accuracy: 0.000_001)
     }
 
+    func testDeletionReconcileRollsBackWithinSameSourceAndRestoresFallbackWhenEmpty() throws {
+        let defaults = try freshDefaults()
+        let profile = ProfileStore(defaults: defaults)
+        profile.weightKg = 84
+        let now = Date()
+        XCTAssertTrue(profile.acceptExternalWeight(weightKg: 82,
+                                                   measuredAt: now.addingTimeInterval(-60),
+                                                   source: "apple-health:new-scale",
+                                                   receivedAt: now))
+
+        XCTAssertTrue(profile.reconcileExternalWeight(weightKg: 83,
+                                                      measuredAt: now.addingTimeInterval(-86_400),
+                                                      source: "apple-health:old-scale",
+                                                      receivedAt: now))
+        XCTAssertEqual(profile.weightKg, 83, accuracy: 0.000_001)
+        XCTAssertTrue(profile.reconcileExternalWeight(weightKg: nil, measuredAt: nil,
+                                                      source: "apple-health", receivedAt: now))
+        XCTAssertEqual(profile.weightKg, 84, accuracy: 0.000_001)
+        XCTAssertNil(profile.externalWeightProvenance)
+    }
+
+    func testDeletionReconcileNeverOverridesManualEditOrAnotherSource() throws {
+        let defaults = try freshDefaults()
+        let profile = ProfileStore(defaults: defaults)
+        let now = Date()
+        XCTAssertTrue(profile.acceptExternalWeight(weightKg: 78,
+                                                   measuredAt: now.addingTimeInterval(-60),
+                                                   source: "apple-health:watch",
+                                                   receivedAt: now))
+        profile.weightKg = 91
+        XCTAssertTrue(profile.reconcileExternalWeight(weightKg: nil, measuredAt: nil,
+                                                      source: "apple-health", receivedAt: now))
+        XCTAssertEqual(profile.weightKg, 91, accuracy: 0.000_001)
+        XCTAssertNil(profile.externalWeightProvenance)
+
+        let later = now.addingTimeInterval(2)
+        XCTAssertTrue(profile.acceptExternalWeight(weightKg: 80, measuredAt: later,
+                                                   source: "bluetooth-sig-wss:scale",
+                                                   receivedAt: later))
+        XCTAssertFalse(profile.reconcileExternalWeight(weightKg: nil, measuredAt: nil,
+                                                       source: "apple-health", receivedAt: later))
+        XCTAssertEqual(profile.weightKg, 80, accuracy: 0.000_001)
+        XCTAssertEqual(profile.externalWeightProvenance?.source, "bluetooth-sig-wss:scale")
+    }
+
     private func freshDefaults() throws -> UserDefaults {
         let name = "ProfileExternalWeightTests-\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: name) else {

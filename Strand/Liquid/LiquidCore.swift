@@ -65,6 +65,7 @@ extension Color {
 /// property reads (NOT @Published) so the per-frame Canvas redraw — driven by
 /// TimelineView — is what advances the picture, never a publish storm. Device
 /// motion via CMMotionManager needs no permission prompt.
+@MainActor
 final class LiquidMotion {
     static let shared = LiquidMotion()
 
@@ -74,9 +75,8 @@ final class LiquidMotion {
 
     #if os(iOS)   // CMMotionManager is iOS/Catalyst only; CoreMotion imports on macOS but the class is unavailable there
     private let manager = CMMotionManager()
-    /// Device-motion callbacks land here, OFF the main thread, so 60Hz sensor updates don't contend with
-    /// the scroll + Canvas redraws on main. `tilt` is a single 8-byte Double (atomic read/write on ARM64),
-    /// read from the Canvas draw on main — a one-frame-stale value is harmless for a decorative slosh.
+    /// Device-motion sampling lands here off-main. Each tiny scalar result then hops to the main actor,
+    /// keeping `tilt` race-free with the Canvas read without moving Core Motion work onto the UI thread.
     private let motionQueue: OperationQueue = {
         let q = OperationQueue()
         q.name = "com.noop.liquid.motion"
@@ -98,27 +98,37 @@ final class LiquidMotion {
             forName: UIApplication.didEnterBackgroundNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in self?.stop() }
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.stop() }
+        }
         notifications.addObserver(
             forName: UIApplication.willEnterForegroundNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in self?.startIfWanted() }
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.startIfWanted() }
+        }
         notifications.addObserver(
             forName: .NSProcessInfoPowerStateDidChange,
             object: nil,
             queue: .main
-        ) { [weak self] _ in self?.syncToPolicy() }
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.syncToPolicy() }
+        }
         notifications.addObserver(
             forName: UIAccessibility.reduceMotionStatusDidChangeNotification,
             object: nil,
             queue: .main
-        ) { [weak self] _ in self?.syncToPolicy() }
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.syncToPolicy() }
+        }
         notifications.addObserver(
             forName: UserDefaults.didChangeNotification,
             object: UserDefaults.standard,
             queue: .main
-        ) { [weak self] _ in self?.syncToPolicy() }
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.syncToPolicy() }
+        }
         #endif
     }
 
@@ -147,7 +157,7 @@ final class LiquidMotion {
         guard manager.isDeviceMotionAvailable else { started = false; return }
         manager.deviceMotionUpdateInterval = 1.0 / 60.0
         manager.startDeviceMotionUpdates(to: motionQueue) { [weak self] motion, _ in
-            guard let self, let m = motion else { return }
+            guard let m = motion else { return }
             // roll ≈ side-to-side tilt of the phone held upright
             // #1004: scale the response by uprightness. `m.gravity` is the unit gravity vector in DEVICE
             // coords, so -gravity.y = dot(world-up, screen-up): 1 held upright, ~0 flat on a table or lying
@@ -155,7 +165,10 @@ final class LiquidMotion {
             // axis), which used to pin the liquid sideways in bed; attenuated, it settles LEVEL instead.
             let upright = LiquidMotion.uprightAttenuation(-m.gravity.y)
             let raw = max(-0.62, min(0.62, m.attitude.roll)) * upright
-            self.tilt += (raw - self.tilt) * 0.18   // light smoothing
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.tilt += (raw - self.tilt) * 0.18   // light smoothing
+            }
         }
         #endif
     }
@@ -167,7 +180,7 @@ final class LiquidMotion {
     /// posture (phone reclined toward the face) keeps the full slosh and the response fades smoothly to
     /// level as the device approaches flat — no hard snap at a threshold. (The explicit follow-tilt on/off
     /// toggle stays on the roadmap; this is the always-on physical fix for near-flat use.)
-    static func uprightAttenuation(_ uprightness: Double) -> Double {
+    nonisolated static func uprightAttenuation(_ uprightness: Double) -> Double {
         let t = max(0, min(1, (uprightness - 0.25) / 0.40))
         return t * t * (3 - 2 * t)
     }

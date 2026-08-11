@@ -22,22 +22,20 @@ import java.util.zip.ZipOutputStream
  * no account, nothing leaves the device except through these two explicit, user-driven
  * file operations (a SAF document the user picks).
  *
- * Export: checkpoint the WAL into the main db file, then write a ZIP (the `.noopbak`
- * format) containing the SQLite file plus a small `settings.json` entry (#1000) with the
- * whitelisted profile/display settings (see [BackupSettingsCodec]), so a restore also
- * brings back weight/height/units and not just the rows. ZIP deflate typically reduces a
+ * Export: checkpoint the WAL into the main db file, write a private temporary ZIP containing the
+ * SQLite file plus a small whitelisted `settings.json` entry (#1000; see [BackupSettingsCodec]),
+ * then encrypt and authenticate it inside the cross-platform `NOOPBAK` v1 envelope before any byte
+ * reaches the selected destination. A restore therefore brings back weight/height/units and not
+ * just the rows. ZIP deflate typically reduces a
  * 100 MB+ SQLite backup to 10–20 MB — SQLite's page-aligned text data compresses very
- * well. The ZIP is a standard container: users can rename `.noopbak` → `.zip` and
- * extract the SQLite manually with any archive tool on any OS.
+ * well. The plaintext container never leaves app-private cache and is always removed.
  *
- * Import: detect whether the picked file is a `.noopbak` ZIP (PK magic) or a legacy
+ * Import: decrypt a current `.noopbak`, or detect a legacy plaintext ZIP (PK magic) / legacy
  * plain `.sqlite` / `.noopdb` (SQLite magic) and handle both, so old backups keep
  * working. Validates the extracted/direct SQLite header, the backup's origin, AND its
- * structural integrity (`PRAGMA quick_check`, #1014) before touching the live DB.
- * Closes the live Room singleton, snapshots the current db, overwrites it with the
- * chosen one, drops the stale `-wal` / `-shm` sidecars, then re-verifies the landed
- * file and rolls back to the snapshot automatically if the copy tore (#1014). The
- * caller then instructs the user to restart the app so Room re-opens the new file fresh.
+ * structural integrity (`PRAGMA quick_check`, #1014) before staging it. The live Room database is
+ * never overwritten here: [PendingDatabaseRestore] performs a same-filesystem atomic swap at the
+ * next cold database open and automatically rolls back if Room cannot open/migrate the replacement.
  */
 object DataBackup {
 
@@ -49,6 +47,9 @@ object DataBackup {
 
     private const val MAX_BACKUP_SQLITE_BYTES = 2_147_483_648L
     private const val MAX_BACKUP_SETTINGS_BYTES = 1_048_576L
+    private const val MAX_BACKUP_ZIP_ENTRIES = 128
+    private const val MAX_BACKUP_CONTAINER_BYTES =
+        MAX_BACKUP_SQLITE_BYTES + MAX_BACKUP_SETTINGS_BYTES + 128L * 1024L * 1024L
 
     /** First 16 bytes of every SQLite 3 file: "SQLite format 3\0". */
     private val SQLITE_MAGIC: ByteArray =
@@ -63,7 +64,7 @@ object DataBackup {
 
     /** Outcome of an [importFrom] call. On success the app must be restarted. */
     sealed interface ImportResult {
-        /** The new database is in place; tell the user to relaunch NOOP. */
+        /** A verified restore is staged; relaunch applies it through the cold-open safety gate. */
         data object NeedsRestart : ImportResult
 
         /** Import failed and the original database is untouched. */
@@ -71,15 +72,16 @@ object DataBackup {
     }
 
     /**
-     * Export the live database to [uri] as a compressed `.noopbak` (single-entry ZIP).
+     * Export the live database to [uri] as an encrypted, authenticated `.noopbak` envelope.
      *
      * Runs `PRAGMA wal_checkpoint(TRUNCATE)` first so the db file is fully consistent.
-     * The ZIP uses deflate compression; typical reduction is 80–90% vs the raw SQLite.
+     * Its private inner ZIP uses deflate compression; typical reduction is 80–90% vs raw SQLite.
      * Throws on failure so the caller can surface the message in a toast/snackbar.
      */
     @Throws(IOException::class)
-    fun exportTo(context: Context, uri: Uri) {
+    fun exportTo(context: Context, uri: Uri, passphrase: String) {
         val appContext = context.applicationContext
+        BackupEnvelope.passphraseProblem(passphrase)?.let { throw IOException(it) }
 
         // Fold the WAL back into the main file so the snapshot is complete.
         val db = WhoopDatabase.get(appContext)
@@ -111,10 +113,9 @@ object DataBackup {
         // `.sqlite` entry, so entry order is part of the cross-platform container contract.
         val settingsJson = BackupSettingsBridge.snapshotJson(appContext)
 
-        val resolver = appContext.contentResolver
-        val output = resolver.openOutputStream(uri)
-            ?: throw IOException("Could not open the chosen file for writing.")
-        output.use { out ->
+        val plaintextZip = File.createTempFile("noop-export-", ".zip", appContext.cacheDir)
+        val encrypted = File.createTempFile("noop-export-", ".noopbak", appContext.cacheDir)
+        try {
             // #1014: copy the file while HOLDING Room's write transaction. In WAL mode the main
             // file is only rewritten by a checkpoint, and a checkpoint only runs on a commit — so
             // with the (single) write connection parked in an empty transaction for the duration
@@ -123,41 +124,75 @@ object DataBackup {
             // unaffected. Anything committed after the checkpoint above lives in the new WAL and
             // is simply (consistently) absent from this snapshot, same as before.
             db.runInTransaction {
-                ZipOutputStream(out).use { zip ->
-                    zip.putNextEntry(ZipEntry(ZIP_ENTRY_NAME))
-                    dbFile.inputStream().use { input -> input.copyTo(zip) }
-                    zip.closeEntry()
-                    if (settingsJson != null) {
-                        zip.putNextEntry(ZipEntry(SETTINGS_ENTRY_NAME))
-                        zip.write(settingsJson.toByteArray(Charsets.UTF_8))
-                        zip.closeEntry()
-                    }
-                }
+                writeBackupZip(dbFile, plaintextZip, settingsJson)
             }
+            BackupEnvelope.encrypt(plaintextZip, encrypted, passphrase)
+            val output = appContext.contentResolver.openOutputStream(uri, "wt")
+                ?: throw IOException("Could not open the chosen file for writing.")
+            output.use { out -> encrypted.inputStream().use { it.copyTo(out) } }
+        } finally {
+            plaintextZip.delete()
+            encrypted.delete()
         }
     }
 
     /**
-     * Replace the live database with the backup at [uri].
+     * Verify and stage the backup at [uri] for a crash-safe cold-launch restore.
      *
-     * Accepts both the new `.noopbak` (ZIP) format and legacy plain `.sqlite`/`.noopdb`
-     * files so older backups keep working after the format upgrade.
+     * Accepts the current encrypted `.noopbak` envelope plus legacy plaintext ZIP and
+     * `.sqlite`/`.noopdb` files, so older backups keep working after the format upgrade.
      *
-     * On any error the current database is left exactly as it was. On success the caller
-     * MUST instruct the user to fully restart the app.
+     * On every path the live database remains open and unchanged. On success the caller MUST
+     * restart the app; [PendingDatabaseRestore] then atomically applies or rolls back the candidate.
      */
-    fun importFrom(context: Context, uri: Uri): ImportResult {
+    fun importFrom(context: Context, uri: Uri, passphrase: String? = null): ImportResult {
         val appContext = context.applicationContext
         val resolver = appContext.contentResolver
 
-        // 1. Peek at the first 16 bytes to distinguish ZIP from plain SQLite.
-        val header = ByteArray(16)
+        val encryptedInput = File.createTempFile("noop-import-", ".encrypted", appContext.cacheDir)
+        val decryptedContainer = File.createTempFile("noop-import-", ".zip", appContext.cacheDir)
+        val tempSqlite = File.createTempFile("noop-import-", ".sqlite", appContext.cacheDir)
+        val tempSettings = File.createTempFile("noop-import-settings-", ".json", appContext.cacheDir)
+        tempSettings.delete()
+        fun cleanup() {
+            encryptedInput.delete(); decryptedContainer.delete(); tempSqlite.delete(); tempSettings.delete()
+        }
+        fun failed(message: String): ImportResult.Failed { cleanup(); return ImportResult.Failed(message) }
+
         try {
-            val read = resolver.openInputStream(uri)?.use { readFully(it, header) }
-                ?: return ImportResult.Failed("Could not open the chosen file.")
-            if (read < 4) return ImportResult.Failed("That file is not a NOOP backup.")
-        } catch (e: IOException) {
-            return ImportResult.Failed("Could not read the chosen file: ${e.message}")
+        // 1. Peek at the first 16 bytes to distinguish ZIP from plain SQLite.
+        val rawHeader = ByteArray(16)
+        try {
+            val read = resolver.openInputStream(uri)?.use { readFully(it, rawHeader) }
+                ?: return failed("Could not open the chosen file.")
+            if (read < 4) return failed("That file is not a NOOP backup.")
+        } catch (e: Exception) {
+            return failed("Could not read the chosen file: ${e.message}")
+        }
+
+        val containerInput: java.io.InputStream
+        val header: ByteArray
+        try {
+            if (BackupEnvelope.isEnvelope(rawHeader)) {
+                val secret = passphrase?.takeIf { it.isNotEmpty() }
+                    ?: return failed("Enter the passphrase used to encrypt this backup.")
+                resolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(encryptedInput).use { out ->
+                        if (!copyBounded(input, out, MAX_BACKUP_CONTAINER_BYTES)) {
+                            return failed("The encrypted backup is too large to restore safely.")
+                        }
+                        out.fd.sync()
+                    }
+                } ?: return failed("Could not open the chosen file.")
+                BackupEnvelope.decrypt(encryptedInput, decryptedContainer, secret)
+                header = peekHeader(decryptedContainer)
+                containerInput = decryptedContainer.inputStream()
+            } else {
+                header = rawHeader
+                containerInput = resolver.openInputStream(uri) ?: return failed("Could not open the chosen file.")
+            }
+        } catch (e: Exception) {
+            return failed(e.message ?: "Could not decrypt the chosen backup.")
         }
 
         // 2. If it's a ZIP (.noopbak), extract the SQLite entry to a temp file.
@@ -166,37 +201,23 @@ object DataBackup {
         //    function) so it can be exercised under real file I/O in unit tests without Room/Context.
         //    A `settings.json` entry (#1000) is staged alongside when present; the stale-delete first
         //    matters, or a leftover from an earlier import could masquerade as THIS backup's settings.
-        val tempSqlite = File(appContext.cacheDir, "import-extract.sqlite")
-        val tempSettings = File(appContext.cacheDir, "import-settings.json")
-        tempSettings.delete()
         try {
-            when (val staged = stageBackupSqlite(resolver.openInputStream(uri), header, tempSqlite, tempSettings)) {
+            when (stageBackupSqlite(containerInput, header, tempSqlite, tempSettings)) {
                 StageResult.OK -> Unit
-                StageResult.CANNOT_OPEN -> return ImportResult.Failed("Could not open the chosen file.")
-                StageResult.NO_DB_IN_ZIP -> {
-                    tempSettings.delete()
-                    return ImportResult.Failed("The backup archive doesn't contain a database file.")
-                }
-                StageResult.ENTRY_TOO_LARGE -> {
-                    tempSqlite.delete()
-                    tempSettings.delete()
-                    return ImportResult.Failed("The backup archive is too large to restore safely.")
-                }
-                StageResult.NOT_A_BACKUP -> return ImportResult.Failed(
+                StageResult.CANNOT_OPEN -> return failed("Could not open the chosen file.")
+                StageResult.NO_DB_IN_ZIP -> return failed("The backup archive doesn't contain a database file.")
+                StageResult.ENTRY_TOO_LARGE -> return failed("The backup archive is too large to restore safely.")
+                StageResult.NOT_A_BACKUP -> return failed(
                     "That file is not a NOOP backup - it doesn't look like a .noopbak archive or a SQLite database."
                 )
             }
-        } catch (e: IOException) {
-            tempSqlite.delete()
-            tempSettings.delete()
-            return ImportResult.Failed("Could not read the chosen file: ${e.message}")
+        } catch (e: Exception) {
+            return failed("Could not read the chosen file: ${e.message}")
         }
 
         // 3. Validate the extracted file is a real SQLite database (magic-byte check).
         if (!isValidSqliteHeader(tempSqlite)) {
-            tempSqlite.delete()
-            tempSettings.delete()
-            return ImportResult.Failed("The backup archive doesn't contain a valid NOOP database.")
+            return failed("The backup archive doesn't contain a valid NOOP database.")
         }
 
         // 3b. Origin check (parity with the Apple side's GRDB-origin rejection). The SQLite magic
@@ -208,9 +229,7 @@ object DataBackup {
         val backupTables = sqliteTableNames(tempSqlite)
         when (backupOriginOf(backupTables)) {
             BackupOrigin.MAC ->
-                return rejectForeign(
-                    tempSqlite,
-                    tempSettings,
+                return failed(
                     "This isn't a NOOP backup from this app. It looks like a backup from the Mac or " +
                         "iOS NOOP app (it carries that platform's migration bookkeeping). Restoring it here " +
                         "would strand your store. To move your history across platforms, export the " +
@@ -218,9 +237,7 @@ object DataBackup {
                 )
             BackupOrigin.UNKNOWN ->
                 if (holdsData(backupTables)) {
-                    return rejectForeign(
-                        tempSqlite,
-                        tempSettings,
+                    return failed(
                         "This isn't a NOOP backup from this app. It's missing the database bookkeeping a " +
                             "NOOP backup carries (it looks like another app's database). Restoring it would " +
                             "strand your store.",
@@ -239,101 +256,24 @@ object DataBackup {
         //     library while still catching truncation and malformed pages. Twin of the Apple side's
         //     DatabaseIntegrity gate.
         sqliteQuickCheckFailure(tempSqlite)?.let { complaint ->
-            tempSqlite.delete()
-            tempSettings.delete()
-            return ImportResult.Failed(
+            return failed(
                 "This backup file is damaged and can't be restored (SQLite reports: $complaint). " +
                     "Your current data is untouched. Try an earlier backup file."
             )
         }
 
-        val dbFile = appContext.getDatabasePath(WhoopDatabase.DB_NAME)
-        val walFile = File(dbFile.path + "-wal")
-        val shmFile = File(dbFile.path + "-shm")
-        val rollbackFile = File(dbFile.path + ".import-bak")
-
-        // 4. Close the live Room singleton so the file handles are released.
-        WhoopDatabase.close()
-
-        // 5. Snapshot the current db so a failed copy can be rolled back.
-        try {
-            rollbackFile.delete()
-            if (dbFile.exists()) dbFile.copyTo(rollbackFile, overwrite = true)
-        } catch (e: IOException) {
-            tempSqlite.delete()
-            tempSettings.delete()
-            return ImportResult.Failed("Could not back up the current data: ${e.message}")
+        return try {
+            PendingDatabaseRestore.stage(appContext, tempSqlite, tempSettings.takeIf(File::exists))
+            cleanup()
+            ImportResult.NeedsRestart
+        } catch (e: Exception) {
+            failed("Could not stage the restore; your current data is unchanged: ${e.message}")
         }
-
-        // 6. Overwrite the db file with the extracted backup, then drop the stale sidecars.
-        try {
-            dbFile.parentFile?.mkdirs()
-            tempSqlite.copyTo(dbFile, overwrite = true)
-            walFile.delete()
-            shmFile.delete()
-        } catch (e: IOException) {
-            runCatching { if (rollbackFile.exists()) rollbackFile.copyTo(dbFile, overwrite = true) }
-            rollbackFile.delete()
-            tempSqlite.delete()
-            tempSettings.delete()
-            return ImportResult.Failed("Import failed, your data is unchanged: ${e.message}")
+        } finally {
+            // Includes unexpected parser/provider exceptions: decrypted health data must never linger
+            // in cache after this call returns or unwinds.
+            cleanup()
         }
-
-        // 6b. #1014 defence-in-depth, post-swap: re-verify the file that actually LANDED at the live
-        //     path with a second read-only quick_check. The staged file was verified in 3c, but the
-        //     copy itself can tear — disk-full mid-copy, a dying flash chip, the process killed at
-        //     the wrong instant — and the next launch would meet a corrupt store (which, before the
-        //     CorruptionPreservingOpenHelperFactory below, the platform would then silently DELETE).
-        //     On failure, roll back to the `.import-bak` snapshot automatically and say so.
-        sqliteQuickCheckFailure(dbFile)?.let { complaint ->
-            tempSqlite.delete()
-            tempSettings.delete()
-            walFile.delete()
-            shmFile.delete()
-            val message: String
-            if (rollbackFile.exists()) {
-                if (runCatching { rollbackFile.copyTo(dbFile, overwrite = true) }.isSuccess) {
-                    rollbackFile.delete()
-                    message = "The backup failed its integrity check after the copy (SQLite reports: " +
-                        "$complaint). Your previous data was rolled back automatically and is unchanged."
-                } else {
-                    // The roll-back copy itself failed: KEEP the snapshot on disk — it is now the
-                    // only good copy of the user's data — and tell the user exactly where it is.
-                    message = "The backup failed its integrity check after the copy (SQLite reports: " +
-                        "$complaint), and rolling back also failed. Your previous data is preserved at " +
-                        "${rollbackFile.name} next to the app's database."
-                }
-            } else {
-                // Fresh install: nothing existed before the import, so removing the damaged file
-                // returns to the exact pre-import (empty) state.
-                dbFile.delete()
-                message = "The backup failed its integrity check after the copy (SQLite reports: " +
-                    "$complaint). There was no previous data to roll back."
-            }
-            return ImportResult.Failed(message)
-        }
-
-        // 7. #1000: re-apply the backup's whitelisted profile/display settings (weight, height, age,
-        //    sex, HR-max override, unit prefs) — but only NOW, after the DB swap landed. Every failure
-        //    path above returns without touching settings. Legacy single-entry backups staged no
-        //    settings file and restore exactly as before; a malformed settings entry degrades to
-        //    "fewer keys applied" inside the codec and can never fail the restore.
-        if (tempSettings.exists()) {
-            runCatching {
-                BackupSettingsBridge.apply(appContext, tempSettings.readText(Charsets.UTF_8))
-            }
-            tempSettings.delete()
-        }
-
-        rollbackFile.delete()
-        tempSqlite.delete()
-        // #57 debug: record when a restore swapped the DB, so the export can correlate a restore with a
-        // subsequent write stall (a restore that wasn't followed by a restart is exactly the #57 failure).
-        runCatching {
-            com.noop.ui.NoopPrefs.of(appContext).edit()
-                .putLong("backup.lastRestoreAt", System.currentTimeMillis() / 1000L).apply()
-        }
-        return ImportResult.NeedsRestart
     }
 
     // ── Container staging (pure file/stream layer, unit-tested under real file I/O) ──────
@@ -349,7 +289,7 @@ object DataBackup {
      * the live import uses (no behaviour fork between test and production).
      *
      * When [settingsDest] is given, a `settings.json` entry (#1000) is ALSO staged there if the ZIP
-     * carries one (either platform's exporter may have written it, in either entry order). Its absence
+     * carries one (legacy exporters may have written it in either entry order). Its absence
      * is not an error — every pre-#1000 backup is a single-entry ZIP — and it never affects the
      * returned [StageResult]: the DB is the payload that decides success.
      *
@@ -368,9 +308,12 @@ object DataBackup {
                 header.startsWith(ZIP_MAGIC) -> {
                     var foundDb = false
                     var foundSettings = false
+                    var entryCount = 0
                     ZipInputStream(stream).use { zip ->
                         var entry = zip.nextEntry
                         while (entry != null) {
+                            entryCount++
+                            if (entryCount > MAX_BACKUP_ZIP_ENTRIES) return StageResult.ENTRY_TOO_LARGE
                             when {
                                 !entry.isDirectory && !foundDb &&
                                     entry.name.substringAfterLast('/') == ZIP_ENTRY_NAME -> {
@@ -426,7 +369,7 @@ object DataBackup {
         }
     }
 
-    /** Write [dbFile]'s bytes into a deflate ZIP at [dest] (the `.noopbak` container), DB entry first,
+    /** Write [dbFile]'s bytes into the private deflate ZIP payload at [dest], DB entry first,
      *  plus the optional `settings.json` entry (#1000) when [settingsJson] is non-null. Context-free
      *  twin of the stream the live [exportTo] writes, so tests round-trip a real archive of either
      *  shape (legacy single-entry when [settingsJson] is null). */
@@ -537,13 +480,6 @@ object DataBackup {
         }
     }
 
-    /** Delete the staged temp files and return a Failed result, keeping the live DB untouched. */
-    private fun rejectForeign(tempSqlite: File, tempSettings: File, message: String): ImportResult {
-        tempSqlite.delete()
-        tempSettings.delete()
-        return ImportResult.Failed(message)
-    }
-
     // ── Integrity gate (#1014 defence-in-depth; twin of the Apple DatabaseIntegrity) ─────
 
     /**
@@ -588,7 +524,7 @@ object DataBackup {
      * recovery, never a content change. Both opens carry [PRESERVE_ON_CORRUPTION] so no probe can
      * ever delete what it probes.
      */
-    private fun sqliteQuickCheckFailure(file: File): String? {
+    internal fun sqliteQuickCheckFailure(file: File): String? {
         val db = runCatching {
             SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY, PRESERVE_ON_CORRUPTION)
         }.recoverCatching {

@@ -1,7 +1,7 @@
 import Foundation
 
 /// One static field entry from a packet spec's "fields" array.
-public struct FieldSpec: Codable, Equatable {
+public struct FieldSpec: Codable, Equatable, Sendable {
     public let off: Int
     public let len: Int
     public let dtype: String?
@@ -12,14 +12,14 @@ public struct FieldSpec: Codable, Equatable {
 }
 
 /// One IMU axis: [name, off, cat] in the JSON (a heterogeneous 3-element array).
-public struct AxisSpec: Equatable {
+public struct AxisSpec: Equatable, Sendable {
     public let name: String
     public let off: Int
     public let cat: String
 }
 
 /// A REALTIME_RAW_DATA variant keyed by payload data_len ("1917" = IMU, "1921" = optical).
-public struct VariantSpec: Equatable {
+public struct VariantSpec: Equatable, Sendable {
     public let kind: String
     public let note: String
     // imu-only
@@ -38,14 +38,14 @@ public struct VariantSpec: Equatable {
 }
 
 /// One type-47 HISTORICAL_DATA version layout (keyed by the version byte = seq).
-public struct VersionSpec: Equatable {
+public struct VersionSpec: Equatable, Sendable {
     public let kind: String?
     public let fields: [FieldSpec]
     public let rrFirstOff: Int?
     public let ref: String?
 }
 
-public struct PacketSpec: Equatable {
+public struct PacketSpec: Equatable, Sendable {
     public let name: String
     public let type: Int
     public let aliases: [Int]
@@ -55,7 +55,7 @@ public struct PacketSpec: Equatable {
     public let versions: [String: VersionSpec]
 }
 
-public struct Schema {
+public struct Schema: Sendable {
     public var enums: [String: [String: String]]
     public var envelope: [FieldSpec]
     public var packets: [String: PacketSpec]
@@ -171,63 +171,63 @@ private struct RawSchema: Decodable {
     let packets: [String: RawPacket]
 }
 
-private var _cachedSchema: Schema?
+private enum SchemaCache {
+    static let value: Schema = {
+        guard let url = Bundle.module.url(forResource: "whoop_protocol", withExtension: "json") else {
+            fatalError("whoop_protocol.json missing from Bundle.module resources")
+        }
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            fatalError("failed to read whoop_protocol.json: \(error)")
+        }
+        let raw: RawSchema
+        do {
+            raw = try JSONDecoder().decode(RawSchema.self, from: data)
+        } catch {
+            fatalError("failed to decode whoop_protocol.json: \(error)")
+        }
+        var packets: [String: PacketSpec] = [:]
+        for (name, rp) in raw.packets {
+            var variants: [String: VariantSpec] = [:]
+            for (key, rv) in rp.variants ?? [:] {
+                variants[key] = VariantSpec(
+                    kind: rv.kind,
+                    note: rv.note,
+                    hrOff: rv.hr_off,
+                    rrCountOff: rv.rr_count_off,
+                    rrFirstOff: rv.rr_first_off,
+                    samples: rv.samples,
+                    axes: (rv.axes ?? []).map { AxisSpec(name: $0.name, off: $0.off, cat: $0.cat) },
+                    tailFrom: rv.tail_from,
+                    ppgOff: rv.ppg_off,
+                    ppgStride: rv.ppg_stride,
+                    ppgSamples: rv.ppg_samples,
+                    configFrom: rv.config_from,
+                    configTo: rv.config_to)
+            }
+            var versions: [String: VersionSpec] = [:]
+            for (key, rvr) in rp.versions ?? [:] {
+                versions[key] = VersionSpec(
+                    kind: rvr.kind,
+                    fields: rvr.fields ?? [],
+                    rrFirstOff: rvr.rr_first_off,
+                    ref: rvr.ref)
+            }
+            packets[name] = PacketSpec(
+                name: name,
+                type: rp.type,
+                aliases: rp.aliases ?? [],
+                post: rp.post,
+                fields: rp.fields ?? [],
+                variants: variants,
+                versions: versions)
+        }
+        return Schema(enums: raw.enums, envelope: raw.envelope, packets: packets)
+    }()
+}
 
 public func loadSchema() -> Schema {
-    if let cached = _cachedSchema { return cached }
-    guard let url = Bundle.module.url(forResource: "whoop_protocol", withExtension: "json") else {
-        fatalError("whoop_protocol.json missing from Bundle.module resources")
-    }
-    let data: Data
-    do {
-        data = try Data(contentsOf: url)
-    } catch {
-        fatalError("failed to read whoop_protocol.json: \(error)")
-    }
-    let raw: RawSchema
-    do {
-        raw = try JSONDecoder().decode(RawSchema.self, from: data)
-    } catch {
-        fatalError("failed to decode whoop_protocol.json: \(error)")
-    }
-    var packets: [String: PacketSpec] = [:]
-    for (name, rp) in raw.packets {
-        var variants: [String: VariantSpec] = [:]
-        for (key, rv) in rp.variants ?? [:] {
-            variants[key] = VariantSpec(
-                kind: rv.kind,
-                note: rv.note,
-                hrOff: rv.hr_off,
-                rrCountOff: rv.rr_count_off,
-                rrFirstOff: rv.rr_first_off,
-                samples: rv.samples,
-                axes: (rv.axes ?? []).map { AxisSpec(name: $0.name, off: $0.off, cat: $0.cat) },
-                tailFrom: rv.tail_from,
-                ppgOff: rv.ppg_off,
-                ppgStride: rv.ppg_stride,
-                ppgSamples: rv.ppg_samples,
-                configFrom: rv.config_from,
-                configTo: rv.config_to)
-        }
-        var versions: [String: VersionSpec] = [:]
-        for (key, rvr) in rp.versions ?? [:] {
-            versions[key] = VersionSpec(
-                kind: rvr.kind,
-                fields: rvr.fields ?? [],
-                rrFirstOff: rvr.rr_first_off,
-                ref: rvr.ref)
-        }
-        packets[name] = PacketSpec(
-            name: name,
-            type: rp.type,
-            aliases: rp.aliases ?? [],
-            post: rp.post,
-            fields: rp.fields ?? [],
-            variants: variants,
-            versions: versions)
-    }
-    let schema = Schema(enums: raw.enums, envelope: raw.envelope, packets: packets)
-    registerPostHooks()
-    _cachedSchema = schema
-    return schema
+    SchemaCache.value
 }

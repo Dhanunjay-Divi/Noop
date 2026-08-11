@@ -146,9 +146,9 @@ class RemoteSyncClientTest {
     }
 
     @Test
-    fun serverErrorNeverEchoesBearerToken() {
+    fun serverErrorIsStableAndNeverPersistsResponseContent() {
         val http = client { request ->
-            response(request, 401, """{"detail":"bad token top-secret"}""")
+            response(request, 401, """{"detail":"bad token top-secret biometric-value"}""")
         }
         val remote = RemoteSyncClient(
             RemoteSyncConfiguration("https://noop.example", "top-secret"),
@@ -158,8 +158,28 @@ class RemoteSyncClientTest {
         val error = assertThrows(RemoteSyncException.Server::class.java) {
             kotlinx.coroutines.runBlocking { remote.authenticatedStatus() }
         }
-        assertTrue(error.message.orEmpty().contains("[redacted]"))
+        assertEquals(
+            "The server did not accept the sync credentials (HTTP 401).",
+            error.message,
+        )
         assertFalse(error.message.orEmpty().contains("top-secret"))
+        assertFalse(error.message.orEmpty().contains("biometric-value"))
+    }
+
+    @Test
+    fun serverErrorClassesHaveActionableStableMessages() {
+        assertEquals(
+            "The sync payload is too large for the server (HTTP 413).",
+            RemoteSyncClient.serverErrorMessage(413),
+        )
+        assertEquals(
+            "The server rejected invalid sync data (HTTP 422).",
+            RemoteSyncClient.serverErrorMessage(422),
+        )
+        assertEquals(
+            "The self-hosted server is unavailable (HTTP 503).",
+            RemoteSyncClient.serverErrorMessage(503),
+        )
     }
 
     private fun client(block: (Request) -> Response): OkHttpClient =

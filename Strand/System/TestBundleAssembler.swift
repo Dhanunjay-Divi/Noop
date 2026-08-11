@@ -176,6 +176,35 @@ enum TestBundleAssembler {
         #endif
     }
 
+    /// Capture effective iOS capabilities from the installed app, not merely the source declaration.
+    /// Re-signers can strip entitlements and redirect App Groups, so this block is essential evidence in
+    /// a physical-device report. Non-iOS reports retain the same schema with unavailable fields omitted.
+    private static func capabilitySnapshot() -> TestBundleMeta.Capabilities {
+        #if os(iOS)
+        let info = Bundle.main.infoDictionary ?? [:]
+        let modes = Set(info["UIBackgroundModes"] as? [String] ?? [])
+        let appGroup = (info["AppGroupIdentifier"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let diagnostics = IOSDiagnostics.capture()
+        return TestBundleMeta.Capabilities(
+            healthKitEntitled: HealthKitBridge.hasHealthKitEntitlement,
+            healthKitBackgroundDeliveryEntitled:
+                HealthKitBridge.hasHealthKitBackgroundDeliveryEntitlement,
+            appGroupIdentifier: appGroup,
+            appGroupContainerAvailable: appGroup.flatMap {
+                FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0) != nil
+            },
+            bluetoothCentralBackgroundMode: modes.contains("bluetooth-central"),
+            locationBackgroundMode: modes.contains("location"),
+            backgroundFetchMode: modes.contains("fetch"),
+            protectedDataAvailable: diagnostics.isProtectedDataAvailable,
+            backgroundRefresh: diagnostics.backgroundRefresh
+        )
+        #else
+        return TestBundleMeta.Capabilities()
+        #endif
+    }
+
     /// Gather the report files for `profile`, redact EVERY file, cap the bundle, then build and append
     /// meta.json (carrying the truncated flag from the cap) and redact-pass it too. Returns the final,
     /// already-redacted + already-capped entries ready for FileExport.exportBundle.
@@ -193,10 +222,13 @@ enum TestBundleAssembler {
                          storage: TestBundleMeta.Storage? = nil,
                          strapModel: String? = nil) -> [FileExport.BundleEntry] {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
         #if os(iOS)
         let platform = "iOS"
+        let hardware = IOSDiagnostics.capture().deviceModel
         #else
         let platform = "macOS"
+        let hardware: String? = nil
         #endif
 
         // 0. The universal clock-drift line (RTC cluster #531/#767/#804/#812): rides EVERY export so a
@@ -290,17 +322,27 @@ enum TestBundleAssembler {
         //    back to the zeroed block - zeros mean "unreadable", we still never fabricate. The
         //    capture_check field carries the same OK/INCOMPLETE verdicts as the report section.
         let started = TestCentre.startedAt(profile).map { ISO8601DateFormatter().string(from: $0) }
+        let ended = ISO8601DateFormatter().string(from: Date())
+        let selectedModel = strapModel.flatMap(WhoopModel.init(rawValue:))
         let meta = TestBundleMeta(
             schema: 1,
             appVersion: version,
+            appBuild: buildNumber,
             platform: platform,
             osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+            deviceHardware: hardware,
             strapModel: strapModel,
+            strapFirmware: live.strapFirmware,
+            deviceFamily: selectedModel?.deviceFamily.rawValue,
+            deviceVariant: live.whoop5Variant,
             source: ["Live Bluetooth"],
             testProfile: profile.id,
             profileStartedAt: started,
+            captureStartedAt: started,
+            captureEndedAt: ended,
             questionnaire: TestCentre.answers(profile),
             build: buildProvenance(),
+            capabilities: capabilitySnapshot(),
             storage: storage ?? TestBundleMeta.Storage(dbBytes: 0, rows: [:], rawCaptureBytes: 0),
             redaction: redactionVersion,
             truncated: truncated,

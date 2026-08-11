@@ -1,3 +1,4 @@
+import java.security.MessageDigest
 import java.util.Properties
 
 plugins {
@@ -31,6 +32,10 @@ val releaseSigningValues = listOf(
 val hasReleaseSigning = releaseSigningValues.all { !it.isNullOrBlank() }
 val hasPartialReleaseSigning = releaseSigningValues.any { !it.isNullOrBlank() } && !hasReleaseSigning
 val isStagingRelease = project.hasProperty("stagingRelease")
+val noopCompileSdk = 36
+val noopTargetSdk = 36
+val noopRequiredPlayTargetSdk = 36
+val isPlayRelease = project.hasProperty("playRelease")
 val requestedReleaseBuild = gradle.startParameter.taskNames.any {
     it.contains("Release", ignoreCase = true)
 }
@@ -42,6 +47,13 @@ if (hasPartialReleaseSigning) {
     throw GradleException(
         "Incomplete release signing configuration. Provide storeFile, storePassword, keyAlias, " +
             "and keyPassword together (or all four NOOP_RELEASE_* environment variables)."
+    )
+}
+if (isPlayRelease && noopTargetSdk < noopRequiredPlayTargetSdk) {
+    throw GradleException(
+        "Google Play release blocked: targetSdk $noopTargetSdk is below the required " +
+            "API $noopRequiredPlayTargetSdk gate. Upgrade AGP/Gradle, install Android API " +
+            "$noopRequiredPlayTargetSdk, update compileSdk/targetSdk, and re-run the full test matrix."
     )
 }
 // Aggregate tasks such as `assemble` do not contain "Release" in the command-line task name.
@@ -56,21 +68,29 @@ gradle.taskGraph.whenReady {
 }
 val legalAssetsDir = layout.buildDirectory.dir("generated/legalAssets")
 val prepareLegalAssets = tasks.register<Sync>("prepareLegalAssets") {
-    // Keep one binding source of truth at the repository root while still packaging an offline copy.
-    from(rootProject.file("../TERMS.md"))
+    // Keep one source of truth at the repository root while packaging the complete offline legal set.
+    from(
+        rootProject.file("../TERMS.md"),
+        rootProject.file("../LICENSE"),
+        rootProject.file("../NOTICE"),
+        rootProject.file("../ATTRIBUTION.md"),
+    )
     into(legalAssetsDir)
 }
 
 android {
     namespace = "com.noop"
-    compileSdk = 34
+    compileSdk = noopCompileSdk
+    // Use the API-36 toolchain already provisioned in local/CI images. AGP 8.13 otherwise defaults to
+    // 35.0.0 and may attempt a surprise SDK mutation during an offline or space-constrained build.
+    buildToolsVersion = "36.0.0"
 
     defaultConfig {
         applicationId = "com.noop.whoop"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 300
-        versionName = "9.1.1"
+        targetSdk = noopTargetSdk
+        versionCode = 301
+        versionName = "9.1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -173,7 +193,27 @@ android {
     sourceSets.getByName("main").assets.srcDir(legalAssetsDir)
 }
 
+tasks.register("verifyPlayTargetSdk") {
+    group = "verification"
+    description = "Fails unless the Android target SDK meets NOOP's Google Play release floor."
+    doLast {
+        if (noopTargetSdk < noopRequiredPlayTargetSdk) {
+            throw GradleException(
+                "Google Play release blocked: targetSdk $noopTargetSdk; " +
+                    "required targetSdk is $noopRequiredPlayTargetSdk."
+            )
+        }
+    }
+}
+
 tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach {
+    dependsOn(prepareLegalAssets)
+}
+
+// Lint reads every declared asset source directly instead of going through the merge task.
+// Make the generated notice bundle an explicit prerequisite so combined build/lint graphs
+// cannot race on or reject the generated directory as an undeclared task output.
+tasks.matching { it.name.contains("lint", ignoreCase = true) }.configureEach {
     dependsOn(prepareLegalAssets)
 }
 
@@ -196,17 +236,45 @@ tasks.matching { it.name == "kspFullDebugKotlin" }.configureEach {
 }
 
 val roomSchemaSnapshotDir = layout.buildDirectory.dir("roomSchemaOracle")
-val syncRoomSchemaSnapshot = tasks.register<Sync>("syncRoomSchemaSnapshot") {
+val roomSchemaInputs = files(
+    "src/main/java/com/noop/data/Entities.kt",
+    "src/main/java/com/noop/data/PairedDevice.kt",
+    "src/main/java/com/noop/data/WhoopDatabase.kt",
+)
+val syncRoomSchemaSnapshot = tasks.register<Copy>("syncRoomSchemaSnapshot") {
     from(roomSchemaDir)
     into(roomSchemaSnapshotDir)
+    inputs.files(roomSchemaInputs).withPropertyName("roomSchemaSources")
     dependsOn(tasks.matching { it.name == "kspFullDebugKotlin" })
     // Gradle validates Test task directory inputs before the test action runs. When Room has no
-    // schema JSON to copy (for example after a clean incremental KSP pass), Sync may legitimately
-    // leave its destination absent, which makes every focused unit-test invocation fail during
-    // validation even though the schema oracle itself is not selected. Keep an empty destination as
-    // a valid optional snapshot; SchemaOracleTest still reports a useful failure when its JSON is
-    // actually required and missing.
-    doLast { roomSchemaSnapshotDir.get().asFile.mkdirs() }
+    // schema JSON to copy (for example after a no-op incremental KSP pass), the producer directory may
+    // legitimately be empty. Copy is intentionally non-destructive so that pass cannot erase the last
+    // valid Room-generated snapshot; a clean build still starts without a snapshot and therefore must
+    // produce one before SchemaOracleTest can pass. Keep an empty destination as a valid optional
+    // snapshot; SchemaOracleTest still reports a useful failure when its JSON is actually missing.
+    doLast {
+        val destination = roomSchemaSnapshotDir.get().asFile.apply { mkdirs() }
+        val marker = destination.resolve(".schema-inputs.sha256")
+        val digest = MessageDigest.getInstance("SHA-256")
+        roomSchemaInputs.files.sortedBy { it.absolutePath }.forEach { source ->
+            digest.update(source.absolutePath.toByteArray())
+            digest.update(0)
+            digest.update(source.readBytes())
+            digest.update(0)
+        }
+        val sourceHash = digest.digest().joinToString("") { "%02x".format(it) }
+        val generatedSchemaExists = roomSchemaDir.get().asFile.walkTopDown()
+            .any { it.isFile && it.extension == "json" }
+
+        if (generatedSchemaExists) {
+            marker.writeText(sourceHash)
+        } else {
+            check(marker.isFile && marker.readText().trim() == sourceHash) {
+                "KSP produced no Room schema after schema-bearing sources changed; refusing to test " +
+                    "against a stale snapshot. Run :app:kspFullDebugKotlin --rerun-tasks."
+            }
+        }
+    }
 }
 
 tasks.withType<Test>().configureEach {
@@ -239,11 +307,10 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
-    // --- Home-screen widget (1.1.x: last line compatible with compileSdk 34) ---
+    // --- Home-screen widget ---
     implementation("androidx.glance:glance-appwidget:1.1.1")
-    // Glance's own POM pins work-runtime 2.7.1 (Oct 2021) — pre-Android-14. Pin a current one
-    // explicitly so the widget scheduler runs on a WorkManager that's maintained for targetSdk 34.
-    // (2.10+ needs compileSdk 35; 2.9.x is the ceiling for this module.)
+    // Glance's own POM pins work-runtime 2.7.1 (Oct 2021). Keep the explicit maintained floor; an
+    // intentional dependency refresh can move to 2.10+ now that this module compiles against API 36.
     implementation("androidx.work:work-runtime-ktx:2.9.0")
 
     // --- Activity / lifecycle / navigation ---
@@ -269,7 +336,7 @@ dependencies {
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // --- Health Connect (optional native Android import of steps/HR/HRV/sleep/etc.) ---
-    // Pinned to alpha07: alpha11+ require compileSdk 35; this module is compileSdk 34.
+    // Pinned for behavior stability; compileSdk 36 no longer constrains a future Health Connect update.
     implementation("androidx.health.connect:connect-client:1.1.0-alpha07")
 
     // --- Unit / instrumentation tests ---

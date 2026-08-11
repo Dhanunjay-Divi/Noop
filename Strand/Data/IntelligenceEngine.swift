@@ -110,12 +110,9 @@ final class IntelligenceEngine: ObservableObject {
     /// One day's off-actor scan output (FIX 1). Carries the pure `AnalyticsEngine.DayResult` produced by
     /// the off-main scan loop plus the pre-computed RHR floor-vs-mean diagnostic line (#691) , computed
     /// inside the detached task from pure inputs so the main actor can replay it through the
-    /// MainActor-bound `diagnosticSink` in the SAME per-day order. Deliberately NOT marked `Sendable`:
-    /// its `AnalyticsEngine.DayResult` member isn't formally `Sendable` either, and the per-day loop ALREADY
-    /// returned a `DayResult` across the `Task.detached` boundary under this project's `minimal` strict-
-    /// concurrency setting (SWIFT_STRICT_CONCURRENCY: minimal, Swift 5 mode) , this wraps the same value
-    /// type the same way, so it crosses the boundary identically.
-    private struct DayScan {
+    /// MainActor-bound `diagnosticSink` in the SAME per-day order. Every carried member is immutable and
+    /// `Sendable`, including `AnalyticsEngine.DayResult`, so the detached-task boundary is explicit.
+    private struct DayScan: Sendable {
         let result: AnalyticsEngine.DayResult
         let rhrLine: String?
         /// CAPTURE-B (#814/#799): the resolved READ owner id this day was scored from, and how many HR rows
@@ -915,10 +912,11 @@ final class IntelligenceEngine: ObservableObject {
                     let verdict = HRVAnalyzer.classifyCoverage(coverage: covVal, collapsed: colCovVal)
                     let accVal = HRVAnalyzer.beatAccurateFraction(tsSec: ts, rrMs: sleepRr)
                     let acc = String(format: "%.2f", accVal)
-                    let sdnnField = HRVAnalyzer.beatSpreadIsTrustworthy(verdict)
+                    let trustworthy = HRVAnalyzer.beatSpreadIsTrustworthy(verdict)
                         && HRVAnalyzer.beatValuesAreTrustworthy(beatAccurateFraction: accVal)
-                        ? "\(ms(h.sdnn))ms" : "withheld"
-                    hrvDiag = "hrv diag day=\(res.daily.day) rmssd=\(ms(h.rmssd))ms sdnn=\(sdnnField) "
+                    let rmssdField = trustworthy ? "\(ms(h.rmssd))ms" : "withheld"
+                    let sdnnField = trustworthy ? "\(ms(h.sdnn))ms" : "withheld"
+                    hrvDiag = "hrv diag day=\(res.daily.day) rmssd=\(rmssdField) sdnn=\(sdnnField) "
                         + "meanNN=\(ms(h.meanNN))ms rr=\(h.nInput)/\(h.nClean) rejected=\(rej)% coverage=\(cov) collapsedCov=\(colCov) dupBeats=\(dup)"
                         + " beatAccurate=\(acc) rrIntegrity=\(verdict.rawValue)"
                 }

@@ -12,6 +12,7 @@ final class BackupSettingsTests: XCTestCase {
     func testEncodeDecodeRoundTripsEveryWhitelistedKey() throws {
         let values: [String: Any] = [
             "profile.age": 34,
+            "profile.dateOfBirth": "1992-11-03",
             "profile.sex": "female",
             "profile.weightKg": 62.5,
             "profile.heightCm": 168.0,
@@ -25,6 +26,8 @@ final class BackupSettingsTests: XCTestCase {
         let back = BackupSettings.decode(data)
 
         XCTAssertEqual(back["profile.age"] as? Int, 34)
+        XCTAssertEqual(back["profile.dateOfBirth"] as? String, "1992-11-03")
+        XCTAssertEqual(back[BackupSettings.schemaVersionKey] as? Int, 2)
         XCTAssertEqual(back["profile.sex"] as? String, "female")
         XCTAssertEqual(back["profile.weightKg"] as? Double, 62.5)
         XCTAssertEqual(back["profile.heightCm"] as? Double, 168.0)
@@ -33,7 +36,7 @@ final class BackupSettingsTests: XCTestCase {
         XCTAssertEqual(back["units.system"] as? String, "imperial")
         XCTAssertEqual(back["units.temperature"] as? String, "celsius")
         XCTAssertEqual(back["effort.scale"] as? String, "whoop")
-        XCTAssertEqual(back.count, values.count, "Nothing extra should appear")
+        XCTAssertEqual(back.count, values.count + 1, "Only the v2 schema stamp should be added")
     }
 
     func testEncodeIsDeterministic() throws {
@@ -103,12 +106,18 @@ final class BackupSettingsTests: XCTestCase {
     func testSnapshotOmitsUnsetKeysAndMapsHrMaxOverride() throws {
         let defaults = try freshDefaults()
         defaults.set(29, forKey: "profile.age")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let dob = try XCTUnwrap(calendar.date(from: DateComponents(year: 1997, month: 4, day: 9)))
+        defaults.set(dob, forKey: "profile.dateOfBirth")
         defaults.set(82.5, forKey: "profile.weightKg")
         defaults.set(198, forKey: "profile.hrMaxOverride") // storage key, not the canonical name
         defaults.set("imperial", forKey: "units.system")
 
         let snap = BackupSettings.snapshot(from: defaults)
         XCTAssertEqual(snap["profile.age"] as? Int, 29)
+        XCTAssertEqual(snap["profile.dateOfBirth"] as? String, "1997-04-09")
+        XCTAssertEqual(snap[BackupSettings.schemaVersionKey] as? Int, 2)
         XCTAssertEqual(snap["profile.weightKg"] as? Double, 82.5)
         XCTAssertEqual(snap["profile.hrMax"] as? Int, 198, "hrMaxOverride surfaces under the canonical key")
         XCTAssertEqual(snap["units.system"] as? String, "imperial")
@@ -162,10 +171,49 @@ final class BackupSettingsTests: XCTestCase {
                        "No age in the payload → the target's DOB is untouched")
     }
 
+    func testV2ExactDateOfBirthWinsOverLossyAge() throws {
+        let defaults = try freshDefaults()
+        defaults.set(Date(timeIntervalSince1970: 0), forKey: "profile.dateOfBirth")
+
+        BackupSettings.apply([
+            BackupSettings.schemaVersionKey: 2,
+            "profile.age": 99,
+            "profile.dateOfBirth": "1992-11-03",
+        ], to: defaults)
+
+        let restored = try XCTUnwrap(defaults.object(forKey: "profile.dateOfBirth") as? Date)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let components = calendar.dateComponents([.year, .month, .day], from: restored)
+        XCTAssertEqual(components.year, 1992)
+        XCTAssertEqual(components.month, 11)
+        XCTAssertEqual(components.day, 3)
+        XCTAssertNotEqual(defaults.object(forKey: "profile.age") as? Int, 99,
+                          "The exact birthday, not the compatibility age, is authoritative in v2")
+    }
+
+    func testMalformedV2DateFallsBackToLegacyAgeMigration() throws {
+        let defaults = try freshDefaults()
+        defaults.set(Date(timeIntervalSince1970: 0), forKey: "profile.dateOfBirth")
+        let decoded = BackupSettings.decode(
+            Data(#"{"settings.schemaVersion":2,"profile.age":44,"profile.dateOfBirth":"1992-02-31"}"#.utf8)
+        )
+
+        BackupSettings.apply(decoded, to: defaults)
+
+        XCTAssertEqual(defaults.object(forKey: "profile.age") as? Int, 44)
+        XCTAssertNil(defaults.object(forKey: "profile.dateOfBirth"),
+                     "An invalid exact date must not override the safe v1 age fallback")
+    }
+
     func testFullExportImportShapedRoundTripThroughDefaults() throws {
         // Device A: user-set values → snapshot → encode (what export writes into the zip).
         let deviceA = try freshDefaults()
         deviceA.set(52, forKey: "profile.age")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let dob = try XCTUnwrap(calendar.date(from: DateComponents(year: 1974, month: 8, day: 22)))
+        deviceA.set(dob, forKey: "profile.dateOfBirth")
         deviceA.set("nonbinary", forKey: "profile.sex")
         deviceA.set(90.25, forKey: "profile.weightKg")
         deviceA.set(0, forKey: "profile.hrMaxOverride") // explicit "auto" is still a value
@@ -175,7 +223,16 @@ final class BackupSettingsTests: XCTestCase {
         let deviceB = try freshDefaults()
         BackupSettings.apply(BackupSettings.decode(payload), to: deviceB)
 
-        XCTAssertEqual(deviceB.object(forKey: "profile.age") as? Int, 52)
+        let restoredDOB = try XCTUnwrap(deviceB.object(forKey: "profile.dateOfBirth") as? Date)
+        let restoredComponents = calendar.dateComponents([.year, .month, .day], from: restoredDOB)
+        XCTAssertEqual(restoredComponents.year, 1974)
+        XCTAssertEqual(restoredComponents.month, 8)
+        XCTAssertEqual(restoredComponents.day, 22)
+        XCTAssertEqual(
+            deviceB.object(forKey: "profile.age") as? Int,
+            calendar.dateComponents([.year], from: restoredDOB, to: Date()).year,
+            "The compatibility age must be derived from the exact restored birthday"
+        )
         XCTAssertEqual(deviceB.string(forKey: "profile.sex"), "nonbinary")
         XCTAssertEqual(deviceB.object(forKey: "profile.weightKg") as? Double, 90.25)
         XCTAssertEqual(deviceB.object(forKey: "profile.hrMaxOverride") as? Int, 0)

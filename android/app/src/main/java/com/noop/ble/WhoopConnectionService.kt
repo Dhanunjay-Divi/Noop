@@ -181,6 +181,18 @@ class WhoopConnectionService : Service() {
             }.onSuccess { bluetoothReceiverRegistered = true }
         }
 
+        // Explicit boot restart or Android START_STICKY process recreation. The pure gate requires
+        // the user's existing keep-connected preference, a remembered device, and BLE permission.
+        // This restores only the connection/history path; realtime HR still requires a foreground
+        // screen lease or the separate Continuous HRV preference.
+        if (intent?.action == ACTION_RECONNECT || intent == null) {
+            val decision = BackgroundReconnectPolicy.runtimeDecision(this)
+            val saved = NoopPrefs.lastDevice(this)
+            if (decision.reconnect && saved != null && !ble.state.value.connected) {
+                ble.reconnectToAddress(saved.first, saved.second)
+            }
+        }
+
         // Keep the ongoing notification in step with the live connection state AND today's recovery
         // (the 15-min IntelligenceEngine recompute), so it re-posts when either changes — a glanceable
         // poor-man's Live Activity (#42). daysMergedFlow is the same merged store the dashboard reads.
@@ -362,11 +374,12 @@ class WhoopConnectionService : Service() {
                 }
         }
 
-        // A normal BLE-only service remains NOT_STICKY: a fresh process lacks enough strap context to
-        // promise a reconnect. An explicitly-started GPS workout is different: GpsSession is durably
-        // checkpointed and initialized before this service, so START_STICKY lets Android resume route
-        // collection after a process kill instead of silently losing the rest of the track.
-        return if (GpsSession.state.value.active) START_STICKY else START_NOT_STICKY
+        // A remembered, user-kept connection is now sufficient durable context for a process-death
+        // reconnect. No remembered strap / opted-out background link stays NOT_STICKY. GPS retains its
+        // independent sticky guarantee. Neither branch leases the high-rate realtime stream.
+        return if (GpsSession.state.value.active ||
+            BackgroundReconnectPolicy.runtimeDecision(this).reconnect
+        ) START_STICKY else START_NOT_STICKY
     }
 
     /** Promote to the foreground. Returns false (rather than throwing) if the platform refuses. When
@@ -485,6 +498,7 @@ class WhoopConnectionService : Service() {
         private const val CHANNEL_ID = "noop_strap_connection"
         private const val NOTIF_ID = 4201
         const val ACTION_STOP = "com.noop.ble.action.STOP_CONNECTION"
+        const val ACTION_RECONNECT = "com.noop.ble.action.RECONNECT_SAVED"
 
         /**
          * Promote the process to the foreground so the strap stays connected. Safe to call when
@@ -497,6 +511,16 @@ class WhoopConnectionService : Service() {
                 ContextCompat.startForegroundService(
                     context,
                     Intent(context, WhoopConnectionService::class.java),
+                )
+            }
+        }
+
+        /** Boot/process recovery entry point; call only after [BackgroundReconnectPolicy] allows it. */
+        fun startReconnect(context: Context) {
+            runCatching {
+                ContextCompat.startForegroundService(
+                    context,
+                    Intent(context, WhoopConnectionService::class.java).setAction(ACTION_RECONNECT),
                 )
             }
         }

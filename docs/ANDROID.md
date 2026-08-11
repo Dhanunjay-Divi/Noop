@@ -111,13 +111,14 @@ bump forces matching KSP and Compose-compiler bumps:
 
 | Component | Version | Notes |
 | --- | --- | --- |
-| Android Gradle Plugin | `8.5.2` | `com.android.application` |
+| Android Gradle Plugin | `8.13.2` | `com.android.application` |
 | Kotlin | `1.9.24` | `org.jetbrains.kotlin.android` |
 | KSP | `1.9.24-1.0.20` | `<kotlinVersion>-<kspVersion>`, must track Kotlin exactly |
 | Compose BOM | `2024.06.00` | pins all Compose artifacts in lockstep |
 | Compose compiler extension | `1.5.14` | matched to Kotlin 1.9.24 |
 | Room | `2.6.1` | `room-runtime`, `room-ktx`, `room-compiler` (via KSP) |
-| `compileSdk` / `targetSdk` | `34` | |
+| `compileSdk` / `targetSdk` | `36` | `verifyPlayTargetSdk` enforces the current API 36 Play floor. |
+| Android Build Tools | `36.0.0` | pinned explicitly so builds do not mutate the SDK installation |
 | `minSdk` | `26` | Android 8.0 — the floor for the current BLE permission split |
 | `sourceCompatibility` / `jvmTarget` | `17` | JDK 17 |
 | `applicationId` | `com.noop.whoop` | `.debug` suffix on debug builds |
@@ -125,6 +126,16 @@ bump forces matching KSP and Compose-compiler bumps:
 The app is local-first and sets `android:allowBackup="false"`. It declares
 `INTERNET` for explicit opt-ins such as the bring-your-own-key Coach and
 Self-hosted Sync; strap collection and local analysis do not require a network.
+
+User-created `.noopbak` files are encrypted and authenticated with the shared
+`NOOPBAK` v1 PBKDF2-HMAC-SHA256/AES-256-GCM envelope. Manual export never stores
+the passphrase. Daily folder backup requires an explicit recovery passphrase,
+stores it only through Android Keystore-backed encrypted preferences, and refuses
+to write if that secret is unavailable. Import supports those encrypted files and
+legacy plaintext backups, stages privately, and swaps only at the next cold Room
+open with an automatic rollback copy. The outer envelope is portable, while the
+embedded Room database is Android-specific; use WHOOP-format CSV between Android
+and Apple.
 
 ---
 
@@ -174,10 +185,10 @@ This section maps the surface so contributors know where each piece lives.
 
 | Tool | Version | Notes |
 | --- | --- | --- |
-| JDK | **17** | AGP 8.5 / Kotlin 1.9 target JVM 17 |
-| Android SDK | API **34** platform + build-tools; `minSdk` 26 | install via Android Studio SDK Manager or `sdkmanager` |
-| Android Studio | current stable (Koala / Ladybug or newer) | optional but recommended; provides the SDK and emulator |
-| Gradle | provided by the committed wrapper (target ~8.7) | use `./gradlew`; do not rely on a global Gradle |
+| JDK | **17** | AGP 8.13.2 / Kotlin 1.9 target JVM 17 |
+| Android SDK | API **36** platform + Build Tools **36.0.0**; `minSdk` 26 | install via Android Studio SDK Manager or `sdkmanager` |
+| Android Studio | current stable | must support syncing the pinned AGP 8.13.2 / Gradle 8.14.5 toolchain; optional but recommended |
+| Gradle | **8.14.5**, provided by the committed wrapper | use `./gradlew`; do not rely on a global Gradle |
 | A physical WHOOP 4.0 or 5.0 strap | — | **required** for any real BLE validation; emulators have no BLE radio |
 | A physical Android device with BLE | Android 8.0+ (API 26+) | the emulator **cannot** reach a real strap |
 
@@ -199,15 +210,16 @@ or export `ANDROID_HOME` / `ANDROID_SDK_ROOT`.
 ```bash
 cd android
 
-# Run the pure-Kotlin unit tests (analytics). No device needed.
-./gradlew :app:testDebugUnitTest
+# Run both flavours' JVM unit-test suites. No device needed.
+./gradlew :app:testFullDebugUnitTest :app:testDemoDebugUnitTest
 
-# Assemble a debug APK.
-./gradlew assembleDebug
-# → app/build/outputs/apk/debug/app-debug.apk  (applicationId com.noop.whoop.debug)
+# Assemble the full debug APK.
+./gradlew :app:assembleFullDebug
+# → app/build/outputs/apk/full/debug/app-full-debug.apk
+#   applicationId com.noop.whoop.debug
 
-# Install onto a connected device and launch.
-./gradlew installDebug
+# Install the full debug flavour onto a connected device and launch it.
+./gradlew :app:installFullDebug
 adb shell am start -n com.noop.whoop.debug/com.noop.ui.MainActivity
 
 # Staging release (separate app ID; still requires private signing credentials).
@@ -215,6 +227,24 @@ adb shell am start -n com.noop.whoop.debug/com.noop.ui.MainActivity
 
 # A non-staging release requires gitignored keystore.properties and a private key.
 ./gradlew assembleFullRelease
+
+# Confirm the configured target meets NOOP's API 36 Play floor.
+./gradlew :app:verifyPlayTargetSdk
+# A Play-labelled release applies that target gate and still requires private signing.
+./gradlew -PplayRelease :app:assembleFullRelease
+```
+
+### Room schema guard
+
+`SchemaOracleTest` compares Room's KSP-generated schema with the byte-identical Android/Swift
+`schema_oracle.json` fixtures. `syncRoomSchemaSnapshot` keeps the last valid generated snapshot when
+KSP performs a no-op incremental pass, but records a SHA-256 fingerprint of every schema-bearing
+Kotlin source. If any entity or database declaration changes and KSP produces no new JSON, the task
+fails instead of allowing that stale snapshot to satisfy the oracle. A clean verification is:
+
+```bash
+./gradlew :app:kspFullDebugKotlin :app:syncRoomSchemaSnapshot --rerun-tasks
+./gradlew :app:testFullDebugUnitTest --tests com.noop.data.SchemaOracleTest
 ```
 
 Open `android/` directly in Android Studio (**File ▸ Open ▸ android/**) and let Gradle sync; run
@@ -608,6 +638,30 @@ there's no hard 5.0/MG gate — but because 5.0/MG HR is currently sparse, those
 
 ---
 
+## Health Connect incremental reconciliation
+
+Automatic Health Connect catch-up uses the provider's changes API with one durable Room token per
+record type. Pages are drained to completion, and tokens are committed only after the local projection
+transaction succeeds; WorkManager retries provider, paging, read, save, and token-store failures without
+advancing the old cursor. Missing or expired tokens trigger a full supported-history rebuild before a
+new cursor can be committed.
+
+The pinned Health Connect SDK's `DeletionChange` exposes only `recordId`, while NOOP stores daily
+aggregates and does not retain that raw id. Exact row deletion therefore cannot be mapped honestly.
+Because a tombstone has no timestamp, any deletion forces a source-scoped rebuild of the importer's
+full supported 10-year history; otherwise an older stale row could survive forever after its token
+advanced. Historical or unknown-shape upsertions take the same complete path. Only upsertions proven
+to overlap the 35-day automatic window use the bounded fast path. Edited Health Connect sleep rows are
+preserved, and partial permissions replace only fields owned by record types that were actually
+readable. WHOOP, manual, Apple Health, activity-file, and other provider rows are never delete targets.
+
+The connection foreground service is independently restartable after process death/reboot only when
+“Keep connected in the background” remains enabled, a previously paired WHOOP is remembered, and the
+Bluetooth connect permission is still granted. That restart restores the low-rate connection/history
+path; it never acquires a realtime-HR lease.
+
+---
+
 ## Compose UI
 
 The UI is Jetpack Compose (Material 3). The theme resources (`res/values/colors.xml`, `themes.xml`
@@ -662,8 +716,8 @@ should be re-verified against a real build, a real device, and a real strap befo
 - [x] Gradle wrapper committed (`gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.{jar,properties}`).
 - [x] Entry points present: `com/noop/NoopApplication.kt`, `com/noop/ui/MainActivity.kt`,
       `app/proguard-rules.pro`.
-- [x] `./gradlew :app:testDebugUnitTest` is green (analytics vectors).
-- [x] `./gradlew assembleDebug` produces `app-debug.apk`.
+- [x] `./gradlew :app:testFullDebugUnitTest :app:testDemoDebugUnitTest` is green.
+- [x] `./gradlew :app:assembleFullDebug` produces `app/build/outputs/apk/full/debug/app-full-debug.apk`.
 - [x] `./gradlew -PstagingRelease assembleFullRelease` uses the separate staging identity when private signing configuration is supplied.
 - [x] Staging and non-staging releases refuse to build without private signing configuration.
 - [x] APK declares `INTERNET` only for explicit opt-in features; fresh-install Self-hosted Sync is disabled.

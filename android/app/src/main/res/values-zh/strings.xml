@@ -5,7 +5,6 @@
         <item quantity="one">已跳过 1 个体重值（请在列名中添加 kg 或 lb）。</item>
         <item quantity="other">已跳过 %d 个体重值（请在列名中添加 kg 或 lb）。</item>
     </plurals>
-    <string name="app_name">NOOP</string>
     <string name="widget_description">今日的恢复、负荷与睡眠情况，以及实时心率和手环电量，一目了然。</string>
     <string name="widget_compact_name">NOOP 迷你组件</string>
     <string name="widget_compact_description">精简版的恢复、负荷与睡眠小组件，带实时心率与手环电量显示。</string>
@@ -1231,7 +1230,7 @@
     <string name="l10n_app_changelog_toggle_the_live_hr_dynamic_island_d3bd70cb">支持开关灵动岛实时心率显示</string>
     <string name="l10n_app_changelog_track_a_workout_manually_2eb43402">手动记录一项运动</string>
     <string name="l10n_app_changelog_trends_report_explains_its_scores_e338d1ee">“趋势”报告现在会解释其评分逻辑了</string>
-    <string name="l10n_app_changelog_true_battery_a_sync_indicator_and_89037fc3">真实的电池电量 %、全新的同步指示器，以及导入运动的心率分析</string>
+    <string name="l10n_app_changelog_true_battery_a_sync_indicator_and_89037fc3" formatted="false">真实的电池电量 %、全新的同步指示器，以及导入运动的心率分析</string>
     <string name="l10n_app_changelog_two_quick_fixes_the_blue_titanium_4c021d78">两个快速修复：蓝色钛金属图标，以及 Mac 版的“你的卡片”面板</string>
     <string name="l10n_app_changelog_under_the_hood_current_api_migration_672da037">底层架构：迁移至现代 API (无用户感知变化)</string>
     <string name="l10n_app_changelog_universal_mac_build_iphone_import_fix_363425a0">Mac 通用构建包 + iPhone 数据导入修复</string>
@@ -1701,4 +1700,121 @@
     <string name="sleep_stages_oura_provenance">Oura Ring 睡眠阶段 · 戒指端估算，未经 Oura App 调整</string>
     <string name="sleep_stages_on_device_provenance">睡眠阶段为设备端估算</string>
     <string name="sleep_stage_summary">卧床 %1$s · 效率 %2$s</string>
+
+    <!-- Strict-lint completeness: device diagnostics, HR recovery, sync, backup and legal. -->
+    <string name="l10n_devices_screen_battery_info_probe_592_re_1dbd4c0f">电池信息探测（#592 重新评估）…</string>
+    <string name="l10n_devices_screen_battery_info_probe_result_592_b97c0bb8">电池信息探测结果（#592）</string>
+    <string name="l10n_devices_screen_body_location_probe_690_re_7def8c39">佩戴位置探测（#690 重新评估）…</string>
+    <string name="l10n_devices_screen_body_location_probe_result_690_60c5ee79">佩戴位置探测结果（#690）</string>
+    <string name="l10n_devices_screen_body_location_probe_explainer_a9363239">发送只读的佩戴位置命令（0x54），并将手环的完整原始回复写入手环日志；在 WHOOP 4.0 上还会解析记录（版本、位置、置信度和状态）。不会向手环写入任何内容，也绝不会改变佩戴检测或评分。</string>
+    <string name="l10n_devices_screen_battery_probe_explainer_2858bb6a">两份独立的协议表对扩展电池操作码存在分歧（98 与 87）。此操作会发送经筛选的只读操作码 98，并将手环的完整原始回复写入手环日志。类似电池数据的载荷可确认固件使用 98；简短的占位回复则表示仍无法确定。不会向手环写入任何内容。之后请导出并分享手环日志。</string>
+    <string name="l10n_devices_screen_close_bbfa773e">关闭</string>
+    <string name="l10n_devices_screen_copy_af74f7c5">复制</string>
+    <string name="l10n_devices_screen_pack_voltage_9af3c3ff">%1$.2f V</string>
+    <string name="l10n_devices_screen_send_probe_read_only_36b318bc">发送探测（只读）</string>
+    <string name="l10n_devices_screen_waiting_for_the_straps_reply_5a06e7ac">正在等待手环回复…</string>
+    <string name="l10n_live_workout_screen_cancel_77dfd213">取消</string>
+    <string name="l10n_live_workout_screen_end_this_workout_4869c76a">结束本次运动？</string>
+    <string name="l10n_live_workout_screen_this_stops_recording_and_saves_what_3e17a23e">这将停止记录并保存目前采集的内容，之后无法继续本次运动。</string>
+    <string name="l10n_notifications_settings_screen_optimal_strain_reached_2862ec2b">已达到最佳负荷</string>
+    <string name="l10n_today_screen_no_new_nights_from_your_strap_for_stale_days_8863bcfe">手环已连续 %1$d 天没有新的夜间数据。请检查连接并确认手环正在保存数据。</string>
+    <string name="l10n_app_changelog_optimal_strain_alerts_faster_history_sync_6488a27a">最佳负荷提醒、更快的历史同步，以及一系列准确性修复</string>
+
+    <string name="l10n_workouts_screen_heart_rate_recovery_516">心率恢复</string>
+    <string name="l10n_workouts_screen_after_high_intensity_effort_516">高强度运动后</string>
+    <string name="l10n_workouts_screen_peak_hr_bpm_516">峰值 %1$d 次/分</string>
+    <string name="l10n_workouts_screen_hrr_one_minute_516">1 分钟</string>
+    <string name="l10n_workouts_screen_hrr_two_minutes_516">2 分钟</string>
+    <string name="l10n_workouts_screen_hrr_five_minutes_516">5 分钟</string>
+    <string name="l10n_workouts_screen_hrr_bpm_516">次/分</string>
+    <string name="l10n_workouts_screen_hrr_not_available_516">暂无数据</string>
+    <string name="l10n_workouts_screen_hrr_accessibility_516">%1$s 时的心率恢复为每分钟 %2$s 次</string>
+    <string name="l10n_workouts_screen_hrr_explanation_516">这是运动结束时心率与之后心率的变化。正值表示心率下降；破折号表示手环在该分钟附近没有记录足够的数据。</string>
+    <string name="l10n_workouts_screen_recovery_trend_516">恢复趋势</string>
+    <string name="l10n_workouts_screen_hrr_range_516">心率恢复 · %1$s</string>
+    <string name="l10n_workouts_screen_hrr_trend_explanation_516">每条线表示运动后心率每分钟变化了多少次。仅包含有运动后心率记录的高强度运动。</string>
+    <string name="l10n_workouts_screen_hrr_chart_accessibility_516">心率恢复趋势，单位为次/分</string>
+    <string name="l10n_workouts_screen_hrr_last_7_days_516">最近 7 天</string>
+    <string name="l10n_workouts_screen_hrr_last_30_days_516">最近 30 天</string>
+    <string name="l10n_workouts_screen_hrr_last_90_days_516">最近 90 天</string>
+    <plurals name="intelligence_days_count">
+        <item quantity="other">%1$d 天</item>
+    </plurals>
+    <plurals name="lab_book_readings_count">
+        <item quantity="other">%1$d 条读数 · 你的记录</item>
+    </plurals>
+    <plurals name="trends_weeks_ago">
+        <item quantity="other">%1$d 周前</item>
+    </plurals>
+    <plurals name="explore_n_days">
+        <item quantity="other">%1$d 天</item>
+    </plurals>
+    <plurals name="l10n_workouts_screen_hrr_workout_count_516">
+        <item quantity="other">%1$d 次运动</item>
+    </plurals>
+
+    <string name="remote_sync_self_hosted_server">自托管服务器</string>
+    <string name="remote_sync_description">将实测数据流、NOOP 派生指标、睡眠、运动和日志条目发送到你自己的 NOOP 服务器。导入的 WHOOP 官方指标使用独立的参考命名空间，以便进行比较，同时不会声称 NOOP 能复现 WHOOP 的专有评分公式。</string>
+    <string name="remote_sync_api_key">API 密钥</string>
+    <string name="remote_sync_saved_key_placeholder">已安全保存——留空即可保留</string>
+    <string name="remote_sync_bearer_token_placeholder">服务器提供的 Bearer 令牌</string>
+    <string name="remote_sync_automatic_upload">自动上传</string>
+    <string name="remote_sync_automatic_upload_description">默认关闭。启用后，WorkManager 会分批补传数据。</string>
+    <string name="remote_sync_save_and_test">保存并测试连接</string>
+    <string name="remote_sync_sync_now">立即同步</string>
+    <string name="remote_sync_full_replay">完整重传</string>
+    <string name="remote_sync_disconnect_and_forget">断开连接并忘记密钥</string>
+    <string name="remote_sync_privacy_notice">隐私说明：只有在你主动启用后，数据才会上传到上方网址。Bearer 密钥由 Android Keystore 加密。公共服务器必须使用 HTTPS；仅 localhost 或私有局域网允许 HTTP。完整重传具有幂等性，但可能传输大量历史数据。同步只用于归档和更新插入：删除本地派生项目不会删除服务器上已有的副本。</string>
+    <string name="remote_sync_replay_title">重传全部本地历史记录？</string>
+    <string name="remote_sync_replay_message">不会删除任何本地数据。所有已解码的原始行都会标记为待处理并重新发送，派生历史则按稳定键重传。更换服务器或修复服务器数据库后可使用此功能；过程可能需要多个后台批次。</string>
+    <string name="remote_sync_replay">重传</string>
+    <string name="remote_sync_disconnect_title">断开自托管服务器？</string>
+    <string name="remote_sync_disconnect_message">这将删除已保存的网址、受 Keystore 保护的 API 密钥、排队的同步游标和自动上传计划。不会删除本地数据，也不会删除服务器上已有的数据。</string>
+    <string name="settings_support_open_url">打开此支持网址：%1$s</string>
+    <string name="l10n_app_changelog_self_hosted_sync_honest_whoop_comparison_new_noop_identity_016ed2b1">自托管同步、诚实的 WHOOP 对比，以及全新的 NOOP 品牌形象</string>
+
+    <string name="workout_discard_title">放弃本次运动？</string>
+    <string name="workout_discard_recovery_message">这将永久删除设备上的恢复副本，且无法撤销。</string>
+    <string name="workout_discard_action">放弃</string>
+    <string name="workout_keep_action">保留运动</string>
+    <string name="workout_saving">正在保存…</string>
+    <string name="workout_retry_save">重试保存</string>
+    <string name="workout_discard">放弃运动</string>
+    <string name="l10n_app_changelog_safer_upgrades_trustworthy_signals_9c1f2a7b">更安全的升级、更可信的信号，以及生产级加固</string>
+
+    <string name="noop_backup_encryption_title">备份加密</string>
+    <string name="noop_backup_encryption_configured_help">用于无人值守备份的恢复口令已存储在 Android Keystore 中。它不会显示或上传，恢复时需重新输入。更换口令不会改变旧备份。</string>
+    <string name="noop_backup_encryption_required_help">请先设置恢复口令，自动备份才能运行。若丢失口令，加密备份将无法恢复。</string>
+    <string name="noop_backup_new_passphrase">新口令</string>
+    <string name="noop_backup_recovery_passphrase">恢复口令</string>
+    <string name="noop_backup_confirm_passphrase">确认口令</string>
+    <string name="noop_backup_replace_recovery_passphrase">更换恢复口令</string>
+    <string name="noop_backup_secure_automatic_backups">安全自动备份</string>
+    <string name="noop_backup_passphrase_saved">恢复口令已安全保存。请自行保留副本；NOOP 无法找回该口令。</string>
+    <string name="noop_backup_passphrase_save_failed">无法安全保存口令。</string>
+    <string name="noop_backup_forget_stored_passphrase">忘记已保存的口令</string>
+    <string name="noop_backup_passphrase_removed">已移除保存的口令。现有备份仍需使用原来的口令。</string>
+    <string name="noop_backup_passphrase_remove_failed">无法移除已保存的口令。</string>
+    <string name="noop_backup_passphrase_mismatch">两次输入的口令不一致。</string>
+    <string name="noop_backup_passphrase_minimum_error">备份口令必须至少包含 12 个字符。</string>
+    <string name="noop_backup_unlock_title">解锁备份</string>
+    <string name="noop_backup_unlock_folder_help">请输入此备份的恢复口令。恢复时仍需使用该口令；仅旧版未加密备份可以留空。</string>
+    <string name="noop_backup_passphrase_label">口令</string>
+    <string name="noop_backup_verify_restore">验证并恢复</string>
+    <string name="noop_backup_encrypt_title">加密备份</string>
+    <string name="noop_backup_export_passphrase_help">请使用至少 12 个字符。若丢失口令，NOOP 无法帮你找回。</string>
+    <string name="noop_backup_import_passphrase_help">请输入创建此备份时使用的口令。仍支持旧版未加密备份。</string>
+    <string name="noop_backup_choose_destination">选择保存位置</string>
+    <string name="noop_backup_restart_apply">备份验证成功——正在重启 NOOP 以安全应用…</string>
+    <string name="noop_backup_platform_portability_help">加密的 .noopbak 文件可在创建它的平台上无损恢复。其封装格式是通用的，但 Room（Android）和 GRDB（Apple）数据库不能互换。导出 CSV 是 Android 与 Apple 之间可移植的数据传输方式。</string>
+
+    <string name="noop_legal_title">法律信息与致谢</string>
+    <string name="noop_legal_accessibility">法律信息与致谢</string>
+    <string name="noop_legal_description">条款、源代码许可证、第三方声明和来源说明——均可离线查看。</string>
+    <string name="noop_legal_subtitle">此版本随附的完整文档。</string>
+    <string name="noop_legal_terms">条款</string>
+    <string name="noop_legal_license">许可证</string>
+    <string name="noop_legal_notices">声明</string>
+    <string name="noop_legal_attribution">来源说明</string>
+    <string name="noop_legal_document_error">无法打开此内置文档。请重新安装当前版本后再试。</string>
 </resources>

@@ -31,7 +31,7 @@ final class OuraConnectModel: ObservableObject {
 
     func connectAndImport(repo: Repository) {
         guard let creds = OuraCredentials.fromBundle else {
-            statusText = "Add your Oura app's client_id/secret to OuraSecrets.xcconfig first."; return
+            statusText = "Add your Oura app's public client ID to OuraSecrets.xcconfig first."; return
         }
         setBusy(true); statusText = "Connecting to Oura…"
         Task {
@@ -64,7 +64,7 @@ final class OuraConnectModel: ObservableObject {
     func disconnect(repo: Repository) {
         busy = true
         Task {
-            OuraOAuthProvider(credentials: OuraCredentials.fromBundle ?? .init(clientId: "", clientSecret: "", redirectURI: "")).signOut()
+            OuraOAuthProvider(credentials: OuraCredentials.fromBundle ?? .init(clientId: "", redirectURI: "")).signOut()
             if let store = await repo.storeHandle() {
                 do {
                     try await store.deleteAllData(deviceId: "oura-api")

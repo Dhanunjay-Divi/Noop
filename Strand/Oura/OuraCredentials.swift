@@ -4,14 +4,13 @@
 #if OURA_CLOUD_IMPORT
 import Foundation
 
-/// The user's own Oura OAuth app credentials, injected at build time via an untracked xcconfig →
-/// Info.plist (Task 5). Absent credentials mean the Connect flow is unavailable (surfaced in the UI).
+/// The user's Oura OAuth public-client configuration, injected at build time via an untracked
+/// xcconfig → Info.plist. A native binary cannot keep a client secret, so none is accepted here.
 struct OuraCredentials: Equatable {
     let clientId: String
-    let clientSecret: String
     let redirectURI: String
 
-    /// Build from an Info-dictionary-shaped map. Returns nil unless all three keys are present and
+    /// Build from an Info-dictionary-shaped map. Returns nil unless both public values are present and
     /// non-blank (so a build without the xcconfig cleanly disables the lane rather than half-configuring).
     static func from(_ info: [String: Any]) -> OuraCredentials? {
         func nonBlank(_ key: String) -> String? {
@@ -20,9 +19,8 @@ struct OuraCredentials: Equatable {
             return s
         }
         guard let id = nonBlank("OURA_CLIENT_ID"),
-              let secret = nonBlank("OURA_CLIENT_SECRET"),
               let redirect = nonBlank("OURA_REDIRECT_URI") else { return nil }
-        return OuraCredentials(clientId: id, clientSecret: secret, redirectURI: redirect)
+        return OuraCredentials(clientId: id, redirectURI: redirect)
     }
 
     /// The live credentials from the app bundle's Info.plist, or nil if not configured.

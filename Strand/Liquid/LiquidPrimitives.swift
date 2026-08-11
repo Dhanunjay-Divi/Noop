@@ -148,7 +148,7 @@ enum LiquidRender {
     static func tube(_ base: GraphicsContext, _ size: CGSize, _ sim: LiquidSim, now: Double, frac: Double, tint: Color) {
         let w = size.width, h = size.height, r = h / 2
         let outline = Path(roundedRect: CGRect(x: 0.5, y: 0.5, width: w - 1, height: h - 1), cornerRadius: r)
-        var ctx = base
+        let ctx = base
         ctx.fill(outline, with: .color(Color(.sRGB, red: 14/255, green: 14/255, blue: 18/255, opacity: 1)))
         ctx.stroke(outline, with: .color(.white.opacity(0.07)), lineWidth: 1)
 
@@ -195,7 +195,7 @@ enum LiquidRender {
             p.addLine(to: CGPoint(x: px(n - 1), y: py(values[n - 1])))
             return p
         }
-        var ctx = base
+        let ctx = base
         ctx.stroke(curve(), with: .color(tint.opacity(0.9)), style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
         // travelling glint
         let phase = -(now * 55).truncatingRemainder(dividingBy: 414)
@@ -384,7 +384,8 @@ struct LiquidPressStyle: ButtonStyle {
 
 /// A number that animates to its value: SwiftUI interpolates `animatableData`, so the shown integer rolls
 /// smoothly frame-by-frame whenever `value` changes inside a `withAnimation` block.
-struct CountUpNumber: View, Animatable {
+@MainActor
+struct CountUpNumber: View, @preconcurrency Animatable {
     var value: Double
     var font: Font
     /// Decimal places to render. 0 (default) keeps the whole-number scores (Charge/Rest/100-scale Effort)

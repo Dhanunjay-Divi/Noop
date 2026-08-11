@@ -52,17 +52,24 @@ class ResolverUnionTest {
         )
     }
 
-    /** A vital with a declared Apple-Health mapping appends the Apple candidate LAST , after the whole
-     *  WHOOP union , so a real Apple export fills only days no WHOOP source covers. The Apple candidate
-     *  carries the MAPPED key ("rhr" → "resting_hr"), not the WHOOP key. */
+    /** A vital with a declared phone-health mapping appends Apple Health and then Health Connect after
+     *  the whole WHOOP union, so phone health fills only days no WHOOP source covers. Both candidates
+     *  carry the MAPPED key ("rhr" → "resting_hr"), not the WHOOP key. */
     @Test
-    fun appleFallbackAppendsLastWithMappedKey() {
+    fun phoneHealthFallbacksAppendLastWithMappedKey() {
         val candidates = WhoopRepository.sourceCandidates("rhr", canonical, reAdded)
         assertEquals(
-            listOf(reAdded, "my-whoop", "$reAdded-noop", "my-whoop-noop", "apple-health"),
+            listOf(
+                reAdded,
+                "my-whoop",
+                "$reAdded-noop",
+                "my-whoop-noop",
+                "apple-health",
+                "health-connect",
+            ),
             candidates.map { it.source },
         )
-        assertEquals("resting_hr", candidates.last().key)
+        assertEquals(listOf("resting_hr", "resting_hr"), candidates.takeLast(2).map { it.key })
     }
 
     /** A derived score with NO Apple mapping never grows an Apple candidate , the resolver must not

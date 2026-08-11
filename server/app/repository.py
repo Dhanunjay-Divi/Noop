@@ -22,6 +22,10 @@ class SyncConflictError(Exception):
     """Raised when a batch identifier is reused for different content."""
 
 
+class SyncRetiredError(Exception):
+    """Raised when retained deletion metadata blocks an exact replay."""
+
+
 class FriendNotFoundError(Exception):
     """Raised when a social object is absent or intentionally undiscoverable."""
 
@@ -81,6 +85,8 @@ class Repository(Protocol):
     async def startup(self) -> None: ...
 
     async def shutdown(self) -> None: ...
+
+    async def ready(self) -> bool: ...
 
     async def sync(
         self,
@@ -145,10 +151,17 @@ class Repository(Protocol):
         end: datetime | None,
     ) -> dict[str, Any]: ...
 
-    async def delete_device(self, device_id: str) -> dict[str, int]: ...
+    async def delete_device(
+        self,
+        device_id: str,
+        replay_guard_until: datetime | None = None,
+    ) -> dict[str, int]: ...
 
     async def purge_before(
-        self, cutoff: datetime, device_id: str | None = None
+        self,
+        cutoff: datetime,
+        device_id: str | None = None,
+        replay_guard_until: datetime | None = None,
     ) -> dict[str, int]: ...
 
     async def create_friend_profile(
@@ -249,7 +262,9 @@ class MemoryRepository:
 
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
+        self._retention_lock = asyncio.Lock()
         self._batch_hashes: dict[str, tuple[str, str, datetime]] = {}
+        self._batch_tombstones: dict[str, tuple[str, datetime]] = {}
         self._devices: dict[str, dict[str, Any]] = {}
         self._metrics: dict[tuple[str, str, datetime, str], dict[str, Any]] = {}
         self._events: dict[tuple[str, str], dict[str, Any]] = {}
@@ -271,6 +286,9 @@ class MemoryRepository:
     async def shutdown(self) -> None:
         return None
 
+    async def ready(self) -> bool:
+        return True
+
     async def sync(
         self,
         payload: SyncPayload,
@@ -279,6 +297,22 @@ class MemoryRepository:
     ) -> SyncResult:
         batch_id = str(payload.batch_id)
         async with self._lock:
+            now = datetime.now(UTC)
+            self._batch_tombstones = {
+                retired_batch_id: tombstone
+                for retired_batch_id, tombstone in self._batch_tombstones.items()
+                if tombstone[1] > now
+            }
+            if any(
+                retired_batch_id == batch_id or retired_hash == payload_hash
+                for retired_batch_id, (
+                    retired_hash,
+                    _,
+                ) in self._batch_tombstones.items()
+            ):
+                raise SyncRetiredError(
+                    "batch content was retired after deletion and cannot be replayed"
+                )
             if social_profile_id is not None:
                 profile = self._friend_profiles.get(social_profile_id)
                 if (
@@ -588,6 +622,7 @@ class MemoryRepository:
                 "workouts": len(self._workouts),
                 "journal_entries": len(self._journal),
                 "sync_batches": len(self._batch_hashes),
+                "sync_tombstones": len(self._batch_tombstones),
                 "latest_sync_at": newest,
             }
 
@@ -661,7 +696,11 @@ class MemoryRepository:
             ),
         }
 
-    async def delete_device(self, device_id: str) -> dict[str, int]:
+    async def delete_device(
+        self,
+        device_id: str,
+        replay_guard_until: datetime | None = None,
+    ) -> dict[str, int]:
         async with self._lock:
             counts = Counter()
             if self._devices.pop(device_id, None) is not None:
@@ -686,62 +725,97 @@ class MemoryRepository:
             ]
             counts["sync_batches"] = len(batch_keys)
             for batch_id in batch_keys:
+                if replay_guard_until is not None:
+                    payload_hash = self._batch_hashes[batch_id][0]
+                    self._batch_tombstones[batch_id] = (
+                        payload_hash,
+                        replay_guard_until,
+                    )
                 del self._batch_hashes[batch_id]
             return dict(counts)
 
     async def purge_before(
-        self, cutoff: datetime, device_id: str | None = None
+        self,
+        cutoff: datetime,
+        device_id: str | None = None,
+        replay_guard_until: datetime | None = None,
     ) -> dict[str, int]:
-        async with self._lock:
-            counts = Counter()
+        # This mirrors PostgreSQL's transaction-scoped advisory lock so two
+        # schedulers cannot interleave a destructive retention cycle.
+        async with self._retention_lock:
+            async with self._lock:
+                return self._purge_before_locked(
+                    cutoff,
+                    device_id,
+                    replay_guard_until,
+                )
 
-            def selected(stored_device: str) -> bool:
-                return device_id is None or stored_device == device_id
+    def _purge_before_locked(
+        self,
+        cutoff: datetime,
+        device_id: str | None,
+        replay_guard_until: datetime | None,
+    ) -> dict[str, int]:
+        counts = Counter()
 
-            timed_stores: tuple[tuple[str, dict[Any, Any], Any], ...] = (
-                ("metric_samples", self._metrics, lambda key, row: key[2]),
-                ("events", self._events, lambda key, row: row["recorded_at"]),
-                ("sleep_sessions", self._sleep, lambda key, row: row["end_ts"]),
-                ("workouts", self._workouts, lambda key, row: row["end_ts"]),
-            )
-            for label, store, timestamp in timed_stores:
-                keys = [
-                    key
-                    for key, row in store.items()
-                    if selected(key[0]) and timestamp(key, row) < cutoff
-                ]
-                counts[label] = len(keys)
-                for key in keys:
-                    del store[key]
-            daily_keys = [
+        def selected(stored_device: str) -> bool:
+            return device_id is None or stored_device == device_id
+
+        timed_stores: tuple[tuple[str, dict[Any, Any], Any], ...] = (
+            ("metric_samples", self._metrics, lambda key, row: key[2]),
+            ("events", self._events, lambda key, row: row["recorded_at"]),
+            ("sleep_sessions", self._sleep, lambda key, row: row["end_ts"]),
+            ("workouts", self._workouts, lambda key, row: row["end_ts"]),
+        )
+        for label, store, timestamp in timed_stores:
+            keys = [
                 key
-                for key in self._daily
-                if selected(key[0]) and key[1] < cutoff.date()
+                for key, row in store.items()
+                if selected(key[0]) and timestamp(key, row) < cutoff
             ]
-            journal_keys = [
-                key
-                for key in self._journal
-                if selected(key[0]) and key[1] < cutoff.date()
-            ]
-            counts["daily_metrics"] = len(daily_keys)
-            counts["journal_entries"] = len(journal_keys)
-            for key in daily_keys:
-                del self._daily[key]
-            for key in journal_keys:
-                del self._journal[key]
-            batch_keys = [
-                batch_id
-                for batch_id, (
-                    _,
-                    stored_device,
-                    received_at,
-                ) in self._batch_hashes.items()
-                if selected(stored_device) and received_at < cutoff
-            ]
-            counts["sync_batches"] = len(batch_keys)
-            for batch_id in batch_keys:
-                del self._batch_hashes[batch_id]
-            return dict(counts)
+            counts[label] = len(keys)
+            for key in keys:
+                del store[key]
+        daily_keys = [
+            key for key in self._daily if selected(key[0]) and key[1] < cutoff.date()
+        ]
+        journal_keys = [
+            key for key in self._journal if selected(key[0]) and key[1] < cutoff.date()
+        ]
+        counts["daily_metrics"] = len(daily_keys)
+        counts["journal_entries"] = len(journal_keys)
+        for key in daily_keys:
+            del self._daily[key]
+        for key in journal_keys:
+            del self._journal[key]
+        batch_keys = [
+            batch_id
+            for batch_id, (
+                _,
+                stored_device,
+                received_at,
+            ) in self._batch_hashes.items()
+            if selected(stored_device) and received_at < cutoff
+        ]
+        counts["sync_batches"] = len(batch_keys)
+        for batch_id in batch_keys:
+            if replay_guard_until is not None:
+                payload_hash = self._batch_hashes[batch_id][0]
+                self._batch_tombstones[batch_id] = (
+                    payload_hash,
+                    replay_guard_until,
+                )
+            del self._batch_hashes[batch_id]
+        now = datetime.now(UTC)
+        expired_tombstones = [
+            batch_id
+            for batch_id, (_, expires_at) in self._batch_tombstones.items()
+            if expires_at <= now
+        ]
+        for batch_id in expired_tombstones:
+            del self._batch_tombstones[batch_id]
+        counts["expired_sync_tombstones"] = len(expired_tombstones)
+        return dict(counts)
 
     async def create_friend_profile(
         self,
@@ -1529,6 +1603,13 @@ class PostgresRepository:
             await self._pool.close()
             self._pool = None
 
+    async def ready(self) -> bool:
+        pool = self._require_pool()
+        try:
+            return bool(await pool.fetchval("SELECT 1"))
+        except Exception:
+            return False
+
     def _require_pool(self) -> Any:
         if self._pool is None:
             raise RuntimeError("repository has not started")
@@ -1565,6 +1646,23 @@ class PostgresRepository:
                     "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                     f"noop-device:{device_id}",
                 )
+                await connection.execute(
+                    "DELETE FROM sync_batch_tombstones WHERE expires_at <= now()"
+                )
+                retired = await connection.fetchrow(
+                    """
+                    SELECT batch_id
+                    FROM sync_batch_tombstones
+                    WHERE batch_id = $1 OR payload_hash = $2
+                    LIMIT 1
+                    """,
+                    payload.batch_id,
+                    payload_hash,
+                )
+                if retired is not None:
+                    raise SyncRetiredError(
+                        "batch content was retired after deletion and cannot be replayed"
+                    )
                 if social_profile_id is not None:
                     active_profile = await connection.fetchrow(
                         """
@@ -2120,6 +2218,7 @@ class PostgresRepository:
             UNION ALL SELECT 'workouts', count(*) FROM workouts
             UNION ALL SELECT 'journal_entries', count(*) FROM journal_entries
             UNION ALL SELECT 'sync_batches', count(*) FROM sync_batches
+            UNION ALL SELECT 'sync_tombstones', count(*) FROM sync_batch_tombstones
             """
         )
         latest = await pool.fetchval("SELECT max(received_at) FROM sync_batches")
@@ -2256,7 +2355,11 @@ class PostgresRepository:
             ),
         }
 
-    async def delete_device(self, device_id: str) -> dict[str, int]:
+    async def delete_device(
+        self,
+        device_id: str,
+        replay_guard_until: datetime | None = None,
+    ) -> dict[str, int]:
         pool = self._require_pool()
         tables = (
             "metric_samples",
@@ -2269,12 +2372,36 @@ class PostgresRepository:
         )
         async with pool.acquire() as connection:
             async with connection.transaction():
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"noop-device:{device_id}",
+                )
                 counts: dict[str, int] = {}
                 for table in tables:
                     counts[table] = await connection.fetchval(
                         f"SELECT count(*) FROM {table} WHERE device_id = $1",
                         device_id,
                     )
+                if replay_guard_until is not None:
+                    tombstone_status = await connection.execute(
+                        """
+                        INSERT INTO sync_batch_tombstones (
+                            batch_id, payload_hash, expires_at
+                        )
+                        SELECT batch_id, payload_hash, $2
+                        FROM sync_batches
+                        WHERE device_id = $1
+                        ON CONFLICT (batch_id) DO UPDATE SET
+                            payload_hash = EXCLUDED.payload_hash,
+                            expires_at = GREATEST(
+                                sync_batch_tombstones.expires_at,
+                                EXCLUDED.expires_at
+                            )
+                        """,
+                        device_id,
+                        replay_guard_until,
+                    )
+                    counts["sync_tombstones_created"] = _command_count(tombstone_status)
                 status = await connection.execute(
                     "DELETE FROM devices WHERE device_id = $1",
                     device_id,
@@ -2283,7 +2410,10 @@ class PostgresRepository:
         return counts
 
     async def purge_before(
-        self, cutoff: datetime, device_id: str | None = None
+        self,
+        cutoff: datetime,
+        device_id: str | None = None,
+        replay_guard_until: datetime | None = None,
     ) -> dict[str, int]:
         pool = self._require_pool()
         predicates = {
@@ -2300,6 +2430,39 @@ class PostgresRepository:
         counts: dict[str, int] = {}
         async with pool.acquire() as connection:
             async with connection.transaction():
+                # Transaction-scoped and shared by every API replica. A second
+                # scheduler waits for the first cycle instead of interleaving
+                # destructive statements against the same tables.
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    "noop-retention",
+                )
+                expired_status = await connection.execute(
+                    "DELETE FROM sync_batch_tombstones WHERE expires_at <= now()"
+                )
+                counts["expired_sync_tombstones"] = _command_count(expired_status)
+                if replay_guard_until is not None:
+                    tombstone_status = await connection.execute(
+                        """
+                        INSERT INTO sync_batch_tombstones (
+                            batch_id, payload_hash, expires_at
+                        )
+                        SELECT batch_id, payload_hash, $2
+                        FROM sync_batches
+                        WHERE received_at < $1
+                          AND ($3::text IS NULL OR device_id = $3)
+                        ON CONFLICT (batch_id) DO UPDATE SET
+                            payload_hash = EXCLUDED.payload_hash,
+                            expires_at = GREATEST(
+                                sync_batch_tombstones.expires_at,
+                                EXCLUDED.expires_at
+                            )
+                        """,
+                        cutoff,
+                        replay_guard_until,
+                        device_id,
+                    )
+                    counts["sync_tombstones_created"] = _command_count(tombstone_status)
                 for table, time_predicate in predicates.items():
                     cutoff_value: datetime | date = (
                         cutoff.date() if "::date" in time_predicate else cutoff

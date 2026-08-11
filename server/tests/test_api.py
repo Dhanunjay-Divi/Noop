@@ -400,6 +400,10 @@ def test_export_delete_and_retention_are_authenticated_and_confirmed(
     assert deleted.status_code == 200
     assert deleted.json()["counts"]["metric_samples"] == 7
 
+    retired_replay = client.post("/v1/sync", headers=auth_headers, json=payload)
+    assert retired_replay.status_code == 410
+    assert "retired after deletion" in retired_replay.json()["detail"]
+
     retention = client.post(
         "/v1/admin/retention/run",
         headers={**auth_headers, "X-Noop-Confirm": "PURGE"},

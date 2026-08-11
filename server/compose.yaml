@@ -2,16 +2,20 @@ name: noop
 
 services:
   db:
-    image: timescale/timescaledb:2.20.3-pg16
+    image: timescale/timescaledb:2.20.3-pg16@sha256:559615191e7249779e5f83a74f01d309bce299bfadd6d3177d7a7b99610eef89
     restart: unless-stopped
     environment:
-      POSTGRES_DB: noop
+      POSTGRES_DB: ${NOOP_DB_NAME:-noop}
       POSTGRES_USER: noop
       POSTGRES_PASSWORD: ${NOOP_DB_PASSWORD:?set NOOP_DB_PASSWORD in .env}
     volumes:
       - noop_timescale_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U noop -d noop"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"",
+        ]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -27,11 +31,16 @@ services:
         condition: service_healthy
     environment:
       NOOP_API_TOKEN: ${NOOP_API_TOKEN:?set NOOP_API_TOKEN in .env}
-      NOOP_DATABASE_URL: postgresql://noop:${NOOP_DB_PASSWORD}@db:5432/noop
+      NOOP_DATABASE_URL: postgresql://noop:${NOOP_DB_PASSWORD}@db:5432/${NOOP_DB_NAME:-noop}
       NOOP_MAX_REQUEST_BYTES: ${NOOP_MAX_REQUEST_BYTES:-10485760}
       NOOP_DB_POOL_MIN_SIZE: ${NOOP_DB_POOL_MIN_SIZE:-1}
       NOOP_DB_POOL_MAX_SIZE: ${NOOP_DB_POOL_MAX_SIZE:-8}
       NOOP_RETENTION_DAYS: ${NOOP_RETENTION_DAYS:-0}
+      NOOP_RETENTION_INTERVAL_HOURS: ${NOOP_RETENTION_INTERVAL_HOURS:-24}
+      NOOP_IDEMPOTENCY_REPLAY_GUARD_DAYS: ${NOOP_IDEMPOTENCY_REPLAY_GUARD_DAYS:-30}
+      NOOP_RATE_LIMIT_REQUESTS_PER_MINUTE: ${NOOP_RATE_LIMIT_REQUESTS_PER_MINUTE:-120}
+      NOOP_RATE_LIMIT_ORIGIN_REQUESTS_PER_MINUTE: ${NOOP_RATE_LIMIT_ORIGIN_REQUESTS_PER_MINUTE:-300}
+      NOOP_RATE_LIMIT_MAX_KEYS: ${NOOP_RATE_LIMIT_MAX_KEYS:-10000}
       NOOP_DASHBOARD_ENABLED: ${NOOP_DASHBOARD_ENABLED:-true}
     # Loopback-only by default. See README.md before exposing this to a LAN or
     # the internet; public endpoints must sit behind TLS.
@@ -50,11 +59,52 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=3)",
         ]
       interval: 15s
       timeout: 5s
       retries: 5
 
+  backup:
+    build:
+      context: ./backup
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: ${NOOP_DB_NAME:-noop}
+      PGUSER: noop
+      PGPASSWORD: ${NOOP_DB_PASSWORD:?set NOOP_DB_PASSWORD in .env}
+      NOOP_BACKUP_DIRECTORY: /backups
+      NOOP_BACKUP_INTERVAL_SECONDS: ${NOOP_BACKUP_INTERVAL_SECONDS:-86400}
+      NOOP_BACKUP_RETENTION_DAYS: ${NOOP_BACKUP_RETENTION_DAYS:-30}
+      NOOP_BACKUP_PASSPHRASE_FILE: /run/secrets/noop_backup_passphrase
+    secrets:
+      - noop_backup_passphrase
+    volumes:
+      - noop_encrypted_backups:/backups
+    read_only: true
+    tmpfs:
+      - /tmp:size=${NOOP_BACKUP_TMPFS_SIZE:-2g},noexec,nosuid
+      - /var/lib/postgresql:size=1m,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "sh", "/opt/noop/backup-healthcheck.sh"]
+      interval: 5m
+      timeout: 5s
+      retries: 3
+      start_period: 5m
+
 volumes:
   noop_timescale_data:
+  noop_encrypted_backups:
+
+secrets:
+  noop_backup_passphrase:
+    file: ${NOOP_BACKUP_SECRET_FILE:-./secrets/backup-passphrase.txt}

@@ -2,11 +2,12 @@
 //
 // OuraSecrets.xcconfig is gitignored and user-created (template: OuraSecrets.example.xcconfig).
 // It carries BOTH halves of the opt-in:
-//   1. the OURA_* OAuth credentials, and
+//   1. the OURA_* public OAuth client configuration, and
 //   2. SWIFT_ACTIVE_COMPILATION_CONDITIONS += OURA_CLOUD_IMPORT, which compiles the Oura import
 //      lane (everything in Strand/Oura/*.swift plus its UI card and tests) into the binary.
 // When the file is absent — every default build — the optional include below is skipped: the
 // OURA_CLOUD_IMPORT condition is never set, so NO Oura network code is compiled at all, and the
-// $(OURA_*) Info.plist keys resolve to empty strings. "Fully offline" is a property of the bytes
+// $(OURA_*) Info.plist keys resolve to empty strings. No client secret is accepted or embedded.
+// "Fully offline" is a property of the bytes
 // in the default binary, not a runtime check.
 #include? "OuraSecrets.xcconfig"

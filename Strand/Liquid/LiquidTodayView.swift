@@ -29,6 +29,24 @@ struct LiquidTodayView: View {
 
     /// Shared with the real Today's card-customise editor so the two stay in sync.
     @AppStorage(DashboardCardPrefs.selectionKey) private var dashboardCardsRaw = ""
+    /// Hydration is independently opt-in. A saved dashboard selection must not keep a dead hydration
+    /// row visible after the feature is turned off.
+    @AppStorage(HydrationStore.enabledKey) private var hydrationEnabled = false
+    @State private var hydrationTotalML: Double?
+    @State private var hydrationGoalML: Int?
+
+    private var enabledDashboardCards: [DashboardCard] {
+        Self.visibleDashboardCards(selectionRaw: dashboardCardsRaw,
+                                   hydrationEnabled: hydrationEnabled)
+    }
+
+    /// Pure visibility seam shared by the view and its regression test. Hydration requires both the
+    /// saved card selection and the independent feature opt-in; every other selected card is unchanged.
+    static func visibleDashboardCards(selectionRaw: String,
+                                      hydrationEnabled: Bool) -> [DashboardCard] {
+        DashboardCardPrefs.decodeEnabled(selectionRaw)
+            .filter { hydrationEnabled || $0 != .hydration }
+    }
 
     // async-loaded via the confirmed Repository accessors
     @State private var restScore: Double?          // sleep_performance, day-keyed
@@ -249,6 +267,10 @@ struct LiquidTodayView: View {
 
                 VStack(alignment: .leading, spacing: 12) {
                     scene
+                    // A raised illness/strain warning must remain visible on the default Today surface.
+                    // Keep it pinned outside the reorderable section list so it cannot be moved below the
+                    // fold; the leaf renders nothing while AppModel has no active warning.
+                    HealthAlertBanner()
                     // #105: the live "workout in progress" card, dropped in the liquid Home rewrite. Restored
                     // here as the SAME leaf the classic TodayView renders (and Android's WorkoutInProgressCard),
                     // pinned above the reorderable block so an active manual workout is immediately visible
@@ -276,6 +298,10 @@ struct LiquidTodayView: View {
                         case .journal: if selectedDayOffset == 0 { JournalReminderCard() }
                         }
                     }
+                    // The suggestion leaf owns the auto-detection mode and candidate gates, so mounting it
+                    // here has zero empty-state footprint while making the opt-in feature reachable from
+                    // the default Liquid Today screen.
+                    AutoWorkoutCard()
                     dataSourcesSection
                 }
                 .padding(.horizontal, 16)
@@ -321,7 +347,9 @@ struct LiquidTodayView: View {
         .liquidSelectionHaptic(trigger: selectedDayOffset)
         // A firm tick when the pull passes the release threshold (the custom liquid refresh).
         .liquidMediumHaptic(trigger: pullHaptic)
-        .task(id: "\(repo.refreshSeq)-\(selectedDayOffset)-\(profile.ageMetricStateToken)") { await load() }
+        .task(id: "\(repo.refreshSeq)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(profile.ageMetricStateToken)") {
+            await load()
+        }
         #if DEBUG
         // Deterministic screenshot framing only; absent in Release. Key this to the real load state rather
         // than a wall-clock guess: compact simulators can take longer than 650 ms to seed, and scrolling
@@ -711,8 +739,9 @@ struct LiquidTodayView: View {
             .padding(.top, 4)
 
             // Data-driven off the SAME @AppStorage the CUSTOMISE editor writes, so add / remove /
-            // reorder in Customise reflects on the home screen live.
-            ForEach(DashboardCardPrefs.decodeEnabled(dashboardCardsRaw)) { card in
+            // reorder in Customise reflects on the home screen live. The independent hydration opt-in
+            // also applies here, matching classic Today and preventing a disabled blank row.
+            ForEach(enabledDashboardCards) { card in
                 liquidCard(for: card)
             }
         }
@@ -776,7 +805,13 @@ struct LiquidTodayView: View {
                      tint: StrandPalette.restColor, frac: fracOver(displayDay?.totalSleepMin, 480))
         case .hydration:
             cardLink(.hydration, title: card.title, sub: card.subtitle,
-                     value: "–", symbol: card.icon, tint: StrandPalette.metricCyan, frac: nil)
+                     value: hydrationGoalML.map {
+                         HydrationGoal.cardValueString(totalML: hydrationTotalML ?? 0, goalML: $0)
+                     } ?? "—",
+                     symbol: card.icon, tint: StrandPalette.metricCyan,
+                     frac: hydrationGoalML.map {
+                         HydrationGoal.fraction(totalML: hydrationTotalML ?? 0, goalML: $0)
+                     })
         case .coupled:
             // A tap-through to the full Coupled day screen. No value.
             cardLink(.coupled, title: card.title, sub: card.subtitle,
@@ -1240,6 +1275,13 @@ struct LiquidTodayView: View {
     // MARK: - Data
 
     private func load() async {
+        if hydrationEnabled {
+            hydrationTotalML = await repo.hydrationTotal(day: Repository.localDayKey(Date()))
+            hydrationGoalML = repo.hydrationGoalML(profileSex: profile.sex)
+        } else {
+            hydrationTotalML = nil
+            hydrationGoalML = nil
+        }
         // Resolve the O(days) lookups ONCE here (not on every body re-render): the selected day and the
         // readiness verdict. Both scan repo.days (up to 599 rows); doing it per-render was the stutter.
         let day = resolveDisplayDay()
@@ -1913,7 +1955,7 @@ private struct SignalPatternDetailSheet: View {
 
 /// Carries the Today scroll's top overscroll offset up to the view for the custom liquid pull-to-refresh.
 private struct PullOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
+    static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
@@ -2498,6 +2540,7 @@ extension LiquidTodayView {
             return String(localized: "Learning your baseline, \(nights) of \(Baselines.minNightsSeed) nights.")
         }
 
+        @MainActor
         static func resolve(todayRecovery: Double?, priorScored: DailyMetric?,
                             calibrationNights: Int?, todayKey: String) -> ChargeDisplay {
             if let pct = todayRecovery { return .scored(pct: pct) }

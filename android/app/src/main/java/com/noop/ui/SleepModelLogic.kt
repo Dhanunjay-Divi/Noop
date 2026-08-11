@@ -5,6 +5,7 @@ import com.noop.analytics.SleepDebt
 import com.noop.analytics.SleepStageTotals
 import com.noop.data.DailyMetric
 import com.noop.data.SleepSession
+import java.util.Calendar
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.max
@@ -104,6 +105,7 @@ internal fun buildSleepModel(
     // Actual asleep minutes from blocks outside each day's canonical main-night group. They repay
     // debt without changing DailyMetric.totalSleepMin, which remains the Rest/headline main-night figure.
     napSleepMinByDay: Map<String, Double> = emptyMap(),
+    sessions: List<SleepSession> = emptyList(),
 ): SleepModel? {
     val effectiveDay = selectedDay ?: days.lastOrNull()?.day ?: return null
     // The HERO night = the selected day's stage-bearing row. The TILE / debt / need / trend
@@ -180,7 +182,7 @@ internal fun buildSleepModel(
             val series = days.mapNotNull { imported.consistency[it.day] }
             Metric(series.lastOrNull(), mean(series), series)
         } else {
-            consistencySeries(days)
+            consistencySeries(sessions)
         }
     }
     val hoursVsNeeded = metric(days) { d ->
@@ -276,12 +278,13 @@ internal fun fallbackSleepModel(
     days: List<DailyMetric>,
     imported: ImportedSleepSeries = ImportedSleepSeries(),
     napSleepMinByDay: Map<String, Double> = emptyMap(),
+    sessions: List<SleepSession> = emptyList(),
 ): SleepModel? {
     val anchorDay = days.lastOrNull {
         (it.deepMin ?: 0.0) + (it.remMin ?: 0.0) + (it.lightMin ?: 0.0) > 0.0
     }?.day ?: return null
     return buildSleepModel(days, null, imported, selectedDay = anchorDay,
-        napSleepMinByDay = napSleepMinByDay)
+        napSleepMinByDay = napSleepMinByDay, sessions = sessions)
 }
 
 /** Build a metric from a per-day transform, keeping only finite values. */
@@ -291,15 +294,18 @@ private fun metric(days: List<DailyMetric>, transform: (DailyMetric) -> Double?)
 }
 
 /**
- * Consistency per day from the rolling bedtime spread — but Android's daily metrics carry
- * no per-night onset timestamp, so a bedtime-variance score isn't reconstructable from the
- * cached `days` alone. We approximate the same intent (steadier nights → higher score) from
- * the trailing-14 spread of total-sleep duration: low duration variability ≈ a consistent
- * routine. Each day's score uses the window ending at that day, matching the macOS rolling
- * shape. Honest note: this is a duration-based proxy, not the onset-spread score.
+ * Bedtime-onset consistency, matching the iOS fallback exactly: local onset minutes are wrapped
+ * across midnight, then each trailing-14 population SD maps to `100 * (1 - sd / 120)`.
  */
-private fun consistencySeries(days: List<DailyMetric>): Metric {
-    val mins = days.mapNotNull { it.totalSleepMin?.takeIf { m -> m > 0.0 } }
+internal fun consistencySeries(sessions: List<SleepSession>): Metric {
+    val cal = Calendar.getInstance()
+    fun bedMinutes(effectiveStartTs: Long): Double {
+        cal.timeInMillis = effectiveStartTs * 1000L
+        var minute = (cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)).toDouble()
+        if (minute < 12 * 60) minute += 24 * 60
+        return minute
+    }
+    val mins = sessions.sortedBy { it.startTs }.map { bedMinutes(it.effectiveStartTs) }
     if (mins.size < 3) return Metric(null, null, emptyList())
     val scores = ArrayList<Double>()
     for (i in mins.indices) {
@@ -309,8 +315,7 @@ private fun consistencySeries(days: List<DailyMetric>): Metric {
         val m = window.average()
         val variance = window.sumOf { (it - m) * (it - m) } / window.size
         val sd = Math.sqrt(variance)
-        // 90 min of duration SD maps to a 0 score; tighter routines climb to 100.
-        scores.add((100.0 * (1.0 - sd / 90.0)).coerceIn(0.0, 100.0))
+        scores.add((100.0 * (1.0 - sd / 120.0)).coerceIn(0.0, 100.0))
     }
     return Metric(scores.lastOrNull(), mean(scores), scores)
 }

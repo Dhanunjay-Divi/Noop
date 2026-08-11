@@ -74,13 +74,13 @@ class RemoteSyncClient(
             throw RemoteSyncException.Network("Could not reach the self-hosted server.", error)
         }
         response.use {
-            val body = runCatching { it.body?.string().orEmpty() }.getOrDefault("")
             if (!it.isSuccessful) {
                 throw RemoteSyncException.Server(
                     it.code,
-                    "Server error ${it.code}: ${safeMessage(body)}",
+                    serverErrorMessage(it.code),
                 )
             }
+            val body = runCatching { it.body?.string().orEmpty() }.getOrDefault("")
             return try {
                 decode(body)
             } catch (error: RemoteSyncException) {
@@ -117,18 +117,19 @@ class RemoteSyncClient(
         )
     }
 
-    private fun safeMessage(body: String): String {
-        if (body.isBlank()) return "request failed"
-        val detail = runCatching { JSONObject(body).optString("detail") }
-            .getOrNull()
-            ?.takeIf(String::isNotBlank)
-            ?: body
-        // The token is header-only and should never be echoed, but scrub defensively before surfacing.
-        return detail.replace(configuration.apiKey, "[redacted]").take(300)
-    }
-
     companion object {
         private val JSON = "application/json; charset=utf-8".toMediaType()
+
+        internal fun serverErrorMessage(statusCode: Int): String = when (statusCode) {
+            400 -> "The server rejected the sync request (HTTP 400)."
+            401, 403 -> "The server did not accept the sync credentials (HTTP $statusCode)."
+            409 -> "The server reported a sync conflict (HTTP 409)."
+            413 -> "The sync payload is too large for the server (HTTP 413)."
+            422 -> "The server rejected invalid sync data (HTTP 422)."
+            429 -> "The server is rate limiting sync requests (HTTP 429)."
+            in 500..599 -> "The self-hosted server is unavailable (HTTP $statusCode)."
+            else -> "The self-hosted server request failed (HTTP $statusCode)."
+        }
 
         /**
          * Biometric request bodies and credentials must never follow a server-controlled Location

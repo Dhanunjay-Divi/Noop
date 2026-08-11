@@ -6,7 +6,7 @@ import Foundation
 import Security
 
 /// The OAuth tokens for the Oura cloud lane. `expiresAt` is absolute (computed from `expires_in` at
-/// exchange time). `isExpired` applies a 60 s skew so we refresh slightly early rather than mid-request.
+/// authorization time). `isExpired` applies a 60 s skew so a request never starts with an almost-dead token.
 struct OuraTokens: Equatable, Codable {
     let accessToken: String
     let refreshToken: String?
@@ -57,8 +57,7 @@ enum OuraTokenStore {
     /// Remove any stored tokens.
     static func clear() { SecItemDelete(baseQuery as CFDictionary) }
 
-    /// True when tokens are present (regardless of expiry — an expired token is still "connected", it
-    /// just needs a refresh).
+    /// True when a token is present. The provider clears an expired token and requests reauthorization.
     static var isConnected: Bool { load() != nil }
 }
 #endif // OURA_CLOUD_IMPORT

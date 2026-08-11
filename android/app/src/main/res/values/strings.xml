@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">NOOP</string>
+    <string name="app_name" translatable="false">NOOP</string>
     <string name="nutrition_weight_unit_missing_failure">No weight imported: label the weight column kg or lb.</string>
     <plurals name="nutrition_weight_values_skipped">
         <item quantity="one">1 weight value skipped (add kg or lb to the column).</item>
@@ -713,7 +713,7 @@
     <string name="l10n_onboarding_screen_a_quiet_ongoing_status_97bf2a44">A quiet, ongoing status</string>
     <string name="l10n_onboarding_screen_about_you_5c4698b6">About you</string>
     <string name="l10n_onboarding_screen_age_ff9f1ff3">Age</string>
-    <string name="l10n_onboarding_screen_all_your_data_none_of_the_6fc6f26d">all your data, none of the cloud</string>
+    <string name="l10n_onboarding_screen_all_your_data_none_of_the_6fc6f26d">your data, local by default</string>
     <string name="l10n_onboarding_screen_back_b52b36b7">Back</string>
     <string name="l10n_onboarding_screen_bring_your_history_5b8775c9">Bring your history</string>
     <string name="l10n_onboarding_screen_dark_ae1ef014">Dark</string>
@@ -1278,7 +1278,7 @@
     <string name="l10n_app_changelog_toggle_the_live_hr_dynamic_island_d3bd70cb">Toggle the live-HR Dynamic Island</string>
     <string name="l10n_app_changelog_track_a_workout_manually_2eb43402">Track a workout manually</string>
     <string name="l10n_app_changelog_trends_report_explains_its_scores_e338d1ee">Trends report explains its scores</string>
-    <string name="l10n_app_changelog_true_battery_a_sync_indicator_and_89037fc3">True battery %, a sync indicator, and HR on imported workouts</string>
+    <string name="l10n_app_changelog_true_battery_a_sync_indicator_and_89037fc3" formatted="false">True battery %, a sync indicator, and HR on imported workouts</string>
     <string name="l10n_app_changelog_two_quick_fixes_the_blue_titanium_4c021d78">Two quick fixes: the Blue Titanium icon, and Mac "Your Cards"</string>
     <string name="l10n_app_changelog_under_the_hood_current_api_migration_672da037">Under-the-hood: current-API migration (no behaviour change)</string>
     <string name="l10n_app_changelog_universal_mac_build_iphone_import_fix_363425a0">Universal Mac build + iPhone import fix</string>
@@ -1423,7 +1423,7 @@
     <string name="l10n_rhythm_screen_this_is_a_wellness_visualization_not_3409b935">This is a wellness visualization, not a screening test. It does not tell you to see a clinician and it names no condition. This is not legal or medical advice.</string>
     <string name="l10n_rhythm_screen_turn_on_rhythm_2275168c">Turn on Rhythm</string>
     <string name="l10n_settings_screen_1f_cardopacity_100_toint_51f10397">%1$s%%</string>
-    <string name="l10n_settings_screen_a_standalone_companion_for_your_whoop_7a132b5a">A standalone companion for your WHOOP. Everything stays on this phone: your history, your live stream, your numbers. Nothing is uploaded.</string>
+    <string name="l10n_settings_screen_a_standalone_companion_for_your_whoop_7a132b5a">A standalone companion for your WHOOP. Data stays on this phone by default. NOOP sends data only after you explicitly enable a self-hosted sync or sharing destination.</string>
     <string name="l10n_settings_screen_a_transparent_cardiorespiratory_recipe_that_recovers_eebe00c2">A transparent cardiorespiratory recipe that recovers deep and REM better than the older </string>
     <string name="l10n_settings_screen_about_6b21fb79">About</string>
     <string name="l10n_settings_screen_advanced_4d064726">Advanced</string>
@@ -1814,4 +1814,39 @@
     <string name="workout_saving">Saving…</string>
     <string name="workout_retry_save">Retry save</string>
     <string name="workout_discard">Discard workout</string>
+    <string name="l10n_app_changelog_safer_upgrades_trustworthy_signals_9c1f2a7b">Safer upgrades, trustworthy signals, and production hardening</string>
+    <string name="noop_backup_encryption_title">Backup encryption</string>
+    <string name="noop_backup_encryption_configured_help">A recovery passphrase is stored in Android Keystore for unattended backups. It is never displayed or uploaded. Enter it again when restoring. Replacing it does not change older backups.</string>
+    <string name="noop_backup_encryption_required_help">Set a recovery passphrase before automatic backups can run. If you lose it, encrypted backups cannot be recovered.</string>
+    <string name="noop_backup_new_passphrase">New passphrase</string>
+    <string name="noop_backup_recovery_passphrase">Recovery passphrase</string>
+    <string name="noop_backup_confirm_passphrase">Confirm passphrase</string>
+    <string name="noop_backup_replace_recovery_passphrase">Replace recovery passphrase</string>
+    <string name="noop_backup_secure_automatic_backups">Secure automatic backups</string>
+    <string name="noop_backup_passphrase_saved">Recovery passphrase stored securely. Keep your own copy; NOOP cannot recover it.</string>
+    <string name="noop_backup_passphrase_save_failed">Could not secure the passphrase.</string>
+    <string name="noop_backup_forget_stored_passphrase">Forget stored passphrase</string>
+    <string name="noop_backup_passphrase_removed">Stored passphrase removed. Existing backups still need their original passphrase.</string>
+    <string name="noop_backup_passphrase_remove_failed">Could not remove the stored passphrase.</string>
+    <string name="noop_backup_passphrase_mismatch">Passphrases do not match.</string>
+    <string name="noop_backup_passphrase_minimum_error">Backup passphrase must be at least 12 characters.</string>
+    <string name="noop_backup_unlock_title">Unlock backup</string>
+    <string name="noop_backup_unlock_folder_help">Enter this backup\'s recovery passphrase. It is required again on restore; leave blank only for a legacy unencrypted backup.</string>
+    <string name="noop_backup_passphrase_label">Passphrase</string>
+    <string name="noop_backup_verify_restore">Verify &amp; restore</string>
+    <string name="noop_backup_encrypt_title">Encrypt backup</string>
+    <string name="noop_backup_export_passphrase_help">Choose at least 12 characters. NOOP cannot recover this passphrase if you lose it.</string>
+    <string name="noop_backup_import_passphrase_help">Enter the passphrase used when this backup was created. Legacy unencrypted backups are still accepted.</string>
+    <string name="noop_backup_choose_destination">Choose destination</string>
+    <string name="noop_backup_restart_apply">Backup verified — restarting NOOP to apply it safely…</string>
+    <string name="noop_backup_platform_portability_help">Encrypted .noopbak files restore losslessly on the platform that created them. The envelope is shared, but Room (Android) and GRDB (Apple) databases are not interchangeable. Export CSV is the portable Android/Apple transfer path.</string>
+    <string name="noop_legal_title">Legal &amp; acknowledgements</string>
+    <string name="noop_legal_accessibility">Legal and acknowledgements</string>
+    <string name="noop_legal_description">Terms, source license, third-party notices and provenance — available offline.</string>
+    <string name="noop_legal_subtitle">The exact documents shipped with this build.</string>
+    <string name="noop_legal_terms">Terms</string>
+    <string name="noop_legal_license">License</string>
+    <string name="noop_legal_notices">Notices</string>
+    <string name="noop_legal_attribution">Attribution</string>
+    <string name="noop_legal_document_error">This bundled document could not be opened. Reinstall this build and try again.</string>
 </resources>

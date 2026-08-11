@@ -107,7 +107,9 @@ private object PowerSaveMonitor {
 fun rememberPowerSaveMode(): Boolean {
     if (LocalInspectionMode.current) return false
     val context = LocalContext.current
-    remember(context) { PowerSaveMonitor.ensureStarted(context) }
+    // Register only after a successful composition. `remember { ... }` must be side-effect free and
+    // returning Unit from it is rejected by Compose lint.
+    LaunchedEffect(context) { PowerSaveMonitor.ensureStarted(context) }
     return PowerSaveMonitor.isSaving.value
 }
 

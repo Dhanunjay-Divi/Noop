@@ -61,7 +61,7 @@ jobs:
             runner: macos-26
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # releases-v4, pinned 2026-08-11
         with:
           persist-credentials: false
 

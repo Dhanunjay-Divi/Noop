@@ -134,6 +134,7 @@ enum ActiveWorkoutPersistence {
         case failed(String)
     }
 
+    @MainActor
     static func saveThenClear(
         from defaults: UserDefaults = .standard,
         save: () async throws -> Void

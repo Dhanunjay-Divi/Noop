@@ -1,8 +1,9 @@
 # Fork-only: ONE on-demand testing build that publishes ALL platforms into ONE release.
 #
-# A `meta` job creates a single dated prerelease, then the android / macOS / iOS jobs each attach
-# their artifact to that SAME tag — so every release has NOOP-android + NOOP-macos.zip +
-# NOOP-ios-unsigned.ipa together, each stamped with the base app version.
+# A `meta` job creates one run-specific DRAFT candidate, then the android / macOS / iOS jobs each
+# attach their artifact to that candidate. Only after every build passes and the complete asset set
+# verifies does `promote` swap it into `testing-latest`. The previous public testing release remains
+# available throughout all builds and is retained as a rollback release during the final tag swap.
 # Replaces the older split fork-testing-apk.yml + fork-testing-apple.yml.
 # Apple artifacts remain unsigned/ad-hoc. Android requires a private staging signing identity held
 # in Actions secrets; the public fork-debug.keystore is never used for a distributable artifact.
@@ -17,7 +18,9 @@ permissions:
 
 concurrency:
   group: testing-build
-  cancel-in-progress: true
+  # A queued run is cheaper than interrupting the short, rollback-protected publication critical
+  # section. Manual cancellation still leaves testing-latest untouched while builds are running.
+  cancel-in-progress: false
 
 jobs:
   meta:
@@ -26,9 +29,11 @@ jobs:
       tag: ${{ steps.m.outputs.tag }}
       ver: ${{ steps.m.outputs.ver }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # releases-v4, pinned 2026-08-11
         with:
           persist-credentials: false
+      - name: Enforce redistribution provenance and notices
+        run: python3 Tools/release-legal-gate.py distribution
       - name: Require private Android staging signing secrets
         env:
           ANDROID_STAGING_KEYSTORE_BASE64: ${{ secrets.ANDROID_STAGING_KEYSTORE_BASE64 }}
@@ -53,16 +58,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="testing-latest"
+          TAG="testing-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           DATE=$(date -u +%Y-%m-%d)
           VER=$(grep -m1 'MARKETING_VERSION' project.yml | sed -E 's/.*"([^"]+)".*/\1/')
           SHA="${GITHUB_SHA:0:7}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "ver=$VER" >> "$GITHUB_OUTPUT"
-          # ROLLING release: recreate the single tag so stale (incl. old-version) assets never linger —
-          # one stable URL, always the newest build, zero cleanup. (To KEEP a build, cut a one-off tag.)
-          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease --target "${{ github.sha }}" \
+          # Build into an isolated draft. Never mutate the currently-installable testing-latest
+          # release here: a failed Android/macOS/iOS job must leave the last known-good build intact.
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --prerelease \
+            --target "${{ github.sha }}" \
             --title "NOOP Staging — base ${VER} · ${DATE} · ${SHA}" \
             --notes "Rolling **latest** testing build — refreshed in place, so this tag is always the newest. It contains exactly the dispatched commit \`${GITHUB_SHA}\`; a PR is included only if its changes are present in that commit. Filenames carry the base app version (\`v${VER}\`).
 
@@ -81,15 +86,17 @@ jobs:
       run:
         working-directory: android
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # releases-v4, pinned 2026-08-11
         with:
           persist-credentials: false
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # releases-v4, pinned 2026-08-11
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/wrapper-validation@v4
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/wrapper-validation@ed408507eac070d1f99cc633dbcf757c94c7933a # v4, pinned 2026-08-11
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4, pinned 2026-08-11
+      - name: Run Android unit tests before release signing
+        run: ./gradlew testFullDebugUnitTest
       - name: Prepare private staging signing key
         env:
           ANDROID_STAGING_KEYSTORE_BASE64: ${{ secrets.ANDROID_STAGING_KEYSTORE_BASE64 }}
@@ -105,13 +112,46 @@ jobs:
           NOOP_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_STAGING_KEY_ALIAS }}
           NOOP_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_STAGING_KEY_PASSWORD }}
         run: ./gradlew assembleFullRelease -PstagingRelease
-      - name: Version the filename + attach
+      - name: Verify APK signature matches the configured release identity
+        env:
+          NOOP_RELEASE_STORE_FILE: ${{ runner.temp }}/noop-staging.jks
+          NOOP_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_STAGING_STORE_PASSWORD }}
+          NOOP_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_STAGING_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          APK=$(find app/build/outputs/apk/full/release -type f -name '*.apk' -print -quit)
+          test -n "$APK"
+          ANDROID_SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$ANDROID_SDK"
+          BUILD_TOOLS=$(find "$ANDROID_SDK/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apksigner.txt"
+          EXPECTED=$(keytool -list -v -keystore "$NOOP_RELEASE_STORE_FILE" \
+            -storepass:env NOOP_RELEASE_STORE_PASSWORD -alias "$NOOP_RELEASE_KEY_ALIAS" \
+            | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          ACTUAL=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/apksigner.txt" \
+            | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          test -n "$EXPECTED" && test -n "$ACTUAL"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::APK signer certificate does not match the configured release key."
+            exit 1
+          fi
+      - name: Version, checksum, inventory + attach
         env:
           GH_TOKEN: ${{ github.token }}
           VER: ${{ needs.meta.outputs.ver }}
         run: |
+          set -euo pipefail
           cp app/build/outputs/apk/full/release/*.apk "NOOP-android-v${VER}.apk"
-          gh release upload "${{ needs.meta.outputs.tag }}" "NOOP-android-v${VER}.apk" \
+          sha256sum "NOOP-android-v${VER}.apk" > "NOOP-android-v${VER}.apk.sha256"
+          python3 ../Tools/android-lockfile-sbom.py app/gradle.lockfile \
+            "NOOP-android-v${VER}.cdx.json" "$VER"
+          python3 -m json.tool "NOOP-android-v${VER}.cdx.json" >/dev/null
+          gh release upload "${{ needs.meta.outputs.tag }}" \
+            "NOOP-android-v${VER}.apk" \
+            "NOOP-android-v${VER}.apk.sha256" \
+            "NOOP-android-v${VER}.cdx.json" \
             --repo "$GITHUB_REPOSITORY" --clobber
 
   macos:
@@ -119,7 +159,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # releases-v4, pinned 2026-08-11
         with:
           persist-credentials: false
       - name: Install XcodeGen
@@ -166,7 +206,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # releases-v4, pinned 2026-08-11
         with:
           persist-credentials: false
       - name: Install XcodeGen
@@ -201,17 +241,208 @@ jobs:
           zip -qr "NOOP-ios-unsigned-v${VER}.ipa" Payload
           gh release upload "${{ needs.meta.outputs.tag }}" "NOOP-ios-unsigned-v${VER}.ipa" --repo "$GITHUB_REPOSITORY" --clobber
 
-  # Fork-only housekeeping: the disposable `noop-staging` branch exists ONLY to feed this build. Once every
-  # platform job has finished (pass OR fail — always()), delete it so GitHub's "Compare & pull request"
-  # banner doesn't linger after each run. The rolling release tag (testing-latest) pins the built sha, so
-  # deleting the branch orphans nothing. Guarded to the disposable branch name — a run dispatched from main
-  # (or any other ref) is left alone.
-  cleanup:
+  promote:
     needs: [meta, android, macos, ios]
-    if: ${{ always() && github.ref_type == 'branch' && github.ref_name == 'noop-staging' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Verify the complete candidate and promote transactionally
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_TAG: ${{ needs.meta.outputs.tag }}
+          PUBLIC_TAG: testing-latest
+          VER: ${{ needs.meta.outputs.ver }}
+          TARGET_SHA: ${{ github.sha }}
+          BACKUP_TAG: testing-rollback-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -Eeuo pipefail
+
+          # Validate the draft and its bytes before touching the currently-public testing release.
+          CANDIDATE_ID=$(gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json databaseId,isDraft --jq 'select(.isDraft == true) | .databaseId')
+          [ -n "$CANDIDATE_ID" ] || {
+            echo "::error::Candidate $CANDIDATE_TAG is missing or is no longer a draft."
+            exit 1
+          }
+          ASSETS=$(gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[].name')
+          EXPECTED=$(printf '%s\n' \
+            "NOOP-android-v${VER}.apk" \
+            "NOOP-android-v${VER}.apk.sha256" \
+            "NOOP-android-v${VER}.cdx.json" \
+            "NOOP-macos-v${VER}.zip" \
+            "NOOP-ios-unsigned-v${VER}.ipa" | sort)
+          [ "$(printf '%s\n' "$ASSETS" | sort)" = "$EXPECTED" ] || {
+            echo "::error::Candidate $CANDIDATE_TAG does not contain exactly the five expected artifacts."
+            printf 'Expected:\n%s\nActual:\n%s\n' "$EXPECTED" "$ASSETS"
+            exit 1
+          }
+
+          VERIFY_DIR=$(mktemp -d "$RUNNER_TEMP/noop-testing-promote.XXXXXX")
+          gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --dir "$VERIFY_DIR" --pattern 'NOOP-*'
+          (
+            cd "$VERIFY_DIR"
+            sha256sum --check "NOOP-android-v${VER}.apk.sha256"
+            jq -e '.bomFormat == "CycloneDX" and (.components | type == "array")' \
+              "NOOP-android-v${VER}.cdx.json" >/dev/null
+            unzip -tq "NOOP-android-v${VER}.apk" >/dev/null
+            unzip -tq "NOOP-macos-v${VER}.zip" >/dev/null
+            unzip -tq "NOOP-ios-unsigned-v${VER}.ipa" >/dev/null
+          )
+          rm -rf "$VERIFY_DIR"
+
+          HAD_OLD_RELEASE=0
+          OLD_RELEASE_ID=""
+          HAD_PUBLIC_REF=0
+          OLD_REF_SHA=""
+          BACKUP_REF_CREATED=0
+          OLD_RENAMED=0
+          SWAP_ARMED=0
+          SWAP_VERIFIED=0
+
+          if gh release view "$PUBLIC_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            HAD_OLD_RELEASE=1
+            OLD_RELEASE_JSON=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${PUBLIC_TAG}")
+            OLD_RELEASE_ID=$(jq -r '.id' <<<"$OLD_RELEASE_JSON")
+            if [ "$(jq -r '.immutable // false' <<<"$OLD_RELEASE_JSON")" = "true" ]; then
+              echo "::error::$PUBLIC_TAG is immutable. Keep versioned testing tags instead of a rolling release."
+              exit 1
+            fi
+          fi
+          if OLD_REF_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${PUBLIC_TAG}" \
+              --jq '.object.sha' 2>/dev/null); then
+            HAD_PUBLIC_REF=1
+          else
+            OLD_REF_SHA=""
+          fi
+          if [ "$HAD_OLD_RELEASE" -eq 1 ] && [ "$HAD_PUBLIC_REF" -ne 1 ]; then
+            echo "::error::$PUBLIC_TAG has a release but no matching git tag; refusing an unsafe swap."
+            exit 1
+          fi
+
+          # If any command in the tag-swap critical section fails, remove only this run's candidate,
+          # restore the old tag ref, and rename the untouched rollback release back to testing-latest.
+          rollback() {
+            status=$?
+            trap - EXIT INT TERM
+            set +e
+            if [ "$SWAP_ARMED" -eq 1 ] && [ "$SWAP_VERIFIED" -ne 1 ]; then
+              rollback_ok=1
+              current_id=$(gh release view "$PUBLIC_TAG" --repo "$GITHUB_REPOSITORY" \
+                --json databaseId --jq '.databaseId' 2>/dev/null)
+              if [ "$current_id" = "$CANDIDATE_ID" ]; then
+                # Do not let a partially-verified candidate block restoration of the known-good tag.
+                gh release delete "$PUBLIC_TAG" --repo "$GITHUB_REPOSITORY" \
+                  --yes >/dev/null 2>&1 || rollback_ok=0
+              fi
+
+              if [ "$HAD_PUBLIC_REF" -eq 1 ]; then
+                gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${PUBLIC_TAG}" \
+                  -f sha="$OLD_REF_SHA" -F force=true >/dev/null || rollback_ok=0
+              else
+                gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${PUBLIC_TAG}" \
+                  >/dev/null 2>&1 || true
+              fi
+
+              if [ "$HAD_OLD_RELEASE" -eq 1 ]; then
+                restored_id=$(gh release view "$PUBLIC_TAG" --repo "$GITHUB_REPOSITORY" \
+                  --json databaseId --jq '.databaseId' 2>/dev/null)
+                if [ "$restored_id" != "$OLD_RELEASE_ID" ] && [ "$OLD_RENAMED" -eq 1 ]; then
+                  gh release edit "$BACKUP_TAG" --repo "$GITHUB_REPOSITORY" \
+                    --tag "$PUBLIC_TAG" >/dev/null 2>&1 || rollback_ok=0
+                  restored_id=$(gh release view "$PUBLIC_TAG" --repo "$GITHUB_REPOSITORY" \
+                    --json databaseId --jq '.databaseId' 2>/dev/null)
+                fi
+                restored_ref=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${PUBLIC_TAG}" \
+                  --jq '.object.sha' 2>/dev/null)
+                if [ "$restored_id" = "$OLD_RELEASE_ID" ] && \
+                    [ "$restored_ref" = "$OLD_REF_SHA" ] && [ "$rollback_ok" -eq 1 ]; then
+                  if [ "$BACKUP_REF_CREATED" -eq 1 ]; then
+                    gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${BACKUP_TAG}" \
+                      >/dev/null 2>&1 || true
+                  fi
+                  echo "::error::Candidate promotion failed; restored the previous $PUBLIC_TAG release."
+                else
+                  echo "::error::Automatic rollback was incomplete. The previous release remains under $BACKUP_TAG for manual recovery."
+                fi
+              else
+                echo "::error::Candidate promotion failed before the first $PUBLIC_TAG release completed."
+              fi
+            fi
+            exit "$status"
+          }
+          # EXIT also covers `set -e` failures; INT/TERM convert a manual cancellation into an EXIT
+          # so the same rollback runs while the runner still permits API calls.
+          trap rollback EXIT
+          trap 'exit 130' INT TERM
+          SWAP_ARMED=1
+
+          if [ "$HAD_OLD_RELEASE" -eq 1 ]; then
+            # Keep the previous release object and every asset intact under a private rollback tag
+            # until the new public release has passed post-promotion verification.
+            BACKUP_REF_CREATED=1
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${BACKUP_TAG}" -f sha="$OLD_REF_SHA" >/dev/null
+            OLD_RENAMED=1
+            gh release edit "$PUBLIC_TAG" --repo "$GITHUB_REPOSITORY" \
+              --tag "$BACKUP_TAG" >/dev/null
+            [ "$(gh release view "$BACKUP_TAG" --repo "$GITHUB_REPOSITORY" \
+              --json databaseId --jq '.databaseId')" = "$OLD_RELEASE_ID" ]
+          fi
+
+          if [ "$HAD_PUBLIC_REF" -eq 1 ]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${PUBLIC_TAG}" \
+              -f sha="$TARGET_SHA" -F force=true >/dev/null
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${PUBLIC_TAG}" -f sha="$TARGET_SHA" >/dev/null
+          fi
+
+          gh release edit "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --tag "$PUBLIC_TAG" --target "$TARGET_SHA" \
+            --verify-tag --draft=false --prerelease --latest=false
+
+          PUBLIC_JSON=$(gh release view "$PUBLIC_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json databaseId,isDraft,isPrerelease,assets)
+          [ "$(jq -r '.databaseId' <<<"$PUBLIC_JSON")" = "$CANDIDATE_ID" ]
+          [ "$(jq -r '.isDraft' <<<"$PUBLIC_JSON")" = "false" ]
+          [ "$(jq -r '.isPrerelease' <<<"$PUBLIC_JSON")" = "true" ]
+          PUBLIC_ASSETS=$(jq -r '.assets[].name' <<<"$PUBLIC_JSON" | sort)
+          [ "$PUBLIC_ASSETS" = "$EXPECTED" ]
+          [ "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${PUBLIC_TAG}" --jq '.object.sha')" = "$TARGET_SHA" ]
+          SWAP_VERIFIED=1
+          trap - EXIT INT TERM
+
+          # The public candidate is now verified. Cleanup is deliberately best-effort: retaining an
+          # inaccessible rollback release is safer than rolling back a healthy testing-latest build.
+          if [ "$HAD_OLD_RELEASE" -eq 1 ]; then
+            gh release delete "$BACKUP_TAG" --repo "$GITHUB_REPOSITORY" \
+              --cleanup-tag --yes || echo "::warning::Published $PUBLIC_TAG, but could not remove $BACKUP_TAG."
+          fi
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${CANDIDATE_TAG}" \
+            >/dev/null 2>&1 || true
+          echo "Promoted verified candidate $CANDIDATE_TAG to $PUBLIC_TAG at $TARGET_SHA."
+
+  # Always remove an unpromoted run-specific draft. This never names testing-latest, so a failed or
+  # cancelled build cannot delete the last known-good public candidate. Also remove the disposable
+  # noop-staging branch after every platform job settles.
+  cleanup:
+    needs: [meta, android, macos, ios, promote]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete this run's unpromoted draft
+        if: ${{ needs.meta.outputs.tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_TAG: ${{ needs.meta.outputs.tag }}
+        run: |
+          if gh release view "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --cleanup-tag --yes
+          fi
       - name: Delete the disposable staging branch
+        if: ${{ github.ref_type == 'branch' && github.ref_name == 'noop-staging' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/noop-staging" || true

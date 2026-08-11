@@ -1,6 +1,6 @@
 import Foundation
 #if os(iOS)
-import CoreMotion
+@preconcurrency import CoreMotion
 #endif
 
 /// One-shot HISTORICAL phone step count for a finished workout window `[start, end]` (#398).
@@ -11,6 +11,7 @@ import CoreMotion
 /// iOS only (`CMPedometer` is unavailable on macOS); the macOS build gets `nil` and falls back to strap
 /// steps. `nil` always means "no phone steps" (unavailable / not authorized / query failed), never a
 /// fabricated zero.
+@MainActor
 enum WorkoutPedometer {
     #if os(iOS)
     private static let pedometer = CMPedometer()

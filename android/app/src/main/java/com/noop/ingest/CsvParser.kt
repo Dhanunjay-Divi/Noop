@@ -34,7 +34,7 @@ internal object Bom {
 
     /** Strip a leading BOM (U+FEFF) that survived string decoding. */
     fun stripString(s: String): String =
-        if (s.isNotEmpty() && s[0] == '﻿') s.substring(1) else s
+        if (s.isNotEmpty() && s[0] == '\uFEFF') s.substring(1) else s
 }
 
 // MARK: - Header normalization

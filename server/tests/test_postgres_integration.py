@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -14,6 +15,7 @@ from app.repository import (
     FriendConflictError,
     FriendNotFoundError,
     PostgresRepository,
+    SyncRetiredError,
 )
 
 FIXTURES = Path(__file__).resolve().parent / "data"
@@ -53,8 +55,14 @@ async def test_timescaledb_migrations_idempotency_rr_and_row_provenance() -> Non
 
     await repository.startup()
     try:
+        assert await repository.ready() is True
         await repository.delete_device(raw.source.device_id)
         await repository.delete_device(official.source.device_id)
+        pool = repository._require_pool()
+        await pool.execute(
+            "DELETE FROM sync_batch_tombstones WHERE batch_id = ANY($1::uuid[])",
+            [raw.batch_id, official.batch_id],
+        )
 
         accepted = await repository.sync(raw, _payload_hash(raw))
         duplicate = await repository.sync(raw, _payload_hash(raw))
@@ -90,12 +98,11 @@ async def test_timescaledb_migrations_idempotency_rr_and_row_provenance() -> Non
         )
         assert export["sleep_sessions"][0]["sync_batch_id"] == official.batch_id
 
-        pool = repository._require_pool()
         async with pool.acquire() as connection:
             migration_count = await connection.fetchval(
                 "SELECT count(*) FROM noop_schema_migrations"
             )
-            assert migration_count == 3
+            assert migration_count == 4
             await repository._run_migrations(connection)
             assert (
                 await connection.fetchval("SELECT count(*) FROM noop_schema_migrations")
@@ -112,7 +119,40 @@ async def test_timescaledb_migrations_idempotency_rr_and_row_provenance() -> Non
                 )
                 == 3
             )
+
+        async with pool.acquire() as lock_connection:
+            await lock_connection.execute(
+                "SELECT pg_advisory_lock(hashtextextended($1, 0))",
+                "noop-retention",
+            )
+            retention_task = asyncio.create_task(
+                repository.purge_before(
+                    datetime(1970, 1, 2, tzinfo=UTC),
+                    replay_guard_until=datetime.now(UTC) + timedelta(days=30),
+                )
+            )
+            await asyncio.sleep(0.05)
+            try:
+                assert retention_task.done() is False
+            finally:
+                await lock_connection.execute(
+                    "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+                    "noop-retention",
+                )
+            await asyncio.wait_for(retention_task, timeout=5)
+
+        await repository.delete_device(
+            raw.source.device_id,
+            datetime.now(UTC) + timedelta(days=30),
+        )
+        with pytest.raises(SyncRetiredError):
+            await repository.sync(raw, _payload_hash(raw))
     finally:
+        if repository._pool is not None:
+            await repository._pool.execute(
+                "DELETE FROM sync_batch_tombstones WHERE batch_id = ANY($1::uuid[])",
+                [raw.batch_id, official.batch_id],
+            )
         await repository.delete_device(raw.source.device_id)
         await repository.delete_device(official.source.device_id)
         await repository.shutdown()

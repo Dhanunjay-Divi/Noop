@@ -52,11 +52,9 @@ public enum AnalyticsEngine {
 
     /// The full analysis result for one day.
     ///
-    /// NOTE: not `Sendable` — it embeds `DailyMetric` / `CachedSleepSession` from
-    /// WhoopStore, which are not `Sendable` (and that package is out of scope to
-    /// modify here). The individual analyzer result types in this package ARE
-    /// `Sendable`.
-    public struct DayResult {
+    /// All embedded store and analyzer values are immutable and `Sendable`, so the complete result can
+    /// safely cross from the detached per-day scan back to the main-actor intelligence fold.
+    public struct DayResult: Sendable {
         /// DailyMetric in the WhoopStore cache shape (recovery/strain/sleep rolled up).
         public let daily: DailyMetric
         /// Detected sleep sessions (rich, with stage segments).
@@ -555,7 +553,7 @@ public enum AnalyticsEngine {
                 if hrvWindowDetail {
                     for w in wins {
                         let rm = w.rmssd.map { "\(r2($0))ms" } ?? "nil"
-                        hrvTraceSink("hrv window t=\((w.startTs - s.start) / 60)min stage=\(w.stage) beats=\(w.cleanBeats) rmssd=\(rm)")
+                        hrvTraceSink("hrv window t=\((w.startTs - s.start) / 60)min stage=\(w.stage) beats=\(w.cleanBeats) rmssd=\(rm) rrIntegrity=\(w.coverageVerdict.rawValue)")
                     }
                 }
                 allWin.append(contentsOf: wins)

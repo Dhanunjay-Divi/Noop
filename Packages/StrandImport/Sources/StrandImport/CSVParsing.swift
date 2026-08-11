@@ -485,14 +485,15 @@ enum WhoopTime {
         guard let s0 = raw?.trimmingCharacters(in: .whitespaces), !s0.isEmpty else { return nil }
 
         // 1) ISO-8601 with embedded offset (e.g. "...T...Z", "...+01:00").
-        if let d = isoFormatter.date(from: s0) { return d }
-        if let d = isoFormatterFractional.date(from: s0) { return d }
+        if let d = try? isoFormat.parse(s0) { return d }
 
         // 2) Plain "YYYY-MM-DD HH:MM:SS" or with a 'T'.
         let normalized = s0.replacingOccurrences(of: "T", with: " ")
         // Reuse one formatter (allocating a DateFormatter per CSV row was a measurable cost on
-        // imports with tens of thousands of rows). Imports run on a single thread, so the shared
-        // mutable formatter is safe; only timeZone/dateFormat are set per parse.
+        // imports with tens of thousands of rows). Imports can run concurrently, so serialize the
+        // formatter's mutable timeZone/dateFormat configuration and parse operation.
+        plainFormatterLock.lock()
+        defer { plainFormatterLock.unlock() }
         let fmt = plainFormatter
         fmt.timeZone = TimeZone(secondsFromGMT: offsetMinutes * 60) ?? TimeZone(identifier: "UTC")!
         for pattern in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"] {
@@ -508,9 +509,7 @@ enum WhoopTime {
     /// be interpreted in a chosen timezone (used by the Hevy lifting importer, #649).
     static func parseISOWithOffset(_ raw: String?) -> Date? {
         guard let s = raw?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
-        if let d = isoFormatter.date(from: s) { return d }
-        if let d = isoFormatterFractional.date(from: s) { return d }
-        return nil
+        return try? isoFormat.parse(s)
     }
 
     private static let plainFormatter: DateFormatter = {
@@ -519,16 +518,9 @@ enum WhoopTime {
         f.calendar = Calendar(identifier: .gregorian)
         return f
     }()
+    private static let plainFormatterLock = NSLock()
 
-    private static let isoFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
-
-    private static let isoFormatterFractional: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
+    // Foundation's modern ISO strategy is a Sendable value, unlike the mutable formatter class.
+    // It accepts the same internet-date-time inputs, with or without fractional seconds.
+    private static let isoFormat = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
 }

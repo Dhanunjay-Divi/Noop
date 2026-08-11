@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 import SQLite3
 import WhoopStore
 import ZIPFoundation
@@ -66,6 +67,206 @@ final class BackupSyncRoundTripTests: XCTestCase {
                        "Restored DB should hold exactly the backed-up rows")
     }
 
+    // MARK: - Encrypted Apple envelope v1
+
+    func testPBKDF2SHA256MatchesPublishedGoldenVector() throws {
+        // RFC 7914 / common PBKDF2-HMAC-SHA256 known answer (P="password", S="salt", c=1,
+        // dkLen=32). This pins normalization/UTF-8, PRF choice and byte order independently of GCM.
+        let key = try DataBackup.deriveBackupKeyForTesting(
+            passphrase: "password",
+            salt: Data("salt".utf8),
+            iterations: 1
+        )
+        XCTAssertEqual(
+            hex(key),
+            "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b"
+        )
+    }
+
+    func testEncryptedEnvelopeDeterministicGoldenRoundTrip() throws {
+        // 65,553 bytes forces two independently authenticated chunks at the v1 minimum chunk size.
+        // Salt/nonce are injected only through the test seam; production always draws fresh randoms.
+        let plaintext = Data((0..<65_553).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ 7) })
+        let source = tmp.appendingPathComponent("golden-plaintext.bin")
+        let envelope = tmp.appendingPathComponent("golden.noopbak")
+        let restored = tmp.appendingPathComponent("golden-restored.bin")
+        try plaintext.write(to: source)
+        try DataBackup.encryptFileForTesting(
+            plaintextAt: source,
+            to: envelope,
+            passphrase: "golden backup phrase",
+            salt: Data(0x00...0x0F),
+            noncePrefix: Data(0xA0...0xA7)
+        )
+
+        let encoded = try Data(contentsOf: envelope)
+        XCTAssertEqual(encoded.count, 64 + plaintext.count + 2 * 16)
+        XCTAssertEqual(
+            hex(encoded.prefix(64)),
+            "4e4f4f5042414b0001010100000186a0000100000000000000010011"
+                + "000102030405060708090a0b0c0d0e0f"
+                + "a0a1a2a3a4a5a6a7"
+                + "000000000000000000000000"
+        )
+        // Generated independently with a second AES-256-GCM + PBKDF2-HMAC-SHA256 implementation
+        // from the documented v1 fields. Cipher/KDF/AAD/record-layout drift changes this digest.
+        XCTAssertEqual(
+            hex(Data(SHA256.hash(data: encoded))),
+            "e84759fc93d512cc67596ae665e33ab32ef6ba7ebfc403aaa4eaaba2f6a455dc"
+        )
+
+        try DataBackup.decryptFileForTesting(
+            envelopeAt: envelope,
+            to: restored,
+            passphrase: "golden backup phrase"
+        )
+        XCTAssertEqual(try Data(contentsOf: restored), plaintext)
+    }
+
+    func testEncryptedAtomicPublishFailurePreservesExistingBackup() throws {
+        let source = tmp.appendingPathComponent("replacement-source.bin")
+        let destination = tmp.appendingPathComponent("existing.noopbak")
+        let oldBackup = Data("the last known-good backup".utf8)
+        try Data(repeating: 0xA5, count: 70_000).write(to: source)
+        try oldBackup.write(to: destination)
+
+        // A user-immutable destination makes the final same-directory rename fail after encryption
+        // has completed. This exercises the exact publish failure path without a mock: the old backup
+        // must remain byte-for-byte intact and the hidden partial must be cleaned up.
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: destination.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.immutable: false], ofItemAtPath: destination.path)
+        }
+
+        XCTAssertThrowsError(
+            try DataBackup.encryptFileForTesting(
+                plaintextAt: source,
+                to: destination,
+                passphrase: "replacement test passphrase",
+                salt: Data(0x10...0x1F),
+                noncePrefix: Data(0xB0...0xB7)
+            )
+        )
+        XCTAssertEqual(try Data(contentsOf: destination), oldBackup)
+        let siblingNames = try FileManager.default.contentsOfDirectory(atPath: tmp.path)
+        XCTAssertFalse(siblingNames.contains(where: { $0.contains(".encrypting-") }))
+    }
+
+    func testEncryptedDecryptPublishFailurePreservesExistingDestination() throws {
+        let plaintext = tmp.appendingPathComponent("decrypt-replacement-source.bin")
+        let envelope = tmp.appendingPathComponent("decrypt-replacement.noopbak")
+        let destination = tmp.appendingPathComponent("existing-decrypted.zip")
+        let previous = Data("the prior authenticated staging file".utf8)
+        try Data(repeating: 0x5A, count: 70_000).write(to: plaintext)
+        try DataBackup.encryptFileForTesting(
+            plaintextAt: plaintext,
+            to: envelope,
+            passphrase: "decrypt replacement passphrase",
+            salt: Data(0x20...0x2F),
+            noncePrefix: Data(0xC0...0xC7)
+        )
+        try previous.write(to: destination)
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: destination.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.immutable: false], ofItemAtPath: destination.path)
+        }
+
+        XCTAssertThrowsError(try DataBackup.decryptFileForTesting(
+            envelopeAt: envelope,
+            to: destination,
+            passphrase: "decrypt replacement passphrase"
+        ))
+        XCTAssertEqual(try Data(contentsOf: destination), previous)
+        let siblingNames = try FileManager.default.contentsOfDirectory(atPath: tmp.path)
+        XCTAssertFalse(siblingNames.contains(where: { $0.contains(".decrypting-") }))
+    }
+
+    func testEncryptedBackupRestoresRowsAndSettingsWithCorrectPassphrase() throws {
+        let sourceDB = tmp.appendingPathComponent("encrypted-source.sqlite")
+        try makeNoopDatabase(at: sourceDB, deviceRows: ["encrypted-whoop", "encrypted-watch"])
+        let backup = tmp.appendingPathComponent("encrypted.noopbak")
+        try DataBackup.writeEncryptedBackupForTesting(
+            databaseAt: sourceDB,
+            to: backup,
+            passphrase: "correct horse battery staple",
+            settings: ["profile.age": 31, "units.system": "metric"]
+        )
+        XCTAssertTrue(DataBackup.isEncryptedBackupForTesting(backup))
+        XCTAssertFalse(isZip(backup), "ciphertext must not expose the ZIP container magic")
+
+        let liveDB = tmp.appendingPathComponent("encrypted-live.sqlite")
+        let result = DataBackup.restore(
+            from: backup,
+            toDatabaseAt: liveDB.path,
+            passphrase: "correct horse battery staple"
+        )
+        guard case .imported = result else {
+            return XCTFail("authenticated backup should stage, got \(result)")
+        }
+        let defaults = try freshDefaults()
+        try applyPendingRestore(to: liveDB, settingsDefaults: defaults)
+        XCTAssertEqual(try deviceRows(in: liveDB), ["encrypted-watch", "encrypted-whoop"])
+        XCTAssertEqual(defaults.integer(forKey: "profile.age"), 31)
+        XCTAssertEqual(defaults.string(forKey: "units.system"), "metric")
+    }
+
+    func testWrongPassphraseFailsWithoutPublishingRestoreOrTouchingLiveData() throws {
+        let sourceDB = tmp.appendingPathComponent("wrong-password-source.sqlite")
+        try makeNoopDatabase(at: sourceDB, deviceRows: ["secret"])
+        let backup = tmp.appendingPathComponent("wrong-password.noopbak")
+        try DataBackup.writeEncryptedBackupForTesting(
+            databaseAt: sourceDB,
+            to: backup,
+            passphrase: "the actual long passphrase"
+        )
+        let liveDB = tmp.appendingPathComponent("wrong-password-live.sqlite")
+        try makeNoopDatabase(at: liveDB, deviceRows: ["keep-me"])
+        let before = try Data(contentsOf: liveDB)
+
+        let result = DataBackup.restore(
+            from: backup,
+            toDatabaseAt: liveDB.path,
+            passphrase: "a different long passphrase"
+        )
+        guard case .failure(let message) = result else {
+            return XCTFail("wrong passphrase must fail, got \(result)")
+        }
+        XCTAssertTrue(message.localizedCaseInsensitiveContains("wrong"))
+        XCTAssertEqual(try Data(contentsOf: liveDB), before)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: liveDB.path + ".pending-restore.json"))
+    }
+
+    func testTamperedEncryptedBackupFailsWithoutPublishingRestoreOrTouchingLiveData() throws {
+        let sourceDB = tmp.appendingPathComponent("tamper-source.sqlite")
+        try makeNoopDatabase(at: sourceDB, deviceRows: ["secret"])
+        let backup = tmp.appendingPathComponent("tampered.noopbak")
+        try DataBackup.writeEncryptedBackupForTesting(
+            databaseAt: sourceDB,
+            to: backup,
+            passphrase: "the actual long passphrase"
+        )
+        var tampered = try Data(contentsOf: backup)
+        XCTAssertGreaterThan(tampered.count, 80)
+        tampered[75] ^= 0x80 // ciphertext, not a parse-only header byte
+        try tampered.write(to: backup, options: .atomic)
+
+        let liveDB = tmp.appendingPathComponent("tamper-live.sqlite")
+        try makeNoopDatabase(at: liveDB, deviceRows: ["keep-me"])
+        let before = try Data(contentsOf: liveDB)
+        let result = DataBackup.restore(
+            from: backup,
+            toDatabaseAt: liveDB.path,
+            passphrase: "the actual long passphrase"
+        )
+        guard case .failure = result else {
+            return XCTFail("tampered ciphertext must fail, got \(result)")
+        }
+        XCTAssertEqual(try Data(contentsOf: liveDB), before)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: liveDB.path + ".pending-restore.json"))
+    }
+
     func testSnapshotExportCapturesWALCommitMadeAfterCheckpointBoundary() throws {
         let sourceDB = tmp.appendingPathComponent("export-source.sqlite")
         try makeNoopDatabase(at: sourceDB, deviceRows: ["before-checkpoint"])
@@ -102,6 +303,33 @@ final class BackupSyncRoundTripTests: XCTestCase {
         XCTAssertEqual(try deviceRows(in: extracted), ["after-checkpoint", "before-checkpoint"])
         XCTAssertFalse(FileManager.default.fileExists(atPath: extracted.path + "-wal"),
                        "the archive must contain a standalone SQLite snapshot")
+    }
+
+    func testPlaintextSnapshotPublishFailurePreservesExistingBackup() throws {
+        let sourceDB = tmp.appendingPathComponent("plaintext-replacement-source.sqlite")
+        try makeNoopDatabase(at: sourceDB, deviceRows: ["fresh-snapshot"])
+        let destination = tmp.appendingPathComponent("existing-plaintext.noopbak")
+        let previous = Data("the last known-good plaintext backup".utf8)
+        try previous.write(to: destination)
+
+        // Automatic/folder backups are intentionally plaintext. Their final publish still must be
+        // transactional: an immutable destination makes the sibling rename fail after the new ZIP has
+        // completed, and the old archive must remain byte-for-byte intact.
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: destination.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.immutable: false], ofItemAtPath: destination.path)
+        }
+
+        XCTAssertThrowsError(
+            try DataBackup.writeSnapshotBackupForTesting(
+                databaseAt: sourceDB,
+                to: destination
+            )
+        )
+        XCTAssertEqual(try Data(contentsOf: destination), previous)
+        let siblingNames = try FileManager.default.contentsOfDirectory(atPath: tmp.path)
+        XCTAssertFalse(siblingNames.contains(where: { $0.contains(".writing-") }))
     }
 
     // MARK: - Settings round trip (#1000: restore brings back weight/height/settings)
@@ -619,6 +847,10 @@ final class BackupSyncRoundTripTests: XCTestCase {
     private func isZip(_ url: URL) -> Bool {
         guard let head = try? FileHandle(forReadingFrom: url).read(upToCount: 4), head.count >= 4 else { return false }
         return Array(head).prefix(4) == [0x50, 0x4B, 0x03, 0x04]
+    }
+
+    private func hex<Bytes: DataProtocol>(_ bytes: Bytes) -> String {
+        bytes.map { String(format: "%02x", $0) }.joined()
     }
 
     private struct TestError: Error { let message: String; init(_ m: String) { message = m } }

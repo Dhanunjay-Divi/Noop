@@ -382,7 +382,8 @@ object AnalyticsEngine {
                     for (w in wins) {
                         hrvTraceSink(
                             "hrv window t=${(w.startTs - s.start) / 60}min stage=${w.stage} " +
-                                "beats=${w.cleanBeats} rmssd=${w.rmssd?.let { "${round2(it)}ms" } ?: "nil"}",
+                                "beats=${w.cleanBeats} rmssd=${w.rmssd?.let { "${round2(it)}ms" } ?: "nil"} " +
+                                "rrIntegrity=${w.coverageVerdict.raw}",
                         )
                     }
                 }

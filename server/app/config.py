@@ -32,6 +32,11 @@ class Settings:
     pool_min_size: int = 1
     pool_max_size: int = 8
     retention_days: int | None = None
+    retention_interval_hours: int = 24
+    idempotency_replay_guard_days: int = 30
+    rate_limit_requests_per_minute: int = 120
+    rate_limit_origin_requests_per_minute: int = 300
+    rate_limit_max_keys: int = 10_000
     dashboard_enabled: bool = True
 
     @classmethod
@@ -53,6 +58,17 @@ class Settings:
             pool_min_size=_positive_int("NOOP_DB_POOL_MIN_SIZE", 1),
             pool_max_size=_positive_int("NOOP_DB_POOL_MAX_SIZE", 8),
             retention_days=retention_value or None,
+            retention_interval_hours=_positive_int("NOOP_RETENTION_INTERVAL_HOURS", 24),
+            idempotency_replay_guard_days=_positive_int(
+                "NOOP_IDEMPOTENCY_REPLAY_GUARD_DAYS", 30
+            ),
+            rate_limit_requests_per_minute=_positive_int(
+                "NOOP_RATE_LIMIT_REQUESTS_PER_MINUTE", 120
+            ),
+            rate_limit_origin_requests_per_minute=_positive_int(
+                "NOOP_RATE_LIMIT_ORIGIN_REQUESTS_PER_MINUTE", 300
+            ),
+            rate_limit_max_keys=_positive_int("NOOP_RATE_LIMIT_MAX_KEYS", 10_000),
             dashboard_enabled=dashboard_raw in {"true", "1", "yes"},
         )
 

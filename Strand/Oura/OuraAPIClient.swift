@@ -31,7 +31,7 @@ enum OuraAPI {
     }
 }
 
-/// The Oura v2 API client. Injected `AuthProvider` supplies the bearer token (refreshing on expiry);
+/// The Oura v2 API client. Injected `AuthProvider` supplies the bearer token;
 /// injected `session` makes it URLProtocol-testable. Follows `next_token` paging, retries 429 with a
 /// bounded backoff, and refreshes-once on 401. Networking lives here in the app target by design.
 final class OuraAPIClient {
@@ -81,7 +81,7 @@ final class OuraAPIClient {
         } while next != nil
     }
 
-    /// GET with auth + 429-backoff + 401-refresh-once. Returns (body, status).
+    /// GET with auth + 429-backoff + one provider token-recovery attempt on 401.
     private func getWithRetry(endpoint: String, query: [String: String]) async throws -> (Data, Int) {
         for attempt in 0..<3 {
             let token = try await auth.validAccessToken()

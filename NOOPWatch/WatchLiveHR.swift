@@ -13,6 +13,7 @@ import HealthKit
 //
 // We deliberately keep this lightweight: an anchored query that delivers the newest samples while the app
 // is foregrounded, no HKWorkoutSession. A full session (and the higher-fidelity in-workout stream) is M4.
+@MainActor
 final class WatchLiveHR: ObservableObject {
 
     /// The most recent heart rate in whole BPM, or nil if we have no reading yet.
@@ -24,7 +25,6 @@ final class WatchLiveHR: ObservableObject {
     private let store = HKHealthStore()
     private let hrType = HKQuantityType.quantityType(forIdentifier: .heartRate)
     private var query: HKAnchoredObjectQuery?
-    private let bpmUnit = HKUnit.count().unitDivided(by: .minute())
     #endif
 
     /// Ask for permission (idempotent) and start streaming. Call when the glance appears.
@@ -37,8 +37,8 @@ final class WatchLiveHR: ObservableObject {
         // Read-only — we never write HR from the watch. If the user declines, the streaming query simply
         // returns no samples and we surface "HR unavailable".
         store.requestAuthorization(toShare: [], read: [hrType]) { [weak self] granted, _ in
-            guard let self else { return }
-            DispatchQueue.main.async {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
                 if granted {
                     self.beginStreaming()
                 } else {
@@ -68,10 +68,10 @@ final class WatchLiveHR: ObservableObject {
                                       predicate: nil,
                                       anchor: nil,
                                       limit: HKObjectQueryNoLimit) { [weak self] _, samples, _, _, _ in
-            self?.handle(samples)
+            Self.publishNewest(samples, to: self)
         }
         q.updateHandler = { [weak self] _, samples, _, _, _ in
-            self?.handle(samples)
+            Self.publishNewest(samples, to: self)
         }
         query = q
         store.execute(q)
@@ -79,14 +79,15 @@ final class WatchLiveHR: ObservableObject {
 
     /// Pull the newest sample out of a batch and publish its BPM. Reads can arrive on a background queue,
     /// so publish on the main actor.
-    private func handle(_ samples: [HKSample]?) {
+    nonisolated private static func publishNewest(_ samples: [HKSample]?, to owner: WatchLiveHR?) {
         guard let latest = (samples as? [HKQuantitySample])?
             .max(by: { $0.endDate < $1.endDate }) else { return }
-        let value = latest.quantity.doubleValue(for: bpmUnit)
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        let value = latest.quantity.doubleValue(for: unit)
         let rounded = Int(value.rounded())
-        DispatchQueue.main.async {
-            self.bpm = rounded
-            self.denied = false
+        Task { @MainActor [weak owner] in
+            owner?.bpm = rounded
+            owner?.denied = false
         }
     }
     #endif

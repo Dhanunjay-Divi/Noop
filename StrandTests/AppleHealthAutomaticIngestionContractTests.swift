@@ -38,12 +38,57 @@ final class AppleHealthAutomaticIngestionContractTests: XCTestCase {
         let resumeBody = String(bridge[resumeStart.lowerBound..<liveStart.lowerBound])
         XCTAssertFalse(resumeBody.contains("requestAuthorization("),
                        "Launch/resume must never open the Health permission sheet.")
+        let launchStart = try XCTUnwrap(
+            bridge.range(of: "func registerObserversAtLaunchIfPreviouslyRequested")
+        )
+        let refreshStart = try XCTUnwrap(
+            bridge.range(of: "func refreshAuthIfPreviouslyGranted()", range: launchStart.upperBound..<bridge.endIndex)
+        )
+        let launchBody = String(bridge[launchStart.lowerBound..<refreshStart.lowerBound])
+        XCTAssertTrue(launchBody.contains("authorizationRequestedKey"),
+                      "Background-launch observers must be gated by NOOP's prior explicit Health action.")
+        XCTAssertTrue(launchBody.contains("enableLiveDelivery()"))
+        XCTAssertFalse(launchBody.contains("requestAuthorization("),
+                       "A HealthKit background launch must never present a permission sheet.")
+        XCTAssertTrue(app.contains("bridge.registerObserversAtLaunchIfPreviouslyRequested()"),
+                      "Observers must be installed during app initialization, before scenePhase becomes active.")
         XCTAssertTrue(app.contains("await health.foregroundCatchUp()"))
         XCTAssertTrue(view.contains("Apple may deliver Health updates in the background on its schedule"))
         XCTAssertTrue(view.contains("does not include Apple's background-delivery entitlement"))
         XCTAssertFalse(view.contains("Apple Health (Live)"),
                        "System-scheduled HealthKit delivery must not be described as realtime.")
         XCTAssertTrue(entitlements.contains("com.apple.developer.healthkit.background-delivery"))
+    }
+
+    func testObserverDeletionsUseDurableAtomicFullTypeReconciliation() throws {
+        let bridge = try text("StrandiOS/Health/HealthKitBridge.swift")
+        let store = try text("Packages/WhoopStore/Sources/WhoopStore/HealthKitProjectionStore.swift")
+
+        XCTAssertTrue(bridge.contains("whoopStore.healthKitAnchor(sampleType: type.identifier)"))
+        XCTAssertTrue(bridge.contains("let deletedCount = deletedObjects?.count ?? 0"))
+        XCTAssertTrue(bridge.contains("hasDeletions = hasDeletions || page.deletedCount > 0"))
+        XCTAssertTrue(bridge.contains("projectionStart = Date(timeIntervalSince1970: 0)"),
+                      "A timestamp-free HKDeletedObject must not be guessed into a recent window.")
+        XCTAssertTrue(bridge.contains("whoopStore.reconcileHealthKitProjection("))
+        XCTAssertFalse(bridge.contains("min(31, daysBack + 1)"))
+        XCTAssertTrue(store.contains("Atomically replace one HealthKit type's complete projection"))
+        XCTAssertTrue(store.contains("previous anchor intact"))
+        XCTAssertTrue(store.contains("upsertHealthKitAnchor("))
+        XCTAssertTrue(store.contains("DELETE FROM workout"))
+    }
+
+    func testEveryCommittedHealthProjectionRefreshesTheVisibleReadSpine() throws {
+        let bridge = try text("StrandiOS/Health/HealthKitBridge.swift")
+        let app = try text("StrandiOS/App/StrandiOSApp.swift")
+        let model = try text("Strand/App/AppModel.swift")
+
+        XCTAssertTrue(bridge.contains("var dataProjectionChanged: (() async -> Void)?"))
+        XCTAssertGreaterThanOrEqual(
+            bridge.components(separatedBy: "await dataProjectionChanged?()").count - 1, 2,
+            "Both full imports and anchored observer reconciliations must refresh visible data.")
+        XCTAssertTrue(app.contains("bridge.dataProjectionChanged ="))
+        XCTAssertTrue(model.contains("func refreshAfterAppleHealthSync"))
+        XCTAssertTrue(model.contains("AppleWatchDevice.shouldAutoActivate"))
     }
 
     func testMenstrualFlowIsBehindDedicatedCycleConsentAndNeverGeneralHealthConsent() throws {

@@ -8,6 +8,7 @@ import Foundation
 /// Mirrors AICoachError's shape (LocalizedError + errorDescription).
 enum OuraError: LocalizedError, Equatable {
     case notConnected
+    case reauthorizationRequired
     case authFailed(String)
     case tokenExchangeFailed(String)
     case badResponse(Int, String)
@@ -19,6 +20,8 @@ enum OuraError: LocalizedError, Equatable {
         switch self {
         case .notConnected:
             return "Connect your Oura account first."
+        case .reauthorizationRequired:
+            return "Your Oura connection expired or was revoked. Connect again to continue."
         case .authFailed(let d):
             return "Oura sign-in didn't complete: \(d)"
         case .tokenExchangeFailed(let d):

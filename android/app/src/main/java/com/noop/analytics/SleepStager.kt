@@ -2359,7 +2359,13 @@ object SleepStager {
     /** One 5-min HRV window: its start ts, the sleep stage at its center, the clean-beat count, and the
      *  window RMSSD (null when fewer than 2 clean beats, or when every successive pair straddles a dropped
      *  beat). Drives both [sessionAvgHRV] and the HRV test-mode trace. */
-    data class HrvWindow(val startTs: Long, val stage: String, val cleanBeats: Int, val rmssd: Double?)
+    data class HrvWindow(
+        val startTs: Long,
+        val stage: String,
+        val cleanBeats: Int,
+        val rmssd: Double?,
+        val coverageVerdict: HrvAnalyzer.RrCoverageVerdict,
+    )
 
     /**
      * Mean RMSSD over 5-min tumbling windows across the session (ms), or null.
@@ -2388,7 +2394,17 @@ object SleepStager {
         val out = ArrayList<HrvWindow>()
         var t = start
         while (t < end) {
-            val bucket = seg.filter { it.ts >= t && it.ts < t + windowS }.map { it.rrMs.toDouble() }
+            val bucketRows = seg.filter {
+                it.ts >= t && it.ts < t + windowS &&
+                    it.rrMs.toDouble() >= HrvAnalyzer.RR_MIN_MS &&
+                    it.rrMs.toDouble() <= HrvAnalyzer.RR_MAX_MS
+            }
+            val bucket = bucketRows.map { it.rrMs.toDouble() }
+            val bucketTs = bucketRows.map { it.ts }
+            val coverageVerdict = HrvAnalyzer.classifyCoverage(
+                HrvAnalyzer.rrCoverage(bucketTs, bucket),
+                HrvAnalyzer.collapsedCoverage(bucketTs, bucket),
+            )
             // Full clean (range + Malik ectopic rejection), not just range — matches the
             // analyze() pipeline. The 0x2A37 RR on a WHOOP 5/MG is PPG-derived and noisier
             // than a 4.0's; rMSSD is built from SUCCESSIVE differences, so an un-rejected
@@ -2397,10 +2413,13 @@ object SleepStager {
             // spurious successive difference, which is the exact spike the rejection above is meant to
             // remove. See HrvAnalyzer.rmssdGapAware.
             val cleaned = HrvAnalyzer.cleanRRGapAware(bucket)
-            val rmssd = if (cleaned.nn.size >= 2) HrvAnalyzer.rmssdGapAware(cleaned.nn, cleaned.contiguous) else null
+            val rmssd = if (HrvAnalyzer.beatSpreadIsTrustworthy(coverageVerdict) && cleaned.nn.size >= 2) {
+                HrvAnalyzer.rmssdGapAware(cleaned.nn, cleaned.contiguous)
+            } else null
             val center = t + windowS / 2
             val stage = stages.firstOrNull { center >= it.start && center < it.end }?.stage ?: "?"
-            out.add(HrvWindow(startTs = t, stage = stage, cleanBeats = cleaned.nn.size, rmssd = rmssd))
+            out.add(HrvWindow(startTs = t, stage = stage, cleanBeats = cleaned.nn.size,
+                rmssd = rmssd, coverageVerdict = coverageVerdict))
             t += windowS
         }
         return out

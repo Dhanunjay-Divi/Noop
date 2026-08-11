@@ -20,7 +20,8 @@ class ScheduledReportPolicyTest {
     @Test fun morningFiresWhenEnabledScorePresentAndNotYetToday() {
         assertTrue(
             ScheduledReportPolicy.shouldNotifyMorning(
-                enabled = true, chargeOrRestPresent = true, lastNotifiedDay = "2026-06-20", reportDay = "2026-06-21",
+                enabled = true, materializedAfterSync = true, chargeOrRestPresent = true,
+                lastNotifiedDay = "2026-06-20", reportDay = "2026-06-21",
             ),
         )
     }
@@ -28,7 +29,8 @@ class ScheduledReportPolicyTest {
     @Test fun morningSuppressedWhenDisabled() {
         assertFalse(
             ScheduledReportPolicy.shouldNotifyMorning(
-                enabled = false, chargeOrRestPresent = true, lastNotifiedDay = null, reportDay = "2026-06-21",
+                enabled = false, materializedAfterSync = true, chargeOrRestPresent = true,
+                lastNotifiedDay = null, reportDay = "2026-06-21",
             ),
         )
     }
@@ -36,7 +38,8 @@ class ScheduledReportPolicyTest {
     @Test fun morningSuppressedWhenAlreadyFiredToday() {
         assertFalse(
             ScheduledReportPolicy.shouldNotifyMorning(
-                enabled = true, chargeOrRestPresent = true, lastNotifiedDay = "2026-06-21", reportDay = "2026-06-21",
+                enabled = true, materializedAfterSync = true, chargeOrRestPresent = true,
+                lastNotifiedDay = "2026-06-21", reportDay = "2026-06-21",
             ),
         )
     }
@@ -44,7 +47,8 @@ class ScheduledReportPolicyTest {
     @Test fun morningSuppressedWhenNoScore() {
         assertFalse(
             ScheduledReportPolicy.shouldNotifyMorning(
-                enabled = true, chargeOrRestPresent = false, lastNotifiedDay = null, reportDay = "2026-06-21",
+                enabled = true, materializedAfterSync = true, chargeOrRestPresent = false,
+                lastNotifiedDay = null, reportDay = "2026-06-21",
             ),
         )
     }
@@ -58,7 +62,17 @@ class ScheduledReportPolicyTest {
         // resolved row is still the 06-20 night → reportDay = "2026-06-20", already notified → suppressed.
         assertFalse(
             ScheduledReportPolicy.shouldNotifyMorning(
-                enabled = true, chargeOrRestPresent = true, lastNotifiedDay = "2026-06-20", reportDay = "2026-06-20",
+                enabled = true, materializedAfterSync = true, chargeOrRestPresent = true,
+                lastNotifiedDay = "2026-06-20", reportDay = "2026-06-20",
+            ),
+        )
+    }
+
+    @Test fun morningSuppressedUntilFreshSyncHasMaterialized() {
+        assertFalse(
+            ScheduledReportPolicy.shouldNotifyMorning(
+                enabled = true, materializedAfterSync = false, chargeOrRestPresent = true,
+                lastNotifiedDay = null, reportDay = "2026-06-21",
             ),
         )
     }

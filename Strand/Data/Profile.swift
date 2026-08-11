@@ -180,6 +180,10 @@ final class ProfileStore: ObservableObject {
         static let externalWeightAt = "profile.externalWeightMeasuredAt"
         static let externalWeightSource = "profile.externalWeightSource"
         static let manualWeightOverrideAt = "profile.manualWeightOverrideAt"
+        /// The user's/profile's value before the first external measurement took control. Kept only
+        /// on-device so deleting every sample from that source can restore a meaningful value instead
+        /// of substituting an arbitrary default. Never exported as measurement history.
+        static let externalWeightFallback = "profile.externalWeightFallbackKg"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -255,12 +259,81 @@ final class ProfileStore: ObservableObject {
                                                  previousExternalAt: previous,
                                                  manualOverrideAt: manualAt) else { return false }
 
+        if externalWeightProvenance == nil,
+           ExternalWeightUpdatePolicy.validWeightKg.contains(self.weightKg) {
+            d.set(self.weightKg, forKey: K.externalWeightFallback)
+        }
         applyingExternalWeight = true
         self.weightKg = weightKg
         applyingExternalWeight = false
         d.set(measuredAt.timeIntervalSince1970, forKey: K.externalWeightAt)
         d.set(String(cleanSource.prefix(160)), forKey: K.externalWeightSource)
         d.removeObject(forKey: K.manualWeightOverrideAt)
+        return true
+    }
+
+    /// Reconcile an external source after its backing health store reports deletions. Unlike the normal
+    /// monotonic `acceptExternalWeight` path, this method may intentionally move to an older remaining
+    /// measurement from the *same* source family. A newer Bluetooth/manual source is never displaced.
+    /// Passing nil means that source now has no measurements: restore the pre-external profile value
+    /// when known, or retain the current value as an unlinked snapshot for installations predating the
+    /// fallback key. In either case stale external provenance is removed.
+    @discardableResult
+    func reconcileExternalWeight(weightKg: Double?,
+                                 measuredAt: Date?,
+                                 source: String,
+                                 receivedAt: Date = Date()) -> Bool {
+        let cleanSource = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanSource.isEmpty else { return false }
+        let sourceFamily = cleanSource.split(separator: ":", maxSplits: 1)
+            .first.map(String.init) ?? cleanSource
+
+        guard let current = externalWeightProvenance else {
+            guard let weightKg, let measuredAt else { return false }
+            return acceptExternalWeight(weightKg: weightKg,
+                                        measuredAt: measuredAt,
+                                        source: cleanSource,
+                                        receivedAt: receivedAt)
+        }
+        let currentFamily = current.source.split(separator: ":", maxSplits: 1)
+            .first.map(String.init) ?? current.source
+        guard currentFamily == sourceFamily else {
+            guard let weightKg, let measuredAt else { return false }
+            return acceptExternalWeight(weightKg: weightKg,
+                                        measuredAt: measuredAt,
+                                        source: cleanSource,
+                                        receivedAt: receivedAt)
+        }
+
+        let manualAt = (d.object(forKey: K.manualWeightOverrideAt) as? Double)
+            .flatMap { $0.isFinite ? Date(timeIntervalSince1970: $0) : nil }
+        if let weightKg, let measuredAt,
+           ExternalWeightUpdatePolicy.accepts(weightKg: weightKg,
+                                              measuredAt: measuredAt,
+                                              receivedAt: receivedAt,
+                                              previousExternalAt: nil,
+                                              manualOverrideAt: manualAt) {
+            applyingExternalWeight = true
+            self.weightKg = weightKg
+            applyingExternalWeight = false
+            d.set(measuredAt.timeIntervalSince1970, forKey: K.externalWeightAt)
+            d.set(String(cleanSource.prefix(160)), forKey: K.externalWeightSource)
+            d.removeObject(forKey: K.manualWeightOverrideAt)
+            return true
+        }
+
+        // A manual edit after the source measurement is already the correct current value. Otherwise
+        // recover the profile value captured before the source first took control, when available.
+        if manualAt == nil,
+           let fallback = d.object(forKey: K.externalWeightFallback) as? Double,
+           ExternalWeightUpdatePolicy.validWeightKg.contains(fallback) {
+            applyingExternalWeight = true
+            self.weightKg = fallback
+            applyingExternalWeight = false
+        }
+        d.removeObject(forKey: K.externalWeightAt)
+        d.removeObject(forKey: K.externalWeightSource)
+        d.removeObject(forKey: K.externalWeightFallback)
         return true
     }
 

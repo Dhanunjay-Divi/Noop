@@ -24,7 +24,7 @@ public extension View {
         of value: V,
         perform action: @escaping (V) -> Void
     ) -> some View {
-        if #available(iOS 17.0, macOS 14.0, *) {
+        if #available(iOS 17.0, macOS 14.0, watchOS 10.0, *) {
             self.onChange(of: value) { _, newValue in action(newValue) }
         } else {
             self.legacyOnChange(of: value, perform: action)
@@ -39,6 +39,7 @@ private extension View {
     /// fires on the macOS-13 build that genuinely needs this path.
     @available(iOS, introduced: 16.0, deprecated: 17.0)
     @available(macOS, introduced: 13.0, deprecated: 14.0)
+    @available(watchOS, introduced: 9.0, deprecated: 10.0)
     @ViewBuilder
     func legacyOnChange<V: Equatable>(
         of value: V,

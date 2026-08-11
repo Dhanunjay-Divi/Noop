@@ -197,7 +197,8 @@ public struct CountUpText: View {
 /// each frame. Conforming the VIEW to `Animatable` (rather than using the deprecated
 /// `AnimatableModifier`) keeps this warning-clean on the iOS-17 / macOS-14 build while still
 /// compiling on the iOS-16 / macOS-13 floor.
-private struct _AnimatableNumber: View, Animatable {
+@MainActor
+private struct _AnimatableNumber: View, @preconcurrency Animatable {
     var number: Double
     let format: (Double) -> String
     let font: Font

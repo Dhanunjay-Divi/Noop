@@ -39,6 +39,7 @@ WIDGET_ENTITLEMENTS="$ENTITLEMENTS_DIR/widget.plist"
 plutil -create xml1 "$APP_ENTITLEMENTS"
 plutil -insert 'com\.apple\.developer\.healthkit' -bool YES "$APP_ENTITLEMENTS"
 plutil -insert 'com\.apple\.developer\.healthkit\.access' -array "$APP_ENTITLEMENTS"
+plutil -insert 'com\.apple\.developer\.healthkit\.background-delivery' -bool YES "$APP_ENTITLEMENTS"
 plutil -insert 'com\.apple\.security\.application-groups' -array "$APP_ENTITLEMENTS"
 plutil -insert 'com\.apple\.security\.application-groups.0' -string "$APP_GROUP" "$APP_ENTITLEMENTS"
 
@@ -61,6 +62,10 @@ SIGNED_APP_GROUP=$(/usr/libexec/PlistBuddy \
   -c 'Print :com.apple.security.application-groups:0' "$SIGNED_APP_ENTITLEMENTS")
 SIGNED_WIDGET_GROUP=$(/usr/libexec/PlistBuddy \
   -c 'Print :com.apple.security.application-groups:0' "$SIGNED_WIDGET_ENTITLEMENTS")
+SIGNED_HEALTHKIT=$(/usr/libexec/PlistBuddy \
+  -c 'Print :com.apple.developer.healthkit' "$SIGNED_APP_ENTITLEMENTS")
+SIGNED_HEALTHKIT_BACKGROUND=$(/usr/libexec/PlistBuddy \
+  -c 'Print :com.apple.developer.healthkit.background-delivery' "$SIGNED_APP_ENTITLEMENTS")
 
 [ "$SIGNED_APP_GROUP" = "$APP_GROUP" ] || {
   echo "signed app lost App Group entitlement" >&2
@@ -70,6 +75,22 @@ SIGNED_WIDGET_GROUP=$(/usr/libexec/PlistBuddy \
   echo "signed widget lost App Group entitlement" >&2
   exit 1
 }
+[ "$SIGNED_HEALTHKIT" = "true" ] || {
+  echo "signed app lost HealthKit entitlement" >&2
+  exit 1
+}
+[ "$SIGNED_HEALTHKIT_BACKGROUND" = "true" ] || {
+  echo "signed app lost HealthKit background-delivery entitlement" >&2
+  exit 1
+}
+[ -f "$APP/PrivacyInfo.xcprivacy" ] || {
+  echo "app privacy manifest missing" >&2
+  exit 1
+}
+[ -f "$WIDGET/PrivacyInfo.xcprivacy" ] || {
+  echo "widget privacy manifest missing" >&2
+  exit 1
+}
 
 codesign --verify --deep --strict "$APP"
-echo "✓ sideload capability template embedded for app + widget: $APP_GROUP"
+echo "✓ sideload capability template embedded for app + widget: HealthKit, background delivery, $APP_GROUP"

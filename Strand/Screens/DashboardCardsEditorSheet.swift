@@ -88,7 +88,7 @@ struct DashboardCardsEditorSheet: View {
             }
             // Persist on EVERY change (toggle / reorder / reset), not only on Done — so closing the sheet by
             // swipe still keeps the edit, mirroring WHOOP's live "My Dashboard" customise. Done just dismisses.
-            .onChange(of: items) { _ in commit() }
+            .onChangeCompat(of: items) { _ in commit() }
         }
         .tint(StrandPalette.accent)
         #if os(macOS)

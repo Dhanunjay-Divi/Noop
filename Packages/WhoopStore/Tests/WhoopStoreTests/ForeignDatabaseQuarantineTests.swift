@@ -77,4 +77,47 @@ final class ForeignDatabaseQuarantineTests: XCTestCase {
         XCTAssertFalse(siblings.contains { $0.hasPrefix(base + ".incompatible-") },
                        "a valid GRDB DB must never be quarantined")
     }
+
+    /// A committed SQLite row may live only in WAL while another connection remains open. Quarantine
+    /// must preserve that logical state, not move the main file and discard its journal sidecars.
+    func testForeignDatabaseQuarantinePreservesCommittedWalRows() async throws {
+        let path = tempPath()
+        defer { cleanup(path) }
+
+        let writer = try DatabaseQueue(path: path)
+        try await writer.writeWithoutTransaction { db in
+            _ = try String.fetchOne(db, sql: "PRAGMA journal_mode=WAL")
+            try db.execute(sql: "PRAGMA wal_autocheckpoint=0")
+            try db.execute(sql: "CREATE TABLE device (id TEXT PRIMARY KEY, mac TEXT, name TEXT, firstSeen INTEGER, lastSeen INTEGER)")
+            try db.execute(sql: "CREATE TABLE hrSample (deviceId TEXT, ts INTEGER, bpm INTEGER)")
+        }
+        try await writer.write { db in
+            try db.execute(sql: "INSERT INTO device (id, name) VALUES ('wal-only', 'WHOOP')")
+        }
+        let walPath = path + "-wal"
+        XCTAssertGreaterThan(
+            ((try? FileManager.default.attributesOfItem(atPath: walPath))?[.size] as? NSNumber)?.intValue ?? 0,
+            0,
+            "precondition: the foreign database has a live WAL"
+        )
+
+        _ = try await WhoopStore(path: path)
+
+        let directory = (path as NSString).deletingLastPathComponent
+        let base = (path as NSString).lastPathComponent
+        let quarantineName = try XCTUnwrap(
+            FileManager.default.contentsOfDirectory(atPath: directory).first {
+                $0.hasPrefix(base + ".incompatible-")
+                    && !$0.hasSuffix("-wal") && !$0.hasSuffix("-shm") && !$0.hasSuffix("-journal")
+            }
+        )
+        let quarantinePath = (directory as NSString).appendingPathComponent(quarantineName)
+        let recovered = try DatabaseQueue(path: quarantinePath)
+        let id = try await recovered.read { db in
+            try String.fetchOne(db, sql: "SELECT id FROM device WHERE id = 'wal-only'")
+        }
+        XCTAssertEqual(id, "wal-only", "the standalone quarantine must include committed WAL pages")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: quarantinePath + "-wal"),
+                       "the recovery copy must not depend on a detached WAL")
+    }
 }

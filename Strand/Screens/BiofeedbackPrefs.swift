@@ -11,7 +11,7 @@ import StrandAnalytics
 // type is the single reader/writer so the engine config stays consistent.
 enum BiofeedbackPrefs {
 
-    private static let d = UserDefaults.standard
+    private static var d: UserDefaults { .standard }
 
     private enum K {
         static let lockedPace   = "biofeedback.resonanceBpm"

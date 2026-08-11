@@ -3,7 +3,7 @@ import UserNotifications
 
 /// A destination carried by a NOOP notification. The route is deliberately small: notifications
 /// open a trusted top-level screen, never a URL or arbitrary stored navigation value.
-enum NoopNotificationRoute: String, Equatable {
+enum NoopNotificationRoute: String, Equatable, Sendable {
     case today
     case sleep
 }
@@ -72,13 +72,13 @@ enum DailyReviewNotifications {
         return clampMinute(value)
     }
 
-    enum EnableOutcome: Equatable {
+    enum EnableOutcome: Equatable, Sendable {
         case scheduled
         case denied
         case off
     }
 
-    struct ReminderSpec: Equatable {
+    struct ReminderSpec: Equatable, Sendable {
         let identifier: String
         let minuteOfDay: Int
         let title: String
@@ -89,7 +89,7 @@ enum DailyReviewNotifications {
     /// Enable/disable the pair. A denied permission never leaves a misleading ON preference behind.
     static func setEnabled(
         _ on: Bool,
-        completion: (@MainActor (EnableOutcome) -> Void)? = nil
+        completion: (@MainActor @Sendable (EnableOutcome) -> Void)? = nil
     ) {
         guard on else {
             UserDefaults.standard.set(false, forKey: enabledKey)
@@ -99,31 +99,27 @@ enum DailyReviewNotifications {
             return
         }
 
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            Task { @MainActor in
-                switch settings.authorizationStatus {
-                case .authorized, .provisional, .ephemeral:
+        Task { @MainActor in
+            let center = UNUserNotificationCenter.current()
+            let settings = await center.notificationSettings()
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                UserDefaults.standard.set(true, forKey: enabledKey)
+                schedule()
+                completion?(.scheduled)
+            case .notDetermined:
+                let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+                if granted {
                     UserDefaults.standard.set(true, forKey: enabledKey)
                     schedule()
                     completion?(.scheduled)
-                case .notDetermined:
-                    UNUserNotificationCenter.current()
-                        .requestAuthorization(options: [.alert, .sound]) { granted, _ in
-                            Task { @MainActor in
-                                if granted {
-                                    UserDefaults.standard.set(true, forKey: enabledKey)
-                                    schedule()
-                                    completion?(.scheduled)
-                                } else {
-                                    UserDefaults.standard.set(false, forKey: enabledKey)
-                                    completion?(.denied)
-                                }
-                            }
-                        }
-                default:
+                } else {
                     UserDefaults.standard.set(false, forKey: enabledKey)
                     completion?(.denied)
                 }
+            default:
+                UserDefaults.standard.set(false, forKey: enabledKey)
+                completion?(.denied)
             }
         }
     }
@@ -142,14 +138,13 @@ enum DailyReviewNotifications {
     /// This never asks for permission; it only restores requests when authorization already exists.
     static func restoreScheduleIfAuthorized() {
         guard isEnabled else { return }
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            Task { @MainActor in
-                switch settings.authorizationStatus {
-                case .authorized, .provisional, .ephemeral:
-                    schedule()
-                default:
-                    break
-                }
+        Task { @MainActor in
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                schedule()
+            default:
+                break
             }
         }
     }

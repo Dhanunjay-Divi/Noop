@@ -9,6 +9,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.noop.data.DataBackup
+import com.noop.data.BackupPassphraseStore
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -18,17 +19,16 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Backup & Sync (Phase 1 - folder destination). Writes the full `.noopbak` snapshot (the existing
- * [DataBackup] whole-DB format) into a user-chosen folder (a SAF tree), on demand and on an opt-in
+ * [DataBackup] encrypted whole-DB format) into a user-chosen folder (a SAF tree), on demand and on an opt-in
  * daily schedule. Point that folder at a desktop Google Drive / Dropbox sync client (or a phone sync
  * app) and you get off-device backup with NO in-app cloud account, no OAuth, no secrets - NOOP only
  * ever writes a local file; the user's own sync client does any upload.
  *
  * DESIGN
- * - Snapshots are timestamped and immutable. "Restore" REPLACES the live DB (whole-DB snapshot,
- *   newest-wins), exactly as [DataBackup.importFrom] already does - we add nothing to the restore
- *   safety path (magic-byte + Room/GRDB-origin validation, sidecar snapshot, rollback-on-failure).
- * - The pure filename/selection helpers are unit-tested byte-for-byte against the Apple twin so a
- *   `.noopbak` produced on either platform is named + selected identically.
+ * - Snapshots are timestamped, encrypted, authenticated, and immutable. Restore validates/decrypts
+ *   into private staging; a cold-launch atomic swap retains the previous DB until Room opens safely.
+ * - Filenames and the encrypted outer envelope match Apple, but the embedded native database is
+ *   platform-specific. WHOOP-format CSV is the portable Android/Apple transfer path.
  * - The daily schedule is opt-in (default OFF) and runs off the main thread (a whole-DB zip can be
  *   100MB+). The periodic write goes through WorkManager (survives reboot/app-kill, never the
  *   launch-critical path); the on-launch CATCH-UP is a deferred IO coroutine (see [catchUpIfDue]).
@@ -41,7 +41,7 @@ object BackupSync {
     private const val PREFIX = "noop-backup-"
     private const val SUFFIX = ".noopbak"
 
-    /** Generic binary MIME for the SAF createDocument call (the bytes are a ZIP container). */
+    /** Generic binary MIME for the SAF createDocument call (the bytes are an encrypted envelope). */
     const val MIME = "application/octet-stream"
 
     /** Default snapshots kept by prune: 7, i.e. a week of daily rollback points. (The Apple twin still
@@ -168,6 +168,9 @@ object BackupSync {
 
     /** Create + write one snapshot into the chosen [treeUri]; returns the new file Uri, or null on failure. */
     fun writeSnapshot(context: Context, treeUri: Uri, nowMs: Long = System.currentTimeMillis()): Uri? {
+        // Automatic backups must never fall back to plaintext. If secure credential storage is
+        // unavailable or the user has not configured a recovery passphrase, fail closed.
+        val passphrase = runCatching { BackupPassphraseStore.read(context) }.getOrNull() ?: return null
         val resolver = context.contentResolver
         val parentDoc = DocumentsContract.buildDocumentUriUsingTree(
             treeUri,
@@ -179,7 +182,7 @@ object BackupSync {
         // exportTo throws on failure; on a partial write delete the half-written doc so prune/latest
         // never picks up a corrupt snapshot.
         return runCatching {
-            DataBackup.exportTo(context, fileUri)
+            DataBackup.exportTo(context, fileUri, passphrase)
             fileUri
         }.getOrElse {
             runCatching { DocumentsContract.deleteDocument(resolver, fileUri) }
@@ -268,6 +271,14 @@ object BackupSync {
             wm.cancelUniqueWork(WORK)
             return
         }
+        // Only touch Android Keystore for users who actually opted into folder backup; startup stays
+        // cheap for the default-off majority.
+        val hasSecret = runCatching { BackupPassphraseStore.has(context) }.getOrDefault(false)
+        if (!hasSecret) {
+            BackupSyncPrefs.setAutoEnabled(context, false)
+            wm.cancelUniqueWork(WORK)
+            return
+        }
         // Anchor the first run to the next chosen time-of-day, then repeat daily. KEEP so an already-
         // scheduled job keeps its anchor rather than resetting on every app-start (matches
         // DebugExportScheduler); toggling auto off/on OR changing the time via [applyTimeChange]
@@ -295,6 +306,7 @@ object BackupSync {
     fun catchUpIfDue(context: Context, nowMs: Long = System.currentTimeMillis()): Boolean {
         if (!BackupSyncPrefs.autoEnabled(context)) return false
         if (BackupSyncPrefs.treeUri(context) == null) return false
+        if (!runCatching { BackupPassphraseStore.has(context) }.getOrDefault(false)) return false
         if (!isCatchUpDue(BackupSyncPrefs.lastBackupMs(context), nowMs)) return false
         return backupNow(context)
     }
@@ -309,6 +321,9 @@ class BackupSyncWorker(appContext: Context, params: WorkerParameters) :
     CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
         if (!BackupSyncPrefs.autoEnabled(applicationContext)) return Result.success()
+        if (!runCatching { BackupPassphraseStore.has(applicationContext) }.getOrDefault(false)) {
+            return Result.success()
+        }
         return if (BackupSync.backupNow(applicationContext)) Result.success() else Result.retry()
     }
 }

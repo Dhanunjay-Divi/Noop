@@ -28,7 +28,7 @@
     <string name="widget_percent_value">%1$d%%</string>
     <string name="nutrition_weight_unit_missing_failure">Aucun poids importé : indiquez kg ou lb dans la colonne de poids.</string>
     <plurals name="nutrition_weight_values_skipped">
-        <item quantity="one">1 valeur de poids ignorée (ajoutez kg ou lb à la colonne).</item>
+        <item quantity="one">%d valeur de poids ignorée (ajoutez kg ou lb à la colonne).</item>
         <item quantity="other">%d valeurs de poids ignorées (ajoutez kg ou lb à la colonne).</item>
     </plurals>
 
@@ -1105,7 +1105,7 @@
     <string name="l10n_app_changelog_toggle_the_live_hr_dynamic_island_d3bd70cb">Buggle l\'île dynamique en direct-HR</string>
     <string name="l10n_app_changelog_track_a_workout_manually_2eb43402">Suivre un entraînement manuellement</string>
     <string name="l10n_app_changelog_trends_report_explains_its_scores_e338d1ee">Le rapport sur les tendances explique ses résultats</string>
-    <string name="l10n_app_changelog_true_battery_a_sync_indicator_and_89037fc3">Vrai batterie %, un indicateur de synchronisation et HR sur les entraînements importés</string>
+    <string name="l10n_app_changelog_true_battery_a_sync_indicator_and_89037fc3" formatted="false">Vrai batterie %, un indicateur de synchronisation et HR sur les entraînements importés</string>
     <string name="l10n_app_changelog_two_quick_fixes_the_blue_titanium_4c021d78">Deux corrections rapides : l\'icône Titanium Bleu, et Mac "Vos Cartes"</string>
     <string name="l10n_app_changelog_under_the_hood_current_api_migration_672da037">Au-dessous de l\'âge: migration API actuelle (pas de changement de comportement)</string>
     <string name="l10n_app_changelog_universal_mac_build_iphone_import_fix_363425a0">Universal Mac build + Correction d\'importation iPhone</string>
@@ -1513,7 +1513,6 @@
     <string name="today_load_ratio">ratio %1$s</string>
 
     <!-- #453 base-catalog locale completion -->
-    <string name="app_name">NOOP</string>
     <string name="widget_description">La Récupération, l\'Effort et le Sommeil d\'aujourd\'hui, avec la fréquence cardiaque et la batterie du bracelet en un coup d\'œil.</string>
     <string name="widget_compact_name">Compact NOOP</string>
     <string name="widget_compact_description">Widget compact Récupération, Effort et Sommeil, avec fréquence cardiaque et batterie du bracelet.</string>
@@ -1789,4 +1788,39 @@
     <string name="sleep_stages_oura_provenance">Stades Oura Ring · estimation sur la bague, non ajustée par l’app Oura</string>
     <string name="sleep_stages_on_device_provenance">Stades approximatifs (sur l’appareil)</string>
     <string name="sleep_stage_summary">%1$s au lit · %2$s d’efficacité</string>
+    <string name="l10n_app_changelog_safer_upgrades_trustworthy_signals_9c1f2a7b">Mises à niveau plus sûres, signaux fiables et durcissement pour la production</string>
+    <string name="noop_backup_encryption_title">Chiffrement des sauvegardes</string>
+    <string name="noop_backup_encryption_configured_help">Une phrase secrète de récupération est stockée dans Android Keystore pour les sauvegardes automatiques. Elle n’est jamais affichée ni envoyée. Saisissez-la à nouveau lors de la restauration. Son remplacement ne modifie pas les anciennes sauvegardes.</string>
+    <string name="noop_backup_encryption_required_help">Définissez une phrase secrète de récupération avant d’activer les sauvegardes automatiques. Si vous la perdez, les sauvegardes chiffrées ne pourront pas être récupérées.</string>
+    <string name="noop_backup_new_passphrase">Nouvelle phrase secrète</string>
+    <string name="noop_backup_recovery_passphrase">Phrase secrète de récupération</string>
+    <string name="noop_backup_confirm_passphrase">Confirmer la phrase secrète</string>
+    <string name="noop_backup_replace_recovery_passphrase">Remplacer la phrase de récupération</string>
+    <string name="noop_backup_secure_automatic_backups">Protéger les sauvegardes automatiques</string>
+    <string name="noop_backup_passphrase_saved">Phrase de récupération stockée de façon sécurisée. Conservez votre propre copie ; NOOP ne peut pas la récupérer.</string>
+    <string name="noop_backup_passphrase_save_failed">Impossible de sécuriser la phrase secrète.</string>
+    <string name="noop_backup_forget_stored_passphrase">Oublier la phrase secrète stockée</string>
+    <string name="noop_backup_passphrase_removed">Phrase secrète stockée supprimée. Les sauvegardes existantes nécessitent toujours leur phrase d’origine.</string>
+    <string name="noop_backup_passphrase_remove_failed">Impossible de supprimer la phrase secrète stockée.</string>
+    <string name="noop_backup_passphrase_mismatch">Les phrases secrètes ne correspondent pas.</string>
+    <string name="noop_backup_passphrase_minimum_error">La phrase secrète de sauvegarde doit contenir au moins 12 caractères.</string>
+    <string name="noop_backup_unlock_title">Déverrouiller la sauvegarde</string>
+    <string name="noop_backup_unlock_folder_help">Saisissez la phrase de récupération de cette sauvegarde. Elle sera à nouveau requise lors de la restauration ; laissez ce champ vide uniquement pour une ancienne sauvegarde non chiffrée.</string>
+    <string name="noop_backup_passphrase_label">Phrase secrète</string>
+    <string name="noop_backup_verify_restore">Vérifier et restaurer</string>
+    <string name="noop_backup_encrypt_title">Chiffrer la sauvegarde</string>
+    <string name="noop_backup_export_passphrase_help">Choisissez au moins 12 caractères. NOOP ne peut pas récupérer cette phrase secrète si vous la perdez.</string>
+    <string name="noop_backup_import_passphrase_help">Saisissez la phrase secrète utilisée lors de la création de cette sauvegarde. Les anciennes sauvegardes non chiffrées restent acceptées.</string>
+    <string name="noop_backup_choose_destination">Choisir la destination</string>
+    <string name="noop_backup_restart_apply">Sauvegarde vérifiée — redémarrage de NOOP pour l’appliquer en toute sécurité…</string>
+    <string name="noop_backup_platform_portability_help">Les fichiers .noopbak chiffrés sont restaurés sans perte sur la plateforme qui les a créés. L’enveloppe est commune, mais les bases Room (Android) et GRDB (Apple) ne sont pas interchangeables. L’export CSV est la voie de transfert portable entre Android et Apple.</string>
+    <string name="noop_legal_title">Mentions légales et remerciements</string>
+    <string name="noop_legal_accessibility">Mentions légales et remerciements</string>
+    <string name="noop_legal_description">Conditions, licence du code source, avis tiers et provenance — disponibles hors ligne.</string>
+    <string name="noop_legal_subtitle">Les documents exacts fournis avec cette version.</string>
+    <string name="noop_legal_terms">Conditions</string>
+    <string name="noop_legal_license">Licence</string>
+    <string name="noop_legal_notices">Avis</string>
+    <string name="noop_legal_attribution">Attribution</string>
+    <string name="noop_legal_document_error">Impossible d’ouvrir ce document inclus. Réinstallez cette version et réessayez.</string>
 </resources>

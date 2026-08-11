@@ -1,5 +1,11 @@
 # Oura Live API Import — Plan 2: Network + Auth (app target)
 
+> **Archived; do not execute (2026-08-11):** This historical plan embeds a confidential Oura
+> client secret in a distributed client and is retained only as implementation history. The active
+> code uses Oura's public-client implicit grant (`response_type=token`), never accepts or compiles a
+> client secret, performs no token exchange, and requires reauthorization after expiry. See
+> `docs/PRIVACY_SECURITY.md` and `Strand/Oura/OuraOAuth.swift`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the app-target network + auth layer for the Oura cloud import — Keychain token storage, credentials, the OAuth2 authorization-code flow (bring-your-own Oura app), and the paging/backoff `URLSession` API client — behind an `AuthProvider` seam, all in `Strand/Oura/`.

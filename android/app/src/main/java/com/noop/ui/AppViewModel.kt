@@ -16,7 +16,6 @@ import com.noop.analytics.IllnessWatch
 import com.noop.analytics.IntelligenceEngine
 import com.noop.analytics.V5HealthSignals
 import com.noop.analytics.RegistryDayOwnerSource
-import com.noop.analytics.RestScorer
 import com.noop.analytics.RouteMath
 import com.noop.analytics.SleepMark
 import com.noop.analytics.SleepMarkType
@@ -39,6 +38,8 @@ import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
 import com.noop.ingest.ActivityFileImporter
 import com.noop.ingest.HealthConnectImporter
+import com.noop.ingest.HealthConnectReconciler
+import com.noop.ingest.HealthConnectReconcileResult
 import com.noop.ingest.HealthConnectSyncScheduler
 import com.noop.ble.WhoopBleClient
 import com.noop.ble.ForegroundRealtimeLeasePolicy
@@ -49,7 +50,6 @@ import com.noop.notif.IllnessAlertNotifier
 import com.noop.notif.ScheduledReportNotifier
 import com.noop.notif.StrainTargetNotifier
 import com.noop.notif.ScheduledReportPolicy
-import com.noop.notif.scorePctOrNull
 import com.noop.protocol.CommandNumber
 import com.noop.widget.WidgetSnapshotFactory
 import com.noop.widget.WidgetSnapshotStore
@@ -697,22 +697,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (previousAlert == null) {
                     _healthAlert.value?.let { IllnessAlertNotifier.onEvaluated(appContext, it) }
                 }
-                // Morning recap (#517) — opt-in, default OFF. Once today's row carries a banked night
-                // (totalSleepMin != null), post a one-per-day Charge + Rest recap. recovery == Charge;
-                // Rest is recomputed from the night's totals via RestScorer (the same single source of
-                // truth Trends/Insights use). The notifier's persisted day gate makes this safe to call
-                // on every republish. Honest: a night with only one of the two scores omits the other.
                 _today.value?.let { todayRow ->
-                    if (todayRow.totalSleepMin != null) {
-                        ScheduledReportNotifier.onMorning(
-                            context = appContext,
-                            // Key the once-per-recap gate on the banked NIGHT's day, not the calendar day —
-                            // otherwise the midnight rollover re-fires last night's recap for late-nighters (#567).
-                            reportDay = todayRow.day,
-                            chargePct = todayRow.recovery.scorePctOrNull(),
-                            restPct = RestScorer.restFromDaily(todayRow).scorePctOrNull(),
-                        )
-                    }
+                    // Morning recap delivery intentionally does not live in this generic database
+                    // collector. An old/imported row can republish here on launch; the recap is posted
+                    // only by WhoopBleClient after a fresh offload's scoring transaction commits.
                     // #593: once-a-day optimal-strain-reached nudge. Convert the stored 0-100 Effort to the
                     // 0-21 coupled axis with the SHIPPED formatter (so it matches every Effort read-out), and
                     // gate against the LOW end of today's recovery-derived optimal band (#43). The notifier's
@@ -2218,15 +2206,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }.getOrDefault(emptySet())
                 // Partial permissions are fine (#150): auto-import as long as at least one type is granted.
                 if (granted.none { it in HealthConnectImporter.PERMISSIONS }) return@withContext false
-                // Pass the profile height so the importer can derive BMI (Health Connect has no BMI record).
+                // A token advances only after its bounded Health Connect-owned projection is rebuilt.
+                // Provider failures keep the old token, so the next foreground/worker run replays it.
                 runCatching {
-                    HealthConnectImporter.import(
-                        appContext,
-                        repository,
-                        profileStore.heightCm,
-                        lookbackDays = HealthConnectImporter.AUTOMATIC_LOOKBACK_DAYS,
+                    HealthConnectReconciler.reconcile(
+                        context = appContext,
+                        repository = repository,
+                        grantedPermissions = granted,
+                        heightCm = profileStore.heightCm,
                     )
-                }.isSuccess
+                }.getOrNull() is HealthConnectReconcileResult.Success
             }
             if (ran) {
                 val t = System.currentTimeMillis()

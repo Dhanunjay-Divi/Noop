@@ -671,6 +671,18 @@ extension WhoopStore {
                 }
             }
         }
+        // v37: HealthKit observer cursors live beside the projections they protect. UserDefaults anchors
+        // could advance after a partial multi-table write and cannot participate in the atomic deletion
+        // reconciliation transaction. One row per HK sample type keeps independent query histories and
+        // records whether the most recent commit was a full type-scoped rebuild.
+        migrator.registerMigration("v37-healthkit-sync-state") { db in
+            try db.create(table: "healthKitSyncState") { t in
+                t.column("sampleType", .text).primaryKey()
+                t.column("anchor", .blob).notNull()
+                t.column("updatedAt", .integer).notNull()
+                t.column("lastFullReconcileAt", .integer)
+            }
+        }
         return migrator
     }
 }

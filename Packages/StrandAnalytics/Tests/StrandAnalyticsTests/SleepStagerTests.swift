@@ -857,6 +857,22 @@ final class SleepStagerTests: XCTestCase {
         XCTAssertLessThan(hrv!, 50, "ectopic spikes must be rejected before rMSSD")
     }
 
+    func testSessionAvgHRVWithholdsCrossSecondOverCount() {
+        let start = 2_000, end = start + 300
+        var rr: [RRInterval] = []
+        // Two distinct, range-valid intervals in every wall-clock second. Same-second collapsing cannot
+        // remove either because their difference exceeds the duplicate tolerance, so coverage stays ~2x.
+        for i in 0..<300 {
+            rr.append(RRInterval(ts: start + i, rrMs: 800))
+            rr.append(RRInterval(ts: start + i, rrMs: 1_000))
+        }
+        let windows = SleepStager.sessionHrvWindows(start: start, end: end, rr: rr, stages: [])
+        XCTAssertEqual(windows.first?.coverageVerdict, .crossSecondOverCount)
+        XCTAssertNil(windows.first?.rmssd)
+        XCTAssertNil(SleepStager.sessionAvgHRV(start: start, end: end, rr: rr),
+                     "contaminated R-R must not produce HRV or downstream Recovery")
+    }
+
     // MARK: - Helper robustness
 
     func testConvolveReflectShortInputDoesNotCrash() {

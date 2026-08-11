@@ -606,7 +606,7 @@ struct DataSourcesView: View {
                             exerciseCount: nil,
                             steps: daySteps
                         )
-                        try? await store.upsertDailyMetrics([metric], deviceId: ActivityFileImporter.sourceId)
+                        _ = try? await store.upsertDailyMetrics([metric], deviceId: ActivityFileImporter.sourceId)
                     }
                 }
 

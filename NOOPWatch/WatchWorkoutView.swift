@@ -1,7 +1,7 @@
 import SwiftUI
 import StrandDesign
 #if canImport(HealthKit)
-import HealthKit
+@preconcurrency import HealthKit
 #endif
 
 // MARK: - WatchWorkoutView — record a workout ON the wrist (M3)
@@ -41,6 +41,8 @@ struct WatchWorkoutView: View {
                     recording(in: geo.size)
                 case .saved:
                     saved
+                case .failed:
+                    failed
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -288,6 +290,32 @@ struct WatchWorkoutView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// A HealthKit callback must explicitly confirm both collection and the final saved workout.
+    /// Never show the success recap after an error or a nil workout: that would tell the user their
+    /// recording was banked when HealthKit did not actually persist it.
+    private var failed: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 30))
+                .foregroundStyle(StrandPalette.statusWarning)
+            Text(workout.failure == .save ? "Workout not saved" : "Workout could not start")
+                .font(StrandFont.rounded(19, weight: .semibold))
+                .foregroundStyle(StrandPalette.textPrimary)
+                .multilineTextAlignment(.center)
+            Text(workout.failure == .save
+                 ? "Health did not confirm the save."
+                 : "Health did not start recording.")
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .multilineTextAlignment(.center)
+            Button("Try again") { workout.reset() }
+                .font(StrandFont.subhead)
+                .tint(StrandPalette.effortColor)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 8)
+    }
+
     // MARK: Helpers
 
     /// m:ss for short sessions, h:mm:ss once we cross the hour. Whole seconds, monospaced at the call site.
@@ -305,6 +333,7 @@ struct WatchWorkoutView: View {
 // to HealthKit. Every published value comes from the builder's own statistics (HR / active energy) or the
 // session's accumulated duration, so the numbers the wrist shows are the ones HealthKit will save. Nothing
 // is invented: a metric stays nil until its first real sample lands and the UI renders a dash for nil.
+@MainActor
 final class WatchWorkoutSession: NSObject, ObservableObject {
 
     /// Where we are in the lifecycle. The view switches its whole layout on this.
@@ -317,6 +346,12 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
         case paused        // recording, paused
         case ending        // end() in flight, saving to HealthKit
         case saved         // saved, showing the recap
+        case failed        // HealthKit did not confirm start or final persistence
+    }
+
+    enum Failure: Equatable {
+        case start
+        case save
     }
 
     @Published private(set) var phase: Phase = .idle
@@ -328,14 +363,14 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
     @Published private(set) var activeKcal: Int?
     /// Accumulated session duration. Read live by the view's TimelineView while active.
     @Published private(set) var elapsed: TimeInterval = 0
+    /// Why the last operation failed. Kept separate from `phase` so the UI can explain whether the
+    /// recording never started or the final HealthKit save was not confirmed.
+    @Published private(set) var failure: Failure?
 
     #if canImport(HealthKit) && os(watchOS)
     private let store = HKHealthStore()
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
-
-    private let hrUnit = HKUnit.count().unitDivided(by: .minute())
-    private let kcalUnit = HKUnit.kilocalorie()
 
     /// What we ask to write: the workout itself plus the two series we surface live. Read-only HR is for the
     /// live readout. Mirrors the phone's "we never invent, we record" stance.
@@ -376,9 +411,13 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
         #if canImport(HealthKit) && os(watchOS)
         guard HKHealthStore.isHealthDataAvailable() else { phase = .unavailable; return }
         phase = .requesting
-        store.requestAuthorization(toShare: shareTypes, read: readTypes) { [weak self] _, _ in
-            guard let self else { return }
-            DispatchQueue.main.async {
+        store.requestAuthorization(toShare: shareTypes, read: readTypes) { [weak self] requestSucceeded, error in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard requestSucceeded, error == nil else {
+                    self.fail(.start)
+                    return
+                }
                 // requestAuthorization's `granted` only reports whether the sheet was shown, not the user's
                 // choice, so we read the real share status back. Denied write = no workout to save.
                 let status = self.store.authorizationStatus(for: HKQuantityType.workoutType())
@@ -422,14 +461,20 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
 
             let begin = Date()
             session.startActivity(with: begin)
-            builder.beginCollection(withStart: begin) { [weak self] _, _ in
-                // Collection started (or failed silently); the delegate callbacks drive the UI from here.
-                DispatchQueue.main.async { self?.phase = .active }
+            builder.beginCollection(withStart: begin) { [weak self, weak session] collectionSucceeded, collectionError in
+                Task { @MainActor [weak self, weak session] in
+                    guard let self else { return }
+                    guard collectionSucceeded, collectionError == nil else {
+                        session?.end()
+                        self.fail(.start)
+                        return
+                    }
+                    self.phase = .active
+                    StrandHaptic.commit.play()
+                }
             }
-            StrandHaptic.commit.play()  // a firm tap confirms the session is live without looking
         } catch {
-            // Could not create the session (rare). Fall back to idle so Start can be tried again.
-            phase = .idle
+            fail(.start)
         }
         #else
         phase = .unavailable
@@ -456,13 +501,26 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
         phase = .ending
         let stop = Date()
         session.stopActivity(with: stop)
-        builder.endCollection(withEnd: stop) { [weak self] _, _ in
-            builder.finishWorkout { [weak self] _, _ in
-                DispatchQueue.main.async {
-                    StrandHaptic.success.play()  // milestone: the workout is banked to HealthKit
-                    self?.phase = .saved
-                    self?.session = nil
-                    self?.builder = nil
+        builder.endCollection(withEnd: stop) { [weak self] collectionSucceeded, collectionError in
+            guard collectionSucceeded, collectionError == nil else {
+                Task { @MainActor [weak self] in
+                    self?.fail(.save)
+                }
+                return
+            }
+            builder.finishWorkout { [weak self] savedWorkout, finishError in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    guard let savedWorkout, finishError == nil else {
+                        self.fail(.save)
+                        return
+                    }
+                    _ = savedWorkout
+                    StrandHaptic.success.play()  // milestone: HealthKit confirmed a persisted workout
+                    self.phase = .saved
+                    self.failure = nil
+                    self.session = nil
+                    self.builder = nil
                 }
             }
         }
@@ -477,7 +535,16 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
         avgBpm = nil
         activeKcal = nil
         elapsed = 0
+        failure = nil
         refreshAvailability()
+    }
+
+    private func fail(_ failure: Failure) {
+        self.failure = failure
+        phase = .failed
+        session = nil
+        builder = nil
+        StrandHaptic.warning.play()
     }
 }
 
@@ -485,11 +552,11 @@ final class WatchWorkoutSession: NSObject, ObservableObject {
 
 #if canImport(HealthKit) && os(watchOS)
 extension WatchWorkoutSession: HKWorkoutSessionDelegate {
-    func workoutSession(_ workoutSession: HKWorkoutSession,
-                        didChangeTo toState: HKWorkoutSessionState,
-                        from fromState: HKWorkoutSessionState,
-                        date: Date) {
-        DispatchQueue.main.async { [weak self] in
+    nonisolated func workoutSession(_ workoutSession: HKWorkoutSession,
+                                    didChangeTo toState: HKWorkoutSessionState,
+                                    from fromState: HKWorkoutSessionState,
+                                    date: Date) {
+        Task { @MainActor [weak self] in
             guard let self else { return }
             switch toState {
             case .running:
@@ -504,32 +571,35 @@ extension WatchWorkoutSession: HKWorkoutSessionDelegate {
         }
     }
 
-    func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: Error) {
-        // The session died on us. Surface idle so the user can retry rather than sitting on a frozen screen.
-        DispatchQueue.main.async { [weak self] in
-            self?.phase = .idle
-            self?.session = nil
-            self?.builder = nil
+    nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: Error) {
+        // A dead session is not a successful recording. If this happened while finishing, surface the
+        // stronger save warning; otherwise state honestly that recording could not start/continue.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.fail(self.phase == .ending ? .save : .start)
         }
     }
 }
 
 extension WatchWorkoutSession: HKLiveWorkoutBuilderDelegate {
-    func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {
+    nonisolated func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {
         // Pause / resume events update the accumulated duration the elapsed readout shows.
-        DispatchQueue.main.async { [weak self] in
-            self?.elapsed = workoutBuilder.elapsedTime
+        let elapsedNow = workoutBuilder.elapsedTime
+        Task { @MainActor [weak self] in
+            self?.elapsed = elapsedNow
         }
     }
 
-    func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder,
-                        didCollectDataOf collectedTypes: Set<HKSampleType>) {
+    nonisolated func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder,
+                                    didCollectDataOf collectedTypes: Set<HKSampleType>) {
         // A new batch of samples landed. Pull the latest HR, the running average HR, and total active
         // energy straight from the builder's own statistics so the wrist shows exactly what HealthKit holds.
         var newBpm: Int?
         var newAvg: Int?
         var newKcal: Int?
 
+        let hrUnit = HKUnit.count().unitDivided(by: .minute())
+        let kcalUnit = HKUnit.kilocalorie()
         if let hrType = HKQuantityType.quantityType(forIdentifier: .heartRate),
            collectedTypes.contains(hrType),
            let stats = workoutBuilder.statistics(for: hrType) {
@@ -549,7 +619,7 @@ extension WatchWorkoutSession: HKLiveWorkoutBuilderDelegate {
         }
 
         let elapsedNow = workoutBuilder.elapsedTime
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             if let newBpm { self.bpm = newBpm }
             if let newAvg { self.avgBpm = newAvg }

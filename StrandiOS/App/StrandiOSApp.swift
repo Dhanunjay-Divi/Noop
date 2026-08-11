@@ -67,6 +67,16 @@ struct StrandiOSApp: App {
         bridge.cycleAnchorsChanged = { [weak model] in
             await model?.refreshV5Signals()
         }
+        bridge.dataProjectionChanged = { [weak bridge, weak model] in
+            guard let model else { return }
+            await model.refreshAfterAppleHealthSync(
+                authorized: bridge?.auth == .authorized)
+        }
+        // HealthKit may relaunch a terminated app in the background to deliver an observer update,
+        // before a SwiftUI scene becomes active. Install observers at this process-launch boundary for
+        // returning users only. The bridge checks NOOP's prior explicit-consent marker and never opens a
+        // permission sheet, so a fresh install still reaches the in-app rationale first.
+        bridge.registerObserversAtLaunchIfPreviouslyRequested()
     }
 
     var body: some Scene {
@@ -217,9 +227,9 @@ struct StrandiOSApp: App {
         // dialog without prior in-app rationale violates Apple HIG / App Review guidance — the user
         // sees the prompt before any context. It is requested from an explicit user action instead:
         // the "Enable Apple Health" affordance in AppleHealthView (More → Data → Apple Health).
-        // Below, `refreshAuthIfPreviouslyGranted` re-primes `auth` for users who already granted
-        // access (it consults only local prior-request state/share status, never prompts) so observer
-        // registration and foreground catch-up resume; and
+        // The app initializer re-arms observer delivery at the process-launch boundary for users with
+        // NOOP's prior explicit-request marker. Below, `refreshAuthIfPreviouslyGranted` also re-primes
+        // legacy returning users once the scene is active (status-only, never prompts); and
         // HealthKitBridge.sync guards on `auth == .authorized`, so the scenePhase trigger stays a
         // safe no-op until the user opts in.
         .onChange(of: scenePhase) { _, phase in

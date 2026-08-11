@@ -7,7 +7,7 @@ enum AppChangelog {
 
     /// Bump this when you add a release below. The "What's New" sheet shows automatically when the
     /// stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
-    static let currentVersion = "9.1.1"
+    static let currentVersion = "9.1.2"
 
     struct Release: Identifiable {
         let version: String
@@ -19,6 +19,18 @@ enum AppChangelog {
 
     /// Newest first.
     static let releases: [Release] = [
+        Release(
+            version: "9.1.2",
+            title: "Safer upgrades, trustworthy signals, and production hardening",
+            date: "August 2026",
+            items: [
+                "**Your history survives upgrades.** Encrypted backups now authenticate every chunk, capture committed SQLite WAL data, publish atomically, and reject corrupt, foreign, or wrongly unlocked restores without touching the live database.",
+                "**Health data stays honest.** Apple Health imports reconcile edits and deletions durably, refresh visible metrics only after a committed projection, and keep RMSSD separate from HealthKit SDNN instead of silently relabeling it.",
+                "**Bad beat data fails closed.** Duplicate or over-counted R-R windows no longer manufacture HRV, Charge, or health suggestions; the affected result stays unavailable with an integrity reason.",
+                "**Permissions follow your choices.** A fresh install does not construct Bluetooth scanners until you explicitly scan, and optional cycle, body-composition, and detailed Health access remain separate consent steps.",
+                "**The whole stack is harder to break.** Device sync, Android Health Connect, local backup, self-hosted retention, request limits, redacted errors, pinned build actions, and release checks now have stricter retry, integrity, and failure tests.",
+            ]
+        ),
         Release(
             version: "9.1.1",
             title: "Self-hosted sync, honest WHOOP comparison, and a new Noop identity",

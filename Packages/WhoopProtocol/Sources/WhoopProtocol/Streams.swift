@@ -4,7 +4,7 @@ import Foundation
 // Phase E and WhoopStore depend on these EXACT shapes. ts is wall-clock unix seconds
 // EXCEPT inside extractStreams' inputs; the structs themselves always carry wall-clock ts.
 
-public struct HRSample: Equatable, Codable {
+public struct HRSample: Equatable, Codable, Sendable {
     public let ts: Int          // wall-clock unix seconds
     public let bpm: Int
     public init(ts: Int, bpm: Int) { self.ts = ts; self.bpm = bpm }
@@ -19,7 +19,7 @@ public enum RRSourceChannel: Int, Equatable, Codable, Sendable, CaseIterable {
     case ibiBare = 4
 }
 
-public struct RRInterval: Equatable, Codable {
+public struct RRInterval: Equatable, Codable, Sendable {
     public let ts: Int          // wall-clock unix seconds
     public let rrMs: Int
     /// nil for sources with one unnamed beat channel (including WHOOP) and legacy rows.
@@ -39,7 +39,7 @@ public extension Array where Element == RRInterval {
     }
 }
 
-public struct WhoopEvent: Equatable, Codable {
+public struct WhoopEvent: Equatable, Codable, Sendable {
     public let ts: Int          // real unix seconds (event RTC; never offset)
     public let kind: String
     public let payload: [String: ParsedValue]
@@ -48,7 +48,7 @@ public struct WhoopEvent: Equatable, Codable {
     }
 }
 
-public struct BatterySample: Equatable, Codable {
+public struct BatterySample: Equatable, Codable, Sendable {
     public let ts: Int          // unix seconds — event RTC for BATTERY_LEVEL events, else wallClockRef
     public let soc: Double?
     public let mv: Int?
@@ -61,7 +61,7 @@ public struct BatterySample: Equatable, Codable {
 // MARK: - type-47 HISTORICAL_DATA biometric rows. JSON keys MUST match
 // biometric_streams_golden.json exactly (see extract_historical_streams).
 
-public struct SpO2Sample: Equatable, Codable {
+public struct SpO2Sample: Equatable, Codable, Sendable {
     public let ts: Int
     public let red: Int
     public let ir: Int
@@ -71,7 +71,7 @@ public struct SpO2Sample: Equatable, Codable {
     }
 }
 
-public struct SkinTempSample: Equatable, Codable {
+public struct SkinTempSample: Equatable, Codable, Sendable {
     public let ts: Int
     public let raw: Int
     public let unit: String     // "raw_adc"
@@ -175,7 +175,7 @@ public enum Whoop4SkinTemp {
     }
 }
 
-public struct RespSample: Equatable, Codable {
+public struct RespSample: Equatable, Codable, Sendable {
     public let ts: Int
     public let raw: Int
     public let unit: String     // "raw_adc"
@@ -184,7 +184,7 @@ public struct RespSample: Equatable, Codable {
     }
 }
 
-public struct GravitySample: Equatable, Codable {
+public struct GravitySample: Equatable, Codable, Sendable {
     public let ts: Int
     public let x: Double
     public let y: Double
@@ -202,7 +202,7 @@ public struct GravitySample: Equatable, Codable {
 /// 0=still, 1=walk, 2=run; nil when the byte was 0xFF/invalid or absent. A lightweight, no-cloud
 /// activity readout that rides alongside the counter. Optional + defaulted so existing call sites and
 /// the persisted store (which carries only ts/counter today) are unchanged.
-public struct StepSample: Equatable, Codable {
+public struct StepSample: Equatable, Codable, Sendable {
     public let ts: Int
     public let counter: Int
     public let activityClass: Int?
@@ -219,7 +219,7 @@ public struct StepSample: Equatable, Codable {
 /// surfaced/persisted as the strap's reported state, NOT trusted to override the derived hypnogram. It
 /// feeds the existing, already-verified H7 morning-stillness re-onset CONFIRM guard (KEEP-biased, never
 /// overrides) and a Deep Timeline display track. Mirrors Android `SleepStateRow`.
-public struct SleepStateSample: Equatable, Codable {
+public struct SleepStateSample: Equatable, Codable, Sendable {
     public let ts: Int
     public let state: Int       // 0 wake / 1 still / 2 asleep / 3 up (band's own high-nibble code)
     public init(ts: Int, state: Int) { self.ts = ts; self.state = state }
@@ -239,7 +239,7 @@ public struct PpgWaveformSample: Equatable, Codable, Sendable {
     public init(ts: Int, samples: [Int]) { self.ts = ts; self.samples = samples }
 }
 
-public struct Streams: Equatable, Codable {
+public struct Streams: Equatable, Codable, Sendable {
     public var hr: [HRSample]
     public var rr: [RRInterval]
     public var spo2: [SpO2Sample]

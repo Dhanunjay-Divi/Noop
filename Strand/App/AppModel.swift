@@ -36,6 +36,11 @@ final class AppModel: ObservableObject {
     /// init(); `weak` so an intent fired while NOOP is closed sees nil and asks the user to open it. (#42)
     static weak var shared: AppModel?
 
+    /// Idle scoring is only a safety-net. Imports, completed syncs, edits, recalibration and foreground
+    /// refreshes each force their own pass, so a 30-minute cadence avoids repeatedly rescoring the full
+    /// lookback while live HR advances the fingerprint every second.
+    nonisolated static let analysisBackstopNanoseconds: UInt64 = 1_800_000_000_000
+
     /// Timestamp formatter for the generic-HR strap-log lines routed through `straplog` into the shared
     /// log (issue #421). Mirrors `BLEManager.logTimeFormatter`'s `HH:mm:ss` so WHOOP and HR-strap lines
     /// read identically in the exported strap log.
@@ -501,13 +506,13 @@ final class AppModel: ObservableObject {
                 // #836: the steady-state tick is a BACKSTOP, not a data-driven refresh — every real update
                 // (sync backfill, import, edit, recalibrate, heal) already rescores via its own forced call.
                 // `force: false` skips the heavy 21-day rescore when the raw HR stream is unchanged since the
-                // last run, instead of re-reading ~21×54 h of HR every 15 min on a big-import library. A new
+                // last run, instead of re-reading ~21×54 h of HR every backstop tick on a big-import library. A new
                 // sample (the heal above, or a sync) moves the fingerprint and the tick rescores as before.
                 await self.intelligence.analyzeRecent(force: false)
                 // v5: recompute the skin-temp suite snapshots (cycle phase + body clock) from the
                 // freshly-scored history so the Health hub cards read a ready result.
                 await self.refreshV5Signals()
-                try? await Task.sleep(nanoseconds: 900_000_000_000)  // 15 min, matches the offload cadence
+                try? await Task.sleep(nanoseconds: Self.analysisBackstopNanoseconds)
             }
         }
     }
@@ -691,7 +696,7 @@ final class AppModel: ObservableObject {
         if let heightCm = measurement.heightCm, heightCm.isFinite, heightCm > 0 {
             points.append(MetricPoint(day: day, key: "heightCm", value: heightCm))
         }
-        try? await store.upsertMetricSeries(points, deviceId: sourceDeviceID)
+        _ = try? await store.upsertMetricSeries(points, deviceId: sourceDeviceID)
         await repo.refresh()
     }
 
@@ -1159,6 +1164,50 @@ final class AppModel: ObservableObject {
         }
     }
 
+    #if os(iOS)
+    /// Refresh the active read spine after Apple Health commits a projection. Apple Health is registered
+    /// with only capabilities actually present in recent samples, and it replaces the seeded WHOOP row
+    /// only when that row is still an unused placeholder. A real or user-selected source is never displaced.
+    func refreshAfterAppleHealthSync(authorized: Bool, now: Date = Date()) async {
+        await wireSourceCoordinator()
+        guard let registry = deviceRegistry, let store = await repo.storeHandle() else {
+            await repo.refresh()
+            return
+        }
+
+        let current = registry.devices.first(where: { $0.id == registry.activeDeviceId })
+        var currentHasRecentData = false
+        if let current {
+            let range = AppleWatchDevice.recentDayRange(now: now)
+            let cutoff = Int(now.timeIntervalSince1970)
+                - AppleWatchDevice.recentWindowDays * 86_400
+            let latestHR = (try? await store.latestHRSampleTs(deviceId: current.id)) ?? nil
+            let recentDaily = (try? await store.dailyMetrics(
+                deviceId: current.id, from: range.from, to: range.to)) ?? []
+            currentHasRecentData = (latestHR ?? 0) >= cutoff || !recentDaily.isEmpty
+        }
+
+        await AppleWatchDevice.registerIfAuthorized(
+            registry: registry, store: store, authorized: authorized, now: now)
+        guard registry.devices.contains(where: { $0.id == AppleWatchDevice.deviceId }) else {
+            await repo.refresh()
+            return
+        }
+
+        if AppleWatchDevice.shouldAutoActivate(
+            current: current, currentHasRecentData: currentHasRecentData) {
+            registry.setActive(AppleWatchDevice.deviceId)
+            await adoptActiveDevice(AppleWatchDevice.deviceId)
+        } else if registry.activeDeviceId == AppleWatchDevice.deviceId {
+            // On relaunch the registry may already be active while the Repository is still initializing.
+            await adoptActiveDevice(AppleWatchDevice.deviceId)
+            await repo.refresh()
+        } else {
+            await repo.refresh()
+        }
+    }
+    #endif
+
     // MARK: - Oura adopt (factory-reset-and-adopt)
 
     /// The live adopt outcome of the active Oura ring, mirrored off the coordinator's live `OuraLiveSource`
@@ -1343,14 +1392,17 @@ final class AppModel: ObservableObject {
     /// identifier per category means a new alert replaces the old one rather than stacking.
     private static func postWristAlert(identifier: String, title: String, body: String) {
         guard UserDefaults.standard.bool(forKey: wristAlertsMasterKey) else { return }
-        let center = UNUserNotificationCenter.current()
-        center.getNotificationSettings { settings in
+        Task { @MainActor in
+            let center = UNUserNotificationCenter.current()
+            let settings = await center.notificationSettings()
             guard settings.authorizationStatus == .authorized else { return }
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
             content.sound = .default
-            center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
+            try? await center.add(
+                UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
+            )
         }
     }
     #endif
@@ -1385,12 +1437,12 @@ final class AppModel: ObservableObject {
     /// user whose backup never fired with nothing in the log. The caller wraps the sink in a main-actor hop
     /// (the auth check completes off-main). Diagnostic only.
     static func scheduleSmartAlarmBackupNotification(minutes: Int, weekdays: Set<Int>,
-                                                     log: ((String) -> Void)? = nil) {
+                                                     log: (@MainActor @Sendable (String) -> Void)? = nil) {
         #if os(iOS)
-        let center = UNUserNotificationCenter.current()
         // Always clear BOTH the single and the per-day ids so switching modes (or editing the weekday set)
         // never leaves an orphaned trigger or double-fires.
-        center.removePendingNotificationRequests(withIdentifiers: smartAlarmBackupIds)
+        UNUserNotificationCenter.current()
+            .removePendingNotificationRequests(withIdentifiers: smartAlarmBackupIds)
         // #34: the backup follows THE ALARM, not the wrist-alerts master. This is only reached from
         // applySmartAlarm() with the alarm enabled, so the alarm being on IS the correct gate — a user who
         // sets a smart alarm but never turned on the separate wrist HR/strain alerts must still get a backup
@@ -1400,45 +1452,27 @@ final class AppModel: ObservableObject {
         // A non-empty selection that filters to nothing (only out-of-range numbers) has no day to fire on.
         if !weekdays.isEmpty && valid.isEmpty { return }
 
-        // Build + add the repeating trigger(s). Factored so the already-authorized and the just-granted
-        // paths schedule identically.
-        func addRequests() {
-            let content = UNMutableNotificationContent()
-            content.title = String(localized: "Smart alarm")
-            content.body = String(localized: "Backup wake: your smart alarm time is here.")
-            content.sound = .default
-            let hour = minutes / 60
-            let minute = minutes % 60
-            if weekdays.isEmpty {
-                var comps = DateComponents()
-                comps.hour = hour
-                comps.minute = minute
-                let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
-                center.add(UNNotificationRequest(identifier: smartAlarmBackupId, content: content, trigger: trigger))
-            } else {
-                for weekday in valid {
-                    var comps = DateComponents()
-                    comps.weekday = weekday   // Calendar weekday 1=Sun…7=Sat , fires weekly on that day
-                    comps.hour = hour
-                    comps.minute = minute
-                    let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
-                    center.add(UNNotificationRequest(identifier: "\(smartAlarmBackupId)-d\(weekday)",
-                                                     content: content, trigger: trigger))
-                }
-            }
-        }
-
-        center.getNotificationSettings { settings in
-            switch settings.authorizationStatus {
+        Task { @MainActor in
+            let center = UNUserNotificationCenter.current()
+            let initialStatus = await center.notificationSettings().authorizationStatus
+            switch initialStatus {
             case .authorized:
-                addRequests()
+                addSmartAlarmBackupRequests(center: center, minutes: minutes, weekdays: valid)
             case .notDetermined:
                 // The user just enabled the alarm but was never asked for notification permission (nothing
                 // else prompted — wrist alerts, which used to, may be off). Ask now, then schedule on grant
                 // so the FIRST night is covered rather than only after some later re-arm.
-                center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-                    if granted { addRequests() }
-                    else { log?("Smart alarm: backup notification NOT scheduled (notification permission denied)") }
+                let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+                if granted {
+                    // Re-read status rather than treating the request return as authorization truth.
+                    let finalStatus = await center.notificationSettings().authorizationStatus
+                    if finalStatus == .authorized {
+                        addSmartAlarmBackupRequests(center: center, minutes: minutes, weekdays: valid)
+                    } else {
+                        log?("Smart alarm: backup notification NOT scheduled (notifications not authorized)")
+                    }
+                } else {
+                    log?("Smart alarm: backup notification NOT scheduled (notification permission denied)")
                 }
             default:
                 log?("Smart alarm: backup notification NOT scheduled (notifications not authorized)")
@@ -1446,6 +1480,40 @@ final class AppModel: ObservableObject {
         }
         #endif
     }
+
+    #if os(iOS)
+    /// Build the repeating request set after authorization has been confirmed. Main-actor isolated with
+    /// the enclosing AppModel, so mutable UserNotifications objects never cross an executor boundary.
+    private static func addSmartAlarmBackupRequests(
+        center: UNUserNotificationCenter,
+        minutes: Int,
+        weekdays: Set<Int>
+    ) {
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "Smart alarm")
+        content.body = String(localized: "Backup wake: your smart alarm time is here.")
+        content.sound = .default
+        let hour = minutes / 60
+        let minute = minutes % 60
+        if weekdays.isEmpty {
+            var comps = DateComponents()
+            comps.hour = hour
+            comps.minute = minute
+            let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
+            center.add(UNNotificationRequest(identifier: smartAlarmBackupId, content: content, trigger: trigger))
+        } else {
+            for weekday in weekdays {
+                var comps = DateComponents()
+                comps.weekday = weekday   // Calendar weekday 1=Sun…7=Sat , fires weekly on that day
+                comps.hour = hour
+                comps.minute = minute
+                let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
+                center.add(UNNotificationRequest(identifier: "\(smartAlarmBackupId)-d\(weekday)",
+                                                 content: content, trigger: trigger))
+            }
+        }
+    }
+    #endif
 
     /// Cancel the smart-alarm backup wake notification(s). Called on disarm. No-op on macOS.
     static func cancelSmartAlarmBackupNotification() {
@@ -1482,7 +1550,7 @@ final class AppModel: ObservableObject {
         Self.scheduleSmartAlarmBackupNotification(minutes: behavior.smartAlarmMinutes,
                                                   weekdays: behavior.smartAlarmWeekdays,
                                                   log: { [weak self] line in
-                                                      Task { @MainActor in self?.live.append(log: line) }
+                                                      self?.live.append(log: line)
                                                   })
     }
 
@@ -1609,7 +1677,7 @@ final class AppModel: ObservableObject {
         let mark = SleepMark(type: .bedtime, at: date)
         Task { [weak self] in
             guard let self, let store = await self.repo.storeHandle() else { return }
-            try? await store.upsertMetricSeries([mark.metricPoint], deviceId: self.repo.deviceId)
+            _ = try? await store.upsertMetricSeries([mark.metricPoint], deviceId: self.repo.deviceId)
         }
     }
 

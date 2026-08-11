@@ -242,7 +242,7 @@ def test_invite_join_atomically_bootstraps_without_admin_credential(
     )
     assert invalid_token.status_code == 422
     assert invalid_secret not in invalid_token.text
-    assert invalid_token.json()["detail"][0]["input"] == "[redacted]"
+    assert all("input" not in error for error in invalid_token.json()["detail"])
 
     invalid = client.post(
         "/v1/social/invites/join",

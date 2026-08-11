@@ -19,7 +19,9 @@ approximate; downloads for this fork are on the
 
 ---
 
-## Unreleased: private Friends and the Obsidian Apple interface
+## 9.1.2: safer upgrades, trustworthy signals, private Friends, and Obsidian
+
+Released **2026-08-11**.
 
 **New**
 
@@ -63,6 +65,29 @@ approximate; downloads for this fork are on the
   foregrounded, throttled to one attempt per 15 minutes, not guaranteed in the
   background. **Leave & delete profile** removes the dedicated server summary
   copy while preserving local data and a separate full backup.
+
+**Reliability and data integrity**
+
+- Encrypted `.noopbak` exports use a versioned PBKDF2-HMAC-SHA256 and chunked
+  AES-256-GCM envelope, capture committed SQLite WAL data, publish atomically,
+  and reject wrong-passphrase, tampered, corrupt, or foreign restores without
+  replacing the live database.
+- Apple Health and Health Connect projections now keep durable sync state and
+  reconcile source edits and deletions. Visible Apple metrics refresh only
+  after the local projection commits; RMSSD is never exported as HealthKit
+  SDNN.
+- R-R windows with duplicate or over-counted beat intervals fail closed, so a
+  damaged trace cannot manufacture HRV, Charge, or downstream suggestions.
+- Fresh Apple installs construct a Bluetooth scanner only after the user taps
+  Scan. Optional cycle, body-composition, detailed write-back, background sync,
+  and Friends paths retain separate explicit consent.
+- Android BLE writes, background reconnect, Health Connect catch-up, scheduled
+  reports, release signing, and database restore now use stricter retry and
+  fail-closed contracts. The self-hosted service adds bounded requests,
+  redacted errors, concurrency-safe retention, and backup/restore checks.
+- GitHub Actions dependencies are pinned to immutable commit SHAs, and release
+  checks cover privacy manifests, entitlements, upgrade identity, dependency
+  inventories, and generated software bills of materials.
 
 ---
 

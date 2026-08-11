@@ -15,6 +15,7 @@ import StrandDesign
 // The published `snapshot` is what the glance binds to. It starts from whatever was last persisted to the
 // App Group (so a relaunch shows the last-known scores immediately, with an honest "as of" age) and is
 // nil only on a truly fresh install, which the glance renders as the "open NOOP on your iPhone" state.
+@MainActor
 final class WatchScoreStore: NSObject, ObservableObject, WCSessionDelegate {
 
     /// The latest snapshot the watch knows about. nil = nothing has ever synced (fresh install).
@@ -67,43 +68,42 @@ final class WatchScoreStore: NSObject, ObservableObject, WCSessionDelegate {
     /// Hops to the main actor because it touches @Published state and WidgetCenter.
     private func apply(_ snap: WatchScoreSnapshot) {
         persist(snap)
-        DispatchQueue.main.async {
-            self.snapshot = snap
-            // The phone just pushed new scores, so pull the complication timelines forward now rather
-            // than waiting for WidgetKit's own cadence.
-            WidgetCenter.shared.reloadAllTimelines()
-        }
+        snapshot = snap
+        // The phone just pushed new scores, so pull the complication timelines forward now rather
+        // than waiting for WidgetKit's own cadence.
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     /// Decode a WatchScoreSnapshot out of a WatchConnectivity payload. The phone encodes the Codable
     /// snapshot to Data under "snapshot"; we tolerate a missing/garbled payload by simply ignoring it.
-    private func decode(from payload: [String: Any]) -> WatchScoreSnapshot? {
+    nonisolated private static func decode(from payload: [String: Any]) -> WatchScoreSnapshot? {
         guard let data = payload["snapshot"] as? Data else { return nil }
         return try? JSONDecoder().decode(WatchScoreSnapshot.self, from: data)
     }
 
     // MARK: WCSessionDelegate
 
-    func session(_ session: WCSession,
-                 activationDidCompleteWith activationState: WCSessionActivationState,
-                 error: Error?) {
+    nonisolated func session(_ session: WCSession,
+                             activationDidCompleteWith activationState: WCSessionActivationState,
+                             error: Error?) {
         // On activation the system hands us the most recent application context the phone set, even if it
         // was set while we were not running. Pick it up so a relaunch immediately reflects the latest scores.
-        if let snap = decode(from: session.receivedApplicationContext) {
-            apply(snap)
+        if let snap = Self.decode(from: session.receivedApplicationContext) {
+            Task { @MainActor [weak self] in self?.apply(snap) }
         }
     }
 
     /// The phone calls `updateApplicationContext` whenever its dashboard refreshes. Latest-state only, so
     /// we always have the freshest scores without a backlog of stale messages.
-    func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
-        if let snap = decode(from: applicationContext) {
-            apply(snap)
+    nonisolated func session(_ session: WCSession,
+                             didReceiveApplicationContext applicationContext: [String: Any]) {
+        if let snap = Self.decode(from: applicationContext) {
+            Task { @MainActor [weak self] in self?.apply(snap) }
         }
     }
 
     // Required by the protocol on watchOS even though they are phone-side concerns. No-ops here.
     #if os(watchOS)
-    func sessionReachabilityDidChange(_ session: WCSession) {}
+    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {}
     #endif
 }

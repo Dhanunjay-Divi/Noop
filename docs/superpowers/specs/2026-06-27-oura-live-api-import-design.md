@@ -1,5 +1,12 @@
 # Oura live API import — design
 
+> **Superseded security design (2026-08-11):** This archived document describes an
+> authorization-code flow that embedded an Oura client secret in the app. Do not implement or
+> deploy that design. The current implementation uses Oura's documented public-client implicit
+> flow (`response_type=token`), contains no confidential secret or token-exchange endpoint, and
+> requires the user to authorize again when the access token expires. See
+> `docs/PRIVACY_SECURITY.md` and `Strand/Oura/OuraOAuth.swift` for the active design.
+
 - **Date:** 2026-06-27
 - **Status:** Draft for review
 - **Scope:** iOS only (the Swift app). macOS, Android explicitly out (see §13).

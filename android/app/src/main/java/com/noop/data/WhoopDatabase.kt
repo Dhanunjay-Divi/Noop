@@ -49,8 +49,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         LiveSessionRow::class,
         PpgWaveformSampleEntity::class,
         RawImuSampleEntity::class,
+        HealthConnectSyncStateRow::class,
     ],
-    version = 27,
+    version = 28,
     // Build-time artifact only; this does not change runtime database behavior.
     exportSchema = true,
 )
@@ -66,13 +67,39 @@ abstract class WhoopDatabase : RoomDatabase() {
         /** Process-wide singleton. Safe to call from any thread. */
         fun get(context: Context): WhoopDatabase =
             instance ?: synchronized(this) {
-                instance ?: build(context.applicationContext).also { instance = it }
+                instance ?: openWithPendingRestore(context.applicationContext).also { instance = it }
             }
+
+        private fun openWithPendingRestore(appContext: Context): WhoopDatabase {
+            val preparation = PendingDatabaseRestore.prepareAtColdOpen(appContext)
+            if (!preparation.applied) return build(appContext)
+            var candidate: WhoopDatabase? = null
+            return try {
+                val opened = build(appContext)
+                candidate = opened
+                // Force Room's identity/migration checks before discarding the previous database.
+                opened.openHelper.writableDatabase
+                check(PendingDatabaseRestore.stillSameAppliedFile(appContext, preparation)) {
+                    "Restored database was replaced while Room opened it."
+                }
+                PendingDatabaseRestore.confirmOpened(appContext)
+                opened
+            } catch (restoreFailure: Throwable) {
+                runCatching { candidate?.close() }
+                if (!PendingDatabaseRestore.rollbackAfterOpenFailure(appContext)) throw restoreFailure
+                try {
+                    build(appContext).also { it.openHelper.writableDatabase }
+                } catch (rollbackOpenFailure: Throwable) {
+                    restoreFailure.addSuppressed(rollbackOpenFailure)
+                    throw restoreFailure
+                }
+            }
+        }
 
         /**
          * Close and forget the singleton so all file handles on [DB_NAME] are released.
-         * The next [get] call rebuilds against whatever file is on disk, used by
-         * [DataBackup.importFrom] to swap the database file underneath the app.
+         * Restore no longer swaps underneath this live process; [PendingDatabaseRestore] applies a
+         * staged candidate automatically at the next cold [get].
          */
         fun close() {
             synchronized(this) {
@@ -660,6 +687,18 @@ abstract class WhoopDatabase : RoomDatabase() {
             }
         }
 
+        /** Durable per-record-type Health Connect change tokens. Additive; user health rows untouched. */
+        internal const val HEALTH_CONNECT_SYNC_STATE_MIGRATION_SQL =
+            "CREATE TABLE IF NOT EXISTS `healthConnectSyncState` (" +
+                "`recordType` TEXT NOT NULL, `changesToken` TEXT NOT NULL, " +
+                "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`recordType`))"
+
+        internal val MIGRATION_27_28 = object : Migration(27, 28) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(HEALTH_CONNECT_SYNC_STATE_MIGRATION_SQL)
+            }
+        }
+
         private fun build(appContext: Context): WhoopDatabase =
             Room.databaseBuilder(appContext, WhoopDatabase::class.java, DB_NAME)
                 // #1014: replace ONLY the corruption handling of the default open-helper. The
@@ -677,7 +716,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                     MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
                     MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22,
                     MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
-                    MIGRATION_26_27,
+                    MIGRATION_26_27, MIGRATION_27_28,
                 )
                 // #1037: a FRESH install builds the schema straight at the current version and runs NO
                 // migrations, so the MIGRATION_7_8 "my-whoop" registry seed never fires and the WHOOP,

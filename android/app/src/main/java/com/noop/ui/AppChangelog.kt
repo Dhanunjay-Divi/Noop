@@ -26,7 +26,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "9.1.1"
+    const val CURRENT_VERSION = "9.1.2"
 
     data class Release(
         val version: String,
@@ -37,6 +37,18 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "9.1.2",
+            title = uiString(R.string.l10n_app_changelog_safer_upgrades_trustworthy_signals_9c1f2a7b),
+            date = "August 2026",
+            items = listOf(
+                "**Your history survives upgrades.** Encrypted backups now authenticate every chunk, capture committed SQLite WAL data, publish atomically, and reject corrupt, foreign, or wrongly unlocked restores without touching the live database.",
+                "**Health data stays honest.** Apple Health imports reconcile edits and deletions durably, refresh visible metrics only after a committed projection, and keep RMSSD separate from HealthKit SDNN instead of silently relabeling it.",
+                "**Bad beat data fails closed.** Duplicate or over-counted R-R windows no longer manufacture HRV, Charge, or health suggestions; the affected result stays unavailable with an integrity reason.",
+                "**Permissions follow your choices.** A fresh install does not construct Bluetooth scanners until you explicitly scan, and optional cycle, body-composition, and detailed Health access remain separate consent steps.",
+                "**The whole stack is harder to break.** Device sync, local backup, self-hosted retention, request limits, redacted errors, pinned build actions, and release checks now have stricter retry, integrity, and failure tests.",
+            ),
+        ),
         Release(
             version = "9.1.1",
             title = uiString(R.string.l10n_app_changelog_self_hosted_sync_honest_whoop_comparison_new_noop_identity_016ed2b1),

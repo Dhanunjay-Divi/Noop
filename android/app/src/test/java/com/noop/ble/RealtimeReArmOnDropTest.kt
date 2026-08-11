@@ -6,9 +6,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * #312: when the GATT write queue drops a frame after MAX_WRITE_RETRIES busy-retries, only a dropped
- * TOGGLE_REALTIME_HR should clear the realtime latch so the keep-alive re-arms live R-R (→ HRV / Autonomic).
- * A 5/MG whose toggle lost a write race would otherwise stream plain HR forever while HRV stayed dark.
+ * #312 legacy recovery contract: only a lost TOGGLE_REALTIME_HR may alter the realtime latch. The
+ * production queue now fail-closes an ambiguous submission instead of retrying/dropping it; reset clears
+ * the latch and reconnect re-arms live R-R from the surviving user intent. A 5/MG whose toggle loses a
+ * write race therefore recovers without ever replaying haptics, alarms, trim ACKs, or other commands.
  *
  * Pins the pure decision [WhoopBleClient.shouldReArmRealtimeAfterDrop] — the full drop→re-arm behaviour
  * needs a live GATT stack the unit harness can't fake (no Robolectric; see GattCrashSafetyTest's INFRA NOTE),

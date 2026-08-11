@@ -9,6 +9,7 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.Manifest
@@ -53,6 +54,7 @@ import com.noop.analytics.IntelligenceEngine
 import com.noop.analytics.NapDetector
 import com.noop.analytics.NapPrefs
 import com.noop.analytics.NapVerdict
+import com.noop.analytics.RestScorer
 import com.noop.analytics.SedentaryDetector
 import com.noop.analytics.StressOnsetDetector
 import com.noop.analytics.UserProfile
@@ -61,6 +63,8 @@ import com.noop.data.NapStore
 import com.noop.ingest.HealthConnectWriter
 import com.noop.notif.AutoWorkoutCandidateNotifier
 import com.noop.notif.InactivityNotifier
+import com.noop.notif.ScheduledReportNotifier
+import com.noop.notif.scorePctOrNull
 import com.noop.ui.BiofeedbackPrefs
 import com.noop.ui.HrvWindow
 import com.noop.ui.InactivityPrefs
@@ -281,9 +285,10 @@ data class LiveState(
  * only the GATT calls that can throw a `DeadObjectException` once the OS Bluetooth binder dies (the
  * radio was turned off mid-link) are routed through it; everything else stays on the concrete handle.
  *
- * The boolean returns mirror `BluetoothGatt`'s own contract (true == the op was accepted by the
- * stack). A THROW is distinct from a `false` return: `false` is a transient BUSY (retry), a throw is
- * a dead binder (tear down). See [WhoopBleClient.safeGatt].
+ * The boolean returns mirror `BluetoothGatt`'s own contract. A THROW means the binder is unusable;
+ * a `false` write result is deliberately treated as UNKNOWN delivery rather than "safe to retry".
+ * Vendor stacks have been observed to report a late callback after rejecting submission, and replaying
+ * the same frame can buzz/reboot/trim twice. See [GattWriteDeliveryGate] and [WhoopBleClient.safeGatt].
  */
 interface GattOps {
     fun writeCharacteristicCompat(
@@ -313,6 +318,93 @@ interface GattOps {
 }
 
 /**
+ * Replay classification for WHOOP commands. This is intentionally explicit and exhaustive at the
+ * [CommandNumber] boundary: adding a new sendable command must choose whether duplicate execution is
+ * harmless. The current queue never replays an ambiguous submission in either class; the distinction
+ * additionally forces a GATT callback for one-shot physical effects so they are never fire-and-forget.
+ */
+internal enum class GattWriteIdempotency { IDEMPOTENT, NON_IDEMPOTENT }
+
+/** The only legal transitions after one call into BluetoothGatt. There is deliberately no RETRY. */
+internal enum class GattWriteAction {
+    /** Accepted WRITE_TYPE_NO_RESPONSE: keep the serial slot for a short pacing window. */
+    PACE_THEN_CONTINUE,
+    /** Accepted confirmed write: wait for exactly one callback. */
+    WAIT_FOR_CALLBACK,
+    /** Submission returned false, but a confirmed write can still report one late callback. */
+    WAIT_FOR_UNCERTAIN_CALLBACK,
+    /** No callback can disambiguate delivery; close this GATT before issuing any later command. */
+    FAIL_CLOSED,
+    /** The connection was already torn down while the submission call was executing. */
+    CANCELLED,
+}
+
+/**
+ * Small, Android-free state machine shared by production and JVM tests. It makes a single-attempt
+ * guarantee: once [begin] has admitted an item, [submitted] can only pace, await one callback, or fail
+ * closed. A `false` result is never a replay signal. [callback] accepts an attempt exactly once and then
+ * quarantines the slot until [paced], so a duplicate/late callback cannot release a later queue item.
+ */
+internal class GattWriteDeliveryGate<T> {
+    private data class Attempt<T>(val item: T, val expectsCallback: Boolean)
+
+    private var active: Attempt<T>? = null
+
+    @Synchronized
+    fun begin(item: T, expectsCallback: Boolean): Boolean {
+        if (active != null) return false
+        active = Attempt(item, expectsCallback)
+        return true
+    }
+
+    @Synchronized
+    fun submitted(accepted: Boolean): GattWriteAction {
+        val attempt = active ?: return GattWriteAction.CANCELLED
+        if (accepted) {
+            return if (attempt.expectsCallback) {
+                GattWriteAction.WAIT_FOR_CALLBACK
+            } else {
+                GattWriteAction.PACE_THEN_CONTINUE
+            }
+        }
+        return if (attempt.expectsCallback) {
+            // Some Android vendor stacks still dispatch onCharacteristicWrite after returning false.
+            // Hold the slot and accept that one callback; timeout disconnects instead of replaying.
+            GattWriteAction.WAIT_FOR_UNCERTAIN_CALLBACK
+        } else {
+            active = null
+            GattWriteAction.FAIL_CLOSED
+        }
+    }
+
+    @Synchronized
+    fun callback(): T? {
+        val attempt = active?.takeIf { it.expectsCallback } ?: return null
+        // Keep the gate occupied through a short post-callback quarantine. A duplicate callback for the
+        // same characteristic then sees a non-callback attempt and cannot consume the next queue item.
+        active = Attempt(attempt.item, expectsCallback = false)
+        return attempt.item
+    }
+
+    @Synchronized
+    fun paced(): T? {
+        val attempt = active?.takeIf { !it.expectsCallback } ?: return null
+        active = null
+        return attempt.item
+    }
+
+    @Synchronized
+    fun timeout(): T? {
+        val attempt = active?.takeIf { it.expectsCallback } ?: return null
+        active = null
+        return attempt.item
+    }
+
+    @Synchronized fun isBusy(): Boolean = active != null
+    @Synchronized fun reset() { active = null }
+}
+
+/**
  * Production [GattOps]: a straight delegate to a live [BluetoothGatt]. The TIRAMISU+/legacy branch
  * for the value-bearing write/descriptor calls lives here (one place) so the client call sites read
  * uniformly. Permission is owned by the caller (the client is @SuppressLint("MissingPermission")).
@@ -325,7 +417,7 @@ class RealGattOps(private val gatt: BluetoothGatt) : GattOps {
         writeType: Int,
     ): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            gatt.writeCharacteristic(ch, value, writeType) == BluetoothGatt.GATT_SUCCESS
+            gatt.writeCharacteristic(ch, value, writeType) == BluetoothStatusCodes.SUCCESS
         } else {
             @Suppress("DEPRECATION")
             run {
@@ -340,7 +432,7 @@ class RealGattOps(private val gatt: BluetoothGatt) : GattOps {
         value: ByteArray,
     ): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            gatt.writeDescriptor(descriptor, value) == BluetoothGatt.GATT_SUCCESS
+            gatt.writeDescriptor(descriptor, value) == BluetoothStatusCodes.SUCCESS
         } else {
             @Suppress("DEPRECATION")
             run {
@@ -828,15 +920,12 @@ class WhoopBleClient(
         private const val CCCD_RETRY_DELAY_MS = 60L
         private const val MAX_CCCD_RETRIES = 8
 
-        /** A command write can transiently return BUSY on a stricter stack (notably Android 13+, and
-         *  worst on Android 16) when the previous write hasn't physically completed. Retry the SAME
-         *  frame a few times (short backoff) instead of dropping it — a dropped TOGGLE_REALTIME_HR /
-         *  SET_CLOCK / offload-ack silently breaks live HR, the clock, or the backfill (issue #77). */
-        // Base backoff; the per-frame delay ESCALATES (× attempt) so a sustained-BUSY stack — a Pixel 7
-        // on Android 16 logged ~56 busy retries + a few hard drops in 10 min (#77) — gets progressively
-        // more time to clear instead of burning the whole budget in ~70ms.
-        private const val WRITE_RETRY_DELAY_MS = 12L
-        private const val MAX_WRITE_RETRIES = 12
+        /**
+         * Maximum time a confirmed write may occupy the serial GATT slot. This also bounds the special
+         * `false`-then-late-callback case: if no callback arrives, the only safe recovery is a fresh GATT
+         * connection. We never submit the same frame again on the current connection.
+         */
+        private const val WRITE_CALLBACK_TIMEOUT_MS = 4_000L
         /** Pacing gap before freeing the slot after a WITHOUT-response write. A bare post fires the next
          *  write on the same looper tick — before Android's GATT has accepted the previous one, which it
          *  then rejects. A small gap lets the stack settle and largely eliminates the rejections (#77). */
@@ -903,13 +992,54 @@ class WhoopBleClient(
         }
 
         /**
-         * #312: when the write queue DROPS a frame after [MAX_WRITE_RETRIES] busy-retries, should the
-         * realtime stream be re-armed? True ONLY for [CommandNumber.TOGGLE_REALTIME_HR] — that write enables
-         * live R-R (→ HRV / Autonomic), and reconcileRealtime latched `realtimeArmed` optimistically when it
-         * queued the write, so a silent drop leaves R-R off with no re-send (plain HR keeps flowing on the
-         * standard 0x2A37 profile — the exact #312 symptom on a 5/MG whose toggle lost a GATT-write race).
-         * Every other dropped frame (haptics, offload-ack, clock, …) has its own recovery and must NOT poke
-         * the realtime latch. Pure + instance-free so the unit harness can pin it without a live GATT stack.
+         * Explicit duplicate-execution policy for every command currently exposed by the sender. Reads
+         * and desired-state setters are idempotent. Physical one-shot effects are not, so [send] upgrades
+         * them to a confirmed GATT write even when the caller requested the historical default.
+         */
+        internal fun commandWriteIdempotency(command: CommandNumber): GattWriteIdempotency = when (command) {
+            CommandNumber.REBOOT_STRAP,
+            CommandNumber.POWER_CYCLE_STRAP,
+            CommandNumber.RUN_HAPTIC_PATTERN_MAVERICK,
+            CommandNumber.RUN_ALARM,
+            CommandNumber.RUN_HAPTICS_PATTERN,
+            -> GattWriteIdempotency.NON_IDEMPOTENT
+
+            CommandNumber.TOGGLE_REALTIME_HR,
+            CommandNumber.REPORT_VERSION_INFO,
+            CommandNumber.SET_CLOCK,
+            CommandNumber.GET_CLOCK,
+            CommandNumber.SEND_HISTORICAL_DATA,
+            CommandNumber.HISTORICAL_DATA_RESULT,
+            CommandNumber.GET_BATTERY_LEVEL,
+            CommandNumber.GET_DATA_RANGE,
+            CommandNumber.GET_HELLO_HARVARD,
+            CommandNumber.GET_HELLO,
+            CommandNumber.SEND_R10_R11_REALTIME,
+            CommandNumber.SET_ALARM_TIME,
+            CommandNumber.GET_ALARM_TIME,
+            CommandNumber.DISABLE_ALARM,
+            CommandNumber.SET_ADVERTISING_NAME,
+            CommandNumber.GET_ALL_HAPTICS_PATTERN,
+            CommandNumber.SET_CONFIG,
+            CommandNumber.SET_DEVICE_CONFIG,
+            CommandNumber.START_RAW_DATA,
+            CommandNumber.STOP_RAW_DATA,
+            CommandNumber.GET_EXTENDED_BATTERY_INFO,
+            CommandNumber.GET_BODY_LOCATION_AND_STATUS,
+            CommandNumber.STOP_HAPTICS,
+            CommandNumber.SELECT_WRIST,
+            -> GattWriteIdempotency.IDEMPOTENT
+        }
+
+        /** One-shot effects must have a callback; all other commands preserve the caller's write type. */
+        internal fun requiresConfirmedGattWrite(command: CommandNumber, requestedWithResponse: Boolean): Boolean =
+            requestedWithResponse || commandWriteIdempotency(command) == GattWriteIdempotency.NON_IDEMPOTENT
+
+        /**
+         * Legacy pure predicate retained for the realtime recovery contract. The production queue no longer
+         * drops/retries an ambiguous frame: it disconnects, [reset] clears `realtimeArmed`, and the normal
+         * post-bond reconciler restores the requested state on a fresh GATT connection. Only a realtime toggle
+         * ever needs that latch repair; one-shot commands must never be synthesized by recovery.
          */
         fun shouldReArmRealtimeAfterDrop(droppedCmd: CommandNumber?): Boolean =
             droppedCmd == CommandNumber.TOGGLE_REALTIME_HR
@@ -2015,6 +2145,17 @@ class WhoopBleClient(
                         val todayKey = com.noop.ui.logicalDayKeyNow()
                         val present = if (merged.any { it.day == todayKey }) "present" else "MISSING"
                         log("Backfill: ${merged.size} day(s) banked; newest=$newest, dashboard-today=$todayKey ($present)")
+                        val localKey = java.time.LocalDate.now().toString()
+                        val todayRow = com.noop.ui.resolveTodayRow(merged, todayKey, localKey)
+                        if (todayRow?.totalSleepMin != null) {
+                            ScheduledReportNotifier.onMorning(
+                                context = context,
+                                reportDay = todayRow.day,
+                                chargePct = todayRow.recovery.scorePctOrNull(),
+                                restPct = RestScorer.restFromDaily(todayRow).scorePctOrNull(),
+                                materializedAfterSync = true,
+                            )
+                        }
                     }
                     // Background parity: the foreground connection service can keep this process alive
                     // without an AppViewModel. After the post-sync reanalysis succeeds, run the SAME
@@ -2226,24 +2367,29 @@ class WhoopBleClient(
      */
     private data class PendingWrite(val frame: ByteArray, val withResponse: Boolean, val cmd: CommandNumber? = null)
     private val writeQueue = ConcurrentLinkedQueue<PendingWrite>()
-    // @Volatile: read on the main looper in drainWriteQueue but CLEARED from the GATT binder thread in the
-    // write-completion callbacks - the barrier guarantees the main-thread drain sees the flag flip promptly
-    // (else a queued write could stall until the next drain trigger).
-    @Volatile private var writeInFlight = false
-    /** A frame being retried after a transient BUSY rejection. Held here rather than re-added to the
-     *  queue so it keeps its place AHEAD of later commands — command order matters (e.g. SET_CLOCK
-     *  before GET_CLOCK). Only ever touched on the main looper inside [drainWriteQueue]. */
-    private var pendingRetry: PendingWrite? = null
-    private var writeRetries = 0
+    /**
+     * One active submission per GATT connection. Unlike the old `writeInFlight + pendingRetry` pair, this
+     * gate has no replay state: `false` means await one confirmed callback or fail closed. Its synchronized
+     * transitions also cover API 26/27 callbacks that Android may deliver from a binder thread.
+     */
+    private val writeDeliveryGate = GattWriteDeliveryGate<PendingWrite>()
 
-    /** The BUSY-retry kick for [drainWriteQueue], held as a NAMED runnable (not an inline lambda) so the
-     *  teardown path can cancel a still-pending retry — otherwise a queued retry fires after the link is
-     *  dead and re-enters the now-dead write, re-throwing `DeadObjectException` (#314). */
-    private val drainWriteRetryRunnable = Runnable { drainWriteQueue() }
+    /** Named so callback/reset can cancel it and a timeout from an old connection cannot kill a new one. */
+    private val writeDeliveryTimeoutRunnable = Runnable { onWriteDeliveryTimeout() }
+    /** Named post-write quarantine release; reset cancels it before a replacement GATT can enqueue work. */
+    private val writePaceRunnable = Runnable {
+        if (writeDeliveryGate.paced() != null) {
+            // Descriptors are GATT operations too. WHOOP 5 subscribes its authenticated notify channels
+            // after CLIENT_HELLO, so they must drain before queued clock/realtime commands resume.
+            gatt?.let { drainCccdQueue(it) }
+            drainWriteQueue()
+        }
+    }
 
     /** Descriptor-write queue: enabling notifications is also a one-at-a-time GATT operation. */
     private val cccdQueue = ConcurrentLinkedQueue<BluetoothGattCharacteristic>()
-    // @Volatile: the CCCD-write twin of [writeInFlight] - read on the main looper in drainCccdQueue but
+    // @Volatile: the descriptor-side equivalent of [writeDeliveryGate] - read on the main looper in
+    // drainCccdQueue but
     // CLEARED from the GATT binder thread in onDescriptorWrite, so the barrier stops a subscription write
     // from stalling on a stale flag (which would leave a notify channel un-enabled → no live data).
     @Volatile private var cccdInFlight = false
@@ -2555,6 +2701,7 @@ class WhoopBleClient(
      * deliberately reconnects (which clears intentionalDisconnect again via connect()). Kotlin twin of iOS
      * `BLEManager.forgetDevice` (which iOS already wires from DevicesView's Remove). Runs on the main looper.
      */
+    @SuppressLint("MissingPermission")
     fun releaseStrap() {
         handler.post {
             intentionalDisconnect = true     // defuse the disconnect→3s-reconnect loop's guard
@@ -2763,15 +2910,19 @@ class WhoopBleClient(
                 byteArrayOf(0x01, 47, 152.toByte(), 0, 0, 0, 0, 0, 0, 0, 0, 0) else payload
             val s = seq.incrementAndGet() and 0xFF
             val frame = Framing.puffinCommandFrame(cmd = puffinCmd, seq = s, payload = puffinPayload)
-            enqueueWrite(PendingWrite(frame, withResponse, cmd))
+            val confirmed = requiresConfirmedGattWrite(cmd, withResponse)
+            enqueueWrite(PendingWrite(frame, confirmed, cmd))
             val cmdNote = if (isHaptics) " cmd=0x13" else ""
-            log("→ ${cmd.name} payload=${puffinPayload.toHex()} (puffin$cmdNote)")
+            val deliveryNote = if (confirmed && !withResponse) ", confirmed for single-execution" else ""
+            log("→ ${cmd.name} payload=${puffinPayload.toHex()} (puffin$cmdNote$deliveryNote)")
             return
         }
         val s = seq.incrementAndGet() and 0xFF
         val frame = Framing.buildCommand(cmd, payload, s)
-        enqueueWrite(PendingWrite(frame, withResponse, cmd))
-        log("→ ${cmd.name} payload=${payload.toHex()}")
+        val confirmed = requiresConfirmedGattWrite(cmd, withResponse)
+        enqueueWrite(PendingWrite(frame, confirmed, cmd))
+        val deliveryNote = if (confirmed && !withResponse) " (confirmed for single-execution)" else ""
+        log("→ ${cmd.name} payload=${payload.toHex()}$deliveryNote")
     }
 
     /**
@@ -4180,9 +4331,24 @@ class WhoopBleClient(
             characteristic: BluetoothGattCharacteristic,
             status: Int,
         ) {
+            // A callback from a GATT that timed out and was closed must never release a write on the
+            // replacement connection. Android provides no command/token in this callback, so current-GATT
+            // identity + the single active gate are the strongest available correlation.
+            if (gatt !== g) {
+                log("Ignoring stale characteristic-write callback from a replaced GATT")
+                return
+            }
+            val completedWrite = writeDeliveryGate.callback()
+            if (completedWrite == null) {
+                // Duplicate/unsolicited callback. In particular, do not let it consume the next command.
+                log("Ignoring characteristic-write callback with no matching confirmed write")
+                return
+            }
+            handler.removeCallbacks(writeDeliveryTimeoutRunnable)
+
             // Port of didWriteValueFor: a CONFIRMED-write completion (no error) == bonding succeeded.
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                log("Confirmed write failed: status=$status")
+                log("Confirmed write failed: command=${completedWrite.cmd?.name ?: "session-open"} status=$status")
                 // Multi-WHOOP stale-pin recovery (#52). A status of INSUFFICIENT_AUTHENTICATION (5) /
                 // INSUFFICIENT_ENCRYPTION (15) on the bond write == the strap refused the encrypted bond
                 // (the Android twin of the iOS "Encryption/Authentication is insufficient" error). When a
@@ -4209,6 +4375,12 @@ class WhoopBleClient(
                         com.noop.testcentre.TestDomain.CONNECTION,
                     )
                 }
+                // The completion is correlated and failed, but continuing this serial queue would leave
+                // desired strap state (clock/realtime/offload trim) unknown. Never replay the frame. Start
+                // from a fresh GATT so reconnect/session reconciliation can restore idempotent state while
+                // one-shot physical effects remain single execution.
+                failClosedAfterWrite(completedWrite, "confirmed callback status=$status")
+                return
             } else if (!didBond && connectedFamily == DeviceFamily.WHOOP5) {
                 // EXPERIMENTAL (issue #17): the CLIENT_HELLO is now a confirmed write, so this ACK means
                 // just-works bonding completed. Now subscribe the puffin notify chars (realtime HR rides
@@ -4261,9 +4433,11 @@ class WhoopBleClient(
                 runConnectHandshake()
             }
 
-            // This with-response write is done; release the in-flight slot and send the next.
-            writeInFlight = false
-            drainWriteQueue()
+            // Hold a tiny post-callback quarantine before the next command. A buggy vendor stack that
+            // duplicates this callback will hit the gate's non-callback state and be ignored instead of
+            // completing a later command that happens to use the same characteristic.
+            handler.removeCallbacks(writePaceRunnable)
+            handler.postDelayed(writePaceRunnable, WITHOUT_RESPONSE_PACE_MS)
         }
 
         override fun onDescriptorWrite(
@@ -5318,78 +5492,84 @@ class WhoopBleClient(
             handler.post { drainWriteQueue() }
             return
         }
-        if (writeInFlight) return
-        gatt ?: return
+        if (writeDeliveryGate.isBusy()) return
+        val currentGatt = gatt ?: return
+        // Descriptor and characteristic mutations share Android's one GATT operation slot. Authenticated
+        // WHOOP 5 notify subscriptions take priority; their final callback resumes this command queue.
+        if (cccdInFlight || cccdQueue.isNotEmpty()) {
+            drainCccdQueue(currentGatt)
+            return
+        }
         val ops = gattOps ?: return
         val ch = cmdCharacteristic ?: return
-        // A frame rejected BUSY last tick takes priority so it keeps its place in the command sequence.
-        val item = pendingRetry ?: writeQueue.poll() ?: return
-        pendingRetry = null
-        writeInFlight = true
+        val item = writeQueue.poll() ?: return
+        submitGattWrite(ops, ch, item, "writeCharacteristic")
+    }
 
+    /**
+     * Submit exactly once. A `false` result is delivery-ambiguous: confirmed writes hold the queue for
+     * one possible late callback; no-response writes cannot be correlated and immediately close the GATT.
+     * Neither path ever calls [GattOps.writeCharacteristicCompat] a second time for [item].
+     */
+    @SuppressLint("MissingPermission")
+    private fun submitGattWrite(
+        ops: GattOps,
+        ch: BluetoothGattCharacteristic,
+        item: PendingWrite,
+        reason: String,
+    ) {
+        if (!writeDeliveryGate.begin(item, expectsCallback = item.withResponse)) {
+            // This should be unreachable because every caller checks/owns the one serial slot. Losing a
+            // command would be worse than a reconnect, so preserve single-execution and fail closed.
+            failClosedAfterWrite(item, "$reason attempted while another write was active")
+            return
+        }
         val writeType = if (item.withResponse) {
-            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT      // with response (acked)
+            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         } else {
             BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         }
-
-        // safeGatt: a throw here means the binder died (radio turned off mid-link, #314) — it tears the
-        // link down and returns false. After teardown the queues are cleared and gatt is null, so the
-        // recursive re-drain below immediately no-ops; we don't fall through into a retry against a dead
-        // binder.
-        val ok = safeGatt("writeCharacteristic") {
+        val accepted = safeGatt(reason) {
             ops.writeCharacteristicCompat(ch, item.frame, writeType)
         }
-
-        if (!ok) {
-            // Transient BUSY — the stack hasn't freed the previous write yet (common on Android 13+/16,
-            // worst when the slot was freed too eagerly). Re-hold THIS frame and retry shortly instead
-            // of dropping it: a dropped TOGGLE_REALTIME_HR / SET_CLOCK / offload-ack silently breaks
-            // live HR, the clock, or the backfill (issue #77 — a Pixel 7 on Android 16 saw exactly this).
-            // If safeGatt already tore down (dead binder), gatt is now null — bail before scheduling a
-            // retry that would re-enter the dead write.
-            writeInFlight = false
-            if (gatt == null) return
-            if (writeRetries < MAX_WRITE_RETRIES) {
-                writeRetries++
-                log("writeCharacteristic busy; retry $writeRetries/$MAX_WRITE_RETRIES")
-                pendingRetry = item
-                // Escalating backoff (12, 24, … capped ~96ms) — ride out a congestion spike instead of
-                // exhausting the budget in a few tens of ms while the stack is still busy (#77). NAMED
-                // runnable so teardown can cancel a pending retry (#314).
-                handler.postDelayed(drainWriteRetryRunnable, WRITE_RETRY_DELAY_MS * minOf(writeRetries, 8))
-            } else {
-                // Genuinely stuck after several tries — drop this one frame so it can't wedge the queue.
-                log("writeCharacteristic rejected by stack; dropping one frame (after $MAX_WRITE_RETRIES retries)")
-                // #312: a dropped TOGGLE_REALTIME_HR would leave live R-R (→ HRV / Autonomic) off FOREVER.
-                // Whoever queued it latched [realtimeArmed] = the value it SENT (reconcileRealtime, or the
-                // direct arm-on-connect / keep-alive paths), so it — and the 30s keep-alive tick that also
-                // reconciles — see no edge (want == armed) and never re-send, while plain HR keeps flowing
-                // over the standard 0x2A37 profile. But the write never reached the strap, so the strap's
-                // TRUE state is the OPPOSITE of the latched value — flip it back, and the next keep-alive
-                // reconcile detects the edge and re-sends the CURRENT want (recovers a dropped ARM *or* a
-                // dropped disarm) within ~30s. Bounded by construction: the re-send rides the keep-alive
-                // cadence, not this drop path, so a persistently-busy stack retries once per tick, never in a loop.
-                if (shouldReArmRealtimeAfterDrop(item.cmd)) {
-                    realtimeArmed = !realtimeArmed
-                    log("realtime toggle dropped — reconciling on the next keep-alive tick (#312)")
-                }
-                writeRetries = 0
-                drainWriteQueue()
+        when (writeDeliveryGate.submitted(accepted)) {
+            GattWriteAction.PACE_THEN_CONTINUE -> {
+                handler.removeCallbacks(writePaceRunnable)
+                handler.postDelayed(writePaceRunnable, WITHOUT_RESPONSE_PACE_MS)
             }
-            return
+            GattWriteAction.WAIT_FOR_CALLBACK -> {
+                handler.removeCallbacks(writeDeliveryTimeoutRunnable)
+                handler.postDelayed(writeDeliveryTimeoutRunnable, WRITE_CALLBACK_TIMEOUT_MS)
+            }
+            GattWriteAction.WAIT_FOR_UNCERTAIN_CALLBACK -> {
+                log(
+                    "$reason returned false for ${item.cmd?.name ?: "session-open"}; " +
+                        "delivery unknown — awaiting one late callback, never replaying",
+                )
+                handler.removeCallbacks(writeDeliveryTimeoutRunnable)
+                handler.postDelayed(writeDeliveryTimeoutRunnable, WRITE_CALLBACK_TIMEOUT_MS)
+            }
+            GattWriteAction.FAIL_CLOSED ->
+                failClosedAfterWrite(item, "$reason returned false without a correlatable callback")
+            GattWriteAction.CANCELLED -> Unit // safeGatt already tore down/reset the connection.
         }
-        writeRetries = 0   // this frame went out — reset the per-frame retry budget
+    }
 
-        // WITHOUT-response writes get NO onCharacteristicWrite callback, so free the slot ourselves —
-        // but after a short PACING gap. A bare post fired the next write on the same looper tick, before
-        // the stack had accepted this one, so Android 16 rejected it (issue #77). postDelayed, not post.
-        if (!item.withResponse) {
-            handler.postDelayed({
-                writeInFlight = false
-                drainWriteQueue()
-            }, WITHOUT_RESPONSE_PACE_MS)
-        }
+    private fun onWriteDeliveryTimeout() {
+        val item = writeDeliveryGate.timeout() ?: return
+        failClosedAfterWrite(item, "confirmed write callback timed out")
+    }
+
+    /** Close this exact command session without replaying [item]; normal reconnect restores safe state. */
+    private fun failClosedAfterWrite(item: PendingWrite, reason: String) {
+        handler.removeCallbacks(writeDeliveryTimeoutRunnable)
+        handler.removeCallbacks(writePaceRunnable)
+        writeDeliveryGate.reset()
+        log(
+            "GATT write fail-closed: ${item.cmd?.name ?: "session-open"}; $reason. " +
+                "The frame will not be replayed; reconnecting with a fresh command sequence.",
+        )
+        if (gatt != null) handleDisconnect(BluetoothGatt.GATT_FAILURE)
     }
 
     /**
@@ -5398,31 +5578,28 @@ class WhoopBleClient(
      */
     @SuppressLint("MissingPermission")
     private fun writeBondFrame(g: BluetoothGatt, ch: BluetoothGattCharacteristic) {
+        if (gatt !== g) return
         val ops = gattOps ?: return
         val s = seq.incrementAndGet() and 0xFF
         val bondFrame = Framing.buildCommand(CommandNumber.GET_BATTERY_LEVEL, byteArrayOf(0), s)
         log("Bonding: confirmed write GET_BATTERY_LEVEL to 61080002")
-        writeInFlight = true   // hold the slot until onCharacteristicWrite fires (with response).
-        // safeGatt: a throw means the binder died (#314) — teardown, return false, fall into the
-        // "rejected" branch which just clears the (now-stale) in-flight slot.
-        val ok = safeGatt("writeBondFrame") {
-            ops.writeCharacteristicCompat(ch, bondFrame, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
-        }
-        if (!ok) {
-            writeInFlight = false
-            log("Bond write rejected by stack")
-        }
+        submitGattWrite(
+            ops,
+            ch,
+            PendingWrite(bondFrame, withResponse = true, cmd = CommandNumber.GET_BATTERY_LEVEL),
+            "writeBondFrame",
+        )
     }
 
     /**
      * EXPERIMENTAL: WHOOP 5.0/MG opens a session with a static CLIENT_HELLO frame written to its
-     * fd4b0002 command characteristic, instead of the WHOOP4 confirmed-write bond. Written WITHOUT a
-     * response (it is a complete framed command), and we do NOT hold the in-flight slot or run the
-     * WHOOP4 handshake for it. Mirrors the order the WHOOP4 bond uses (write first, then drain the
-     * notify subscriptions). Unverified on real MG hardware.
+     * fd4b0002 command characteristic, instead of the WHOOP4 bond. It is a confirmed write and occupies
+     * the same single-delivery gate until callback/timeout. Mirrors the order the WHOOP4 bond uses (write
+     * first, then drain the notify subscriptions). Unverified on real MG hardware.
      */
     @SuppressLint("MissingPermission")
     private fun writeClientHello(g: BluetoothGatt, ch: BluetoothGattCharacteristic) {
+        if (gatt !== g) return
         val hello = DeviceFamily.WHOOP5.clientHello ?: return
         val ops = gattOps ?: return
         // CONFIRMED (with-response) write — mirrors the macOS v1.5 fix and the hardware-verified finding
@@ -5431,14 +5608,12 @@ class WhoopBleClient(
         // unacknowledged write left it bond-less and silent — CLIENT_HELLO written, then nothing (#17).
         // Hold the slot until the ACK; the opt-in puffin probe now fires post-bond (onCharacteristicWrite).
         log("WHOOP 5/MG: writing CLIENT_HELLO to fd4b0002 with response (to trigger bonding, experimental).")
-        writeInFlight = true
-        val ok = safeGatt("writeClientHello") {
-            ops.writeCharacteristicCompat(ch, hello, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
-        }
-        if (!ok) {
-            writeInFlight = false
-            log("CLIENT_HELLO write rejected by stack")
-        }
+        submitGattWrite(
+            ops,
+            ch,
+            PendingWrite(hello, withResponse = true, cmd = null),
+            "writeClientHello",
+        )
     }
 
     /**
@@ -5471,7 +5646,7 @@ class WhoopBleClient(
             handler.post { drainCccdQueue(g) }
             return
         }
-        if (cccdInFlight) return
+        if (cccdInFlight || writeDeliveryGate.isBusy()) return
         val ch = cccdQueue.poll()
         if (ch == null) {
             // 5/MG handshake tail: after the PUFFIN notify chars are subscribed (the post-CLIENT_HELLO
@@ -6209,9 +6384,9 @@ class WhoopBleClient(
      * `SecurityException` (permission revoked) from the same calls. On ANY of these the link is gone:
      * tear down so the UI flips to disconnected instead of crashing.
      *
-     * @return the block's boolean (stack-accepted) on success, or `false` if the binder was dead — a
-     *   `false` lets callers run their normal "rejected by stack" path, which after teardown is inert
-     *   (the queues are cleared and `gatt` is null, so the recursive re-drain immediately no-ops).
+     * @return the block's boolean on success, or `false` if the binder was dead. Callers pass the result
+     *   through [GattWriteDeliveryGate]; because teardown resets the gate first, it resolves CANCELLED and
+     *   cannot mistake a thrown operation for an ambiguous submission.
      */
     private fun safeGatt(reason: String, block: () -> Boolean): Boolean =
         try {
@@ -6231,20 +6406,20 @@ class WhoopBleClient(
     /**
      * Full teardown after a raw GATT call threw because the binder died (#314). Mirrors the
      * intentional-disconnect teardown but is reached from the catch path, so it must do everything
-     * [handleDisconnect]+[reset] do AND cancel the two BUSY-retry kicks — a still-pending
-     * [drainWriteRetryRunnable]/[drainCccdRetryRunnable] would otherwise fire after the link is dead
-     * and re-enter the dead write, throwing again. Marks the disconnect intentional so no auto-rescan
+     * [handleDisconnect]+[reset] do AND cancel pending write timeout/quarantine and the descriptor retry.
+     * A still-pending callback timer would otherwise fire after the link is dead and act on a replacement
+     * connection. Marks the disconnect intentional so no auto-rescan
      * loops against a powered-off radio (the adapter.isEnabled gate already suppresses connect, but
      * suppressing the rescan keeps the log clean and avoids a tight retry loop).
      */
     private fun teardownAfterGattFailure() {
-        // Cancel any scheduled BUSY-retry kicks BEFORE handleDisconnect/reset clears the queues, so a
-        // retry can't re-enter drainWriteQueue/drainCccdQueue against the dead binder.
-        handler.removeCallbacks(drainWriteRetryRunnable)
+        // Cancel scheduled write lifecycle callbacks BEFORE handleDisconnect/reset clears the queues.
+        handler.removeCallbacks(writeDeliveryTimeoutRunnable)
+        handler.removeCallbacks(writePaceRunnable)
         handler.removeCallbacks(drainCccdRetryRunnable)
         intentionalDisconnect = true   // don't auto-rescan against a dead/off radio
-        // reset() (inside handleDisconnect) clears writeInFlight + the write/cccd queues + pendingRetry
-        // and cancels the keep-alive/backfill timers; handleDisconnect publishes connected=false and
+        // reset() (inside handleDisconnect) clears the delivery gate + write/cccd queues and cancels the
+        // keep-alive/backfill timers; handleDisconnect publishes connected=false and
         // closes + nulls gatt. Also drop the GattOps wrapper so a late call can't reach the dead gatt.
         handleDisconnect(BluetoothGatt.GATT_FAILURE)
         gattOps = null
@@ -6497,12 +6672,11 @@ class WhoopBleClient(
         seq.set(0)
         writeQueue.clear()
         cccdQueue.clear()
-        writeInFlight = false
-        pendingRetry = null
-        writeRetries = 0
-        // Cancel any scheduled BUSY-retry kicks so a queued retry can't fire after teardown and
-        // re-enter a dead write/descriptor (#314).
-        handler.removeCallbacks(drainWriteRetryRunnable)
+        writeDeliveryGate.reset()
+        // Cancel callback timeout/quarantine and descriptor retries so no old-connection runnable can
+        // enter a replacement connection (#314 + ambiguous-delivery hardening).
+        handler.removeCallbacks(writeDeliveryTimeoutRunnable)
+        handler.removeCallbacks(writePaceRunnable)
         handler.removeCallbacks(drainCccdRetryRunnable)
         resubscribedSinceData = false
         cccdInFlight = false

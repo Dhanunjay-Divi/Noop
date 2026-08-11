@@ -42,6 +42,9 @@ final class WeightScaleSource: NSObject, ObservableObject {
 
     private let defaults: UserDefaults
     private var lifecycle = WeightScaleLifecycle()
+    /// Constructed lazily on iOS so merely creating AppModel on a fresh install cannot trigger the
+    /// system Bluetooth permission sheet before NOOP has shown its own rationale. A remembered scale is
+    /// evidence of a prior explicit pairing gesture, so that path may activate restoration at launch.
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
     private var seen: [UUID: CBPeripheral] = [:]
@@ -66,8 +69,7 @@ final class WeightScaleSource: NSObject, ObservableObject {
         }
         super.init()
         #if os(iOS)
-        central = CBCentralManager(delegate: self, queue: .main,
-                                   options: [CBCentralManagerOptionRestoreIdentifierKey: Self.restoreIdentifier])
+        if restoredPeripheralID != nil { activateCentralIfNeeded() }
         #else
         central = CBCentralManager(delegate: self, queue: .main)
         #endif
@@ -78,6 +80,7 @@ final class WeightScaleSource: NSObject, ObservableObject {
 
     /// Explicit foreground discovery. The scan is service-filtered and bounded to 15 seconds.
     func scan() {
+        activateCentralIfNeeded()
         userStopped = false
         wantsResume = false
         scanRequested = true
@@ -93,7 +96,7 @@ final class WeightScaleSource: NSObject, ObservableObject {
     func stopScan() {
         scanRequested = false
         cancelScanTimeout()
-        if central.state == .poweredOn { central.stopScan() }
+        if central?.state == .poweredOn { central.stopScan() }
         guard phase == .scanning else { return }
         transition(.userStopped)
         statusText = hasPairedScale ? "Paired · not listening" : "Scan stopped"
@@ -101,6 +104,7 @@ final class WeightScaleSource: NSObject, ObservableObject {
 
     /// Pair/listen to a scale the user explicitly selected from this scan.
     func connect(_ id: UUID) {
+        activateCentralIfNeeded()
         userStopped = false
         wantsResume = false
         scanRequested = false
@@ -123,6 +127,7 @@ final class WeightScaleSource: NSObject, ObservableObject {
     /// Resume only a scale the user previously paired. Called at app startup; never starts an open scan.
     func resumePairedScale() {
         guard pairedPeripheralID != nil else { return }
+        activateCentralIfNeeded()
         userStopped = false
         wantsResume = true
         transition(.rememberedScaleResume)
@@ -139,7 +144,7 @@ final class WeightScaleSource: NSObject, ObservableObject {
         reconnectTask = nil
         cancelScanTimeout()
         stopRadioScanOnly()
-        if let peripheral { central.cancelPeripheralConnection(peripheral) }
+        if let peripheral { central?.cancelPeripheralConnection(peripheral) }
         peripheral = nil
         transition(.userStopped)
         statusText = hasPairedScale ? "Paired · listening paused" : "Not paired"
@@ -185,6 +190,22 @@ final class WeightScaleSource: NSObject, ObservableObject {
         phase = lifecycle.handle(event)
     }
 
+    /// The only iOS central construction point. Calls come from an explicit scan/connect action or from
+    /// resuming an exact peripheral identifier the user paired previously; a fresh unpaired launch never
+    /// reaches here. macOS retains its existing eager construction in `init`.
+    private func activateCentralIfNeeded() {
+        guard central == nil else { return }
+        #if os(iOS)
+        central = CBCentralManager(
+            delegate: self,
+            queue: .main,
+            options: [CBCentralManagerOptionRestoreIdentifierKey: Self.restoreIdentifier]
+        )
+        #else
+        central = CBCentralManager(delegate: self, queue: .main)
+        #endif
+    }
+
     private func finishTimedScan() {
         guard phase == .scanning else { return }
         scanRequested = false
@@ -197,7 +218,7 @@ final class WeightScaleSource: NSObject, ObservableObject {
     }
 
     private func stopRadioScanOnly() {
-        if central.state == .poweredOn { central.stopScan() }
+        if central?.state == .poweredOn { central.stopScan() }
     }
 
     private func cancelScanTimeout() {
@@ -215,7 +236,7 @@ final class WeightScaleSource: NSObject, ObservableObject {
     }
 
     private func startScanIfReady() {
-        guard central.state == .poweredOn else { return }
+        guard let central, central.state == .poweredOn else { return }
         if !central.isScanning {
             central.scanForPeripherals(withServices: [Self.service],
                                        options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
@@ -224,7 +245,7 @@ final class WeightScaleSource: NSObject, ObservableObject {
     }
 
     private func connectRememberedIfReady() {
-        guard central.state == .poweredOn, let id = pairedPeripheralID else { return }
+        guard let central, central.state == .poweredOn, let id = pairedPeripheralID else { return }
         if let known = central.retrievePeripherals(withIdentifiers: [id]).first {
             connect(known)
         } else {

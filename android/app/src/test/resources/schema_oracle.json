@@ -1,6 +1,6 @@
 {
   "_readme": "SHARED Room<->GRDB SCHEMA ORACLE (#775). Two byte-identical copies: Packages/WhoopStore/Tests/WhoopStoreTests/Resources/schema_oracle.json and android/app/src/test/resources/schema_oracle.json. SchemaOracleTests.swift compares GRDB's PRAGMA table_info/index_list against it; SchemaOracleTest.kt compares Room's exported schema JSON against it. `columns` is the iOS/GRDB shape in GRDB column order (macOS is the reference implementation); every way Android differs is spelled out in an `android` / `iosAbsent` / `androidColumnOrder` override naming a key in `divergenceReasons`. Adding a column, reordering one, or changing a type/nullability on one platform only fails both suites until it is either fixed or written down here.",
-  "roomVersion": 27,
+  "roomVersion": 28,
   "grdbMigrations": [
     "v1",
     "v2",
@@ -37,7 +37,8 @@
     "v33-rr-src-channel",
     "v34-body-measurement",
     "v35-workout-steps",
-    "v36-whoop-caps-no-spo2"
+    "v36-whoop-caps-no-spo2",
+    "v37-healthkit-sync-state"
   ],
   "divergenceReasons": {
     "android-orphan-synced-column": "REAL COLUMN DRIFT: `synced` exists on Android only. GRDB's v10 note is explicit that stepSample gets no `synced` column ('unused; see StreamStore'), and v12's ppgHrSample never had one either; the Room entities copied the flag from the older per-second entities. Nothing reads it on Android — the per-row upload flag belongs to an upload path that does not exist there — so it is dead width, not divergent data. Removing it needs a Room table rebuild.",
@@ -664,6 +665,68 @@
       "primaryKey": [
         "deviceId",
         "ts"
+      ],
+      "indices": []
+    },
+    "healthConnectSyncState": {
+      "platform": "android_only",
+      "reason": "Health Connect emits per-record-type opaque changes tokens. Android persists one cursor per type and advances it only after its source-scoped aggregate projection rebuild commits; HealthKit uses its separate iOS-only anchor table.",
+      "columns": [
+        {
+          "name": "recordType",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "changesToken",
+          "affinity": "TEXT",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "updatedAt",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        }
+      ],
+      "primaryKey": [
+        "recordType"
+      ],
+      "indices": []
+    },
+    "healthKitSyncState": {
+      "platform": "ios_only",
+      "reason": "HealthKit observer anchors and atomic deletion-reconciliation state are iOS-only; Android Health Connect uses its own changes-token contract.",
+      "columns": [
+        {
+          "name": "sampleType",
+          "affinity": "TEXT",
+          "notNull": false,
+          "default": null
+        },
+        {
+          "name": "anchor",
+          "affinity": "BLOB",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "updatedAt",
+          "affinity": "INTEGER",
+          "notNull": true,
+          "default": null
+        },
+        {
+          "name": "lastFullReconcileAt",
+          "affinity": "INTEGER",
+          "notNull": false,
+          "default": null
+        }
+      ],
+      "primaryKey": [
+        "sampleType"
       ],
       "indices": []
     },

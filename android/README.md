@@ -30,9 +30,9 @@ buzz cannot be exercised in an emulator. See the **Verification checklist** at t
 
 | Requirement | Version | Notes |
 |---|---|---|
-| **JDK** | 17 | The build targets `jvmTarget = "17"`. JDK 17 ships inside recent Android Studio (Jellyfish / Koala) — use *Settings → Build Tools → Gradle → Gradle JDK → 17*, or install Temurin 17. |
-| **Android SDK** | API 34 (compileSdk/targetSdk) | Install "Android 14 (UpsideDownCake)" + Platform-Tools via the SDK Manager. `minSdk` is 26 (Android 8.0). |
-| **Android Studio** | Koala 2024.x or newer | Bundles a compatible Gradle 8.5 + AGP 8.5. |
+| **JDK** | 17 | The build targets `jvmTarget = "17"`. Select JDK 17 under *Settings → Build Tools → Gradle → Gradle JDK*, or install Temurin 17. |
+| **Android SDK** | API 36 (compileSdk/targetSdk), Build Tools 36.0.0 | Install the Android 16 platform, Build Tools 36.0.0, and Platform-Tools via the SDK Manager. `minSdk` remains 26 (Android 8.0). |
+| **Android Studio** | Current stable | Must support syncing the pinned AGP 8.13.2 / Gradle 8.14.5 toolchain. |
 | **A physical device** | Android 8.0+ with BLE | An emulator has no Bluetooth radio — you cannot test the strap link on it. |
 | **A WHOOP strap** | WHOOP 4.0 (verified) or 5.0 | Required to exercise the protocol end-to-end. |
 
@@ -52,12 +52,12 @@ Android Studio writes this for you automatically when you open the project.
 
 These are fixed in the build files; keep them in lockstep if you upgrade:
 
-- **Android Gradle Plugin** 8.5.2 · **Gradle** 8.7 (wrapper)
+- **Android Gradle Plugin** 8.13.2 · **Gradle** 8.14.5 (wrapper)
 - **Kotlin** 1.9.24 · **KSP** 1.9.24-1.0.20 (KSP must always match the Kotlin version)
 - **Compose Compiler** extension 1.5.14 (matched to Kotlin 1.9.24)
 - **Compose BOM** 2024.06.00 · **Material3** (from the BOM)
 - **Room** 2.6.1 · **coroutines** 1.8.1
-- **minSdk** 26 · **compile/targetSdk** 34 · **JDK target** 17
+- **minSdk** 26 · **compile/targetSdk** 36 · **Build Tools** 36.0.0 · **JDK target** 17
 
 ### Updating dependencies safely
 
@@ -95,19 +95,21 @@ JAR/scripts with the target Gradle version.
 cd /path/to/NOOP/android
 
 # If intentionally regenerating the checked-in wrapper, use the pinned version + official checksum.
-./gradlew wrapper --gradle-version 8.7 \
-  --gradle-distribution-sha256-sum 544c35d6bd849ae8a5ed0bcea39ba677dc40f49df7d1835561582da2009b961d
+./gradlew wrapper --gradle-version 8.14.5 \
+  --gradle-distribution-sha256-sum 6f74b601422d6d6fc4e1f9a1ab6522f642c2fdcbc15ae33ebd30ba3d7198e854
 
-# Compile a debug APK:
-./gradlew assembleDebug
+# Compile the full debug APK:
+./gradlew :app:assembleFullDebug
 
-# Install onto a connected, USB-debugging-enabled device:
-./gradlew installDebug
+# Install the full debug flavour onto a connected, USB-debugging-enabled device:
+./gradlew :app:installFullDebug
 
 # Or simply open this folder in Android Studio and press Run.
 ```
 
-The debug APK lands at `app/build/outputs/apk/debug/app-debug.apk`.
+The full debug APK lands at `app/build/outputs/apk/full/debug/app-full-debug.apk`. The demo
+counterpart is `app/build/outputs/apk/demo/debug/app-demo-debug.apk` after
+`./gradlew :app:assembleDemoDebug`.
 
 > **About the wrapper:** `gradle-wrapper.jar`, both wrapper scripts, and the wrapper properties are
 > checked in. The properties pin the Gradle distribution checksum, while CI validates the wrapper
@@ -124,6 +126,12 @@ gate. Both staging and non-staging release builds require either the gitignored
 `keystore.properties` values or all four `NOOP_RELEASE_*` environment variables.
 Repository workflows obtain a private staging identity from Actions secrets.
 
+The pinned AGP 8.13.2 / Gradle 8.14.5 toolchain compiles and targets API 36. A Play-labelled build
+must use `-PplayRelease`; `./gradlew :app:verifyPlayTargetSdk` exposes the same API-floor gate
+directly. Meeting that build-time target is not by itself a publication: Play policy, console, and
+review requirements still apply. Every release path, including `-PplayRelease`, remains fail-closed
+unless the private signing configuration above is present.
+
 Ordinary local debug builds still work without release secrets and use Gradle's
 per-machine debug identity. The tracked `fork-debug.keystore` is retained only as
 a historical artifact and is no longer referenced by Gradle or release workflows:
@@ -137,6 +145,16 @@ Export and verify an in-app backup before uninstalling the old app, then restore
 after installing the new build. Preserve and back up the private staging key;
 rotating or losing it prevents future in-place updates.
 
+Android `.noopbak` exports use the authenticated `NOOPBAK` v1 envelope: PBKDF2-
+HMAC-SHA256 (310,000 iterations) plus chunked AES-256-GCM. Manual exports ask for
+the passphrase each time. Opt-in folder backups store their user-chosen recovery
+passphrase only in Keystore-backed encrypted preferences and fail closed if it is
+missing; losing it makes those backups unrecoverable. Restore decrypts into private
+staging and applies the candidate on a cold database open with an atomic swap and
+automatic rollback if Room cannot open or migrate it. Legacy plaintext backups are
+import-only. The envelope is shared with Apple, but embedded Room/GRDB databases are
+platform-specific; WHOOP-format CSV is the portable transfer format.
+
 ---
 
 ## Project layout
@@ -148,7 +166,7 @@ android/
 ├── gradle.properties            # AndroidX on, JVM args
 ├── gradlew / gradlew.bat        # checked-in wrapper launchers
 ├── gradle/verification-metadata.xml # SHA-256 allowlist for plugins + dependencies
-├── gradle/wrapper/…             # checked-in Gradle 8.7 wrapper + distribution checksum
+├── gradle/wrapper/…             # checked-in Gradle 8.14.5 wrapper + distribution checksum
 └── app/
     ├── build.gradle.kts         # android{} config + dependencies + locking policy
     ├── gradle.lockfile          # exact resolved versions for every Android variant
@@ -222,7 +240,7 @@ phone **and** a WHOOP strap.
 
 **Build (phone or emulator):**
 
-- [ ] `./gradlew assembleDebug` compiles with no errors.
+- [ ] `./gradlew :app:assembleFullDebug` compiles with no errors.
 - [ ] App installs and launches to the main screen without crashing.
 - [ ] Dark NOOP theme renders (surfaceBase `#060A08`, accent `#18C98B`); no white flash on launch.
 - [ ] Navigation between screens works (Live / History / Support, etc.).

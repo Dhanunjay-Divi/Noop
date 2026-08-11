@@ -4,7 +4,6 @@ import android.content.Context
 import android.os.Build
 import android.os.ext.SdkExtensions
 import androidx.health.connect.client.HealthConnectClient
-import androidx.health.connect.client.permission.HealthPermission
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -29,7 +28,9 @@ internal object HealthConnectBackgroundPolicy {
     // connect-client predates HealthConnectFeatures, so use the equivalent platform extension gate.
     const val MIN_BACKGROUND_API = 35
     const val MIN_ANDROID_14_EXTENSION = 13
-    const val BACKGROUND_PERMISSION = HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND
+    // The library symbol is @RestrictTo(LIBRARY), so consumers must use the platform permission value
+    // declared in AndroidManifest.xml instead of reaching through Health Connect's private constant.
+    const val BACKGROUND_PERMISSION = "android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND"
 
     fun supportsBackground(apiLevel: Int, android14Extension: Int = 0): Boolean =
         apiLevel >= MIN_BACKGROUND_API ||
@@ -135,13 +136,13 @@ class HealthConnectSyncWorker(appContext: Context, params: WorkerParameters) :
 
         return try {
             val repository = WhoopRepository.from(applicationContext)
-            val summary = HealthConnectImporter.import(
+            val outcome = HealthConnectReconciler.reconcile(
                 context = applicationContext,
-                repo = repository,
+                repository = repository,
+                grantedPermissions = granted,
                 heightCm = ProfileStore.from(applicationContext).heightCm,
-                lookbackDays = HealthConnectImporter.AUTOMATIC_LOOKBACK_DAYS,
             )
-            if (summary.succeeded) {
+            if (outcome is HealthConnectReconcileResult.Success) {
                 NoopPrefs.setHcLastSync(applicationContext, System.currentTimeMillis())
                 // The worker may run with no Activity and no BLE foreground service, so neither normal
                 // widget producer is necessarily alive. Republish the newly-imported scores directly;

@@ -17,6 +17,7 @@ import StrandAnalytics
 /// The selection itself is NOT re-implemented here: `resolve` composes `TodayView.lastScoredRecoveryDay`
 /// (the #547 future-day guard included) and `TodayView.carriedCaption`, so Liquid and Classic cannot drift.
 /// This pins the presentation decision on top of them. Pure, so it needs no strap, no clock and no view.
+@MainActor
 final class LiquidChargeCarryTests: XCTestCase {
 
     private typealias Display = LiquidTodayView.ChargeDisplay

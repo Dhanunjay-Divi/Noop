@@ -1,5 +1,5 @@
 import SwiftUI
-import MarkdownUI
+@preconcurrency import MarkdownUI
 import StrandDesign
 
 /// The MarkdownUI theme for Coach replies.
@@ -10,7 +10,7 @@ import StrandDesign
 /// look, sized for a chat bubble: headings are capped near body size (a `#` must
 /// not shout inside a 560pt bubble), and tables get hairline borders.
 extension Theme {
-    static let strand = Theme()
+    @MainActor static let strand = Theme()
         // Base body text — mirrors StrandFont.body (15 / regular).
         .text {
             ForegroundColor(StrandPalette.textPrimary)

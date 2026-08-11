@@ -26,8 +26,12 @@ cp .env.example .env
 openssl rand -hex 32
 openssl rand -hex 32
 # Put those two different values into NOOP_API_TOKEN and NOOP_DB_PASSWORD.
+install -d -m 0700 secrets
+openssl rand -base64 48 > secrets/backup-passphrase.txt
+chmod 0600 secrets/backup-passphrase.txt
 docker compose up --build -d
 curl http://127.0.0.1:8080/healthz
+curl http://127.0.0.1:8080/readyz
 ```
 
 The dashboard is at `http://127.0.0.1:8080/`. Paste `NOOP_API_TOKEN` to
@@ -49,21 +53,32 @@ private. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md).
 | --- | --- | --- | --- |
 | `NOOP_API_TOKEN` | yes | none | At least 32 random bytes; authenticates full-data and social-admin routes |
 | `NOOP_DATABASE_URL` | in non-Compose deployments | none | PostgreSQL/TimescaleDB URL |
+| `NOOP_DB_NAME` | Compose only | `noop` | Database selected by the DB, API, and backup services; useful for a staged restore cutover |
 | `NOOP_MAX_REQUEST_BYTES` | no | `10485760` | Hard maximum sync body size |
 | `NOOP_DB_POOL_MIN_SIZE` | no | `1` | Minimum async database connections |
 | `NOOP_DB_POOL_MAX_SIZE` | no | `8` | Maximum async database connections |
-| `NOOP_RETENTION_DAYS` | no | `0` | `0` disables purging; positive values enable explicit retention runs |
+| `NOOP_RETENTION_DAYS` | no | `0` | `0` disables purging; positive values enable scheduled and explicit retention runs |
+| `NOOP_RETENTION_INTERVAL_HOURS` | no | `24` | Hours between automatic retention cycles when retention is enabled |
+| `NOOP_IDEMPOTENCY_REPLAY_GUARD_DAYS` | no | `30` | Days to retain non-biometric batch UUID/digest tombstones after data deletion |
+| `NOOP_RATE_LIMIT_REQUESTS_PER_MINUTE` | no | `120` | Per-process, per-Bearer-credential API request ceiling |
+| `NOOP_RATE_LIMIT_ORIGIN_REQUESTS_PER_MINUTE` | no | `300` | Per-process API request ceiling for each trusted direct peer/client address |
+| `NOOP_RATE_LIMIT_MAX_KEYS` | no | `10000` | Maximum in-memory limiter identities before new identities share a fail-closed overflow bucket |
 | `NOOP_DASHBOARD_ENABLED` | no | `true` | Serve the static dashboard |
 | `NOOP_PORT` | Compose only | `8080` | Loopback host port |
+| `NOOP_BACKUP_SECRET_FILE` | Compose only | `./secrets/backup-passphrase.txt` | Host path to an untracked file containing at least 32 random bytes |
+| `NOOP_BACKUP_INTERVAL_SECONDS` | no | `86400` | Seconds between encrypted PostgreSQL backups; one backup also runs at container start |
+| `NOOP_BACKUP_RETENTION_DAYS` | no | `30` | Age after which this backup job deletes only its own encrypted archives/manifests |
+| `NOOP_BACKUP_TMPFS_SIZE` | Compose only | `2g` | Memory-backed plaintext workspace ceiling for dump/restore; size above the largest compressed dump |
 
 Changing `NOOP_API_TOKEN` invalidates existing app/dashboard connections. Never
 commit `.env`, put the token in a URL, or send it in a bug report.
 
 ## API contract
 
-`GET /healthz` is the only route with no credential or capability and returns
-only `{"status":"ok"}`. Full-data sync/reads, data control, and social bootstrap
-routes require:
+`GET /healthz` is a process liveness probe and does not touch the database.
+`GET /readyz` executes a database query and returns HTTP 503 until storage is
+available. Both are public and reveal only a generic state. Full-data
+sync/reads, data control, and social bootstrap routes require:
 
 ```text
 Authorization: Bearer <NOOP_API_TOKEN>
@@ -84,6 +99,13 @@ The app uploads to `POST /v1/sync`. `batch_id` is the durable idempotency key;
 the optional `Idempotency-Key` header must contain that same UUID. A replay with
 identical normalized content returns `duplicate: true`; reusing the UUID for
 different content returns HTTP 409.
+
+Every `/v1` request is bounded in-process by its direct client address and, when
+present, a SHA-256 fingerprint of its Bearer credential. Plaintext tokens are
+not retained by the limiter. These limits protect one API process only: a
+multi-replica or internet deployment must also use a shared/distributed limit at
+its trusted reverse proxy. Do not accept client-supplied forwarding headers from
+untrusted peers.
 
 Sync is atomic: malformed or out-of-range records return HTTP 422 with their
 field/index path; the server never silently drops a sensor row and acknowledges
@@ -274,6 +296,14 @@ drained, while supported derived history is currently capped at ten years.
 - `DELETE /v1/devices/{id}` with `X-Noop-Confirm: DELETE <id>`
 - `POST /v1/admin/retention/run` with `X-Noop-Confirm: PURGE`
 
+When `NOOP_RETENTION_DAYS` is positive, the API also runs the same global purge
+on a bounded schedule. The first automatic cycle occurs after
+`NOOP_RETENTION_INTERVAL_HOURS`; the manual route remains available for an
+immediate, explicitly confirmed run. A failed scheduled cycle is logged and
+retried at the next interval without interrupting sync ingestion. PostgreSQL
+serializes retention cycles across API replicas with a transaction-scoped
+advisory lock; the in-memory test repository uses an equivalent async lock.
+
 ### Invitation-only Friends
 
 Friends is an optional local-server feature. Bootstrap is protected by
@@ -322,10 +352,23 @@ curl --fail-with-body \
   "http://127.0.0.1:8080/v1/devices/$NOOP_DEVICE_ID/export"
 ```
 
-Retention never runs just because the variable exists. Set a positive
-`NOOP_RETENTION_DAYS`, restart, then trigger it deliberately from the dashboard
-or authenticated endpoint. Purging also removes old idempotency receipts, so a
-client retaining older local rows can upload them again.
+Set a positive `NOOP_RETENTION_DAYS` and restart to enable scheduled retention;
+the authenticated endpoint remains available for an immediate confirmed run.
+When a retention run or explicit device deletion removes an idempotency receipt,
+the server retains only its batch UUID and canonical payload digest for
+`NOOP_IDEMPOTENCY_REPLAY_GUARD_DAYS`. An exact retry returns HTTP 410 instead of
+silently recreating deleted rows. The tombstone has no device identifier or
+biometric values and expires automatically. It cannot prevent a deliberately
+modified payload with a new identity, so local-to-server deletion is still not
+a two-way protocol tombstone.
+
+Compose also starts an encrypted backup worker. It performs a custom-format
+`pg_dump` at startup and on the configured interval, encrypts it with GnuPG
+AES-256 using the mounted secret file, publishes it atomically with a SHA-256
+manifest, and prunes only archives it owns. The worker fails before invoking
+`pg_dump` when the secret is missing, unreadable, empty, or shorter than 32
+bytes. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md) for off-host copies and the
+required disposable restore drill.
 
 ## Development and tests
 
@@ -353,3 +396,6 @@ database-constrained to `false`.
 Migration `003_friends.sql` adds invitation-only profiles, one-time invite and
 request state, canonical friendships, directional visibility, and blocks. Only
 credential/code digests are persisted.
+
+Migration `004_sync_tombstones.sql` adds the bounded, device-unlinked deletion
+ledger used to reject exact replay after idempotency receipts are removed.

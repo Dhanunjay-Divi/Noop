@@ -178442,6 +178442,150 @@
           }
         }
       }
+    },
+    "Ready to search": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bereit zum Suchen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listo para buscar"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prêt à rechercher"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pronto para pesquisar"
+          }
+        }
+      }
+    },
+    "Scanning starts only when you ask, and may show the system Bluetooth permission prompt.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Suche beginnt erst auf deine Anfrage und kann die Systemabfrage für die Bluetooth-Berechtigung anzeigen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La búsqueda solo comienza cuando tú lo solicitas y puede mostrar el permiso de Bluetooth del sistema."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La recherche ne démarre qu’à votre demande et peut afficher la demande d’autorisation Bluetooth du système."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A pesquisa só começa quando pedir e pode apresentar o pedido de permissão Bluetooth do sistema."
+          }
+        }
+      }
+    },
+    "Folder snapshots are standard unencrypted .noopbak ZIP files for compatibility with older NOOP and Android. Use Settings → Export encrypted backup when sharing a sensitive copy; NOOP never stores that passphrase, so unattended backups cannot use it.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ordner-Sicherungen sind unverschlüsselte .noopbak-Standard-ZIP-Dateien, damit sie mit älteren NOOP-Versionen und Android kompatibel bleiben. Verwende beim Teilen einer vertraulichen Kopie Einstellungen → Verschlüsselte Sicherung exportieren. NOOP speichert diese Passphrase nie, daher können unbeaufsichtigte Sicherungen sie nicht verwenden."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las copias de carpeta son archivos ZIP .noopbak estándar sin cifrar para mantener la compatibilidad con versiones anteriores de NOOP y Android. Al compartir una copia confidencial, usa Ajustes → Exportar copia cifrada. NOOP nunca guarda esa frase de contraseña, por lo que las copias desatendidas no pueden utilizarla."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les sauvegardes de dossier sont des fichiers ZIP .noopbak standard non chiffrés afin de rester compatibles avec les anciennes versions de NOOP et Android. Pour partager une copie sensible, utilisez Réglages → Exporter une sauvegarde chiffrée. NOOP ne conserve jamais cette phrase secrète ; les sauvegardes automatiques ne peuvent donc pas l’utiliser."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "As cópias da pasta são ficheiros ZIP .noopbak padrão não encriptados para manter a compatibilidade com versões anteriores do NOOP e Android. Ao partilhar uma cópia sensível, use Definições → Exportar cópia encriptada. O NOOP nunca guarda essa frase-passe, pelo que as cópias automáticas não a podem utilizar."
+          }
+        }
+      }
+    },
+    "Encrypted export protects the full backup with a passphrase using AES-256-GCM. The passphrase is never saved and cannot be recovered; this encrypted envelope currently imports only in NOOP on iPhone or Mac. Import also keeps compatibility with older unencrypted .noopbak, ZIP, and SQLite backups. It validates and stages without touching the open database; fully quit and reopen NOOP to apply it. Export CSV remains the portable Mac, iPhone, and Android data-transfer path. Folder and automatic backups are unencrypted because NOOP does not store their passphrase, so protect that folder with the storage provider's encryption.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der verschlüsselte Export schützt die vollständige Sicherung mit einer Passphrase und AES-256-GCM. Die Passphrase wird nie gespeichert und kann nicht wiederhergestellt werden; dieser verschlüsselte Container kann derzeit nur in NOOP auf iPhone oder Mac importiert werden. Der Import bleibt mit älteren unverschlüsselten .noopbak-, ZIP- und SQLite-Sicherungen kompatibel. Er validiert und stellt bereit, ohne die geöffnete Datenbank zu verändern; beende NOOP vollständig und öffne es erneut, um die Wiederherstellung anzuwenden. CSV exportieren bleibt der portable Übertragungsweg zwischen Mac, iPhone und Android. Ordner- und automatische Sicherungen sind unverschlüsselt, weil NOOP ihre Passphrase nicht speichert; schütze den Ordner daher mit der Verschlüsselung des Speicheranbieters."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La exportación cifrada protege la copia completa con una frase de contraseña mediante AES-256-GCM. La frase nunca se guarda ni se puede recuperar; actualmente este contenedor cifrado solo se importa en NOOP para iPhone o Mac. La importación también mantiene la compatibilidad con copias .noopbak, ZIP y SQLite antiguas sin cifrar. Valida y prepara la restauración sin tocar la base de datos abierta; cierra NOOP por completo y vuelve a abrirlo para aplicarla. Exportar CSV sigue siendo la vía portátil de transferencia entre Mac, iPhone y Android. Las copias de carpeta y automáticas no están cifradas porque NOOP no guarda su frase de contraseña, así que protege esa carpeta con el cifrado del proveedor de almacenamiento."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’exportation chiffrée protège la sauvegarde complète avec une phrase secrète et AES-256-GCM. La phrase secrète n’est jamais enregistrée et ne peut pas être récupérée ; cette enveloppe chiffrée ne s’importe actuellement que dans NOOP sur iPhone ou Mac. L’importation reste compatible avec les anciennes sauvegardes .noopbak, ZIP et SQLite non chiffrées. Elle valide et prépare la restauration sans toucher à la base ouverte ; quittez complètement NOOP puis rouvrez-le pour l’appliquer. L’export CSV reste la méthode portable de transfert entre Mac, iPhone et Android. Les sauvegardes de dossier et automatiques ne sont pas chiffrées, car NOOP ne conserve pas leur phrase secrète ; protégez donc ce dossier avec le chiffrement du fournisseur de stockage."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A exportação encriptada protege a cópia completa com uma frase-passe através de AES-256-GCM. A frase-passe nunca é guardada nem pode ser recuperada; atualmente este contentor encriptado só pode ser importado no NOOP no iPhone ou Mac. A importação mantém a compatibilidade com cópias .noopbak, ZIP e SQLite antigas não encriptadas. Valida e prepara a restauração sem tocar na base de dados aberta; feche completamente o NOOP e volte a abri-lo para a aplicar. Exportar CSV continua a ser o método portátil de transferência entre Mac, iPhone e Android. As cópias de pasta e automáticas não são encriptadas porque o NOOP não guarda a respetiva frase-passe; proteja essa pasta com a encriptação do fornecedor de armazenamento."
+          }
+        }
+      }
+    },
+    "Create backup passphrase": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Sicherungspassphrase erstellen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Crear frase de contraseña de la copia" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Créer la phrase secrète de sauvegarde" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Criar frase-passe da cópia" } }
+      }
+    },
+    "Backup passphrase": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Sicherungspassphrase" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Frase de contraseña de la copia" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Phrase secrète de sauvegarde" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Frase-passe da cópia" } }
+      }
+    },
+    "Confirm backup passphrase": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Sicherungspassphrase bestätigen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Confirmar frase de contraseña de la copia" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Confirmer la phrase secrète de sauvegarde" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Confirmar frase-passe da cópia" } }
+      }
+    },
+    "Leave this blank for an older or automatic unencrypted backup.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Lass dieses Feld bei einer älteren oder automatischen unverschlüsselten Sicherung leer." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Déjalo en blanco para una copia antigua o automática sin cifrar." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Laissez ce champ vide pour une ancienne sauvegarde ou une sauvegarde automatique non chiffrée." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Deixe em branco para uma cópia antiga ou automática não encriptada." } }
+      }
     }
   },
   "version": "1.0"

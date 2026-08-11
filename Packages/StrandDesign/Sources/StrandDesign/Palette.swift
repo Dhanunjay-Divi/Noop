@@ -120,7 +120,23 @@ public enum StrandPalette {
     // DomainTheme worlds) branch on this — so flipping it re-colours every gauge/chart/scale to the
     // classic red→green readiness scale, in BOTH light and dark, with NO call-site changes. Chrome
     // (surfaces, text, accent) is never touched.
-    public static var chartStyle: ChartStyle = .titanium
+    // This process-wide preference is read from drawing code on multiple executors. Keep the tiny value
+    // behind an explicit lock rather than actor-isolating the whole palette (whose pure color tokens are
+    // intentionally usable from any rendering context).
+    private static let chartStyleLock = NSLock()
+    nonisolated(unsafe) private static var storedChartStyle: ChartStyle = .titanium
+    public static var chartStyle: ChartStyle {
+        get {
+            chartStyleLock.lock()
+            defer { chartStyleLock.unlock() }
+            return storedChartStyle
+        }
+        set {
+            chartStyleLock.lock()
+            storedChartStyle = newValue
+            chartStyleLock.unlock()
+        }
+    }
     @inline(__always) static var isClassic: Bool { chartStyle == .classic }
 
     // MARK: Classic (throwback) data ramps — the recognizable health-app scale. Light/dark tuned.
@@ -425,7 +441,9 @@ public enum StrandPalette {
 // the cache miss (and re-resolve) exactly when the scheme changes, so the output stays byte-identical to
 // calling `rgbaComponents` directly. Bounded so a pathological caller can't grow it without limit.
 enum ColorComponentCache {
-    private static var store: [Key: (r: Double, g: Double, b: Double, a: Double)] = [:]
+    // All access is serialized by `lock`; the annotation documents that synchronization to Swift's
+    // static concurrency checker without moving color resolution onto the main actor.
+    nonisolated(unsafe) private static var store: [Key: (r: Double, g: Double, b: Double, a: Double)] = [:]
     private static let lock = NSLock()
 
     private struct Key: Hashable {

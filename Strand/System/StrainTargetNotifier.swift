@@ -47,8 +47,10 @@ enum StrainTargetNotifier {
     /// Ask up front (called when the user enables the nudge) so the system dialog appears at a
     /// predictable moment, not on the first crossing. BatteryNotifier idiom.
     static func requestAuthorization() {
-        UNUserNotificationCenter.current()
-            .requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        Task { @MainActor in
+            _ = try? await UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .sound])
+        }
     }
 
     /// Run the policy against the resolved today-row's values and post at most one notification per day.
@@ -66,17 +68,24 @@ enum StrainTargetNotifier {
                                               today: day) else { return }
         // Non-nil: shouldNotify above required a non-nil target before returning true.
         let copy = StrainTargetPolicy.copy(target: target21!)
-        let center = UNUserNotificationCenter.current()
-        // Authorization is requested once via requestAuthorization() when the toggle is enabled; here we
-        // only check status (no second system prompt) — the BatteryNotifier idiom.
-        center.getNotificationSettings { settings in
+        Task { @MainActor in
+            let center = UNUserNotificationCenter.current()
+            // Authorization is requested once via requestAuthorization() when the toggle is enabled; here we
+            // only check status (no second system prompt) — the BatteryNotifier idiom.
+            let settings = await center.notificationSettings()
             guard settings.authorizationStatus == .authorized else { return }
             let content = UNMutableNotificationContent()
             content.title = copy.title
             content.body = copy.body
             content.sound = .default
-            center.add(UNNotificationRequest(identifier: "strain-target", content: content, trigger: nil))
-            UserDefaults.standard.set(day, forKey: lastDayKey)
+            do {
+                try await center.add(
+                    UNNotificationRequest(identifier: "strain-target", content: content, trigger: nil)
+                )
+                UserDefaults.standard.set(day, forKey: lastDayKey)
+            } catch {
+                // Keep the day unset so a later analytics pass can retry after a transient add failure.
+            }
         }
     }
 }

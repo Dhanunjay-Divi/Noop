@@ -40,9 +40,11 @@ public enum PendingDatabaseRestore {
     private static let candidatePrefix = ".noop-pending-restore-"
     private static let stagingIOLock = NSLock()
     private static let processAttemptLock = NSLock()
-    private static var processAttemptedPaths: Set<String> = []
-    private static var processCompletedPaths: Set<String> = []
-    private static var processFailures: [String: String] = [:]
+    // Every read and mutation of these process-wide registries is serialized by `processAttemptLock`.
+    // `nonisolated(unsafe)` teaches Swift's static checker about that explicit synchronization contract.
+    nonisolated(unsafe) private static var processAttemptedPaths: Set<String> = []
+    nonisolated(unsafe) private static var processCompletedPaths: Set<String> = []
+    nonisolated(unsafe) private static var processFailures: [String: String] = [:]
 
     /// Normalize `sourcePath` (including legacy `-wal`/`-shm` siblings) into a private, standalone
     /// candidate and publish the pending manifest last. Nothing at `databasePath` is opened, checkpointed,

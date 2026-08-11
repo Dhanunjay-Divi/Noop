@@ -1,6 +1,6 @@
 import Foundation
 
-public struct DecodedField: Codable, Equatable {
+public struct DecodedField: Codable, Equatable, Sendable {
     public let off: Int
     public let len: Int
     public let name: String
@@ -10,7 +10,7 @@ public struct DecodedField: Codable, Equatable {
     public let note: String?
 }
 
-public struct ParsedFrame: Codable, Equatable {
+public struct ParsedFrame: Codable, Equatable, Sendable {
     public let ok: Bool
     public let typeName: String
     public let seq: Int?
@@ -860,7 +860,7 @@ private func hexFrameSlice(_ f: [UInt8], _ start: Int, _ end: Int) -> String {
     return f[start..<end].map { String(format: "%02x", $0) }.joined()
 }
 
-// Post-hook registry (populated in PostHooks.swift by Task B7).
+// Immutable post-hook registry (built in PostHooks.swift by Task B7).
 // name -> (FieldBuilder, frame, length, schema) -> Void
-typealias PostHook = (FieldBuilder, [UInt8], Int?, Schema) -> Void
-var postHooks: [String: PostHook] = [:]
+typealias PostHook = @Sendable (FieldBuilder, [UInt8], Int?, Schema) -> Void
+let postHooks: [String: PostHook] = makePostHooks()

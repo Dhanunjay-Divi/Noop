@@ -5,8 +5,7 @@ import XCTest
 @testable import Strand
 
 final class OuraOAuthTests: XCTestCase {
-    private let creds = OuraCredentials(clientId: "cid", clientSecret: "sec",
-                                        redirectURI: "noop://oura/callback")
+    private let creds = OuraCredentials(clientId: "cid", redirectURI: "noop://oura/callback")
 
     func testAuthorizeURLHasRequiredParams() throws {
         let url = OuraOAuth.authorizeURL(credentials: creds, state: "xyz")
@@ -14,7 +13,7 @@ final class OuraOAuthTests: XCTestCase {
         XCTAssertEqual(comps.host, "cloud.ouraring.com")
         XCTAssertEqual(comps.path, "/oauth/authorize")
         let q = Dictionary(uniqueKeysWithValues: (comps.queryItems ?? []).map { ($0.name, $0.value) })
-        XCTAssertEqual(q["response_type"], "code")
+        XCTAssertEqual(q["response_type"], "token")
         XCTAssertEqual(q["client_id"], "cid")
         XCTAssertEqual(q["redirect_uri"], "noop://oura/callback")
         XCTAssertEqual(q["state"], "xyz")
@@ -25,48 +24,43 @@ final class OuraOAuthTests: XCTestCase {
         XCTAssertFalse(OuraOAuth.scopes.contains("spo2Daily"))
     }
 
-    func testTokenExchangeRequestIsFormPost() throws {
-        let req = OuraOAuth.tokenExchangeRequest(credentials: creds, code: "the-code")
-        XCTAssertEqual(req.url?.absoluteString, "https://api.ouraring.com/oauth/token")
-        XCTAssertEqual(req.httpMethod, "POST")
-        XCTAssertEqual(req.value(forHTTPHeaderField: "Content-Type"), "application/x-www-form-urlencoded")
-        let body = String(data: req.httpBody ?? Data(), encoding: .utf8) ?? ""
-        XCTAssertTrue(body.contains("grant_type=authorization_code"))
-        XCTAssertTrue(body.contains("code=the-code"))
-        XCTAssertTrue(body.contains("client_id=cid"))
-        XCTAssertTrue(body.contains("client_secret=sec"))
-    }
-
-    func testParseTokenResponseComputesExpiry() throws {
+    func testCallbackFragmentValidatesStateAndComputesExpiry() throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let json = #"{"access_token":"acc","refresh_token":"ref","expires_in":86400}"#.data(using: .utf8)!
-        let tokens = try OuraOAuth.parseTokenResponse(json, now: now)
+        let url = try XCTUnwrap(URL(string:
+            "noop://oura/callback#access_token=acc&token_type=bearer&expires_in=86400&state=xyz"))
+        let tokens = try OuraOAuth.parseCallback(url, expectedState: "xyz", now: now)
         XCTAssertEqual(tokens.accessToken, "acc")
-        XCTAssertEqual(tokens.refreshToken, "ref")
+        XCTAssertNil(tokens.refreshToken)
         XCTAssertEqual(tokens.expiresAt, now.addingTimeInterval(86400))
     }
 
-    func testParseTokenResponseDefaultsExpiryWhenExpiresInAbsent() throws {
+    func testCallbackQueryDefaultsExpiryWhenExpiresInAbsent() throws {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let json = #"{"access_token":"acc"}"#.data(using: .utf8)!
-        let tokens = try OuraOAuth.parseTokenResponse(json, now: now)
+        let url = try XCTUnwrap(URL(string: "noop://oura/callback?access_token=acc&state=xyz"))
+        let tokens = try OuraOAuth.parseCallback(url, expectedState: "xyz", now: now)
         XCTAssertEqual(tokens.accessToken, "acc")
         XCTAssertNil(tokens.refreshToken)
         XCTAssertEqual(tokens.expiresAt, now.addingTimeInterval(2_592_000))
     }
 
-    func testParseTokenResponseThrowsOnMissingAccessToken() {
-        let json = #"{"error":"invalid_grant"}"#.data(using: .utf8)!
-        XCTAssertThrowsError(try OuraOAuth.parseTokenResponse(json, now: Date()))
+    func testCallbackRejectsMissingTokenStateMismatchAndDuplicates() throws {
+        XCTAssertThrowsError(try OuraOAuth.parseCallback(
+            XCTUnwrap(URL(string: "noop://oura/callback?error=access_denied&state=xyz")),
+            expectedState: "xyz", now: Date()))
+        XCTAssertThrowsError(try OuraOAuth.parseCallback(
+            XCTUnwrap(URL(string: "noop://oura/callback#access_token=acc&state=wrong")),
+            expectedState: "xyz", now: Date()))
+        XCTAssertThrowsError(try OuraOAuth.parseCallback(
+            XCTUnwrap(URL(string: "noop://oura/callback?state=xyz#access_token=a&access_token=b")),
+            expectedState: "xyz", now: Date()))
     }
 
-    func testTokenExchangeRequestEscapesReservedCharsInSecret() {
-        let c = OuraCredentials(clientId: "cid", clientSecret: "aB+cd/eF12==", redirectURI: "noop://oura/callback")
-        let req = OuraOAuth.tokenExchangeRequest(credentials: c, code: "x+y")
-        let body = String(data: req.httpBody ?? Data(), encoding: .utf8) ?? ""
-        XCTAssertTrue(body.contains("client_secret=aB%2Bcd%2FeF12%3D%3D"))   // + -> %2B, / -> %2F, = -> %3D
-        XCTAssertTrue(body.contains("code=x%2By"))                            // + escaped, not left literal
-        XCTAssertFalse(body.contains("aB+cd"))                                // no raw '+'
+    func testNoConfidentialSecretOrTokenExchangeExistsInPublicClientFlow() throws {
+        let source = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Strand/Oura/OuraOAuth.swift"), encoding: .utf8)
+        XCTAssertFalse(source.contains("client_secret"))
+        XCTAssertFalse(source.contains("oauth/token"))
     }
 }
 #endif // OURA_CLOUD_IMPORT

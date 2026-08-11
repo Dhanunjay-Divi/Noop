@@ -2104,6 +2104,10 @@ public enum SleepStager {
         public let stage: String
         public let cleanBeats: Int
         public let rmssd: Double?
+        /// Integrity classification of the range-valid source beats. An over-count verdict forces
+        /// `rmssd` to nil: publishing a plausible-looking value is less safe than withholding it while
+        /// live and historical streams may contain the same beats under different timestamps (#1118).
+        public let coverageVerdict: HRVAnalyzer.RrCoverageVerdict
     }
 
     /// Mean RMSSD over 5-min tumbling windows across the session (ms), or nil.
@@ -2127,7 +2131,17 @@ public enum SleepStager {
         var out: [HrvWindow] = []
         var t = start
         while t < end {
-            let bucket = seg.filter { $0.ts >= t && $0.ts < t + windowS }.map { Double($0.rrMs) }
+            let bucketRows = seg.filter {
+                $0.ts >= t && $0.ts < t + windowS
+                    && Double($0.rrMs) >= HRVAnalyzer.rrMinMs
+                    && Double($0.rrMs) <= HRVAnalyzer.rrMaxMs
+            }
+            let bucket = bucketRows.map { Double($0.rrMs) }
+            let bucketTs = bucketRows.map(\.ts)
+            let coverage = HRVAnalyzer.rrCoverage(tsSec: bucketTs, rrMs: bucket)
+            let collapsedCoverage = HRVAnalyzer.collapsedCoverage(tsSec: bucketTs, rrMs: bucket)
+            let coverageVerdict = HRVAnalyzer.classifyCoverage(
+                coverage: coverage, collapsed: collapsedCoverage)
             // Full clean (range + Malik ectopic rejection), not just range — matches the
             // analyze() pipeline. The 0x2A37 RR on a WHOOP 5/MG is PPG-derived and noisier
             // than a 4.0's; rMSSD is built from SUCCESSIVE differences, so an un-rejected
@@ -2135,10 +2149,14 @@ public enum SleepStager {
             // #204/#195: gap-aware — a successive difference straddling a dropped beat is skipped so a
             // removed out-of-range/ectopic beat can't splice its neighbours into a spurious delta.
             let cleaned = HRVAnalyzer.cleanRRGapAware(bucket)
-            let rmssd: Double? = (cleaned.nn.count >= 2) ? HRVAnalyzer.rmssdGapAware(cleaned.nn, cleaned.contiguous) : nil
+            let rmssd: Double? = HRVAnalyzer.beatSpreadIsTrustworthy(coverageVerdict)
+                && cleaned.nn.count >= 2
+                ? HRVAnalyzer.rmssdGapAware(cleaned.nn, cleaned.contiguous)
+                : nil
             let center = t + windowS / 2
             let stage = stages.first { center >= $0.start && center < $0.end }?.stage ?? "?"
-            out.append(HrvWindow(startTs: t, stage: stage, cleanBeats: cleaned.nn.count, rmssd: rmssd))
+            out.append(HrvWindow(startTs: t, stage: stage, cleanBeats: cleaned.nn.count,
+                                 rmssd: rmssd, coverageVerdict: coverageVerdict))
             t += windowS
         }
         return out

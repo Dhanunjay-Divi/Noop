@@ -479,6 +479,13 @@ public final class BLEManager: NSObject, ObservableObject {
     static let disHwRevChar     = CBUUID(string: "2A27") // Hardware Revision String
 
     static let restoreID = "com.openwhoop.ble.central"
+    /// Explicit local proof that the user has asked NOOP to use Bluetooth at least once. CoreBluetooth can
+    /// present the system permission sheet as soon as a central is constructed, so a fresh install must not
+    /// create one while Terms/onboarding are still explaining why Bluetooth is needed.
+    private static let bluetoothIntentKey = "noop.bluetooth.userPrimed"
+    /// A deliberate device removal must beat the legacy `lastSyncedAt` migration signal below; otherwise an
+    /// app that once connected would recreate its central and begin scanning again after the user removed it.
+    private static let bluetoothReleasedKey = "noop.bluetooth.explicitlyReleased"
 
     // MARK: Published state
     public let state: LiveState
@@ -720,6 +727,10 @@ public final class BLEManager: NSObject, ObservableObject {
 
     // MARK: CoreBluetooth
     private var central: CBCentralManager!
+    /// A user connect requested while CoreBluetooth is still moving from `.unknown` to `.poweredOn`.
+    /// Consumed exactly once by `centralManagerDidUpdateState` so the chosen family is not replaced by a
+    /// default system reconnect after lazy central construction.
+    private var pendingConnectModel: WhoopModel?
     private var peripheral: CBPeripheral?
     /// Multi-WHOOP: when non-nil, the scan/discover path connects ONLY to the peripheral whose
     /// `identifier == preferredPeripheralUUID` and ignores every other discovered WHOOP. When nil
@@ -915,11 +926,9 @@ public final class BLEManager: NSObject, ObservableObject {
         state.lastSyncedAt = UserDefaults.standard.object(forKey: "lastSyncedAt") as? Double
         // Restore identifier + background-capable central (foundation for M3 state restoration).
         #if os(iOS)
-        // iOS background state preservation/restoration: the restore identifier is what makes
-        // CoreBluetooth relaunch the app into the background and deliver willRestoreState after
-        // a suspend-then-jettison. Without it, willRestoreState is never called.
-        central = CBCentralManager(delegate: self, queue: .main,
-                                   options: [CBCentralManagerOptionRestoreIdentifierKey: BLEManager.restoreID])
+        // Returning users retain restoration. Fresh installs do not construct CoreBluetooth until an
+        // explicit Connect/Scan gesture, so the system sheet can never precede NOOP's rationale.
+        if Self.shouldResumeBluetoothRuntime { activateCentralIfNeeded(recordUserIntent: false) }
         #else
         // Strand (macOS desktop): no state-restoration identifier (iOS background feature).
         central = CBCentralManager(delegate: self, queue: .main)
@@ -1044,11 +1053,10 @@ public final class BLEManager: NSObject, ObservableObject {
         self.collector = collector
         super.init()
         state.lastSyncedAt = UserDefaults.standard.object(forKey: "lastSyncedAt") as? Double
-        // Restore identifier + background-capable central (mirrors the production initializer
-        // so a restored manager matches by identifier; only exercised by tests/previews).
+        // Tests/previews remain inert on iOS until they exercise a connect API. This also makes the
+        // fresh-install consent contract deterministic in unit tests.
         #if os(iOS)
-        central = CBCentralManager(delegate: self, queue: .main,
-                                   options: [CBCentralManagerOptionRestoreIdentifierKey: BLEManager.restoreID])
+        central = nil
         #else
         // Strand (macOS desktop): no state-restoration identifier (iOS background feature).
         central = CBCentralManager(delegate: self, queue: .main)
@@ -1060,6 +1068,34 @@ public final class BLEManager: NSObject, ObservableObject {
     }
 
     // MARK: Public API
+
+    /// Migration policy for builds that predate `bluetoothIntentKey`: a recorded successful sync proves the
+    /// user already connected a strap. A later explicit removal is authoritative and disables auto-resume.
+    private static var shouldResumeBluetoothRuntime: Bool {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: bluetoothReleasedKey) else { return false }
+        return defaults.bool(forKey: bluetoothIntentKey)
+            || defaults.object(forKey: "lastSyncedAt") != nil
+    }
+
+    /// The single central-construction point. On iOS callers are either a returning-user restoration path or
+    /// an explicit user action. macOS keeps its historical eager construction in the initializer.
+    private func activateCentralIfNeeded(recordUserIntent: Bool) {
+        if recordUserIntent {
+            UserDefaults.standard.set(true, forKey: Self.bluetoothIntentKey)
+            UserDefaults.standard.set(false, forKey: Self.bluetoothReleasedKey)
+        }
+        guard central == nil else { return }
+        #if os(iOS)
+        central = CBCentralManager(
+            delegate: self,
+            queue: .main,
+            options: [CBCentralManagerOptionRestoreIdentifierKey: BLEManager.restoreID]
+        )
+        #else
+        central = CBCentralManager(delegate: self, queue: .main)
+        #endif
+    }
 
     /// USER-initiated connect (the Connect button, the scan flow, Add-a-WHOOP). The ONLY entry that
     /// re-arms a bond-loop give-up: a user gesture is an explicit "try again", so the streak + pause
@@ -1076,6 +1112,8 @@ public final class BLEManager: NSObject, ObservableObject {
             autoReconnectPausedForBondLoop = false
             bondLoopPausedAt = nil
         }
+        activateCentralIfNeeded(recordUserIntent: true)
+        if central.state != .poweredOn { pendingConnectModel = model }
         connectCore(model: model)
     }
 
@@ -1086,6 +1124,7 @@ public final class BLEManager: NSObject, ObservableObject {
     /// path schedules nothing afterwards, so the hammer loop cannot restart. A genuine bond still fully
     /// resets via the didWriteValueFor path, so a strap freed since the give-up self-heals.
     func connectFromSystem(model: WhoopModel = .persisted) {
+        guard central != nil else { return }
         connectCore(model: model)
     }
 
@@ -1109,10 +1148,15 @@ public final class BLEManager: NSObject, ObservableObject {
         // the GET_CLOCK correlation flow untouched. Re-applied after bootstrapStore builds the
         // collector so whichever runs last wins.
         configureCollectorFamily()
+        guard let central else {
+            log("Bluetooth has not been enabled in NOOP yet; waiting for an explicit Connect action")
+            return
+        }
         guard central.state == .poweredOn else {
             log("Bluetooth not powered on (state=\(central.state.rawValue)); cannot scan yet")
             return
         }
+        pendingConnectModel = nil
         // Reuse the already-held peripheral ONLY if it's the strap we're pinned to. Without this guard a
         // multi-WHOOP switch attached straight back to the previously-held strap, ignoring the new active
         // device (registry said B, radio stayed on A). No pin (single-WHOOP) → always true, unchanged.
@@ -1181,10 +1225,11 @@ public final class BLEManager: NSObject, ObservableObject {
         readoptingTo = nil   // #52: a clean teardown abandons any in-flight pin handoff
         standardHRFallback = false
         state.standardHRMode = nil
+        pendingConnectModel = nil
         if let p = peripheral {
-            central.cancelPeripheralConnection(p)
+            central?.cancelPeripheralConnection(p)
         }
-        central.stopScan()
+        central?.stopScan()
     }
 
     /// #78: fully RELEASE a strap when the user removes it from the Devices screen. Archiving the registry
@@ -1206,7 +1251,7 @@ public final class BLEManager: NSObject, ObservableObject {
         if target == nil || restoredPeripheral?.identifier == target { restoredPeripheral = nil }
         // Drop the live BLE link so the strap is free to enter pairing mode.
         if isCurrent, let p = peripheral {
-            central.cancelPeripheralConnection(p)
+            central?.cancelPeripheralConnection(p)
             peripheral = nil
             resetCharacteristics()
             state.connected = false
@@ -1220,7 +1265,12 @@ public final class BLEManager: NSObject, ObservableObject {
         bondGiveUp.reset()
         autoReconnectPausedForBondLoop = false
         bondLoopPausedAt = nil
-        central.stopScan()
+        pendingConnectModel = nil
+        central?.stopScan()
+        if isCurrent {
+            UserDefaults.standard.removeObject(forKey: Self.bluetoothIntentKey)
+            UserDefaults.standard.set(true, forKey: Self.bluetoothReleasedKey)
+        }
         log("Device removed — released the strap: stopped auto-reconnect, dropped the link, cleared targeting. Put it in pairing mode (blue LEDs) to re-pair if you want it back. (#78)")
     }
 
@@ -1256,7 +1306,7 @@ public final class BLEManager: NSObject, ObservableObject {
     /// Minimum time since the pause tripped (or since the last probe) before another salvage probe may
     /// fire. 10 minutes: long enough that a still-held strap sees a handful of bounded attempts per day,
     /// short enough that a strap the user freed reconnects on the next natural app open.
-    static let bondLoopSalvageFloorSeconds: TimeInterval = 10 * 60
+    nonisolated static let bondLoopSalvageFloorSeconds: TimeInterval = 10 * 60
 
     /// Pure gate for the one-shot bond-loop salvage probe: probe ONLY while the pause is latched, with no
     /// live link, no user teardown in force, and at least `bondLoopSalvageFloorSeconds` since the pause
@@ -1419,13 +1469,17 @@ public final class BLEManager: NSObject, ObservableObject {
     /// The wizard MUST call `stopWhoopScan()` before any normal connect resumes — this mode owns the
     /// central while active. No-op-to-the-connect-path: it never touches `peripheral`/bond state.
     public func scanForWhoops() {
+        // Mark present mode before constructing the central: its asynchronous poweredOn callback then resumes
+        // this exact user-requested scan instead of taking the default auto-connect branch.
+        isPresentingScan = true
+        pendingConnectModel = nil
+        discoveredWhoops = []
+        activateCentralIfNeeded(recordUserIntent: true)
         guard central.state == .poweredOn else {
             log("Add-a-WHOOP scan: Bluetooth not powered on (state=\(central.state.rawValue))")
             return
         }
         cancelScanFallback()            // no family-rotation timer should fire during a present-scan
-        isPresentingScan = true
-        discoveredWhoops = []           // fresh list each time the wizard opens the scan
         central.stopScan()
         // Allow duplicates so the wizard's RSSI/signal readout updates as straps move.
         central.scanForPeripherals(
@@ -1440,7 +1494,7 @@ public final class BLEManager: NSObject, ObservableObject {
     public func stopWhoopScan() {
         guard isPresentingScan else { return }
         isPresentingScan = false
-        central.stopScan()
+        central?.stopScan()
         log("Add-a-WHOOP scan: stopped")
     }
 
@@ -3626,6 +3680,19 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
             } else {
                 discoverPrimaryServices(on: p)
             }
+        } else if isPresentingScan {
+            // Lazy construction was triggered by the Add-device screen. Resume the explicit discovery mode,
+            // never the normal first-device auto-connect path.
+            cancelScanFallback()
+            central.stopScan()
+            central.scanForPeripherals(
+                withServices: [selectedModel.scanService],
+                options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+            )
+            log("Add-a-WHOOP scan: presenting nearby \(selectedModel.displayName) straps")
+        } else if let requestedModel = pendingConnectModel {
+            pendingConnectModel = nil
+            connectFromSystem(model: requestedModel)
         } else {
             // #78 hole-2: poweredOn is SYSTEM-initiated (every Bluetooth toggle / bluetoothd restart
             // lands here), so it must not reset a latched bond-loop give-up - it gets ONE bounded
@@ -3990,6 +4057,7 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
     /// Stores the restored peripheral and — if already connected — immediately
     /// re-discovers services so `cmdCharacteristic` is re-acquired and
     /// notifications are re-routed without user interaction.
+    #if os(iOS)
     public func centralManager(_ central: CBCentralManager,
                                willRestoreState dict: [String: Any]) {
         guard let peripherals = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral],
@@ -4044,6 +4112,7 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
             if central.state == .poweredOn { central.connect(p, options: nil) }
         }
     }
+    #endif
 }
 
 // MARK: - CBPeripheralDelegate

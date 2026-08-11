@@ -11,13 +11,14 @@ import UserNotifications
 ///
 /// Cross-platform (iOS + macOS). Register once at launch:
 /// `UNUserNotificationCenter.current().delegate = NotificationPresenter.shared`.
+@MainActor
 final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
 
     static let shared = NotificationPresenter()
 
     private override init() { super.init() }
 
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
@@ -27,7 +28,7 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
 
     /// Route a tapped review reminder into the relevant top-level screen. The bridge persists first,
     /// which is essential during a cold launch: SwiftUI may not have mounted RootView/RootTabView yet.
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void

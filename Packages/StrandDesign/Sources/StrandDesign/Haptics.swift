@@ -23,6 +23,7 @@ public enum StrandHaptic {
     // watchOS has no UIKit feedback generators; the Taptic engine is driven through WatchKit's
     // `WKHapticType`. Map our vocabulary onto the closest watch haptics so the breathing / interval
     // features (which depend on a real tactile cue) actually buzz on the wrist.
+    @MainActor
     private func fire() {
         let device = WKInterfaceDevice.current()
         switch self {
@@ -36,6 +37,7 @@ public enum StrandHaptic {
     #elseif canImport(UIKit)
     // Generators are cheap to make; UIKit pools the engine. We don't retain selection
     // generators (tab/pill taps are bursty).
+    @MainActor
     private func fire() {
         switch self {
         case .selection: UISelectionFeedbackGenerator().selectionChanged()
@@ -48,6 +50,7 @@ public enum StrandHaptic {
     #endif
 
     /// Fire this haptic now. No-op on macOS.
+    @MainActor
     public func play() {
         #if os(watchOS)
         fire()

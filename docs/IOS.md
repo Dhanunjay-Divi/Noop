@@ -88,6 +88,34 @@ below.
 > Skip step 1 and the build still works under the default `com.noopapp` identifiers — fine if this is
 > the only NOOP install on your device.
 
+### Signed release and upgrade gate
+
+A successful compile is not release evidence. Before sharing a TestFlight/App Store/development-team
+archive, export the signed `.app` and run:
+
+```bash
+bash Tools/verify-ios-release-contract.sh /path/to/New/NOOP.app /path/to/Previous/NOOP.app
+```
+
+The first artifact can omit the second argument. Every later release must compare against the last
+installed production artifact. The gate verifies the actual code signature—not only `project.yml`—for
+HealthKit, HealthKit background delivery, and the shared App Group across the app, widget, Watch app,
+and complication. It also requires each process's privacy manifest and the declared Bluetooth,
+location, and fetch background modes.
+
+Most importantly, the upgrade comparison fails if the app bundle identifier, App Group, nested
+extension identifiers, or monotonically increasing build number changed. iOS keys the Application
+Support database sandbox to the signed app identity; changing `BUNDLE_ID_PREFIX` produces a second app
+with a different empty container rather than upgrading the existing install. Choose one production
+prefix, keep it for the lifetime of that release channel, install the new build over the old one, and
+confirm the previous dashboard/history remains. Before any intentional signing-team or identifier
+transition, export and verify a `.noopbak`; that is a migration event, not a routine update.
+
+The unsigned community IPA is a separate, capability-limited lane. Its preparation script verifies
+that the replaceable capability template contains HealthKit, background delivery, matching app/widget
+groups, and privacy manifests, but the user's sideloader may still strip capabilities. The Test Centre
+report's `capabilities` block records what the installed build can actually access.
+
 > ℹ️ **Cross-platform engineering lives in [`CROSS_PLATFORM.md`](CROSS_PLATFORM.md)** — the shared-code
 > boundary across the macOS / iOS / Android clients, the `Platform.swift` shim convention, the
 > Swift↔Kotlin parity discipline, and the playbook for adding a feature across all three. Read that

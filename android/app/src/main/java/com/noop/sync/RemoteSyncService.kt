@@ -187,8 +187,10 @@ object RemoteSyncService {
         }
     }
 
-    private fun safeError(error: Throwable): String =
-        (error.message ?: "Unknown error").take(350)
+    private fun safeError(error: Throwable): String = when (error) {
+        is RemoteSyncException -> error.message ?: "The sync request failed."
+        else -> "An unexpected sync failure occurred."
+    }
 }
 
 /** Every first-party namespace with user-owned data that the v1 API understands. */

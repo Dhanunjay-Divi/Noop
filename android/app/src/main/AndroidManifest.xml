@@ -41,6 +41,7 @@
          before a GPS workout starts (see rememberRequestLocation, #101) — NOT for BLE, which stays
          opted out of location via neverForLocation above. Capping this at API 30 made GPS workouts
          crash on Android 12+ because the permission could never be held. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <!-- Keep the BLE link alive while collecting/offloading in the background. -->
@@ -312,6 +313,18 @@
              silently drop the user's wake. -->
         <receiver
             android:name="com.noop.alarm.SmartAlarmBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Restore only a previously paired, user-kept WHOOP connection after reboot. The receiver
+             never enables realtime HR; it starts the same low-rate connected-device FGS already gated
+             by Settings → Keep connected in the background. -->
+        <receiver
+            android:name="com.noop.ble.WhoopReconnectBootReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

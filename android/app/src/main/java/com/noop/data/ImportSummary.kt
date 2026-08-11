@@ -18,12 +18,35 @@ data class ImportSummary(
     val message: String,
     /** Distinguishes a valid zero-row import from a read/save failure. */
     val succeeded: Boolean = true,
+    /** Health Connect record types actually attempted (ungranted types are not attempted). */
+    val recordTypesAttempted: Int = 0,
+    /** Attempted Health Connect record types whose complete paginated read succeeded. */
+    val recordTypesSucceeded: Int = 0,
+    /** Attempted Health Connect record types whose read failed. Partial rows are never counted here. */
+    val recordTypesFailed: Int = 0,
 ) {
     val totalRows: Int get() = counts.values.sum()
 
     companion object {
         /** A failed import carrying a reason. */
-        fun failure(source: String, reason: String) =
-            ImportSummary(source = source, counts = emptyMap(), message = reason, succeeded = false)
+        fun failure(
+            source: String,
+            reason: String,
+            recordTypesAttempted: Int = 0,
+            recordTypesSucceeded: Int = 0,
+            recordTypesFailed: Int = 0,
+        ) = ImportSummary(
+            source = source,
+            counts = emptyMap(),
+            message = reason,
+            succeeded = false,
+            recordTypesAttempted = recordTypesAttempted,
+            recordTypesSucceeded = recordTypesSucceeded,
+            recordTypesFailed = recordTypesFailed,
+        )
     }
 }
+
+/** A coroutine completing normally is not enough: importers return explicit failure summaries. */
+internal fun importCompletedSuccessfully(result: Result<ImportSummary>): Boolean =
+    result.getOrNull()?.succeeded == true

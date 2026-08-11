@@ -617,10 +617,11 @@ object IntelligenceEngine {
                 val verdict = HrvAnalyzer.classifyCoverage(covVal, colCovVal)
                 val accVal = HrvAnalyzer.beatAccurateFraction(ts, sleepRr)
                 val acc = String.format(java.util.Locale.US, "%.2f", accVal)
-                val sdnnField =
-                    if (HrvAnalyzer.beatSpreadIsTrustworthy(verdict) &&
-                        HrvAnalyzer.beatValuesAreTrustworthy(accVal)) "${ms(h.sdnn)}ms" else "withheld"
-                diag("hrv diag day=${res.daily.day} rmssd=${ms(h.rmssd)}ms sdnn=$sdnnField meanNN=${ms(h.meanNN)}ms " +
+                val trustworthy = HrvAnalyzer.beatSpreadIsTrustworthy(verdict) &&
+                    HrvAnalyzer.beatValuesAreTrustworthy(accVal)
+                val rmssdField = if (trustworthy) "${ms(h.rmssd)}ms" else "withheld"
+                val sdnnField = if (trustworthy) "${ms(h.sdnn)}ms" else "withheld"
+                diag("hrv diag day=${res.daily.day} rmssd=$rmssdField sdnn=$sdnnField meanNN=${ms(h.meanNN)}ms " +
                     "rr=${h.nInput}/${h.nClean} rejected=$rej% coverage=$cov collapsedCov=$colCov dupBeats=$dup " +
                     "beatAccurate=$acc rrIntegrity=${verdict.raw}")
             }

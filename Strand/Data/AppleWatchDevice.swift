@@ -20,7 +20,7 @@ enum AppleWatchDevice {
 
     /// The registry id + sample `deviceId` the watch feeds. Matches `Repository.appleHealthSource`
     /// so the engines and multi-source selection treat watch days exactly like the existing import.
-    static let deviceId = Repository.appleHealthSource   // "apple-health"
+    nonisolated static let deviceId = Repository.appleHealthSource   // "apple-health"
 
     /// How far back we look for "recent" data before deciding the watch is genuinely in use. A user
     /// who imported a one-off export months ago shouldn't get a live "Apple Watch" device; a watch
@@ -80,9 +80,30 @@ enum AppleWatchDevice {
             peripheralId: nil,                 // HealthKit source, not a BLE peripheral
             sourceKind: .liveAppleWatch,
             capabilities: caps,
-            status: .paired,
+            // Capability refreshes must not demote a source the user already made active.
+            status: existing?.status ?? .paired,
             addedAt: existing?.addedAt ?? ts,
             lastSeenAt: ts)
+    }
+
+    /// Apple Health may become the initial dashboard source only when the active row is the untouched
+    /// migration placeholder: no bonded WHOOP identifier and no recent data. A real strap, another
+    /// wearable, or any source the user explicitly selected always wins.
+    static func shouldAutoActivate(current: PairedDevice?, currentHasRecentData: Bool) -> Bool {
+        guard let current else { return true }
+        return current.id == Repository.whoopSource
+            && current.status == .active
+            && current.sourceKind == .liveBLE
+            && current.brand.caseInsensitiveCompare("WHOOP") == .orderedSame
+            && current.model.caseInsensitiveCompare("WHOOP") == .orderedSame
+            && current.peripheralId == nil
+            && !currentHasRecentData
+    }
+
+    /// Shared local-day window for capability registration and active-source recency checks.
+    static func recentDayRange(now: Date = Date()) -> (from: String, to: String) {
+        let fromDate = Calendar.current.date(byAdding: .day, value: -recentWindowDays, to: now) ?? now
+        return (dayString(fromDate), dayString(now))
     }
 
     // MARK: - Registration (live; iOS supplies `authorized` from HealthKitBridge)
@@ -98,12 +119,12 @@ enum AppleWatchDevice {
     static func registerIfAuthorized(registry: DeviceRegistry, store: WhoopStore,
                                      authorized: Bool, now: Date = Date()) async {
         guard authorized else { return }
-        let to = dayString(now)
-        let fromDate = Calendar.current.date(byAdding: .day, value: -recentWindowDays, to: now) ?? now
-        let from = dayString(fromDate)
+        let range = recentDayRange(now: now)
 
-        let daily = (try? await store.dailyMetrics(deviceId: deviceId, from: from, to: to)) ?? []
-        let apple = (try? await store.appleDaily(deviceId: deviceId, from: from, to: to)) ?? []
+        let daily = (try? await store.dailyMetrics(
+            deviceId: deviceId, from: range.from, to: range.to)) ?? []
+        let apple = (try? await store.appleDaily(
+            deviceId: deviceId, from: range.from, to: range.to)) ?? []
 
         let existing = registry.devices.first(where: { $0.id == deviceId })
         guard let device = device(daily: daily, apple: apple, authorized: authorized,

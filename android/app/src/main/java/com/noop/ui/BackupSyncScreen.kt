@@ -50,6 +50,8 @@ import androidx.compose.ui.unit.dp
 import com.noop.NoopApplication
 import com.noop.ble.WhoopBleClient
 import com.noop.data.DataBackup
+import com.noop.data.BackupEnvelope
+import com.noop.data.BackupPassphraseStore
 import com.noop.sync.RemoteSyncPrefs
 import com.noop.sync.RemoteSyncService
 import kotlinx.coroutines.Dispatchers
@@ -79,7 +81,14 @@ fun BackupSyncScreen() {
     RemoteSyncService.initialize(context)
 
     var treeUri by remember { mutableStateOf(BackupSyncPrefs.treeUri(context)) }
-    var auto by remember { mutableStateOf(BackupSyncPrefs.autoEnabled(context)) }
+    var backupSecretConfigured by remember {
+        mutableStateOf(runCatching { BackupPassphraseStore.has(context) }.getOrDefault(false))
+    }
+    var auto by remember {
+        mutableStateOf(BackupSyncPrefs.autoEnabled(context) && backupSecretConfigured)
+    }
+    var folderPassphrase by remember { mutableStateOf("") }
+    var folderPassphraseConfirm by remember { mutableStateOf("") }
     var lastMs by remember { mutableStateOf(BackupSyncPrefs.lastBackupMs(context)) }
     var busy by remember { mutableStateOf(false) }
     // How many dated snapshots to keep; pruning deletes the oldest beyond this (BackupSync.snapshotsToPrune).
@@ -104,28 +113,31 @@ fun BackupSyncScreen() {
     var snapshots by remember { mutableStateOf<List<BackupSync.SnapshotDoc>>(emptyList()) }
     var showSnapshotPicker by remember { mutableStateOf(false) }
     var pendingRestore by remember { mutableStateOf<Pair<String, Uri>?>(null) }
+    var restoreSecretTarget by remember { mutableStateOf<Pair<String, Uri>?>(null) }
+    var restorePassphrase by remember { mutableStateOf("") }
 
     // Runs the actual destructive restore for a chosen backup Uri, off the main thread.
-    fun runRestore(uri: Uri) {
+    fun runRestore(uri: Uri, passphrase: String) {
         busy = true
         scope.launch {
-            val r = withContext(Dispatchers.IO) { DataBackup.importFrom(context, uri) }
+            val r = withContext(Dispatchers.IO) { DataBackup.importFrom(context, uri, passphrase) }
             busy = false
             when (r) {
                 is DataBackup.ImportResult.NeedsRestart -> {
-                    // #57: the restore CLOSED and swapped the database file. The long-lived WhoopRepository +
-                    // BLE client still hold a DAO on the OLD (now-closed) connection, so any strap sync would
-                    // fail with "connection pool has been closed" — and, worse, empty/metadata history ENDs
-                    // would still ack and trim the strap PAST records we can't store, discarding real history.
-                    // Relaunching the process re-opens Room against the restored file. Do it automatically
-                    // rather than trust the user to read a toast (which is exactly how #57 happened).
-                    Toast.makeText(context, "Backup restored — restarting NOOP…", Toast.LENGTH_LONG).show()
+                    // Import staged a verified candidate without touching the live Room connection. A cold
+                    // launch performs the atomic swap, forces Room's migration/open checks, and rolls back on
+                    // failure; restart automatically so the safety gate runs now.
+                    Toast.makeText(
+                        context,
+                        uiString(R.string.noop_backup_restart_apply),
+                        Toast.LENGTH_LONG,
+                    ).show()
                     // NonCancellable: this coroutine runs in the screen's scope, which is cancelled the
                     // instant the user navigates away. The restart is a data-safety guarantee (the DB is
                     // already swapped), so it must complete even if the composition leaves — otherwise the
-                    // user could keep syncing into the closed DB, the very bug we're fixing.
+                        // a staged restore could otherwise remain unapplied until a later cold launch.
                     withContext(NonCancellable) {
-                        delay(800)   // let the toast render before the process dies
+                        delay(800)
                         val ctx = context.applicationContext
                         ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
                             ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
@@ -408,7 +420,125 @@ fun BackupSyncScreen() {
 
         // 2 · Auto-backup + back up now
         item {
-            NoopCard(padding = 20.dp, tint = if (auto && treeUri != null) Palette.accent else null) {
+            NoopCard(padding = 20.dp, tint = if (backupSecretConfigured) Palette.accent else null) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        uiString(R.string.noop_backup_encryption_title),
+                        style = NoopType.headline,
+                        color = Palette.textPrimary,
+                    )
+                    Text(
+                        if (backupSecretConfigured) {
+                            uiString(R.string.noop_backup_encryption_configured_help)
+                        } else {
+                            uiString(R.string.noop_backup_encryption_required_help)
+                        },
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                    OutlinedTextField(
+                        value = folderPassphrase,
+                        onValueChange = { folderPassphrase = it },
+                        label = {
+                            Text(
+                                uiString(
+                                    if (backupSecretConfigured) R.string.noop_backup_new_passphrase
+                                    else R.string.noop_backup_recovery_passphrase,
+                                ),
+                            )
+                        },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = remoteSyncFieldColors(),
+                    )
+                    OutlinedTextField(
+                        value = folderPassphraseConfirm,
+                        onValueChange = { folderPassphraseConfirm = it },
+                        label = { Text(uiString(R.string.noop_backup_confirm_passphrase)) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = remoteSyncFieldColors(),
+                    )
+                    val secretProblem = BackupEnvelope.passphraseProblem(folderPassphrase)
+                    NoopButton(
+                        text = uiString(
+                            if (backupSecretConfigured) R.string.noop_backup_replace_recovery_passphrase
+                            else R.string.noop_backup_secure_automatic_backups,
+                        ),
+                        kind = NoopButtonKind.Secondary,
+                        fullWidth = true,
+                        enabled = !busy && secretProblem == null && folderPassphrase == folderPassphraseConfirm,
+                        onClick = {
+                            val saved = runCatching { BackupPassphraseStore.save(context, folderPassphrase) }
+                            if (saved.isSuccess) {
+                                backupSecretConfigured = true
+                                folderPassphrase = ""
+                                folderPassphraseConfirm = ""
+                                runCatching { BackupSync.reschedule(context) }
+                                Toast.makeText(
+                                    context,
+                                    uiString(R.string.noop_backup_passphrase_saved),
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    saved.exceptionOrNull()?.message
+                                        ?: uiString(R.string.noop_backup_passphrase_save_failed),
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        },
+                    )
+                    if (backupSecretConfigured) {
+                        NoopButton(
+                            text = uiString(R.string.noop_backup_forget_stored_passphrase),
+                            kind = NoopButtonKind.Destructive,
+                            fullWidth = true,
+                            enabled = !busy,
+                            onClick = {
+                                val cleared = runCatching { BackupPassphraseStore.clear(context) }
+                                if (cleared.isSuccess) {
+                                    backupSecretConfigured = false
+                                    auto = false
+                                    BackupSyncPrefs.setAutoEnabled(context, false)
+                                    runCatching { BackupSync.reschedule(context) }
+                                    Toast.makeText(
+                                        context,
+                                        uiString(R.string.noop_backup_passphrase_removed),
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        cleared.exceptionOrNull()?.message
+                                            ?: uiString(R.string.noop_backup_passphrase_remove_failed),
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                            },
+                        )
+                    }
+                    if (folderPassphrase.isNotEmpty() && (secretProblem != null || folderPassphrase != folderPassphraseConfirm)) {
+                        Text(
+                            if (secretProblem != null) {
+                                uiString(R.string.noop_backup_passphrase_minimum_error)
+                            } else {
+                                uiString(R.string.noop_backup_passphrase_mismatch)
+                            },
+                            style = NoopType.caption,
+                            color = Palette.statusCritical,
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3 · Auto-backup + back up now
+        item {
+            NoopCard(padding = 20.dp, tint = if (auto && treeUri != null && backupSecretConfigured) Palette.accent else null) {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(
@@ -425,7 +555,7 @@ fun BackupSyncScreen() {
                         Spacer(Modifier.width(16.dp))
                         Switch(
                             checked = auto,
-                            enabled = treeUri != null && !busy,
+                            enabled = treeUri != null && backupSecretConfigured && !busy,
                             onCheckedChange = {
                                 auto = it
                                 BackupSyncPrefs.setAutoEnabled(context, it)
@@ -521,7 +651,7 @@ fun BackupSyncScreen() {
                         text = if (busy) "Working…" else "Back up now",
                         leadingIcon = Icons.Filled.CloudUpload,
                         fullWidth = true,
-                        enabled = treeUri != null && !busy,
+                        enabled = treeUri != null && backupSecretConfigured && !busy,
                         onClick = {
                             busy = true
                             scope.launch {
@@ -544,7 +674,7 @@ fun BackupSyncScreen() {
             }
         }
 
-        // 3 · Restore (must-fix #1: from the chosen folder, newest-first)
+        // 4 · Restore (must-fix #1: from the chosen folder, newest-first)
         item {
             NoopCard(padding = 20.dp) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -793,8 +923,9 @@ fun BackupSyncScreen() {
             },
             confirmButton = {
                 TextButton(onClick = {
+                    restorePassphrase = ""
+                    restoreSecretTarget = label to uri
                     pendingRestore = null
-                    runRestore(uri)
                 }) {
                     Text(uiString(R.string.l10n_backup_sync_screen_replace_a7cf7b25), style = NoopType.body, color = Palette.statusCritical)
                 }
@@ -802,6 +933,67 @@ fun BackupSyncScreen() {
             dismissButton = {
                 TextButton(onClick = { pendingRestore = null }) {
                     Text(uiString(R.string.l10n_backup_sync_screen_cancel_77dfd213), style = NoopType.body, color = Palette.textSecondary)
+                }
+            },
+        )
+    }
+
+    restoreSecretTarget?.let { (_, uri) ->
+        AlertDialog(
+            onDismissRequest = {
+                restoreSecretTarget = null
+                restorePassphrase = ""
+            },
+            containerColor = Palette.surfaceOverlay,
+            title = {
+                Text(
+                    uiString(R.string.noop_backup_unlock_title),
+                    style = NoopType.title2,
+                    color = Palette.textPrimary,
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        uiString(R.string.noop_backup_unlock_folder_help),
+                        style = NoopType.footnote,
+                        color = Palette.textSecondary,
+                    )
+                    OutlinedTextField(
+                        value = restorePassphrase,
+                        onValueChange = { restorePassphrase = it },
+                        label = { Text(uiString(R.string.noop_backup_passphrase_label)) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = remoteSyncFieldColors(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    restoreSecretTarget = null
+                    val secret = restorePassphrase
+                    restorePassphrase = ""
+                    runRestore(uri, secret)
+                }) {
+                    Text(
+                        uiString(R.string.noop_backup_verify_restore),
+                        style = NoopType.body,
+                        color = Palette.statusCritical,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    restoreSecretTarget = null
+                    restorePassphrase = ""
+                }) {
+                    Text(
+                        uiString(R.string.l10n_backup_sync_screen_cancel_77dfd213),
+                        style = NoopType.body,
+                        color = Palette.textSecondary,
+                    )
                 }
             },
         )

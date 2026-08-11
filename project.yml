@@ -17,11 +17,11 @@ configFiles:
   Release: Config/BundleId.xcconfig
 settings:
   base:
-    MARKETING_VERSION: "9.1.1"
+    MARKETING_VERSION: "9.1.2"
     # iOS build number (CFBundleVersion). GLOBAL so the iOS app AND its widget extension inherit the
     # SAME value — they must match or iOS warns "extension version must match parent app" (#416).
-    # macOS sets its own CFBundleVersion on the Strand target and is unaffected by this.
-    CURRENT_PROJECT_VERSION: "210"
+    # macOS inherits it too so every artifact from one source revision reports the same build.
+    CURRENT_PROJECT_VERSION: "217"
     SWIFT_VERSION: "5.0"
     # Emit localizable strings so Xcode auto-extracts every LocalizedStringKey into the
     # String Catalog on build (the English (US) base entries).
@@ -107,7 +107,7 @@ targets:
         CFBundleName: NOOP
         CFBundleDisplayName: NOOP
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
-        CFBundleVersion: "198"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSMinimumSystemVersion: "13.0"
         LSApplicationCategoryType: public.app-category.healthcare-fitness
         NSBluetoothAlwaysUsageDescription: "NOOP connects directly to your wearable and standards-compatible Bluetooth health devices, including an explicitly paired weight scale, to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server."
@@ -119,10 +119,9 @@ targets:
         # HTTPS endpoints are unaffected. No arbitrary-loads blanket exemption.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-        # Oura BYO-app OAuth credentials (values come from configFiles above); read at runtime via
+        # Oura public-client configuration (values come from configFiles above); read at runtime via
         # OuraCredentials.fromBundle. Absent/blank values cleanly disable the Connect-Oura lane.
         OURA_CLIENT_ID: $(OURA_CLIENT_ID)
-        OURA_CLIENT_SECRET: $(OURA_CLIENT_SECRET)
         OURA_REDIRECT_URI: $(OURA_REDIRECT_URI)
         # Registers the noop:// URL scheme so ASWebAuthenticationSession's OAuth redirect
         # (noop://oura/callback) reaches OuraOAuthProvider instead of bouncing off the OS.
@@ -304,10 +303,9 @@ targets:
         # Both keys are required for the folder to actually appear in Files.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
-        # Oura BYO-app OAuth credentials (values come from configFiles above); read at runtime via
+        # Oura public-client configuration (values come from configFiles above); read at runtime via
         # OuraCredentials.fromBundle. Absent/blank values cleanly disable the Connect-Oura lane.
         OURA_CLIENT_ID: $(OURA_CLIENT_ID)
-        OURA_CLIENT_SECRET: $(OURA_CLIENT_SECRET)
         OURA_REDIRECT_URI: $(OURA_REDIRECT_URI)
         # Registers the noop:// URL scheme so ASWebAuthenticationSession's OAuth redirect
         # (noop://oura/callback) reaches OuraOAuthProvider instead of bouncing off the OS.
