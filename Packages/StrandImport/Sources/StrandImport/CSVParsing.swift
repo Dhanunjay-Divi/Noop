@@ -485,7 +485,7 @@ enum WhoopTime {
         guard let s0 = raw?.trimmingCharacters(in: .whitespaces), !s0.isEmpty else { return nil }
 
         // 1) ISO-8601 with embedded offset (e.g. "...T...Z", "...+01:00").
-        if let d = try? isoFormat.parse(s0) { return d }
+        if let d = parseISO8601(s0) { return d }
 
         // 2) Plain "YYYY-MM-DD HH:MM:SS" or with a 'T'.
         let normalized = s0.replacingOccurrences(of: "T", with: " ")
@@ -509,7 +509,7 @@ enum WhoopTime {
     /// be interpreted in a chosen timezone (used by the Hevy lifting importer, #649).
     static func parseISOWithOffset(_ raw: String?) -> Date? {
         guard let s = raw?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
-        return try? isoFormat.parse(s)
+        return parseISO8601(s)
     }
 
     private static let plainFormatter: DateFormatter = {
@@ -520,7 +520,27 @@ enum WhoopTime {
     }()
     private static let plainFormatterLock = NSLock()
 
-    // Foundation's modern ISO strategy is a Sendable value, unlike the mutable formatter class.
-    // It accepts the same internet-date-time inputs, with or without fractional seconds.
-    private static let isoFormat = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    /// `Date.ISO8601FormatStyle(includingFractionalSeconds: true)` is strict on macOS 15 and rejects
+    /// whole-second timestamps such as `2026-06-01T10:00:00Z` (macOS 26 accepts the same input).
+    /// Use the proven Foundation formatters for both legal forms. They are mutable reference types,
+    /// so a dedicated lock keeps concurrent imports safe without serializing plain-date parsing too.
+    private static func parseISO8601(_ value: String) -> Date? {
+        isoFormatterLock.lock()
+        defer { isoFormatterLock.unlock() }
+        if let date = isoFormatter.date(from: value) { return date }
+        return isoFormatterFractional.date(from: value)
+    }
+
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    private static let isoFormatterFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private static let isoFormatterLock = NSLock()
 }

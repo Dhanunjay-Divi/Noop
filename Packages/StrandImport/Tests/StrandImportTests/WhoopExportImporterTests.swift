@@ -50,6 +50,22 @@ final class WhoopExportImporterTests: XCTestCase {
         XCTAssertEqual(d2, Fixtures.utc(2024, 1, 3, 5, 5, 0))
     }
 
+    func testISOTimeParsingAcceptsWholeAndFractionalSeconds() throws {
+        // macOS 15 treats Date.ISO8601FormatStyle(includingFractionalSeconds: true) as strict, while
+        // macOS 26 accepts this whole-second form. Pin both forms so CI and supported devices agree.
+        let whole = try XCTUnwrap(WhoopTime.parse("2026-06-01T10:00:00Z", offsetMinutes: 0))
+        let fractional = try XCTUnwrap(WhoopTime.parse("2026-06-01T10:00:00.500Z", offsetMinutes: 0))
+        XCTAssertEqual(whole, Fixtures.utc(2026, 6, 1, 10, 0, 0))
+        XCTAssertEqual(fractional.timeIntervalSince(whole), 0.5, accuracy: 0.000_001)
+
+        // The offset-only entry point uses the same guarded parser pair.
+        XCTAssertEqual(
+            WhoopTime.parseISOWithOffset("2026-06-01T11:00:00+01:00"),
+            whole
+        )
+        XCTAssertNil(WhoopTime.parseISOWithOffset("2026-06-01T10:00:00"))
+    }
+
     // MARK: - physiological_cycles.csv
 
     func testCyclesParseToExpectedValues() throws {
