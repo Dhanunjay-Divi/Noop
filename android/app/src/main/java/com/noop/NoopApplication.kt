@@ -7,6 +7,7 @@ import androidx.annotation.StringRes
 import android.util.Log
 import com.noop.ble.SourceCoordinator
 import com.noop.ble.WhoopBleClient
+import com.noop.analytics.RegistryDayOwnerSource
 import com.noop.ble.WhoopModel
 import com.noop.data.DeviceRegistry
 import com.noop.data.WhoopDatabase
@@ -46,6 +47,9 @@ class NoopApplication : Application() {
         // ViewModel reads GpsSession. The checkpoint is local-only and expires after 24 hours.
         GpsSession.initialize(this)
         com.noop.ui.NoopPrefs.migrateContinuousHrvOvernightDefault(this)
+        // Canonicalize the retired auto-save/Boolean preferences before any UI or background notifier
+        // reads them. Ask remains approval-first and rollback cannot resurrect unattended writes.
+        NoopPrefs.migrateAutoWorkoutMode(this)
         // Preference initialization only; no network work occurs here. Self-hosted upload remains
         // opt-in and is scheduled later from the activity after the user saves a destination.
         RemoteSyncService.initialize(this)
@@ -76,7 +80,12 @@ class NoopApplication : Application() {
 
     /** Process-wide BLE client. Owns the GATT connection and outlives any single Activity/ViewModel. */
     val ble: WhoopBleClient by lazy {
-        WhoopBleClient(applicationContext, repository = repository, deviceId = activeDeviceId).apply {
+        WhoopBleClient(
+            applicationContext,
+            repository = repository,
+            deviceId = activeDeviceId,
+            dayOwnerSource = RegistryDayOwnerSource(deviceRegistry),
+        ).apply {
             // Apply the persisted "Debug logging" preference at the composition root so the low-level
             // client never has to read the UI/prefs layer. Default OFF — see WhoopBleClient.debugLogcat.
             debugLogcat = NoopPrefs.debugLogging(applicationContext)

@@ -14,6 +14,10 @@ final class SleepWindowReclipTests: XCTestCase {
         }
     }
 
+    private func segmentObjects(_ json: String) -> [[String: Any]] {
+        (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] ?? []
+    }
+
     private func minutes(_ json: String) -> [String: Double] {
         let dict = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] ?? [:]
         return dict.compactMapValues { ($0 as? NSNumber)?.doubleValue }
@@ -50,6 +54,25 @@ final class SleepWindowReclipTests: XCTestCase {
         XCTAssertEqual(segs.last?.end, 3600)
     }
 
+    func testSegmentReclipPreservesOuraProvenanceAndOpenEndedMetadata() throws {
+        let json = """
+        [{"start":1000,"end":2000,"stage":"light","source":"oura","confidence":0.91},
+         {"start":2000,"end":3000,"stage":"deep","source":"oura"}]
+        """
+        let out = try XCTUnwrap(SleepWindowReclip.reclip(
+            stagesJSON: json, sessionStart: 1000, oldEnd: 3000, newStart: 1500, newEnd: 3600))
+        let objects = segmentObjects(out)
+
+        XCTAssertEqual(objects.count, 3)
+        XCTAssertEqual((objects[0]["start"] as? NSNumber)?.intValue, 1500, "the retained segment is clipped")
+        XCTAssertEqual(try XCTUnwrap((objects[0]["confidence"] as? NSNumber)?.doubleValue),
+                       0.91, accuracy: 0.0001,
+                       "unknown per-segment metadata survives a clip")
+        XCTAssertTrue(objects.allSatisfy { ($0["source"] as? String) == "oura" },
+                      "both retained and synthetic wake segments keep Oura provenance")
+        XCTAssertEqual(objects.last?["stage"] as? String, "wake")
+    }
+
     // MARK: - minute dict (imported nights)
 
     func testMinutesTrimCascadesFromAwakeThenLight() throws {
@@ -78,7 +101,8 @@ final class SleepWindowReclipTests: XCTestCase {
         // COALESCE keep the OLD stages extending PAST the new wake), emit a single wake segment that
         // covers exactly the corrected window. (#318 review #8)
         let json = """
-        [{"start":2000,"end":3000,"stage":"light"},{"start":3000,"end":4000,"stage":"deep"}]
+        [{"start":2000,"end":3000,"stage":"light","source":"oura"},
+         {"start":3000,"end":4000,"stage":"deep","source":"oura"}]
         """
         let out = try XCTUnwrap(SleepWindowReclip.reclip(
             stagesJSON: json, sessionStart: 1000, oldEnd: 4000, newStart: 1000, newEnd: 1500))
@@ -86,6 +110,8 @@ final class SleepWindowReclipTests: XCTestCase {
         XCTAssertEqual(segs.count, 1)
         XCTAssertEqual(segs[0].stage, "wake")
         XCTAssertEqual(segs.map { $0.end }.max(), 1500, "no stage extends past the corrected wake")
+        XCTAssertEqual(segmentObjects(out).first?["source"] as? String, "oura",
+                       "a full synthetic replacement retains session provenance")
     }
 
     // MARK: - degenerate input

@@ -85,12 +85,15 @@ data class OuraRecord(val type: Int, val ringTimestamp: Long, val payload: IntAr
 }
 
 /**
- * The parsed result of a 0x11 GetEvents response (OURA_PROTOCOL.md s5.2). Kotlin twin of the Swift
- * `(cursor: UInt32, moreData: Bool)` tuple. `cursor` is the new resume cursor (an unsigned 32-bit ring
- * timestamp carried as a Long, 0..0xFFFFFFFF); `moreData` is true while the ring still has banked events
- * to hand over.
+ * The parsed result of a 0x11 GetEvents response (OURA_PROTOCOL.md s5.2). The packet reports how many
+ * events were delivered and how many BYTES remain; it does not carry a resume cursor. NOOP owns that
+ * cursor and derives it from event-envelope ring-times instead.
  */
-data class GetEventsSummary(val cursor: Long, val moreData: Boolean)
+data class GetEventsSummary(
+    val eventsReceived: Int,
+    val bytesLeft: Long,
+    val moreData: Boolean,
+)
 
 object OuraFraming {
     /** The secure-session / extended opcode. Per OURA_PROTOCOL.md s2.2 / s4.1. */
@@ -115,20 +118,22 @@ object OuraFraming {
     const val minRecordLen = 4
 
     /**
-     * Parse a 0x11 GetEvents response body: `status:1 sub_status:1 last_ring_timestamp:4LE pad:2`
-     * (OURA_PROTOCOL.md s5.2). `status` 0x00 = empty/no more; any other value = data follows. The
-     * `last_ring_timestamp` is the new cursor to resume the fetch from. Returns null on a short body
-     * (never guesses a cursor). Kotlin twin of Swift's parseGetEventsResponse; `cursor` is the unsigned
-     * 32-bit ring timestamp carried as a Long (0..0xFFFFFFFF).
+     * Parse a 0x11 GetEvents response body per open_oura's `EventBatchSummary`:
+     * `events_received:1 sleep_analysis_progress:1 bytes_left:4LE [pad:2]`. A drain is complete only when
+     * `bytes_left == 0`. Bytes 2...5 are a byte count, never a ring-time or resume cursor.
      */
     fun parseGetEventsResponse(body: IntArray): GetEventsSummary? {
         if (body.size < 6) return null
-        val status = body[0]
-        val cursor = (body[2].toLong() and 0xFFL) or
+        val eventsReceived = body[0]
+        val bytesLeft = (body[2].toLong() and 0xFFL) or
             ((body[3].toLong() and 0xFFL) shl 8) or
             ((body[4].toLong() and 0xFFL) shl 16) or
             ((body[5].toLong() and 0xFFL) shl 24)
-        return GetEventsSummary(cursor = cursor, moreData = status != 0x00)
+        return GetEventsSummary(
+            eventsReceived = eventsReceived,
+            bytesLeft = bytesLeft,
+            moreData = bytesLeft > 0,
+        )
     }
 
     /**

@@ -186,6 +186,7 @@ internal fun appLaunchIntent(context: Context): Intent =
 enum class AutoWorkoutMode(val storedValue: String) {
     OFF("off"),
     ASK("ask"),
+    /** Legacy preference only; the UI does not offer it until confidence is field-calibrated. */
     AUTO_SAVE("autoSave");
 
     companion object {
@@ -701,9 +702,50 @@ object NoopPrefs {
     const val KEY_AUTO_WORKOUT_MODE = "noop.autoWorkoutMode"
 
     internal fun resolveAutoWorkoutMode(storedRaw: String?, legacyEnabled: Boolean?): AutoWorkoutMode =
-        AutoWorkoutMode.fromStored(storedRaw)
+        AutoWorkoutMode.fromStored(storedRaw)?.let {
+            if (it == AutoWorkoutMode.AUTO_SAVE) AutoWorkoutMode.ASK else it
+        }
             ?: legacyEnabled?.let { if (it) AutoWorkoutMode.ASK else AutoWorkoutMode.OFF }
             ?: AutoWorkoutMode.ASK
+
+    /** Canonical startup state for the approval-first detector. The legacy Boolean is deliberately
+     *  disabled for every modern mode: an older build that is restored after this migration must not
+     *  interpret a stale `true` as permission for an unattended workout write. */
+    internal data class AutoWorkoutPreferenceMigration(
+        val mode: AutoWorkoutMode,
+        val legacyEnabled: Boolean,
+    )
+
+    internal fun canonicalAutoWorkoutPreferences(
+        storedRaw: String?,
+        legacyEnabled: Boolean?,
+    ): AutoWorkoutPreferenceMigration = AutoWorkoutPreferenceMigration(
+        mode = resolveAutoWorkoutMode(storedRaw, legacyEnabled),
+        legacyEnabled = false,
+    )
+
+    /** One lifecycle-owned migration. Rendering remains side-effect free: the app process calls this
+     *  once before any screen or notification policy reads the mode. */
+    fun migrateAutoWorkoutMode(context: Context): AutoWorkoutMode {
+        val prefs = of(context)
+        val legacy = if (prefs.contains(KEY_AUTO_DETECT_WORKOUTS)) {
+            prefs.getBoolean(KEY_AUTO_DETECT_WORKOUTS, false)
+        } else null
+        val canonical = canonicalAutoWorkoutPreferences(
+            storedRaw = prefs.getString(KEY_AUTO_WORKOUT_MODE, null),
+            legacyEnabled = legacy,
+        )
+        val storedRaw = prefs.getString(KEY_AUTO_WORKOUT_MODE, null)
+        val legacyNeedsWrite = !prefs.contains(KEY_AUTO_DETECT_WORKOUTS) ||
+            prefs.getBoolean(KEY_AUTO_DETECT_WORKOUTS, false) != canonical.legacyEnabled
+        if (storedRaw != canonical.mode.storedValue || legacyNeedsWrite) {
+            prefs.edit()
+                .putString(KEY_AUTO_WORKOUT_MODE, canonical.mode.storedValue)
+                .putBoolean(KEY_AUTO_DETECT_WORKOUTS, canonical.legacyEnabled)
+                .apply()
+        }
+        return canonical.mode
+    }
 
     fun autoWorkoutMode(context: Context): AutoWorkoutMode {
         val prefs = of(context)
@@ -714,10 +756,12 @@ object NoopPrefs {
     }
 
     fun setAutoWorkoutMode(context: Context, mode: AutoWorkoutMode) {
+        val effective = if (mode == AutoWorkoutMode.AUTO_SAVE) AutoWorkoutMode.ASK else mode
         of(context).edit()
-            .putString(KEY_AUTO_WORKOUT_MODE, mode.storedValue)
-            // Rollback safety: an older build treats either active mode as its historical Ask behavior.
-            .putBoolean(KEY_AUTO_DETECT_WORKOUTS, mode != AutoWorkoutMode.OFF)
+            .putString(KEY_AUTO_WORKOUT_MODE, effective.storedValue)
+            // Rollback safety: never leave an old Boolean that a retired build could interpret as
+            // permission for an unattended write. Modern Ask is represented by the string above.
+            .putBoolean(KEY_AUTO_DETECT_WORKOUTS, false)
             .apply()
     }
 

@@ -66,9 +66,10 @@ internal object AutoWorkoutCandidateNotificationPolicy {
 }
 
 /**
- * Runs the same scan as Today after reanalysis. Ask posts a suggestion; Auto-save persists one stronger
- * finalized candidate as Detected/NOOP and posts a Keep/Not-a-workout review. It never requests
- * notification permission, and a failed unattended write falls back to an explicit suggestion.
+ * Runs the same scan as Today after reanalysis. Ask posts a suggestion. The dormant legacy Auto-save
+ * branch can persist only when a future calibrated-confidence policy permits it; current preferences
+ * resolve it to Ask. It never requests notification permission, and a failed unattended write falls
+ * back to an explicit suggestion.
  */
 object AutoWorkoutCandidateNotifier {
     private const val CHANNEL_ID = "noop_auto_workout_candidates"

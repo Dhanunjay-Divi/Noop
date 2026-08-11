@@ -121,7 +121,7 @@ import kotlin.math.roundToInt
  * DailyMetric deep/rem/light minutes (the grid/trends window ends on that day, exactly
  * as it followed the old day selector). The hero hypnogram prefers the REAL per-epoch
  * segments the on-device stager persists into sleepSession.stagesJSON ([{start,end,stage}])
- * when the merged session is the same night — labelled approximate (on-device staging).
+ * when the merged session is the same night — labelled with its honest local/Oura provenance.
  * Imported nights carry minutes only, so they keep the reconstructed plausible architecture
  * (deep early, REM later, awake last). No data is fabricated: with no nights the screen
  * shows an honest empty state, and a navigated night with no usable stage data says so
@@ -617,6 +617,7 @@ fun SleepScreen(
                 groupInBedMin = night?.groupInBedMin,
                 windowOnsetTs = night?.heroOnsetTs,
                 windowWakeTs = night?.heroWakeTs,
+                hasOuraStages = night?.hasOuraStages == true,
             )
             }
             // Tiles / ledger / trends read the FULL-history model (#940): they stay up when only the
@@ -970,6 +971,7 @@ private fun Hero(
     // to the session window below, byte-identical to before.
     windowOnsetTs: Long? = null,
     windowWakeTs: Long? = null,
+    hasOuraStages: Boolean = false,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         NightNavHeader(nightOffset, lastIndex, clock, onNavigate, session, onUpdateTimes, onDeleteSession, onAddNap, onPickNightDate)
@@ -1001,8 +1003,17 @@ private fun Hero(
             val inBedMin = groupInBedMin
                 ?: session?.let { (it.endTs - it.effectiveStartTs) / 60.0 }
                 ?: s.total
-            val subtitle = "${durationText(inBedMin)} in bed · ${display.efficiencyText} efficiency" +
-                (if (display.realSegments != null) " · approx. stages (on-device)" else "")
+            val stageProvenance = when {
+                hasOuraStages -> uiString(R.string.sleep_stages_oura_provenance)
+                display.realSegments != null -> uiString(R.string.sleep_stages_on_device_provenance)
+                else -> null
+            }
+            val subtitle = uiString(
+                R.string.sleep_stage_summary,
+                durationText(inBedMin),
+                display.efficiencyText,
+            ) +
+                (stageProvenance?.let { " · $it" } ?: "")
             // iOS #988 port: true per-epoch segments (≥ 2 — a single run has no transitions to lay
             // out) get the per-stage timeline rows; the rows ARE the legend, so no footer. Anything
             // else keeps the honest proportional strip + StageBreakdownRows footer.

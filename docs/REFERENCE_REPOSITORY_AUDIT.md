@@ -54,6 +54,63 @@ friends, watch surfaces, iOS/macOS/Android parity tests, backups, and explicit
 source provenance. Replacing NOOP wholesale with another project would lose more
 than it gains.
 
+## Runnable three-way product audit
+
+The two named references and this private fork were built and launched, not just
+read as source. Simulator captures are retained outside the repository so health
+data and machine paths never become release assets.
+
+| Product | Revision actually run | UI and product result | Metric/result result |
+|---|---|---|---|
+| `b-nnett/goose` | `ba9ae0280c9b5b9a1545baab8e944cb3b7563c62` | Functional light SwiftUI app with Home / Health / Coach / More, useful provenance/unavailable states and a strong manual-workout carousel/Live Activity concept. Onboarding visibly duplicates Import Weight. | Not a score oracle. Its own reference-comparison function blocks HRV, sleep, strain and stress because real inputs are unwired; large parts of recovery, sleep, energy and cardio persistence remain TODO. WHOOP 5 only, alpha, no physical BLE proof from Simulator. |
+| `ryanbr/noop` | `3605f6168aac4752b625604414168a5c8e390f09` | Exact-current revision built, installed and launched. It is a broad upstream product with useful cross-screen hosted cards, user backgrounds, workout heatmap, route export, biomarker import and richer Oura tooling. Its default visual hierarchy is flatter than this fork. | Same independent scoring lineage as this fork, not WHOOP's proprietary formula. Its erased-page and source-local duplicate-sleep fixes were the most important integrity comparison. |
+| Private NOOP | `4f0e912af5cfa4b34e3e91ab24118448494ba7ef` pre-integration baseline | Best base: liquid dark/light design, adaptive bottom navigation, denser Today hierarchy, metric info/details, Fitness Age, Friends, self-hosting, multi-source onboarding and device capability honesty. | 62 metric descriptors versus upstream's 60; this fork additionally exposes body and wrist temperature with provenance. It retains upstream analytics plus stricter multi-device, remote-sync and activity safeguards. |
+
+The UI decision is selective integration, not replacement. Keep this fork's
+visual system and navigation. Reimplement Goose's workout-session ideas only
+after product design and battery review; its missing license means no source,
+assets or distinctive UI can be copied. Bring Ryan fixes across as small,
+cross-platform, fixture-backed slices so Friends, self-hosting and source fusion
+are never erased by a wholesale merge.
+
+The final upstream delta reviewed during this audit (`3605f616`) adds a selectable,
+read-only copy of the latest-night stage chart to Today. NOOP already exposes the
+same stage timeline, breakdown, confidence caveats and Oura provenance in its
+dedicated bottom-nav Sleep surface. Duplicating that large renderer on Today was
+therefore not treated as a missing metric or correctness fix; the compact Rest
+headline remains the glance, and one tap reaches the richer editable view. This
+keeps Today fast and avoids maintaining two independently drifting stage UIs.
+
+### Result-comparison limit
+
+Passing one export through two importers only verifies parsing and display. It
+does not recreate what either app would have computed from raw, time-aligned
+sensor streams, and Goose cannot currently run that comparison at all. A valid
+ranking requires the same participant-day raw inputs, source/firmware metadata,
+coverage and frozen algorithm version, followed by a later untouched official
+WHOOP export. NOOP's Study Harness reports paired-day bias, MAE, RMSE and
+correlation, with participant-held-out calibration; it never overwrites imported
+official values or treats a single person's fit as formula parity.
+
+### Private-export compatibility check
+
+Three user-supplied WHOOP ZIP exports—a new-user export and two longer-history
+variants—were passed separately through this fork's and pinned upstream's
+`StrandImport`/Backfill path into isolated temporary SQLite databases. Both
+implementations produced identical aggregate counts for cycles, metric points,
+journal entries and workouts on every export. No filename, CSV row, aggregate
+count, biometric value or generated database was added to the repository, and
+all temporary databases were removed after `PRAGMA integrity_check` returned
+`ok`.
+
+This verifies archive discovery, the observed CSV schemas, deterministic parser
+acceptance and successful database writes for those exports. It does **not** rank
+recovery/sleep/effort formulas: those ZIPs contain WHOOP's already-computed daily
+values, not the raw time-aligned sensor streams needed to rescore a day. The
+private parser is still stricter outside this sample: it preserves producer
+provenance and converts explicitly Fahrenheit skin-temperature columns to
+Celsius instead of treating the number as Celsius.
+
 ## Correctness work before more surface area
 
 1. **Effort integration:** integrate every adjacent HR interval using its actual
@@ -138,7 +195,7 @@ part of making NOOP clean.
 
 ## Upstream synchronization
 
-At audit time the custom branch is eight commits ahead and 343 commits behind
+At audit completion the custom branch is ten commits ahead and 352 commits behind
 `ryanbr/noop/main` by history. The custom beta work is a large squash touching
 hundreds of files, so a blanket merge produces extensive conflicts and is not a
 safe update strategy. Port upstream fixes in tested, reviewable slices while
@@ -167,7 +224,7 @@ still need a real-device matrix before a release can claim them as validated.
 ### Bounded ports completed in this integration branch
 
 These changes were ported as reviewable slices with Swift/Kotlin fixtures instead
-of merging the 343-commit history gap:
+of merging the 352-commit history gap:
 
 | Upstream PR | Integrated behavior |
 |---|---|
@@ -176,12 +233,28 @@ of merging the 343-commit history gap:
 | [#895](https://github.com/ryanbr/noop/pull/895) | WHOOP 5 optical-v20 records are CRC16/CRC32-gated and decode signed samples/configuration against the same deterministic synthetic golden vectors on Swift and Kotlin; no captured biometric data is committed. |
 | [#957](https://github.com/ryanbr/noop/pull/957) | Standalone diagnostic logs/raw captures fail closed on binary or malformed input, are PII-scrubbed and capped at 20 MB, and require an explicit review/confirmation before interactive sharing. Normal user health exports are unchanged. |
 | [#959](https://github.com/ryanbr/noop/pull/959) | Apple Health starts with a smaller core permission request; body composition, detailed write-back and cycle data remain separate explicit choices. RMSSD/SDNN semantics are stated at the permission surface. |
+| [#1246](https://github.com/ryanbr/noop/pull/1246) | An all-`0xFF` Oura hypnogram page is treated as erased flash, not fabricated awake epochs, while a lone or mixed `0xFF` byte remains valid awake data. Swift and Kotlin now assemble the whole burst on a 30-second axis, preserve erased positions as real gaps, pair the nearest bounded 0x49 sleep window, give every persisted phase a distinct natural key and upsert the stage-rich night under the ring source. |
+| [#1248](https://github.com/ryanbr/noop/pull/1248) | The overlap repair sweeps the computed source and every registered source independently, so Oura-bank rows cannot accumulate into phantom naps. Swift and Kotlin use the same unique, sorted device scope. |
+
+The Apple Oura integration also adds a local durability barrier around this port.
+The history cursor advances only after every raw/stage row and the stage-rich
+sleep session acknowledge a successful store write. A failed, timed-out or
+stale-generation acknowledgement leaves the whole drain cursor unchanged for an
+idempotent retry; terminal summaries force the final partial batch to flush
+before the cursor decision. Deterministic gate tests cover out-of-order success,
+one failed write, forced-stop completion semantics, stale-generation invalidation,
+a partial hypnogram crossing a drain boundary and late completion after timeout;
+the app-hosted build covers the wiring. This is NOOP hardening, not a claim about
+an upstream PR.
 
 This branch also hardens the existing auto-workout rules against invalid BPM,
 duplicate timestamps, telemetry gaps and sparse motion. Candidates now expose a
 fixed detector version, input provenance and an explicitly uncalibrated event
-confidence rather than inventing a probability. The change is replay-tested on
-both platforms, but it is not a claim of held-out or owned-hardware accuracy.
+confidence rather than inventing a probability. Because no calibrated confidence
+state exists yet, the settings surface offers only Off and approval-first Ask;
+legacy Auto-save preferences migrate to Ask on both platforms. The change is
+replay-tested on both platforms, but it is not a claim of held-out or
+owned-hardware accuracy.
 
 ### Still open after this pass
 
@@ -237,7 +310,7 @@ both platforms, but it is not a claim of held-out or owned-hardware accuracy.
 
 The following gates passed from this branch on 2026-08-11:
 
-- `StrandAnalytics`: 1,208 tests, zero failures.
+- `StrandAnalytics`: 1,210 tests, zero failures.
 - `WhoopProtocol`: 402 tests, zero failures and one environment-gated optional
   test skipped.
 - `StrandImport`: 219 tests, zero failures and one environment-gated optional
@@ -252,6 +325,18 @@ The following gates passed from this branch on 2026-08-11:
   credential/private-key pattern scan and `git diff --check`: successful.
 - Swift and Android optical-v20 oracles are byte-identical, fully synthetic and
   explicitly declare that they contain no captured biometric data.
+- `OuraProtocol`: 133 tests, zero failures, including all-`0xFF`, lone-`0xFF`,
+  mixed-page and burst/time-axis reconstruction cases.
+- `WhoopStore`: 314 tests, zero failures, including the Oura persistence-boundary
+  gap filter, stage-session mapping and an in-memory natural-key survival check.
+- Focused Android Oura framing, drain, driver, mapping, hypnogram assembly and
+  stage-session mapping suite: 88 tests, zero failures or skips, with all 43
+  Gradle tasks executed rather than served from cache. The separate sleep-repair
+  and workout-mode migration tests also passed in the earlier full focused run.
+- Focused macOS-hosted `IntelligenceDaySourceTests`, `WorkoutSourceTests` and the
+  six-case Oura history-persistence gate: 63 tests, zero failures after a clean
+  rebuild. The iOS `NOOPiOS` simulator target also rebuilt successfully after
+  these integrations.
 
 These are source, simulator and unit-test gates. They do not validate real
 WHOOP/Oura/HealthKit background behavior, firmware compatibility, battery cost,

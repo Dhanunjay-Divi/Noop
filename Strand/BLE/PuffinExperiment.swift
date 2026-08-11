@@ -135,6 +135,8 @@ enum PuffinExperiment {
     enum AutoWorkoutMode: String, CaseIterable, Identifiable {
         case off
         case ask
+        /// Retained only to migrate older preferences. The UI does not offer this until held-out
+        /// validation produces a calibrated confidence state that can authorize unattended writes.
         case autoSave
 
         var id: String { rawValue }
@@ -148,16 +150,21 @@ enum PuffinExperiment {
         }
     }
 
+    static let selectableAutoWorkoutModes: [AutoWorkoutMode] = [.off, .ask]
+
     /// Pure migration seam, kept testable without mutating process-global defaults.
     static func resolvedAutoWorkoutMode(storedRaw: String?, legacyEnabled: Bool?) -> AutoWorkoutMode {
-        if let storedRaw, let stored = AutoWorkoutMode(rawValue: storedRaw) { return stored }
+        if let storedRaw, let stored = AutoWorkoutMode(rawValue: storedRaw) {
+            return stored == .autoSave ? .ask : stored
+        }
         if let legacyEnabled { return legacyEnabled ? .ask : .off }
         return .ask
     }
 
-    static var autoWorkoutMode: AutoWorkoutMode {
-        let defaults = UserDefaults.standard
-        return resolvedAutoWorkoutMode(
+    /// Side-effect-free defaults reader for SwiftUI selection getters and other render-time callers.
+    /// Persistence belongs in `migrateAutoWorkoutMode(in:)`, which must run from a lifecycle/action hook.
+    static func resolvedAutoWorkoutMode(in defaults: UserDefaults = .standard) -> AutoWorkoutMode {
+        resolvedAutoWorkoutMode(
             storedRaw: defaults.string(forKey: autoWorkoutModeKey),
             legacyEnabled: defaults.object(forKey: autoDetectWorkoutsKey) == nil
                 ? nil
@@ -165,12 +172,35 @@ enum PuffinExperiment {
         )
     }
 
-    static func setAutoWorkoutMode(_ mode: AutoWorkoutMode) {
-        let defaults = UserDefaults.standard
-        defaults.set(mode.rawValue, forKey: autoWorkoutModeKey)
+    /// Resolve and persist the canonical mode so a retired `autoSave` value cannot keep leaking into
+    /// picker state or unattended-write call sites. Keeping the legacy Boolean in sync also preserves
+    /// approval-first behavior if the user rolls back to an older build.
+    @discardableResult
+    static func migrateAutoWorkoutMode(in defaults: UserDefaults = .standard) -> AutoWorkoutMode {
+        let storedRaw = defaults.string(forKey: autoWorkoutModeKey)
+        let resolved = resolvedAutoWorkoutMode(in: defaults)
+
+        if storedRaw != resolved.rawValue {
+            defaults.set(resolved.rawValue, forKey: autoWorkoutModeKey)
+        }
+        let legacyEnabled = resolved != .off
+        if defaults.object(forKey: autoDetectWorkoutsKey) == nil
+            || defaults.bool(forKey: autoDetectWorkoutsKey) != legacyEnabled {
+            defaults.set(legacyEnabled, forKey: autoDetectWorkoutsKey)
+        }
+        return resolved
+    }
+
+    static var autoWorkoutMode: AutoWorkoutMode {
+        migrateAutoWorkoutMode()
+    }
+
+    static func setAutoWorkoutMode(_ mode: AutoWorkoutMode, in defaults: UserDefaults = .standard) {
+        let effective = mode == .autoSave ? AutoWorkoutMode.ask : mode
+        defaults.set(effective.rawValue, forKey: autoWorkoutModeKey)
         // Keep older app builds safe if a user rolls back: non-off modes remain enabled there and retain
         // their historical ask-before-saving semantics rather than unexpectedly auto-saving.
-        defaults.set(mode != .off, forKey: autoDetectWorkoutsKey)
+        defaults.set(effective != .off, forKey: autoDetectWorkoutsKey)
     }
 
     static var autoDetectWorkoutsEnabled: Bool {

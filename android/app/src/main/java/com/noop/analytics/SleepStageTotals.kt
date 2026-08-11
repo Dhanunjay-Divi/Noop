@@ -112,7 +112,12 @@ object SleepStageTotals {
             val e = seg.optLong("end")
             val s = maxOf(seg.optLong("start"), onsetSec)
             if (e <= s) continue                                          // fully before the onset → drop
-            out.put(JSONObject().put("start", s).put("end", e).put("stage", seg.optString("stage", "")))
+            // Keep open-ended metadata such as Oura's `source` marker. Rebuilding only the canonical
+            // fields here used to silently erase provenance whenever an onset edit forced a clamp.
+            out.put(JSONObject(seg.toString())
+                .put("start", s)
+                .put("end", e)
+                .put("stage", seg.optString("stage", "")))
         }
         return out.toString()
     }

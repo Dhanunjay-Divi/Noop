@@ -171,7 +171,7 @@ struct AddDeviceWizard: View {
         // `feedsLive: false` so it never writes LiveState or persists. Same shared strap-log sink (#421).
         _ouraScanner = StateObject(wrappedValue: OuraLiveSource(
             live: live, deviceId: "scan-preview", ringGen: .gen3, authKey: { nil },
-            persist: { _ in }, log: wizardLog, feedsLive: false))
+            log: wizardLog, feedsLive: false))
     }
 
     var body: some View {

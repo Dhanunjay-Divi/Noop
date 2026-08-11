@@ -91,6 +91,7 @@ class MergeSleepLocalDayTest {
     // computed day that has stage data. Mirrors the Swift SleepMergeTests richness cases.
 
     private val wake = 1_781_389_800L // 2026-06-14 01:30 local (UTC+3)
+    private val ouraStages = """[{"start":0,"end":3600,"stage":"deep","source":"oura"}]"""
 
     @Test
     fun mergeSleep_stagelessImportYieldsToComputedDayWithStages() {
@@ -147,5 +148,21 @@ class MergeSleepLocalDayTest {
         val imp = session(wake - 6 * 3600L, wake, null) // same day, stage-less
         val out = WhoopRepository.mergeSleepRichness(listOf(imp), listOf(comp), ::endDay)
         assertEquals("stage-less import yields to computed-with-stages", listOf(comp.startTs), out.map { it.startTs })
+    }
+
+    @Test
+    fun mergeSleep_ouraNapDoesNotDisplaceSeparateComputedMainNight() {
+        val night = session(wake - 8 * 3600L, wake, someStages)
+        val nap = session(wake + 10 * 3600L, wake + 11 * 3600L, ouraStages).copy(deviceId = "oura-ring")
+        val merged = WhoopRepository.mergeSleep(listOf(nap), listOf(night))
+        assertEquals(listOf(night.startTs, nap.startTs), merged.map { it.startTs })
+    }
+
+    @Test
+    fun mergeSleep_ouraNightReplacesOverlappingComputedReconstruction() {
+        val local = session(wake - 8 * 3600L, wake, someStages)
+        val ring = session(wake - 7 * 3600L, wake, ouraStages).copy(deviceId = "oura-ring")
+        val merged = WhoopRepository.mergeSleep(listOf(ring), listOf(local))
+        assertEquals(listOf(ring.startTs), merged.map { it.startTs })
     }
 }

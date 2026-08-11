@@ -3,6 +3,7 @@ package com.noop.oura
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -175,6 +176,23 @@ class DecoderGoldenTest {
             ),
             phases,
         )
+    }
+
+    @Test
+    fun wholeFFSleepPageIsUnwrittenButLoneAndMixedFFRemainAwake() {
+        val erased = requireNotNull(OuraDecoders.decodeSleepPhase(record("4e070200010000ffff")))
+        assertEquals(8, erased.size)
+        assertTrue(erased.all { it.unwritten && it.stage == OuraSleepStage.AWAKE })
+
+        val lone = requireNotNull(OuraDecoders.decodeSleepPhase(record("4e060200010000ff")))
+        assertEquals(4, lone.size)
+        assertTrue(lone.none { it.unwritten })
+        assertTrue(lone.all { it.stage == OuraSleepStage.AWAKE })
+
+        val mixed = requireNotNull(OuraDecoders.decodeSleepPhase(record("4e0702000100006cff")))
+        assertEquals(8, mixed.size)
+        assertTrue(mixed.none { it.unwritten })
+        assertTrue(mixed.takeLast(4).all { it.stage == OuraSleepStage.AWAKE })
     }
 
     // MARK: - 0x6B motion period (2-bit MOTION_STATE codes; 2 header bytes skipped)

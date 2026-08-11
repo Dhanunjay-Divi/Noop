@@ -161,6 +161,30 @@ final class DecoderGoldenTests: XCTestCase {
         ])
     }
 
+    func testWholeFFSleepPageIsUnwrittenButLoneAndMixedFFRemainAwake() {
+        let erased = OuraDecoders.decodeSleepPhase(record("4e070200010000ffff"))
+        XCTAssertEqual(erased?.count, 8)
+        XCTAssertEqual(erased?.allSatisfy { $0.unwritten && $0.stage == .awake }, true)
+
+        let lone = OuraDecoders.decodeSleepPhase(record("4e060200010000ff"))
+        XCTAssertEqual(lone?.count, 4)
+        XCTAssertEqual(lone?.contains { $0.unwritten }, false)
+        XCTAssertEqual(lone?.allSatisfy { $0.stage == .awake }, true)
+
+        let mixed = OuraDecoders.decodeSleepPhase(record("4e0702000100006cff"))
+        XCTAssertEqual(mixed?.count, 8)
+        XCTAssertEqual(mixed?.contains { $0.unwritten }, false)
+        XCTAssertEqual(mixed?.suffix(4).allSatisfy { $0.stage == .awake }, true)
+    }
+
+    func testLegacySleepPhaseJSONDefaultsToWritten() throws {
+        let legacy = Data(#"{"ringTimestamp":65538,"index":2,"stage":3}"#.utf8)
+        let phase = try JSONDecoder().decode(OuraSleepPhase.self, from: legacy)
+
+        XCTAssertEqual(phase, OuraSleepPhase(ringTimestamp: 65_538, index: 2, stage: .awake))
+        XCTAssertFalse(phase.unwritten)
+    }
+
     // MARK: - 0x6B motion period (2-bit MOTION_STATE codes; 2 header bytes skipped)
 
     func testMotionPeriod0x6B() {

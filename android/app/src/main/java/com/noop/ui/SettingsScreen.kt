@@ -2295,7 +2295,7 @@ fun SettingsScreen(
                 RowDivider()
                 FormRow(label = uiString(R.string.settings_automatic_activity)) {
                     SegmentedPillControl(
-                        items = listOf(AutoWorkoutMode.OFF, AutoWorkoutMode.ASK, AutoWorkoutMode.AUTO_SAVE),
+                        items = listOf(AutoWorkoutMode.OFF, AutoWorkoutMode.ASK),
                         selection = autoWorkoutMode,
                         label = {
                             when (it) {

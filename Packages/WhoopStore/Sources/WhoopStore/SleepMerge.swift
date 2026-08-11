@@ -29,9 +29,27 @@ public enum SleepMerge {
         var out: [CachedSleepSession] = []
         out.reserveCapacity(imported.count + computed.count)
         for (day, imp) in importedByDay {
-            if let comp = computedByDay[day],
-               !imp.contains(where: hasStages),
-               comp.contains(where: hasStages) {
+            let oura = imp.filter(OuraSleepSessionMapping.hasOuraProvenance)
+            let otherImported = imp.filter { !OuraSleepSessionMapping.hasOuraProvenance($0) }
+            if !oura.isEmpty, let comp = computedByDay[day] {
+                // Ring-provided phases beat an overlapping local reconstruction, but a nap/fragment must
+                // not erase a separate computed main night. A conventional import still outranks an
+                // overlapping Oura row; non-overlapping ring blocks remain visible.
+                let acceptedOura = oura.filter { ring in
+                    !otherImported.contains { SleepSessionDedup.isDuplicate($0, ring) }
+                }
+                if otherImported.isEmpty {
+                    out.append(contentsOf: acceptedOura)
+                    out.append(contentsOf: comp.filter { local in
+                        !acceptedOura.contains { SleepSessionDedup.isDuplicate($0, local) }
+                    })
+                } else {
+                    out.append(contentsOf: otherImported)
+                    out.append(contentsOf: acceptedOura)
+                }
+            } else if let comp = computedByDay[day],
+                      !imp.contains(where: hasStages),
+                      comp.contains(where: hasStages) {
                 out.append(contentsOf: comp)   // richer computed day survives a stage-less import
             } else {
                 out.append(contentsOf: imp)    // imported wins its day (unchanged rule)

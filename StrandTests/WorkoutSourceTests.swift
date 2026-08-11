@@ -1,4 +1,5 @@
 import XCTest
+import OuraProtocol
 import WhoopStore
 import StrandAnalytics
 @testable import Strand
@@ -28,8 +29,60 @@ final class WorkoutSourceTests: XCTestCase {
                        .off)
         XCTAssertEqual(PuffinExperiment.resolvedAutoWorkoutMode(storedRaw: "off", legacyEnabled: true),
                        .off, "the explicit new mode wins over the legacy Boolean")
+        XCTAssertEqual(PuffinExperiment.resolvedAutoWorkoutMode(storedRaw: "autoSave", legacyEnabled: true),
+                       .ask, "legacy auto-save migrates to approval-first until confidence is calibrated")
+        XCTAssertEqual(PuffinExperiment.resolvedAutoWorkoutMode(storedRaw: "autoSave", legacyEnabled: false),
+                       .ask, "the retired richer mode wins over a stale legacy Boolean, but resolves safely")
         XCTAssertEqual(PuffinExperiment.resolvedAutoWorkoutMode(storedRaw: "bad", legacyEnabled: true),
                        .ask, "a corrupt raw value falls back to the user's legacy choice")
+    }
+
+    func testAutomaticActivityMigrationPersistsASelectableApprovalFirstMode() {
+        let suite = "WorkoutSourceTests.autoWorkoutMode.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(PuffinExperiment.AutoWorkoutMode.autoSave.rawValue,
+                     forKey: PuffinExperiment.autoWorkoutModeKey)
+        defaults.set(false, forKey: PuffinExperiment.autoDetectWorkoutsKey)
+
+        let migrated = PuffinExperiment.migrateAutoWorkoutMode(in: defaults)
+
+        XCTAssertEqual(migrated, .ask)
+        XCTAssertTrue(PuffinExperiment.selectableAutoWorkoutModes.contains(migrated),
+                      "the Settings picker must always receive one of its visible tags")
+        XCTAssertEqual(defaults.string(forKey: PuffinExperiment.autoWorkoutModeKey),
+                       PuffinExperiment.AutoWorkoutMode.ask.rawValue)
+        XCTAssertTrue(defaults.bool(forKey: PuffinExperiment.autoDetectWorkoutsKey),
+                      "older builds must continue to interpret Ask as enabled, approval-first detection")
+    }
+
+    func testAutomaticActivityRenderTimeResolverHasNoPersistenceSideEffects() {
+        let suite = "WorkoutSourceTests.autoWorkoutResolver.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(PuffinExperiment.AutoWorkoutMode.autoSave.rawValue,
+                     forKey: PuffinExperiment.autoWorkoutModeKey)
+        defaults.set(false, forKey: PuffinExperiment.autoDetectWorkoutsKey)
+
+        let resolved = PuffinExperiment.resolvedAutoWorkoutMode(in: defaults)
+
+        XCTAssertEqual(resolved, .ask)
+        XCTAssertEqual(defaults.string(forKey: PuffinExperiment.autoWorkoutModeKey),
+                       PuffinExperiment.AutoWorkoutMode.autoSave.rawValue,
+                       "render-time resolution must not publish a defaults change during a SwiftUI update")
+        XCTAssertFalse(defaults.bool(forKey: PuffinExperiment.autoDetectWorkoutsKey))
+    }
+
+    func testAutomaticActivitySetterCannotRestoreRetiredAutoSaveMode() {
+        let suite = "WorkoutSourceTests.autoWorkoutSetter.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        PuffinExperiment.setAutoWorkoutMode(.autoSave, in: defaults)
+
+        XCTAssertEqual(defaults.string(forKey: PuffinExperiment.autoWorkoutModeKey),
+                       PuffinExperiment.AutoWorkoutMode.ask.rawValue)
+        XCTAssertTrue(defaults.bool(forKey: PuffinExperiment.autoDetectWorkoutsKey))
     }
 
     func testUncalibratedCandidatesNeverSaveUnattended() {
@@ -485,5 +538,101 @@ final class WorkoutSourceTests: XCTestCase {
         XCTAssertNil(m?.energyKcal)
         XCTAssertNil(m?.distanceM)
         XCTAssertNil(m?.avgHr)
+    }
+}
+
+/// The Oura transport awaits real SQLite acknowledgements before moving its history cursor. These pure
+/// cases pin the failure, forced-stop, reconnect and timeout seams without requiring CoreBluetooth.
+final class OuraHistoryPersistenceGateTests: XCTestCase {
+    func testTerminalSummaryWaitsForAcknowledgedWrite() {
+        var gate = OuraHistoryPersistenceGate()
+        let generation = gate.begin()
+        XCTAssertTrue(gate.register(generation: generation))
+        XCTAssertNil(gate.requestFinish(drainCompleted: true))
+        XCTAssertTrue(gate.shouldStartTimeout)
+
+        let result = gate.completeWrite(generation: generation, succeeded: true)
+        XCTAssertTrue(result.accepted)
+        XCTAssertEqual(result.resolution, .init(drainCompleted: true, allWritesSucceeded: true))
+    }
+
+    func testOneFailureBlocksWholeOutOfOrderDrain() {
+        var gate = OuraHistoryPersistenceGate()
+        let generation = gate.begin()
+        XCTAssertTrue(gate.register(generation: generation))
+        XCTAssertTrue(gate.register(generation: generation))
+        XCTAssertNil(gate.requestFinish(drainCompleted: true))
+
+        XCTAssertNil(gate.completeWrite(generation: generation, succeeded: true).resolution)
+        XCTAssertEqual(
+            gate.completeWrite(generation: generation, succeeded: false).resolution,
+            .init(drainCompleted: true, allWritesSucceeded: false)
+        )
+    }
+
+    func testForcedStopCanResolveSafeProgressOnlyAfterAllWrites() {
+        var gate = OuraHistoryPersistenceGate()
+        let generation = gate.begin()
+        XCTAssertTrue(gate.register(generation: generation))
+        XCTAssertNil(gate.requestFinish(drainCompleted: false))
+        XCTAssertEqual(
+            gate.completeWrite(generation: generation, succeeded: true).resolution,
+            .init(drainCompleted: false, allWritesSucceeded: true)
+        )
+    }
+
+    func testStaleCompletionCannotMutateReconnectGeneration() {
+        var gate = OuraHistoryPersistenceGate()
+        let oldGeneration = gate.begin()
+        XCTAssertTrue(gate.register(generation: oldGeneration))
+        gate.invalidate()
+
+        let currentGeneration = gate.begin()
+        XCTAssertTrue(gate.register(generation: currentGeneration))
+        XCTAssertNil(gate.requestFinish(drainCompleted: true))
+        let stale = gate.completeWrite(generation: oldGeneration, succeeded: false)
+        XCTAssertFalse(stale.accepted)
+        XCTAssertEqual(gate.pendingWriteCount, 1)
+        XCTAssertFalse(gate.sawWriteFailure)
+
+        XCTAssertEqual(
+            gate.completeWrite(generation: currentGeneration, succeeded: true).resolution,
+            .init(drainCompleted: true, allWritesSucceeded: true)
+        )
+    }
+
+    func testTimeoutInvalidatesAndLateSuccessIsIgnored() {
+        var gate = OuraHistoryPersistenceGate()
+        let generation = gate.begin()
+        XCTAssertTrue(gate.register(generation: generation))
+        XCTAssertNil(gate.requestFinish(drainCompleted: true))
+        XCTAssertTrue(gate.timeOut(generation: generation))
+        XCTAssertFalse(gate.isActive)
+
+        let late = gate.completeWrite(generation: generation, succeeded: true)
+        XCTAssertFalse(late.accepted)
+        XCTAssertNil(late.resolution)
+    }
+
+    func testPendingHypnogramKeepsOldGenerationAcrossNewDrain() {
+        var gate = OuraHistoryPersistenceGate()
+        var receipts = OuraHypnogramReceiptTracker()
+        let assembler = OuraHypnogramAssembler()
+
+        let oldGeneration = gate.begin()
+        XCTAssertNil(receipts.rotate(to: oldGeneration))
+        XCTAssertNil(assembler.feed(
+            ringTimestamp: 1_000,
+            phases: [.init(ringTimestamp: 1_000, index: 0, stage: .light)]
+        ))
+
+        let newGeneration = gate.begin()
+        let staleReceipt = receipts.rotate(to: newGeneration)
+        let staleBurst = assembler.flush()
+        XCTAssertEqual(staleReceipt?.historyGeneration, oldGeneration)
+        XCTAssertEqual(staleBurst?.records.first?.ringTimestamp, 1_000)
+        XCTAssertFalse(gate.register(generation: staleReceipt?.historyGeneration ?? 0))
+        XCTAssertEqual(receipts.pendingReceipt?.historyGeneration, newGeneration)
+        XCTAssertEqual(gate.pendingWriteCount, 0)
     }
 }

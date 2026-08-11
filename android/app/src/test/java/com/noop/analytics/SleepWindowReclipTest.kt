@@ -27,6 +27,11 @@ class SleepWindowReclipTest {
         }
     }
 
+    private fun segmentObjects(json: String): List<JSONObject> {
+        val arr = JSONArray(json)
+        return (0 until arr.length()).mapNotNull(arr::optJSONObject)
+    }
+
     private fun minutes(json: String): Map<String, Double> {
         val o = JSONObject(json)
         return o.keys().asSequence().associateWith { o.optDouble(it) }
@@ -64,15 +69,35 @@ class SleepWindowReclipTest {
     }
 
     @Test
+    fun segmentReclipPreservesOuraProvenanceAndOpenEndedMetadata() {
+        val json = """
+            [{"start":1000,"end":2000,"stage":"light","source":"oura","confidence":0.91},
+             {"start":2000,"end":3000,"stage":"deep","source":"oura"}]
+        """.trimIndent()
+        val out = SleepWindowReclip.reclip(json, 1000, 3000, 1500, 3600)!!
+        val objects = segmentObjects(out)
+
+        assertEquals(3, objects.size)
+        assertEquals("the retained segment is clipped", 1500, objects[0].optLong("start"))
+        assertEquals("unknown per-segment metadata survives a clip", 0.91,
+            objects[0].optDouble("confidence"), 0.0001)
+        assertEquals("both retained and synthetic wake segments keep Oura provenance",
+            true, objects.all { it.optString("source") == "oura" })
+        assertEquals("wake", objects.last().optString("stage"))
+    }
+
+    @Test
     fun segmentTrimBeforeAllSegmentsReturnsWakeFillNotNull() {
         // Corrected wake lands before every stage → emit a single wake covering the corrected window so
         // the store's COALESCE doesn't keep the OLD stages extending past the new wake time.
-        val json = """[{"start":2000,"end":3000,"stage":"light"},{"start":3000,"end":4000,"stage":"deep"}]"""
+        val json = """[{"start":2000,"end":3000,"stage":"light","source":"oura"},{"start":3000,"end":4000,"stage":"deep","source":"oura"}]"""
         val out = SleepWindowReclip.reclip(json, 1000, 4000, 1000, 1500)!!
         val segs = segments(out)
         assertEquals(1, segs.size)
         assertEquals("wake", segs[0].stage)
         assertEquals("no stage extends past the corrected wake", 1500, segs.maxOf { it.end })
+        assertEquals("a full synthetic replacement retains session provenance", "oura",
+            segmentObjects(out).first().optString("source"))
     }
 
     // ── minute dict (imported nights) ────────────────────────────────────────────────────────────

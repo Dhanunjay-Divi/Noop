@@ -471,7 +471,12 @@ struct SleepView: View {
     /// carries no sleep into `importedSleep`, so the sleep merge winner is only ever Whoop vs on-device. (C4)
     private func nightSource(_ night: Night) -> String {
         let wakeDay = Repository.localDayKey(Date(timeIntervalSince1970: TimeInterval(night.session.endTs)))
-        return repo.importedSleep[wakeDay] != nil ? String(localized: "Whoop") : String(localized: "On-device")
+        let hasWhoop = repo.importedSleep[wakeDay] != nil
+        let hasOura = night.sourceBlocks.contains(where: OuraSleepSessionMapping.hasOuraProvenance)
+        if hasWhoop && hasOura { return String(localized: "Whoop") + " + " + String(localized: "Oura ring") }
+        if hasWhoop { return String(localized: "Whoop") }
+        if hasOura { return String(localized: "Oura ring") }
+        return String(localized: "On-device")
     }
 
     // MARK: - 0b. SLEEP MARKS — tap to log "going to sleep" / "I'm awake" (#461, Phase 1)
@@ -668,10 +673,18 @@ struct SleepView: View {
     @ViewBuilder
     private func stageCard(_ night: Night, intervals: [SleepInterval]) -> some View {
         let s = night.stages
-        let isPersisted = (night.realSegments?.count ?? 0) >= 2
-        let subtitle = isPersisted
-            ? String(localized: "\(durationText(night.timeInBed)) in bed · \(efficiencyText(night)) efficiency · stages approximate (on-device)")
-            : String(localized: "\(durationText(night.timeInBed)) in bed · \(efficiencyText(night)) efficiency")
+        let hasPersistedStages = night.realSegments != nil
+        let hasOuraStages = night.sourceBlocks.contains(where: OuraSleepSessionMapping.hasOuraProvenance)
+        let baseSubtitle = String(localized: "\(durationText(night.timeInBed)) in bed · \(efficiencyText(night)) efficiency")
+        let subtitle: String = {
+            if hasOuraStages {
+                return baseSubtitle + " · " + String(localized: "Oura Ring stages · on-ring estimate, not Oura app-adjusted")
+            }
+            if hasPersistedStages {
+                return baseSubtitle + " · " + String(localized: "Stages approximate (on-device)")
+            }
+            return baseSubtitle
+        }()
         VStack(alignment: .leading, spacing: NoopMetrics.space2) {
             if intervals.count >= 2 {
                 // WHOOP sleep-details layout (ryanAtriumAi #988): one full-width timeline ROW per
@@ -2757,8 +2770,8 @@ private struct SleepModel {
     /// Stage intervals for the hypnogram — computed once (Night.intervals is a computed
     /// property; it was previously re-derived on each access during render).
     let intervals: [SleepInterval]
-    /// True when `intervals` are the stager's persisted per-epoch segments (on-device
-    /// APPROXIMATE staging), not the synthesized architecture.
+    /// True when `intervals` are persisted per-epoch segments (NOOP's local estimate or Oura's
+    /// on-ring estimate), not the synthesized architecture.
     let isPersistedHypnogram: Bool
     /// True when `night` is the stage-less STUB for a newest day that failed to merge (#940: e.g.
     /// an impossible hand-edit staged all-awake). The hero then renders the honest no-stage-data

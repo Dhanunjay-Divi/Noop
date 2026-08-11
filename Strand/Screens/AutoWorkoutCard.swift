@@ -4,8 +4,8 @@ import StrandAnalytics
 
 // MARK: - Auto-detected workout prompt (Today screen)
 //
-// Today surface for the three automatic-activity modes. Ask presents the existing Save/dismiss nudge.
-// Auto-save persists only a stronger confidence-gated candidate as a Detected/NOOP row, then presents
+// Today surface for automatic-activity modes. Ask presents the existing Save/dismiss nudge.
+// A dormant future auto-save path may persist only a calibrated confidence-gated candidate, then presents
 // a durable Keep / Not a workout review. A weaker candidate still asks. Off performs no scan.
 
 struct AutoWorkoutCard: View {
@@ -47,7 +47,10 @@ struct AutoWorkoutCard: View {
     }
 
     private var currentMode: PuffinExperiment.AutoWorkoutMode {
-        PuffinExperiment.AutoWorkoutMode(rawValue: storedModeRaw) ?? PuffinExperiment.autoWorkoutMode
+        // Keep the AppStorage dependency so the card reloads when Settings changes, but resolve through
+        // the side-effect-free migration seam: a retired `autoSave` value behaves as approval-first Ask.
+        _ = storedModeRaw
+        return PuffinExperiment.resolvedAutoWorkoutMode()
     }
 
     @ViewBuilder

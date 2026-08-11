@@ -125786,6 +125786,32 @@
         }
       }
     },
+    "Oura Ring stages · on-ring estimate, not Oura app-adjusted": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Oura-Ring-Phasen · Schätzung auf dem Ring, nicht von der Oura-App angepasst" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Oura Ring stages · on-ring estimate, not Oura app-adjusted" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Fases de Oura Ring · estimación del anillo, sin ajustes de la app Oura" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Stades Oura Ring · estimation sur la bague, non ajustée par l’app Oura" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Fasi Oura Ring · stima sull’anello, non corretta dall’app Oura" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Fases do Oura Ring · estimativa no anel, sem ajuste da app Oura" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Стадии Oura Ring · оценка на кольце, без корректировки приложением Oura" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Oura Ring 睡眠阶段 · 戒指端估算，未经 Oura App 调整" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Oura Ring 睡眠階段 · 戒指端估算，未經 Oura App 調整" } }
+      }
+    },
+    "Stages approximate (on-device)": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Phasen ungefähr (auf dem Gerät)" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Stages approximate (on-device)" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Fases aproximadas (en el dispositivo)" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Stades approximatifs (sur l’appareil)" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Fasi approssimative (sul dispositivo)" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Fases aproximadas (no dispositivo)" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Приблизительные стадии (на устройстве)" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "睡眠阶段为设备端估算" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "睡眠階段為裝置端估算" } }
+      }
+    },
     "Stages vs typical": {
       "localizations": {
         "de": {
@@ -177005,30 +177031,86 @@
         }
       }
     },
-    "After a sync, NOOP looks for a finalized, sustained rise in heart rate with sufficient signal coverage and motion confirmation when available. Ask always waits for you. Auto-save writes only stronger 15+ minute candidates as Detected, then lets you keep, edit or dismiss them. This is a conservative on-device heuristic, not WHOOP's proprietary detector, so it can miss or misread activities. On %@ only.": {
+    "Ask": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nach einer Synchronisierung sucht NOOP nach einem abgeschlossenen, anhaltenden Anstieg der Herzfrequenz mit ausreichender Signalabdeckung und – sofern verfügbar – bestätigter Bewegung. „Immer nachfragen“ wartet stets auf deine Entscheidung. „Automatisch speichern“ speichert nur stärkere Kandidaten ab 15 Minuten als „Erkannt“; anschließend kannst du sie behalten, bearbeiten oder verwerfen. Dies ist eine konservative Heuristik auf dem Gerät, nicht der proprietäre Detektor von WHOOP, und kann Aktivitäten übersehen oder falsch einordnen. Nur auf %@."
+            "value": "Nachfragen"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Después de una sincronización, NOOP busca un aumento sostenido y ya finalizado de la frecuencia cardíaca, con cobertura de señal suficiente y confirmación de movimiento cuando esté disponible. «Preguntar siempre» espera tu decisión. «Guardar automáticamente» solo registra como «Detectadas» las candidatas más claras de 15 minutos o más; después puedes conservarlas, editarlas o descartarlas. Es una heurística conservadora en el dispositivo, no el detector propietario de WHOOP, por lo que puede omitir o interpretar mal algunas actividades. Solo en %@."
+            "value": "Preguntar"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Après une synchronisation, NOOP recherche une hausse soutenue et terminée de la fréquence cardiaque, avec une couverture du signal suffisante et une confirmation par le mouvement lorsqu’elle est disponible. « Toujours demander » attend votre décision. « Enregistrer automatiquement » ne conserve comme « Détectées » que les activités candidates les plus nettes d’au moins 15 minutes ; vous pouvez ensuite les garder, les modifier ou les ignorer. Il s’agit d’une heuristique prudente exécutée sur l’appareil, et non du détecteur propriétaire de WHOOP ; elle peut donc manquer ou mal interpréter certaines activités. Uniquement sur %@."
+            "value": "Demander"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Após uma sincronização, o NOOP procura uma subida sustentada e já terminada da frequência cardíaca, com cobertura de sinal suficiente e confirmação de movimento quando disponível. «Perguntar sempre» aguarda a sua decisão. «Guardar automaticamente» regista como «Detetadas» apenas as atividades candidatas mais claras com 15 minutos ou mais; depois pode mantê-las, editá-las ou ignorá-las. Esta é uma heurística conservadora executada no dispositivo, não o detetor proprietário do WHOOP, pelo que pode falhar ou interpretar incorretamente algumas atividades. Apenas em %@."
+            "value": "Perguntar"
+          }
+        }
+      }
+    },
+    "Choose off or ask before saving": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wähle „Aus“ oder „Vor dem Speichern fragen“."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elige Desactivado o Preguntar antes de guardar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisissez Désactivé ou Demander avant d’enregistrer."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolha Desligado ou Perguntar antes de guardar."
+          }
+        }
+      }
+    },
+    "After a sync, NOOP looks for a finalized, sustained rise in heart rate with sufficient signal coverage and motion confirmation when available. Ask always waits for your approval before saving. Automatic saving stays unavailable until the detector has held-out field validation and calibrated confidence. This is a conservative on-device heuristic, not WHOOP's proprietary detector, so it can miss or misread activities. On %@ only.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nach einer Synchronisierung sucht NOOP nach einem abgeschlossenen, anhaltenden Anstieg der Herzfrequenz mit ausreichender Signalabdeckung und – sofern verfügbar – bestätigter Bewegung. „Nachfragen“ wartet stets auf deine Bestätigung, bevor etwas gespeichert wird. Automatisches Speichern bleibt deaktiviert, bis der Detektor mit zurückgehaltenen Felddaten validiert wurde und über eine kalibrierte Konfidenz verfügt. Dies ist eine konservative Heuristik auf dem Gerät, nicht der proprietäre Detektor von WHOOP, und kann Aktivitäten übersehen oder falsch einordnen. Nur auf %@."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Después de una sincronización, NOOP busca un aumento sostenido y ya finalizado de la frecuencia cardíaca, con cobertura de señal suficiente y confirmación de movimiento cuando esté disponible. «Preguntar» siempre espera tu aprobación antes de guardar. El guardado automático seguirá sin estar disponible hasta que el detector tenga validación de campo con datos reservados y una confianza calibrada. Es una heurística conservadora en el dispositivo, no el detector propietario de WHOOP, por lo que puede omitir o interpretar mal algunas actividades. Solo en %@."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Après une synchronisation, NOOP recherche une hausse soutenue et terminée de la fréquence cardiaque, avec une couverture du signal suffisante et une confirmation par le mouvement lorsqu’elle est disponible. « Demander » attend systématiquement votre approbation avant tout enregistrement. L’enregistrement automatique reste indisponible tant que le détecteur n’a pas été validé sur le terrain avec des données réservées et que son niveau de confiance n’est pas étalonné. Il s’agit d’une heuristique prudente exécutée sur l’appareil, et non du détecteur propriétaire de WHOOP ; elle peut donc manquer ou mal interpréter certaines activités. Uniquement sur %@."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Após uma sincronização, o NOOP procura uma subida sustentada e já terminada da frequência cardíaca, com cobertura de sinal suficiente e confirmação de movimento quando disponível. «Perguntar» aguarda sempre a sua aprovação antes de guardar. A gravação automática permanece indisponível até o detetor ter validação de campo com dados reservados e confiança calibrada. Esta é uma heurística conservadora executada no dispositivo, não o detetor proprietário do WHOOP, pelo que pode falhar ou interpretar incorretamente algumas atividades. Apenas em %@."
           }
         }
       }

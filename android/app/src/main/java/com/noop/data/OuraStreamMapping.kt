@@ -109,6 +109,9 @@ object OuraStreamMapping {
                 }
 
                 is OuraEvent.SleepPhaseEvent -> {
+                    // Erased-flash placeholders are gaps, not awake epochs. Drop at the persistence
+                    // boundary so every live/import/replay path receives the same protection (#1246).
+                    if (ev.value.unwritten) continue
                     val ts = anchor(ev.value.ringTimestamp) ?: continue
                     out.events.add(
                         WhoopEvent(

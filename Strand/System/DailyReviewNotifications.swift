@@ -203,9 +203,9 @@ enum DailyReviewNotifications {
     }
 }
 
-/// Privacy-safe alerts for a candidate that needs approval or a confidence-gated workout that NOOP just
-/// auto-saved. Both open Today: Ask mode offers Save/dismiss, while Auto-save mode offers Keep/Not a
-/// workout. This helper never asks for permission and never embeds a health value in notification copy.
+/// Privacy-safe alerts for a candidate that needs approval or a future validated policy just saved.
+/// Both open Today: Ask offers Save/dismiss, while the dormant review path offers Keep/Not a workout.
+/// This helper never asks for permission and never embeds a health value in notification copy.
 @MainActor
 enum AutoWorkoutNotifications {
     private static let requestID = "auto-workout-candidate"

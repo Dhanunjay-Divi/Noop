@@ -348,13 +348,45 @@ final class SourceCoordinator: ObservableObject {
         // read-only session that re-authenticates with the now-stored key and never re-installs.
         let adoptIntent = (pendingAdoptDeviceId == id)
         pendingAdoptDeviceId = nil
+        let historyLog = straplog
         let source = OuraLiveSource(
             live: live,
             deviceId: id,
             ringGen: ringGen,
             authKey: { OuraKeyStore.read(deviceId: id) },
             persist: { [storeHandle] streams in
-                Task { if let store = await storeHandle() { _ = try? await store.insert(streams, deviceId: id) } }
+                Task {
+                    guard let store = await storeHandle() else {
+                        historyLog("Oura: store unavailable while persisting history")
+                        return false
+                    }
+                    do {
+                        try await store.insert(streams, deviceId: id)
+                        return true
+                    } catch {
+                        historyLog("Oura: history stream persistence failed - \(error.localizedDescription)")
+                        return false
+                    }
+                }
+            },
+            persistSleepSession: { [storeHandle] session in
+                // Ring-provided SleepNet staging is imported/measured data under the ring's own id. The
+                // normal sleep merge then prefers it over a sparse-motion computed sibling when richer.
+                Task {
+                    guard let store = await storeHandle() else {
+                        historyLog("Oura: store unavailable while persisting the sleep-stage session")
+                        return false
+                    }
+                    do {
+                        // Zero changed rows is still success: it means an identical idempotent row was
+                        // already durable, not that the write failed.
+                        _ = try await store.upsertSleepSessions([session], deviceId: id)
+                        return true
+                    } catch {
+                        historyLog("Oura: sleep-stage persistence failed - \(error.localizedDescription)")
+                        return false
+                    }
+                }
             },
             log: straplog,
             onBattery: { [live] pct in live.setBattery(Double(pct)) },

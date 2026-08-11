@@ -107,6 +107,131 @@ final class IntelligenceDaySourceTests: XCTestCase {
             imported.id, devices: [imported], fallbackDeviceId: "my-whoop"))
     }
 
+    // MARK: - banked-sleep repair scope
+
+    func testSleepRepairIncludesComputedAndEveryRegisteredDevice() {
+        let ids = IntelligenceEngine.sleepHealDeviceIds(
+            computedId: "my-whoop-noop",
+            registeredIds: ["my-whoop", "oura-ring"])
+
+        XCTAssertEqual(ids, ["my-whoop", "my-whoop-noop", "oura-ring"])
+    }
+
+    func testSleepRepairScopeIsUniqueSortedAndKeepsComputedId() {
+        XCTAssertEqual(
+            IntelligenceEngine.sleepHealDeviceIds(
+                computedId: "b-noop",
+                registeredIds: ["oura-ring", "b-noop", "a-whoop"]),
+            ["a-whoop", "b-noop", "oura-ring"])
+        XCTAssertEqual(
+            IntelligenceEngine.sleepHealDeviceIds(computedId: "my-whoop-noop", registeredIds: []),
+            ["my-whoop-noop"])
+    }
+
+    private func sleep(_ start: Int, _ end: Int, edited: Bool = false) -> CachedSleepSession {
+        CachedSleepSession(
+            startTs: start,
+            endTs: end,
+            efficiency: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            stagesJSON: nil,
+            userEdited: edited)
+    }
+
+    @MainActor
+    func testSleepRepairDeletesPerSourceAndPreservesEditedAndNonOverlappingRowsIdempotently() async throws {
+        let store = try await WhoopStore.inMemory()
+
+        // Computed source: this pass's fresh row wins its shifted duplicate.
+        try await store.upsertSleepSessions([
+            sleep(10_000, 20_000),
+            sleep(10_600, 20_300),
+        ], deviceId: "computed")
+
+        // Oura source: longest wins without borrowing a row from another device id; the later nap is
+        // disjoint and must survive.
+        try await store.upsertSleepSessions([
+            sleep(40_000, 60_000),
+            sleep(40_600, 59_000),
+            sleep(62_000, 64_000),
+        ], deviceId: "oura")
+
+        // A hand-edited night always survives an overlapping unedited copy, and a separate sleep remains.
+        try await store.upsertSleepSessions([
+            sleep(70_000, 90_000, edited: true),
+            sleep(70_600, 89_000),
+            sleep(92_000, 95_000),
+        ], deviceId: "edited-source")
+
+        let first = await IntelligenceEngine.healBankedSleepSessions(
+            store: store,
+            deviceIds: ["oura", "computed", "edited-source", "oura"],
+            from: 0,
+            to: 100_000,
+            oldestDay: "1970-01-01",
+            newestDay: "2100-01-01",
+            timezoneOffsetSeconds: 0,
+            freshStarts: [10_600])
+
+        XCTAssertEqual(first.deleted.count, 3)
+        XCTAssertEqual(first.unchangedDeleteCount, 0)
+        XCTAssertEqual(first.failedDeleteCount, 0)
+        XCTAssertEqual(first.failedReadCount, 0)
+        let computedRows = try await store.sleepSessions(
+            deviceId: "computed", from: 0, to: 100_000, limit: 20)
+        let ouraRows = try await store.sleepSessions(
+            deviceId: "oura", from: 0, to: 100_000, limit: 20)
+        XCTAssertEqual(computedRows.map(\.startTs), [10_600])
+        XCTAssertEqual(ouraRows.map(\.startTs), [40_000, 62_000])
+        let editedRows = try await store.sleepSessions(
+            deviceId: "edited-source", from: 0, to: 100_000, limit: 20)
+        XCTAssertEqual(editedRows.map(\.startTs), [70_000, 92_000])
+        XCTAssertTrue(editedRows.first?.userEdited == true)
+
+        let second = await IntelligenceEngine.healBankedSleepSessions(
+            store: store,
+            deviceIds: ["computed", "oura", "edited-source"],
+            from: 0,
+            to: 100_000,
+            oldestDay: "1970-01-01",
+            newestDay: "2100-01-01",
+            timezoneOffsetSeconds: 0,
+            freshStarts: [10_600])
+        XCTAssertTrue(second.deleted.isEmpty, "a completed repair must be idempotent")
+        XCTAssertEqual(second.unchangedDeleteCount, 0)
+        XCTAssertFalse(second.hasFailures)
+    }
+
+    @MainActor
+    func testSleepRepairNeverCountsOrRemovesARowWhenTheDeleteFails() async throws {
+        enum ExpectedFailure: Error { case delete }
+
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertSleepSessions([
+            sleep(10_000, 20_000),
+            sleep(10_600, 19_000),
+        ], deviceId: "oura")
+
+        let result = await IntelligenceEngine.healBankedSleepSessions(
+            store: store,
+            deviceIds: ["oura"],
+            from: 0,
+            to: 30_000,
+            oldestDay: "1970-01-01",
+            newestDay: "2100-01-01",
+            timezoneOffsetSeconds: 0,
+            freshStarts: [],
+            deleteSession: { _, _ in throw ExpectedFailure.delete })
+
+        XCTAssertTrue(result.deleted.isEmpty)
+        XCTAssertEqual(result.failedDeleteCount, 1)
+        XCTAssertTrue(result.hasFailures)
+        let rowsAfterFailure = try await store.sleepSessions(
+            deviceId: "oura", from: 0, to: 30_000, limit: 20)
+        XCTAssertEqual(rowsAfterFailure.count, 2, "a failed delete must leave both source rows intact")
+    }
+
     // MARK: - diagnostic line shape (the strap-log proof the next report ships)
 
     /// The exact line the engine emits per scored day; assembled here from the same parts so the format

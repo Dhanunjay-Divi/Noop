@@ -11,6 +11,7 @@ final class SleepMergeTests: XCTestCase {
                            restingHr: nil, avgHrv: nil, stagesJSON: stages)
     }
     private let someStages = #"[{"start":0,"end":3600,"stage":"deep"}]"#
+    private let ouraStages = #"[{"start":0,"end":3600,"stage":"deep","source":"oura"}]"#
     // Deterministic "local day" keyer for the tests (real callers pass their tz-aware keyer).
     private let dayKey: (CachedSleepSession) -> String = { String($0.endTs / 86_400) }
 
@@ -86,5 +87,19 @@ final class SleepMergeTests: XCTestCase {
         let imp   = session(start: 3600, end: 8 * 3600 + 1800)
         let merged = SleepMerge.merge(imported: [imp], computed: [night, nap], endDay: dayKey)
         XCTAssertEqual(merged.map(\.startTs), [0, 14 * 3600])
+    }
+
+    func testOuraNapDoesNotDisplaceSeparateComputedMainNight() {
+        let computedNight = session(start: 0, end: 8 * 3600, stages: someStages)
+        let ouraNap = session(start: 14 * 3600, end: 15 * 3600, stages: ouraStages)
+        let merged = SleepMerge.merge(imported: [ouraNap], computed: [computedNight], endDay: dayKey)
+        XCTAssertEqual(merged.map(\.startTs), [0, 14 * 3600])
+    }
+
+    func testOuraNightReplacesOverlappingComputedReconstruction() {
+        let computedNight = session(start: 0, end: 8 * 3600, stages: someStages)
+        let ouraNight = session(start: 15 * 60, end: 8 * 3600, stages: ouraStages)
+        let merged = SleepMerge.merge(imported: [ouraNight], computed: [computedNight], endDay: dayKey)
+        XCTAssertEqual(merged.map(\.startTs), [15 * 60])
     }
 }

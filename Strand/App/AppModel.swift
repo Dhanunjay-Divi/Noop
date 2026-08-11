@@ -612,7 +612,7 @@ final class AppModel: ObservableObject {
         await refreshV5Signals()
         // A completed sync is the earliest reliable moment to inspect an offloaded session. Existing
         // users keep their chosen mode; fresh installs default to Ask until the classifier has real-world
-        // validation. Explicit Auto-save still uses the stricter gate and durable Keep/undo review path.
+        // validation. A legacy Auto-save preference resolves to approval-first Ask until confidence is calibrated.
         await processAutomaticWorkoutAfterSync()
         #if os(iOS)
         // #980: a strap backfill routinely completes while the app is BACKGROUNDED (it runs as a

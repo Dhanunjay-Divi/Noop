@@ -229,9 +229,10 @@ interface WhoopDao : DeviceRegistryDao {
     suspend fun upsertSleepSessions(rows: List<SleepSession>)
 
     /** Remove one sleep session by its full primary key (deviceId, startTs) — used by the
-     *  bed/wake-time edit, which deletes then re-inserts because startTs is part of the PK. */
+     *  bed/wake-time edit, which deletes then re-inserts because startTs is part of the PK. Returns the
+     *  number of rows changed so repair callers never report a candidate as deleted when it was not. */
     @Query("DELETE FROM sleepSession WHERE deviceId = :deviceId AND startTs = :startTs")
-    suspend fun deleteSleepSession(deviceId: String, startTs: Long)
+    suspend fun deleteSleepSession(deviceId: String, startTs: Long): Int
 
     /** Manually ADD a sleep session the detector missed — typically a daytime NAP (#508). Port of iOS
      *  MetricsCache.insertManualSleepSession. `onConflict = IGNORE` makes it purely ADDITIVE: it can

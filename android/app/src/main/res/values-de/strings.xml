@@ -1756,7 +1756,7 @@
     <string name="live_tracking_stop">Live-Tracking stoppen</string>
     <string name="live_tracking_start">Live-Tracking starten</string>
     <string name="settings_automatic_activity">Automatische Aktivität</string>
-    <string name="settings_automatic_activity_help">Nach einer Synchronisierung sucht NOOP nach einem abgeschlossenen, anhaltenden Anstieg der Herzfrequenz mit ausreichender Signalabdeckung und, sofern verfügbar, Bewegungsbestätigung. „Fragen“ wartet immer auf dich. „Automatisch speichern“ schreibt nur stärkere Kandidaten ab 15 Minuten als „Erkannt“ und lässt dich diese anschließend behalten, bearbeiten oder verwerfen. Dies ist eine konservative Heuristik auf dem Gerät und nicht der proprietäre Detektor von WHOOP; Aktivitäten können daher übersehen oder falsch erkannt werden. Nur auf diesem Smartphone.</string>
+    <string name="settings_automatic_activity_help">Nach einer Synchronisierung sucht NOOP nach einem abgeschlossenen, anhaltenden Anstieg der Herzfrequenz mit ausreichender Signalabdeckung und, sofern verfügbar, Bewegungsbestätigung. „Fragen“ wartet vor dem Speichern immer auf deine Bestätigung. Automatisches Speichern bleibt deaktiviert, bis der Detektor mit zurückgehaltenen Felddaten validiert ist und eine kalibrierte Konfidenz liefert. Dies ist eine konservative Heuristik auf dem Gerät und nicht der proprietäre Detektor von WHOOP; Aktivitäten können daher übersehen oder falsch erkannt werden. Nur auf diesem Smartphone.</string>
     <string name="cycle_tracker_title">Zyklus-Tracker</string>
     <string name="cycle_tracker_private_dates">Private Daten zum Periodenbeginn</string>
     <string name="cycle_tracker_already_logged">Bereits erfasst</string>
@@ -1775,4 +1775,7 @@
     <string name="workout_saving">Wird gespeichert…</string>
     <string name="workout_retry_save">Speichern erneut versuchen</string>
     <string name="workout_discard">Training verwerfen</string>
+    <string name="sleep_stages_oura_provenance">Oura-Ring-Phasen · Schätzung auf dem Ring, nicht von der Oura-App angepasst</string>
+    <string name="sleep_stages_on_device_provenance">Phasen ungefähr (auf dem Gerät)</string>
+    <string name="sleep_stage_summary">%1$s im Bett · %2$s Effizienz</string>
 </resources>

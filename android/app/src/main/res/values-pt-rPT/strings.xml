@@ -1735,7 +1735,7 @@
     <string name="live_tracking_stop">Parar monitorização em direto</string>
     <string name="live_tracking_start">Iniciar monitorização em direto</string>
     <string name="settings_automatic_activity">Atividade automática</string>
-    <string name="settings_automatic_activity_help">Após uma sincronização, o NOOP procura um aumento sustentado e finalizado da frequência cardíaca, com cobertura de sinal suficiente e confirmação de movimento quando disponível. Perguntar aguarda sempre a tua confirmação. Guardar automaticamente regista apenas como Detetadas as candidatas mais fortes com 15 minutos ou mais e permite-te depois mantê-las, editá-las ou ignorá-las. É uma heurística conservadora no dispositivo, não o detetor proprietário da WHOOP, pelo que pode falhar ou interpretar incorretamente atividades. Apenas neste telemóvel.</string>
+    <string name="settings_automatic_activity_help">Após uma sincronização, o NOOP procura um aumento sustentado e finalizado da frequência cardíaca, com cobertura de sinal suficiente e confirmação de movimento quando disponível. Perguntar aguarda sempre a tua aprovação antes de guardar. O registo automático permanece indisponível até o detetor ter validação de campo com dados reservados e confiança calibrada. É uma heurística conservadora no dispositivo, não o detetor proprietário da WHOOP, pelo que pode falhar ou interpretar incorretamente atividades. Apenas neste telemóvel.</string>
     <string name="cycle_tracker_title">Monitor do ciclo</string>
     <string name="cycle_tracker_private_dates">Datas privadas de início do período</string>
     <string name="cycle_tracker_already_logged">Já registado</string>
@@ -1754,4 +1754,7 @@
     <string name="workout_saving">A guardar…</string>
     <string name="workout_retry_save">Tentar guardar novamente</string>
     <string name="workout_discard">Descartar treino</string>
+    <string name="sleep_stages_oura_provenance">Fases do Oura Ring · estimativa no anel, sem ajuste da app Oura</string>
+    <string name="sleep_stages_on_device_provenance">Fases aproximadas (no dispositivo)</string>
+    <string name="sleep_stage_summary">%1$s na cama · %2$s de eficiência</string>
 </resources>

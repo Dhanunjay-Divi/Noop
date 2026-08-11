@@ -12,8 +12,9 @@ import kotlin.math.sqrt
  * same outputs), verified by the mirrored unit tests on each platform.
  *
  * This is DELIBERATELY SEPARATE from [WorkoutDetector] (the internal scoring detector). This one is the
- * canonical PURE detector. This component never performs I/O; the app-level Off / Ask / Auto-save
- * policy decides whether a candidate is ignored, shown for approval, or persisted as a Detected row.
+ * canonical PURE detector. This component never performs I/O; the app-level Off / Ask policy decides
+ * whether a candidate is ignored or shown for approval. A dormant legacy path remains fail-closed until
+ * confidence is field-calibrated.
  *
  * The thresholds here are intentionally CONSERVATIVE (low sensitivity): a sustained ≥10-min
  * elevation of HR ≥ resting+30 bpm, brief (≤90 s) dips tolerated, and only short workout

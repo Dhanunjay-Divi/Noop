@@ -87,6 +87,10 @@ public enum OuraStreamMapping {
                 out.skinTemp.append(SkinTempSample(ts: ts, raw: Int((v.celsius * 100).rounded()), unit: "centi_c"))
 
             case .sleepPhase(let v):
+                // Erased-flash placeholders preserve decoder positions but are missing data, not awake
+                // sleep. Drop them at the persistence boundary so live/import/replay callers all receive
+                // the same protection (#1246).
+                guard !v.unwritten else { continue }
                 out.events.append(WhoopEvent(ts: ts, kind: sleepPhaseEventKind, payload: [
                     "phase": .int(v.stage.rawValue),
                     "index": .int(v.index),

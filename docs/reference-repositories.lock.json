@@ -17,7 +17,7 @@
     {"repo":"krumjahn/health-dashboard","commit":"7dbae98c88dcb209ff09e95ea6e099696a7f8b37","license":"NOASSERTION","use":"concepts-only"},
     {"repo":"markwk/qs_ledger","commit":"218e9d8abd52135f8c1de797a8ec390621bf6bc2","license":"MIT","use":"compatible-with-notice"},
     {"repo":"muftiarfan/noop","commit":"7be90e0af86ba2c6545dbf7d051bacd370350c67","license":"NOASSERTION","use":"provenance-review-facts-only"},
-    {"repo":"ryanbr/noop","commit":"18fc65636d754646a6b6ef5b84326df8e176b1c3","license":"PolyForm-Noncommercial-1.0.0","use":"upstream-review"},
+    {"repo":"ryanbr/noop","commit":"3605f6168aac4752b625604414168a5c8e390f09","license":"PolyForm-Noncommercial-1.0.0","use":"upstream-review"},
     {"repo":"the-momentum/open-wearables","commit":"71843a5c013499f6487ef9731c494775b75725fd","license":"MIT","use":"compatible-with-notice"},
     {"repo":"tigercraft4/goose","commit":"33cea3fd88412486b91fc693970329fb484a4600","license":"PolyForm-Noncommercial-1.0.0","use":"lineage-review-required"},
     {"repo":"wger-project/wger","commit":"53e85b328efaab42eb736d24d5d294d036b2a7ef","license":"AGPL-3.0-only","use":"concepts-only"},

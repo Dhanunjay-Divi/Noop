@@ -79,8 +79,16 @@ enum class OuraSleepStage(val raw: Int) {
     }
 }
 
-/** One decoded sleep-phase code in order within a 0x4E/0x5A record (OURA_PROTOCOL.md s6.12). */
-data class OuraSleepPhase(val ringTimestamp: Long, val index: Int, val stage: OuraSleepStage)
+/**
+ * One decoded sleep-phase code in order within a 0x4E/0x5A record. [unwritten] marks a positional
+ * placeholder decoded from a whole erased-flash page; it is a gap and must not persist as AWAKE.
+ */
+data class OuraSleepPhase(
+    val ringTimestamp: Long,
+    val index: Int,
+    val stage: OuraSleepStage,
+    val unwritten: Boolean = false,
+)
 
 /** Motion state (OURA_PROTOCOL.md s6.13): 0 NO_MOTION, 1 RESTLESS, 2 TOSSING, 3 ACTIVE. */
 enum class OuraMotionState(val raw: Int) {
@@ -203,4 +211,26 @@ sealed class OuraEvent {
 
     /** True for Tier-B events, so a consumer can assert none leaked into a Tier-A-only sink. */
     val isTierB: Boolean get() = this is TierB || this is ActivityInfo
+
+    /**
+     * The source record's envelope ring-time. History continuation uses this for every decoded record,
+     * even when its UTC anchor has not arrived yet. Battery is an outer response and has no envelope time.
+     */
+    val envelopeRingTimestamp: Long?
+        get() = when (this) {
+            is Hr -> value.ringTimestamp
+            is Ibi -> value.ringTimestamp
+            is Hrv -> value.ringTimestamp
+            is Spo2 -> value.ringTimestamp
+            is Temp -> value.ringTimestamp
+            is Battery -> null
+            is SleepPhaseEvent -> value.ringTimestamp
+            is MotionEvent -> value.ringTimestamp
+            is StateEvent -> value.ringTimestamp
+            is TimeSyncEvent -> value.ringTimestamp
+            is RtcBeaconEvent -> value.ringTimestamp
+            is DebugTextEvent -> ringTimestamp
+            is TierB -> value.ringTimestamp
+            is ActivityInfo -> value.ringTimestamp
+        }
 }

@@ -46,7 +46,7 @@ sealed class OuraTransition {
     /** The app wants to fetch buffered history from this cursor (optional path). */
     data class StartHistoryFetch(val cursor: Long) : OuraTransition()
 
-    /** The last GetEvents response advanced the cursor to this value; continue or stop. */
+    /** The app advanced its client-managed envelope cursor to this value; continue or stop. */
     data class HistoryCursorAdvanced(val cursor: Long, val moreData: Boolean) : OuraTransition()
 }
 

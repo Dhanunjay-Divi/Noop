@@ -45,6 +45,20 @@ object SleepWindowReclip {
     private fun reclipSegments(arr: JSONArray, newStart: Long, newEnd: Long): String? {
         val out = JSONArray()
         var maxEnd = newStart
+        // Segment metadata is intentionally open-ended (for example Oura's `source` marker). Preserve
+        // it when clipping and carry an unambiguous session source onto any synthetic wake fill so a
+        // harmless window edit cannot erase provenance used by merge policy and UI attribution.
+        val sources = (0 until arr.length()).mapNotNull { index ->
+            arr.optJSONObject(index)?.optString("source")?.takeIf { it.isNotEmpty() }
+        }.toSet()
+        val inheritedSource = sources.singleOrNull()
+
+        fun syntheticWake(start: Long, end: Long): JSONObject = JSONObject()
+            .put("start", start)
+            .put("end", end)
+            .put("stage", "wake")
+            .also { segment -> inheritedSource?.let { segment.put("source", it) } }
+
         for (i in 0 until arr.length()) {
             val seg = arr.optJSONObject(i) ?: continue
             val start = seg.optLong("start", -1)
@@ -55,16 +69,19 @@ object SleepWindowReclip {
             if (end <= newStart) continue                        // wholly before the new bed time → drop
             val clippedStart = maxOf(start, newStart)            // clip the segment spanning the new bed time
             val clippedEnd = minOf(end, newEnd)
-            out.put(JSONObject().put("start", clippedStart).put("end", clippedEnd).put("stage", stage))
+            out.put(JSONObject(seg.toString())
+                .put("start", clippedStart)
+                .put("end", clippedEnd)
+                .put("stage", stage))
             if (clippedEnd > maxEnd) maxEnd = clippedEnd
         }
         if (newEnd > maxEnd && maxEnd >= newStart) {             // window grew → trailing awake
-            out.put(JSONObject().put("start", maxEnd).put("end", newEnd).put("stage", "wake"))
+            out.put(syntheticWake(maxEnd, newEnd))
         }
         // If every segment trimmed away, emit a single wake covering the corrected window so the
         // store's COALESCE doesn't keep the old segments extending past the new wake time.
         if (out.length() == 0 && newEnd > newStart) {
-            out.put(JSONObject().put("start", newStart).put("end", newEnd).put("stage", "wake"))
+            out.put(syntheticWake(newStart, newEnd))
         }
         return if (out.length() > 0) out.toString() else null
     }

@@ -372,15 +372,22 @@ public enum OuraDecoders {
         return String(bytes: rec.payload, encoding: .utf8)
     }
 
-    // MARK: - Sleep phase, 2-bit codes (0x4E / 0x5A; s6.12)
+    // MARK: - Sleep phase, 2-bit codes (0x4B / 0x4E / 0x5A; s6.12)
 
-    /// Decode the 0x4E/0x5A sleep_phase_details: byte6 = header; phase codes are 2-bit, 4 per byte
-    /// (bits [7:6][5:4][3:2][1:0]); codes 0=awake,1=light,2=deep,3=REM. Per OURA_PROTOCOL.md s6.12.
+    /// Decode the 0x4B/0x4E/0x5A sleep_phase_details: byte6 = header; phase codes are 2-bit, 4 per byte
+    /// (bits [7:6][5:4][3:2][1:0]); validated SleepNet mapping is
+    /// 0=deep, 1=light, 2=REM, 3=awake. Per OURA_PROTOCOL.md s6.12.
     /// Returns nil on a short body. The header byte is skipped; phase bytes follow.
     public static func decodeSleepPhase(_ rec: OuraRecord) -> [OuraSleepPhase]? {
         let b = rec.payload
         // body[0] is the header (spec offset 6); phase codes begin at body[1].
         guard b.count >= 2 else { return nil }
+        // A whole record of 0xFF code bytes is erased flash, not four awake epochs per byte. Require at
+        // least two code bytes so a lone 0xFF (which can genuinely represent four awake epochs) remains
+        // valid. Keep placeholders through decode so their positions remain explicit; persistence drops
+        // them as gaps. Upstream ryanbr/noop #1246, expressed against this fork's direct-event pipeline.
+        let codeBytes = b.dropFirst()
+        let unwritten = codeBytes.count >= 2 && codeBytes.allSatisfy { $0 == 0xFF }
         var out: [OuraSleepPhase] = []
         var index = 0
         for k in 1..<b.count {
@@ -389,7 +396,8 @@ public enum OuraDecoders {
             for shift in stride(from: 6, through: 0, by: -2) {
                 let code = Int((byte >> UInt8(shift)) & 0x03)
                 if let stage = OuraSleepStage(rawValue: code) {
-                    out.append(OuraSleepPhase(ringTimestamp: rec.ringTimestamp, index: index, stage: stage))
+                    out.append(OuraSleepPhase(ringTimestamp: rec.ringTimestamp, index: index,
+                                              stage: stage, unwritten: unwritten))
                     index += 1
                 }
             }

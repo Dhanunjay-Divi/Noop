@@ -98,13 +98,37 @@ public enum OuraSleepStage: Int, Sendable, Equatable, Codable {
     case awake = 3
 }
 
-/// One decoded sleep-phase code in order within a 0x4E/0x5A record (OURA_PROTOCOL.md s6.12).
+/// One decoded sleep-phase code in order within a 0x4B/0x4E/0x5A record (OURA_PROTOCOL.md s6.12).
 public struct OuraSleepPhase: Equatable, Sendable, Codable {
     public let ringTimestamp: UInt32
     public let index: Int          // position within the record's phase sequence
     public let stage: OuraSleepStage
-    public init(ringTimestamp: UInt32, index: Int, stage: OuraSleepStage) {
+    /// True when this placeholder came from a whole erased-flash hypnogram page. It must retain its
+    /// position while decoding, but it is a gap and must never be persisted as an awake epoch.
+    public let unwritten: Bool
+    public init(ringTimestamp: UInt32, index: Int, stage: OuraSleepStage, unwritten: Bool = false) {
         self.ringTimestamp = ringTimestamp; self.index = index; self.stage = stage
+        self.unwritten = unwritten
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case ringTimestamp, index, stage, unwritten
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        ringTimestamp = try values.decode(UInt32.self, forKey: .ringTimestamp)
+        index = try values.decode(Int.self, forKey: .index)
+        stage = try values.decode(OuraSleepStage.self, forKey: .stage)
+        unwritten = try values.decodeIfPresent(Bool.self, forKey: .unwritten) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(ringTimestamp, forKey: .ringTimestamp)
+        try values.encode(index, forKey: .index)
+        try values.encode(stage, forKey: .stage)
+        try values.encode(unwritten, forKey: .unwritten)
     }
 }
 
@@ -235,6 +259,27 @@ public enum OuraEvent: Equatable, Sendable {
         switch self {
         case .tierB, .activityInfo: return true
         default: return false
+        }
+    }
+
+    /// The source record's envelope ring-time. History draining advances past every observed record,
+    /// including one that is not yet UTC-anchored; battery is a plain response and has no envelope time.
+    public var envelopeRingTimestamp: UInt32? {
+        switch self {
+        case .hr(let value): return value.ringTimestamp
+        case .ibi(let value): return value.ringTimestamp
+        case .hrv(let value): return value.ringTimestamp
+        case .spo2(let value): return value.ringTimestamp
+        case .temp(let value): return value.ringTimestamp
+        case .battery: return nil
+        case .sleepPhase(let value): return value.ringTimestamp
+        case .motion(let value): return value.ringTimestamp
+        case .state(let value): return value.ringTimestamp
+        case .timeSync(let value): return value.ringTimestamp
+        case .rtcBeacon(let value): return value.ringTimestamp
+        case .debugText(let ringTimestamp, _): return ringTimestamp
+        case .tierB(let value): return value.ringTimestamp
+        case .activityInfo(let value): return value.ringTimestamp
         }
     }
 }

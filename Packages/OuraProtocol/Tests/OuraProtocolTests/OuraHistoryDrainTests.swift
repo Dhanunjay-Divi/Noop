@@ -104,6 +104,34 @@ final class OuraHistoryDrainTests: XCTestCase {
                        "a reboot forces 0 (full pull) even if a forward sample also arrived")
     }
 
+    // MARK: in-session continuation cursor
+
+    func testContinuationAdvancesPastNewestObservedRecord() {
+        var d = OuraHistoryDrain()
+        d.noteSeenRingTime(1_686_000)
+        d.noteSeenRingTime(3_595_428)
+        d.noteSeenRingTime(2_000_000)
+        XCTAssertEqual(d.continuationCursor(lastRequestCursor: 1_681_398), 3_595_429)
+    }
+
+    func testContinuationStopsOnEmptyOrNonAdvancingBatch() {
+        var d = OuraHistoryDrain()
+        XCTAssertNil(d.continuationCursor(lastRequestCursor: 1_000))
+        d.noteSeenRingTime(900)
+        XCTAssertNil(d.continuationCursor(lastRequestCursor: 1_000))
+    }
+
+    func testContinuationRearmsPerRequestAndSeparatesSeenFromStored() {
+        var d = OuraHistoryDrain()
+        d.noteSeenRingTime(2_000)
+        XCTAssertEqual(d.continuationCursor(lastRequestCursor: 1_000), 2_001)
+        XCTAssertNil(d.continuationCursor(lastRequestCursor: 2_001))
+        XCTAssertEqual(d.maxStoredRingTime, 0)
+        d.noteStoredRingTime(1_900, resumeCursorAtFetchStart: 0)
+        XCTAssertEqual(d.maxSeenRingTime, 2_000)
+        XCTAssertEqual(d.maxStoredRingTime, 1_900)
+    }
+
     // MARK: loaded-cursor sanitize + reset
 
     func testSanitizeLoadedCursor() {
@@ -117,9 +145,12 @@ final class OuraHistoryDrainTests: XCTestCase {
         var d = OuraHistoryDrain()
         d.noteStoredRingTime(3_453_828, resumeCursorAtFetchStart: 1000)
         d.noteStoredRingTime(500, resumeCursorAtFetchStart: 1000)
+        d.noteSeenRingTime(3_453_900)
         _ = d.onSummary(bytesLeft: 1000, moreData: true, elapsedSeconds: 1)
         d.reset()
         XCTAssertEqual(d.maxStoredRingTime, 0)
+        XCTAssertEqual(d.maxSeenRingTime, 0)
+        XCTAssertEqual(d.eventsSinceLastRequest, 0)
         XCTAssertFalse(d.sawPreResumeData)
         // Stall floor reset: a fresh flat sequence starts counting from scratch.
         XCTAssertTrue(d.onSummary(bytesLeft: 1000, moreData: true, elapsedSeconds: 1))

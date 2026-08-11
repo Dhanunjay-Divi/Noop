@@ -56,7 +56,7 @@ passes 9/9. These counts are evidence for this snapshot, not a replacement for t
 
 ## Automatic activity detection contract
 
-NOOP's detector is local, retrospective, and controlled by **Off / Ask / Auto-save**:
+NOOP's detector is local, retrospective, and controlled by **Off / Ask**:
 
 1. A candidate needs at least 10 minutes at `resting HR + 30 bpm`, enough real HR observations, a
    post-session quiet tail so an ongoing workout is never prompted, and no
@@ -67,13 +67,12 @@ NOOP's detector is local, retrospective, and controlled by **Off / Ask / Auto-sa
 4. Saved and dismissed spans are excluded/deduplicated; notification delivery is also token-deduplicated.
 5. A completed backfill triggers the same scan in background. A local notification is posted only when
    notification access was already granted; detection never requests permission by itself.
-6. **Ask** preserves the former behavior: the user must tap Save or dismiss. **Auto-save** adds a stricter
-   15-minute floor and writes only candidates that pass the detector's finalization, coverage, overlap,
-   and available-motion gates. The result is stored under `<strap>-noop` as **Detected**, never Manual.
-   A privacy-safe notification opens a durable Today card where the user can Keep or mark it Not a
-   workout; the full row remains editable/relabelable/dismissible in Workouts. **Off** performs no scan.
-   Existing explicit Boolean choices migrate true → Ask and false → Off; a genuinely fresh install
-   defaults to Ask until real-world classifier validation is complete.
+6. **Ask** requires the user to tap Save or dismiss before any workout is written. **Off** performs no
+   scan. Existing explicit Boolean choices migrate true → Ask and false → Off. A legacy Auto-save value
+   also migrates to Ask: the detector currently produces only uncalibrated event confidence, so its
+   unattended-save policy intentionally rejects every candidate. Auto-save must not return to the UI
+   until participant/device-held-out validation demonstrates calibrated confidence and acceptable false
+   starts per wear-hour.
 7. The broad type hint (walk/run/strength/cycle/ski) is explicitly experimental. It is shown only when
    decoded activity-class ticks cover the detected window and the advisory classifier clears its score
    and confidence gates. Otherwise the label remains `Workout`. The saved label is always editable.

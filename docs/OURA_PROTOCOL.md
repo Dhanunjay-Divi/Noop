@@ -241,15 +241,27 @@ Gen 5 example `0912 020100 020103 010001 090329 665544332211`. [open_oura-r5]
 
 ### 5.2 GetEvents response / summary (`0x11`)
 ```
-11 08 <status:1> <sub_status:1> <last_ring_timestamp:4 LE> <pad:2>
+11 08 <events_received:1> <reserved:1> <bytes_left:4 LE> <pad:2>
 ```
-[open_ring]
-- `status` - `0x00` = empty/no more; `0xFF` = data follows (event records arrive as inner TLV stream, §2.3). [open_ring]
-- `last_ring_timestamp` - new cursor value to use next fetch.
+[open_oura]
+- `events_received` describes the batch; it is **not** a completion status or a cursor.
+- `bytes_left` is a remaining-byte count. `0` means caught up; any positive value means another batch is
+  available. It must never be persisted or compared across sessions as ring time.
+- The response contains **no server cursor**. The client derives the next in-session request position from
+  the newest event-envelope ring timestamp it actually observed, while its durable resume point advances
+  only to the newest successfully stored, UTC-anchored sample.
+- A summary can arrive before the final event notification in its batch. Treat it as an early summary, not
+  an end-of-notification delimiter; wait for a quiet window after the last record before continuing or
+  committing the drain.
 
 ### 5.3 Canonical fetch loop (NOOP)
-1. SyncTime (§5.4). 2. Send `0x10` with stored cursor, `max=255`. 3. Receive inner TLV records (§6). 4. ~100 ms later send ack-fetch (`max=0`, cursor = `last_ring_timestamp`) to advance. 5. Repeat until `status=0x00`. [open_ring]
-6. Optionally `28 01 00` to flush flash-buffered events first. [open_ring]
+1. SyncTime (§5.4). 2. Optionally flush flash-buffered events with `28 01 00`. 3. Send `0x10` with the
+sanitized durable cursor and `max=255`. 4. Receive inner TLV records (§6) and the `0x11` early summary.
+5. After 1.5 seconds of record silence, if `bytes_left > 0` and the batch made strict timestamp progress,
+send the ack-fetch (`max=0`) from `max_seen_ring_timestamp + 1`; repeat. 6. If `bytes_left == 0`, finish
+after the same quiet window and commit only the newest stored, anchor-resolved ring timestamp. A flat
+`bytes_left` sequence, empty/non-advancing batch or five-minute deadline stops safely without inventing a
+cursor. [open_oura][open_ring]
 
 ### 5.4 SyncTime (`0x12`)
 ```
@@ -385,7 +397,8 @@ like its sibling banked streams (`.hrv`/`.temp`/`.spo2`/`.sleepPhase`) — the f
 - This is the primary UTC anchor (§5.5). [open_ring][ringverse]
 
 ### 6.12 Sleep architecture
-- **`0x4E` / `0x5A` `sleep_phase_details`** (≥19 B): byte6 = header; phase codes are **2-bit**, 4 per byte (bits `[7:6][5:4][3:2][1:0]`); codes **0=awake, 1=light, 2=deep, 3=REM**. [ringverse]
+- **`0x4B` / `0x4E` / `0x5A` `sleep_phase_details`** (≥19 B): byte6 = header; phase codes are **2-bit**, 4 per byte (bits `[7:6][5:4][3:2][1:0]`); the validated SleepNet mapping is **0=deep, 1=light, 2=REM, 3=awake**. [open_oura] An earlier draft used the ringverse labels in the opposite order; decoder fixtures and the validated open_oura mapping supersede that draft.
+- These phase records arrive as a post-wake burst rather than independent UTC-stamped epochs. NOOP groups the complete burst, lays its codes backward on a 30-second axis, and only then drops whole all-`0xFF` erased pages so their positions remain real gaps. A lone or mixed `0xFF` code byte is valid awake data and is retained. The nearest plausible `0x49` sleep window may trim pre-onset codes, while `0x42` time-sync or `0x85` RTC supplies the UTC anchor. Until an anchor exists the burst is held rather than guessed; once anchored, distinct phase events and a stage-rich session are stored under the ring's device ID. Efficiency is left unknown whenever erased epochs make coverage discontinuous.
 - **`0x6A` `sleep_period_info`** (14 B): bytes6–9 four int8 metrics; bytes10–11 `uint8/8.0`; byte12 motion-seconds uint8; byte13 sleep-state int8; bytes14–15 `uint16 LE / 65536`. [ringverse]
 - **`0x72` `sleep_acm_period`** (16 B): values0–2 = `whole(8)+frac(8)/255`; values3–5 = `whole(4)+frac(12)/4095`. [ringverse]
 - **`0x49` `sleep_summary_1`**: start/end as uint16 LE minutes-before-event. [ringverse]

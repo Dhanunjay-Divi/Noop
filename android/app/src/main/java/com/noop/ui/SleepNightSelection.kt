@@ -4,6 +4,7 @@ import com.noop.analytics.AnalyticsEngine
 import com.noop.analytics.SleepStageTotals
 import com.noop.data.DailyMetric
 import com.noop.data.SleepSession
+import com.noop.oura.OuraSleepSessionMapping
 import java.util.TimeZone
 
 /**
@@ -114,8 +115,9 @@ internal fun selectNight(
     val groupInBedMin = if (heroGroup.size > 1) {
         heroGroup.sumOf { (it.endTs - it.effectiveStartTs).coerceAtLeast(0L) } / 60.0
     } else null
+    val hasOuraStages = heroGroup.any { OuraSleepSessionMapping.hasOuraProvenance(it.stagesJSON) }
     return HeroNight(session, dayKey, segments, clockLabelFor(heroOnsetTs, heroWakeTs), napBlocks, groupStages,
-        groupSegments, groupMotion, groupInBedMin, heroOnsetTs, heroWakeTs)
+        groupSegments, groupMotion, groupInBedMin, heroOnsetTs, heroWakeTs, hasOuraStages)
 }
 
 /**

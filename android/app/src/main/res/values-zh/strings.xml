@@ -1660,7 +1660,7 @@
     <string name="live_tracking_stop">停止实时跟踪</string>
     <string name="live_tracking_start">开始实时跟踪</string>
     <string name="settings_automatic_activity">自动活动检测</string>
-    <string name="settings_automatic_activity_help">同步后，NOOP 会查找已结束且持续的心率升高，并要求足够的信号覆盖，有运动数据时还会进行验证。“询问”始终等待你确认。“自动保存”仅会将可信度较高且持续 15 分钟以上的候选活动写入为“已检测”，之后你可以保留、编辑或忽略。这是在设备上运行的保守启发式方法，并非 WHOOP 的专有检测器，因此可能遗漏或误判活动。仅限此手机。</string>
+    <string name="settings_automatic_activity_help">同步后，NOOP 会查找已结束且持续的心率升高，并要求足够的信号覆盖，有运动数据时还会进行验证。“询问”始终等待你批准后才保存。自动保存会保持不可用，直到检测器通过留出现场数据验证并具有校准后的置信度。这是在设备上运行的保守启发式方法，并非 WHOOP 的专有检测器，因此可能遗漏或误判活动。仅限此手机。</string>
     <string name="cycle_tracker_title">周期跟踪</string>
     <string name="cycle_tracker_private_dates">私密经期开始日期</string>
     <string name="cycle_tracker_already_logged">已记录</string>
@@ -1672,4 +1672,7 @@
     <string name="cycle_tracker_delete_all_message">这将永久删除经期开始历史。传感器历史不受影响。</string>
     <string name="cycle_tracker_update_failed_title">无法更新周期历史</string>
     <string name="cycle_tracker_update_failed_message">未进行任何更改。请在本地数据库完成打开后重试。</string>
+    <string name="sleep_stages_oura_provenance">Oura Ring 睡眠阶段 · 戒指端估算，未经 Oura App 调整</string>
+    <string name="sleep_stages_on_device_provenance">睡眠阶段为设备端估算</string>
+    <string name="sleep_stage_summary">卧床 %1$s · 效率 %2$s</string>
 </resources>

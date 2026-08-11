@@ -32,9 +32,15 @@ import com.noop.oura.OuraFraming
 import com.noop.oura.OuraGatt
 import com.noop.oura.OuraCommands
 import com.noop.oura.OuraDecoders
+import com.noop.oura.OuraHistoryDrain
+import com.noop.oura.OuraHypnogramAssembler
+import com.noop.oura.OuraHypnogramBurst
 import com.noop.oura.OuraOuterFrame
 import com.noop.oura.OuraReassembler
 import com.noop.oura.OuraRingGen
+import com.noop.oura.OuraSleepPhase
+import com.noop.oura.OuraSleepSession
+import com.noop.oura.OuraSleepSessionMapping
 import com.noop.oura.OuraTransition
 import com.noop.oura.OuraWearState
 import com.noop.oura.OuraWearTracker
@@ -94,6 +100,8 @@ class OuraLiveSource(
     private val authKey: () -> IntArray?,
     /** Persist a batch under [deviceId] - wired to `repository.insert`. Mirrors the other sources. */
     private val persist: (StreamBatch, String) -> Unit = { _, _ -> },
+    /** Upsert the ring-provided reconstructed hypnogram as a stage-rich night under [deviceId]. */
+    private val persistSleepSession: (OuraSleepSession, String) -> Unit = { _, _ -> },
     /** Diagnostic sink for the connect/auth/stream lifecycle - the SAME exportable strap log (#421).
      *  Every line is prefixed "Oura: ". Statuses / UUIDs / counts only, NEVER a device address. Default
      *  no-op keeps existing call sites compiling and tests silent. */
@@ -352,6 +360,11 @@ class OuraLiveSource(
      *  half-record never bleeds into the next session. */
     private val reassembler = OuraReassembler()
 
+    /** Groups burst-written SleepNet phase records and reconstructs their true 30-second time axis. */
+    private val hypnogramAssembler = OuraHypnogramAssembler()
+    /** Closed bursts waiting for the ring-time anchor. They are never assigned a guessed wall clock. */
+    private val pendingUnanchoredBursts = ArrayList<OuraHypnogramBurst>()
+
     /** Cached characteristics, resolved in onServicesDiscovered. */
     private var writeChar: BluetoothGattCharacteristic? = null
     private var notifyChar: BluetoothGattCharacteristic? = null
@@ -385,11 +398,32 @@ class OuraLiveSource(
     // retrievable only by asking the ring for its history. Kotlin twin of the Swift lane9 history wiring.
 
     /**
-     * The GetEvents cursor to resume from, loaded from [OuraHistoryCursorStore] on connect and advanced as
-     * `0x11` summaries arrive. 0 = fetch everything the ring has banked (first-ever connect for this ring;
-     * OURA_PROTOCOL.md s5.1). Held as a Long (the unsigned 32-bit ring timestamp).
+     * Client-managed GetEvents resume cursor, loaded from [OuraHistoryCursorStore] and committed only from
+     * the newest stored + UTC-anchored history sample. A 0x11 summary contains `bytes_left`, not a cursor.
      */
     private var historyCursor: Long = 0
+
+    /** Pure, unit-tested byte-progress, envelope-progress, and durable-cursor decisions. */
+    private val historyDrain = OuraHistoryDrain()
+    /** Cursor used to begin this drain, retained for genuine ring-clock reset detection. */
+    private var resumeCursorAtFetchStart: Long = 0
+    /** Wall-clock start for the hard drain deadline. */
+    private var historyDrainStartedAtMs: Long? = null
+    /** Cursor used by the most recent request; a continuation must move strictly beyond it. */
+    private var lastHistoryRequestCursor: Long = 0
+
+    private sealed class PendingHistoryDrainAction {
+        object ContinueBatch : PendingHistoryDrainAction()
+        data class Finish(val completed: Boolean) : PendingHistoryDrainAction()
+    }
+
+    /**
+     * A 0x11 response may arrive before the last event notifications in its batch. Delay finalization or
+     * continuation until no history event has arrived for this window, then use the true newest envelope.
+     */
+    private var pendingHistoryDrainAction: PendingHistoryDrainAction? = null
+    private val historyBatchQuietIntervalMs = 1_500L
+    private val historyBatchQuietRunnable = Runnable { continueHistoryDrainAfterQuiet() }
 
     /**
      * Periodic re-fetch while connected, so an overnight-connected session (or one left open after a nap)
@@ -416,7 +450,17 @@ class OuraLiveSource(
      * if no anchor ever arrived this session (never silently dropped). Reset on stop/disconnect. Kotlin twin
      * of Swift's `pendingAnchorEvents`.
      */
-    private val pendingAnchorEvents = ArrayList<Pair<OuraEvent, Long>>()
+    private data class PendingAnchorEvent(
+        val event: OuraEvent,
+        val ringTimestamp: Long,
+        /** True only for a TLV record delivered by an in-flight GetEvents drain, never a live push. */
+        val durableHistorySample: Boolean,
+    )
+
+    private val pendingAnchorEvents = ArrayList<PendingAnchorEvent>()
+
+    /** Bounded 0x49 onset/end-offset windows used to refine a burst from write time to true sleep time. */
+    private val recentSleepWindows049 = ArrayList<Triple<Long, Int, Int>>()
 
     /**
      * Kick a history-fetch pass at the current cursor, but ONLY when the driver is idle-streaming (never
@@ -427,6 +471,12 @@ class OuraLiveSource(
     private fun fetchHistoryIfIdle(): Unit = guardedCallback("history-fetch") {
         val d = driver ?: return@guardedCallback
         if (d.phase != OuraDriverPhase.Streaming) return@guardedCallback
+        resumeCursorAtFetchStart = historyCursor
+        historyDrainStartedAtMs = System.currentTimeMillis()
+        historyDrain.reset()
+        lastHistoryRequestCursor = historyCursor
+        pendingHistoryDrainAction = null
+        cancelHistoryBatchQuietTimer()
         log("Oura: fetching history from cursor $historyCursor")
         advance(OuraTransition.StartHistoryFetch(cursor = historyCursor))
     }
@@ -442,38 +492,212 @@ class OuraLiveSource(
         handler.removeCallbacks(historyFetchRunnable)
     }
 
-    /**
-     * Handle a `0x11` GetEvents response (OURA_PROTOCOL.md s5.2): persist the advanced cursor (so a LATER
-     * connection resumes rather than re-fetching everything) and drive the driver's cursor-loop state
-     * machine, which asks for another ack-fetch while `moreData` or returns to Streaming once caught up.
-     *
-     * The ring's terminal "no more data" response (moreData=false, status 0x00) zero-fills the cursor
-     * field, whereas a mid-fetch response (moreData=true) carries a real advancing nonzero cursor. So the
-     * cursor is only trusted/persisted while the response is actually carrying new data - persisting the
-     * terminal zero would reset the cursor to 0 on every fetch and force a full backlog re-fetch forever.
-     *
-     * A cursor persisted from one BLE connection can come back SMALLER on the next connection's first real
-     * cursor: `ringTimestamp = (session << 16) | counter` (s2.3), and the ring's internal `session`
-     * component can shift across reconnects/restarts. Resuming from a cursor whose session no longer matches
-     * the ring's current one is not a real resume - the ring just re-dumps its whole backlog anyway - so we
-     * detect the regression and reset to an honest, explicit 0 rather than feed the ring a now-meaningless
-     * reference. Kotlin twin of Swift's `handleHistorySummary`.
-     */
+    /** Fold a 0x11 byte-progress summary, then wait for the batch's trailing event notifications. */
     private fun handleHistorySummary(summary: com.noop.oura.GetEventsSummary): Unit = guardedCallback("history-summary") {
-        if (summary.moreData) {
-            if (summary.cursor < historyCursor) {
-                log("Oura: ring-time regression detected (fetch cursor ${summary.cursor} < persisted " +
-                    "$historyCursor) - the ring's session likely reset; resetting our cursor to 0")
+        val elapsedSeconds = historyDrainStartedAtMs?.let {
+            (System.currentTimeMillis() - it).coerceAtLeast(0L) / 1_000.0
+        } ?: 0.0
+        val continueDrain = historyDrain.onSummary(
+            bytesLeft = summary.bytesLeft,
+            moreData = summary.moreData,
+            elapsedSeconds = elapsedSeconds,
+        )
+        if (summary.moreData && !continueDrain) {
+            val reason = if (elapsedSeconds > OuraHistoryDrain.MAX_DRAIN_SECONDS) {
+                "deadline exceeded"
+            } else {
+                "bytes_left stalled"
+            }
+            log("Oura: history drain force-stopped - $reason (guard)")
+        }
+        pendingHistoryDrainAction = if (continueDrain) {
+            PendingHistoryDrainAction.ContinueBatch
+        } else {
+            PendingHistoryDrainAction.Finish(completed = !summary.moreData)
+        }
+        restartHistoryBatchQuietTimer()
+    }
+
+    private fun continueHistoryDrainAfterQuiet(): Unit = guardedCallback("history-batch-quiet") {
+        cancelHistoryBatchQuietTimer()
+        val action = pendingHistoryDrainAction ?: return@guardedCallback
+        pendingHistoryDrainAction = null
+        val d = driver ?: return@guardedCallback
+        if (d.phase != OuraDriverPhase.FetchingHistory) return@guardedCallback
+        when (action) {
+            is PendingHistoryDrainAction.Finish -> finishHistoryDrain(action.completed)
+            PendingHistoryDrainAction.ContinueBatch -> {
+                val next = historyDrain.continuationCursor(lastHistoryRequestCursor)
+                if (next == null) {
+                    log("Oura: history batch made no cursor progress - stopping drain")
+                    finishHistoryDrain(completed = false)
+                    return@guardedCallback
+                }
+                lastHistoryRequestCursor = next
+                log("Oura: history batch quiet - continuing from the next record")
+                advance(OuraTransition.HistoryCursorAdvanced(cursor = next, moreData = true))
+            }
+        }
+    }
+
+    private fun finishHistoryDrain(completed: Boolean) {
+        pendingHistoryDrainAction = null
+        cancelHistoryBatchQuietTimer()
+        val persisted = runCatching {
+            hypnogramAssembler.flush()?.let(::persistHypnogramBurst)
+            // `noteStoredRingTime` happens when an anchored sample enters the buffer. Flush it before the
+            // durable cursor is committed, so a persistence exception leaves the cursor behind the data.
+            flush()
+        }.onFailure {
+            log("Oura: history persistence failed; resume cursor left unchanged (${it.javaClass.simpleName})")
+        }.isSuccess
+        if (persisted) commitHistoryResumeCursor(completed)
+        historyDrainStartedAtMs = null
+        // Even a persistence failure must release the driver's FetchingHistory phase. Because its cursor
+        // stayed behind, the next scheduled/connect fetch safely retries instead of silently skipping data.
+        advance(OuraTransition.HistoryCursorAdvanced(cursor = historyCursor, moreData = false))
+    }
+
+    private fun commitHistoryResumeCursor(completed: Boolean) {
+        val how = if (completed) "caught up" else "stopped early"
+        val candidate = historyDrain.maxStoredRingTime
+        val resolves = candidate > 0 && driver?.unixSeconds(forRingTimestamp = candidate) != null
+        val newCursor = historyDrain.resumeCursorAtDrainEnd(
+            currentCursor = historyCursor,
+            resolvesUnderAnchor = resolves,
+        )
+        when {
+            historyDrain.sawPreResumeData -> {
                 historyCursor = 0
                 OuraHistoryCursorStore.save(appContext, deviceId, 0)
-            } else {
-                historyCursor = summary.cursor
-                OuraHistoryCursorStore.save(appContext, deviceId, summary.cursor)
+                log("Oura: history $how but the ring served data older than the requested cursor; next connect does a full pull")
             }
-        } else {
-            log("Oura: history fetch caught up (cursor $historyCursor)")
+            newCursor != historyCursor -> {
+                historyCursor = newCursor
+                OuraHistoryCursorStore.save(appContext, deviceId, newCursor)
+                log("Oura: history $how - resume cursor advanced from stored samples")
+            }
+            candidate > historyCursor -> {
+                log("Oura: history $how but the stored resume candidate has no current time anchor; cursor unchanged")
+            }
+            else -> log("Oura: history $how (resume cursor unchanged)")
         }
-        advance(OuraTransition.HistoryCursorAdvanced(cursor = summary.cursor, moreData = summary.moreData))
+    }
+
+    private fun restartHistoryBatchQuietTimer() {
+        handler.removeCallbacks(historyBatchQuietRunnable)
+        handler.postDelayed(historyBatchQuietRunnable, historyBatchQuietIntervalMs)
+    }
+
+    private fun cancelHistoryBatchQuietTimer() {
+        handler.removeCallbacks(historyBatchQuietRunnable)
+    }
+
+    private fun resetHistoryDrainState() {
+        cancelHistoryBatchQuietTimer()
+        pendingHistoryDrainAction = null
+        historyDrain.reset()
+        resumeCursorAtFetchStart = 0
+        historyDrainStartedAtMs = null
+        lastHistoryRequestCursor = 0
+    }
+
+    private fun closestSleepWindow049(
+        ringTimestamp: Long,
+        tolerance: Long = 6_000L,
+    ): Triple<Long, Int, Int>? {
+        var closest: Triple<Long, Int, Int>? = null
+        var closestGap = Long.MAX_VALUE
+        for (window in recentSleepWindows049) {
+            val gap = if (window.first >= ringTimestamp) {
+                window.first - ringTimestamp
+            } else {
+                ringTimestamp - window.first
+            }
+            if (gap <= tolerance && gap < closestGap) {
+                closest = window
+                closestGap = gap
+            }
+        }
+        return closest
+    }
+
+    /**
+     * Persist a closed burst on its reconstructed time axis. All-FF pages are gaps, not Awake, and every
+     * written phase receives a distinct event key. The same sequence is upserted as a ring-provided night
+     * so normal sleep consumers can display its stage breakdown.
+     */
+    private fun persistHypnogramBurst(burst: OuraHypnogramBurst) {
+        val d = driver ?: return
+        if (burst.totalCodes <= 0) return
+        val writeEnd: Long = d.unixSeconds(forRingTimestamp = burst.lastRingTimestamp) ?: run {
+            pendingUnanchoredBursts.add(burst)
+            log("Oura: hypnogram burst held until the time anchor arrives")
+            return
+        }
+
+        var end: Long = writeEnd
+        var sleepStart: Long? = null
+        closestSleepWindow049(burst.lastRingTimestamp)?.let { window ->
+            d.unixSeconds(forRingTimestamp = window.first)?.let { eventUtc ->
+                val candidateEnd = eventUtc - window.third * 60L
+                if (candidateEnd <= writeEnd && writeEnd - candidateEnd < 6L * 3_600L) {
+                    end = candidateEnd
+                }
+                val candidateStart = eventUtc - window.second * 60L
+                if (candidateStart < end && end - candidateStart < 16L * 3_600L) {
+                    sleepStart = candidateStart
+                }
+            }
+        }
+
+        if (burst.hasNonMonotonicRingTimes) {
+            log("Oura: hypnogram burst has non-monotonic envelope times; preserving event-log arrival order")
+        }
+        val laid = burst.codesWithTimes(
+            endUnixSeconds = end,
+            sleepStartUnixSeconds = sleepStart,
+        )
+        if (laid.isEmpty()) {
+            log("Oura: hypnogram burst entirely unwritten (0xFF); no awake stages or blank session persisted")
+            return
+        }
+
+        for (code in laid) {
+            enqueue(listOf(OuraEvent.SleepPhaseEvent(code.phase)), code.ts.toInt())
+        }
+        noteStoredHistoryRingTime(burst.lastRingTimestamp)
+        OuraSleepSessionMapping.session(laid.map { it.ts to it.phase.stage })?.let {
+            persistSleepSession(it, deviceId)
+        }
+        val preservedGaps = laid.size < burst.totalCodes
+        log(
+            if (preservedGaps) {
+                "Oura: hypnogram reconstructed with erased/pre-onset gaps preserved"
+            } else {
+                "Oura: hypnogram reconstructed"
+            },
+        )
+    }
+
+    private fun drainPendingHypnogramBursts() {
+        if (pendingUnanchoredBursts.isEmpty()) return
+        val pending = pendingUnanchoredBursts.toList()
+        pendingUnanchoredBursts.clear()
+        pending.forEach(::persistHypnogramBurst)
+    }
+
+    private fun dropUnanchoredHypnogramBursts() {
+        if (pendingUnanchoredBursts.isEmpty()) return
+        // No stored-sample high-water mark was advanced for these bursts, so a future anchored fetch can
+        // safely serve them again without mutating the durable cursor here.
+        log("Oura: dropping unanchored hypnogram burst; cursor was not advanced")
+        pendingUnanchoredBursts.clear()
+    }
+
+    /** Record a history sample only after it was placed on a real ring-time-derived UTC timestamp. */
+    private fun noteStoredHistoryRingTime(ringTimestamp: Long) {
+        historyDrain.noteStoredRingTime(ringTimestamp, resumeCursorAtFetchStart)
     }
 
     // MARK: - Sample buffer (flushed in batches off the per-notification hot loop)
@@ -573,9 +797,19 @@ class OuraLiveSource(
         loggedTierBKinds.clear()
         loggedFeatureStatuses.clear()
         pendingAnchorEvents.clear()
+        hypnogramAssembler.reset()
+        pendingUnanchoredBursts.clear()
+        recentSleepWindows049.clear()
+        resetHistoryDrainState()
         // Resume the GetEvents cursor from where the LAST connection to this ring left off (s5.1/5.3), so a
-        // routine reconnect doesn't re-fetch the ring's entire banked history every time.
-        historyCursor = OuraHistoryCursorStore.read(appContext, deviceId)
+        // routine reconnect doesn't re-fetch the ring's entire banked history every time. Values beyond
+        // the plausible ring-time ceiling are pre-fix byte-count/misframe garbage and must not starve sync.
+        val loadedHistoryCursor = OuraHistoryCursorStore.read(appContext, deviceId)
+        historyCursor = OuraHistoryDrain.sanitizeLoadedCursor(loadedHistoryCursor)
+        if (historyCursor != loadedHistoryCursor) {
+            log("Oura: persisted resume cursor was implausible (pre-fix garbage) - full pull")
+            OuraHistoryCursorStore.save(appContext, deviceId, 0)
+        }
         // connectGatt can throw (SecurityException if BLUETOOTH_CONNECT was revoked mid-session,
         // IllegalArgumentException on a stale device) - never let that crash the app; a failed start
         // simply leaves the previous source in place (mirrors [StandardHrSource]).
@@ -607,9 +841,12 @@ class OuraLiveSource(
         pendingConnectAddress = null
         cancelReengage()
         cancelHistoryFetch()
-        // Drain BEFORE driver.stop() clears its anchor, so a pending event still gets a real anchored time
-        // if one exists rather than always falling back to wall-clock at teardown (mirrors Swift's stop()).
+        cancelHistoryBatchQuietTimer()
+        pendingHistoryDrainAction = null
+        // Close the phase burst and drain parked samples before driver.stop() clears its time anchor.
+        hypnogramAssembler.flush()?.let(::persistHypnogramBurst)
         drainPendingAnchorEvents()
+        dropUnanchoredHypnogramBursts()
         driver?.stop()
         gatt?.let { runCatching { it.disconnect(); it.close() } }
         gatt = null
@@ -622,7 +859,10 @@ class OuraLiveSource(
         loggedAnchor = false
         loggedTierBKinds.clear()
         loggedFeatureStatuses.clear()
+        hypnogramAssembler.reset()
+        recentSleepWindows049.clear()
         reachedStreaming = false
+        resetHistoryDrainState()
         // A stop MID-install is an honest failure (no ack will come); a stop after streaming leaves the
         // completed Streaming outcome intact so the wizard's success transition is not undone.
         if (_adoptPhase.value == AdoptPhase.InstallingKey) _adoptPhase.value = AdoptPhase.Failed
@@ -683,8 +923,14 @@ class OuraLiveSource(
         if (pendingAnchorEvents.isEmpty()) return@guardedCallback
         val d = driver ?: return@guardedCallback
         val now = (System.currentTimeMillis() / 1000L).toInt()
-        val stamped = pendingAnchorEvents.map { (event, ringTimestamp) ->
-            event to (d.unixSeconds(forRingTimestamp = ringTimestamp)?.toInt() ?: now)
+        val stamped = pendingAnchorEvents.map { pending ->
+            val event = pending.event
+            val ringTimestamp = pending.ringTimestamp
+            val anchored = d.unixSeconds(forRingTimestamp = ringTimestamp)
+            if (anchored != null && pending.durableHistorySample) {
+                noteStoredHistoryRingTime(ringTimestamp)
+            }
+            event to (anchored?.toInt() ?: now)
         }
         for ((ts, events) in OuraStreamMapping.batched(stamped)) enqueue(events, ts)
         pendingAnchorEvents.clear()
@@ -743,17 +989,22 @@ class OuraLiveSource(
                     resetWear()             // #628: the wear badge must not survive the link dropping
                     cancelReengage()
                     cancelHistoryFetch()
-                    // Drain BEFORE the driver's anchor is gone (same reasoning as stop()): a pending event
-                    // still gets a real anchored time if the current session set one, else an honest
-                    // wall-clock fallback rather than being silently dropped.
+                    cancelHistoryBatchQuietTimer()
+                    pendingHistoryDrainAction = null
+                    // Close the phase burst and drain parked samples while this session's anchor exists.
+                    hypnogramAssembler.flush()?.let(::persistHypnogramBurst)
                     drainPendingAnchorEvents()
+                    dropUnanchoredHypnogramBursts()
                     reassembler.reset()
                     loggedFirstTemp = false
                     loggedFirstSpo2 = false
                     loggedAnchor = false
                     loggedTierBKinds.clear()
-        loggedFeatureStatuses.clear()
+                    loggedFeatureStatuses.clear()
+                    hypnogramAssembler.reset()
+                    recentSleepWindows049.clear()
                     reachedStreaming = false
+                    resetHistoryDrainState()
                     // A disconnect MID-install is an honest failure (no 0x25 ack will arrive); a disconnect
                     // after streaming leaves the completed Streaming outcome intact. Drop any in-flight key
                     // WITHOUT persisting it (a failed install must never leave a wrongly-trusted key).
@@ -1057,7 +1308,19 @@ class OuraLiveSource(
         }
         if (nonSecure.isNotEmpty()) {
             val records = reassembler.feed(IntArray(nonSecure.size) { nonSecure[it] })
-            for (rec in records) emit(d.ingest(rec))
+            for (rec in records) {
+                val isHistoryEnvelope = d.phase == OuraDriverPhase.FetchingHistory
+                if (isHistoryEnvelope) {
+                    // Continuation is a transport decision: count the RAW TLV envelope even when its tag
+                    // is unknown, Tier-B-gated, padding-only, or otherwise decodes to no OuraEvent.
+                    historyDrain.noteSeenRingTime(rec.ringTimestamp)
+                    if (pendingHistoryDrainAction != null) restartHistoryBatchQuietTimer()
+                }
+                emit(
+                    events = d.ingest(rec),
+                    historyEnvelope = isHistoryEnvelope,
+                )
+            }
         }
     }
 
@@ -1116,18 +1379,29 @@ class OuraLiveSource(
      * since they really are "now"; HR is range-gated for the LIVE display (off-finger / garbage never
      * shown) and battery surfaces immediately (a status, not a timestamped row). Ring-time-carrying events
      * (IBI, temp, SpO2, HRV, sleep-phase) are stamped with their REAL ring-time-anchored UTC (s5.5) so last
-     * night's banked data is never mis-recorded as happening right now (IBI arrives both live and banked, so
-     * it anchors like history but never advances the resume cursor); when no anchor has arrived yet this
-     * session, the event is PARKED
+     * night's banked data is never mis-recorded as happening right now. IBI arrives both live and banked;
+     * [historyEnvelope] keeps those paths distinct so only a stored banked beat may move the resume cursor.
+     * When no anchor has arrived yet this session, the event is PARKED
      * ([pendingAnchorEvents]) until one does, rather than immediately guessing wall-clock. A 0x42
      * time-sync (the anchor) drains anything parked. Tier-B events (allowed for INVESTIGATION - see the
      * driver construction comment) are LOGGED only, never enqueued: OuraStreamMapping drops them anyway,
      * so an unverified layout can never feed a durable stream or scoring.
      */
-    private fun emit(events: List<OuraEvent>) = guardedCallback("emit") {
+    private fun emit(
+        events: List<OuraEvent>,
+        historyEnvelope: Boolean = false,
+    ) = guardedCallback("emit") {
         if (events.isEmpty()) return@guardedCallback
         val d = driver ?: return@guardedCallback
         val now = (System.currentTimeMillis() / 1000L).toInt()
+        // A 0x4B/0x4E/0x5A record arrives as one event list. Preserve that record boundary while building
+        // the finalization burst; the envelope timestamp is a write time, not an epoch time.
+        val phases: List<OuraSleepPhase> = events.mapNotNull {
+            (it as? OuraEvent.SleepPhaseEvent)?.value
+        }
+        phases.firstOrNull()?.let { first ->
+            hypnogramAssembler.feed(first.ringTimestamp, phases)?.let(::persistHypnogramBurst)
+        }
         // A record's beats must reach the store together. The R-R `ord`/`seq` counters are batch-local;
         // one persist per beat would restart both counters and destroy same-second emission order.
         val anchoredBeats = events.mapNotNull { event ->
@@ -1135,7 +1409,14 @@ class OuraLiveSource(
             else d.unixSeconds(forRingTimestamp = event.value.ringTimestamp)
                 ?.let { event as OuraEvent to it.toInt() }
         }
-        for ((ts, batch) in OuraStreamMapping.batched(anchoredBeats)) enqueue(batch, ts)
+        for ((ts, batch) in OuraStreamMapping.batched(anchoredBeats)) {
+            enqueue(batch, ts)
+            if (historyEnvelope) {
+                for (event in batch) {
+                    if (event is OuraEvent.Ibi) noteStoredHistoryRingTime(event.value.ringTimestamp)
+                }
+            }
+        }
         for (e in events) when (e) {
             is OuraEvent.Hr -> {
                 val bpm = e.value.bpm
@@ -1176,7 +1457,9 @@ class OuraLiveSource(
                 if (rr in 250..3000) handler.post { guardedCallback("live-sink") { liveSink(0, listOf(rr)) } }
                 // Anchored beats were enqueued above as one record batch. Only unanchored beats park here.
                 if (d.unixSeconds(forRingTimestamp = e.value.ringTimestamp) == null) {
-                    pendingAnchorEvents.add(e to e.value.ringTimestamp)
+                    pendingAnchorEvents.add(
+                        PendingAnchorEvent(e, e.value.ringTimestamp, durableHistorySample = historyEnvelope),
+                    )
                 }
             }
             is OuraEvent.Battery -> {
@@ -1201,7 +1484,7 @@ class OuraLiveSource(
                 enqueueAnchoredOrPark(e, e.value.ringTimestamp, d)
             }
             is OuraEvent.Hrv -> enqueueAnchoredOrPark(e, e.value.ringTimestamp, d)
-            is OuraEvent.SleepPhaseEvent -> enqueueAnchoredOrPark(e, e.value.ringTimestamp, d)
+            is OuraEvent.SleepPhaseEvent -> Unit // record/burst pipeline above owns persistence
             is OuraEvent.TimeSyncEvent -> {
                 // #91: a 0x42 whose epoch is outside the 2020–2035 plausibility window is silently ignored,
                 // so history samples stay unanchored (no sleep/daily). Log the rejection with the offending
@@ -1220,17 +1503,38 @@ class OuraLiveSource(
                 // The 0x42 time-sync can arrive ANYWHERE in a history-fetch stream, not necessarily first.
                 // Anything parked while unanchored gets its real time retroactively the moment it lands.
                 drainPendingAnchorEvents()
+                drainPendingHypnogramBursts()
             }
             is OuraEvent.RtcBeaconEvent -> {
                 // #91: the 0x85 beacon is the SECONDARY anchor (fills the gap only until a 0x42 arrives). A
                 // beacon ignored because a primary anchor already exists is NORMAL and not logged; only an
                 // IMPLAUSIBLE-epoch beacon is a real failure (it can never anchor), so log just that.
-                if (!d.isPlausibleAnchorEpoch(e.value.unixSeconds)) {
+                if (d.isPlausibleAnchorEpoch(e.value.unixSeconds)) {
+                    // The driver accepts this secondary anchor before emitting the event. Drain scalar
+                    // samples and whole bursts here too, so an 0x85-only session cannot strand sleep stages.
+                    drainPendingAnchorEvents()
+                    drainPendingHypnogramBursts()
+                } else {
                     log("Oura: 0x85 RTC beacon REJECTED - implausible epoch ${e.value.unixSeconds}s (outside " +
                         "the 2020–2035 anchor window) (#91)")
                 }
             }
             is OuraEvent.TierB -> {
+                // Validated ringverse 0x49 layout: two little-endian offsets in minutes before the event.
+                // Keep a bounded list so each burst pairs with the nearest overnight/nap window.
+                if (e.value.tag == 0x49 && e.value.rawPayload.size >= 4) {
+                    val startOff = (e.value.rawPayload[0] and 0xFF) or
+                        ((e.value.rawPayload[1] and 0xFF) shl 8)
+                    val endOff = (e.value.rawPayload[2] and 0xFF) or
+                        ((e.value.rawPayload[3] and 0xFF) shl 8)
+                    recentSleepWindows049.add(Triple(e.value.ringTimestamp, startOff, endOff))
+                    if (recentSleepWindows049.size > RECENT_SLEEP_WINDOWS_049_CAP) {
+                        recentSleepWindows049.subList(
+                            0,
+                            recentSleepWindows049.size - RECENT_SLEEP_WINDOWS_049_CAP,
+                        ).clear()
+                    }
+                }
                 // INVESTIGATION ONLY (real_steps / activity-summary / sleep-summary / smoothed-SpO2,
                 // OURA_PROTOCOL.md s7.3 Tier B; PR #960). Logged ONCE PER KIND with the raw bytes so we
                 // can see whether the ring sends these tags at all and collect capture material - e.g.
@@ -1303,7 +1607,14 @@ class OuraLiveSource(
      */
     private fun enqueueAnchoredOrPark(event: OuraEvent, ringTimestamp: Long, d: OuraDriver) {
         val ts = d.unixSeconds(forRingTimestamp = ringTimestamp)
-        if (ts != null) enqueue(listOf(event), ts.toInt()) else pendingAnchorEvents.add(event to ringTimestamp)
+        if (ts != null) {
+            enqueue(listOf(event), ts.toInt())
+            noteStoredHistoryRingTime(ringTimestamp)
+        } else {
+            pendingAnchorEvents.add(
+                PendingAnchorEvent(event, ringTimestamp, durableHistorySample = true),
+            )
+        }
     }
 
     private fun handleBattery(pct: Int) = guardedCallback("battery") {
@@ -1349,6 +1660,8 @@ class OuraLiveSource(
         intentionalDisconnect = true
         reconnectAddress = null
         failedReconnectAttempts = 0
+        cancelHistoryFetch()
+        resetHistoryDrainState()
         if (_needsPairing.value != null) return
         _needsPairing.value = message
         log("Oura: $message")
@@ -1381,6 +1694,8 @@ class OuraLiveSource(
         /** Android's infamous generic GATT connect failure (`BluetoothGatt.GATT_ERROR`, not a public
          *  constant). We auto-retry it once. */
         private const val GATT_ERROR_133 = 133
+
+        private const val RECENT_SLEEP_WINDOWS_049_CAP = 16
 
         /** The SetAuthKey-response OUTER opcode (`0x25`) and its OK status byte (`0x00`). The ring replies
          *  `25 01 00` to a successful `0x24` key install (OURA_PROTOCOL.md s3.2). */

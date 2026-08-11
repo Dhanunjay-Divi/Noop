@@ -112,9 +112,10 @@ struct SettingsView: View {
     // hidden. Mirrors the Android pref so the toggle reads the same on both platforms.
     @AppStorage(HydrationStore.enabledKey) private var hydrationEnabled = false
 
-    /// Empty means the richer mode has never been selected, so `PuffinExperiment.autoWorkoutMode`
-    /// applies its legacy-safe migration (old true → Ask, old false → Off, fresh install → Ask).
+    /// Observes the persisted value so Settings refreshes after the legacy-safe migration
+    /// (old true/Auto-save → Ask, old false → Off, fresh install → Ask).
     @AppStorage(PuffinExperiment.autoWorkoutModeKey) private var autoWorkoutModeRaw = ""
+    @State private var didMigrateAutoWorkoutMode = false
 
     /// "Journal reminder" (#627, default ON). When ON, Today shows the persistent journal widget
     /// (last-7-days strip + tap-through). Mirrors the Android `NoopPrefs.KEY_JOURNAL_REMINDER_ENABLED`.
@@ -265,6 +266,11 @@ struct SettingsView: View {
             DiagnosticsSheet(onClose: { showDiagnostics = false })
         }
         #endif
+        .task {
+            guard !didMigrateAutoWorkoutMode else { return }
+            didMigrateAutoWorkoutMode = true
+            PuffinExperiment.migrateAutoWorkoutMode()
+        }
     }
 
     // MARK: - Profile photo (optional, on-device)
@@ -1238,23 +1244,24 @@ struct SettingsView: View {
                         .foregroundStyle(StrandPalette.textPrimary)
                     Picker("Automatic activity tracking", selection: Binding(
                         get: {
-                            PuffinExperiment.AutoWorkoutMode(rawValue: autoWorkoutModeRaw)
-                                ?? PuffinExperiment.autoWorkoutMode
+                            // Read the wrapper to keep SwiftUI subscribed, but never write during view
+                            // evaluation. The Settings lifecycle task persists this resolved value once.
+                            _ = autoWorkoutModeRaw
+                            return PuffinExperiment.resolvedAutoWorkoutMode()
                         },
                         set: { mode in
-                            autoWorkoutModeRaw = mode.rawValue
                             PuffinExperiment.setAutoWorkoutMode(mode)
                         }
                     )) {
-                        ForEach(PuffinExperiment.AutoWorkoutMode.allCases) { mode in
+                        ForEach(PuffinExperiment.selectableAutoWorkoutModes) { mode in
                             Text(mode.title).tag(mode)
                         }
                     }
                     .pickerStyle(.segmented)
-                    .accessibilityHint("Choose off, ask before saving, or confidence-gated automatic saving")
+                    .accessibilityHint("Choose off or ask before saving")
                 }
 
-                Text("After a sync, NOOP looks for a finalized, sustained rise in heart rate with sufficient signal coverage and motion confirmation when available. Ask always waits for you. Auto-save writes only stronger 15+ minute candidates as Detected, then lets you keep, edit or dismiss them. This is a conservative on-device heuristic, not WHOOP's proprietary detector, so it can miss or misread activities. On \(Platform.deviceNounPhrase) only.")
+                Text("After a sync, NOOP looks for a finalized, sustained rise in heart rate with sufficient signal coverage and motion confirmation when available. Ask always waits for your approval before saving. Automatic saving stays unavailable until the detector has held-out field validation and calibrated confidence. This is a conservative on-device heuristic, not WHOOP's proprietary detector, so it can miss or misread activities. On \(Platform.deviceNounPhrase) only.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

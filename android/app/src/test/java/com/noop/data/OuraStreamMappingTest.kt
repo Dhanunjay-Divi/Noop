@@ -5,6 +5,8 @@ import com.noop.oura.OuraHR
 import com.noop.oura.OuraHRV
 import com.noop.oura.OuraIBI
 import com.noop.oura.OuraIbiChannel
+import com.noop.oura.OuraHypnogramBurst
+import com.noop.oura.OuraHypnogramRecord
 import com.noop.oura.OuraSleepPhase
 import com.noop.oura.OuraSleepStage
 import com.noop.oura.OuraSpO2
@@ -93,6 +95,48 @@ class OuraStreamMappingTest {
         // PARITY: the payload is exactly { phase, index } - the Swift twin emits no phase_name, so neither
         // does Kotlin. Pin it so a re-added phase_name key breaks this test.
         assertNull(deep.payload["phase_name"])
+    }
+
+    @Test
+    fun unwrittenSleepPhaseDoesNotBecomeAwakeEvent() {
+        val s = OuraStreamMapping.streams(
+            listOf(
+                OuraEvent.SleepPhaseEvent(
+                    OuraSleepPhase(2, index = 0, stage = OuraSleepStage.AWAKE, unwritten = true),
+                ),
+                OuraEvent.SleepPhaseEvent(OuraSleepPhase(2, index = 1, stage = OuraSleepStage.LIGHT)),
+            ),
+            anchor,
+        )
+        assertEquals(1, s.events.size)
+        assertEquals(OuraSleepStage.LIGHT.raw, s.events.single().payload["phase"])
+        assertEquals(1, s.events.single().payload["index"])
+    }
+
+    @Test
+    fun reconstructedPhasesHaveDistinctRoomNaturalKeys() {
+        val phases = listOf(
+            OuraSleepPhase(10, index = 0, stage = OuraSleepStage.DEEP),
+            OuraSleepPhase(10, index = 1, stage = OuraSleepStage.LIGHT),
+            OuraSleepPhase(10, index = 2, stage = OuraSleepStage.REM),
+            OuraSleepPhase(10, index = 3, stage = OuraSleepStage.AWAKE),
+        )
+        val laid = OuraHypnogramBurst(
+            listOf(OuraHypnogramRecord(ringTimestamp = 10, phases = phases)),
+        ).codesWithTimes(endUnixSeconds = 10_000)
+
+        // This is the exact production mapping immediately before WhoopRepository constructs EventRow;
+        // EventRow's Room PK is (deviceId, ts, kind), so these keys must all differ.
+        val persisted = laid.flatMap { code ->
+            val streams = OuraStreamMapping.streams(
+                listOf(OuraEvent.SleepPhaseEvent(code.phase)),
+            ) { code.ts.toInt() }
+            StreamPersistence.toBatch(streams).events
+        }
+        val keys = persisted.map { Triple("oura-test", it.ts, it.kind) }
+        assertEquals(4, persisted.size)
+        assertEquals(4, keys.toSet().size)
+        assertEquals(listOf(9_880L, 9_910L, 9_940L, 9_970L), persisted.map { it.ts })
     }
 
     @Test

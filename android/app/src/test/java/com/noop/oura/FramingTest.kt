@@ -2,6 +2,7 @@ package com.noop.oura
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -62,21 +63,23 @@ class FramingTest {
 
     @Test
     fun testParseGetEventsResponseMoreDataFollows() {
-        // 11 08 <status=ff> <sub_status=00> <last_rt:4LE=78563412> <pad:2>
-        val outer = OuraFraming.parseOuterFrame(bytes("1108ff00785634120000"))
+        // events_received can be zero while bytes remain. The old status interpretation stopped here.
+        val outer = OuraFraming.parseOuterFrame(bytes("11080000785634120000"))
         assertEquals(OuraFraming.getEventsResponseOp, outer?.op)
         val summary = OuraFraming.parseGetEventsResponse(outer!!.body)
-        assertEquals(0x1234_5678L, summary?.cursor)
-        assertEquals(true, summary?.moreData)
+        assertEquals(0, summary?.eventsReceived)
+        assertEquals(0x1234_5678L, summary?.bytesLeft)
+        assertTrue(summary?.moreData == true)
     }
 
     @Test
     fun testParseGetEventsResponseNoMoreData() {
-        // status 0x00 -> caught up, no more data.
-        val outer = OuraFraming.parseOuterFrame(bytes("11080000785634120000"))
+        // events_received may be non-zero in the terminal batch; bytes_left=0 is the completion signal.
+        val outer = OuraFraming.parseOuterFrame(bytes("11081700000000000000"))
         val summary = OuraFraming.parseGetEventsResponse(outer!!.body)
-        assertEquals(0x1234_5678L, summary?.cursor)
-        assertEquals(false, summary?.moreData)
+        assertEquals(0x17, summary?.eventsReceived)
+        assertEquals(0L, summary?.bytesLeft)
+        assertFalse(summary?.moreData ?: true)
     }
 
     @Test

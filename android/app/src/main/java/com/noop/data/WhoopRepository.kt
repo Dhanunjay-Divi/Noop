@@ -421,9 +421,8 @@ class WhoopRepository(private val dao: WhoopDao) {
      *  here would overlap the surviving night's window and permanently suppress its re-detection. Only
      *  the engine's dedup heal calls this; the user-facing delete stays [deleteSleepSession]. Mirrors
      *  the Swift heal, which calls the tombstone-free store-level delete directly. */
-    suspend fun deleteSleepSessionRowOnly(session: SleepSession) {
+    suspend fun deleteSleepSessionRowOnly(session: SleepSession): Int =
         dao.deleteSleepSession(session.deviceId, session.startTs)
-    }
 
     /**
      * #547 one-time heal: purge rows polluted by a bad-strap-clock timestamp. pikapik's WHOOP 4.0 emitted
@@ -2163,7 +2162,22 @@ class WhoopRepository(private val dao: WhoopDao) {
             val out = ArrayList<SleepSession>(imported.size + computed.size)
             for ((day, imp) in importedByDay) {
                 val comp = computedByDay[day]
-                if (comp != null && imp.none { hasStages(it) } && comp.any { hasStages(it) }) {
+                val oura = imp.filter { com.noop.oura.OuraSleepSessionMapping.hasOuraProvenance(it.stagesJSON) }
+                val otherImported = imp.filterNot { com.noop.oura.OuraSleepSessionMapping.hasOuraProvenance(it.stagesJSON) }
+                if (oura.isNotEmpty() && comp != null) {
+                    val acceptedOura = oura.filter { ring ->
+                        otherImported.none { com.noop.analytics.SleepSessionDedup.isDuplicate(it, ring) }
+                    }
+                    if (otherImported.isEmpty()) {
+                        out.addAll(acceptedOura)
+                        out.addAll(comp.filter { local ->
+                            acceptedOura.none { com.noop.analytics.SleepSessionDedup.isDuplicate(it, local) }
+                        })
+                    } else {
+                        out.addAll(otherImported)
+                        out.addAll(acceptedOura)
+                    }
+                } else if (comp != null && imp.none { hasStages(it) } && comp.any { hasStages(it) }) {
                     out.addAll(comp)   // richer computed day survives a stage-less import
                 } else {
                     out.addAll(imp)    // imported wins its day (unchanged rule)

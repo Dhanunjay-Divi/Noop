@@ -116,6 +116,16 @@ final class OuraStreamMappingTests: XCTestCase {
         XCTAssertEqual(s.events.map { $0.ts }, [ts, ts])
     }
 
+    func testUnwrittenSleepPhaseIsNotPersistedAsAwake() {
+        let s = OuraStreamMapping.streams(from: [
+            .sleepPhase(OuraSleepPhase(ringTimestamp: 100, index: 0, stage: .awake, unwritten: true)),
+            .sleepPhase(OuraSleepPhase(ringTimestamp: 100, index: 1, stage: .light)),
+        ], at: ts)
+        XCTAssertEqual(s.events.count, 1)
+        XCTAssertEqual(s.events[0].payload["phase"], .int(OuraSleepStage.light.rawValue))
+        XCTAssertEqual(s.events[0].payload["index"], .int(1))
+    }
+
     // MARK: - Battery -> battery:[BatterySample]
 
     func testBatteryMapsToBatterySample() {

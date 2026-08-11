@@ -1741,7 +1741,7 @@
     <string name="live_tracking_stop">Arrêter le suivi en direct</string>
     <string name="live_tracking_start">Démarrer le suivi en direct</string>
     <string name="settings_automatic_activity">Activité automatique</string>
-    <string name="settings_automatic_activity_help">Après une synchronisation, NOOP recherche une hausse durable et finalisée de la fréquence cardiaque, avec une couverture du signal suffisante et, si disponible, une confirmation par le mouvement. Demander attend toujours votre confirmation. L’enregistrement automatique ne conserve comme Détectées que les activités probables les plus nettes d’au moins 15 minutes, puis vous permet de les conserver, les modifier ou les ignorer. Il s’agit d’une heuristique prudente sur l’appareil, et non du détecteur propriétaire de WHOOP ; elle peut donc manquer ou mal interpréter des activités. Sur ce téléphone uniquement.</string>
+    <string name="settings_automatic_activity_help">Après une synchronisation, NOOP recherche une hausse durable et finalisée de la fréquence cardiaque, avec une couverture du signal suffisante et, si disponible, une confirmation par le mouvement. Demander attend toujours votre accord avant d’enregistrer. L’enregistrement automatique reste indisponible tant que le détecteur n’a pas été validé sur des données de terrain réservées et que sa confiance n’est pas calibrée. Il s’agit d’une heuristique prudente sur l’appareil, et non du détecteur propriétaire de WHOOP ; elle peut donc manquer ou mal interpréter des activités. Sur ce téléphone uniquement.</string>
     <string name="cycle_tracker_title">Suivi du cycle</string>
     <string name="cycle_tracker_private_dates">Dates privées de début des règles</string>
     <string name="cycle_tracker_already_logged">Déjà enregistré</string>
@@ -1760,4 +1760,7 @@
     <string name="workout_saving">Enregistrement…</string>
     <string name="workout_retry_save">Réessayer l’enregistrement</string>
     <string name="workout_discard">Abandonner l’entraînement</string>
+    <string name="sleep_stages_oura_provenance">Stades Oura Ring · estimation sur la bague, non ajustée par l’app Oura</string>
+    <string name="sleep_stages_on_device_provenance">Stades approximatifs (sur l’appareil)</string>
+    <string name="sleep_stage_summary">%1$s au lit · %2$s d’efficacité</string>
 </resources>

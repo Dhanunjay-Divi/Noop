@@ -483,6 +483,7 @@ internal fun daySourceBadge(deviceId: String): Pair<String, Color> = when {
     deviceId.endsWith("-noop") -> "On-device" to Palette.chargeColor
     deviceId == com.noop.data.WhoopRepository.APPLE_HEALTH_SOURCE ||
         deviceId == com.noop.data.WhoopRepository.HEALTH_CONNECT_SOURCE -> "Apple Health" to Palette.accent
+    deviceId == "oura-api" || deviceId.startsWith("oura-") -> "Oura Ring" to Palette.restColor
     else -> "Whoop" to Palette.accent
 }
 

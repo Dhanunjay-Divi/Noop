@@ -1,5 +1,6 @@
 package com.noop.analytics
 
+import org.json.JSONArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
@@ -60,5 +61,18 @@ class Issue259PreOnsetClampTest {
         )
         assertNotNull(r)
         assertEquals(27_000.0 / 60.0, r!!.sleep.totalSleepMin, 1e-6)
+    }
+
+    @Test
+    fun onsetClampPreservesOuraProvenanceAndUnknownMetadata() {
+        val json = """[{"start":0,"end":120,"stage":"light","source":"oura","confidence":0.82},{"start":120,"end":240,"stage":"deep","source":"oura"}]"""
+        val out = SleepStageTotals.clampStagesToOnset(json, 60)!!
+        val segments = JSONArray(out)
+
+        assertEquals(2, segments.length())
+        assertEquals(60, segments.getJSONObject(0).optLong("start"))
+        assertEquals(0.82, segments.getJSONObject(0).optDouble("confidence"), 0.0001)
+        assertTrue("an onset clamp must not erase source attribution",
+            (0 until segments.length()).all { segments.getJSONObject(it).optString("source") == "oura" })
     }
 }

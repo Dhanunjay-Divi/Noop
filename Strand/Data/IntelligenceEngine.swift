@@ -214,6 +214,89 @@ final class IntelligenceEngine: ObservableObject {
             + "(floor = WHOOP-style lowest-sustained = NOOP RHR; mean = sleeping-HR-app number)"
     }
 
+    /// Device ids whose banked sleep rows need overlap repair. Live sources such as Oura store their
+    /// hypnograms under their own ids, so repairing only the computed-score id leaves source-local
+    /// duplicates behind and lets them be re-detected as phantom naps on later analysis passes.
+    nonisolated static func sleepHealDeviceIds(computedId: String, registeredIds: [String]) -> [String] {
+        Set([computedId] + registeredIds).sorted()
+    }
+
+    /// Result of the destructive half of the banked-sleep overlap repair. A row is included in
+    /// `deleted` only when SQLite confirms that one row changed; a stale candidate that was already
+    /// removed concurrently is counted separately, and an I/O failure is never reported as a delete.
+    struct SleepHealResult {
+        let deleted: [CachedSleepSession]
+        let unchangedDeleteCount: Int
+        let failedDeleteCount: Int
+        let failedReadCount: Int
+
+        var hasFailures: Bool { failedDeleteCount > 0 || failedReadCount > 0 }
+    }
+
+    /// Store-backed, source-local overlap repair used by `analyzeRecent` and its regression tests.
+    /// Each device is deduped independently: a session under one source can never delete a row under
+    /// another source. The injectable delete seam exists only so the error-accounting contract can be
+    /// tested deterministically; production always uses `WhoopStore.deleteSleepSession`.
+    static func healBankedSleepSessions(
+        store: WhoopStore,
+        deviceIds: [String],
+        from windowStart: Int,
+        to windowEnd: Int,
+        oldestDay: String,
+        newestDay: String,
+        timezoneOffsetSeconds: Int,
+        freshStarts: Set<Int>,
+        deleteSession: ((String, Int) async throws -> Int)? = nil
+    ) async -> SleepHealResult {
+        var deleted: [CachedSleepSession] = []
+        var unchangedDeleteCount = 0
+        var failedDeleteCount = 0
+        var failedReadCount = 0
+
+        for deviceId in Set(deviceIds).sorted() {
+            let storedSessions: [CachedSleepSession]
+            do {
+                storedSessions = try await store.sleepSessions(
+                    deviceId: deviceId,
+                    from: windowStart,
+                    to: windowEnd,
+                    limit: 4000)
+            } catch {
+                failedReadCount += 1
+                continue
+            }
+            let healable = storedSessions.filter {
+                (oldestDay...newestDay).contains(
+                    AnalyticsEngine.dayString($0.endTs, offsetSec: timezoneOffsetSeconds))
+            }
+            let candidates = SleepSessionDedup.dedupe(healable, freshStarts: freshStarts).dropped
+            for stale in candidates {
+                do {
+                    let changed: Int
+                    if let deleteSession {
+                        changed = try await deleteSession(deviceId, stale.startTs)
+                    } else {
+                        changed = try await store.deleteSleepSession(deviceId: deviceId, startTs: stale.startTs)
+                    }
+                    if changed > 0 {
+                        deleted.append(stale)
+                    } else {
+                        // A concurrent delete already achieved the desired state, but this pass did not
+                        // delete a row and therefore must not claim that it did.
+                        unchangedDeleteCount += 1
+                    }
+                } catch {
+                    failedDeleteCount += 1
+                }
+            }
+        }
+        return SleepHealResult(
+            deleted: deleted,
+            unchangedDeleteCount: unchangedDeleteCount,
+            failedDeleteCount: failedDeleteCount,
+            failedReadCount: failedReadCount)
+    }
+
     /// The Saturday on-or-before a "yyyy-MM-dd" local-day string , the weekly key Fitness Age writes to.
     static func saturdayKey(onOrBefore dayStr: String) -> String {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = .current
@@ -1531,14 +1614,28 @@ final class IntelligenceEngine: ObservableObject {
         // stale copies. Scoped to sessions whose wake day lies inside the [oldestDay, newestDay] daily
         // reconcile window: exactly the days this pass re-scored/evicted, so a session row is never
         // deleted out from under a daily row the pass did not refresh. Edited rows are never dropped.
-        let storedSessions = (try? await store.sleepSessions(deviceId: computedId, from: windowStart,
-                                                             to: now, limit: 4000)) ?? []
-        let healable = storedSessions.filter {
-            (oldestDay...newestDay).contains(AnalyticsEngine.dayString($0.endTs, offsetSec: tzOffset))
+        let healIds = Self.sleepHealDeviceIds(
+            computedId: computedId,
+            registeredIds: regDevices.map(\.id))
+        let healResult = await Self.healBankedSleepSessions(
+            store: store,
+            deviceIds: healIds,
+            from: windowStart,
+            to: now,
+            oldestDay: oldestDay,
+            newestDay: newestDay,
+            timezoneOffsetSeconds: tzOffset,
+            freshStarts: keptStarts)
+        let healDropped = healResult.deleted
+        if healResult.failedReadCount > 0 || healResult.failedDeleteCount > 0 {
+            diagnosticSink?("Dedup(#899): repair incomplete; failed to read "
+                + "\(healResult.failedReadCount) source(s) and failed to delete "
+                + "\(healResult.failedDeleteCount) row(s). Failed rows were not counted as removed; "
+                + "the next scoring pass will retry.", nil)
         }
-        let healDropped = SleepSessionDedup.dedupe(healable, freshStarts: keptStarts).dropped
-        for stale in healDropped {
-            _ = try? await store.deleteSleepSession(deviceId: computedId, startTs: stale.startTs)
+        if healResult.unchangedDeleteCount > 0 {
+            diagnosticSink?("Dedup(#899): \(healResult.unchangedDeleteCount) candidate row(s) were already "
+                + "absent when deletion ran; they were not counted as removed.", nil)
         }
         if !healDropped.isEmpty {
             diagnosticSink?("Dedup(#899): removed \(healDropped.count) overlapping duplicate sleep "
@@ -1580,7 +1677,13 @@ final class IntelligenceEngine: ObservableObject {
         // #836: record the raw-HR fingerprint this run scored against, so a later NON-forced tick can
         // short-circuit while it's unchanged. Written ONLY here at the end of a completed run (never on an
         // early guard-return), so an interrupted/failed run can't advance the watermark past unscored data.
-        if !wmKey.isEmpty { UserDefaults.standard.set(wmKey, forKey: Self.analyzeWatermarkKey) }
+        // A repair I/O failure leaves the HR fingerprint unchanged. Clear even an older matching watermark
+        // so the next idle pass retries instead of treating the incomplete destructive repair as complete.
+        if healResult.hasFailures {
+            UserDefaults.standard.removeObject(forKey: Self.analyzeWatermarkKey)
+        } else if !wmKey.isEmpty {
+            UserDefaults.standard.set(wmKey, forKey: Self.analyzeWatermarkKey)
+        }
         return ScoreRunReceipt(whoopStrapDays: persistedWhoopStrapDays)
     }
 

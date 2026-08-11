@@ -1239,14 +1239,24 @@ object IntelligenceEngine {
         // reconcile window: exactly the days this pass re-scored/evicted, so a session row is never
         // deleted out from under a daily row the pass did not refresh. Edited rows are never dropped.
         // Mirrors the Swift analyzeRecent heal.
-        val storedSessions = repo.sleepSessions(computedId, windowStart, nowSeconds, 4000)
-        val healable = storedSessions.filter {
-            AnalyticsEngine.dayString(it.endTs, tzOffsetSeconds) in oldestDay..newestDay
+        val healIds = sleepHealDeviceIds(computedId, candidatePriorities.map { it.first })
+        val healResult = healBankedSleepSessions(
+            repo = repo,
+            deviceIds = healIds,
+            windowStart = windowStart,
+            windowEnd = nowSeconds,
+            oldestDay = oldestDay,
+            newestDay = newestDay,
+            timezoneOffsetSeconds = tzOffsetSeconds,
+            freshStarts = keptStarts,
+        )
+        val healDropped = healResult.deleted
+        if (healResult.unchangedDeleteCount > 0) {
+            diag(
+                "Dedup(#899): ${healResult.unchangedDeleteCount} candidate row(s) were already absent " +
+                    "when deletion ran; they were not counted as removed.",
+            )
         }
-        val healDropped = SleepSessionDedup.dedupe(healable, freshStarts = keptStarts).dropped
-        // Row-only delete: the user-facing deleteSleepSession writes a #33 dismissal tombstone, which
-        // would overlap the SURVIVING night's window and permanently suppress its re-detection.
-        for (stale in healDropped) repo.deleteSleepSessionRowOnly(stale)
         if (healDropped.isNotEmpty()) {
             diag(
                 "Dedup(#899): removed ${healDropped.size} overlapping duplicate sleep " +
@@ -1873,5 +1883,52 @@ object IntelligenceEngine {
             else Math.round(inBedBpms.sum().toDouble() / inBedBpms.size).toString()
         return "rhr day=$day floor=$floor nightMean=$meanLog inBedSamples=${inBedBpms.size} " +
             "(floor = WHOOP-style lowest-sustained = NOOP RHR; mean = sleeping-HR-app number)"
+    }
+
+    /** Device ids whose banked sleep rows need overlap repair, sorted for deterministic cross-platform runs. */
+    internal fun sleepHealDeviceIds(computedId: String, registeredIds: List<String>): List<String> =
+        (listOf(computedId) + registeredIds).toSortedSet().toList()
+
+    /** Confirmed result of the destructive half of the source-local overlap repair. */
+    internal data class SleepHealResult(
+        val deleted: List<SleepSession>,
+        val unchangedDeleteCount: Int,
+    )
+
+    /**
+     * Store-backed multi-source repair shared by production and regression tests. Each source is deduped
+     * independently. A candidate enters [SleepHealResult.deleted] only when Room confirms that the DELETE
+     * changed a row; a concurrent/already-completed delete is tracked separately and never claimed in the
+     * user-visible diagnostic. DAO failures propagate, aborting the scoring pass before its caller advances
+     * the raw-HR watermark, so the next pass can retry instead of silently accepting an incomplete repair.
+     */
+    internal suspend fun healBankedSleepSessions(
+        repo: WhoopRepository,
+        deviceIds: List<String>,
+        windowStart: Long,
+        windowEnd: Long,
+        oldestDay: String,
+        newestDay: String,
+        timezoneOffsetSeconds: Long,
+        freshStarts: Set<Long>,
+    ): SleepHealResult {
+        val deleted = ArrayList<SleepSession>()
+        var unchangedDeleteCount = 0
+        for (deviceId in deviceIds.toSortedSet()) {
+            val healable = repo.sleepSessions(deviceId, windowStart, windowEnd, 4000).filter {
+                AnalyticsEngine.dayString(it.endTs, timezoneOffsetSeconds) in oldestDay..newestDay
+            }
+            val candidates = SleepSessionDedup.dedupe(healable, freshStarts = freshStarts).dropped
+            // Row-only delete: the user-facing deleteSleepSession writes a dismissal tombstone that
+            // could also suppress the surviving night. Repair rows only, under their original device id.
+            for (stale in candidates) {
+                if (repo.deleteSleepSessionRowOnly(stale) > 0) {
+                    deleted.add(stale)
+                } else {
+                    unchangedDeleteCount += 1
+                }
+            }
+        }
+        return SleepHealResult(deleted = deleted, unchangedDeleteCount = unchangedDeleteCount)
     }
 }

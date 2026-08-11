@@ -25,6 +25,10 @@ public struct OuraHistoryDrain: Sendable, Equatable {
     private var stallCount = 0
     /// Newest STORED ring-time seen this drain — the value the resume cursor commits to at drain end.
     public private(set) var maxStoredRingTime: UInt32 = 0
+    /// Newest envelope time seen in this drain, anchored or not. Used only for the next in-session request.
+    public private(set) var maxSeenRingTime: UInt32 = 0
+    /// Records observed since the last request, used to refuse a non-progressing continuation.
+    public private(set) var eventsSinceLastRequest = 0
     /// A real stored sample older than where we sought this fetch: the ring's clock reset (or it ignored
     /// the seek), so the persisted cursor is stale → full pull next connect.
     public private(set) var sawPreResumeData = false
@@ -36,6 +40,8 @@ public struct OuraHistoryDrain: Sendable, Equatable {
         minBytesLeftSeen = .max
         stallCount = 0
         maxStoredRingTime = 0
+        maxSeenRingTime = 0
+        eventsSinceLastRequest = 0
         sawPreResumeData = false
     }
 
@@ -66,6 +72,26 @@ public struct OuraHistoryDrain: Sendable, Equatable {
         guard rt <= Self.maxPlausibleResumeTicks else { return }
         if rt > maxStoredRingTime { maxStoredRingTime = rt }
         if resumeCursorAtFetchStart > 0, rt < resumeCursorAtFetchStart { sawPreResumeData = true }
+    }
+
+    /// Record every history envelope toward the in-session continuation position. This is deliberately
+    /// separate from `maxStoredRingTime`: unanchored records can advance the current batch without ever
+    /// becoming a durable checkpoint.
+    public mutating func noteSeenRingTime(_ rt: UInt32) {
+        guard rt <= Self.maxPlausibleResumeTicks else { return }
+        if rt > maxSeenRingTime { maxSeenRingTime = rt }
+        eventsSinceLastRequest += 1
+    }
+
+    /// Resume one tick after the newest record only when this batch actually advanced. Returning nil
+    /// stops instead of re-requesting a stale cursor and making the ring re-serve the same window.
+    public mutating func continuationCursor(lastRequestCursor: UInt32) -> UInt32? {
+        guard eventsSinceLastRequest > 0,
+              maxSeenRingTime < UInt32.max else { return nil }
+        let next = maxSeenRingTime + 1
+        guard next > lastRequestCursor else { return nil }
+        eventsSinceLastRequest = 0
+        return next
     }
 
     /// The cursor to persist at drain end, given the current cursor and whether `maxStoredRingTime`

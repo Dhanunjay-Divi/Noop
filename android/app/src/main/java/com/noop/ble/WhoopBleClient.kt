@@ -388,6 +388,12 @@ class WhoopBleClient(
      * construction, so [setActiveDeviceId] re-points that too (see there).
      */
     private var deviceId: String = DEFAULT_DEVICE_ID,
+    /**
+     * Registry-backed source list for post-offload scoring. Without this, `analyzeRecent` sees only the
+     * computed WHOOP id and cannot repair source-local sleep duplicates under Oura/other registered ids.
+     * Kept injectable so pure BLE tests need no Room registry.
+     */
+    private val dayOwnerSource: IntelligenceEngine.DayOwnerSource? = null,
     /** Durable trim-cursor store for the offload safe-trim watermark (see [Backfiller]). */
     private val cursorStore: TrimCursorStore = PrefsTrimCursorStore(context),
     /**
@@ -1929,6 +1935,10 @@ class WhoopBleClient(
                         profile = profile,
                         importedDeviceId = deviceId,
                         maxHROverride = profileStore.hrMaxOverride.takeIf { it > 0 }?.toDouble(),
+                        // The post-offload pass must see the same complete, non-archived registry source
+                        // set as the UI scorer; otherwise it advances the watermark after healing only
+                        // `<strap>-noop`, and a later idle pass skips Oura/source-local duplicates.
+                        ownerSource = dayOwnerSource,
                         // Steps-estimate calibration: honor the user's manual override and persist the fit
                         // after a backfill too, so the Settings/Steps screen reflects the latest data.
                         manualStepCoefficient = profileStore.stepsManualOverride,

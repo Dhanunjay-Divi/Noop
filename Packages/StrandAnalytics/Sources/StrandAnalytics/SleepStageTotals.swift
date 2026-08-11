@@ -67,7 +67,13 @@ public enum SleepStageTotals {
             let name = seg["stage"] as? String ?? ""
             let s = max(rawS, onsetSec)
             guard e > s else { continue }                                        // fully before the onset → drop
-            out.append(["start": s, "end": e, "stage": name])
+            // Keep open-ended metadata such as Oura's `source` marker. Rebuilding only the canonical
+            // fields here used to silently erase provenance whenever an onset edit forced a clamp.
+            var clamped = seg
+            clamped["start"] = s
+            clamped["end"] = e
+            clamped["stage"] = name
+            out.append(clamped)
         }
         guard let outData = try? JSONSerialization.data(withJSONObject: out),
               let str = String(data: outData, encoding: .utf8) else { return stagesJSON }

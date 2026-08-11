@@ -115,6 +115,23 @@ final class SleepStageTotalsTests: XCTestCase {
         XCTAssertEqual(r.sleep.totalSleepMin, 450, accuracy: 0.001)
     }
 
+    func testClampStagesToOnsetPreservesOuraProvenanceAndUnknownMetadata() throws {
+        let json = """
+        [{"start":0,"end":120,"stage":"light","source":"oura","confidence":0.82},
+         {"start":120,"end":240,"stage":"deep","source":"oura"}]
+        """
+        let out = try XCTUnwrap(SleepStageTotals.clampStagesToOnset(json, onsetSec: 60))
+        let segments = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(out.utf8)) as? [[String: Any]])
+
+        XCTAssertEqual(segments.count, 2)
+        XCTAssertEqual((segments[0]["start"] as? NSNumber)?.intValue, 60)
+        XCTAssertEqual(try XCTUnwrap((segments[0]["confidence"] as? NSNumber)?.doubleValue),
+                       0.82, accuracy: 0.0001)
+        XCTAssertTrue(segments.allSatisfy { ($0["source"] as? String) == "oura" },
+                      "an onset clamp must not erase source attribution")
+    }
+
     func testHonoringEditsMultiBlockSubstitutesOnlyTheEditedBlock() throws {
         // A nap (startTs 100, untouched) + a main sleep (startTs 1000, edited shorter).
         let r = try XCTUnwrap(SleepStageTotals.dailyAggregateHonoringEdits(

@@ -1741,7 +1741,7 @@
     <string name="live_tracking_stop">Detener seguimiento en directo</string>
     <string name="live_tracking_start">Iniciar seguimiento en directo</string>
     <string name="settings_automatic_activity">Actividad automática</string>
-    <string name="settings_automatic_activity_help">Tras una sincronización, NOOP busca un aumento sostenido y finalizado de la frecuencia cardiaca con cobertura de señal suficiente y confirmación de movimiento cuando está disponible. Preguntar siempre espera tu confirmación. Guardado automático solo registra como Detectadas las candidatas más claras de 15 minutos o más y luego te permite conservarlas, editarlas o descartarlas. Es una heurística conservadora en el dispositivo, no el detector propietario de WHOOP, por lo que puede omitir o interpretar mal algunas actividades. Solo en este teléfono.</string>
+    <string name="settings_automatic_activity_help">Tras una sincronización, NOOP busca un aumento sostenido y finalizado de la frecuencia cardiaca con cobertura de señal suficiente y confirmación de movimiento cuando está disponible. Preguntar siempre espera tu aprobación antes de guardar. El guardado automático seguirá sin estar disponible hasta que el detector tenga validación de campo con datos reservados y una confianza calibrada. Es una heurística conservadora en el dispositivo, no el detector propietario de WHOOP, por lo que puede omitir o interpretar mal algunas actividades. Solo en este teléfono.</string>
     <string name="cycle_tracker_title">Seguimiento del ciclo</string>
     <string name="cycle_tracker_private_dates">Fechas privadas de inicio del período</string>
     <string name="cycle_tracker_already_logged">Ya registrado</string>
@@ -1760,4 +1760,7 @@
     <string name="workout_saving">Guardando…</string>
     <string name="workout_retry_save">Reintentar guardado</string>
     <string name="workout_discard">Descartar entrenamiento</string>
+    <string name="sleep_stages_oura_provenance">Fases de Oura Ring · estimación del anillo, sin ajustes de la app Oura</string>
+    <string name="sleep_stages_on_device_provenance">Fases aproximadas (en el dispositivo)</string>
+    <string name="sleep_stage_summary">%1$s en cama · %2$s de eficiencia</string>
 </resources>

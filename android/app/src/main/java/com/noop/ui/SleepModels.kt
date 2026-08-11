@@ -52,8 +52,8 @@ internal data class SleepModel(
     val trendNeedHours: List<Double>,
     val trendDebtHours: List<Double>,
     val trendDates: List<String>,
-    /** Persisted per-epoch segments as ordered (stage, minutes) weights — the REAL
-     *  hypnogram (on-device APPROXIMATE staging) — or null → synthesized fallback. */
+    /** Persisted per-epoch segments as ordered (stage, minutes) weights — NOOP's local estimate or
+     *  Oura's on-ring estimate — or null → synthesized fallback. */
     val realSegments: List<Pair<String, Float>>?,
     /** Rolling 14-night sleep-debt ledger: Σ(slept − personal need) across the recent
      *  fortnight, with the per-night deltas behind it. Computed once per data change. (#242) */
@@ -96,6 +96,9 @@ internal data class HeroNight(
     // window row and axis were already whole-night. Null only via the default → session fallback.
     val heroOnsetTs: Long? = null,
     val heroWakeTs: Long? = null,
+    /** True when any block supplying the displayed main-night hypnogram came from Oura's on-ring
+     *  SleepNet output. Kept separate from score provenance: this labels stages only. */
+    val hasOuraStages: Boolean = false,
 )
 
 /** What the hero card draws for the selected night — null means no usable stage data

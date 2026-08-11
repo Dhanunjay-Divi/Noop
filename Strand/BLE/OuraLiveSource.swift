@@ -6,6 +6,122 @@ import WhoopProtocol
 import WhoopStore
 import OuraProtocol
 
+/// Pure state machine that keeps an Oura history resume cursor behind every asynchronous store write.
+/// The BLE transport owns the tasks and ring timestamps; this type owns only ordering, failure and stale-
+/// generation decisions so reconnect/timeout behavior is deterministic and unit-testable.
+struct OuraHistoryPersistenceGate: Equatable {
+    struct Resolution: Equatable {
+        let drainCompleted: Bool
+        let allWritesSucceeded: Bool
+    }
+
+    struct WriteResult: Equatable {
+        let accepted: Bool
+        let resolution: Resolution?
+    }
+
+    private(set) var generation: UInt64 = 0
+    private(set) var isActive = false
+    private(set) var pendingWriteCount = 0
+    private(set) var sawWriteFailure = false
+    private(set) var requestedFinish: Bool?
+
+    @discardableResult
+    mutating func begin() -> UInt64 {
+        generation &+= 1
+        isActive = true
+        pendingWriteCount = 0
+        sawWriteFailure = false
+        requestedFinish = nil
+        return generation
+    }
+
+    mutating func invalidate() {
+        generation &+= 1
+        isActive = false
+        pendingWriteCount = 0
+        sawWriteFailure = false
+        requestedFinish = nil
+    }
+
+    mutating func register(generation candidate: UInt64) -> Bool {
+        guard isActive, candidate == generation else { return false }
+        pendingWriteCount += 1
+        return true
+    }
+
+    mutating func completeWrite(generation candidate: UInt64, succeeded: Bool) -> WriteResult {
+        guard isActive, candidate == generation, pendingWriteCount > 0 else {
+            return WriteResult(accepted: false, resolution: nil)
+        }
+        pendingWriteCount -= 1
+        if !succeeded { sawWriteFailure = true }
+        return WriteResult(accepted: true, resolution: resolveIfReady())
+    }
+
+    mutating func requestFinish(drainCompleted: Bool) -> Resolution? {
+        guard isActive else { return nil }
+        requestedFinish = drainCompleted
+        return resolveIfReady()
+    }
+
+    var shouldStartTimeout: Bool {
+        isActive && requestedFinish != nil && pendingWriteCount > 0
+    }
+
+    /// Invalidating instead of cancelling preserves an idempotent write that may already have committed.
+    mutating func timeOut(generation candidate: UInt64) -> Bool {
+        guard isActive, candidate == generation, requestedFinish != nil else { return false }
+        invalidate()
+        return true
+    }
+
+    private mutating func resolveIfReady() -> Resolution? {
+        guard isActive, let drainCompleted = requestedFinish, pendingWriteCount == 0 else { return nil }
+        let resolution = Resolution(
+            drainCompleted: drainCompleted,
+            allWritesSucceeded: !sawWriteFailure
+        )
+        isActive = false
+        requestedFinish = nil
+        return resolution
+    }
+}
+
+/// Associates the records currently buffered by `OuraHypnogramAssembler` with the history drain that
+/// actually delivered them. The wrapper is deliberately optional inside an optional: a pending live
+/// burst has a nil history generation, while a nil `pendingReceipt` means there is no buffered burst.
+/// This prevents an old partial burst from inheriting a newer drain generation when it closes later.
+struct OuraHypnogramReceiptTracker: Equatable {
+    struct Receipt: Equatable {
+        let historyGeneration: UInt64?
+    }
+
+    private(set) var pendingReceipt: Receipt?
+
+    /// Starts tracking `generation`, or rotates to it and returns the receipt that must be flushed first.
+    mutating func rotate(to generation: UInt64?) -> Receipt? {
+        let incoming = Receipt(historyGeneration: generation)
+        guard let pendingReceipt else {
+            self.pendingReceipt = incoming
+            return nil
+        }
+        guard pendingReceipt != incoming else { return nil }
+        self.pendingReceipt = incoming
+        return pendingReceipt
+    }
+
+    /// Takes the receipt for an explicit assembler flush and clears the pending association.
+    mutating func takeForFlush() -> Receipt? {
+        defer { pendingReceipt = nil }
+        return pendingReceipt
+    }
+
+    mutating func reset() {
+        pendingReceipt = nil
+    }
+}
+
 /// EXPERIMENTAL, ISOLATED live-BLE source for the Oura ring (gen 3/4/5), driven by the clean-room
 /// `OuraProtocol.OuraDriver`.
 ///
@@ -116,7 +232,12 @@ public final class OuraLiveSource: NSObject, ObservableObject {
 
     private let live: LiveState
     private let deviceId: String
-    private let persist: (Streams) -> Void
+    /// Starts an asynchronous store write and returns an acknowledgement task. History cursors never move
+    /// until that task succeeds; live writes still run immediately and ignore the result as before.
+    private let persist: (Streams) -> Task<Bool, Never>
+    /// Upserts the ring-provided, reconstructed hypnogram as a stage-rich sleep session under the ring's
+    /// own device id, so the normal imported-vs-computed sleep arbitration can consume it.
+    private let persistSleepSession: (CachedSleepSession) -> Task<Bool, Never>
     private let log: (String) -> Void
     private let onBattery: (Int) -> Void
     /// The ring generation (carried on `PairedDevice.model`, recovered via `OuraRingGen.from(model:)`).
@@ -142,6 +263,19 @@ public final class OuraLiveSource: NSObject, ObservableObject {
     private var driver: OuraDriver?
     /// Reassembles notification fragments into complete TLV inner records across feeds.
     private let reassembler = OuraReassembler()
+    /// Oura writes a whole night's SleepNet phases in a compact post-wake burst whose envelope timestamps
+    /// are write times. Accumulate the records and reconstruct one 30-second time axis before persistence.
+    private let hypnogramAssembler = OuraHypnogramAssembler()
+    /// Keeps a partial phase burst attached to its originating history generation. A later drain may close
+    /// that burst, but can never claim its writes toward the newer cursor.
+    private var hypnogramReceiptTracker = OuraHypnogramReceiptTracker()
+    /// Bursts closed before the ring-time anchor arrives. These are retried when time sync lands and never
+    /// stamped with a guessed wall clock because the anchor defines the entire night.
+    private struct PendingUnanchoredBurst {
+        let burst: OuraHypnogramBurst
+        let historyGeneration: UInt64?
+    }
+    private var pendingUnanchoredBursts: [PendingUnanchoredBurst] = []
 
     /// Live wear/charge indicator: a LIVE-HR push (.hr) means the ring is on a finger; the ring's own "chg.
     /// detected"/"stopped" STATE strings bracket a charging period. Fed ONLY from the live push and STATE
@@ -205,6 +339,11 @@ public final class OuraLiveSource: NSObject, ObservableObject {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f   // local time zone by default
     }()
 
+    /// Recent Tier-B 0x49 window candidates (minutes before the finalization event). The nearest window
+    /// refines a phase burst from analysis-write time to the ring's tracked onset/end. Bounded per session.
+    private var recentSleepWindows049: [(ringTimestamp: UInt32, startOffMin: Int, endOffMin: Int)] = []
+    private static let recentSleepWindows049Cap = 16
+
     /// History-fetched events decoded BEFORE a ring-time -> UTC anchor exists this session, held here
     /// (with their own ring timestamp) until the anchor lands (`drainPendingAnchorEvents`), so they get
     /// their real historical time instead of a premature wall-clock guess. The ring's 0x42 time-sync can
@@ -212,7 +351,14 @@ public final class OuraLiveSource: NSObject, ObservableObject {
     /// are parked here and re-stamped the moment an anchor lands. Drained with an honest wall-clock
     /// fallback at teardown if no anchor ever arrived this session (never silently dropped). Reset on
     /// stop/disconnect.
-    private var pendingAnchorEvents: [(event: OuraEvent, ringTimestamp: UInt32)] = []
+    private struct PendingAnchorEvent {
+        let event: OuraEvent
+        let ringTimestamp: UInt32
+        /// The history-drain generation that delivered this record. nil means a live push. Retaining the
+        /// original generation prevents a late time anchor from crediting an old record to a new drain.
+        let historyGeneration: UInt64?
+    }
+    private var pendingAnchorEvents: [PendingAnchorEvent] = []
     /// True once the live-HR stream has been requested, so the disconnect handler can tell "we never got
     /// authenticated/streaming" (-> honest note) from "the link just dropped".
     private var reachedStreaming = false
@@ -292,6 +438,22 @@ public final class OuraLiveSource: NSObject, ObservableObject {
     private var resumeCursorAtFetchStart: UInt32 = 0
     /// Wall-clock start of the current drain; `drain`'s deadline guard force-stops one running too long.
     private var drainStartedAt: Date?
+    /// Cursor used by the most recent GetEvents request. Continuations must move strictly beyond it.
+    private var lastRequestCursor: UInt32 = 0
+    private enum PendingDrainAction {
+        case continueBatch
+        case finish(completed: Bool)
+    }
+    /// A 0x11 summary is an early summary, not an end-of-notification delimiter. Finalize or continue only
+    /// after 1.5 seconds without another history record so tail events cannot be skipped by a cursor commit.
+    private var pendingDrainAction: PendingDrainAction?
+    private var batchQuietTimer: Timer?
+    private let batchQuietInterval: TimeInterval = 1.5
+    /// Async persistence barrier for the current history drain. A generation token prevents a late callback
+    /// from a disconnected session mutating a later fetch. Any failed write keeps the durable cursor behind.
+    private var historyPersistence = OuraHistoryPersistenceGate()
+    private var historyPersistenceTimer: Timer?
+    private let historyPersistenceTimeout: TimeInterval = 45
     /// Periodic re-fetch while connected, so an overnight-connected session (or one left open after a nap)
     /// picks up freshly-banked sleep data without needing a reconnect. Mirrors BLEManager's ~15 min
     /// periodic WHOOP history-offload floor.
@@ -308,6 +470,10 @@ public final class OuraLiveSource: NSObject, ObservableObject {
         resumeCursorAtFetchStart = historyCursor
         drainStartedAt = Date()
         drain.reset()
+        lastRequestCursor = historyCursor
+        pendingDrainAction = nil
+        stopBatchQuietTimer()
+        beginHistoryPersistenceBarrier()
         log("Oura: fetching history from cursor \(historyCursor) (\(describeCursor(historyCursor))) [cursor-fix]")
         advance(.startHistoryFetch(cursor: historyCursor))
     }
@@ -346,12 +512,149 @@ public final class OuraLiveSource: NSObject, ObservableObject {
                 : "bytes_left stalled"
             log("Oura: history drain force-stopped - \(reason) at bytes_left \(summary.bytesLeft) (guard)")
         }
-        if !continueDrain {
-            commitResumeCursor(drainCompleted: !summary.moreData)
-            logActivityEstimateSummary()
+        pendingDrainAction = continueDrain
+            ? .continueBatch
+            : .finish(completed: !summary.moreData)
+        restartBatchQuietTimer()
+    }
+
+    private func finishHistoryDrain(completed: Bool) {
+        pendingDrainAction = nil
+        stopBatchQuietTimer()
+        flushPendingHypnogramBurst()
+        // The final batch is frequently smaller than the normal buffer threshold. Force it to disk, then
+        // wait for every history write acknowledgement before committing the cursor. Advancing first can
+        // permanently skip a failed SQLite insert on the next resume.
+        flush()
+        if let resolution = historyPersistence.requestFinish(drainCompleted: completed) {
+            finalizeHistoryDrain(resolution)
+        } else {
+            startHistoryPersistenceTimerIfNeeded()
         }
-        // The continuation cursor is the resume point; the ring streams the remainder (maxEvents=0 ack).
-        advance(.historyCursorAdvanced(cursor: historyCursor, moreData: continueDrain))
+    }
+
+    /// Start a new per-drain persistence generation. Store tasks from an older connection may still finish,
+    /// but their generation can no longer mutate this drain or its durable cursor.
+    private func beginHistoryPersistenceBarrier() {
+        stopHistoryPersistenceTimer()
+        historyPersistence.begin()
+    }
+
+    /// Close the current barrier without treating cancellation as success. In-flight SQLite tasks are left
+    /// alone (they may already have committed); their late acknowledgements are simply ignored.
+    private func invalidateHistoryPersistenceBarrier() {
+        stopHistoryPersistenceTimer()
+        historyPersistence.invalidate()
+    }
+
+    private func registerHistoryWrite(
+        _ task: Task<Bool, Never>,
+        ringTimestamps: [UInt32],
+        generation: UInt64
+    ) {
+        guard !ringTimestamps.isEmpty,
+              historyPersistence.register(generation: generation) else { return }
+        Task { @MainActor [weak self] in
+            let succeeded = await task.value
+            self?.historyWriteCompleted(
+                succeeded: succeeded,
+                ringTimestamps: ringTimestamps,
+                generation: generation
+            )
+        }
+        startHistoryPersistenceTimerIfNeeded()
+    }
+
+    private func historyWriteCompleted(
+        succeeded: Bool,
+        ringTimestamps: [UInt32],
+        generation: UInt64
+    ) {
+        let result = historyPersistence.completeWrite(
+            generation: generation,
+            succeeded: succeeded
+        )
+        guard result.accepted else { return }
+        if succeeded {
+            for ringTimestamp in ringTimestamps {
+                noteStoredHistoryRingTime(ringTimestamp)
+            }
+        }
+        if let resolution = result.resolution {
+            finalizeHistoryDrain(resolution)
+        }
+    }
+
+    private func finalizeHistoryDrain(_ resolution: OuraHistoryPersistenceGate.Resolution) {
+        stopHistoryPersistenceTimer()
+        if !resolution.allWritesSucceeded {
+            // Do not advance even to a later successful row: history can arrive out of order, so doing so
+            // could place the failed record permanently behind the next resume cursor.
+            log("Oura: history persistence failed - keeping resume cursor \(historyCursor) for a safe retry")
+        } else {
+            commitResumeCursor(drainCompleted: resolution.drainCompleted)
+        }
+        logActivityEstimateSummary()
+        advance(.historyCursorAdvanced(cursor: historyCursor, moreData: false))
+    }
+
+    private func startHistoryPersistenceTimerIfNeeded() {
+        guard historyPersistence.shouldStartTimeout,
+              historyPersistenceTimer == nil else { return }
+        let generation = historyPersistence.generation
+        let timer = Timer.scheduledTimer(withTimeInterval: historyPersistenceTimeout, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.historyPersistenceTimedOut(generation: generation) }
+        }
+        historyPersistenceTimer = timer
+    }
+
+    private func stopHistoryPersistenceTimer() {
+        historyPersistenceTimer?.invalidate()
+        historyPersistenceTimer = nil
+    }
+
+    private func historyPersistenceTimedOut(generation: UInt64) {
+        let outstanding = historyPersistence.pendingWriteCount
+        guard historyPersistence.timeOut(generation: generation) else { return }
+        // Invalidate before returning the driver to streaming. A task that commits after this timeout is
+        // safe/idempotent, but its late acknowledgement must never move the cursor.
+        stopHistoryPersistenceTimer()
+        log("Oura: history persistence timed out with \(outstanding) write(s) pending - keeping resume cursor \(historyCursor)")
+        logActivityEstimateSummary()
+        advance(.historyCursorAdvanced(cursor: historyCursor, moreData: false))
+    }
+
+    private func continueHistoryDrainAfterQuiet() {
+        stopBatchQuietTimer()
+        guard let action = pendingDrainAction else { return }
+        pendingDrainAction = nil
+        guard let driver, driver.phase == .fetchingHistory else { return }
+        switch action {
+        case .finish(let completed):
+            finishHistoryDrain(completed: completed)
+        case .continueBatch:
+            guard let next = drain.continuationCursor(lastRequestCursor: lastRequestCursor) else {
+                log("Oura: history batch made no cursor progress - stopping drain")
+                finishHistoryDrain(completed: false)
+                return
+            }
+            lastRequestCursor = next
+            log("Oura: history batch quiet - continuing from the next record")
+            advance(.historyCursorAdvanced(cursor: next, moreData: true))
+        }
+    }
+
+    private func restartBatchQuietTimer() {
+        stopBatchQuietTimer()
+        let timer = Timer.scheduledTimer(withTimeInterval: batchQuietInterval, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.continueHistoryDrainAfterQuiet() }
+        }
+        batchQuietTimer = timer
+    }
+
+    private func stopBatchQuietTimer() {
+        batchQuietTimer?.invalidate()
+        batchQuietTimer = nil
     }
 
     /// Commit the durable resume cursor at drain end. Only a cursor that (a) moved forward, (b) is below
@@ -375,6 +678,154 @@ public final class OuraLiveSource: NSObject, ObservableObject {
         } else {
             log("Oura: history \(how) (resume cursor unchanged \(historyCursor) [\(describeCursor(historyCursor))])")
         }
+    }
+
+    /// Pick the 0x49 sleep window nearest a phase burst's final envelope time. A drain may contain an
+    /// overnight and a nap, so "most recent" is not a safe pairing rule.
+    nonisolated static func closestSleepWindow049(
+        in windows: [(ringTimestamp: UInt32, startOffMin: Int, endOffMin: Int)],
+        toRingTimestamp ringTimestamp: UInt32,
+        within tolerance: UInt32
+    ) -> (ringTimestamp: UInt32, startOffMin: Int, endOffMin: Int)? {
+        var closest: (ringTimestamp: UInt32, startOffMin: Int, endOffMin: Int)?
+        var closestGap = UInt32.max
+        for window in windows {
+            let gap = window.ringTimestamp >= ringTimestamp
+                ? window.ringTimestamp - ringTimestamp
+                : ringTimestamp - window.ringTimestamp
+            if gap <= tolerance, gap < closestGap {
+                closestGap = gap
+                closest = window
+            }
+        }
+        return closest
+    }
+
+    /// Reconstruct and persist one phase burst. Every written code gets its own 30-second timestamp,
+    /// preventing `event(deviceId, ts, kind)` collisions; erased 0xFF pages remain gaps. The same sequence
+    /// is also upserted as a stage-rich session so the Sleep UI consumes the ring-provided hypnogram.
+    private func persistHypnogramBurst(
+        _ burst: OuraHypnogramBurst,
+        historyGeneration: UInt64?
+    ) {
+        guard let driver, burst.totalCodes > 0 else { return }
+        guard let writeEnd = driver.unixSeconds(forRingTimestamp: burst.lastRingTimestamp) else {
+            pendingUnanchoredBursts.append(PendingUnanchoredBurst(
+                burst: burst,
+                historyGeneration: historyGeneration
+            ))
+            log("Oura: hypnogram burst held until the time anchor arrives")
+            return
+        }
+
+        var end = writeEnd
+        var sleepStart: Int?
+        if let window = Self.closestSleepWindow049(
+            in: recentSleepWindows049,
+            toRingTimestamp: burst.lastRingTimestamp,
+            within: 6_000
+        ), let eventUtc = driver.unixSeconds(forRingTimestamp: window.ringTimestamp) {
+            let candidateEnd = eventUtc - window.endOffMin * 60
+            if candidateEnd <= writeEnd, writeEnd - candidateEnd < 6 * 3_600 {
+                end = candidateEnd
+            }
+            let candidateStart = eventUtc - window.startOffMin * 60
+            if candidateStart < end, end - candidateStart < 16 * 3_600 {
+                sleepStart = candidateStart
+            }
+        }
+
+        if burst.hasNonMonotonicRingTimes {
+            log("Oura: hypnogram burst has non-monotonic envelope times; preserving event-log arrival order")
+        }
+
+        let laid = burst.codesWithTimes(
+            endUnixSeconds: end,
+            sleepStartUnixSeconds: sleepStart
+        )
+        guard !laid.isEmpty else {
+            log("Oura: hypnogram burst entirely unwritten (0xFF); no awake stages or blank session persisted")
+            return
+        }
+
+        let historyRingTimestamps = burst.records.map(\.ringTimestamp)
+        let acknowledgedRingTimestamps = historyGeneration == nil ? [] : historyRingTimestamps
+        for code in laid {
+            // Every phase-row insert is part of the same durability obligation. Repeating the receipt is
+            // intentional: one failed row blocks the whole drain, while successful duplicate acknowledgements
+            // are harmless because the history high-water mark is idempotent.
+            enqueue(
+                [.sleepPhase(code.phase)],
+                ts: code.ts,
+                historyRingTimestamps: acknowledgedRingTimestamps,
+                historyGeneration: historyGeneration
+            )
+        }
+
+        if let session = OuraSleepSessionMapping.session(
+            fromCodes: laid.map { (ts: $0.ts, stage: $0.phase.stage) }
+        ) {
+            let task = persistSleepSession(session)
+            if let historyGeneration {
+                registerHistoryWrite(
+                    task,
+                    ringTimestamps: historyRingTimestamps,
+                    generation: historyGeneration
+                )
+            }
+        }
+        let preservedGaps = laid.count < burst.totalCodes
+        log(preservedGaps
+            ? "Oura: hypnogram reconstructed with erased/pre-onset gaps preserved"
+            : "Oura: hypnogram reconstructed")
+    }
+
+    /// Close the currently assembled phase burst with the receipt captured when its first record arrived.
+    /// Clearing both sides together keeps assembler contents and generation ownership in lockstep.
+    private func flushPendingHypnogramBurst() {
+        let receipt = hypnogramReceiptTracker.takeForFlush()
+        guard let burst = hypnogramAssembler.flush() else { return }
+        persistHypnogramBurst(burst, historyGeneration: receipt?.historyGeneration)
+    }
+
+    /// Feed one phase record without ever allowing a partial burst to cross a history-generation boundary.
+    private func ingestHypnogramRecord(
+        ringTimestamp: UInt32,
+        phases: [OuraSleepPhase],
+        historyGeneration: UInt64?
+    ) {
+        if let priorReceipt = hypnogramReceiptTracker.rotate(to: historyGeneration),
+           let priorBurst = hypnogramAssembler.flush() {
+            persistHypnogramBurst(
+                priorBurst,
+                historyGeneration: priorReceipt.historyGeneration
+            )
+        }
+        if let closed = hypnogramAssembler.feed(
+            ringTimestamp: ringTimestamp,
+            phases: phases
+        ) {
+            // A timestamp gap closes the preceding burst and starts a new one from this same record. Both
+            // belong to the same already-captured receipt because generation changes were flushed above.
+            persistHypnogramBurst(closed, historyGeneration: historyGeneration)
+        }
+    }
+
+    private func drainPendingHypnogramBursts() {
+        guard !pendingUnanchoredBursts.isEmpty else { return }
+        let pending = pendingUnanchoredBursts
+        pendingUnanchoredBursts.removeAll(keepingCapacity: true)
+        for item in pending {
+            persistHypnogramBurst(item.burst, historyGeneration: item.historyGeneration)
+        }
+    }
+
+    /// Never fabricate a night's axis at teardown. Because no burst cursor was advanced, the ring can
+    /// serve these records again after a future connection obtains a valid anchor.
+    private func dropUnanchoredHypnogramBursts() {
+        guard !pendingUnanchoredBursts.isEmpty else { return }
+        log("Oura: dropping unanchored hypnogram burst; cursor was not advanced")
+        pendingUnanchoredBursts.removeAll(keepingCapacity: true)
     }
 
     /// Record a STORED history sample's ring-time toward the resume cursor (open_oura `nextEventToSync`).
@@ -414,7 +865,20 @@ public final class OuraLiveSource: NSObject, ObservableObject {
     /// IBI, battery) are stamped at wall-clock arrival time; history-fetched events (temp, SpO2, HRV,
     /// sleep-phase) are stamped with their REAL ring-time-anchored UTC (s5.5) when an anchor is available,
     /// so last night's data is never mis-recorded as happening right now.
-    private var buffer: [(events: [OuraEvent], ts: Int)] = []
+    private struct HistoryWriteReceipt {
+        let generation: UInt64
+        /// One insert can contain several beats collapsed onto the same unix second. Preserve every
+        /// represented ring-time so reboot detection and the durable high-water mark remain exact.
+        let ringTimestamps: [UInt32]
+    }
+
+    private struct BufferedEntry {
+        let events: [OuraEvent]
+        let ts: Int
+        let historyReceipt: HistoryWriteReceipt?
+    }
+
+    private var buffer: [BufferedEntry] = []
     private var lastFlush: Date = .init()
     private let flushCount = 30
     private let flushInterval: TimeInterval = 30
@@ -434,6 +898,7 @@ public final class OuraLiveSource: NSObject, ObservableObject {
     ///   - ringGen: the ring generation (selects MTU clamp + command set).
     ///   - authKey: supplies the 16-byte install key from the Keychain, or nil to drive `needsPairing`.
     ///   - persist: wired by the app to `store.insert(_, deviceId:)`. Called on the main actor.
+    ///   - persistSleepSession: wired to `store.upsertSleepSessions` for the ring-provided hypnogram night.
     ///   - log: connect-lifecycle diagnostics sink, wired at the composition root to the same strap log
     ///     `BLEManager` writes to (issue #421). Every line is prefixed "Oura: ". Defaults to a no-op.
     ///   - onBattery: fired with the ring's battery percent (0-100). Default no-op.
@@ -447,7 +912,8 @@ public final class OuraLiveSource: NSObject, ObservableObject {
                 deviceId: String,
                 ringGen: OuraRingGen,
                 authKey: @escaping () -> Data?,
-                persist: @escaping (Streams) -> Void = { _ in },
+                persist: @escaping (Streams) -> Task<Bool, Never> = { _ in Task { true } },
+                persistSleepSession: @escaping (CachedSleepSession) -> Task<Bool, Never> = { _ in Task { true } },
                 log: @escaping (String) -> Void = { _ in },
                 onBattery: @escaping (Int) -> Void = { _ in },
                 feedsLive: Bool = true,
@@ -457,6 +923,7 @@ public final class OuraLiveSource: NSObject, ObservableObject {
         self.ringGen = ringGen
         self.authKey = authKey
         self.persist = persist
+        self.persistSleepSession = persistSleepSession
         self.log = log
         self.onBattery = onBattery
         self.feedsLive = feedsLive
@@ -533,12 +1000,19 @@ public final class OuraLiveSource: NSObject, ObservableObject {
         pendingConnectID = nil
         stopReengageTimer()
         stopHistoryFetchTimer()
+        stopBatchQuietTimer()
+        pendingDrainAction = nil
         if let p = peripheral { central.cancelPeripheralConnection(p) }
         peripheral = nil
         writeCharacteristic = nil
-        // Drain BEFORE driver.stop() clears its anchor, so a pending event still gets a real anchored
-        // time if one exists rather than always falling back to wall-clock at teardown.
+        // Close the phase burst and drain parked samples BEFORE driver.stop() clears its anchor.
+        flushPendingHypnogramBurst()
         drainPendingAnchorEvents()
+        dropUnanchoredHypnogramBursts()
+        // Dispatch best-effort writes while every history entry still carries its original generation,
+        // then invalidate the barrier before clearing the drain. Late acknowledgements cannot move a cursor.
+        flush()
+        invalidateHistoryPersistenceBarrier()
         driver?.stop()
         driver = nil
         reassembler.reset()
@@ -550,6 +1024,9 @@ public final class OuraLiveSource: NSObject, ObservableObject {
         loggedAnchor = false
         loggedTierBKinds.removeAll()
         loggedFeatureStatuses.removeAll()
+        recentSleepWindows049.removeAll()
+        hypnogramAssembler.reset()
+        hypnogramReceiptTracker.reset()
         activityMETByDay.removeAll()
         activityCadenceObs.removeAll()
         lastActivityUtc = nil
@@ -557,12 +1034,12 @@ public final class OuraLiveSource: NSObject, ObservableObject {
         drain.reset()
         resumeCursorAtFetchStart = 0
         drainStartedAt = nil
+        lastRequestCursor = 0
         reachedStreaming = false
         pendingInstallKey = nil
         adoptPhase = .idle
         batteryPct = nil
         needsPairing = nil
-        flush()                       // persist anything still buffered
         if feedsLive { live.connected = false; live.streamingLiveHR = false }
     }
 
@@ -683,10 +1160,26 @@ public final class OuraLiveSource: NSObject, ObservableObject {
 
     // MARK: - Buffer / persistence
 
-    private func enqueue(_ events: [OuraEvent], ts: Int) {
+    private func enqueue(
+        _ events: [OuraEvent],
+        ts: Int,
+        historyRingTimestamps: [UInt32] = [],
+        historyGeneration: UInt64? = nil
+    ) {
         guard !events.isEmpty else { return }
-        buffer.append((events: events, ts: ts))
-        if buffer.count >= flushCount || Date().timeIntervalSince(lastFlush) >= flushInterval {
+        let receipt: HistoryWriteReceipt?
+        if historyRingTimestamps.isEmpty {
+            receipt = nil
+        } else {
+            receipt = HistoryWriteReceipt(
+                generation: historyGeneration ?? historyPersistence.generation,
+                ringTimestamps: historyRingTimestamps
+            )
+        }
+        buffer.append(BufferedEntry(events: events, ts: ts, historyReceipt: receipt))
+        if buffer.count >= flushCount
+            || Date().timeIntervalSince(lastFlush) >= flushInterval
+            || (receipt != nil && historyPersistence.requestedFinish != nil) {
             flush()
         }
     }
@@ -697,7 +1190,16 @@ public final class OuraLiveSource: NSObject, ObservableObject {
             // Pure, unit-tested mapping (events -> Streams) keyed by each entry's own ts (wall-clock for
             // live pushes, ring-time-anchored for history-fetched records). A signal that could not be
             // decoded never reaches here, so a missing stream stays empty, never faked.
-            persist(OuraStreamMapping.streams(from: entry.events, at: entry.ts))
+            let streams = OuraStreamMapping.streams(from: entry.events, at: entry.ts)
+            guard !streams.isEmpty else { continue }
+            let task = persist(streams)
+            if let receipt = entry.historyReceipt {
+                registerHistoryWrite(
+                    task,
+                    ringTimestamps: receipt.ringTimestamps,
+                    generation: receipt.generation
+                )
+            }
         }
         buffer.removeAll()
         lastFlush = Date()
@@ -710,22 +1212,40 @@ public final class OuraLiveSource: NSObject, ObservableObject {
     private func drainPendingAnchorEvents() {
         guard !pendingAnchorEvents.isEmpty, let driver else { return }
         let now = Int(Date().timeIntervalSince1970)
-        var stamped: [(event: OuraEvent, ts: Int)] = []
-        for pending in pendingAnchorEvents {
-            if let ts = driver.unixSeconds(forRingTimestamp: pending.ringTimestamp) {
-                stamped.append((event: pending.event, ts: ts))
-                // A parked IBI can be a LIVE beat that arrived before the anchor (see .ibi in ingest());
-                // it must never advance the resume cursor either, or a live push could skip un-drained
-                // backlog on a force-stopped drain. Only the history-only siblings drive the cursor.
-                if case .ibi = pending.event {} else {
-                    noteStoredHistoryRingTime(pending.ringTimestamp)   // parked history sample placed → advance resume cursor
-                }
-            } else {
-                stamped.append((event: pending.event, ts: now))
-            }
+
+        struct GroupKey: Hashable {
+            let ts: Int
+            let historyGeneration: UInt64?
         }
-        for batch in OuraStreamMapping.batched(stamped) {
-            enqueue(batch.events, ts: batch.ts)
+        var order: [GroupKey] = []
+        var grouped: [GroupKey: [(event: OuraEvent, ringTimestamp: UInt32?)]] = [:]
+        for pending in pendingAnchorEvents {
+            let resolvedTs = driver.unixSeconds(forRingTimestamp: pending.ringTimestamp)
+            let key: GroupKey
+            let durableRingTimestamp: UInt32?
+            if let ts = resolvedTs {
+                key = GroupKey(ts: ts, historyGeneration: pending.historyGeneration)
+                durableRingTimestamp = pending.historyGeneration == nil ? nil : pending.ringTimestamp
+            } else {
+                // Honest wall-clock fallback at teardown: persist the sample, but never acknowledge it as
+                // a durable history checkpoint because its ring time was not anchored.
+                key = GroupKey(ts: now, historyGeneration: nil)
+                durableRingTimestamp = nil
+            }
+            if grouped[key] == nil {
+                order.append(key)
+                grouped[key] = []
+            }
+            grouped[key]?.append((event: pending.event, ringTimestamp: durableRingTimestamp))
+        }
+        for key in order {
+            let values = grouped[key] ?? []
+            enqueue(
+                values.map(\.event),
+                ts: key.ts,
+                historyRingTimestamps: values.compactMap(\.ringTimestamp),
+                historyGeneration: key.historyGeneration
+            )
         }
         pendingAnchorEvents.removeAll()
     }
@@ -738,12 +1258,26 @@ public final class OuraLiveSource: NSObject, ObservableObject {
     /// HRV, sleep-phase) are stamped with their REAL ring-time-anchored UTC (s5.5) so last night's banked
     /// data is never mis-recorded as happening right now; when no anchor has arrived yet this session, we
     /// park the event until one does (`pendingAnchorEvents`), rather than immediately guessing wall-clock.
-    /// (IBI is special: it arrives both live and banked, so it anchors like history but — unlike the
-    /// history-only streams — never advances the resume cursor; see the `.ibi` case.) Out-of-range HR/temp
+    /// IBI is special because it arrives both live and banked: `historyEnvelope` lets only an anchored,
+    /// stored GetEvents beat advance the durable cursor; a secure live push never can. Out-of-range HR/temp
     /// is dropped, never shown.
-    private func ingest(_ events: [OuraEvent]) {
+    private func ingest(_ events: [OuraEvent], historyEnvelope: Bool = false) {
         guard !events.isEmpty, let driver else { return }
         let now = Int(Date().timeIntervalSince1970)
+        // A decoded 0x4B/0x4E/0x5A record arrives as one events array. Feed all of its phase codes to the
+        // burst assembler as one unit; individual envelope timestamps are analysis-write times and must
+        // never be used directly as stage timestamps.
+        let phases = events.compactMap { event -> OuraSleepPhase? in
+            if case .sleepPhase(let phase) = event { return phase }
+            return nil
+        }
+        if let first = phases.first {
+            ingestHypnogramRecord(
+                ringTimestamp: first.ringTimestamp,
+                phases: phases,
+                historyGeneration: historyEnvelope ? historyPersistence.generation : nil
+            )
+        }
         // A record's beats must reach StreamStore in one batch; otherwise its batch-local emission-order
         // counter restarts at zero for every beat and RMSSD is computed from value-sorted rows.
         let anchoredBeats: [(event: OuraEvent, ts: Int)] = events.compactMap { event in
@@ -752,7 +1286,17 @@ public final class OuraLiveSource: NSObject, ObservableObject {
             return (event: event, ts: ts)
         }
         for batch in OuraStreamMapping.batched(anchoredBeats) {
-            enqueue(batch.events, ts: batch.ts)
+            let ringTimestamps: [UInt32] = historyEnvelope
+                ? batch.events.compactMap { event in
+                    if case .ibi(let ibi) = event { return ibi.ringTimestamp }
+                    return nil
+                }
+                : []
+            enqueue(
+                batch.events,
+                ts: batch.ts,
+                historyRingTimestamps: ringTimestamps
+            )
         }
         for e in events {
             switch e {
@@ -790,7 +1334,11 @@ public final class OuraLiveSource: NSObject, ObservableObject {
                 // Anchored beats were already enqueued above as one record-sized batch. Only unanchored
                 // beats remain for this arm to park until the time anchor arrives.
                 if driver.unixSeconds(forRingTimestamp: ibi.ringTimestamp) == nil {
-                    pendingAnchorEvents.append((e, ibi.ringTimestamp))
+                    pendingAnchorEvents.append(PendingAnchorEvent(
+                        event: e,
+                        ringTimestamp: ibi.ringTimestamp,
+                        historyGeneration: historyEnvelope ? historyPersistence.generation : nil
+                    ))
                 }
 
             case .battery(let bat):
@@ -806,10 +1354,17 @@ public final class OuraLiveSource: NSObject, ObservableObject {
                     log("Oura: first skin temp decoded (last night) - \(String(format: "%.2f", t.celsius))C")
                 }
                 if let ts = driver.unixSeconds(forRingTimestamp: t.ringTimestamp) {
-                    enqueue([e], ts: ts)
-                    noteStoredHistoryRingTime(t.ringTimestamp)
+                    enqueue(
+                        [e],
+                        ts: ts,
+                        historyRingTimestamps: historyEnvelope ? [t.ringTimestamp] : []
+                    )
                 } else {
-                    pendingAnchorEvents.append((e, t.ringTimestamp))
+                    pendingAnchorEvents.append(PendingAnchorEvent(
+                        event: e,
+                        ringTimestamp: t.ringTimestamp,
+                        historyGeneration: historyEnvelope ? historyPersistence.generation : nil
+                    ))
                 }
 
             case .spo2(let s):
@@ -818,27 +1373,37 @@ public final class OuraLiveSource: NSObject, ObservableObject {
                     log("Oura: first SpO2 decoded (last night) - value \(s.value) (\(s.unit))")
                 }
                 if let ts = driver.unixSeconds(forRingTimestamp: s.ringTimestamp) {
-                    enqueue([e], ts: ts)
-                    noteStoredHistoryRingTime(s.ringTimestamp)
+                    enqueue(
+                        [e],
+                        ts: ts,
+                        historyRingTimestamps: historyEnvelope ? [s.ringTimestamp] : []
+                    )
                 } else {
-                    pendingAnchorEvents.append((e, s.ringTimestamp))
+                    pendingAnchorEvents.append(PendingAnchorEvent(
+                        event: e,
+                        ringTimestamp: s.ringTimestamp,
+                        historyGeneration: historyEnvelope ? historyPersistence.generation : nil
+                    ))
                 }
 
             case .hrv(let v):
                 if let ts = driver.unixSeconds(forRingTimestamp: v.ringTimestamp) {
-                    enqueue([e], ts: ts)
-                    noteStoredHistoryRingTime(v.ringTimestamp)
+                    enqueue(
+                        [e],
+                        ts: ts,
+                        historyRingTimestamps: historyEnvelope ? [v.ringTimestamp] : []
+                    )
                 } else {
-                    pendingAnchorEvents.append((e, v.ringTimestamp))
+                    pendingAnchorEvents.append(PendingAnchorEvent(
+                        event: e,
+                        ringTimestamp: v.ringTimestamp,
+                        historyGeneration: historyEnvelope ? historyPersistence.generation : nil
+                    ))
                 }
 
-            case .sleepPhase(let v):
-                if let ts = driver.unixSeconds(forRingTimestamp: v.ringTimestamp) {
-                    enqueue([e], ts: ts)
-                    noteStoredHistoryRingTime(v.ringTimestamp)
-                } else {
-                    pendingAnchorEvents.append((e, v.ringTimestamp))
-                }
+            case .sleepPhase:
+                // Persisted at the record/burst level above after reconstructing the real 30-second axis.
+                break
 
             case .timeSync(let ts):
                 // #91: a 0x42 whose epoch is outside the 2020–2035 plausibility window is silently ignored,
@@ -857,16 +1422,36 @@ public final class OuraLiveSource: NSObject, ObservableObject {
                 // The 0x42 time-sync can arrive ANYWHERE in a history-fetch stream, not necessarily first.
                 // Anything parked while unanchored gets its real time retroactively the moment an anchor lands.
                 drainPendingAnchorEvents()
+                drainPendingHypnogramBursts()
 
             case .rtcBeacon(let r):
                 // #91: the 0x85 beacon is the SECONDARY anchor (fills the gap only until a 0x42 arrives). A
                 // beacon ignored because a primary anchor already exists is NORMAL and not logged; only an
                 // IMPLAUSIBLE-epoch beacon is a real failure (it can never anchor), so log just that.
-                if !OuraDriver.isPlausibleAnchorEpoch(Int64(r.unixSeconds)) {
+                if OuraDriver.isPlausibleAnchorEpoch(Int64(r.unixSeconds)) {
+                    // OuraDriver has accepted the secondary anchor before emitting this event. Drain both
+                    // parked scalar samples and whole hypnogram bursts just as the primary 0x42 path does;
+                    // otherwise a session that receives only 0x85 can lose its ring-provided sleep stages.
+                    drainPendingAnchorEvents()
+                    drainPendingHypnogramBursts()
+                } else {
                     log("Oura: 0x85 RTC beacon REJECTED - implausible epoch \(r.unixSeconds)s (outside the 2020–2035 anchor window) (#91)")
                 }
 
             case .tierB(let summary):
+                // The validated 0x49 fields are offsets in minutes before the finalization event. Retain a
+                // bounded set so the nearest phase burst can anchor to the true sleep window, not the later
+                // analysis-write time. Still Tier-B: this raw summary is never itself persisted or scored.
+                if summary.tag == 0x49, summary.rawPayload.count >= 4 {
+                    let startOff = Int(summary.rawPayload[0]) | (Int(summary.rawPayload[1]) << 8)
+                    let endOff = Int(summary.rawPayload[2]) | (Int(summary.rawPayload[3]) << 8)
+                    recentSleepWindows049.append((summary.ringTimestamp, startOff, endOff))
+                    if recentSleepWindows049.count > Self.recentSleepWindows049Cap {
+                        recentSleepWindows049.removeFirst(
+                            recentSleepWindows049.count - Self.recentSleepWindows049Cap
+                        )
+                    }
+                }
                 // INVESTIGATION ONLY (real_steps / activity-summary / sleep-summary / smoothed-SpO2,
                 // OURA_PROTOCOL.md s7.3 Tier B; PR #960). Logged ONCE PER KIND with the raw bytes so we
                 // can see whether the ring sends these tags at all and collect capture material - e.g.
@@ -1052,6 +1637,10 @@ public final class OuraLiveSource: NSObject, ObservableObject {
         log("Oura: \(msg)")
         stopReengageTimer()
         stopHistoryFetchTimer()
+        stopBatchQuietTimer()
+        pendingDrainAction = nil
+        flush()
+        invalidateHistoryPersistenceBarrier()
         if feedsLive { live.connected = false; live.streamingLiveHR = false }
     }
 
@@ -1113,6 +1702,10 @@ extension OuraLiveSource: @preconcurrency CBCentralManagerDelegate {
         log("Oura: connected - discovering services")
         failedReconnectAttempts = 0   // a real connection clears the reconnect backoff (#912)
         peripheral.delegate = self
+        // A reconnect starts a wholly new persistence generation. Dispatch any straggling buffered data,
+        // then make every old completion incapable of touching the new drain.
+        flush()
+        invalidateHistoryPersistenceBarrier()
         // Fresh driver per connection so a new session re-runs auth (the app key is session-scoped). The
         // driver's `allowKeyInstall` is gated on this connection's adopt consent ONLY: with no consent the
         // dangerous `0x24` installKey can never be sequenced, so a read-only / Advanced-key connect stays
@@ -1135,6 +1728,10 @@ extension OuraLiveSource: @preconcurrency CBCentralManagerDelegate {
         loggedTierBKinds.removeAll()
         loggedFeatureStatuses.removeAll()
         pendingAnchorEvents.removeAll()   // a fresh session must never replay a stale-anchor guess
+        hypnogramAssembler.reset()
+        hypnogramReceiptTracker.reset()
+        pendingUnanchoredBursts.removeAll()
+        recentSleepWindows049.removeAll()
         pendingInstallKey = nil
         adoptPhase = .idle
         reassembler.reset()
@@ -1143,6 +1740,7 @@ extension OuraLiveSource: @preconcurrency CBCentralManagerDelegate {
         drain.reset()
         resumeCursorAtFetchStart = 0
         drainStartedAt = nil
+        lastRequestCursor = 0
         // Resume the GetEvents cursor from where the LAST connection to this ring left off (s5.1/5.3), so
         // a routine reconnect doesn't re-fetch the ring's entire banked history every time. A persisted
         // value above the plausibility ceiling is garbage banked by a pre-fix build (a bytes_left count or
@@ -1159,6 +1757,8 @@ extension OuraLiveSource: @preconcurrency CBCentralManagerDelegate {
     public func centralManager(_ central: CBCentralManager,
                                didFailToConnect peripheral: CBPeripheral, error: Error?) {
         log("Oura: WARNING failed to connect - \(error?.localizedDescription ?? "unknown error")")
+        flush()
+        invalidateHistoryPersistenceBarrier()
         if feedsLive { live.connected = false; live.streamingLiveHR = false }
         // The ring wiped its bond (re-paired in the Oura app, or a firmware reset). CoreBluetooth surfaces
         // this as a stable CBError, and re-issuing connect just loops the same stale-pairing failure and
@@ -1182,8 +1782,14 @@ extension OuraLiveSource: @preconcurrency CBCentralManagerDelegate {
         }
         stopReengageTimer()
         stopHistoryFetchTimer()
-        // Drain BEFORE driver.stop() clears its anchor (same reasoning as stop()).
+        stopBatchQuietTimer()
+        pendingDrainAction = nil
+        // Close the phase burst and drain parked samples before the driver's time anchor is cleared.
+        flushPendingHypnogramBurst()
         drainPendingAnchorEvents()
+        dropUnanchoredHypnogramBursts()
+        flush()
+        invalidateHistoryPersistenceBarrier()
         driver?.stop()
         driver = nil
         reassembler.reset()
@@ -1196,6 +1802,9 @@ extension OuraLiveSource: @preconcurrency CBCentralManagerDelegate {
         loggedAnchor = false
         loggedTierBKinds.removeAll()
         loggedFeatureStatuses.removeAll()
+        recentSleepWindows049.removeAll()
+        hypnogramAssembler.reset()
+        hypnogramReceiptTracker.reset()
         activityMETByDay.removeAll()
         activityCadenceObs.removeAll()
         lastActivityUtc = nil
@@ -1206,7 +1815,6 @@ extension OuraLiveSource: @preconcurrency CBCentralManagerDelegate {
         // the completed `.streaming` outcome intact so the wizard's success transition isn't undone.
         if adoptPhase == .installingKey { adoptPhase = .failed }
         batteryPct = nil
-        flush()
         if feedsLive { live.connected = false; live.streamingLiveHR = false }
         if self.peripheral?.identifier == peripheral.identifier { self.peripheral = nil }
         // Auto-reconnect on an INVOLUNTARY drop (#912): the paired ring went out of range or the link timed
@@ -1284,55 +1892,63 @@ extension OuraLiveSource: @preconcurrency CBPeripheralDelegate {
         // The notify char carries TWO framings on the same channel (OURA_PROTOCOL.md s2):
         //   - 0x2F secure-session sub-frames (auth nonce/status, enable ACKs, live-HR pushes)
         //   - inner TLV event records (IBI / HRV / SpO2 / temp / sleep-phase / battery)
-        // Split the notification into outer frames; route 0x2F ones through the driver's secure handler,
-        // and feed the remainder to the reassembler as TLV records.
+        // Event tags are >= 0x41. Parse those notifications directly through the one-packet, lenient TLV
+        // path; command/response opcodes are below that range and use outer framing. This prevents a 0x11
+        // summary from being misread as an unknown event and overwriting the driver's last ring timestamp.
         guard let driver else { return }
-        let frames = OuraFraming.parseOuterFrames(bytes)
-        // The `0x25` SetAuthKey-response is an OUTER frame (NOT a 0x2F secure sub-frame): `25 01 <status>`,
-        // status `0x00` = OK (OURA_PROTOCOL.md s3.2). It only ever arrives during an adopt install we
-        // initiated, so handle it ONLY while a key install is pending; otherwise it is ignored (never fed to
-        // the TLV decoder, where its op byte would be misread as a record type). Per OURA_PROTOCOL.md s3.2.
-        if pendingInstallKey != nil,
-           let ackFrame = frames.first(where: { $0.op == Self.setAuthKeyRespOp }) {
-            handleKeyInstallAck(status: ackFrame.body.first ?? 0xFF)
+        if let op = bytes.first, op >= 0x41 {
+            ingestTLVNotification(bytes, driver: driver)
             return
         }
-        // The `0x11` GetEvents summary drives the history-fetch cursor loop (s5.2/5.3) - detected here as a
-        // side-channel PEEK, intentionally NOT stripped from `frames` below: its op (0x11) is well below the
-        // event-tag range (tags are >= 0x41), so it round-trips safely through the TLV decoder as an
-        // "unknown tag" no-op with correct byte accounting (both framings share the same op/len/body wire
-        // shape, so the byte count consumed is identical either way).
-        if let summaryFrame = frames.first(where: { $0.op == OuraFraming.getEventsResponseOp }) {
-            let hex = summaryFrame.body.map { String(format: "%02x", $0) }.joined(separator: " ")
-            log("Oura: GetEvents summary raw body (\(summaryFrame.body.count)B) - \(hex)")
-            if let summary = OuraFraming.parseGetEventsResponse(summaryFrame.body) {
-                handleHistorySummary(summary)
-            }
-        }
-        // The `0x0D` GetBattery response is ALSO an outer frame (never a TLV record, s6.10), detected the
-        // same non-destructive way as the 0x11 summary: its op is below the event-tag range (>= 0x41), so
-        // it round-trips safely through the TLV decoder as an "unknown tag" no-op if left unfiltered. Routed
-        // through the existing `.battery` ingest path (batteryPct/onBattery/log side effects).
-        if let batteryFrame = frames.first(where: { $0.op == OuraFraming.batteryResponseOp }),
-           let battery = OuraDecoders.decodeBattery(batteryFrame.body) {
-            ingest([.battery(battery)])
-        }
-        if frames.contains(where: { $0.op == OuraFraming.secureSessionOp }) {
-            for frame in frames where frame.op == OuraFraming.secureSessionOp {
+
+        let frames = OuraFraming.parseOuterFrames(bytes)
+        for frame in frames {
+            switch frame.op {
+            case Self.setAuthKeyRespOp where pendingInstallKey != nil:
+                // `25 01 <status>` is an outer SetAuthKey acknowledgement, never an event record.
+                handleKeyInstallAck(status: frame.body.first ?? 0xFF)
+
+            case OuraFraming.getEventsResponseOp:
+                // A 0x11 summary is an early byte-progress report. It is consumed here and never allowed
+                // to mutate the event-envelope cursor or driver's last real ring timestamp.
+                if let summary = OuraFraming.parseGetEventsResponse(frame.body) {
+                    handleHistorySummary(summary)
+                }
+
+            case OuraFraming.batteryResponseOp:
+                if let battery = OuraDecoders.decodeBattery(frame.body) {
+                    ingest([.battery(battery)])
+                }
+
+            case OuraFraming.secureSessionOp:
                 guard let secure = OuraFraming.parseSecureFrame(frame) else { continue }
                 handleSecure(driver.handleSecureFrame(secure))
+
+            default:
+                // A secure notification may pack a normal event frame beside the secure frame. Rebuild
+                // that one record exactly and feed it through the same raw-envelope path.
+                if frame.op >= 0x41 {
+                    ingestTLVNotification(
+                        [frame.op, UInt8(frame.body.count)] + frame.body,
+                        driver: driver
+                    )
+                }
             }
-            // Any non-secure outer frames in the same notification are TLV records; fall through to decode.
-            // The 0x25 ack (if any) is consumed above, so it never reaches here.
-            let tlvBytes = frames.filter { $0.op != OuraFraming.secureSessionOp && $0.op != Self.setAuthKeyRespOp }
-                                 .flatMap { [$0.op, UInt8($0.body.count)] + $0.body }
-            if !tlvBytes.isEmpty {
-                ingest(driver.ingest(notification: tlvBytes, reassembler: reassembler))
-            }
-            return
         }
-        // No secure frame in this notification: treat the whole value as TLV record bytes.
-        ingest(driver.ingest(notification: bytes, reassembler: reassembler))
+    }
+
+    /// Observe the RAW record envelope before decoding it. Unknown or malformed payloads still move the
+    /// in-session continuation position, while only successfully stored, anchored samples may move the
+    /// durable resume cursor. A trailing record after an early summary also extends the quiet window.
+    private func ingestTLVNotification(_ bytes: [UInt8], driver: OuraDriver) {
+        for record in reassembler.feed(bytes) {
+            let historyEnvelope = driver.phase == .fetchingHistory
+            if historyEnvelope {
+                drain.noteSeenRingTime(record.ringTimestamp)
+                if pendingDrainAction != nil { restartBatchQuietTimer() }
+            }
+            ingest(driver.ingest(record: record), historyEnvelope: historyEnvelope)
+        }
     }
 
     /// Act on what the driver resolved a 0x2F secure sub-frame to.

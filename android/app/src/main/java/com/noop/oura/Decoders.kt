@@ -435,17 +435,21 @@ object OuraDecoders {
         return String(raw, Charsets.UTF_8)
     }
 
-    // MARK: - Sleep phase, 2-bit codes (0x4E / 0x5A; s6.12)
+    // MARK: - Sleep phase, 2-bit codes (0x4B / 0x4E / 0x5A; s6.12)
 
     /**
-     * Decode the 0x4E/0x5A sleep_phase_details: byte6 = header; phase codes are 2-bit, 4 per byte
-     * (bits [7:6][5:4][3:2][1:0]); codes 0=awake,1=light,2=deep,3=REM. Per OURA_PROTOCOL.md s6.12.
+     * Decode the 0x4B/0x4E/0x5A sleep_phase_details: byte6 = header; phase codes are 2-bit, 4 per byte
+     * (bits [7:6][5:4][3:2][1:0]); validated SleepNet mapping is
+     * 0=deep, 1=light, 2=REM, 3=awake. Per OURA_PROTOCOL.md s6.12.
      * Returns null on a short body. The header byte is skipped; phase bytes follow.
      */
     fun decodeSleepPhase(rec: OuraRecord): List<OuraSleepPhase>? {
         val b = rec.payload
         // body[0] is the header (spec offset 6); phase codes begin at body[1].
         if (b.size < 2) return null
+        // A whole record of 0xFF code bytes is erased flash, not awake sleep. A lone 0xFF can be four
+        // genuine awake epochs, so only an all-0xFF run of at least two code bytes is a gap (#1246).
+        val unwritten = (b.size - 1) >= 2 && (1 until b.size).all { (b[it] and 0xFF) == 0xFF }
         val out = ArrayList<OuraSleepPhase>()
         var index = 0
         for (k in 1 until b.size) {
@@ -456,7 +460,14 @@ object OuraDecoders {
                 val code = (byte shr shift) and 0x03
                 val stage = OuraSleepStage.fromRaw(code)
                 if (stage != null) {
-                    out.add(OuraSleepPhase(ringTimestamp = rec.ringTimestamp, index = index, stage = stage))
+                    out.add(
+                        OuraSleepPhase(
+                            ringTimestamp = rec.ringTimestamp,
+                            index = index,
+                            stage = stage,
+                            unwritten = unwritten,
+                        ),
+                    )
                     index += 1
                 }
                 shift -= 2

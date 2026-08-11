@@ -1347,7 +1347,7 @@ struct TodayView: View {
                 workoutsSection.staggeredAppear(index: 3)
                 heartRateTrendSection.staggeredAppear(index: 4)
                 yourCardsSection.staggeredAppear(index: 5)
-                // Off / Ask / Auto-save automatic-activity surface. Renders only when the
+                // Off / Ask automatic-activity surface (plus a dormant legacy review state). Renders only when the
                 // mode is active and a candidate or pending auto-save review exists.
                 AutoWorkoutCard()
                 // #627: the persistent journal widget (last-7-days strip + tap-through to the journal).

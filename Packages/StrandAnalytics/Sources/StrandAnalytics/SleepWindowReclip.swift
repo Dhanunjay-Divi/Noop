@@ -39,6 +39,21 @@ public enum SleepWindowReclip {
     private static func reclipSegments(_ arr: [[String: Any]], newStart: Int, newEnd: Int) -> String? {
         var out: [[String: Any]] = []
         var maxEnd = newStart
+        // Segment metadata is intentionally open-ended (for example Oura's `source` marker). Preserve
+        // it when clipping and carry an unambiguous session source onto any synthetic wake fill so a
+        // harmless window edit cannot erase provenance used by merge policy and UI attribution.
+        let sources = Set(arr.compactMap { seg -> String? in
+            guard let source = seg["source"] as? String, !source.isEmpty else { return nil }
+            return source
+        })
+        let inheritedSource = sources.count == 1 ? sources.first : nil
+
+        func syntheticWake(start: Int, end: Int) -> [String: Any] {
+            var segment: [String: Any] = ["start": start, "end": end, "stage": "wake"]
+            if let inheritedSource { segment["source"] = inheritedSource }
+            return segment
+        }
+
         for seg in arr {
             guard let start = (seg["start"] as? NSNumber)?.intValue,
                   let end = (seg["end"] as? NSNumber)?.intValue,
@@ -47,17 +62,21 @@ public enum SleepWindowReclip {
             if end <= newStart { continue }                 // wholly before the new bed time → drop
             let clippedStart = max(start, newStart)         // clip the segment spanning the new bed time
             let clippedEnd = min(end, newEnd)               // clip the segment spanning the new wake
-            out.append(["start": clippedStart, "end": clippedEnd, "stage": stage])
+            var clipped = seg
+            clipped["start"] = clippedStart
+            clipped["end"] = clippedEnd
+            clipped["stage"] = stage
+            out.append(clipped)
             maxEnd = max(maxEnd, clippedEnd)
         }
         if newEnd > maxEnd, maxEnd >= newStart {            // window grew → trailing time in bed = awake
-            out.append(["start": maxEnd, "end": newEnd, "stage": "wake"])
+            out.append(syntheticWake(start: maxEnd, end: newEnd))
         }
         // If every segment was trimmed away (the corrected window lands outside every stage), don't
         // return nil — that would let the store's COALESCE keep the OLD stages, which then extend PAST
         // the new wake. Emit a single wake segment covering the (valid, ≥60s) corrected window instead.
         if out.isEmpty, newEnd > newStart {
-            out.append(["start": newStart, "end": newEnd, "stage": "wake"])
+            out.append(syntheticWake(start: newStart, end: newEnd))
         }
         guard !out.isEmpty, let d = try? JSONSerialization.data(withJSONObject: out) else { return nil }
         return String(data: d, encoding: .utf8)

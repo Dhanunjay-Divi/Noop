@@ -12,7 +12,24 @@ class AutoWorkoutSuggestionPolicyTest {
         assertEquals(AutoWorkoutMode.ASK, NoopPrefs.resolveAutoWorkoutMode(null, true))
         assertEquals(AutoWorkoutMode.OFF, NoopPrefs.resolveAutoWorkoutMode(null, false))
         assertEquals(AutoWorkoutMode.OFF, NoopPrefs.resolveAutoWorkoutMode("off", true))
+        assertEquals(AutoWorkoutMode.ASK, NoopPrefs.resolveAutoWorkoutMode("autoSave", true))
         assertEquals(AutoWorkoutMode.ASK, NoopPrefs.resolveAutoWorkoutMode("bad", true))
+    }
+
+    @Test
+    fun startupMigration_canonicalizesRetiredAutoSave_andDisablesLegacyWriteGate() {
+        listOf(
+            Triple(null, null, AutoWorkoutMode.ASK),
+            Triple(null, true, AutoWorkoutMode.ASK),
+            Triple(null, false, AutoWorkoutMode.OFF),
+            Triple("autoSave", true, AutoWorkoutMode.ASK),
+            Triple("ask", true, AutoWorkoutMode.ASK),
+            Triple("off", true, AutoWorkoutMode.OFF),
+        ).forEach { (stored, legacy, expectedMode) ->
+            val canonical = NoopPrefs.canonicalAutoWorkoutPreferences(stored, legacy)
+            assertEquals(expectedMode, canonical.mode)
+            assertEquals(false, canonical.legacyEnabled)
+        }
     }
 
     @Test
