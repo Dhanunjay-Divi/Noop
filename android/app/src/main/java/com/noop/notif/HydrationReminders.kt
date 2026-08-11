@@ -190,7 +190,8 @@ object HydrationReminderNotifier {
         val manager = NotificationManagerCompat.from(context)
         if (!manager.areNotificationsEnabled()) return false
         ensureChannel(context)
-        val (title, body) = HydrationReminderPolicy.notificationCopy()
+        val title = context.getString(R.string.l10n_hydration_reminders_hydration_check_in_f93a58b5)
+        val body = context.getString(R.string.l10n_hydration_reminders_take_a_moment_to_drink_some_6a03f36a)
         val openApp = PendingIntent.getActivity(
             context,
             14,
@@ -213,16 +214,19 @@ object HydrationReminderNotifier {
     private fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-        manager.createNotificationChannel(
-            NotificationChannel(
+        val channel = manager.getNotificationChannel(CHANNEL_ID)
+            ?: NotificationChannel(
                 CHANNEL_ID,
-                "Hydration reminders",
+                context.getString(R.string.l10n_hydration_reminders_hydration_reminders_a4e4defb),
                 NotificationManager.IMPORTANCE_DEFAULT,
-            ).apply {
-                description = "Optional private reminders to pause and hydrate."
-            },
+            )
+        // Re-apply user-visible metadata so it follows a later app-language change. Re-registering an
+        // existing channel preserves the user's importance and delivery choices.
+        channel.name = context.getString(R.string.l10n_hydration_reminders_hydration_reminders_a4e4defb)
+        channel.description = context.getString(
+            R.string.l10n_hydration_reminders_optional_private_reminders_to_pause_and_1f99dac8,
         )
+        manager.createNotificationChannel(channel)
     }
 }
 

@@ -159623,6 +159623,12 @@
             "value": "min"
           }
         },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "min"
+          }
+        },
         "es": {
           "stringUnit": {
             "state": "translated",
@@ -178585,6 +178591,584 @@
         "es": { "stringUnit": { "state": "translated", "value": "Déjalo en blanco para una copia antigua o automática sin cifrar." } },
         "fr": { "stringUnit": { "state": "translated", "value": "Laissez ce champ vide pour une ancienne sauvegarde ou une sauvegarde automatique non chiffrée." } },
         "pt-PT": { "stringUnit": { "state": "translated", "value": "Deixe em branco para uma cópia antiga ou automática não encriptada." } }
+      }
+    },
+    "Allow notifications in Settings to use optional review and water reminders. NOOP still works normally without them.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktiviere Mitteilungen in den Einstellungen, um optionale Erinnerungen zur Auswertung und zum Trinken zu nutzen. NOOP funktioniert auch ohne sie weiterhin normal."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow notifications in Settings to use optional review and water reminders. NOOP still works normally without them."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permite las notificaciones en Ajustes para usar los recordatorios opcionales de revisión y de agua. NOOP sigue funcionando con normalidad sin ellos."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorisez les notifications dans Réglages pour utiliser les rappels facultatifs de bilan et d’hydratation. NOOP continue de fonctionner normalement sans eux."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permite as notificações nas Definições para usar os lembretes opcionais de revisão e de hidratação. O NOOP continua a funcionar normalmente sem eles."
+          }
+        }
+      }
+    },
+    "Wrist alerts are off. Turn on the master switch below before WHOOP can buzz; phone reminders remain independent.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Handgelenk-Hinweise sind ausgeschaltet. Schalte den Hauptschalter unten ein, bevor WHOOP vibrieren kann; Erinnerungen auf dem Telefon bleiben davon unabhängig."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wrist alerts are off. Turn on the master switch below before WHOOP can buzz; phone reminders remain independent."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Las alertas de muñeca están desactivadas. Activa el interruptor principal de abajo antes de que WHOOP pueda vibrar; los recordatorios del teléfono siguen siendo independientes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les alertes au poignet sont désactivées. Activez l’interrupteur principal ci-dessous avant que WHOOP puisse vibrer ; les rappels sur le téléphone restent indépendants."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os alertas de pulso estão desativados. Liga a chave principal abaixo antes de o WHOOP poder vibrar; os lembretes no telemóvel continuam independentes."
+          }
+        }
+      }
+    },
+    "The phone notification may tap a paired Apple Watch according to your iPhone and Watch notification settings. NOOP does not bypass those controls.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Je nach Mitteilungseinstellungen auf deinem iPhone und deiner Watch kann die Mitteilung auf dem Telefon ein haptisches Signal auf einer gekoppelten Apple Watch auslösen. NOOP umgeht diese Einstellungen nicht."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The phone notification may tap a paired Apple Watch according to your iPhone and Watch notification settings. NOOP does not bypass those controls."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La notificación del teléfono puede activar un toque háptico en un Apple Watch enlazado según los ajustes de notificaciones del iPhone y del Watch. NOOP no elude esos controles."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La notification du téléphone peut déclencher un signal haptique sur une Apple Watch jumelée selon les réglages de notification de votre iPhone et de votre Watch. NOOP ne contourne pas ces réglages."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A notificação do telemóvel pode gerar um toque háptico num Apple Watch emparelhado, de acordo com as definições de notificações do iPhone e do Watch. O NOOP não contorna esses controlos."
+          }
+        }
+      }
+    },
+    "Reminder delivery follows your system notification settings. The WHOOP buzz is available only while NOOP is actively connected.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Zustellung von Erinnerungen richtet sich nach den Mitteilungseinstellungen deines Systems. Die WHOOP-Vibration ist nur verfügbar, solange NOOP aktiv verbunden ist."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reminder delivery follows your system notification settings. The WHOOP buzz is available only while NOOP is actively connected."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La entrega de recordatorios sigue los ajustes de notificaciones del sistema. La vibración de WHOOP solo está disponible mientras NOOP mantenga una conexión activa."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La réception des rappels suit les réglages de notification du système. La vibration WHOOP n’est disponible que lorsque NOOP est activement connecté."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A entrega dos lembretes segue as definições de notificações do sistema. A vibração do WHOOP só está disponível enquanto o NOOP estiver ativamente ligado."
+          }
+        }
+      }
+    },
+    "The active start is included and the end is excluded. Choose matching times for an all-day schedule.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Startzeit des aktiven Fensters ist eingeschlossen, die Endzeit ausgeschlossen. Wähle identische Zeiten für einen ganztägigen Zeitplan."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The active start is included and the end is excluded. Choose matching times for an all-day schedule."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "El inicio del intervalo activo está incluido y el final, excluido. Elige la misma hora en ambos campos para un horario de todo el día."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le début de la plage active est inclus et la fin est exclue. Choisissez la même heure dans les deux champs pour un programme actif toute la journée."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O início do período ativo está incluído e o fim está excluído. Escolhe a mesma hora nos dois campos para um horário de dia inteiro."
+          }
+        }
+      }
+    },
+    "Water reminders": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trinkerinnerungen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Water reminders"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recordatorios de hidratación"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rappels d’hydratation"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lembretes de hidratação"
+          }
+        }
+      }
+    },
+    "Gentle, optional prompts during your chosen hours. iOS schedules the phone reminders; a WHOOP buzz needs a fresh, worn and encrypted live connection.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sanfte, optionale Hinweise während der von dir gewählten Zeiten. iOS plant die Erinnerungen auf dem Telefon; eine WHOOP-Vibration erfordert eine aktuelle, getragene und verschlüsselte Live-Verbindung."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gentle, optional prompts during your chosen hours. iOS schedules the phone reminders; a WHOOP buzz needs a fresh, worn and encrypted live connection."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avisos suaves y opcionales durante el horario que elijas. iOS programa los recordatorios del teléfono; para que WHOOP vibre, se necesita una conexión en directo reciente y cifrada, con la pulsera puesta."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Des rappels discrets et facultatifs pendant les heures choisies. iOS programme les rappels sur le téléphone ; une vibration WHOOP nécessite une connexion en direct récente et chiffrée, avec le bracelet porté."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avisos suaves e opcionais durante o horário que escolheres. O iOS agenda os lembretes no telemóvel; para o WHOOP vibrar, é necessária uma ligação em direto recente e encriptada, com a pulseira colocada."
+          }
+        }
+      }
+    },
+    "Remind me to drink water": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ans Trinken erinnern"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remind me to drink water"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recuérdame beber agua"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Me rappeler de boire de l’eau"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lembrar-me de beber água"
+          }
+        }
+      }
+    },
+    "Off by default. Turning this on asks for notification access. Water logging remains a separate choice.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Standardmäßig ausgeschaltet. Beim Einschalten wird der Zugriff auf Mitteilungen angefragt. Das Wasserprotokoll bleibt eine separate Option."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off by default. Turning this on asks for notification access. Water logging remains a separate choice."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desactivado de forma predeterminada. Al activarlo, se solicita acceso a las notificaciones. El registro de agua sigue siendo una opción independiente."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Désactivé par défaut. Son activation demande l’autorisation d’envoyer des notifications. Le suivi de l’eau reste un choix distinct."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desativado por predefinição. Ao ativares esta opção, é pedido acesso às notificações. O registo de água continua a ser uma opção separada."
+          }
+        }
+      }
+    },
+    "Remind every": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erinnern alle"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remind every"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recordar cada"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rappeler toutes les"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lembrar a cada"
+          }
+        }
+      }
+    },
+    "A practical interval during your active window.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein praktikables Intervall innerhalb deines aktiven Zeitfensters."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A practical interval during your active window."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un intervalo práctico durante tu franja activa."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un intervalle pratique pendant votre plage active."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Um intervalo prático durante o teu período ativo."
+          }
+        }
+      }
+    },
+    "Active from": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktiv ab"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active from"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activo desde"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actif à partir de"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ativo a partir das"
+          }
+        }
+      }
+    },
+    "Active until": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktiv bis"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active until"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activo hasta"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Actif jusqu’à"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ativo até às"
+          }
+        }
+      }
+    },
+    "Also buzz WHOOP": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WHOOP zusätzlich vibrieren lassen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Also buzz WHOOP"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hacer vibrar también WHOOP"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Faire aussi vibrer WHOOP"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fazer o WHOOP vibrar também"
+          }
+        }
+      }
+    },
+    "Best effort only while NOOP has a fresh, worn, bonded and encrypted live connection. One short buzz; never a guaranteed background alert.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nur nach bestem Bemühen, solange NOOP eine aktuelle, getragene, gekoppelte und verschlüsselte Live-Verbindung hat. Eine kurze Vibration; niemals ein garantierter Hintergrundhinweis."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Best effort only while NOOP has a fresh, worn, bonded and encrypted live connection. One short buzz; never a guaranteed background alert."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Solo se intenta mientras NOOP tenga una conexión en directo reciente, con la pulsera puesta, enlazada y cifrada. Una vibración breve; nunca una alerta en segundo plano garantizada."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disponible au mieux uniquement lorsque NOOP dispose d’une connexion en direct récente, avec le bracelet porté, jumelé et chiffré. Une brève vibration ; jamais une alerte garantie en arrière-plan."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Funciona apenas na medida do possível enquanto o NOOP tiver uma ligação em direto recente, com a pulseira colocada, emparelhada e encriptada. Uma vibração curta; nunca um alerta garantido em segundo plano."
+          }
+        }
+      }
+    },
+    "Hydration check-in": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trink-Check-in"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hydration check-in"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pausa de hidratación"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Point hydratation"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pausa para hidratação"
+          }
+        }
+      }
+    },
+    "Take a moment to drink some water if you need it.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nimm dir einen Moment, um etwas Wasser zu trinken, wenn du es brauchst."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Take a moment to drink some water if you need it."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tómate un momento para beber un poco de agua si lo necesitas."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prenez un moment pour boire un peu d’eau si vous en ressentez le besoin."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reserva um momento para beber um pouco de água, se precisares."
+          }
+        }
       }
     }
   },

@@ -228,23 +228,23 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         item {
         SettingsSection(
             icon = Icons.Filled.WaterDrop,
-            title = "Hydration reminders",
-            blurb = "A quiet check-in during hours you choose. NOOP does not infer that you drank, and the lock-screen message never shows an intake, goal or health value.",
+            title = stringResource(R.string.l10n_automations_screen_hydration_reminders_a4e4defb),
+            blurb = stringResource(R.string.l10n_automations_screen_a_quiet_check_in_during_hours_9c51ddf5),
             active = hydrationRemindersEnabled,
         ) {
             ToggleRow(
-                label = "Remind me to hydrate",
-                help = "Uses a local Android reminder. It is best-effort and may arrive late under Doze or battery restrictions.",
+                label = stringResource(R.string.l10n_automations_screen_remind_me_to_hydrate_ddd350c5),
+                help = stringResource(R.string.l10n_automations_screen_uses_a_local_android_reminder_it_31de6a42),
                 checked = hydrationRemindersEnabled,
                 onChange = ::setHydrationReminderEnabled,
             )
             if (hydrationRemindersEnabled) {
                 RowDivider()
                 StepperRow(
-                    label = "Remind every",
-                    help = "How often to check in inside the active window.",
+                    label = stringResource(R.string.l10n_automations_screen_remind_every_8f5f4f63),
+                    help = stringResource(R.string.l10n_automations_screen_how_often_to_check_in_inside_68e143d2),
                     value = hydrationInterval,
-                    suffix = "min",
+                    suffix = stringResource(R.string.l10n_automations_screen_min_b6c935d4),
                     range = 60..240,
                     step = 30,
                     onChange = {
@@ -256,12 +256,20 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 RowDivider()
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("Active hours", style = NoopType.body, color = Palette.textPrimary)
-                        Text("No hydration reminders outside this window.", style = NoopType.footnote, color = Palette.textTertiary)
+                        Text(
+                            stringResource(R.string.l10n_automations_screen_active_hours_7936460b),
+                            style = NoopType.body,
+                            color = Palette.textPrimary,
+                        )
+                        Text(
+                            stringResource(R.string.l10n_automations_screen_no_hydration_reminders_outside_this_window_ec3b7dba),
+                            style = NoopType.footnote,
+                            color = Palette.textTertiary,
+                        )
                     }
                     TimeChip(
                         minutes = hydrationStart,
-                        accessibilityLabel = "Hydration reminders start",
+                        accessibilityLabel = stringResource(R.string.l10n_automations_screen_hydration_reminders_start_6640d85d),
                         onPicked = {
                             hydrationStart = it
                             HydrationReminderPrefs.setStartMinutes(ctx, it)
@@ -269,11 +277,15 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                         },
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text("to", style = NoopType.body, color = Palette.textSecondary)
+                    Text(
+                        stringResource(R.string.l10n_automations_screen_to_4374aaee),
+                        style = NoopType.body,
+                        color = Palette.textSecondary,
+                    )
                     Spacer(Modifier.width(8.dp))
                     TimeChip(
                         minutes = hydrationEnd,
-                        accessibilityLabel = "Hydration reminders end",
+                        accessibilityLabel = stringResource(R.string.l10n_automations_screen_hydration_reminders_end_1b524ef4),
                         onPicked = {
                             hydrationEnd = it
                             HydrationReminderPrefs.setEndMinutes(ctx, it)
@@ -283,8 +295,8 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 }
                 RowDivider()
                 ToggleRow(
-                    label = "Also buzz WHOOP",
-                    help = "Optional and off by default. Buzzes once only when a worn WHOOP is connected, encrypted and sending a fresh live sample.",
+                    label = stringResource(R.string.l10n_automations_screen_also_buzz_whoop_6ea22671),
+                    help = stringResource(R.string.l10n_automations_screen_optional_and_off_by_default_buzzes_1753c0f2),
                     checked = hydrationStrapBuzz,
                     onChange = {
                         hydrationStrapBuzz = it
@@ -294,7 +306,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 if (hydrationStrapBuzz && !notifMasterOn) {
                     RowDivider()
                     Text(
-                        "Wrist alerts are off. Turn on the master switch in Settings -> Notifications before WHOOP can buzz.",
+                        stringResource(R.string.l10n_automations_screen_wrist_alerts_are_off_turn_on_a1b97d2b),
                         style = NoopType.footnote,
                         color = Palette.statusWarning,
                     )
@@ -303,9 +315,9 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                     RowDivider()
                     Text(
                         if (live.connected && live.bonded && live.encryptedBond) {
-                            "WHOOP is ready. A buzz still needs a fresh live stream at the reminder time."
+                            stringResource(R.string.l10n_automations_screen_whoop_is_ready_a_buzz_still_d887f71f)
                         } else {
-                            "WHOOP haptics are unavailable until the strap has a live encrypted bond. The phone reminder remains independent."
+                            stringResource(R.string.l10n_automations_screen_whoop_haptics_are_unavailable_until_the_6b2fe1c5)
                         },
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
