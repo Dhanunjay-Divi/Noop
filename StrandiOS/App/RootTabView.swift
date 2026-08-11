@@ -202,6 +202,7 @@ struct RootTabView: View {
         }
         .onAppear {
             DailyReviewNotifications.restoreScheduleIfAuthorized()
+            HydrationReminders.restoreScheduleIfAuthorized()
             // Let TabView finish mounting before a cold-launch notification changes its selection.
             // Routing synchronously from onAppear can be overwritten by the tab controller's own
             // initial-selection pass on the same run loop.

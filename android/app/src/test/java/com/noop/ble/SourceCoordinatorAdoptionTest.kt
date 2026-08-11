@@ -34,6 +34,7 @@ class SourceCoordinatorAdoptionTest {
     private class FakeRegistryDao : DeviceRegistryDao {
         val devices = LinkedHashMap<String, PairedDeviceRow>()
         val owners = LinkedHashMap<String, DayOwnershipRow>()
+        val touches = mutableListOf<String>()
 
         override suspend fun pairedDevices(): List<PairedDeviceRow> = devices.values.sortedBy { it.addedAt }
         override suspend fun activeDeviceId(): String? =
@@ -56,8 +57,13 @@ class SourceCoordinatorAdoptionTest {
         override suspend fun setModel(id: String, model: String) {
             devices[id]?.let { devices[id] = it.copy(model = model) }
         }
+        override suspend fun setLegacyDeviceName(id: String, model: String) {}
         override suspend fun setPeripheralId(id: String, peripheralId: String?) {
             devices[id]?.let { devices[id] = it.copy(peripheralId = peripheralId) }
+        }
+        override suspend fun touchLastSeen(id: String, now: Long) {
+            devices[id]?.let { devices[id] = it.copy(lastSeenAt = now) }
+            touches += id
         }
         override suspend fun deviceForPeripheralId(peripheralId: String): PairedDeviceRow? =
             devices.values.firstOrNull { it.peripheralId == peripheralId }
@@ -143,6 +149,7 @@ class SourceCoordinatorAdoptionTest {
         coordinator.connectedPeripheralChanged("AA:BB:CC:DD:EE:01")
 
         assertEquals("AA:BB:CC:DD:EE:01", dao.devices["my-whoop"]!!.peripheralId)
+        assertEquals(listOf("my-whoop"), dao.touches)
     }
 
     @Test
@@ -153,11 +160,13 @@ class SourceCoordinatorAdoptionTest {
         var logged: String? = null
         val coordinator = coordinatorOver(dao) { logged = it }
 
-        // Same strap reconnecting (case-insensitive match) — nothing written, nothing logged.
+        // Same strap reconnecting (case-insensitive match) — identity is unchanged and no mismatch logs;
+        // the real connection transition is still allowed to refresh lastSeen.
         coordinator.connectedPeripheralChanged("aa:bb:cc:dd:ee:01")
 
         assertEquals("AA:BB:CC:DD:EE:01", dao.devices["my-whoop"]!!.peripheralId)
         assertNull("matching address must not log a different-strap notice", logged)
+        assertEquals(listOf("my-whoop"), dao.touches)
     }
 
     @Test
@@ -179,6 +188,7 @@ class SourceCoordinatorAdoptionTest {
                 "AA:BB:CC:DD:EE:02 connected — not overwriting.",
             logged,
         )
+        assertTrue("a different physical strap must not refresh this row", dao.touches.isEmpty())
     }
 
     @Test
@@ -189,6 +199,20 @@ class SourceCoordinatorAdoptionTest {
         coordinator.connectedPeripheralChanged(null) // a disconnect republish
 
         assertNull(dao.devices["my-whoop"]!!.peripheralId) // nothing adopted
+        assertTrue(dao.touches.isEmpty())
+    }
+
+    @Test
+    fun actualConnectAndDisconnectEachStampLastSeenOnce() = runBlocking {
+        val dao = FakeRegistryDao().apply {
+            devices["my-whoop"] = whoopRow("my-whoop", peripheralId = "AA:BB:CC:DD:EE:01")
+        }
+        val coordinator = coordinatorOver(dao)
+
+        coordinator.connectedPeripheralChanged("AA:BB:CC:DD:EE:01")
+        coordinator.connectedPeripheralChanged(null)
+
+        assertEquals(listOf("my-whoop", "my-whoop"), dao.touches)
     }
 
     @Test
@@ -209,6 +233,7 @@ class SourceCoordinatorAdoptionTest {
         assertNull("a generic-strap active row must not adopt a WHOOP connection's address",
             dao.devices["polar-1"]!!.peripheralId)
         assertTrue(dao.devices.size == 1)
+        assertTrue(dao.touches.isEmpty())
     }
 
     // ── make-active adopt-in-place (#74 keep) ───────────────────────────────────

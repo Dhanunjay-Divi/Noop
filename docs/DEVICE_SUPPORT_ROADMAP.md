@@ -24,6 +24,8 @@ source stands and the protocol facts we've verified, so the next build can pick 
 | **Garmin** | ✅ Export import; 🧪 broadcast Live | Garmin wellness JSON and FIT/GPX/TCX activity files import locally. A Garmin/HRM that advertises standard `0x180D` can use the experimental live-Broadcast lane. Proprietary deep BLE history, Body Battery recreation, and Garmin cloud sync are not implemented. |
 | **Amazfit / Zepp / Helio** | 🧪 Best-effort live HR only | Experimental isolated Huami driver reads standard `0x180D` when exposed, then the documented readable Huami HR characteristic. Models requiring vendor authentication remain unsupported; there is no deep history/sleep sync and NOOP never logs into the vendor cloud. |
 | **Oura** (Gen 3/4/5) | 🔬 Cloud import shipped; local BLE ring **experimental** | Cloud API v2 (off-by-default OAuth backfill) **+** clean-room BLE ring — auth, live HR/IBI, history drain, sleep hypnogram, activity/HR research (below) |
+| **RingConn Gen 3** | 🧭 Apple Health bridge only; direct BLE unavailable | Import standard records that the RingConn app writes to HealthKit, preserving its source and delay. No public BLE SDK/GATT or documented Health Connect lane; proprietary apnea/vascular/readiness outputs are not recreated. |
+| **Hume Band 2.0** | 🧭 Apple Health bridge only; direct BLE unavailable | Import only verified HealthKit categories written by the Hume app. No public BLE SDK/GATT, stable export schema, or documented Health Connect lane; Hume Pod body composition is not attributed to the band. |
 | **Fitbit / Google** | ✅ Fitbit export import; no direct live lane | Local Google Takeout/Fitbit JSON import for sleep and stages, resting HR, and steps. Missing Fitbit fields remain absent rather than inferred. Automatic Google Health/cloud integration and proprietary Fitbit BLE are not implemented. |
 
 ## What “supports a device” means
@@ -51,6 +53,32 @@ recover history that the device never exposes.
 Platform references: [Apple HealthKit](https://developer.apple.com/documentation/healthkit),
 [Apple Watch workout sessions](https://developer.apple.com/documentation/healthkit/running-workout-sessions),
 and [Android Health Connect](https://developer.android.com/health-and-fitness/health-connect).
+
+The device-by-device measured/derived feature comparison, validation gates, and current
+WHOOP/Oura/RingConn/Hume source evidence are maintained in
+[`COMPETITIVE_CAPABILITY_AUDIT.md`](COMPETITIVE_CAPABILITY_AUDIT.md).
+
+### RingConn and Hume bridge boundary
+
+- **RingConn Gen 3:** official support documents Apple Health writes for selected
+  standard values, often after vendor-app processing/sync. Treat these as delayed
+  HealthKit imports, not a live ring connection. Official material indicates about ten
+  days of offline storage, but NOOP cannot drain that storage without the RingConn app.
+- **Hume Band 2.0:** Hume documents an Apple Health integration but does not publish a
+  stable list of exported HealthKit types. Enable a category only after a real device/app
+  proves its type, units, source bundle, correction behavior, and cadence. Hume describes
+  about seven days of local storage; NOOP cannot directly drain it.
+- Neither vendor documents a public direct-BLE SDK/GATT service or Health Connect path.
+  Google Fit is not interchangeable with Health Connect. A direct lane remains unavailable
+  unless a vendor SDK or separately documented clean-room, hardware-validated protocol is
+  completed.
+- RingConn's vascular/BP and apnea outputs and Hume's metabolic/age/risk outputs are
+  vendor-derived wellness products. They are not silently reconstructed from HR/HRV/SpO2.
+  Hume's current official pages conflict on BP availability, battery duration, and export;
+  the conservative state wins until shipping hardware resolves the conflict.
+- HealthKit source metadata, measurement time, import time, last vendor sync, missing
+  intervals, and staleness must remain visible. `Unsupported`, `not exported`, and
+  `waiting for vendor sync` are valid states; none may render as `0`.
 
 ### Health Connect temperature and scheduling boundary
 

@@ -377,6 +377,7 @@ struct RootView: View {
         }
         .onAppear {
             DailyReviewNotifications.restoreScheduleIfAuthorized()
+            HydrationReminders.restoreScheduleIfAuthorized()
             // Defer one turn so NavigationSplitView has installed its initial selection before a
             // cold-launch reminder replaces it.
             Task { @MainActor in

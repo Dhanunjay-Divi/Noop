@@ -30,6 +30,7 @@ import com.noop.ble.WhoopModel
 import com.noop.data.DemoSeeder
 import com.noop.data.WhoopRepository
 import com.noop.ingest.HealthConnectSyncScheduler
+import com.noop.notif.HydrationReminderScheduler
 import com.noop.sync.RemoteSyncScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -102,6 +103,11 @@ class MainActivity : ComponentActivity() {
         // extension 13) can grant the dedicated background-health permission; older releases stay
         // foreground/on-open only and reconcile() cancels any stale periodic work.
         runCatching { HealthConnectSyncScheduler.reconcile(applicationContext) }
+
+        // Hydration reminders are a separate explicit opt-in (default OFF). WorkManager persists its
+        // one-shot chain, and this cheap reconcile repairs it after an update/reboot without touching
+        // hydration logs or enabling anything on the user's behalf.
+        runCatching { HydrationReminderScheduler.reconcile(applicationContext) }
 
         // Load the Light/Dark/System + chart-colour preferences before first composition so the theme
         // and chart ramps are correct from the very first frame (no flash).

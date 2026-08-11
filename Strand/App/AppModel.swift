@@ -539,6 +539,10 @@ final class AppModel: ObservableObject {
         guard sourceCoordinator == nil, let store = await repo.storeHandle() else { return }
         let registry = DeviceRegistry(store: DeviceRegistryStore(dbQueue: store.registryWriter))
         registry.reload()
+        // BLE writes connected GATT/DIS identity directly to the durable registry. Refresh this observable
+        // cache on each actual identity change so Devices immediately shows WHOOP MG vs WHOOP 5.0 rather
+        // than waiting for a disconnect or relaunch.
+        ble.onRegistryIdentityChanged = { [weak registry] in registry?.reload() }
         let coordinator = SourceCoordinator(
             registry: registry,
             live: live,
@@ -730,6 +734,15 @@ final class AppModel: ObservableObject {
         let smoothed = vals.isEmpty ? nil : Int(vals[vals.count / 2].rounded())
         if bpm != smoothed { bpm = smoothed }
         evaluateStress()
+        // Hydration's durable lane is the scheduled OS notification. The optional strap lane is
+        // deliberately evaluated only while fresh HR packets are flowing, then additionally gated by
+        // connected + worn + bonded + encrypted state. This makes the one-buzz behavior useful without
+        // pretending iOS can guarantee a background BLE command after NOOP is suspended.
+        if live.connected, live.worn, canBuzz,
+           HydrationReminders.claimDueStrapBuzz(now: now) {
+            buzz(loops: 1)
+            live.append(log: "Water reminder · WHOOP buzz")
+        }
     }
 
     // MARK: - Manual workout tracking

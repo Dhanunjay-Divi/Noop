@@ -95,10 +95,8 @@ enum class DeviceFamily {
          * positively-identified 4.0 changes scale (#938). Mirrors the Swift
          * `DeviceFamily.forRegistryModel`.
          */
-        fun forRegistryModel(model: String?): DeviceFamily = when (model) {
-            "4.0", "WHOOP 4.0" -> WHOOP4
-            else -> WHOOP5
-        }
+        fun forRegistryModel(model: String?): DeviceFamily =
+            WhoopRegistryIdentity.positivelyIdentifiedFamily(model) ?: WHOOP5
 
         /** Whoop 5.0 CLIENT_HELLO bytes (16 bytes). Exposed as a named constant for test/debug use. */
         val WHOOP5_CLIENT_HELLO: ByteArray = byteArrayOf(

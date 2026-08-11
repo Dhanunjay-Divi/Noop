@@ -491,11 +491,12 @@ public final class BLEManager: NSObject, ObservableObject {
     public let state: LiveState
     private let router: FrameRouter
     private var collector: Collector?
-    /// #716: stored on bootstrap so the scan callback can fix the seeded "WHOOP" model label.
+    /// Stored on bootstrap so connected GATT + DIS identity evidence can repair the active registry row.
     private var registryStore: DeviceRegistryStore?
-    /// #716: true once the seeded "WHOOP" model has been stamped to the correct family.
-    private var modelStamped = false
-
+    /// App-layer cache refresh hook. The BLE engine owns the durable identity write, while AppModel owns
+    /// the observable DeviceRegistry; this keeps an exact post-DIS model visible immediately without
+    /// coupling the engine to that UI cache type.
+    var onRegistryIdentityChanged: (() -> Void)?
     // MARK: Upload / server sync — REMOVED for Strand (standalone, fully on-device).
 
     // MARK: Backfill
@@ -784,8 +785,17 @@ public final class BLEManager: NSObject, ObservableObject {
     private var disSerialCharacteristic: CBCharacteristic?
     private var disHwRevCharacteristic: CBCharacteristic?
     private var disRead = false
+    /// Both DIS reads are asynchronous. Exact identity must wait until every issued read settles;
+    /// otherwise a fast MG serial callback could be persisted before a later, contradictory hardware
+    /// revision arrives. Errors settle a read too (the remaining positive signal may still attest).
+    private var disSerialReadPending = false
+    private var disHwRevReadPending = false
     private var disSerial: String?
     private var disHwRev: String?
+    /// Family supported by connection evidence from this physical link (accepted service-filtered scan,
+    /// service-filtered connected-peripheral retrieval, or discovered custom GATT service). Unlike the
+    /// persisted picker, this is safe to replay if the store finishes bootstrapping after the connection.
+    private var observedGattFamily: DeviceFamily?
     /// EXPERIMENTAL WHOOP 5.0/MG puffin notify chars (fd4b0003/4/5/7), remembered at discovery so we
     /// can re-subscribe them AFTER bonding — the strap refuses them ("Authentication is insufficient")
     /// until the link is encrypted (issue #17).
@@ -887,7 +897,8 @@ public final class BLEManager: NSObject, ObservableObject {
     /// `.unknown` until a DIS string lands — and `.unknown` is NOT MG, so an MG-only capability stays
     /// off until the hardware actually attests to itself.
     var whoop5Variant: Whoop5Variant {
-        guard selectedModel.deviceFamily == .whoop5 else { return .unknown }
+        guard observedGattFamily == .whoop5,
+              disRead, !disSerialReadPending, !disHwRevReadPending else { return .unknown }
         return Whoop5Variant.from(serial: disSerial, hardwareRevision: disHwRev)
     }
 
@@ -974,7 +985,29 @@ public final class BLEManager: NSObject, ObservableObject {
            !activeId.isEmpty {
             self.deviceId = activeId
         }
-        try? await store.upsertDevice(id: deviceId, mac: nil, name: "WHOOP 4.0")
+        // A fast/restored connection can finish before the asynchronous store opens. Re-apply whatever
+        // identity evidence is already live now that the registry is writable, so that race cannot leave
+        // a WHOOP 5/MG permanently labelled 4.0. Positive DIS evidence refines the GATT family exactly.
+        if state.connected, let observedGattFamily {
+            observeConnectedGattFamily(observedGattFamily, evidence: "store bootstrap")
+            reconcileRegistryModelFromAttestation(whoop5Variant)
+        }
+        // Seed the legacy stream-owner row without ever overwriting identity learned on a prior run.
+        // The former unconditional "WHOOP 4.0" upsert could immediately clobber an existing MG/5.0
+        // name every time the store bootstrapped. Prefer the reconciled registry label when it carries
+        // real family evidence; otherwise use this connection/persisted family only as a first seed.
+        let activeRegistryModel = (try? registry.all())?
+            .first(where: { $0.id == deviceId })?.model
+        let seedModel: String
+        if let activeRegistryModel,
+           DeviceFamily.identifiedRegistryModel(activeRegistryModel) != nil {
+            seedModel = activeRegistryModel
+        } else if let observedGattFamily {
+            seedModel = observedGattFamily.registryModelLabel
+        } else {
+            seedModel = selectedModel.deviceFamily.registryModelLabel
+        }
+        try? await store.ensureDevice(id: deviceId, mac: nil, name: seedModel)
         // Research toggle — OFF by default. When disabled the app is decoded-only and never
         // persists raw frames. Flip "enableRawCapture" in UserDefaults to capture raw again.
         let enableRawCapture = UserDefaults.standard.bool(forKey: "enableRawCapture")
@@ -3137,12 +3170,18 @@ public final class BLEManager: NSObject, ObservableObject {
     private func preparePeripheral(_ p: CBPeripheral) {
         peripheral = p
         p.delegate = self
+        observedGattFamily = nil
         resetCharacteristics()
     }
 
     private func discoverPrimaryServices(on p: CBPeripheral) {
+        // Ask for both supported WHOOP service families. Normal scan/connect still targets one family,
+        // but state restoration can hand us a live peripheral while the persisted picker is stale. The
+        // services the peripheral actually returns are authoritative and reconcile `selectedModel` before
+        // any characteristic is interpreted or written.
         p.discoverServices([
-            selectedModel.scanService, BLEManager.heartRateService, BLEManager.batteryService,
+            BLEManager.customService, BLEManager.whoop5Service,
+            BLEManager.heartRateService, BLEManager.batteryService,
             BLEManager.disService,
         ])
     }
@@ -3157,6 +3196,8 @@ public final class BLEManager: NSObject, ObservableObject {
         disSerialCharacteristic = nil
         disHwRevCharacteristic = nil
         disRead = false
+        disSerialReadPending = false
+        disHwRevReadPending = false
         disSerial = nil
         disHwRev = nil
         whoop5NotifyCharacteristics.removeAll()
@@ -3169,6 +3210,9 @@ public final class BLEManager: NSObject, ObservableObject {
     /// stale after an update/restore. Discovery/connect cancels the pending rotation. (PR#195)
     private func startScan(for model: WhoopModel, allowFallback: Bool) {
         cancelScanFallback()
+        // A scan begins a new identity-observation window. Never let evidence from the peripheral that
+        // just disconnected be replayed onto whichever strap satisfies this scan.
+        observedGattFamily = nil
         selectedModel = model
         reassembler = Reassembler(family: model.deviceFamily)
         router.family = model.deviceFamily
@@ -3241,11 +3285,19 @@ public final class BLEManager: NSObject, ObservableObject {
         // and the earliest can land before DIS discovery has completed. Setting the flag unconditionally
         // would burn the one-shot on a call where the characteristics were still nil, and the variant
         // would never resolve. Leaving it unset lets a later caller (the keep-alive tick) pick it up.
-        if !disRead, selectedModel.deviceFamily != .whoop4,
-           let serialChar = disSerialCharacteristic, serialChar.properties.contains(.read) {
+        if !disRead, selectedModel.deviceFamily != .whoop4 {
+            let serialChar = disSerialCharacteristic?.properties.contains(.read) == true
+                ? disSerialCharacteristic : nil
+            let hwChar = disHwRevCharacteristic?.properties.contains(.read) == true
+                ? disHwRevCharacteristic : nil
+            guard serialChar != nil || hwChar != nil else { return }
             disRead = true
-            p.readValue(for: serialChar)
-            if let c = disHwRevCharacteristic, c.properties.contains(.read) { p.readValue(for: c) }
+            // Mark every issued read pending BEFORE asking CoreBluetooth for either value, so callback
+            // ordering can never expose a partially-resolved identity as final.
+            disSerialReadPending = serialChar != nil
+            disHwRevReadPending = hwChar != nil
+            if let serialChar { p.readValue(for: serialChar) }
+            if let hwChar { p.readValue(for: hwChar) }
         }
     }
 
@@ -3260,24 +3312,60 @@ public final class BLEManager: NSObject, ObservableObject {
         let prefix = (disSerial?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
             .map { String($0.prefix(3)) } ?? "?"
         log("DIS: serialPrefix=\(prefix) hwRev=\(disHwRev ?? "?") -> variant=\(variant.label)")
+        guard disRead, !disSerialReadPending, !disHwRevReadPending else {
+            log("DIS: waiting for remaining identity characteristic before attestation")
+            return
+        }
+        guard observedGattFamily == .whoop5 else {
+            // DIS strings alone are not enough when the transport family is absent or contradictory.
+            // Keep both the UI and registry fail-closed instead of presenting an exact model guess.
+            state.whoop5Variant = nil
+            log("DIS: identity ignored because the connected WHOOP GATT family is not unambiguous")
+            return
+        }
         // Publish it so an MG-only capability can gate on attested hardware. Still diagnostic for every
         // existing consumer — nothing about framing or decode reads this.
         state.whoop5Variant = variant.label
         reconcileRegistryModelFromAttestation(variant)
     }
 
-    /// The picker/seeded registry label is only a connection hint. Once the standard Device
-    /// Information Service positively identifies a 5-generation strap, repair an old 4.0 label so
-    /// every downstream family-dependent interpretation (notably skin-temperature scaling) follows
-    /// the hardware that is actually connected. Unknown/contradictory attestation never mutates data.
-    private func reconcileRegistryModelFromAttestation(_ variant: Whoop5Variant) {
-        guard variant != .unknown,
-              let registryStore,
-              let active = try? registryStore.all().first(where: { $0.status == .active }),
-              DeviceFamily.forRegistryModel(active.model) == .whoop4 else { return }
+    /// Persist the connected transport family and reconfigure every family-sensitive decoder before
+    /// characteristics or packets are handled. GATT can distinguish 4.0 from 5-generation, but not MG
+    /// from plain 5.0, so it writes only the honest family label; DIS refines it later.
+    private func observeConnectedGattFamily(_ family: DeviceFamily, evidence: String) {
+        observedGattFamily = family
+        let observedModel: WhoopModel = family == .whoop4 ? .whoop4 : .whoop5mg
+        if selectedModel != observedModel {
+            log("Connected GATT family is \(observedModel.displayName), overriding stale \(selectedModel.displayName) selection (\(evidence))")
+            selectedModel = observedModel
+            reassembler = Reassembler(family: family)
+            router.family = family
+            configureCollectorFamily()
+            state.batteryRatedHours = family == .whoop5
+                ? BatteryEstimator.ratedLifeHoursWhoop5 : BatteryEstimator.ratedLifeHoursWhoop4
+        }
+        UserDefaults.standard.set(observedModel.rawValue, forKey: "selectedWhoopModel")
 
-        try? registryStore.setModel(active.id, model: "WHOOP 5.0 / MG")
-        log("Updated active device model to WHOOP 5.0 / MG from DIS attestation")
+        guard let registryStore else { return }
+        if (try? registryStore.reconcileActiveWhoopModel(observedFamily: family)) == true {
+            log("Updated active device model to \(family.registryModelLabel) from \(evidence)")
+            onRegistryIdentityChanged?()
+        }
+    }
+
+    /// Refine the already-confirmed 5-generation GATT family to an exact model only when DIS positively
+    /// attests it. `.unknown` includes contradictory evidence and is therefore always non-mutating.
+    private func reconcileRegistryModelFromAttestation(_ variant: Whoop5Variant) {
+        guard observedGattFamily == .whoop5,
+              let exactLabel = variant.registryModelLabel,
+              let registryStore else { return }
+        if (try? registryStore.reconcileActiveWhoopModel(
+            observedFamily: .whoop5,
+            attestedVariant: variant
+        )) == true {
+            log("Updated active device model to \(exactLabel) from DIS attestation")
+            onRegistryIdentityChanged?()
+        }
     }
 
     private func requestNotify(_ c: CBCharacteristic, on p: CBPeripheral, reason: String) {
@@ -3706,16 +3794,6 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
                                advertisementData: [String: Any],
                                rssi RSSI: NSNumber) {
         let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? peripheral.name ?? "unknown"
-        // #716: the seeded "my-whoop" device has model "WHOOP" (no generation). Once a live scan
-        // confirms which service family the strap advertises, stamp the correct model so
-        // forRegistryModel returns the right DeviceFamily (fixes skin-temp ADC scale + display).
-        if !modelStamped, let rs = registryStore,
-           let stale = try? rs.all().first(where: { $0.status == .active && $0.model == "WHOOP" }) {
-            let correct = selectedModel == .whoop4 ? "WHOOP 4.0" : "WHOOP 5.0 / MG"
-            try? rs.setModel(stale.id, model: correct)
-            log("Updated device model from \"WHOOP\" to \"\(correct)\" (#716)")
-            modelStamped = true
-        }
         let advertisedServiceUUIDs = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? [])
             .map { $0.uuidString.lowercased() }
         let scanDecision = whoopGattScanDecision(
@@ -3751,6 +3829,9 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
             log("Discovered \(name) (\(peripheral.identifier)) — not the preferred strap; ignoring")
             return
         }
+        // This is the accepted auto-connect candidate, and a service-filtered scan either observed the
+        // selected custom service in the advertisement or CoreBluetooth matched it on our behalf. Repair
+        // ANY stale active WHOOP label now; the exact MG/plain-5 distinction waits for post-bond DIS.
         cancelScanFallback()
         // Persist the family that actually advertised so the next scan starts on the right service —
         // this is what makes a one-time rotation stick after a stale-preference reconnect. (PR#195)
@@ -3758,12 +3839,14 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         log("Discovered \(name) (rssi \(RSSI)) — connecting")
         central.stopScan()
         preparePeripheral(peripheral)
+        observeConnectedGattFamily(selectedModel.deviceFamily, evidence: "advertised GATT service")
         central.connect(peripheral, options: nil)
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         cancelScanFallback()
         failedConnectAttempts = 0   // a successful connect clears the reconnect backoff (#414)
+        let wasRestoredConnection = restoredPeripheral?.identifier == peripheral.identifier
         restoredPeripheral = nil
         preparePeripheral(peripheral)
         // Clear the per-connection bond BEFORE publishing the connected uuid below. SourceCoordinator's #52
@@ -3776,6 +3859,15 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         // only — BLEManager stays decoupled from the store and the connect flow below is unchanged.
         connectedPeripheralUUID = peripheral.identifier.uuidString
         state.connected = true
+        // `retrieveConnectedPeripherals(withServices:)` can bypass discovery, so the selected service
+        // family at this point is itself positive transport evidence. Reconcile before service callbacks.
+        if !wasRestoredConnection {
+            // Normal connections came from either a service-filtered scan or
+            // retrieveConnectedPeripherals(withServices:), so the selected family is positive evidence.
+            // A restored disconnected peripheral did not pass through either filter; wait for its actual
+            // discovered custom service instead of trusting a possibly stale persisted picker.
+            observeConnectedGattFamily(selectedModel.deviceFamily, evidence: "connected GATT service")
+        }
         // A connect succeeded → clear the stale-bond re-pair guide UNLESS we are in a known bond-loop
         // (#617). In that loop the strap "connects" every ~3 s before timing out again, so clearing here
         // wiped the guide on EVERY cycle: it flashed for ~1 s and vanished, so the user could never read it
@@ -3891,6 +3983,10 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         }
         bondedAt = nil   // cleared after the bond-loop detector above read it (#617)
         state.connected = false
+        observedGattFamily = nil
+        // Publish the real down edge. SourceCoordinator uses it to clear physical-strap identity state
+        // and refresh lastSeen once; without this the UI could retain a stale connected UUID indefinitely.
+        connectedPeripheralUUID = nil
         state.encryptedBond = false   // cleared with didBond; next session must re-prove the bond (#69)
         state.charging = nil          // a stale charging flag must not outlive the link
         state.batteryMv = nil         // #592: a stale pack voltage must not outlive the link
@@ -4068,6 +4164,10 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
         self.peripheral = p
         self.restoredPeripheral = p
         p.delegate = self
+        // Restoration supplies a peripheral identity, not its GATT generation. Wait for the restored
+        // service list before repairing the durable model; the persisted picker may be precisely the
+        // stale value this reconciliation path is meant to correct.
+        observedGattFamily = nil
         resetCharacteristics()
         // Re-derive the inbound-decode family from the persisted model. connect()/startScan() set the
         // reassembler + router family, but NEITHER runs on the restore path — so without this a restored
@@ -4124,6 +4224,25 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
         }
         guard let services = peripheral.services else { return }
         log("Services discovered: \(services.map { $0.uuid.uuidString }.joined(separator: ", "))")
+
+        // The peripheral's actual custom service is the strongest generation evidence available and is
+        // especially important on CoreBluetooth state restoration, where a stale persisted picker can be
+        // wrong. Configure the family BEFORE discovering/writing characteristics. If a malformed device
+        // exposes both supported families, refuse to choose: contradictory identity must never be guessed.
+        let observedFamilies = Set(services.compactMap { service -> DeviceFamily? in
+            WhoopGattServiceFamily.forServiceUUIDString(service.uuid.uuidString)?.connectableDeviceFamily
+        })
+        if observedFamilies.count == 1, let family = observedFamilies.first {
+            observeConnectedGattFamily(family, evidence: "discovered GATT service")
+        } else if observedFamilies.count > 1 {
+            // Override any provisional selected-family evidence recorded at didConnect. A malformed or
+            // unexpected peripheral exposing both custom services is contradictory, so neither DIS nor
+            // later store-bootstrap callbacks may refine it into an exact model.
+            observedGattFamily = nil
+            state.whoop5Variant = nil
+            log("Contradictory WHOOP GATT services discovered; retaining the selected family and not rewriting device identity")
+        }
+
         for s in services {
             switch s.uuid {
             case BLEManager.customService:
@@ -4227,6 +4346,11 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                     whoop5NotifyCharacteristics.append(c)
                 }
             }
+        }
+        // Service and bond callbacks can race. If DIS characteristics arrive after the bond completed,
+        // issue their one-shot reads immediately instead of waiting for the next keep-alive tick.
+        if service.uuid == BLEManager.disService, didBond {
+            enableLiveNotifications(reason: "post-bond DIS discovery")
         }
     }
 
@@ -4616,6 +4740,20 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
                            didUpdateValueFor characteristic: CBCharacteristic,
                            error: Error?) {
         if let error {
+            // A failed immutable DIS read is still a settled signal. Resolve from whatever other positive
+            // evidence arrived, but never from a provisional result while its sibling read is outstanding.
+            if characteristic.uuid == BLEManager.disSerialChar {
+                disSerialReadPending = false
+                log("DIS serial read failed: \(error.localizedDescription)")
+                noteWhoop5VariantFromDIS()
+                return
+            }
+            if characteristic.uuid == BLEManager.disHwRevChar {
+                disHwRevReadPending = false
+                log("DIS hardware-revision read failed: \(error.localizedDescription)")
+                noteWhoop5VariantFromDIS()
+                return
+            }
             log("Notify update failed for \(characteristic.uuid): \(error.localizedDescription)")
             return
         }
@@ -4644,10 +4782,12 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
             // #520: NUL-terminated ASCII per the DIS spec; trim any padding before resolving.
             disSerial = String(decoding: bytes, as: UTF8.self)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "\0").union(.whitespacesAndNewlines))
+            disSerialReadPending = false
             noteWhoop5VariantFromDIS()
         case BLEManager.disHwRevChar:
             disHwRev = String(decoding: bytes, as: UTF8.self)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "\0").union(.whitespacesAndNewlines))
+            disHwRevReadPending = false
             noteWhoop5VariantFromDIS()
         case BLEManager.dataNotifyChar,
              BLEManager.cmdNotifyChar,

@@ -42,6 +42,7 @@ import com.noop.protocol.Framing
 import com.noop.protocol.HapticClock
 import com.noop.protocol.Reassembler
 import com.noop.protocol.Whoop5Variant
+import com.noop.protocol.WhoopRegistryIdentity
 import com.noop.protocol.RebootProbeVariant
 import com.noop.protocol.Streams
 import com.noop.protocol.Whoop5Config
@@ -83,6 +84,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
@@ -1876,7 +1879,6 @@ class WhoopBleClient(
     /// dropout re-scans for the same model instead of falling back to WHOOP 4.0.
     private var selectedModel = WhoopModel.WHOOP4
     /** #716: true once the seeded "WHOOP" model has been stamped to the correct family. */
-    private var modelStamped = false
     /// The last device we connected to, kept so an auto-reconnect after a dropout can connect
     /// DIRECTLY to it (autoConnect=true) instead of scanning. A bonded strap the OS still holds (or
     /// that simply isn't advertising) won't appear in a scan — so the old scan-only reconnect looped
@@ -2265,6 +2267,10 @@ class WhoopBleClient(
     private var disRead = false
     private var disSerial: String? = null
     private var disHwRev: String? = null
+    /** Serialize lower-confidence service repair with higher-confidence DIS attestation. Without this,
+     *  two IO coroutines could both read a stale 4.0 label and a late service write could erase an exact
+     *  MG label written milliseconds earlier. */
+    private val identityReconcileLock = Mutex()
 
     /** #364 auto-continue: consecutive immediate re-kicks after a 60s idle-cap OR HISTORY_COMPLETE exit on
      *  THIS connection. Bounded by [MAX_AUTO_CONTINUES] so a pathological strap can't pin the radio. Reset
@@ -3422,14 +3428,15 @@ class WhoopBleClient(
         }
     }
 
-    /** Chained second half of [readDisIdentity] — issued only after the serial read has landed. */
-    private fun readDisHardwareRevision() {
-        val g = gatt ?: return
-        val ops = gattOps ?: return
-        val ch = g.getService(DIS_SERVICE)?.getCharacteristic(DIS_HW_REV_CHAR) ?: return
-        if ((ch.properties and BluetoothGattCharacteristic.PROPERTY_READ) != 0) {
-            safeGatt("readCharacteristic(dis-hwrev)") { ops.readCharacteristicCompat(ch) }
-        }
+    /** Chained second half of [readDisIdentity] — issued only after the serial read has landed.
+     *  Returns true only when the read was actually submitted, so the caller knows whether to wait for
+     *  the second piece of evidence before committing an exact hardware label. */
+    private fun readDisHardwareRevision(): Boolean {
+        val g = gatt ?: return false
+        val ops = gattOps ?: return false
+        val ch = g.getService(DIS_SERVICE)?.getCharacteristic(DIS_HW_REV_CHAR) ?: return false
+        if ((ch.properties and BluetoothGattCharacteristic.PROPERTY_READ) == 0) return false
+        return safeGatt("readCharacteristic(dis-hwrev)") { ops.readCharacteristicCompat(ch) }
     }
 
     /**
@@ -3446,16 +3453,54 @@ class WhoopBleClient(
         reconcileRegistryModelFromAttestation(variant)
     }
 
-    /** Repair a stale 4.0 registry label only after the connected hardware positively attests as a
-     *  5-generation strap. Unknown or contradictory DIS evidence deliberately changes nothing. */
+    /** Store the exact physical variant only after positive DIS evidence. UNKNOWN (including a
+     *  serial/hardware contradiction) deliberately performs no write. */
     private fun reconcileRegistryModelFromAttestation(variant: Whoop5Variant) {
-        if (variant == Whoop5Variant.UNKNOWN) return
+        val exactModel = WhoopRegistryIdentity.exactModelFromDis(variant) ?: return
+        val address = gatt?.device?.address
         ioScope.launch {
-            val active = repository.pairedDevices().firstOrNull { it.status == "active" } ?: return@launch
-            if (DeviceFamily.forRegistryModel(active.model) != DeviceFamily.WHOOP4) return@launch
-            repository.setDeviceModel(active.id, "WHOOP 5.0 / MG")
-            log("Updated active device model to WHOOP 5.0 / MG from DIS attestation")
+            identityReconcileLock.withLock {
+                val active = connectedActiveWhoopRow(address) ?: return@withLock
+                // Do not skip an already-exact paired model: legacy device.name may still be stale.
+                repository.reconcileDeviceIdentity(active.id, exactModel)
+                log("Reconciled active device identity to $exactModel from DIS attestation")
+            }
         }
+    }
+
+    /**
+     * Repair a stale registry label from the service family the hardware actually advertised or exposed
+     * through GATT. A WHOOP 5/MG service proves the shared family, not the exact MG/5.0 variant; exact
+     * labels already established by DIS are therefore preserved.
+     */
+    private fun reconcileRegistryModelFromServiceFamily(
+        family: DeviceFamily,
+        connectedAddress: String?,
+    ) {
+        ioScope.launch {
+            identityReconcileLock.withLock {
+                val active = connectedActiveWhoopRow(connectedAddress) ?: return@withLock
+                // Even when pairedDevice.model is already right, run the exact-id transaction to heal a
+                // stale legacy device.name. Preserve an exact MG/5.0 label because the shared service is
+                // less specific than DIS.
+                val repaired = WhoopRegistryIdentity.modelUpdateFromService(active.model, family)
+                    ?: active.model
+                repository.reconcileDeviceIdentity(active.id, repaired)
+                log("Reconciled active device identity to $repaired from connected GATT service")
+            }
+        }
+    }
+
+    /** Resolve only the active WHOOP row that belongs to this physical connection. */
+    private suspend fun connectedActiveWhoopRow(address: String?): com.noop.data.PairedDeviceRow? {
+        val active = repository.pairedDevices().firstOrNull { it.status == "active" } ?: return null
+        if (!SourceCoordinator.isWhoop(active)) return null
+        val registered = active.peripheralId
+        if (registered != null && address != null && !registered.equals(address, ignoreCase = true)) {
+            log("Device identity: connected strap does not match active WHOOP row; model unchanged")
+            return null
+        }
+        return active
     }
 
     fun refreshBattery() {
@@ -3592,22 +3637,6 @@ class WhoopBleClient(
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device: BluetoothDevice = result.device
             val name = result.scanRecord?.deviceName ?: device.name ?: "unknown"
-            // #716: the seeded "my-whoop" device has model "WHOOP" (no generation). Once a live
-            // scan confirms which service family the strap advertises, stamp the correct model so
-            // forRegistryModel returns the right DeviceFamily (fixes skin-temp ADC scale + display).
-            if (!modelStamped) {
-                modelStamped = true
-                ioScope.launch {
-                    val stale = repository.pairedDevices().firstOrNull {
-                        it.status == "active" && it.model == "WHOOP"
-                    }
-                    if (stale != null) {
-                        val correct = if (selectedModel == WhoopModel.WHOOP4) "WHOOP 4.0" else "WHOOP 5.0 / MG"
-                        repository.setDeviceModel(stale.id, correct)
-                        log("Updated device model from \"WHOOP\" to \"$correct\" (#716)")
-                    }
-                }
-            }
             val advertisedServiceUuids = result.scanRecord?.serviceUuids
                 ?.map { it.uuid.toString().lowercase() }
                 .orEmpty()
@@ -3621,6 +3650,13 @@ class WhoopBleClient(
                 log("Discovered $name (rssi ${result.rssi}) without ${selectedModel.displayName} service — ignoring")
                 return
             }
+            // Stamp from the service ACTUALLY present in the advertisement, never from the picker or a
+            // stale saved preference. Empty UUID lists carry no identity evidence; GATT discovery will
+            // attest the family after connection instead.
+            advertisedServiceUuids.asSequence()
+                .mapNotNull { WhoopGattServiceFamily.forServiceUuidString(it)?.connectableDeviceFamily }
+                .firstOrNull()
+                ?.let { reconcileRegistryModelFromServiceFamily(it, device.address) }
             // Multi-WHOOP present-scan (Add-a-device wizard, MW-4): accumulate the strap, do NOT
             // auto-connect, and return before touching the connect flow. Only reachable when the wizard
             // turned on [scanningForList] via scanForWhoops(); on the default path this branch is skipped
@@ -4280,6 +4316,7 @@ class WhoopBleClient(
                 // notifications ever enable, so HR/battery/events stay empty (issue #12). The bond write
                 // is deferred to startSession(), which runs once every notification is on.
                 connectedFamily = DeviceFamily.WHOOP4
+                reconcileRegistryModelFromServiceFamily(DeviceFamily.WHOOP4, g.device.address)
                 cmdCharacteristic = whoop4.getCharacteristic(CMD_WRITE_CHAR)
                 whoop4.getCharacteristic(CMD_NOTIFY_CHAR)?.let { cccdQueue.add(it) }
                 whoop4.getCharacteristic(EVENT_NOTIFY_CHAR)?.let { cccdQueue.add(it) }
@@ -4288,6 +4325,7 @@ class WhoopBleClient(
                 // EXPERIMENTAL WHOOP 5.0/MG: opens with CLIENT_HELLO (sent in startSession, after the
                 // standard HR/battery notifications are enabled), not the WHOOP4 confirmed-write bond.
                 connectedFamily = DeviceFamily.WHOOP5
+                reconcileRegistryModelFromServiceFamily(DeviceFamily.WHOOP5, g.device.address)
                 log("WHOOP 5/MG detected — will send CLIENT_HELLO after subscribing (experimental).")
                 _state.update { it.copy(
                     whoop5Detected = true,
@@ -4518,8 +4556,10 @@ class WhoopBleClient(
             // lands first and CHAINS the hardware-revision read (Android serializes GATT ops).
             uuid == DIS_SERIAL_CHAR -> {
                 disSerial = bytes.toString(Charsets.UTF_8).trim { it == '\u0000' || it.isWhitespace() }
-                noteWhoop5VariantFromDis()
-                readDisHardwareRevision()
+                // If hardware revision is readable, wait for it so contradictory evidence can fail
+                // closed before any exact label is stored. Serial alone remains positive evidence when
+                // the second characteristic is unavailable or its read cannot be submitted.
+                if (!readDisHardwareRevision()) noteWhoop5VariantFromDis()
             }
             uuid == DIS_HW_REV_CHAR -> {
                 disHwRev = bytes.toString(Charsets.UTF_8).trim { it == '\u0000' || it.isWhitespace() }

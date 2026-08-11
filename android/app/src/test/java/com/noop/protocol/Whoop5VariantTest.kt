@@ -11,9 +11,10 @@ import org.junit.Test
  */
 class Whoop5VariantTest {
 
-    @Test fun serialPrefixIdentifiesMg() {
+    @Test fun currentAndLegacySerialPrefixesIdentifyMg() {
+        assertEquals(Whoop5Variant.MG, Whoop5Variant.from("MGB12345678"))
         assertEquals(Whoop5Variant.MG, Whoop5Variant.from("5AM12345678"))
-        assertTrue(Whoop5Variant.from("5AM12345678").isMG)
+        assertTrue(Whoop5Variant.from("MGB12345678").isMG)
     }
 
     @Test fun serialPrefixIdentifiesFiveZero() {
@@ -22,23 +23,31 @@ class Whoop5VariantTest {
     }
 
     @Test fun hardwareRevisionIsDeviceAttestedFiveZero() {
-        // The observed 5.0 hardware id, with no serial available at all.
         assertEquals(Whoop5Variant.FIVE_ZERO, Whoop5Variant.from(null, "WG50_r52"))
+    }
+
+    @Test fun realLifeMgHardwareRevisionIdentifiesMg() {
+        assertEquals(Whoop5Variant.MG, Whoop5Variant.from(null, "WS50_r03"))
+        assertTrue(Whoop5Variant.from("MGB12345678", "WS50_r03").isMG)
     }
 
     @Test fun advertisedNamePrefixTolerated() {
         // Callers may pass the advertised name instead of the DIS serial.
-        assertEquals(Whoop5Variant.MG, Whoop5Variant.from("WHOOP 5AM12345678"))
+        assertEquals(Whoop5Variant.MG, Whoop5Variant.from("WHOOP MGB12345678"))
         assertEquals(Whoop5Variant.FIVE_ZERO, Whoop5Variant.from("  whoop 5ag12345678  "))
+        assertEquals(Whoop5Variant.MG, Whoop5Variant.from("  whoop   mgb12345678 ", " ws50_r03 "))
     }
 
     @Test fun contradictionYieldsUnknownRatherThanAGuess() {
-        // Only the 5.0 hardware string is attested today; a contradiction means our model is
-        // incomplete, so refuse to pick a winner (#716: a mis-stamped model is worse than none).
+        assertEquals(Whoop5Variant.UNKNOWN, Whoop5Variant.from("MGB12345678", "WG50_r52"))
         assertEquals(Whoop5Variant.UNKNOWN, Whoop5Variant.from("5AM12345678", "WG50_r52"))
+        assertEquals(Whoop5Variant.UNKNOWN, Whoop5Variant.from("5AG12345678", "WS50_r03"))
+        assertEquals(Whoop5Variant.UNKNOWN, Whoop5Variant.from(null, "WS50_WG50_r03"))
     }
 
     @Test fun agreeingSignalsResolve() {
+        assertEquals(Whoop5Variant.MG, Whoop5Variant.from("MGB12345678", "WS50_r03"))
+        assertEquals(Whoop5Variant.MG, Whoop5Variant.from("5AM12345678", "WS50_r03"))
         assertEquals(Whoop5Variant.FIVE_ZERO, Whoop5Variant.from("5AG12345678", "WG50_r52"))
     }
 
@@ -50,7 +59,7 @@ class Whoop5VariantTest {
         // serial's "5" as Gen5 on a Gen3 ring; same failure mode, different product).
         assertEquals(Whoop5Variant.UNKNOWN, Whoop5Variant.from("WHOOP 4.0"))
         assertEquals(Whoop5Variant.UNKNOWN, Whoop5Variant.from("5XX99999999"))
-        // An MG hardware-revision string is not yet attested, so it must not resolve by itself.
+        // Similar-looking but unattested tokens remain unknown.
         assertEquals(Whoop5Variant.UNKNOWN, Whoop5Variant.from(null, "WGMG_r01"))
     }
 

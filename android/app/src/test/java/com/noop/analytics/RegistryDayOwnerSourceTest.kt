@@ -44,8 +44,12 @@ class RegistryDayOwnerSourceTest {
         override suspend fun setModel(id: String, model: String) {
             devices[id]?.let { devices[id] = it.copy(model = model) }
         }
+        override suspend fun setLegacyDeviceName(id: String, model: String) {}
         override suspend fun setPeripheralId(id: String, peripheralId: String?) {
             devices[id]?.let { devices[id] = it.copy(peripheralId = peripheralId) }
+        }
+        override suspend fun touchLastSeen(id: String, now: Long) {
+            devices[id]?.let { devices[id] = it.copy(lastSeenAt = now) }
         }
         override suspend fun deviceForPeripheralId(peripheralId: String): PairedDeviceRow? =
             devices.values.firstOrNull { it.peripheralId == peripheralId }

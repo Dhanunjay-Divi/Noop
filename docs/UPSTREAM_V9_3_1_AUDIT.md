@@ -107,6 +107,34 @@ Run on both a physical iPhone and Android phone, with identifiers/personal value
 Record firmware, phone/OS, strap model, start/end timestamps, relevant redacted log lines, and pass/fail
 for every step. Until this checklist is attached to a release report, #1154 remains hardware-pending.
 
+### 2026-08-11 partial physical run — WHOOP Life/MG + iPhone
+
+An owner-authorized, read-only snapshot from a physical WHOOP Life/MG worn with NOOP 9.1.2 (217) on
+an iPhone 17 Pro Max running iOS 26.5.2 provided the first local 5/MG data-path evidence. Identifiers,
+timestamps, and biometric values are intentionally omitted from this repository.
+
+- `PRAGMA integrity_check` passed. The snapshot contained fresh HR/R-R, gravity, skin-temperature,
+  step, band sleep-state, PPG-derived HR, and optical-waveform rows plus one structurally valid staged
+  sleep session. The step, sleep-state, and optical-waveform streams are 5/MG protocol evidence; this
+  was not a WHOOP 4 capture.
+- No duplicate HR timestamps, duplicate R-R identities, future timestamps, or quarantined future-R-R
+  rows were found. A small raw R-R outlier tail was retained as designed; scoring uses the existing
+  artifact/range filters rather than deleting owner data.
+- The capture covered more than fourteen hours, but its HR timeline still contained dozens of gaps over
+  60 seconds, including several not adjacent to recorded wrist or BLE transitions. This is useful real
+  data, not yet a completeness pass: background/offload continuity needs a fresh instrumented run.
+- The device registry incorrectly retained `WHOOP 4.0` even though the stored streams proved a 5/MG
+  connection. Generation must be repaired from the observed GATT service, then plain 5.0 versus MG must
+  be refined only from positive Device Information Service attestation. A picker label is never hardware
+  truth.
+- The Apple Health lane had no anchors or Apple-sourced rows in this snapshot, so no Apple Watch versus
+  WHOOP agreement claim can be made from it. Connect/authorize HealthKit in an entitled build, or import
+  an Apple Health export, before running the paired-source comparison.
+
+This closes neither the full checklist nor #1154: battery-read spacing, known-empty offload throttling,
+locked-device protected archives, repeated reconnects, activity controls, and same-window Apple Watch /
+official WHOOP comparisons still need instrumented evidence on the updated build.
+
 ## Deliberately unresolved, not hidden
 
 - [#1146](https://github.com/ryanbr/noop/issues/1146) concerns bounded raw-row retention. This fork does

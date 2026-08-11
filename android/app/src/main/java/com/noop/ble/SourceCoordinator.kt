@@ -155,6 +155,9 @@ class SourceCoordinator(
      *  row is the same physical strap (#74 keep): a stop/start churn there would drop the live link and
      *  reconnect through the scan path. Cleared on disconnect (null address). */
     private var connectedWhoopAddress: String? = null
+    /** Registry row that owns the current physical WHOOP connection. Captured after the address guard
+     *  passes so a disconnect can stamp the correct row even if active-device selection changed. */
+    private var connectedWhoopRegistryId: String? = null
 
     /** Serializes [reconcile] so two device switches — or [start] racing [onActiveDeviceChanged] — can't
      *  interleave on the multi-threaded [scope] (Dispatchers.IO is a pool) and leak a half-torn-down live
@@ -201,7 +204,12 @@ class SourceCoordinator(
         // disconnect/never-connected republish: clear it so a later make-active can't wrongly match a stale
         // link, then fall through to the existing ignore.
         connectedWhoopAddress = address
-        if (address == null) return
+        if (address == null) {
+            val disconnectedId = connectedWhoopRegistryId
+            connectedWhoopRegistryId = null
+            if (disconnectedId != null) scope.launch { registry.touchLastSeen(disconnectedId) }
+            return
+        }
         scope.launch {
             val activeId = registry.activeDeviceId() ?: return@launch
             val devices = registry.all()
@@ -210,11 +218,17 @@ class SourceCoordinator(
 
             val existing = row.peripheralId
             when {
-                existing == null ->
+                existing == null -> {
                     // First connect for this WHOOP row → adopt the strap's stable identity (its address).
                     registry.setPeripheralId(activeId, address)
+                    connectedWhoopRegistryId = activeId
+                    registry.touchLastSeen(activeId)
+                }
                 existing.equals(address, ignoreCase = true) -> {
-                    // Already adopted this exact strap → nothing to do.
+                    // Already adopted this exact strap. Stamp only this real connection transition; high-
+                    // rate sample packets never pass through the coordinator.
+                    connectedWhoopRegistryId = activeId
+                    registry.touchLastSeen(activeId)
                 }
                 else ->
                     // A DIFFERENT strap connected under this WHOOP row. Never silently overwrite — that would

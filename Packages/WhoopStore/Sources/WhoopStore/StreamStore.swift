@@ -77,6 +77,24 @@ extension WhoopStore {
         }
     }
 
+    /// Create the legacy stream-owner row when it is missing without replacing identity that was
+    /// already learned from a real connection. Bootstrap uses this instead of a hard-coded upsert:
+    /// repeatedly opening the store must never turn an attested "WHOOP MG" back into "WHOOP 4.0".
+    /// Nil legacy fields may still be filled once; populated fields remain authoritative.
+    public func ensureDevice(id: String, mac: String?, name: String?) async throws {
+        let now = Int(Date().timeIntervalSince1970)
+        try syncWrite { db in
+            try db.execute(sql: """
+                INSERT INTO device (id, mac, name, firstSeen, lastSeen)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    mac = COALESCE(device.mac, excluded.mac),
+                    name = COALESCE(device.name, excluded.name),
+                    lastSeen = excluded.lastSeen
+                """, arguments: [id, mac, name, now, now])
+        }
+    }
+
     /// #423: persist decoded 5/MG raw-IMU offload buffers (one row per strap-second, packed i16 BLOB),
     /// then bound the table to the newest `retentionRows` for the device (rolling retention). Written from
     /// the deep-buffer capture seam, not the normal stream path, so it inserts directly (idempotent by ts).

@@ -7,6 +7,8 @@ Noop aims for **data ownership and useful independent equivalents**, not a
 pixel-for-pixel clone or a reproduction of WHOOP's proprietary formulas. Product
 names, membership tiers, hardware capabilities, and regional availability can
 change; the source links at the bottom are the reference point for this review.
+The cross-vendor measured/derived/regulatory comparison and completion gates live in
+[`COMPETITIVE_CAPABILITY_AUDIT.md`](COMPETITIVE_CAPABILITY_AUDIT.md).
 
 ## Status key
 
@@ -28,13 +30,14 @@ screens that depend on those signals.
 | **P0** | WHOOP 5/MG deep history and overnight inputs | Live HR works, but firmware-dependent sleep, motion, temperature, SpO₂, overnight R-R/HRV, and respiratory inputs remain incomplete. Scores cannot honestly fill a missing measurement. |
 | **P0** | Real-iPhone BLE validation | The Simulator verifies rendering and navigation, not CoreBluetooth. Bonding, background reconnect/offload, haptics, and overnight reliability need a physical iPhone and strap. |
 | **P0** | WHOOP 5/MG v9.3.1 hardware gate | Software backports and the exact physical validation checklist are tracked in [`UPSTREAM_V9_3_1_AUDIT.md`](UPSTREAM_V9_3_1_AUDIT.md); #1154 remains hardware-pending until that report is complete. |
+| **P0** | Cross-source capability and freshness contract | WHOOP, Oura, RingConn, Hume, Apple Health, and Health Connect expose different signals and delays. Each value must preserve source, measured/derived/imported class, event/receipt time, coverage, and explicit unsupported/stale states; a missing input must never become zero or an inferred sensor reading. |
 | **P1** | Full Strength Trainer | Imports and training volume exist; live sets/reps, exercise history and PRs, plans, muscle maps, and independently validated muscular-load logic do not. |
 | **P1** | Complete Sleep Planner | Sleep need/debt, schedules, wind-down reminders, and alarms exist in parts. Goal-based wake modes, In-the-Green behavior, richer planning, and time-zone flows remain incomplete. |
 | **P1** | Persistent, action-taking Coach and faster Journal entry | NOOP Coach is private/BYO-provider and useful, but does not yet keep user-managed long-term memory, initiate check-ins, mutate activities, build linked strength workouts, or turn free-form voice/text into journal rows. |
 | **P1** | Service integrations and complete restore | File imports are broad, but automatic Strava/two-way service sync is absent. Self-hosted sync v1 is an archive, not yet a full device-to-device restore with tombstones for every local dataset. |
 | **P1** | Weekly goals and plans | Weekly digest/reporting exists; a surfaced system for Sleep, Effort, steps, and strength goals does not. |
-| **P2** | Pregnancy coaching, public teams/leaderboards, and clinician services | Private friend summaries now exist on a self-hosted server, but public competition, team administration, and clinical services are separate product/service investments. |
-| **Research-only** | ECG/AFib classification and cuff-calibrated BP inference | These require validated MG acquisition, clinical governance, regional handling, and an independent regulatory path. Protocol clues are not a safe shipped medical feature. |
+| **P2** | Pregnancy trend companion, public teams/leaderboards, and clinician services | A private, opt-in educational pregnancy trend view can be built from user-entered dates and personal trends after clinical copy review. Risk assessment, diagnosis, fertility/contraception, public competition, team administration, and clinician services are separate product, safety, and regulatory investments. |
+| **Research-only** | ECG/AFib classification, cuff-calibrated BP inference, apnea, and fall response | These require the appropriate sensors and references, prospective hardware/clinical validation, governance, regional handling, and potentially an independent regulatory path. Protocol clues or a detector prototype are not safe shipped medical/emergency features. |
 
 ### Where NOOP is already ahead
 
@@ -84,13 +87,14 @@ screens that depend on those signals.
 | Haptic alarm and on-wrist cues | **Available / experimental by device** | Firmware alarm, breathing cues, interval cues, HR-zone coaching, and test haptics are supported where the decoded command path works. |
 | Weekly plans and goals | **Partial** | Weekly digest/reporting and several notification targets exist. NOOP does not yet expose one cohesive weekly Sleep, Effort, steps, and strength-goal planner. |
 | Activity editing and merging | **Partial** | Manual/detected sessions can be reviewed, edited, relabeled, dismissed, and deduplicated. The local suggestion detector merges only candidate fragments separated by **up to and including 5 minutes** before presenting one window, avoiding accidental combination of separate workouts. NOOP still does not match WHOOP's chat-driven add/edit/delete workflow, graph-scrubbing time trim, or server-trained/personalized activity processing. |
+| Fall detection / emergency response | **Not available** | Noop does not currently claim fall detection or emergency dispatch. An experimental classifier is not sufficient: physical staged-fall and hard-negative data, participant/device-held-out performance, cancellation and dispatch reliability, safety review, and platform/regulatory review are release gates. |
 
 ## Hormonal and clinical-adjacent features
 
 | WHOOP capability | Noop status | What Noop does, and what it does not claim |
 |---|---|---|
 | Menstrual-cycle / hormonal insights | **Partial, opt-in** | Noop offers coarse on-device phase awareness and a probabilistic next-period window from temperature/history. It is awareness only: not contraception, fertility prediction, or diagnosis. |
-| Pregnancy coaching | **Not available** | Noop does not currently provide pregnancy-specific coaching or normative comparisons. |
+| Pregnancy coaching | **Not available; wellness companion feasible** | Noop does not currently provide pregnancy-specific coaching or normative comparisons. A future opt-in view may provide user-entered gestational context and personal seven-day trends with clinician-reviewed educational copy; it must not diagnose maternal/fetal conditions, predict complications, or delay care. |
 | Blood Pressure Insights | **Not available** | Blood-pressure values may be recorded manually in Lab Book, but Noop does not estimate daily systolic/diastolic pressure from the strap. |
 | ECG / Heart Screener | **Not available** | Protocol notes and experimental command identifiers are not a validated ECG feature. Noop does not display or interpret a diagnostic ECG. |
 | Irregular Heart Rhythm Notifications | **Not available** | R-R rhythm views are not atrial-fibrillation detection, an irregular-rhythm notification system, or a diagnosis. |

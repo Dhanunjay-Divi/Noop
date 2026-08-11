@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import WhoopProtocol
 
 /// Synchronous GRDB access to the device registry + day-ownership tables. Kept synchronous (its own
 /// queue) to mirror the existing store helpers; the app wraps it behind the WhoopStore actor / a
@@ -42,6 +43,16 @@ public struct DeviceRegistryStore: Sendable {
         }
     }
 
+    /// Refresh connection recency without changing device status or identity. Call this only on a real
+    /// connect/disconnect transition; live samples can arrive many times per second and must not turn the
+    /// registry into a write-amplification path.
+    public func touch(_ id: String, at unix: Int = Int(Date().timeIntervalSince1970)) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "UPDATE pairedDevice SET lastSeenAt = ? WHERE id = ?",
+                           arguments: [unix, id])
+        }
+    }
+
     public func archive(_ id: String) throws {
         try dbQueue.write { db in
             try db.execute(sql: "UPDATE pairedDevice SET status = 'archived' WHERE id = ?", arguments: [id])
@@ -57,18 +68,59 @@ public struct DeviceRegistryStore: Sendable {
     /// Update the model label for an existing device (e.g. seeded "WHOOP" → "WHOOP 4.0" once the
     /// strap's service family is known from a live BLE connect).
     public func setModel(_ id: String, model: String) throws {
+        try dbQueue.write { db in try Self.updateModel(db, id: id, model: model) }
+    }
+
+    /// Reconcile the active WHOOP row with identity evidence from the connection that is actually live.
+    ///
+    /// `attestedVariant == nil` means only the GATT family is known. That evidence repairs stale labels,
+    /// but preserves an existing exact label from the same family (an ordinary reconnect must not turn
+    /// "WHOOP MG" back into "WHOOP 5.0 / MG"). Passing `.unknown` means DIS evidence was absent or
+    /// contradictory and is deliberately a no-op. A positive DIS variant stores the exact model label.
+    /// Non-WHOOP active rows are never touched.
+    @discardableResult
+    public func reconcileActiveWhoopModel(
+        observedFamily: DeviceFamily,
+        attestedVariant: Whoop5Variant? = nil
+    ) throws -> Bool {
         try dbQueue.write { db in
-            // A model attestation also repairs the seeded WHOOP's capability truth. This is important
-            // for a 5/MG: only after generation is known can the live `steps` capability be advertised.
-            let capabilities = WhoopLiveCapabilities.encoded(forModel: model)
+            guard let row = try Row.fetchOne(
+                db,
+                sql: "SELECT * FROM pairedDevice WHERE status = 'active' LIMIT 1"
+            ) else { return false }
+
+            let active = Self.decode(row)
+            guard Self.isWhoop(active) else { return false }
+
+            let target: String
+            if let attestedVariant {
+                // DIS is only meaningful on the 5-generation transport. Refuse a cross-family or
+                // unknown/contradictory result instead of choosing a convenient label.
+                guard observedFamily == .whoop5,
+                      let exact = attestedVariant.registryModelLabel else { return false }
+                target = exact
+            } else {
+                // The existing label is already exact/vague for the observed family: preserve it.
+                // This is what prevents a later GATT reconnect from downgrading WHOOP MG to 5.0 / MG.
+                target = DeviceFamily.identifiedRegistryModel(active.model) == observedFamily
+                    ? active.model : observedFamily.registryModelLabel
+            }
+
+            var changed = false
+            if active.model != target {
+                try Self.updateModel(db, id: active.id, model: target)
+                changed = true
+            }
+            // `device` is the legacy stream-owner table used by older reads/exports. Keep the row for
+            // THIS attested WHOOP in lockstep with the canonical registry inside the same transaction;
+            // otherwise a real MG can remain labelled 4.0 there forever. The active-row `isWhoop` guard
+            // above is load-bearing: no non-WHOOP brand or different device id is eligible.
             try db.execute(sql: """
-                UPDATE pairedDevice SET model = ?,
-                    capabilities = CASE
-                        WHEN brand = 'WHOOP' OR id = 'my-whoop' OR id LIKE 'whoop-%' THEN ?
-                        ELSE capabilities
-                    END
-                WHERE id = ?
-                """, arguments: [model, capabilities, id])
+                UPDATE device SET name = ?
+                WHERE id = ? AND (name IS NULL OR name <> ?)
+                """, arguments: [target, active.id, target])
+            changed = changed || db.changesCount > 0
+            return changed
         }
     }
 
@@ -154,6 +206,26 @@ public struct DeviceRegistryStore: Sendable {
     }
 
     // MARK: mapping
+    private static func isWhoop(_ device: PairedDevice) -> Bool {
+        device.brand.caseInsensitiveCompare("WHOOP") == .orderedSame
+            || device.id == "my-whoop"
+            || device.id.lowercased().hasPrefix("whoop-")
+    }
+
+    private static func updateModel(_ db: Database, id: String, model: String) throws {
+        // A model attestation also repairs the seeded WHOOP's capability truth. This is important
+        // for a 5/MG: only after generation is known can the live `steps` capability be advertised.
+        let capabilities = WhoopLiveCapabilities.encoded(forModel: model)
+        try db.execute(sql: """
+            UPDATE pairedDevice SET model = ?,
+                capabilities = CASE
+                    WHEN brand = 'WHOOP' OR id = 'my-whoop' OR id LIKE 'whoop-%' THEN ?
+                    ELSE capabilities
+                END
+            WHERE id = ?
+            """, arguments: [model, capabilities, id])
+    }
+
     private static func upsert(_ db: Database, _ d: PairedDevice) throws {
         try db.execute(sql: """
             INSERT INTO pairedDevice (id, brand, model, nickname, peripheralId, sourceKind, capabilities, status, addedAt, lastSeenAt)

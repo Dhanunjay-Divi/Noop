@@ -1,6 +1,7 @@
 package com.noop.data
 
 import android.content.Context
+import androidx.room.withTransaction
 import com.noop.protocol.DroppedRtcEvent
 import com.noop.protocol.RrSourceChannel
 import kotlinx.coroutines.flow.Flow
@@ -222,9 +223,18 @@ object HistoryHeal {
  * Reads.swift, MetricsCache.swift) , the phone does NO metric computation here; daily/sleep
  * rows are an offline cache of server-computed values.
  */
-class WhoopRepository(private val dao: WhoopDao) {
+class WhoopRepository private constructor(
+    private val dao: WhoopDao,
+    /** Production wraps Room; DAO-only unit-test fixtures use a pass-through boundary. */
+    private val identityTransactor: suspend (block: suspend () -> Unit) -> Unit,
+) {
 
-    constructor(db: WhoopDatabase) : this(db.whoopDao())
+    constructor(dao: WhoopDao) : this(dao, { block -> block() })
+
+    constructor(db: WhoopDatabase) : this(
+        db.whoopDao(),
+        { block -> db.withTransaction { block() } },
+    )
 
     // MARK: - Device
 
@@ -243,8 +253,16 @@ class WhoopRepository(private val dao: WhoopDao) {
         )
     }
 
-    /** #716: update the model label for the seeded device once the BLE family is known. */
-    suspend fun setDeviceModel(id: String, model: String) = dao.setModel(id, model)
+    /** Atomically reconcile the paired model and matching legacy device name once BLE identity is known. */
+    suspend fun reconcileDeviceIdentity(id: String, model: String) {
+        identityTransactor {
+            dao.setModel(id, model)
+            dao.setLegacyDeviceName(id, model)
+        }
+    }
+
+    /** Compatibility spelling; retains the cross-table atomic identity contract. */
+    suspend fun setDeviceModel(id: String, model: String) = reconcileDeviceIdentity(id, model)
 
     /** #716: read all paired devices (thin pass-through for the BLE scan fix). */
     suspend fun pairedDevices(): List<PairedDeviceRow> = dao.pairedDevices()

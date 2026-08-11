@@ -36,6 +36,8 @@ class RegistryModelFamilyTest {
         // "WHOOP 5.0 / MG"); it lands on the safe WHOOP5 default, which happens to be correct.
         assertEquals(DeviceFamily.WHOOP5, DeviceFamily.forRegistryModel("WHOOP 5.0 MG"))
         assertEquals(DeviceFamily.WHOOP5, DeviceFamily.forRegistryModel("WHOOP 5.0 / MG"))
+        assertEquals(DeviceFamily.WHOOP5, DeviceFamily.forRegistryModel("WHOOP 5.0"))
+        assertEquals(DeviceFamily.WHOOP5, DeviceFamily.forRegistryModel("WHOOP MG"))
     }
 
     // ── Legacy + unknowns — the prior WHOOP5 fallback, unchanged ────────────

@@ -52,6 +52,28 @@ final class InsertTests: XCTestCase {
         XCTAssertEqual(row?.name, "second")
     }
 
+    func testEnsureDeviceNeverClobbersLearnedIdentity() async throws {
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertDevice(id: "my-whoop", mac: "stable-id", name: "WHOOP MG")
+
+        try await store.ensureDevice(id: "my-whoop", mac: nil, name: "WHOOP 4.0")
+
+        let row = try await store.deviceRowForTest(id: "my-whoop")
+        XCTAssertEqual(row?.mac, "stable-id")
+        XCTAssertEqual(row?.name, "WHOOP MG")
+    }
+
+    func testEnsureDeviceSeedsMissingFields() async throws {
+        let store = try await WhoopStore.inMemory()
+        try await store.upsertDevice(id: "my-whoop", mac: nil, name: nil)
+
+        try await store.ensureDevice(id: "my-whoop", mac: "stable-id", name: "WHOOP 5.0 / MG")
+
+        let row = try await store.deviceRowForTest(id: "my-whoop")
+        XCTAssertEqual(row?.mac, "stable-id")
+        XCTAssertEqual(row?.name, "WHOOP 5.0 / MG")
+    }
+
     func testTwoDevicesAreIndependent() async throws {
         let store = try await WhoopStore.inMemory()
         try await store.upsertDevice(id: "a", mac: nil, name: nil)

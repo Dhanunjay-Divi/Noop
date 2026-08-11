@@ -25,10 +25,20 @@ final class RegistryModelFamilyTests: XCTestCase {
 
     func testWizard5MgLabelResolvesToWhoop5() {
         XCTAssertEqual(DeviceFamily.forRegistryModel("5.0 MG"), .whoop5)
-        // "WHOOP 5.0 MG" is a spelling no writer produces today (the picker writes
-        // "WHOOP 5.0 / MG"); it lands on the safe .whoop5 default, which happens to be correct.
         XCTAssertEqual(DeviceFamily.forRegistryModel("WHOOP 5.0 MG"), .whoop5)
         XCTAssertEqual(DeviceFamily.forRegistryModel("WHOOP 5.0 / MG"), .whoop5)
+    }
+
+    func testExactPostAttestationLabelsResolveToWhoop5() {
+        XCTAssertEqual(DeviceFamily.identifiedRegistryModel("WHOOP MG"), .whoop5)
+        XCTAssertEqual(DeviceFamily.identifiedRegistryModel("WHOOP 5.0"), .whoop5)
+        XCTAssertEqual(DeviceFamily.forRegistryModel("WHOOP MG"), .whoop5)
+        XCTAssertEqual(DeviceFamily.forRegistryModel("WHOOP 5.0"), .whoop5)
+    }
+
+    func testWhitespaceAndSlashVariantsNormalize() {
+        XCTAssertEqual(DeviceFamily.identifiedRegistryModel("  whoop   5.0/MG  "), .whoop5)
+        XCTAssertEqual(DeviceFamily.identifiedRegistryModel(" whoop 4.0 "), .whoop4)
     }
 
     // MARK: - Legacy + unknowns — the prior .whoop5 fallback, unchanged
@@ -36,6 +46,7 @@ final class RegistryModelFamilyTests: XCTestCase {
     /// The seeded "my-whoop" row predates the wizard and was written identically for 4.0 and 5/MG
     /// installs, so "WHOOP" carries no family information; it keeps the prior fallback.
     func testLegacySeededWhoopLabelKeepsWhoop5Fallback() {
+        XCTAssertNil(DeviceFamily.identifiedRegistryModel("WHOOP"))
         XCTAssertEqual(DeviceFamily.forRegistryModel("WHOOP"), .whoop5)
     }
 
@@ -44,5 +55,10 @@ final class RegistryModelFamilyTests: XCTestCase {
         XCTAssertEqual(DeviceFamily.forRegistryModel(""), .whoop5)
         XCTAssertEqual(DeviceFamily.forRegistryModel("Oura Ring Gen3"), .whoop5)
         XCTAssertEqual(DeviceFamily.forRegistryModel("garmin-hrm"), .whoop5)
+    }
+
+    func testCanonicalGattLabelsStayVagueUntilVariantAttestation() {
+        XCTAssertEqual(DeviceFamily.whoop4.registryModelLabel, "WHOOP 4.0")
+        XCTAssertEqual(DeviceFamily.whoop5.registryModelLabel, "WHOOP 5.0 / MG")
     }
 }

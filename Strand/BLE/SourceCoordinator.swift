@@ -435,12 +435,18 @@ final class SourceCoordinator: ObservableObject {
         // Track the live strap's uuid for the WHOOP->WHOOP adopt-in-place skip (#74). nil is a
         // disconnect/never-connected republish: clear it so a later make-active can't wrongly match a stale
         // link, then fall through to the existing ignore.
+        let previousUuid = connectedWhoopUuid
         connectedWhoopUuid = uuid
-        guard let uuid else { return }
 
         let activeId = registry.activeDeviceId
         guard isWhoop(activeId),
               let device = registry.devices.first(where: { $0.id == activeId }) else { return }
+
+        // Connection recency is a transition fact, not a sample counter. Touch once when a link comes up
+        // or goes down; repeated publisher values were already collapsed by removeDuplicates().
+        if previousUuid != uuid, uuid != nil || previousUuid != nil { registry.touch(activeId) }
+
+        guard let uuid else { return }
 
         switch device.peripheralId {
         case .none:

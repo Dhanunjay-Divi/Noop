@@ -27,6 +27,7 @@ import com.noop.data.DailyMetric
 import com.noop.location.GpsSession
 import com.noop.location.LocationTracker
 import com.noop.notif.BatteryAlertNotifier
+import com.noop.notif.HydrationReminderDelivery
 import com.noop.notif.IllnessAlertNotifier
 import com.noop.ui.NoopPrefs
 import com.noop.ui.appLaunchIntent
@@ -108,6 +109,11 @@ class WhoopConnectionService : Service() {
      *  more often than the strap's ~8-min battery cadence; gating the Room read + estimator fit on an
      *  actual SoC change keeps the predictive path as cheap as the SoC-only alert beside it. */
     private var lastRuntimeEvalPct: Int? = null
+
+    /** Last live-HR packet considered by the hydration haptic lane. The policy has its own persisted
+     * slot de-dup; this sequence guard additionally proves the call came from a NEW packet rather than
+     * a recompute of the combined day flow or a cached HR value. */
+    private var lastHydrationLiveSequence: Long = 0L
 
     /** Smart-alarm light-sleep watcher (#207). Feeds the live HR while we're inside the wake window
      *  and, on a lighter-phase reading, advances the GUARANTEED alarm earlier. It can only ever move
@@ -281,6 +287,19 @@ class WhoopConnectionService : Service() {
                             charging = state.charging,
                         )
                     }
+                }
+                if (state.heartRateSampleSequence > 0L &&
+                    state.heartRateSampleSequence != lastHydrationLiveSequence
+                ) {
+                    lastHydrationLiveSequence = state.heartRateSampleSequence
+                    // This is intentionally evaluated on a fresh live packet. The delivery policy also
+                    // requires connected + bonded + encrypted + worn, the independent opt-in, and the
+                    // global wrist-alert master before it can issue a one-loop WHOOP cue.
+                    HydrationReminderDelivery.maybeBuzzOnFreshWhoopSample(
+                        context = this@WhoopConnectionService,
+                        state = state,
+                        buzz = ble::buzz,
+                    )
                 }
                 // Feed the home-screen widget from the same stream — this service is its heartbeat
                 // while the app UI is closed. Throttled + no-op without a placed widget (the store

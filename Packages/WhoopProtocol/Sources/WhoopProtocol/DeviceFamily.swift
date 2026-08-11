@@ -135,6 +135,42 @@ public func whoopGattScanDecision(
 }
 
 public extension DeviceFamily {
+    /// Canonical registry label for a family known from its GATT service alone. A WHOOP 5-generation
+    /// service cannot distinguish MG from plain 5.0, so that family deliberately keeps the vague label
+    /// until Device Information Service attestation supplies positive variant evidence.
+    var registryModelLabel: String {
+        switch self {
+        case .whoop4: return "WHOOP 4.0"
+        case .whoop5: return "WHOOP 5.0 / MG"
+        }
+    }
+
+    /// Positively identify a registry model label without applying the historical fallback.
+    ///
+    /// This accepts every spelling written by old and current clients, plus the exact post-DIS labels
+    /// ("WHOOP 5.0" and "WHOOP MG"). A bare "WHOOP" is intentionally nil: it predates generation
+    /// tracking and carries no identity evidence. Callers that need legacy decode behaviour should use
+    /// `forRegistryModel`, while capability and reconciliation code should use this fail-closed resolver.
+    static func identifiedRegistryModel(_ model: String?) -> DeviceFamily? {
+        guard let model else { return nil }
+        let normalized = model
+            .uppercased()
+            .replacingOccurrences(of: "/", with: " ")
+            .split(whereSeparator: \Character.isWhitespace)
+            .joined(separator: " ")
+
+        switch normalized {
+        case "4.0", "WHOOP 4.0":
+            return .whoop4
+        case "5.0", "WHOOP 5.0",
+             "MG", "WHOOP MG",
+             "5.0 MG", "WHOOP 5.0 MG":
+            return .whoop5
+        default:
+            return nil
+        }
+    }
+
     /// Resolve a device-registry `model` label to the strap family that wrote its rows (#171).
     ///
     /// The registry holds several historical spellings for the same hardware: the Add-Device wizard
@@ -148,10 +184,7 @@ public extension DeviceFamily {
     /// labels (non-WHOOP imports whose skin temp is already °C) — only a positively-identified 4.0
     /// changes scale (#938). Mirrors the Kotlin `DeviceFamily.forRegistryModel`.
     static func forRegistryModel(_ model: String?) -> DeviceFamily {
-        switch model {
-        case "4.0", "WHOOP 4.0": return .whoop4
-        default: return .whoop5
-        }
+        identifiedRegistryModel(model) ?? .whoop5
     }
 
     /// The header-CRC algorithm this family uses. This is the single switch that the family-aware

@@ -1,20 +1,74 @@
-# NOOP v5 — "Rhythm" experimental irregular-rhythm screening — design
+# NOOP v5 — "Rhythm" experimental regularity visualization and held screening design
 
-**Pillar:** Rhythm screening (FRONTIER — ships clearly-EXPERIMENTAL + opt-in, or is held; see §11).
-**Status:** Design only. NOT approved. NOT built. Highest-liability feature NOOP has ever scoped.
+**Pillar:** Beat-to-beat regularity visualization (implemented, experimental, opt-in) with a separate
+irregular-rhythm screening proposal that remains held; see §0 and §11.
+**Status:** Partially implemented. The deterministic Swift/Kotlin regularity engine, tests, consent
+gate, and opt-in Poincaré visualization exist. No AFib/arrhythmia classifier, rhythm alert,
+persistence-backed medical screen, diagnostic output, or clinical claim is shipped.
 **Date:** 2026-06-19.
-**Engine:** new `RhythmScreener` in `Packages/StrandAnalytics` + Kotlin twin `RhythmScreener.kt`.
+**Last status audit:** 2026-08-11.
+**Engine:** `RhythmScreener` in `Packages/StrandAnalytics` + Kotlin twin `RhythmScreener.kt`.
 **Reuses:** `HRVAnalyzer` (ectopic rejection), the R-R stream (`RRInterval`), raw PPG (`SpO2Sample` red/IR),
 accelerometer (`GravitySample`), `PpgHr` autocorrelation, `ScoreConfidence` pattern.
 
-> **One-line honest summary of what this is:** a wellness heads-up that says *"your beat-to-beat
-> rhythm looked irregular during this quiet window — that is often nothing, but if it keeps happening
-> you may want to mention it to a clinician."* It is **not** an ECG, **not** AFib detection, **not** a
-> diagnosis, **not** a medical device. It cannot tell you *why* a rhythm looked irregular.
+> **Current one-line summary:** the repository currently implements only an opt-in, on-device visualization of
+> beat-to-beat timing and neutral labels such as *looked steady*, *some variation*, or *varied more
+> than usual*. It is **not** an ECG, **not** AFib detection, **not** an alert, **not** a diagnosis, and
+> **not** a medical device. It cannot determine whether a heart condition is present or absent.
+
+> **Historical-design note:** Sections 1–10 preserve the original screening proposal so its reasoning,
+> rejected scope, and safety constraints remain reviewable. Future-tense statements in those sections
+> are proposals, not descriptions of shipped behavior. Section 0 records what the repository actually
+> implements today; §11 records the current hold decision and gates.
+
+---
+
+## 0. Current implementation status (repository audit)
+
+### Implemented now
+
+- A pure, deterministic Swift `RhythmScreener` and Kotlin twin compute Poincaré points, SD1/SD2,
+  normalized RMSSD, turning-point rate, ectopic-filter fraction, signal-quality gates, confidence, and
+  neutral regularity labels. Synthetic Swift and Kotlin tests cover the same behavior.
+- SwiftUI and Android Compose screens provide an **experimental, opt-in Poincaré visualization** behind
+  a versioned, un-pre-checked consent gate that defaults OFF. User-facing copy expressly says the view
+  is not an ECG, diagnosis, condition detector, or substitute for professional care.
+- The Apple-platform `RhythmHost` reads already-banked R-R and gravity samples from the most recent
+  sleep session, forms quiet five-minute windows, runs the pure engine in memory, and supplies the
+  results to the visualization after consent.
+- `summarizeNight` performs a descriptive in-memory count of readable/steady/occasional/varied windows.
+  Its `variationRecurred` value exists only to describe the visualization; it does not trigger a
+  notification, medical conclusion, or care recommendation.
+
+### Not implemented or shipped
+
+- No AFib, atrial-fibrillation, arrhythmia, PVC, or other condition classifier; no condition
+  probability; no ECG-equivalent interpretation; and no clinical claim.
+- No rhythm push notification, morning heads-up, alarm, emergency triage, clinician recommendation,
+  or other alert path.
+- No `rhythmWindow` database table, retained rhythm-result history, background `RhythmService`, or
+  persistence-based screening decision. Reopening the visualization recomputes from available source
+  rows rather than reading a stored medical-screen result.
+- No clinically calibrated or validated threshold set, sensitivity/specificity evidence, labeled
+  patient-data validation, regulatory authorization, or production medical-device quality system.
+- No shipped PPG peak-to-peak IBI extractor or live rhythm check. The engine can compare an optional
+  precomputed PPG-IBI series, but the current host does not create or supply that series.
+- Android has the consent-gated visualization surface and engine, but its current navigation wiring
+  supplies an empty night/window result set; a populated Android capture/orchestration pipeline is not
+  complete.
+- No rhythm PDF/CSV clinician export.
+
+The implemented feature is therefore a **wellness visualization**, not a rhythm-screening product.
+Terms such as `screenWindow`, `RhythmScreener`, threshold names, and synthetic “AFib-like” test-fixture
+comments are internal/historical engineering vocabulary; they do not establish a clinical capability.
 
 ---
 
 ## 1. Goal & differentiation (why only NOOP)
+
+> **Historical proposal:** This section explains the motivation originally considered for a future
+> screening heads-up. The current product does not make the heads-up or competitor-equivalence claims
+> below.
 
 WHOOP gates its on-demand **ECG / "Irregular Heart Rhythm Notifications" (IHRN)** to the **MG**
 hardware on the top **$359/yr** membership tier. Apple/Samsung gate AFib features to specific watches
@@ -59,14 +113,16 @@ care, and structurally prone to false positives (motion, ectopy, a wandering opt
 | **Ectopic rejection** | `HRVAnalyzer.rejectEctopic` (Malik 20% local-median), `rangeFilter` [300,2000] ms. | We **invert** part of this: HRV throws ectopics away; Rhythm *counts* them — but reuses the exact same range filter and the median helper. |
 | **Confidence tiering** | `ScoreConfidence` (calibrating/building/solid) pattern. | A near-identical `RhythmConfidence` rides every screen result. |
 
-### New (small, additive — no protocol changes)
+### Originally proposed additions (historical — implementation differs)
 - A **`RhythmScreener`** engine (Swift + Kotlin twin) computing the irregularity statistics in §3.
 - A **`RhythmWindowResult`** row type and an opt-in store table `rhythmWindow` (mirrors existing
   `MetricSeriesStore` style) so the (very sparse) flagged windows can be reviewed. **Default: nothing
   is computed or stored until the user opts in and passes the consent gate (§9).**
 - One settings flag (`noopRhythmScreening`, default **OFF**), gated behind a one-time consent screen.
 
-No firmware writes, no new BLE commands, no cloud. Everything rides signals NOOP already decodes.
+The engine and visualization now exist, but the proposed `rhythmWindow` persistence, background
+service, alerts, and screening verdict do not. There are no rhythm-specific firmware writes, BLE
+commands, or cloud transfers in the current implementation.
 
 ---
 
@@ -147,7 +203,10 @@ channel on 4.0:
 
 ---
 
-## 4. Architecture & files (engine + Kotlin twin + UI)
+## 4. Architecture & files (historical proposal plus implemented subset)
+
+> The engine/twin and opt-in visualization described here were implemented with deliberately neutral
+> `RhythmRegularity` labels. The storage and service subsections remain unimplemented proposals.
 
 ### Shared Swift engine (serves mac + iOS)
 `Packages/StrandAnalytics/Sources/StrandAnalytics/RhythmScreener.swift` — **pure, Foundation-only,
@@ -182,12 +241,12 @@ public enum RhythmConfidence: String, Codable, Sendable { case calibrating, buil
 - All thresholds are named `static let` constants at the top (`tauRatio`, `tauNRmssd`, `tauTP`,
   `windowMinBeats`, `nightMinIrregularWindows`, …) so they are testable and tunable in one place.
 
-### Storage (opt-in, sparse)
+### Storage (historical proposal; not implemented)
 - New `rhythmWindow` table via `WhoopStore` migration (id, deviceId, windowStart, windowEnd, state,
   stats blob, confidence). Follows `MetricSeriesStore` conventions. **Only written when the feature is
   ON.** A short retention/prune policy (these are tiny + rare).
 
-### Orchestration
+### Orchestration (historical proposal; only the in-memory Apple host exists)
 - A `RhythmService` (app layer, not the package) assembles resting windows from `Reads.rrIntervals`,
   `spo2`, and `gravity` over a completed sleep window (post-offload, same hook as nightly scoring), runs
   the engine, persists results, and decides whether `summarizeNight` warrants a single morning card.
@@ -223,7 +282,11 @@ needs a hand-port; verify iOS centrally):
 
 ---
 
-## 6. UX (screens / flows, honest + skimmable)
+## 6. UX (historical proposal; only the consent-gated visualization is implemented)
+
+> Current UI scope is the opt-in Poincaré visualization, neutral descriptive statistics, confidence,
+> methodology, and permanent non-diagnostic disclaimer. The morning card, clinician export, and live
+> check below are not shipped.
 
 **Entry point.** Settings → "Labs / Experimental" → **"Rhythm screening (experimental)"**, OFF by
 default. Tapping it opens the **consent gate** (§9) *before* anything computes.
@@ -380,7 +443,43 @@ Each phase ships OFF-by-default behind the consent gate; nothing auto-enables.
 
 ---
 
-## 11. Ship in v5, or hold? (recommendation)
+## 11. Ship or hold? (historical recommendation and current decision)
+
+### Current decision
+
+The recommendation below was followed at the safer boundary: **the engine, tests, consent gate, and
+neutral Poincaré visualization exist; the screening verdict remains held.** No single window or
+nightly summary can emit an alert, diagnose/classify AFib or another condition, recommend care, or
+persist a medical-screening result.
+
+Moving beyond the visualization requires a new, explicit maintainer go/no-go and all of these gates:
+
+1. **Intended-use and regulatory review:** define the exact claim, supported jurisdictions, age and
+   eligibility limits, contraindications, labeling, and whether the behavior is regulated medical
+   device software. Disclaimers alone are not clearance.
+2. **Clinical validation:** freeze the algorithm and thresholds, then evaluate representative labeled
+   datasets and prospective real-device recordings against an appropriate clinical reference. Report
+   sensitivity, specificity, PPV/NPV, subgroup performance, unreadable rate, and confidence intervals.
+   Synthetic fixtures prove deterministic software behavior only; they do not prove clinical validity.
+3. **Acquisition validation:** verify WHOOP 4/5/MG R-R fidelity, timestamp integrity, motion/contact
+   rejection, missingness, firmware variation, and—if used—PPG-derived IBI accuracy on supported
+   devices. Define fail-closed quality thresholds.
+4. **Persistence and alert safety:** design and test the still-unbuilt retained-window store,
+   deletion/retention controls, background orchestration, sustained/non-contiguous persistence rule,
+   rate limits, suppression rules, and complete proof that one noisy window cannot alert.
+5. **Human-factors and clinical-copy review:** validate comprehension of consent, false-positive and
+   false-negative risk, the meaning of a regular result, escalation language, accessibility, and
+   anxiety/over-reassurance risks. A qualified reviewer must approve every clinical-adjacent string.
+6. **Privacy and security review:** threat-model sensitive heartbeat data, minimize retention, protect
+   exports/backups, provide deletion controls, and document all data flows.
+7. **Cross-platform and release evidence:** populate and validate the Android pipeline, run parity and
+   safety-copy tests, complete real-device matrix testing, and retain traceable test evidence for the
+   exact released build.
+
+Until every applicable gate is complete, the release boundary remains: **opt-in descriptive
+visualization only; no classifier, no alert, no persisted medical screen, and no clinical claim.**
+
+### Historical recommendation
 
 **Recommendation: HOLD the *notification/screening verdict* for v5; ship at most a clearly-labelled
 "Beat-to-beat regularity (experimental)" *visualization* — the Poincaré plot + descriptive stats with
@@ -405,10 +504,10 @@ screening verdict behind an explicit the maintainer go/no-go and the full consen
 
 ---
 
-## 12. Open questions
+## 12. Open questions and resolved decisions
 
-1. **Ship the screening verdict in v5 at all, or only the visualization?** (§11 — the maintainer's call; this is
-   the central decision.)
+1. **Resolved for the current repository:** only the visualization is implemented; the screening
+   verdict is held. Reopening this decision requires every applicable gate in §11.
 2. **Threshold tuning without clinical data.** We can only tune τ on *synthetic* fixtures and self-tracked
    normal data — we have no labelled AFib recordings and won't acquire any. Is synthetic-only tuning an
    acceptable basis even for an explicitly experimental feature, and how conservative do we set defaults?

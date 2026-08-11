@@ -1,0 +1,22 @@
+name: Health claims safety gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  health_claims:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          persist-credentials: false
+      - name: Test the health-claims gate
+        run: python3 -m unittest Tools.tests.test_health_claims_gate
+      - name: Reject unsupported health and delivery claims
+        run: python3 Tools/health_claims_gate.py

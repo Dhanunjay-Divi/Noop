@@ -30,6 +30,7 @@
   <a href="https://www.reddit.com/r/NoopBand/">👽&nbsp;Reddit</a> ·
   <a href="#features">Features</a> ·
   <a href="docs/FEATURE_PARITY.md">WHOOP comparison</a> ·
+  <a href="docs/COMPETITIVE_CAPABILITY_AUDIT.md">Wearable audit</a> ·
   <a href="docs/PROTOCOL.md">Protocol</a> ·
 </p>
 
@@ -676,6 +677,8 @@ That's it — copy away.
 - [`DISCLAIMER.md`](DISCLAIMER.md) — trademark, interoperability, and medical/legal notice.
 - [`ATTRIBUTION.md`](ATTRIBUTION.md) — full credits and licensing notes.
 - [`docs/FEATURE_PARITY.md`](docs/FEATURE_PARITY.md) — honest WHOOP capability comparison, gaps, and parallel-reference workflow.
+- [`docs/COMPETITIVE_CAPABILITY_AUDIT.md`](docs/COMPETITIVE_CAPABILITY_AUDIT.md) — measured-versus-derived comparison for WHOOP, Oura, RingConn, and Hume, with evidence and release gates.
+- [`docs/DEVICE_SUPPORT_ROADMAP.md`](docs/DEVICE_SUPPORT_ROADMAP.md) — source-by-source live, platform-bridge, and owner-import support boundaries.
 - [`server/README.md`](server/README.md) — deploy, secure, back up, export, and operate the optional self-hosted service.
 - [`server/FRIENDS.md`](server/FRIENDS.md) — invitation, member-token, per-friend visibility, and feed projection contract.
 - [`project.yml`](project.yml) — XcodeGen project definition (source of `Strand.xcodeproj`).

@@ -12,9 +12,9 @@ package com.noop.protocol
  * Pure: no Android, no I/O. Faithful twin of WhoopProtocol/Whoop5Variant.swift — keep them
  * byte-identical (same resolution order, same unknown-over-guess rule).
  *
- * Provenance: the serial prefixes and the 5.0 hardware-revision string are protocol FACTS
- * (uncopyrightable), corroborated by community reverse-engineering discussed in #520. They are read
- * from the standard BLE Device Information Service, not from any WHOOP code.
+ * Provenance: these serial prefixes and hardware-revision tokens are protocol facts read from the
+ * standard BLE Device Information Service. `MGB` + `WS50_r03` are additionally attested by the user's
+ * physical WHOOP Life/MG; independent community hardware mapping identifies WS50 as MG and WG50 as 5.0.
  */
 enum class Whoop5Variant(val label: String) {
     /** WHOOP MG — has the ECG-conductive clasp. */
@@ -28,14 +28,15 @@ enum class Whoop5Variant(val label: String) {
     val isMG: Boolean get() = this == MG
 
     companion object {
-        /** Serial prefix attesting an MG (BLE DIS Serial Number String, 0x2A25). */
-        const val MG_SERIAL_PREFIX = "5AM"
+        /** Current serial prefix attesting an MG (BLE DIS Serial Number String, 0x2A25). */
+        const val MG_SERIAL_PREFIX = "MGB"
+        /** Legacy MG serial prefix retained for already-shipped hardware. */
+        const val LEGACY_MG_SERIAL_PREFIX = "5AM"
         /** Serial prefix attesting a plain 5.0. */
         const val FIVE_ZERO_SERIAL_PREFIX = "5AG"
-        /**
-         * Observed 5.0 Hardware Revision String (0x2A27), e.g. "WG50_r52". The MG's own
-         * hardware-revision string is NOT yet attested on real hardware, so its absence proves nothing.
-         */
+        /** MG Hardware Revision String token (0x2A27), e.g. `WS50_r03`. */
+        const val MG_HARDWARE_ID_TOKEN = "WS50"
+        /** Plain 5.0 Hardware Revision String token, e.g. `WG50_r52`. */
         const val FIVE_ZERO_HARDWARE_ID_TOKEN = "WG50"
 
         /**
@@ -44,28 +45,40 @@ enum class Whoop5Variant(val label: String) {
          * [serial] is the DIS Serial Number String (0x2A25) or the advertised name (a leading
          * "WHOOP " is tolerated). [hardwareRevision] is the DIS Hardware Revision String (0x2A27).
          *
-         * Resolution order, and why:
-         *  1. Both present and CONTRADICTORY (hw says 5.0, serial says MG) -> [UNKNOWN]. Only the
-         *     5.0 hardware string is attested today, so a contradiction means our model is
-         *     incomplete, not that one source wins. Mis-stamping hardware is what #716 cost us.
-         *  2. Hardware revision carrying the known 5.0 token -> [FIVE_ZERO] (device-attested).
-         *  3. Serial prefix -> [MG] / [FIVE_ZERO].
-         *  4. Anything else -> [UNKNOWN]. Never infer from a stray digit in the name (#772).
+         * Serial and hardware evidence are resolved independently. If both are known and disagree (or
+         * one hardware string contains both known tokens), the answer is [UNKNOWN]. Otherwise either
+         * positive signal may identify the variant. Anything unrecognised fails closed; a stray digit or
+         * product name is never treated as evidence (#772).
          */
         fun from(serial: String?, hardwareRevision: String? = null): Whoop5Variant {
-            val hw = (hardwareRevision ?: "").uppercase()
-            var s = (serial ?: "").uppercase().trim()
-            if (s.startsWith("WHOOP ")) s = s.removePrefix("WHOOP ")
-            s = s.trim()
+            var s = normalize(serial)
+            if (s.startsWith("WHOOP")) s = s.removePrefix("WHOOP")
+            val hw = normalize(hardwareRevision)
 
-            val hwSaysFiveZero = hw.contains(FIVE_ZERO_HARDWARE_ID_TOKEN)
-            val serialSaysMG = s.startsWith(MG_SERIAL_PREFIX)
+            val serialVariant = when {
+                s.startsWith(MG_SERIAL_PREFIX) || s.startsWith(LEGACY_MG_SERIAL_PREFIX) -> MG
+                s.startsWith(FIVE_ZERO_SERIAL_PREFIX) -> FIVE_ZERO
+                else -> null
+            }
 
-            if (hwSaysFiveZero && serialSaysMG) return UNKNOWN   // contradiction — do not guess
-            if (hwSaysFiveZero) return FIVE_ZERO
-            if (serialSaysMG) return MG
-            if (s.startsWith(FIVE_ZERO_SERIAL_PREFIX)) return FIVE_ZERO
-            return UNKNOWN
+            val hardwareSaysMg = hw.contains(MG_HARDWARE_ID_TOKEN)
+            val hardwareSaysFiveZero = hw.contains(FIVE_ZERO_HARDWARE_ID_TOKEN)
+            if (hardwareSaysMg && hardwareSaysFiveZero) return UNKNOWN
+            val hardwareVariant = when {
+                hardwareSaysMg -> MG
+                hardwareSaysFiveZero -> FIVE_ZERO
+                else -> null
+            }
+
+            if (serialVariant != null && hardwareVariant != null && serialVariant != hardwareVariant) {
+                return UNKNOWN
+            }
+            return hardwareVariant ?: serialVariant ?: UNKNOWN
         }
+
+        /** Case- and whitespace-insensitive evidence comparison; no punctuation/digit guessing. */
+        private fun normalize(value: String?): String = (value ?: "")
+            .uppercase()
+            .filterNot { it.isWhitespace() }
     }
 }

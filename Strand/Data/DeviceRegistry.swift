@@ -108,4 +108,11 @@ final class DeviceRegistry: ObservableObject {
         try? store.setModel(id, model: model)
         reload()
     }
+
+    /// Refresh the device's last-seen timestamp on a real connection edge. Kept separate from sample
+    /// ingestion so a high-rate heart-rate stream never writes the registry for every packet.
+    func touch(_ id: String, at unix: Int = Int(Date().timeIntervalSince1970)) {
+        try? store.touch(id, at: unix)
+        reload()
+    }
 }

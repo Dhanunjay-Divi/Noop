@@ -59,6 +59,110 @@ final class DeviceRegistryStoreTests: XCTestCase {
         XCTAssertFalse(device.capabilities.contains(.spo2))
     }
 
+    func testGattFamilyRepairsAnyStaleActiveWhoopModel() throws {
+        let store = DeviceRegistryStore(dbQueue: try makeDB())
+
+        try store.setModel("my-whoop", model: "WHOOP 4.0")
+        XCTAssertTrue(try store.reconcileActiveWhoopModel(observedFamily: .whoop5))
+        var device = try XCTUnwrap(store.all().first { $0.id == "my-whoop" })
+        XCTAssertEqual(device.model, "WHOOP 5.0 / MG")
+        XCTAssertTrue(device.capabilities.contains(.steps))
+
+        XCTAssertTrue(try store.reconcileActiveWhoopModel(observedFamily: .whoop4))
+        device = try XCTUnwrap(store.all().first { $0.id == "my-whoop" })
+        XCTAssertEqual(device.model, "WHOOP 4.0")
+        XCTAssertFalse(device.capabilities.contains(.steps))
+    }
+
+    func testPositiveDisAttestationStoresExactVariant() throws {
+        let store = DeviceRegistryStore(dbQueue: try makeDB())
+
+        _ = try store.reconcileActiveWhoopModel(observedFamily: .whoop5)
+        XCTAssertTrue(try store.reconcileActiveWhoopModel(
+            observedFamily: .whoop5, attestedVariant: .mg))
+        XCTAssertEqual(try store.all().first?.model, "WHOOP MG")
+
+        XCTAssertTrue(try store.reconcileActiveWhoopModel(
+            observedFamily: .whoop5, attestedVariant: .fiveZero))
+        XCTAssertEqual(try store.all().first?.model, "WHOOP 5.0")
+    }
+
+    func testPositiveIdentityReconciliationKeepsLegacyDeviceNameInSync() throws {
+        let dbq = try makeDB()
+        let store = DeviceRegistryStore(dbQueue: dbq)
+        try store.add(PairedDevice(id: "whoop-other", brand: "WHOOP", model: "WHOOP 4.0",
+                                   sourceKind: .liveBLE, capabilities: [.hr], status: .paired,
+                                   addedAt: 1, lastSeenAt: 1))
+        try store.add(PairedDevice(id: "polar-1", brand: "Polar", model: "H10",
+                                   sourceKind: .liveBLE, capabilities: [.hr], status: .paired,
+                                   addedAt: 1, lastSeenAt: 1))
+        try dbq.write { db in
+            for (id, name) in [
+                ("my-whoop", "WHOOP 4.0"),
+                ("whoop-other", "WHOOP 4.0"),
+                ("polar-1", "H10"),
+            ] {
+                try db.execute(sql: """
+                    INSERT INTO device (id, mac, name, firstSeen, lastSeen)
+                    VALUES (?, NULL, ?, 1, 1)
+                    """, arguments: [id, name])
+            }
+        }
+
+        XCTAssertTrue(try store.reconcileActiveWhoopModel(observedFamily: .whoop5))
+        XCTAssertTrue(try store.reconcileActiveWhoopModel(
+            observedFamily: .whoop5, attestedVariant: .mg))
+
+        // Also heal a pre-existing cross-table mismatch even when the canonical paired model is
+        // already exact (for example, an older build repaired pairedDevice but left device.name stale).
+        try dbq.write { db in
+            try db.execute(sql: "UPDATE device SET name = 'WHOOP 4.0' WHERE id = 'my-whoop'")
+        }
+        XCTAssertTrue(try store.reconcileActiveWhoopModel(
+            observedFamily: .whoop5, attestedVariant: .mg))
+
+        let registryModel = try store.all().first { $0.id == "my-whoop" }?.model
+        let legacyNames = try dbq.read { db in
+            try Dictionary(uniqueKeysWithValues: Row.fetchAll(
+                db, sql: "SELECT id, name FROM device"
+            ).map { row in (row["id"] as String, row["name"] as String) })
+        }
+        XCTAssertEqual(registryModel, "WHOOP MG")
+        XCTAssertEqual(legacyNames["my-whoop"], "WHOOP MG")
+        XCTAssertEqual(legacyNames["whoop-other"], "WHOOP 4.0")
+        XCTAssertEqual(legacyNames["polar-1"], "H10")
+    }
+
+    func testUnknownDisNeverMutatesAndGattDoesNotDowngradeExactVariant() throws {
+        let store = DeviceRegistryStore(dbQueue: try makeDB())
+        try store.setModel("my-whoop", model: "WHOOP MG")
+
+        XCTAssertFalse(try store.reconcileActiveWhoopModel(
+            observedFamily: .whoop5, attestedVariant: .unknown))
+        XCTAssertEqual(try store.all().first?.model, "WHOOP MG")
+
+        XCTAssertFalse(try store.reconcileActiveWhoopModel(observedFamily: .whoop5))
+        XCTAssertEqual(try store.all().first?.model, "WHOOP MG")
+    }
+
+    func testIdentityReconciliationNeverTouchesNonWhoopActiveDevice() throws {
+        let store = DeviceRegistryStore(dbQueue: try makeDB())
+        try store.add(PairedDevice(id: "polar-1", brand: "Polar", model: "H10", sourceKind: .liveBLE,
+                                   capabilities: [.hr, .hrv], status: .paired, addedAt: 1, lastSeenAt: 1))
+        try store.setActive("polar-1")
+
+        XCTAssertFalse(try store.reconcileActiveWhoopModel(observedFamily: .whoop5))
+        XCTAssertEqual(try store.all().first { $0.id == "polar-1" }?.model, "H10")
+    }
+
+    func testTouchRefreshesLastSeenWithoutChangingStatus() throws {
+        let store = DeviceRegistryStore(dbQueue: try makeDB())
+        try store.touch("my-whoop", at: 1_777_777_777)
+        let device = try XCTUnwrap(store.all().first { $0.id == "my-whoop" })
+        XCTAssertEqual(device.lastSeenAt, 1_777_777_777)
+        XCTAssertEqual(device.status, .active)
+    }
+
     func testPeripheralIdRoundTripsThroughAddAndAll() throws {
         let store = DeviceRegistryStore(dbQueue: try makeDB())
         let pid = "8E1A2B3C-4D5E-6F70-8192-A3B4C5D6E7F8"

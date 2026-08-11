@@ -36,6 +36,13 @@ struct AutomationsView: View {
     @State private var dailyReviewEnabled = DailyReviewNotifications.isEnabled
     @AppStorage(DailyReviewNotifications.morningMinutesKey) private var morningReviewMinutes = 8 * 60
     @AppStorage(DailyReviewNotifications.eveningMinutesKey) private var eveningReviewMinutes = 19 * 60
+    /// Hydration reminders are independent from manual water logging. Both remain opt-in, and changing
+    /// this schedule never rewrites an existing hydration total or the dashboard-card preference.
+    @State private var hydrationReminderEnabled = HydrationReminders.isEnabled
+    @AppStorage(HydrationReminders.intervalMinutesKey) private var hydrationIntervalMinutes = 120
+    @AppStorage(HydrationReminders.activeStartMinutesKey) private var hydrationStartMinutes = 8 * 60
+    @AppStorage(HydrationReminders.activeEndMinutesKey) private var hydrationEndMinutes = 21 * 60
+    @AppStorage(HydrationReminders.strapBuzzEnabledKey) private var hydrationStrapBuzzEnabled = false
     @State private var notificationPermissionDenied = false
     @State private var showNotificationPermissionAlert = false
     /// Inactivity reminder (#419) — UI-local store, persisted in UserDefaults. The buzz itself fires
@@ -58,6 +65,7 @@ struct AutomationsView: View {
                        // instead of constructing all eight/nine + their toggle subtrees up-front.
                        lazy: true) {
             dailyReviewCard
+            hydrationReminderCard
             #if os(iOS)
             wristAlertsCard
             #endif
@@ -75,13 +83,14 @@ struct AutomationsView: View {
         }
         .onAppear {
             dailyReviewEnabled = DailyReviewNotifications.isEnabled
+            hydrationReminderEnabled = HydrationReminders.isEnabled
             refreshNotificationPermissionState()
         }
         .alert("Notifications are off", isPresented: $showNotificationPermissionAlert) {
             Button("Open Settings") { openNotificationSettings() }
             Button("Not now", role: .cancel) {}
         } message: {
-            Text("Allow notifications in Settings to use morning and evening review reminders. NOOP still works normally without them.")
+            Text("Allow notifications in Settings to use optional review and water reminders. NOOP still works normally without them.")
         }
     }
 
@@ -204,6 +213,155 @@ struct AutomationsView: View {
         }
         .frame(minHeight: 42)
         .padding(.vertical, 4)
+    }
+
+    // MARK: - Hydration reminders
+
+    private var hydrationReminderCard: some View {
+        Section2(
+            icon: "drop.fill",
+            title: String(localized: "Water reminders"),
+            blurb: String(localized: "Gentle, optional prompts during your chosen hours. iOS schedules the phone reminders; a WHOOP buzz needs a fresh, worn and encrypted live connection."),
+            active: hydrationReminderEnabled
+        ) {
+            VStack(spacing: 0) {
+                ToggleRow(
+                    label: String(localized: "Remind me to drink water"),
+                    help: String(localized: "Off by default. Turning this on asks for notification access. Water logging remains a separate choice."),
+                    isOn: hydrationReminderToggle
+                )
+
+                if hydrationReminderEnabled {
+                    rowDivider
+                    stepperRow(
+                        label: String(localized: "Remind every"),
+                        help: String(localized: "A practical interval during your active window."),
+                        value: hydrationIntervalBinding,
+                        suffix: String(localized: "min"),
+                        range: 60...240,
+                        step: 30
+                    )
+                    rowDivider
+                    reviewTimeRow(
+                        label: String(localized: "Active from"),
+                        minutes: hydrationStartBinding
+                    )
+                    rowDivider
+                    reviewTimeRow(
+                        label: String(localized: "Active until"),
+                        minutes: hydrationEndBinding
+                    )
+                    rowDivider
+                    ToggleRow(
+                        label: String(localized: "Also buzz WHOOP"),
+                        help: String(localized: "Best effort only while NOOP has a fresh, worn, bonded and encrypted live connection. One short buzz; never a guaranteed background alert."),
+                        isOn: hydrationStrapBuzzToggle
+                    )
+                    if hydrationStrapBuzzEnabled && !notifMasterOn {
+                        rowDivider
+                        Text("Wrist alerts are off. Turn on the master switch below before WHOOP can buzz; phone reminders remain independent.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.statusWarning)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 6)
+                    }
+                    rowDivider
+                    #if os(iOS)
+                    Text("The phone notification may tap a paired Apple Watch according to your iPhone and Watch notification settings. NOOP does not bypass those controls.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                    #else
+                    Text("Reminder delivery follows your system notification settings. The WHOOP buzz is available only while NOOP is actively connected.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                    #endif
+                    Text("The active start is included and the end is excluded. Choose matching times for an all-day schedule.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                }
+            }
+        }
+    }
+
+    private var hydrationReminderToggle: Binding<Bool> {
+        Binding(
+            get: { hydrationReminderEnabled },
+            set: { on in
+                if !on {
+                    hydrationReminderEnabled = false
+                    HydrationReminders.setEnabled(false)
+                    return
+                }
+
+                hydrationReminderEnabled = true
+                HydrationReminders.setEnabled(true) { outcome in
+                    switch outcome {
+                    case .scheduled:
+                        hydrationReminderEnabled = true
+                        notificationPermissionDenied = false
+                    case .denied:
+                        hydrationReminderEnabled = false
+                        notificationPermissionDenied = true
+                        showNotificationPermissionAlert = true
+                    case .off:
+                        hydrationReminderEnabled = false
+                    }
+                }
+            }
+        )
+    }
+
+    private var hydrationIntervalBinding: Binding<Int> {
+        Binding(
+            get: { hydrationIntervalMinutes },
+            set: { value in
+                let clamped = HydrationReminders.clampedInterval(value)
+                hydrationIntervalMinutes = clamped
+                HydrationReminders.setIntervalMinutes(clamped)
+            }
+        )
+    }
+
+    private var hydrationStartBinding: Binding<Date> {
+        Binding(
+            get: { Self.date(fromMinutes: hydrationStartMinutes) },
+            set: { date in
+                let minutes = Self.minutes(from: date)
+                hydrationStartMinutes = minutes
+                HydrationReminders.setActiveStartMinutes(minutes)
+            }
+        )
+    }
+
+    private var hydrationEndBinding: Binding<Date> {
+        Binding(
+            get: { Self.date(fromMinutes: hydrationEndMinutes) },
+            set: { date in
+                let minutes = Self.minutes(from: date)
+                hydrationEndMinutes = minutes
+                HydrationReminders.setActiveEndMinutes(minutes)
+            }
+        )
+    }
+
+    private var hydrationStrapBuzzToggle: Binding<Bool> {
+        Binding(
+            get: { hydrationStrapBuzzEnabled },
+            set: { on in
+                hydrationStrapBuzzEnabled = on
+                HydrationReminders.setStrapBuzzEnabled(on)
+            }
+        )
     }
 
     private func refreshNotificationPermissionState() {

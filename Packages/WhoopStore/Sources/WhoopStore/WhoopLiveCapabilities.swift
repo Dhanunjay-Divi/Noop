@@ -1,4 +1,5 @@
 import Foundation
+import WhoopProtocol
 
 /// Metrics NOOP can honestly derive from a live WHOOP connection without a cloud/CSV import.
 /// Calibrated SpO2 percentage is intentionally absent: the decoded WHOOP optical values are raw ADC,
@@ -7,8 +8,7 @@ public enum WhoopLiveCapabilities {
     public static let base: Set<Metric> = [.hr, .hrv, .skinTemp, .sleep, .strainLoad]
 
     public static func isFiveOrMG(model: String) -> Bool {
-        let value = model.lowercased()
-        return value.contains("5") || value.contains("mg")
+        DeviceFamily.identifiedRegistryModel(model) == .whoop5
     }
 
     public static func metrics(forModel model: String) -> Set<Metric> {

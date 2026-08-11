@@ -25,6 +25,7 @@ class DeviceRegistryTest {
      *  transactor runs the block straight through, exactly as Room's withTransaction would commit it. */
     private class FakeRegistryDao : DeviceRegistryDao {
         val devices = LinkedHashMap<String, PairedDeviceRow>() // insertion order ≈ addedAt order
+        val legacyNames = LinkedHashMap<String, String?>()
         val owners = LinkedHashMap<String, DayOwnershipRow>()
 
         override suspend fun pairedDevices(): List<PairedDeviceRow> =
@@ -61,8 +62,15 @@ class DeviceRegistryTest {
             devices[id]?.let { devices[id] = it.copy(model = model) }
         }
 
+        override suspend fun setLegacyDeviceName(id: String, model: String) {
+            if (id in legacyNames) legacyNames[id] = model
+        }
+
         override suspend fun setPeripheralId(id: String, peripheralId: String?) {
             devices[id]?.let { devices[id] = it.copy(peripheralId = peripheralId) }
+        }
+        override suspend fun touchLastSeen(id: String, now: Long) {
+            devices[id]?.let { devices[id] = it.copy(lastSeenAt = now) }
         }
 
         override suspend fun deviceForPeripheralId(peripheralId: String): PairedDeviceRow? =
@@ -272,6 +280,39 @@ class DeviceRegistryTest {
         reg.setPeripheralId("my-whoop", null)
         assertNull(reg.all().first().peripheralId)
         assertNull(reg.deviceForPeripheralId("AA:BB:CC:DD:EE:FF"))
+    }
+
+    @Test
+    fun setModelReconcilesMatchingPairedAndLegacyRowsOnly() = runBlocking {
+        val dao = seededDao().apply {
+            devices["other-whoop"] = devices.getValue("my-whoop").copy(
+                id = "other-whoop", model = "WHOOP 4.0", status = DeviceStatus.paired.name,
+            )
+            legacyNames["my-whoop"] = "WHOOP 4.0"
+            legacyNames["other-whoop"] = "WHOOP 4.0"
+        }
+        val reg = registryWith(dao)
+
+        reg.setModel("my-whoop", "WHOOP MG")
+
+        assertEquals("WHOOP MG", dao.devices.getValue("my-whoop").model)
+        assertEquals("WHOOP MG", dao.legacyNames["my-whoop"])
+        assertEquals("WHOOP 4.0", dao.devices.getValue("other-whoop").model)
+        assertEquals("WHOOP 4.0", dao.legacyNames["other-whoop"])
+    }
+
+    @Test
+    fun setModelHealsLegacyNameWhenPairedModelIsAlreadyExact() = runBlocking {
+        val dao = seededDao().apply {
+            devices["my-whoop"] = devices.getValue("my-whoop").copy(model = "WHOOP MG")
+            legacyNames["my-whoop"] = "WHOOP 4.0"
+        }
+        val reg = registryWith(dao)
+
+        reg.setModel("my-whoop", "WHOOP MG")
+
+        assertEquals("WHOOP MG", dao.devices.getValue("my-whoop").model)
+        assertEquals("WHOOP MG", dao.legacyNames["my-whoop"])
     }
 
     @Test

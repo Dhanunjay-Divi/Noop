@@ -1,6 +1,11 @@
 package com.noop.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import com.noop.R
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -29,6 +34,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -51,8 +57,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.content.ContextCompat
 import com.noop.analytics.HrZones
 import com.noop.analytics.NapCandidate
+import com.noop.notif.HydrationReminderPrefs
+import com.noop.notif.HydrationReminderScheduler
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -102,6 +111,42 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     // The engine also requires the global notification master (default OFF); surface that dependency so
     // enabling the reminder while master is off isn't silently inert.
     val notifMasterOn = NotifPrefs.getBool(ctx, NotifPrefs.MASTER, false)
+
+    // Hydration reminders are independently opt-in and live in their own prefs file, so adding this
+    // automation cannot overwrite hydration totals or any existing dashboard preference. Phone delivery
+    // is a persisted WorkManager one-shot; the optional strap lane only fires on a fresh encrypted packet.
+    val hydrationConfig = remember { HydrationReminderPrefs.config(ctx) }
+    var hydrationRemindersEnabled by remember { mutableStateOf(hydrationConfig.enabled) }
+    var hydrationInterval by remember { mutableStateOf(hydrationConfig.intervalMinutes) }
+    var hydrationStart by remember { mutableStateOf(hydrationConfig.startMinutes) }
+    var hydrationEnd by remember { mutableStateOf(hydrationConfig.endMinutes) }
+    var hydrationStrapBuzz by remember { mutableStateOf(hydrationConfig.strapBuzzEnabled) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        hydrationRemindersEnabled = granted
+        HydrationReminderPrefs.setEnabled(ctx, granted)
+        HydrationReminderScheduler.reconcile(ctx)
+    }
+
+    fun setHydrationReminderEnabled(enabled: Boolean) {
+        if (!enabled) {
+            hydrationRemindersEnabled = false
+            HydrationReminderPrefs.setEnabled(ctx, false)
+            HydrationReminderScheduler.reconcile(ctx)
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        hydrationRemindersEnabled = true
+        HydrationReminderPrefs.setEnabled(ctx, true)
+        HydrationReminderScheduler.reconcile(ctx)
+    }
 
     // PERF (#707): lazy scaffold — each settings section is an unconditional top-level child, so each
     // becomes one `item { }` in the same order. No standalone Spacers (the eager `spacedBy(20.dp)` is
@@ -178,6 +223,97 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         // #766: the strap's silent wake-alarm card used to sit here, which let users conflate it with the
         // Wake Window + Wind-Down reminder over on the Alarms screen. It's moved to SmartAlarmScreen so
         // every wake/alarm control lives in one place. Automations is just inputs-to-actions now.
+
+        // Hydration check-ins — opt-in, privacy-safe local notification; optional live WHOOP haptic.
+        item {
+        SettingsSection(
+            icon = Icons.Filled.WaterDrop,
+            title = "Hydration reminders",
+            blurb = "A quiet check-in during hours you choose. NOOP does not infer that you drank, and the lock-screen message never shows an intake, goal or health value.",
+            active = hydrationRemindersEnabled,
+        ) {
+            ToggleRow(
+                label = "Remind me to hydrate",
+                help = "Uses a local Android reminder. It is best-effort and may arrive late under Doze or battery restrictions.",
+                checked = hydrationRemindersEnabled,
+                onChange = ::setHydrationReminderEnabled,
+            )
+            if (hydrationRemindersEnabled) {
+                RowDivider()
+                StepperRow(
+                    label = "Remind every",
+                    help = "How often to check in inside the active window.",
+                    value = hydrationInterval,
+                    suffix = "min",
+                    range = 60..240,
+                    step = 30,
+                    onChange = {
+                        hydrationInterval = it
+                        HydrationReminderPrefs.setIntervalMinutes(ctx, it)
+                        HydrationReminderScheduler.reconcile(ctx)
+                    },
+                )
+                RowDivider()
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Active hours", style = NoopType.body, color = Palette.textPrimary)
+                        Text("No hydration reminders outside this window.", style = NoopType.footnote, color = Palette.textTertiary)
+                    }
+                    TimeChip(
+                        minutes = hydrationStart,
+                        accessibilityLabel = "Hydration reminders start",
+                        onPicked = {
+                            hydrationStart = it
+                            HydrationReminderPrefs.setStartMinutes(ctx, it)
+                            HydrationReminderScheduler.reconcile(ctx)
+                        },
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("to", style = NoopType.body, color = Palette.textSecondary)
+                    Spacer(Modifier.width(8.dp))
+                    TimeChip(
+                        minutes = hydrationEnd,
+                        accessibilityLabel = "Hydration reminders end",
+                        onPicked = {
+                            hydrationEnd = it
+                            HydrationReminderPrefs.setEndMinutes(ctx, it)
+                            HydrationReminderScheduler.reconcile(ctx)
+                        },
+                    )
+                }
+                RowDivider()
+                ToggleRow(
+                    label = "Also buzz WHOOP",
+                    help = "Optional and off by default. Buzzes once only when a worn WHOOP is connected, encrypted and sending a fresh live sample.",
+                    checked = hydrationStrapBuzz,
+                    onChange = {
+                        hydrationStrapBuzz = it
+                        HydrationReminderPrefs.setStrapBuzzEnabled(ctx, it)
+                    },
+                )
+                if (hydrationStrapBuzz && !notifMasterOn) {
+                    RowDivider()
+                    Text(
+                        "Wrist alerts are off. Turn on the master switch in Settings -> Notifications before WHOOP can buzz.",
+                        style = NoopType.footnote,
+                        color = Palette.statusWarning,
+                    )
+                }
+                if (hydrationStrapBuzz) {
+                    RowDivider()
+                    Text(
+                        if (live.connected && live.bonded && live.encryptedBond) {
+                            "WHOOP is ready. A buzz still needs a fresh live stream at the reminder time."
+                        } else {
+                            "WHOOP haptics are unavailable until the strap has a live encrypted bond. The phone reminder remains independent."
+                        },
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                }
+            }
+        }
+        }
 
         // Inactivity reminder (#419) — real + persisted via InactivityPrefs; opt-in, default OFF.
         item {

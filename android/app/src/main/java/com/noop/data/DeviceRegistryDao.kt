@@ -55,11 +55,20 @@ interface DeviceRegistryDao {
     )
     suspend fun setModel(id: String, model: String)
 
+    /** Heal the matching v1 legacy device identity without creating or touching any other id. */
+    @Query("UPDATE device SET name = :model WHERE id = :id")
+    suspend fun setLegacyDeviceName(id: String, model: String)
+
     /** Persist (or clear) a device's stable BLE peripheral identifier (the MAC address on Android). Lets
      *  the seeded "my-whoop" adopt its strap's address on first connect and a specific WHOOP confirm its
      *  identity. Twin of the Swift store's `setPeripheralId`. */
     @Query("UPDATE pairedDevice SET peripheralId = :peripheralId WHERE id = :id")
     suspend fun setPeripheralId(id: String, peripheralId: String?)
+
+    /** Stamp a real connect/disconnect transition. Kept separate from [promote] so an already-active
+     *  strap can refresh recency without changing active-device ownership. */
+    @Query("UPDATE pairedDevice SET lastSeenAt = :now WHERE id = :id")
+    suspend fun touchLastSeen(id: String, now: Long)
 
     /** The paired device whose [peripheralId] matches, or null if none — so a strap discovered by its MAC
      *  address can be resolved back to its registry row. Twin of the Swift store's `deviceForPeripheralId`. */

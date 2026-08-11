@@ -34,6 +34,10 @@ jobs:
           persist-credentials: false
       - name: Enforce redistribution provenance and notices
         run: python3 Tools/release-legal-gate.py distribution
+      - name: Reject unsupported health and delivery claims
+        run: |
+          python3 -m unittest Tools.tests.test_health_claims_gate
+          python3 Tools/health_claims_gate.py
       - name: Require private Android staging signing secrets
         env:
           ANDROID_STAGING_KEYSTORE_BASE64: ${{ secrets.ANDROID_STAGING_KEYSTORE_BASE64 }}

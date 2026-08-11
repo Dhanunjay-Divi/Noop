@@ -7,6 +7,11 @@ final class WhoopLiveCapabilitiesTests: XCTestCase {
                        [.hr, .hrv, .skinTemp, .sleep, .strainLoad])
         XCTAssertEqual(WhoopLiveCapabilities.metrics(forModel: "5.0 MG"),
                        [.hr, .hrv, .skinTemp, .sleep, .strainLoad, .steps])
+        XCTAssertTrue(WhoopLiveCapabilities.metrics(forModel: "WHOOP MG").contains(.steps))
+        XCTAssertTrue(WhoopLiveCapabilities.metrics(forModel: "WHOOP 5.0").contains(.steps))
+        XCTAssertTrue(WhoopLiveCapabilities.metrics(forModel: "WHOOP 5.0 / MG").contains(.steps))
+        XCTAssertFalse(WhoopLiveCapabilities.metrics(forModel: "WHOOP").contains(.steps))
+        XCTAssertFalse(WhoopLiveCapabilities.metrics(forModel: "WHOOP 4.0").contains(.steps))
         XCTAssertFalse(WhoopLiveCapabilities.metrics(forModel: "5.0 MG").contains(.spo2))
     }
 
