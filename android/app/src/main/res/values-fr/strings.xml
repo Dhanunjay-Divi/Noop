@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="widget_wide_name">Signal quotidien NOOP</string>
+    <string name="widget_wide_description">Récupération, sommeil et effort avec VFC, fréquence au repos, durée du sommeil, fréquence en direct et batterie.</string>
+    <string name="widget_daily_signal">SIGNAL QUOTIDIEN</string>
+    <string name="widget_source_noop">NOOP sur l’appareil</string>
+    <string name="widget_source_wearable">Appareil</string>
+    <string name="widget_source_health_connect">Health Connect</string>
+    <string name="widget_source_apple_health">Santé Apple</string>
+    <string name="widget_source_activity_file">Fichier d’activité</string>
+    <string name="widget_latest_available">Dernières données</string>
+    <string name="widget_connected">Connecté</string>
+    <string name="widget_updated_at">Mis à jour à %1$s</string>
+    <string name="widget_last_update_at">Dernière mise à jour %1$s</string>
+    <string name="widget_open_noop">Ouvrir NOOP</string>
+    <string name="widget_hrv">VFC</string>
+    <string name="widget_resting_hr">FC au repos</string>
+    <string name="widget_sleep_duration">Sommeil</string>
+    <string name="widget_heart_rate">Fréquence cardiaque</string>
+    <string name="widget_battery">Batterie</string>
+    <string name="widget_unit_ms">ms</string>
+    <string name="widget_unit_bpm">bpm</string>
+    <string name="widget_sleep_duration_format">%1$d h %2$d min</string>
+    <string name="widget_mixed_days">Scores %1$s · constantes %2$s</string>
+    <string name="widget_live_prefix">● %1$s</string>
+    <string name="widget_offline_prefix">○ %1$s</string>
+    <string name="widget_battery_value">▰ %1$d%%</string>
+    <string name="widget_percent_value">%1$d%%</string>
     <string name="nutrition_weight_unit_missing_failure">Aucun poids importé : indiquez kg ou lb dans la colonne de poids.</string>
     <plurals name="nutrition_weight_values_skipped">
         <item quantity="one">1 valeur de poids ignorée (ajoutez kg ou lb à la colonne).</item>

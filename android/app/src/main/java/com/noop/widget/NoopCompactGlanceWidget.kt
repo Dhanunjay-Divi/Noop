@@ -1,10 +1,7 @@
 package com.noop.widget
-import com.noop.ui.uiString
 
-import androidx.compose.ui.res.stringResource
 import android.content.Context
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.ColorFilter
@@ -12,7 +9,7 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.Image
 import androidx.glance.ImageProvider
-import androidx.glance.action.actionStartActivity
+import androidx.glance.action.Action
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.cornerRadius
@@ -32,26 +29,14 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.noop.R
-import com.noop.ui.MainActivity
-import java.text.DateFormat
-import java.util.Date
+import com.noop.ui.NoopNotificationRoute
 
-/** Compact home-screen widget: Rest, Charge and Effort icon cells plus live HR and strap battery. */
+/** Compact 2×1 widget: three honest scores plus last/live HR and battery, without tiny status prose. */
 class NoopCompactGlanceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val snap = runCatching { WidgetSnapshotStore.load(context) }.getOrDefault(WidgetSnapshot())
-        val dark = runCatching {
-            when (context.getSharedPreferences("noop_prefs", Context.MODE_PRIVATE)
-                .getString("theme.appearance", "system")) {
-                "light" -> false
-                "dark" -> true
-                else -> (context.resources.configuration.uiMode and
-                    android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-                    android.content.res.Configuration.UI_MODE_NIGHT_YES
-            }
-        }.getOrDefault(true)
-        provideContent { CompactWidgetContent(snap, dark) }
+        provideContent { CompactWidgetContent(context, snap, context.noopWidgetDarkMode()) }
     }
 
     override fun onCompositionError(
@@ -67,95 +52,80 @@ class NoopCompactGlanceWidget : GlanceAppWidget() {
     }
 }
 
-private fun compactWidgetSurface(dark: Boolean) =
-    ColorProvider(if (dark) Color(0xFF0A1322) else Color(0xFFF4F1EA))
-private fun compactWidgetTextPrimary(dark: Boolean) =
-    ColorProvider(if (dark) Color(0xFFF4F6F8) else Color(0xFF1A2230))
-private fun compactWidgetTextSecondary(dark: Boolean) =
-    ColorProvider(if (dark) Color(0xFF8A94A4) else Color(0xFF7C8696))
-
-private fun compactBandColor(recovery: Int, dark: Boolean): ColorProvider = ColorProvider(
-    when {
-        recovery >= 67 -> if (dark) Color(0xFFE8B84B) else Color(0xFFB07D17)
-        recovery >= 34 -> if (dark) Color(0xFFD98A3D) else Color(0xFFC2792E)
-        else -> if (dark) Color(0xFFE0662F) else Color(0xFFC84E1E)
-    },
-)
-
-private fun compactEffortColor(dark: Boolean): ColorProvider =
-    ColorProvider(if (dark) Color(0xFF4FB6A8) else Color(0xFF2E7D74))
-
 @Composable
-private fun CompactWidgetContent(snap: WidgetSnapshot, dark: Boolean) {
-    val surface = compactWidgetSurface(dark)
-    val textPrimary = compactWidgetTextPrimary(dark)
-    val textSecondary = compactWidgetTextSecondary(dark)
+private fun CompactWidgetContent(context: Context, snap: WidgetSnapshot, dark: Boolean) {
+    val colors = noopWidgetColors(dark)
+    val today = widgetRouteAction(context, NoopNotificationRoute.TODAY)
+    val isLive = snap.freshness(System.currentTimeMillis()) == WidgetFreshness.LIVE
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
-            .background(surface)
-            .cornerRadius(16.dp)
-            .clickable(actionStartActivity<MainActivity>())
+            .background(colors.surface)
+            .cornerRadius(20.dp)
             .padding(horizontal = 10.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
             modifier = GlanceModifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalAlignment = Alignment.Bottom,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            CompactScoreCell(
-                label = uiString(R.string.l10n_noop_compact_glance_widget_rest_cbaaa181),
-                iconRes = R.drawable.ic_widget_rest,
-                pct = snap.restPct,
-                color = snap.restPct?.let { compactBandColor(it, dark) } ?: textSecondary,
-                modifier = GlanceModifier.defaultWeight(),
+            Text(
+                text = context.getString(
+                    if (isLive) R.string.widget_live_prefix else R.string.widget_offline_prefix,
+                    snap.compactScoreContextText(context),
+                ),
+                modifier = GlanceModifier.clickable(today),
+                style = TextStyle(
+                    color = if (isLive) colors.positive else colors.primary,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                ),
             )
-            CompactScoreCell(
-                label = uiString(R.string.l10n_noop_compact_glance_widget_charge_49a8cb83),
-                iconRes = R.drawable.ic_widget_charge,
-                pct = snap.recoveryPct,
-                color = snap.recoveryPct?.let { compactBandColor(it, dark) } ?: textSecondary,
-                modifier = GlanceModifier.defaultWeight(),
+            Spacer(modifier = GlanceModifier.defaultWeight())
+            Text(
+                text = snap.heartRate?.let { "♥ $it" } ?: "♥ —",
+                modifier = GlanceModifier.clickable(widgetRouteAction(context, NoopNotificationRoute.LIVE)),
+                style = TextStyle(color = colors.primary, fontSize = 10.sp, fontWeight = FontWeight.Medium),
             )
-            CompactScoreCell(
-                label = uiString(R.string.l10n_noop_compact_glance_widget_effort_660752e7),
-                iconRes = R.drawable.ic_widget_effort,
-                pct = snap.effortPct,
-                color = snap.effortPct?.let { compactEffortColor(dark) } ?: textSecondary,
-                modifier = GlanceModifier.defaultWeight(),
+            Spacer(modifier = GlanceModifier.width(8.dp))
+            Text(
+                text = snap.batteryPct?.let { context.getString(R.string.widget_battery_value, it) } ?: "▰ —",
+                modifier = GlanceModifier.clickable(today),
+                style = TextStyle(color = colors.secondary, fontSize = 10.sp),
             )
         }
         Spacer(modifier = GlanceModifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = snap.heartRate?.let { "♥ $it" } ?: "♥ - ",
-                style = TextStyle(color = textPrimary, fontSize = 13.sp),
+        Row(
+            modifier = GlanceModifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CompactScoreCell(
+                label = context.getString(R.string.l10n_noop_compact_glance_widget_rest_cbaaa181),
+                iconRes = R.drawable.ic_widget_rest,
+                pct = snap.restPct,
+                color = if (snap.restPct == null) colors.secondary else colors.sleep,
+                action = widgetRouteAction(context, NoopNotificationRoute.SLEEP),
+                modifier = GlanceModifier.defaultWeight(),
             )
-            Spacer(modifier = GlanceModifier.width(10.dp))
-            Image(
-                provider = ImageProvider(R.drawable.ic_widget_strap_battery),
-                contentDescription = uiString(R.string.l10n_noop_compact_glance_widget_strap_battery_a6c7f09c),
-                modifier = GlanceModifier.width(14.dp).height(14.dp),
-                colorFilter = ColorFilter.tint(textPrimary),
+            CompactScoreCell(
+                label = context.getString(R.string.l10n_noop_compact_glance_widget_charge_49a8cb83),
+                iconRes = R.drawable.ic_widget_charge,
+                pct = snap.recoveryPct,
+                color = recoveryWidgetColor(snap.recoveryPct, colors),
+                action = today,
+                emphasized = true,
+                modifier = GlanceModifier.defaultWeight(),
             )
-            Spacer(modifier = GlanceModifier.width(3.dp))
-            Text(
-                text = snap.batteryPct?.let { "$it%" } ?: "-",
-                style = TextStyle(color = textPrimary, fontSize = 13.sp),
+            CompactScoreCell(
+                label = context.getString(R.string.l10n_noop_compact_glance_widget_effort_660752e7),
+                iconRes = R.drawable.ic_widget_effort,
+                pct = snap.effortPct,
+                color = if (snap.effortPct == null) colors.secondary else colors.effort,
+                action = widgetRouteAction(context, NoopNotificationRoute.TRENDS),
+                modifier = GlanceModifier.defaultWeight(),
             )
         }
-        Spacer(modifier = GlanceModifier.height(1.dp))
-        Text(
-            text = when {
-                snap.connected -> "Connected"
-                snap.updatedAtMs > 0L ->
-                    DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(snap.updatedAtMs))
-                else -> "Open NOOP to connect"
-            },
-            style = TextStyle(color = textSecondary, fontSize = 11.sp),
-        )
     }
 }
 
@@ -165,21 +135,30 @@ private fun CompactScoreCell(
     iconRes: Int,
     pct: Int?,
     color: ColorProvider,
+    action: Action,
+    emphasized: Boolean = false,
     modifier: GlanceModifier = GlanceModifier,
 ) {
-    Column(
-        modifier = modifier,
+    Row(
+        modifier = modifier.clickable(action).padding(horizontal = 2.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Image(
             provider = ImageProvider(iconRes),
             contentDescription = label,
-            modifier = GlanceModifier.width(18.dp).height(18.dp),
+            modifier = GlanceModifier.width(if (emphasized) 17.dp else 15.dp)
+                .height(if (emphasized) 17.dp else 15.dp),
             colorFilter = ColorFilter.tint(color),
         )
+        Spacer(modifier = GlanceModifier.width(3.dp))
         Text(
-            text = pct?.let { "$it%" } ?: "—",
-            style = TextStyle(color = color, fontSize = 21.sp, fontWeight = FontWeight.Bold),
+            text = pct?.toString() ?: "—",
+            style = TextStyle(
+                color = color,
+                fontSize = if (emphasized) 21.sp else 18.sp,
+                fontWeight = FontWeight.Bold,
+            ),
         )
     }
 }

@@ -276,6 +276,19 @@
                 android:resource="@xml/noop_compact_widget_info" />
         </receiver>
 
+        <!-- Wide Daily Signal: scores plus the most useful overnight vitals. -->
+        <receiver
+            android:name="com.noop.widget.NoopWideWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_wide_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/noop_wide_widget_info" />
+        </receiver>
+
         <!-- Optional native phone-call alerts. The receiver only reacts to ringing/offhook/idle state
              and never reads the incoming-number extra. Delivery is gated by the Notifications screen
              settings and by the just-in-time READ_PHONE_STATE runtime permission. -->

@@ -22,6 +22,7 @@ final class NavRouter: ObservableObject {
     /// fused record, the experimental Rhythm visualization), Trends, and the active-workout return route
     /// the Today indicator card raises.
     enum Destination: String, Equatable, Identifiable {
+        case today
         case devices
         case friends
         case insightsHub
@@ -29,6 +30,8 @@ final class NavRouter: ObservableObject {
         case fusedRecord
         case rhythm
         case trends
+        case sleep
+        case live
         case activeWorkout
         case liveSession
         case journal
@@ -101,6 +104,10 @@ final class NavRouter: ObservableObject {
     func openRhythm() { requestedDestination = .rhythm }
     /// Open the Trends screen (where a "new data" reading deep-links).
     func openTrends() { requestedDestination = .trends }
+    /// Open one of the primary daily surfaces from a system widget or notification deep link.
+    func openToday() { requestedDestination = .today }
+    func openSleep() { requestedDestination = .sleep }
+    func openLive() { requestedDestination = .live }
     /// Open the active workout: route to the Live surface AND raise the one-shot flag so `LiveView`
     /// presents the in-exercise screen even when the workout is already running, in one tap from the Today
     /// indicator card. The flag is consumed (and cleared) by `LiveView.consumeActiveWorkoutRequest()`.

@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="widget_wide_name">Señal diaria de NOOP</string>
+    <string name="widget_wide_description">Recuperación, sueño y esfuerzo con VFC, frecuencia en reposo, duración del sueño, frecuencia en directo y batería.</string>
+    <string name="widget_daily_signal">SEÑAL DIARIA</string>
+    <string name="widget_source_noop">NOOP en el dispositivo</string>
+    <string name="widget_source_wearable">Dispositivo</string>
+    <string name="widget_source_health_connect">Health Connect</string>
+    <string name="widget_source_apple_health">Salud de Apple</string>
+    <string name="widget_source_activity_file">Archivo de actividad</string>
+    <string name="widget_latest_available">Último disponible</string>
+    <string name="widget_connected">Conectado</string>
+    <string name="widget_updated_at">Actualizado %1$s</string>
+    <string name="widget_last_update_at">Última actualización %1$s</string>
+    <string name="widget_open_noop">Abrir NOOP</string>
+    <string name="widget_hrv">VFC</string>
+    <string name="widget_resting_hr">FC en reposo</string>
+    <string name="widget_sleep_duration">Sueño</string>
+    <string name="widget_heart_rate">Frecuencia cardíaca</string>
+    <string name="widget_battery">Batería</string>
+    <string name="widget_unit_ms">ms</string>
+    <string name="widget_unit_bpm">lpm</string>
+    <string name="widget_sleep_duration_format">%1$d h %2$d min</string>
+    <string name="widget_mixed_days">Puntuaciones %1$s · constantes %2$s</string>
+    <string name="widget_live_prefix">● %1$s</string>
+    <string name="widget_offline_prefix">○ %1$s</string>
+    <string name="widget_battery_value">▰ %1$d%%</string>
+    <string name="widget_percent_value">%1$d%%</string>
     <string name="nutrition_weight_unit_missing_failure">No se importó ningún peso: indica kg o lb en la columna de peso.</string>
     <plurals name="nutrition_weight_values_skipped">
         <item quantity="one">Se omitió 1 valor de peso (añade kg o lb a la columna).</item>

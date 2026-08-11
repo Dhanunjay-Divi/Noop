@@ -208,6 +208,7 @@ struct RootTabView: View {
             Task { @MainActor in
                 await Task.yield()
                 consumePendingNotificationRoute()
+                consumeRequestedDestination(router.requestedDestination)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NotificationRouteBridge.routeRequested)) { _ in
@@ -236,48 +237,7 @@ struct RootTabView: View {
         // the persistent four-tab glass bar behaves identically whether a page was opened from the More
         // index, a dashboard card, or a deep link. Only short tasks and immersive sessions use sheets.
         .onChange(of: router.requestedDestination) { _, dest in
-            switch dest {
-            case .devices:
-                routeToMore(.devices)
-                router.requestedDestination = nil
-            case .friends:
-                routeToMore(.friends)
-                router.requestedDestination = nil
-            case .insightsHub:
-                routeToMore(.insightsHub)
-                router.requestedDestination = nil
-            case .labBook:
-                routeToMore(.labBook)
-                router.requestedDestination = nil
-            case .fusedRecord:
-                routeToMore(.fusedRecord)
-                router.requestedDestination = nil
-            case .rhythm:
-                routeToMore(.rhythm)
-                router.requestedDestination = nil
-            case .trends:
-                // Trends is already a primary tab on iPhone.
-                withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selectedTab = 1 }
-                router.requestedDestination = nil
-            case .activeWorkout:
-                // Enter Live through More so the global bar remains visible on the browsing page.
-                // LiveView consumes `presentActiveWorkout` and then presents the focused in-exercise
-                // sheet, where hiding the global bar is intentional.
-                routeToMore(.live)
-                router.requestedDestination = nil
-            case .liveSession:
-                // Live Sessions is presented from Today's own Start entry (a cover, not a routed sheet),
-                // so a deep-link lands on the Today tab where that entry lives.
-                withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selectedTab = 0 }
-                router.requestedDestination = nil
-            case .journal:
-                // Journal is a normal browsing destination. Route through More so the selected tab and
-                // Back stack remain visible; the requested day offset is still consumed by InsightsView.
-                routeToMore(.insights)
-                router.requestedDestination = nil
-            case nil:
-                break
-            }
+            consumeRequestedDestination(dest)
         }
         // A screen's top-bar "+" routes here: open the quick-action sheet, then clear the flag.
         .onChange(of: router.quickActionsRequested) { _, req in
@@ -328,6 +288,40 @@ struct RootTabView: View {
         tabBarDragStarted = false
         tabBarDragLastTranslation = .zero
         tabBarDragAccumulator = 0
+    }
+
+    /// Consume both live and cold-launch navigation requests. `onChange` handles taps while the shell is
+    /// mounted; the matching `onAppear` call handles a widget URL received while Terms/onboarding still
+    /// covered the shell, when the router value was already set before this view existed.
+    private func consumeRequestedDestination(_ destination: NavRouter.Destination?) {
+        guard let destination else { return }
+        switch destination {
+        case .today:
+            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selectedTab = 0 }
+        case .devices:
+            routeToMore(.devices)
+        case .friends:
+            routeToMore(.friends)
+        case .insightsHub:
+            routeToMore(.insightsHub)
+        case .labBook:
+            routeToMore(.labBook)
+        case .fusedRecord:
+            routeToMore(.fusedRecord)
+        case .rhythm:
+            routeToMore(.rhythm)
+        case .trends:
+            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selectedTab = 1 }
+        case .sleep:
+            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selectedTab = 2 }
+        case .live, .activeWorkout:
+            routeToMore(.live)
+        case .liveSession:
+            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selectedTab = 0 }
+        case .journal:
+            routeToMore(.insights)
+        }
+        router.requestedDestination = nil
     }
 
     /// Consume exactly one persisted notification route. Clearing the destination stack guarantees

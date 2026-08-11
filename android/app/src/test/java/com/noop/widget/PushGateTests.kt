@@ -18,6 +18,11 @@ class PushGateTests {
         effort: Int? = null,
         hr: Int? = null,
         battery: Int? = null,
+        hrv: Int? = null,
+        restingHr: Int? = null,
+        sleepMinutes: Int? = null,
+        scoreDay: String? = null,
+        scoreSource: String? = null,
         connected: Boolean = true,
         at: Long = 0L,
     ) = WidgetSnapshot(
@@ -26,6 +31,11 @@ class PushGateTests {
         effortPct = effort,
         heartRate = hr,
         batteryPct = battery,
+        hrvMs = hrv,
+        restingHr = restingHr,
+        sleepMinutes = sleepMinutes,
+        scoreDay = scoreDay,
+        scoreSource = scoreSource,
         connected = connected,
         updatedAtMs = at,
     )
@@ -100,5 +110,17 @@ class PushGateTests {
         // With all three scores stable and inside the window, the gate still throttles (HR-only churn).
         PushGate.markPushed(snap(recovery = 60, rest = 80, effort = 12, hr = 70, at = 1_000))
         assertFalse(PushGate.admit(snap(recovery = 60, rest = 80, effort = 12, hr = 71, at = 2_000)))
+    }
+
+    @Test
+    fun overnightVitalChangeIsAdmittedImmediately() {
+        PushGate.markPushed(snap(hrv = 52, restingHr = 57, sleepMinutes = 430, at = 1_000))
+        assertTrue(PushGate.admit(snap(hrv = 56, restingHr = 57, sleepMinutes = 430, at = 2_000)))
+    }
+
+    @Test
+    fun scoreDayAndSourceChangesAreAdmittedImmediately() {
+        PushGate.markPushed(snap(scoreDay = "2026-08-10", scoreSource = "wearable", at = 1_000))
+        assertTrue(PushGate.admit(snap(scoreDay = "2026-08-11", scoreSource = "noop", at = 2_000)))
     }
 }

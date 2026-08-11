@@ -20,10 +20,10 @@ struct NOOPLiveActivity: Widget {
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
                 Spacer()
-                // Recovery + Effort (#446) on the banner, mirroring the Dynamic Island expanded stats.
+                // Charge + Effort (#446) on the banner, mirroring the Dynamic Island expanded stats.
                 HStack(spacing: 12) {
                     if let r = context.state.recovery {
-                        bannerStat(label: "Recovery", value: "\(r)%")
+                        bannerStat(label: "Charge", value: "\(r)%")
                     }
                     if let e = context.state.effort {
                         bannerStat(label: "Effort", value: "\(e)")
@@ -40,10 +40,10 @@ struct NOOPLiveActivity: Widget {
                         .foregroundStyle(StrandPalette.statusCritical)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    // Recovery + Effort (#446) — one more stat alongside the leading live HR.
+                    // Charge + Effort (#446) — one more stat alongside the leading live HR.
                     HStack(spacing: 10) {
                         if let r = context.state.recovery {
-                            statColumn(label: "Recovery", value: "\(r)%")
+                            statColumn(label: "Charge", value: "\(r)%")
                         }
                         if let e = context.state.effort {
                             statColumn(label: "Effort", value: "\(e)")

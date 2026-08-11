@@ -319,6 +319,7 @@ struct RootView: View {
         // then clear it so the same tap can fire again later. Devices maps to the `.devices` sidebar item.
         .onChangeCompat(of: router.requestedDestination) { dest in
             switch dest {
+            case .today: selection = .today
             case .devices: selection = .devices
             case .friends: selection = .friends
             case .insightsHub: selection = .insightsHub
@@ -326,6 +327,8 @@ struct RootView: View {
             case .fusedRecord: selection = .fusedRecord
             case .rhythm: selection = .rhythm
             case .trends: selection = .trends
+            case .sleep: selection = .sleep
+            case .live: selection = .live
             // The Today active-workout indicator routes to the Live surface; LiveView then consumes the
             // one-shot `presentActiveWorkout` flag on appear to open the in-exercise screen.
             case .activeWorkout: selection = .live

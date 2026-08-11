@@ -1,15 +1,13 @@
 package com.noop.widget
-import com.noop.ui.uiString
 
-import androidx.compose.ui.res.stringResource
 import android.content.Context
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
-import androidx.glance.action.actionStartActivity
+import androidx.glance.action.Action
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.cornerRadius
@@ -29,45 +27,19 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.noop.R
-import com.noop.ui.MainActivity
-import java.text.DateFormat
-import java.util.Date
+import com.noop.ui.NoopNotificationRoute
 
 /**
- * Home-screen widget: today's three top scores (Rest · Charge · Effort, Charge centred), with live HR
- * and strap battery at a glance (#516). Renders purely from the [WidgetSnapshotStore] SharedPreferences
- * snapshot — no BLE, no DB — so it costs nothing and survives process death. Tapping anywhere opens the
- * app. Each score is honest-null ("—") until NOOP has scored it; it never fabricates a number.
- *
- * Colours are hardcoded mirrors of the Titanium & Gold [com.noop.ui.Palette] (navy surface / textPrimary
- * / textSecondary, and the gold → amber → burnt-orange recovery tiers): Glance composes outside our
- * theme, and the widget is deliberately always-dark like the app.
+ * The balanced 2×2 Daily Signal widget. It reads only the private snapshot written by the app/service,
+ * never opens Room or BLE, and gives each score a trusted in-app destination.
  */
 class NoopGlanceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        // A corrupt pref must degrade to the empty-state widget, not throw mid-provide.
         val snap = runCatching { WidgetSnapshotStore.load(context) }.getOrDefault(WidgetSnapshot())
-        // Follow the app's Light/Dark/System theme (read straight from noop_prefs; the widget runs in a
-        // separate process so it can't see the in-app snapshot state). System resolves off the device's
-        // night-mode config. Any failure degrades to dark (the historical default).
-        val dark = runCatching {
-            when (context.getSharedPreferences("noop_prefs", Context.MODE_PRIVATE)
-                .getString("theme.appearance", "system")) {
-                "light" -> false
-                "dark" -> true
-                else -> (context.resources.configuration.uiMode and
-                    android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-                    android.content.res.Configuration.UI_MODE_NIGHT_YES
-            }
-        }.getOrDefault(true)
-        provideContent { WidgetContent(snap, dark) }
+        provideContent { WidgetContent(context, snap, context.noopWidgetDarkMode()) }
     }
 
-    /** Defence-in-depth, NOT a crash fix: Glance 1.1.0's default already contains composition errors
-     *  (it renders its built-in error layout; verified in bytecode while investigating #82 — which we
-     *  could not reproduce). This override only swaps that generic layout for our own friendlier one.
-     *  The widget heals on the next successful push. */
     override fun onCompositionError(
         context: Context,
         glanceId: GlanceId,
@@ -81,122 +53,139 @@ class NoopGlanceWidget : GlanceAppWidget() {
     }
 }
 
-// Per-scheme widget colours (mirror the app palette; deepened gold/amber/orange on light for contrast
-// on the warm-paper card). The widget is a separate surface, so these are local — not Palette reads.
-private fun widgetSurface(dark: Boolean) = ColorProvider(if (dark) Color(0xFF0A1322) else Color(0xFFF4F1EA))
-private fun widgetTextPrimary(dark: Boolean) = ColorProvider(if (dark) Color(0xFFF4F6F8) else Color(0xFF1A2230))
-private fun widgetTextSecondary(dark: Boolean) = ColorProvider(if (dark) Color(0xFF8A94A4) else Color(0xFF7C8696))
-
-/** Recovery-band colour, the app-wide 67 / 34 cuts (RecoveryScorer.band); deepened on light. Charge and
- *  Rest both read on the recovery band in the app, so they share this. */
-private fun bandColor(recovery: Int, dark: Boolean): ColorProvider = ColorProvider(
-    when {
-        recovery >= 67 -> if (dark) Color(0xFFE8B84B) else Color(0xFFB07D17)
-        recovery >= 34 -> if (dark) Color(0xFFD98A3D) else Color(0xFFC2792E)
-        else -> if (dark) Color(0xFFE0662F) else Color(0xFFC84E1E)
-    },
-)
-
-/** Effort tint — the app's strain colour (Palette.strain066), a distinct teal so Effort doesn't read as
- *  another recovery band. Deepened on light for contrast on the warm-paper card. (#516) */
-private fun effortColor(dark: Boolean): ColorProvider =
-    ColorProvider(if (dark) Color(0xFF4FB6A8) else Color(0xFF2E7D74))
-
 @Composable
-private fun WidgetContent(snap: WidgetSnapshot, dark: Boolean) {
-    val surface = widgetSurface(dark)
-    val textPrimary = widgetTextPrimary(dark)
-    val textSecondary = widgetTextSecondary(dark)
+private fun WidgetContent(context: Context, snap: WidgetSnapshot, dark: Boolean) {
+    val colors = noopWidgetColors(dark)
+    val today = widgetRouteAction(context, NoopNotificationRoute.TODAY)
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
-            .background(surface)
-            .cornerRadius(16.dp)
-            .clickable(actionStartActivity<MainActivity>())
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            .background(colors.surface)
+            .cornerRadius(22.dp)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // The three top scores in one row, Charge centred + enlarged (the app's hero order Rest · Charge ·
-        // Effort). Each cell is honest-null until that score exists — never a fabricated number. (#516)
+        Row(
+            modifier = GlanceModifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "NOOP",
+                modifier = GlanceModifier.clickable(today),
+                style = TextStyle(color = colors.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold),
+            )
+            Spacer(modifier = GlanceModifier.defaultWeight())
+            Text(
+                text = snap.scoreContextText(context),
+                modifier = GlanceModifier.clickable(today),
+                style = TextStyle(color = colors.secondary, fontSize = 9.sp),
+                maxLines = 1,
+            )
+        }
+        Spacer(modifier = GlanceModifier.height(8.dp))
         Row(
             modifier = GlanceModifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalAlignment = Alignment.Bottom,
         ) {
             ScoreCell(
-                label = uiString(R.string.l10n_noop_glance_widget_rest_cbaaa181),
+                label = context.getString(R.string.l10n_noop_glance_widget_rest_cbaaa181),
                 pct = snap.restPct,
-                color = snap.restPct?.let { bandColor(it, dark) } ?: textSecondary,
-                valueSize = 22.sp,
-                textSecondary = textSecondary,
+                color = if (snap.restPct == null) colors.secondary else colors.sleep,
+                valueSize = 23.sp,
+                colors = colors,
+                action = widgetRouteAction(context, NoopNotificationRoute.SLEEP),
                 modifier = GlanceModifier.defaultWeight(),
             )
             ScoreCell(
-                label = uiString(R.string.l10n_noop_glance_widget_charge_49a8cb83),
+                label = context.getString(R.string.l10n_noop_glance_widget_charge_49a8cb83),
                 pct = snap.recoveryPct,
-                color = snap.recoveryPct?.let { bandColor(it, dark) } ?: textSecondary,
+                color = recoveryWidgetColor(snap.recoveryPct, colors),
                 valueSize = 30.sp,
-                textSecondary = textSecondary,
+                colors = colors,
+                action = today,
                 modifier = GlanceModifier.defaultWeight(),
             )
             ScoreCell(
-                label = uiString(R.string.l10n_noop_glance_widget_effort_660752e7),
+                label = context.getString(R.string.l10n_noop_glance_widget_effort_660752e7),
                 pct = snap.effortPct,
-                color = snap.effortPct?.let { effortColor(dark) } ?: textSecondary,
-                valueSize = 22.sp,
-                textSecondary = textSecondary,
+                color = if (snap.effortPct == null) colors.secondary else colors.effort,
+                valueSize = 23.sp,
+                colors = colors,
+                action = widgetRouteAction(context, NoopNotificationRoute.TRENDS),
                 modifier = GlanceModifier.defaultWeight(),
             )
         }
-        Spacer(modifier = GlanceModifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Spacer(modifier = GlanceModifier.height(7.dp))
+        Row(
+            modifier = GlanceModifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                text = snap.heartRate?.let { "♥ $it" } ?: "♥ - ",
-                style = TextStyle(color = textPrimary, fontSize = 13.sp),
+                text = snap.freshnessText(context),
+                modifier = GlanceModifier.defaultWeight().clickable(today),
+                style = TextStyle(
+                    color = if (snap.freshness(System.currentTimeMillis()) == WidgetFreshness.LIVE)
+                        colors.positive else colors.secondary,
+                    fontSize = 10.sp,
+                ),
+                maxLines = 1,
             )
-            Spacer(modifier = GlanceModifier.width(10.dp))
-            Text(
-                text = snap.batteryPct?.let { "⚡ $it%" } ?: "⚡ - ",
-                style = TextStyle(color = textPrimary, fontSize = 13.sp),
+            MetricPill(
+                text = snap.heartRate?.let { "♥ $it" } ?: "♥ —",
+                action = widgetRouteAction(context, NoopNotificationRoute.LIVE),
+                colors = colors,
+            )
+            Spacer(modifier = GlanceModifier.width(5.dp))
+            MetricPill(
+                text = snap.batteryPct?.let { context.getString(R.string.widget_battery_value, it) } ?: "▰ —",
+                action = today,
+                colors = colors,
             )
         }
-        Spacer(modifier = GlanceModifier.height(2.dp))
-        Text(
-            text = when {
-                snap.connected -> "Connected"
-                snap.updatedAtMs > 0L ->
-                    DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(snap.updatedAtMs))
-                else -> "Open NOOP to connect"
-            },
-            style = TextStyle(color = textSecondary, fontSize = 11.sp),
-        )
     }
 }
 
-/** One score column in the 2x2 widget: a small overline label over a big band-coloured "N%" (or a calm
- *  "—" in the secondary colour while that score is still null, so an unscored cell reads honestly rather
- *  than as a broken zero). (#516) */
 @Composable
 private fun ScoreCell(
     label: String,
     pct: Int?,
     color: ColorProvider,
-    valueSize: androidx.compose.ui.unit.TextUnit,
-    textSecondary: ColorProvider,
+    valueSize: TextUnit,
+    colors: NoopWidgetColors,
+    action: Action,
     modifier: GlanceModifier = GlanceModifier,
 ) {
     Column(
-        modifier = modifier,
+        modifier = modifier
+            .background(colors.inset)
+            .cornerRadius(13.dp)
+            .clickable(action)
+            .padding(horizontal = 4.dp, vertical = 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = label,
-            style = TextStyle(color = textSecondary, fontSize = 10.sp, fontWeight = FontWeight.Medium),
-        )
-        Text(
-            text = pct?.let { "$it%" } ?: "—",
+            text = pct?.toString() ?: "—",
             style = TextStyle(color = color, fontSize = valueSize, fontWeight = FontWeight.Bold),
         )
+        Text(
+            text = label,
+            style = TextStyle(color = colors.secondary, fontSize = 8.sp, fontWeight = FontWeight.Medium),
+            maxLines = 1,
+        )
     }
+}
+
+@Composable
+private fun MetricPill(text: String, action: Action, colors: NoopWidgetColors) {
+    Text(
+        text = text,
+        modifier = GlanceModifier
+            .background(colors.inset)
+            .cornerRadius(10.dp)
+            .clickable(action)
+            .padding(horizontal = 7.dp, vertical = 4.dp),
+        style = TextStyle(color = colors.primary, fontSize = 10.sp, fontWeight = FontWeight.Medium),
+        maxLines = 1,
+    )
 }

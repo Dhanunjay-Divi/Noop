@@ -322,11 +322,15 @@ equivalent (or to be conditionally compiled out).
 zone-tinted HR dot + a compact recovery/HR/battery popover), wired in
 `StrandApp.swift`. **iOS has no menu bar.** The iOS equivalents:
 
-- A **Home Screen widget** / **Lock Screen widget** (WidgetKit) showing recovery,
-  live/last HR, and battery — the natural iOS analogue of the menu-bar glance.
+- Three purpose-built **Home Screen / Lock Screen widgets** (WidgetKit): **Daily Signal**
+  for Charge, Effort and Rest; **Vitals** for live-or-last HR, HRV, resting HR and band
+  status; and **Sleep** for Rest, duration and overnight heart signals. Daily values carry
+  their actual score day, while live/device readings carry a separate freshness state, so
+  a prior-day score or an old connection is never presented as current.
 - A **Live Activity** (ActivityKit) during an active workout or live HR session.
-- The popover's content (`RecoveryRing`, `StatePill`, the stats row) is already
-  built from `StrandDesign` components and can be reused inside the widget views.
+- Tapping each widget opens its matching Today, Live or Sleep surface. The original widget
+  kind and App Group storage key remain stable, so an app update does not remove an existing
+  widget or the local data snapshot behind it.
 
 ### 2. Screen lock — macOS-only API
 

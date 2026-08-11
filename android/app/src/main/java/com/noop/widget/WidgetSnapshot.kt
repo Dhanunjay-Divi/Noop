@@ -22,7 +22,50 @@ data class WidgetSnapshot(
     val connected: Boolean = false,
     /** Wall-clock millis of the last push, so the widget can show honest staleness. */
     val updatedAtMs: Long = 0L,
+    /** HRV for [vitalsDay], which may be newer than the most recent fully-scored day. */
+    val hrvMs: Int? = null,
+    /** Resting HR for [vitalsDay], in beats per minute. */
+    val restingHr: Int? = null,
+    /** Total measured sleep for [vitalsDay], in whole minutes. */
+    val sleepMinutes: Int? = null,
+    /** ISO yyyy-MM-dd day represented by the score fields; null for snapshots from older builds. */
+    val scoreDay: String? = null,
+    /** Stable provenance key (see [WidgetScoreSource]); unknown/old snapshots leave this null. */
+    val scoreSource: String? = null,
+    /** Day/source for overnight vitals when they come from a newer row than the last scored day. */
+    val vitalsDay: String? = null,
+    val vitalsSource: String? = null,
+    /** Last observation of live connection/HR state, distinct from a score-only republish. */
+    val liveUpdatedAtMs: Long = 0L,
 )
+
+/** Persisted source keys rather than display copy, so locale changes never invalidate a snapshot. */
+internal enum class WidgetScoreSource(val storageKey: String) {
+    NOOP("noop"),
+    WEARABLE("wearable"),
+    HEALTH_CONNECT("health_connect"),
+    APPLE_HEALTH("apple_health"),
+    ACTIVITY_FILE("activity_file");
+
+    companion object {
+        fun fromStorageKey(raw: String?): WidgetScoreSource? = entries.firstOrNull { it.storageKey == raw }
+    }
+}
+
+/** Honest state used by every widget footer. It describes snapshot freshness, not sensor cadence. */
+internal enum class WidgetFreshness { LIVE, RECENT, STALE, EMPTY }
+
+internal fun WidgetSnapshot.freshness(
+    nowMs: Long,
+    liveWindowMs: Long = 2 * 60_000L,
+    staleAfterMs: Long = 6 * 60 * 60_000L,
+): WidgetFreshness {
+    val liveAge = nowMs - liveUpdatedAtMs
+    if (connected && liveUpdatedAtMs > 0L && liveAge in 0..liveWindowMs) return WidgetFreshness.LIVE
+    if (updatedAtMs <= 0L) return WidgetFreshness.EMPTY
+    val age = nowMs - updatedAtMs
+    return if (age in 0..staleAfterMs) WidgetFreshness.RECENT else WidgetFreshness.STALE
+}
 
 /**
  * Persists snapshots and tells Glance to recompose. Both producers funnel through [push]:
@@ -54,9 +97,13 @@ object WidgetSnapshotStore {
         val compactIds = runCatching {
             GlanceAppWidgetManager(app).getGlanceIds(NoopCompactGlanceWidget::class.java)
         }.getOrDefault(emptyList())
-        if (standardIds.isEmpty() && compactIds.isEmpty()) return
+        val wideIds = runCatching {
+            GlanceAppWidgetManager(app).getGlanceIds(NoopWideGlanceWidget::class.java)
+        }.getOrDefault(emptyList())
+        if (standardIds.isEmpty() && compactIds.isEmpty() && wideIds.isEmpty()) return
         runCatching { NoopGlanceWidget().updateAll(app) }
         runCatching { NoopCompactGlanceWidget().updateAll(app) }
+        runCatching { NoopWideGlanceWidget().updateAll(app) }
     }
 
     fun save(context: Context, snap: WidgetSnapshot) {
@@ -68,6 +115,14 @@ object WidgetSnapshotStore {
             .putInt("battery", snap.batteryPct ?: -1)
             .putBoolean("connected", snap.connected)
             .putLong("updatedAt", snap.updatedAtMs)
+            .putInt("hrvMs", snap.hrvMs ?: -1)
+            .putInt("restingHr", snap.restingHr ?: -1)
+            .putInt("sleepMinutes", snap.sleepMinutes ?: -1)
+            .putString("scoreDay", snap.scoreDay)
+            .putString("scoreSource", snap.scoreSource)
+            .putString("vitalsDay", snap.vitalsDay)
+            .putString("vitalsSource", snap.vitalsSource)
+            .putLong("liveUpdatedAt", snap.liveUpdatedAtMs)
             .apply()
     }
 
@@ -81,6 +136,14 @@ object WidgetSnapshotStore {
             batteryPct = p.getInt("battery", -1).takeIf { it >= 0 },
             connected = p.getBoolean("connected", false),
             updatedAtMs = p.getLong("updatedAt", 0L),
+            hrvMs = p.getInt("hrvMs", -1).takeIf { it >= 0 },
+            restingHr = p.getInt("restingHr", -1).takeIf { it > 0 },
+            sleepMinutes = p.getInt("sleepMinutes", -1).takeIf { it >= 0 },
+            scoreDay = p.getString("scoreDay", null),
+            scoreSource = p.getString("scoreSource", null),
+            vitalsDay = p.getString("vitalsDay", null),
+            vitalsSource = p.getString("vitalsSource", null),
+            liveUpdatedAtMs = p.getLong("liveUpdatedAt", 0L),
         )
     }
 }
@@ -102,7 +165,10 @@ internal object PushGate {
         // Rest + Effort join the change-key (#516) so a freshly-scored 2x2 score lands immediately, the
         // same way recovery does — not waiting out the HR refresh window.
         "${snap.recoveryPct}|${snap.restPct}|${snap.effortPct}|" +
-            "${snap.batteryPct?.div(5)}|${snap.connected}|${snap.heartRate != null}"
+            "${snap.hrvMs}|${snap.restingHr}|${snap.sleepMinutes}|" +
+            "${snap.scoreDay}|${snap.scoreSource}|${snap.vitalsDay}|${snap.vitalsSource}|" +
+            "${snap.batteryPct?.div(5)}|" +
+            "${snap.connected}|${snap.heartRate != null}"
 
     fun admit(snap: WidgetSnapshot): Boolean =
         keyOf(snap) != lastKey || snap.updatedAtMs - lastPushAtMs >= HR_REFRESH_MS

@@ -57,7 +57,10 @@ extension WidgetSnapshot {
             effort: day?.strain.map { Int($0.rounded()) },
             rest: restScore.map { Int($0.rounded()) },
             hrv: day?.avgHrv.map { Int($0.rounded()) },
-            restingHr: day?.restingHr
+            restingHr: day?.restingHr,
+            sleepMinutes: day?.totalSleepMin.map { Int($0.rounded()) },
+            connected: model.live.connected,
+            scoreDay: day?.day
         )
         snap.save()
         WidgetCenter.shared.reloadAllTimelines()

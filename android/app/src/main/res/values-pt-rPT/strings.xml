@@ -1,5 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="widget_wide_name">Sinal diário NOOP</string>
+    <string name="widget_wide_description">Recuperação, sono e esforço com VFC, frequência em repouso, duração do sono, frequência em direto e bateria.</string>
+    <string name="widget_daily_signal">SINAL DIÁRIO</string>
+    <string name="widget_source_noop">NOOP no dispositivo</string>
+    <string name="widget_source_wearable">Dispositivo</string>
+    <string name="widget_source_health_connect">Health Connect</string>
+    <string name="widget_source_apple_health">Saúde Apple</string>
+    <string name="widget_source_activity_file">Ficheiro de atividade</string>
+    <string name="widget_latest_available">Último disponível</string>
+    <string name="widget_connected">Ligado</string>
+    <string name="widget_updated_at">Atualizado %1$s</string>
+    <string name="widget_last_update_at">Última atualização %1$s</string>
+    <string name="widget_open_noop">Abrir NOOP</string>
+    <string name="widget_hrv">VFC</string>
+    <string name="widget_resting_hr">FC em repouso</string>
+    <string name="widget_sleep_duration">Sono</string>
+    <string name="widget_heart_rate">Frequência cardíaca</string>
+    <string name="widget_battery">Bateria</string>
+    <string name="widget_unit_ms">ms</string>
+    <string name="widget_unit_bpm">bpm</string>
+    <string name="widget_sleep_duration_format">%1$d h %2$d min</string>
+    <string name="widget_mixed_days">Pontuações %1$s · sinais %2$s</string>
+    <string name="widget_live_prefix">● %1$s</string>
+    <string name="widget_offline_prefix">○ %1$s</string>
+    <string name="widget_battery_value">▰ %1$d%%</string>
+    <string name="widget_percent_value">%1$d%%</string>
     <string name="nutrition_weight_unit_missing_failure">Nenhum peso importado: indique kg ou lb na coluna de peso.</string>
     <plurals name="nutrition_weight_values_skipped">
         <item quantity="one">1 valor de peso ignorado (adicione kg ou lb à coluna).</item>

@@ -178,7 +178,14 @@ struct StrandiOSApp: App {
                 // HealthKit-free payload. Filter on the host so other future schemes don't trip the
                 // importer; macOS never registers the scheme so this stays iOS-only.
                 .onOpenURL { url in
-                    if url.host == "import-health" {
+                    if let destination = NOOPWidgetDestination(url: url) {
+                        switch destination {
+                        case .today: router.openToday()
+                        case .trends: router.openTrends()
+                        case .sleep: router.openSleep()
+                        case .live: router.openLive()
+                        }
+                    } else if url.host == "import-health" {
                         model.handleHealthImportURL(url)
                     }
                 }

@@ -11,8 +11,10 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.noop.data.WhoopRepository
+import com.noop.NoopApplication
 import com.noop.ui.NoopPrefs
 import com.noop.ui.ProfileStore
+import com.noop.widget.WidgetSnapshotPublisher
 import java.util.concurrent.TimeUnit
 
 /**
@@ -132,14 +134,23 @@ class HealthConnectSyncWorker(appContext: Context, params: WorkerParameters) :
         }
 
         return try {
+            val repository = WhoopRepository.from(applicationContext)
             val summary = HealthConnectImporter.import(
                 context = applicationContext,
-                repo = WhoopRepository.from(applicationContext),
+                repo = repository,
                 heightCm = ProfileStore.from(applicationContext).heightCm,
                 lookbackDays = HealthConnectImporter.AUTOMATIC_LOOKBACK_DAYS,
             )
             if (summary.succeeded) {
                 NoopPrefs.setHcLastSync(applicationContext, System.currentTimeMillis())
+                // The worker may run with no Activity and no BLE foreground service, so neither normal
+                // widget producer is necessarily alive. Republish the newly-imported scores directly;
+                // this is best-effort and can never turn a successful health import into a retry loop.
+                runCatching {
+                    val activeId = (applicationContext as? NoopApplication)?.activeDeviceId
+                        ?: WhoopRepository.WHOOP_SOURCE
+                    WidgetSnapshotPublisher.refreshScores(applicationContext, repository, activeId)
+                }
                 Result.success()
             } else {
                 // Do not stamp a failed read/save as a successful sync; WorkManager applies backoff.

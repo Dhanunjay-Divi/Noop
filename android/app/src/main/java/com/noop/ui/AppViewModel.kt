@@ -51,7 +51,7 @@ import com.noop.notif.StrainTargetNotifier
 import com.noop.notif.ScheduledReportPolicy
 import com.noop.notif.scorePctOrNull
 import com.noop.protocol.CommandNumber
-import com.noop.widget.WidgetSnapshot
+import com.noop.widget.WidgetSnapshotFactory
 import com.noop.widget.WidgetSnapshotStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -755,14 +755,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     // widget reads the anchor here (the notification's honest-null contract lives in the
                     // service), keeping the two symmetric.
                     val anchorRow = widgetAnchorRow(days, logicalKey, localKey)
+                    val vitalsRow = WidgetSnapshotFactory.vitalsRow(days, logicalKey, localKey)
                     WidgetSnapshotStore.push(
                         appContext,
-                        WidgetSnapshot(
-                            recoveryPct = anchorRow?.recovery?.roundToInt(),
-                            // Rest = the sleep_performance composite from THIS row's banked stage figures
-                            // (pure, honest-null until last night is scored); Effort = the 0–100 strain. (#516)
-                            restPct = anchorRow?.let { RestScorer.restFromDaily(it)?.roundToInt() },
-                            effortPct = anchorRow?.strain?.roundToInt(),
+                        WidgetSnapshotFactory.make(
+                            anchorRow = anchorRow,
+                            vitalsRow = vitalsRow,
                             heartRate = live.heartRate,
                             batteryPct = live.batteryPct?.roundToInt(),
                             connected = live.connected,

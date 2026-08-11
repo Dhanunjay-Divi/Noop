@@ -8,7 +8,11 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /** Trusted top-level destinations that a NOOP-owned notification may open. */
 internal enum class NoopNotificationRoute(val navRoute: String) {
-    TODAY("today");
+    TODAY("today"),
+    TRENDS("trends"),
+    SLEEP("sleep"),
+    LIVE("live"),
+    HEALTH("health");
 
     companion object {
         fun fromRaw(raw: String?): NoopNotificationRoute? = entries.firstOrNull { it.navRoute == raw }

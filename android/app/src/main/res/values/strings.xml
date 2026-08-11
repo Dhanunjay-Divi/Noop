@@ -10,6 +10,32 @@
     <string name="widget_compact_name">NOOP Compact</string>
     <string name="widget_compact_description">Compact Sleep, Recovery and Effort widget, with live heart rate and strap battery.</string>
     <string name="widget_error">NOOP widget couldn\'t draw — it will recover on the next update.</string>
+    <string name="widget_wide_name">NOOP Daily Signal</string>
+    <string name="widget_wide_description">Recovery, Sleep and Effort with HRV, resting heart rate, sleep duration, live heart rate and battery.</string>
+    <string name="widget_daily_signal">DAILY SIGNAL</string>
+    <string name="widget_source_noop">NOOP on-device</string>
+    <string name="widget_source_wearable">Wearable</string>
+    <string name="widget_source_health_connect">Health Connect</string>
+    <string name="widget_source_apple_health">Apple Health</string>
+    <string name="widget_source_activity_file">Activity file</string>
+    <string name="widget_latest_available">Latest available</string>
+    <string name="widget_connected">Connected</string>
+    <string name="widget_updated_at">Updated %1$s</string>
+    <string name="widget_last_update_at">Last update %1$s</string>
+    <string name="widget_open_noop">Open NOOP</string>
+    <string name="widget_hrv">HRV</string>
+    <string name="widget_resting_hr">Resting HR</string>
+    <string name="widget_sleep_duration">Sleep</string>
+    <string name="widget_heart_rate">Heart rate</string>
+    <string name="widget_battery">Battery</string>
+    <string name="widget_unit_ms">ms</string>
+    <string name="widget_unit_bpm">bpm</string>
+    <string name="widget_sleep_duration_format">%1$dh %2$dm</string>
+    <string name="widget_mixed_days">Scores %1$s · vitals %2$s</string>
+    <string name="widget_live_prefix">● %1$s</string>
+    <string name="widget_offline_prefix">○ %1$s</string>
+    <string name="widget_battery_value">▰ %1$d%%</string>
+    <string name="widget_percent_value">%1$d%%</string>
 
     <!-- Navigation: bottom-bar tabs, the More page rows, and the top-bar screen titles. These are the
          localized display labels for the Destination enum; the underlying route ids stay English and

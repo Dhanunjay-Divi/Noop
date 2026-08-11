@@ -23,7 +23,6 @@ import com.noop.alarm.SmartAlarmScheduler
 import com.noop.alarm.SmartAlarmStore
 import com.noop.analytics.BatteryEstimator
 import com.noop.analytics.IllnessWatch
-import com.noop.analytics.RestScorer
 import com.noop.data.DailyMetric
 import com.noop.location.GpsSession
 import com.noop.location.LocationTracker
@@ -31,7 +30,7 @@ import com.noop.notif.BatteryAlertNotifier
 import com.noop.notif.IllnessAlertNotifier
 import com.noop.ui.NoopPrefs
 import com.noop.ui.appLaunchIntent
-import com.noop.widget.WidgetSnapshot
+import com.noop.widget.WidgetSnapshotFactory
 import com.noop.widget.WidgetSnapshotStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -75,6 +74,7 @@ private data class NotifyTick(
     val state: LiveState,
     val todayRow: DailyMetric?,
     val anchorRow: DailyMetric?,
+    val vitalsRow: DailyMetric?,
     val illness: String?,
 )
 
@@ -214,10 +214,12 @@ class WhoopConnectionService : Service() {
                 //    symmetric with AppViewModel, where only the widget push reads the anchor.
                 val todayRow = com.noop.ui.resolveTodayRow(days, logicalKey, localKey)
                 val anchorRow = com.noop.ui.widgetAnchorRow(days, logicalKey, localKey)
+                val vitalsRow = WidgetSnapshotFactory.vitalsRow(days, logicalKey, localKey)
                 NotifyTick(
                     state = state,
                     todayRow = todayRow,
                     anchorRow = anchorRow,
+                    vitalsRow = vitalsRow,
                     // Illness watch in the background (gated on the opt-out pref): the FGS is the
                     // only long-lived collector, so this is what makes the early-warning reach a
                     // user who hasn't opened the app today.
@@ -229,7 +231,7 @@ class WhoopConnectionService : Service() {
                 // every push mid-flight and the widget starved on stale data the moment HR started
                 // streaming. Conflation still processes only the latest value — just without the axe.
                 .conflate()
-                .collect { (state, todayRow, anchorRow, illness) ->
+                .collect { (state, todayRow, anchorRow, vitalsRow, illness) ->
                 // Honest-null: the notification's Recovery line reads the NAIVE today row, never the
                 // carried anchor, so it stays blank until tonight's recovery actually lands (#911).
                 postNotification(state, todayRow?.recovery)
@@ -274,13 +276,9 @@ class WhoopConnectionService : Service() {
                 runCatching {
                     WidgetSnapshotStore.push(
                         this@WhoopConnectionService,
-                        WidgetSnapshot(
-                            recoveryPct = anchorRow?.recovery?.roundToInt(),
-                            // Rest = the sleep_performance composite from the anchor row's banked stage
-                            // figures (pure, honest-null until last night is scored); Effort = the 0-100
-                            // strain. Widget-only carry, so it shows the same day as Today. (#516/#911)
-                            restPct = anchorRow?.let { RestScorer.restFromDaily(it)?.roundToInt() },
-                            effortPct = anchorRow?.strain?.roundToInt(),
+                        WidgetSnapshotFactory.make(
+                            anchorRow = anchorRow,
+                            vitalsRow = vitalsRow,
                             heartRate = state.heartRate,
                             batteryPct = state.batteryPct?.roundToInt(),
                             connected = state.connected,
