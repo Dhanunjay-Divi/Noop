@@ -1769,4 +1769,11 @@
     <string name="cycle_tracker_delete_all_message">This permanently removes period-start history. Sensor history is unchanged.</string>
     <string name="cycle_tracker_update_failed_title">Couldn’t update cycle history</string>
     <string name="cycle_tracker_update_failed_message">Nothing was changed. Please try again after the local database finishes opening.</string>
+    <string name="workout_discard_title">Discard this workout?</string>
+    <string name="workout_discard_recovery_message">This permanently removes the on-device recovery copy. This cannot be undone.</string>
+    <string name="workout_discard_action">Discard</string>
+    <string name="workout_keep_action">Keep workout</string>
+    <string name="workout_saving">Saving…</string>
+    <string name="workout_retry_save">Retry save</string>
+    <string name="workout_discard">Discard workout</string>
 </resources>

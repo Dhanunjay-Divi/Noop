@@ -172,7 +172,7 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
                             onClick = { showDiscardConfirm = true },
                             enabled = !saveInProgress,
                         ) {
-                            Text("Discard workout", color = Palette.statusCritical)
+                            Text(uiString(R.string.workout_discard), color = Palette.statusCritical)
                         }
                     }
                 }
@@ -197,8 +197,8 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
             ) {
                 Text(
                     when {
-                        saveInProgress -> "Saving…"
-                        w.endMs != null -> "Retry save"
+                        saveInProgress -> uiString(R.string.workout_saving)
+                        w.endMs != null -> uiString(R.string.workout_retry_save)
                         else -> uiString(R.string.l10n_live_workout_screen_end_workout_3e8d6238)
                     },
                     style = NoopType.headline,
@@ -248,22 +248,27 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
         AlertDialog(
             onDismissRequest = { showDiscardConfirm = false },
             containerColor = Palette.surfaceOverlay,
-            title = { Text("Discard this workout?", style = NoopType.title2, color = Palette.textPrimary) },
+            title = {
+                Text(uiString(R.string.workout_discard_title),
+                    style = NoopType.title2, color = Palette.textPrimary)
+            },
             text = {
                 Text(
-                    "This permanently removes the on-device recovery copy. This cannot be undone.",
+                    uiString(R.string.workout_discard_recovery_message),
                     style = NoopType.subhead,
                     color = Palette.textSecondary,
                 )
             },
             confirmButton = {
                 TextButton(onClick = { showDiscardConfirm = false; vm.discardActiveWorkout() }) {
-                    Text("Discard", style = NoopType.body, color = Palette.statusCritical)
+                    Text(uiString(R.string.workout_discard_action),
+                        style = NoopType.body, color = Palette.statusCritical)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDiscardConfirm = false }) {
-                    Text("Keep workout", style = NoopType.body, color = Palette.textSecondary)
+                    Text(uiString(R.string.workout_keep_action),
+                        style = NoopType.body, color = Palette.textSecondary)
                 }
             },
         )

@@ -177361,6 +177361,174 @@
         }
       }
     },
+    "WORKOUT KEPT": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TRAINING ERHALTEN"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ENTRENAMIENTO CONSERVADO"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ENTRAÎNEMENT CONSERVÉ"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TREINO MANTIDO"
+          }
+        }
+      }
+    },
+    "Discard this workout?": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieses Training verwerfen?"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Descartar este entrenamiento?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abandonner cet entraînement ?"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descartar este treino?"
+          }
+        }
+      }
+    },
+    "Discard recording": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aufzeichnung verwerfen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descartar grabación"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abandonner l’enregistrement"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descartar gravação"
+          }
+        }
+      }
+    },
+    "Keep it": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Behalten"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conservar"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conserver"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manter"
+          }
+        }
+      }
+    },
+    "Only discard removes the retained recovery copy. Retry keeps the workout intact.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nur durch Verwerfen wird die aufbewahrte Wiederherstellungskopie entfernt. Beim erneuten Versuch bleibt das Training vollständig erhalten."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Solo al descartar se elimina la copia de recuperación conservada. Al reintentar, el entrenamiento permanece intacto."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seul l’abandon supprime la copie de récupération conservée. Réessayer laisse l’entraînement intact."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Só a opção de descartar remove a cópia de recuperação guardada. Tentar novamente mantém o treino intacto."
+          }
+        }
+      }
+    },
+    "Saving this workout on your iPhone…": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieses Training wird auf dem iPhone gespeichert…"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Guardando este entrenamiento en el iPhone…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enregistrement de cet entraînement sur l’iPhone…"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A guardar este treino no iPhone…"
+          }
+        }
+      }
+    },
     "Sleep steadiness: Sleep Score varied ±%@ pts night to night.": {
       "localizations": {
         "de": {

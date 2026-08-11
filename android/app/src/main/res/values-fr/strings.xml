@@ -1744,4 +1744,11 @@
     <string name="cycle_tracker_delete_all_message">Cette action supprime définitivement l’historique des débuts de règles. L’historique du capteur reste inchangé.</string>
     <string name="cycle_tracker_update_failed_title">Impossible de mettre à jour l’historique du cycle</string>
     <string name="cycle_tracker_update_failed_message">Aucune modification n’a été effectuée. Réessayez une fois la base de données locale ouverte.</string>
+    <string name="workout_discard_title">Abandonner cet entraînement ?</string>
+    <string name="workout_discard_recovery_message">Cette action supprime définitivement la copie de récupération enregistrée sur cet appareil. Elle est irréversible.</string>
+    <string name="workout_discard_action">Abandonner</string>
+    <string name="workout_keep_action">Conserver l’entraînement</string>
+    <string name="workout_saving">Enregistrement…</string>
+    <string name="workout_retry_save">Réessayer l’enregistrement</string>
+    <string name="workout_discard">Abandonner l’entraînement</string>
 </resources>

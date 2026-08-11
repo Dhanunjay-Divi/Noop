@@ -1759,4 +1759,11 @@
     <string name="cycle_tracker_delete_all_message">Dadurch wird der Verlauf der Periodenbeginne dauerhaft gelöscht. Der Sensorverlauf bleibt unverändert.</string>
     <string name="cycle_tracker_update_failed_title">Zyklusverlauf konnte nicht aktualisiert werden</string>
     <string name="cycle_tracker_update_failed_message">Es wurde nichts geändert. Versuche es erneut, nachdem die lokale Datenbank vollständig geöffnet wurde.</string>
+    <string name="workout_discard_title">Dieses Training verwerfen?</string>
+    <string name="workout_discard_recovery_message">Dadurch wird die Wiederherstellungskopie auf diesem Gerät dauerhaft gelöscht. Dies kann nicht rückgängig gemacht werden.</string>
+    <string name="workout_discard_action">Verwerfen</string>
+    <string name="workout_keep_action">Training behalten</string>
+    <string name="workout_saving">Wird gespeichert…</string>
+    <string name="workout_retry_save">Speichern erneut versuchen</string>
+    <string name="workout_discard">Training verwerfen</string>
 </resources>

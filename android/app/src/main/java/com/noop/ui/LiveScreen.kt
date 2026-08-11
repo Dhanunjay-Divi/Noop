@@ -216,16 +216,18 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
     if (showDiscardWorkoutConfirm) {
         AlertDialog(
             onDismissRequest = { showDiscardWorkoutConfirm = false },
-            title = { Text("Discard this workout?") },
-            text = { Text("This permanently removes the on-device recovery copy. This cannot be undone.") },
+            title = { Text(uiString(R.string.workout_discard_title)) },
+            text = { Text(uiString(R.string.workout_discard_recovery_message)) },
             confirmButton = {
                 TextButton(onClick = {
                     showDiscardWorkoutConfirm = false
                     viewModel.discardActiveWorkout()
-                }) { Text("Discard", color = Palette.statusCritical) }
+                }) { Text(uiString(R.string.workout_discard_action), color = Palette.statusCritical) }
             },
             dismissButton = {
-                TextButton(onClick = { showDiscardWorkoutConfirm = false }) { Text("Keep workout") }
+                TextButton(onClick = { showDiscardWorkoutConfirm = false }) {
+                    Text(uiString(R.string.workout_keep_action))
+                }
             },
         )
     }
@@ -456,8 +458,8 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
                     ) {
                         Text(
                             when {
-                                workoutSaveInProgress -> "Saving…"
-                                w.endMs != null -> "Retry save"
+                                workoutSaveInProgress -> uiString(R.string.workout_saving)
+                                w.endMs != null -> uiString(R.string.workout_retry_save)
                                 else -> uiString(R.string.l10n_live_screen_end_workout_3e8d6238)
                             },
                             style = NoopType.captionNumber,
@@ -472,7 +474,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
                         TextButton(
                             onClick = { showDiscardWorkoutConfirm = true },
                             enabled = !workoutSaveInProgress,
-                        ) { Text("Discard workout", color = Palette.statusCritical) }
+                        ) { Text(uiString(R.string.workout_discard), color = Palette.statusCritical) }
                     }
                 }
             }

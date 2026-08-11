@@ -1738,4 +1738,11 @@
     <string name="cycle_tracker_delete_all_message">Isto elimina permanentemente o histórico de inícios de período. O histórico do sensor não é alterado.</string>
     <string name="cycle_tracker_update_failed_title">Não foi possível atualizar o histórico do ciclo</string>
     <string name="cycle_tracker_update_failed_message">Nada foi alterado. Tenta novamente depois de a base de dados local terminar de abrir.</string>
+    <string name="workout_discard_title">Descartar este treino?</string>
+    <string name="workout_discard_recovery_message">Esta ação remove permanentemente a cópia de recuperação neste dispositivo. Não pode ser anulada.</string>
+    <string name="workout_discard_action">Descartar</string>
+    <string name="workout_keep_action">Manter treino</string>
+    <string name="workout_saving">A guardar…</string>
+    <string name="workout_retry_save">Tentar guardar novamente</string>
+    <string name="workout_discard">Descartar treino</string>
 </resources>
