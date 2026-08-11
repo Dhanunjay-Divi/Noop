@@ -143,4 +143,19 @@ final class LiquidChargeCarryTests: XCTestCase {
         XCTAssertNil(Display.carried(pct: 82.3, caption: "Last night · 4 Jul").calibrationDetail)
         XCTAssertNil(Display.noData.calibrationDetail)
     }
+
+    func testCalibrationFillsOnlyToObservedNightProgress() {
+        XCTAssertEqual(Display.calibrating(nights: 0).calibrationFraction, 0)
+        XCTAssertEqual(Display.calibrating(nights: 2).calibrationFraction, 0.5)
+        XCTAssertEqual(Display.calibrating(nights: 4).calibrationFraction, 1)
+        XCTAssertEqual(Display.calibrating(nights: 99).calibrationFraction, 1,
+                       "the visual must clamp corrupt or stale counts to a full vessel")
+        XCTAssertEqual(Display.calibrating(nights: -2).calibrationFraction, 0)
+        XCTAssertEqual(Display.calibrating(nights: 2).calibrationCompactText, "2/4")
+
+        for display in [Display.scored(pct: 61), .carried(pct: 82, caption: "Last night"), .noData] {
+            XCTAssertNil(display.calibrationFraction)
+            XCTAssertNil(display.calibrationCompactText)
+        }
+    }
 }

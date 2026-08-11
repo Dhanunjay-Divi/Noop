@@ -15,6 +15,14 @@ class ScoreTerminologyTest {
     }
 
     @Test
+    fun liquidProgressIsLimitedToGenuinelyBoundedDailyScores() {
+        assertEquals(
+            listOf(KeyMetric.CHARGE, KeyMetric.EFFORT, KeyMetric.REST),
+            KeyMetric.entries.filter { it.isBoundedProgress },
+        )
+    }
+
+    @Test
     fun heroAndGuideUseRecoveryAndSleep() {
         assertEquals("Recovery", DomainTheme.Charge.label)
         assertEquals("Sleep", DomainTheme.Rest.label)

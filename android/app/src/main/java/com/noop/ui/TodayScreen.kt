@@ -2424,8 +2424,18 @@ private fun ScoreHeroRow(
                                 showsValue = true,
                             )
                         } else {
+                            // Calibration is genuine bounded progress toward the minimum baseline window,
+                            // not a provisional Recovery score. Fill the vessel to N / required nights while
+                            // the overlay below continues to say "Calibrating · N of M" and no score number
+                            // is shown.
+                            val recoveryProgress = when {
+                                recovery != null -> recovery / 100.0
+                                recoveryCalibration != null ->
+                                    recoveryCalibration.toDouble() / Baselines.minNightsSeed.toDouble()
+                                else -> 0.0
+                            }.coerceIn(0.0, 1.0)
                             HeroScoreVessel(
-                                fraction = (recovery ?: 0.0) / 100.0,
+                                fraction = recoveryProgress,
                                 value = recovery ?: 0.0,
                                 tint = Palette.recoveryColor(recovery ?: 0.0),
                                 diameter = ring,
@@ -4310,13 +4320,22 @@ private fun MetricGrid(
     onOpenMetric: (String) -> Unit = {},
 ) {
     // FIX 3 (iOS `keyMetricsSection` parity): a 3-COLUMN grid of COMPACT liquid tiles, each an iOS `ktile`
-    // — a 9sp/+1.2 overline label, a value + small unit, and a thin 8dp LiquidTube fill bar — REPLACING the
-    // old 2-column large sparkline cards. One descriptor per KeyMetric, carrying the SAME value/tint reads
-    // the old builders used PLUS the tile's LiquidTube fraction (mirroring the iOS ktile frac). The #251
+    // — a 9sp/+1.2 overline label and a value + small unit. Genuinely bounded daily scores also get a thin
+    // 8dp LiquidTube; raw measurements keep the same aligned space without an arbitrary "more is better"
+    // fill. One descriptor per KeyMetric carries the same value/tint reads the old builders used. The #251
     // editor + enabled-order + collapse expander are all preserved; only the tile look changes.
     val descriptors: Map<KeyMetric, KeyTileData> = mapOf(
         KeyMetric.CHARGE to run {
             val v = d?.recovery ?: lastScoredCharge?.value
+            // A scored/carried Recovery uses its 0–100 axis. During calibration the visible N/M copy is
+            // backed by the same bounded N/M liquid progress; it never becomes a fabricated Recovery score.
+            val progress = when {
+                d?.recovery != null -> d.recovery / 100.0
+                recoveryCalibration != null ->
+                    recoveryCalibration.toDouble() / Baselines.minNightsSeed.toDouble()
+                lastScoredCharge != null -> lastScoredCharge.value / 100.0
+                else -> null
+            }
             KeyTileData(
                 label = uiString(R.string.l10n_today_screen_recovery_ea924f72),
                 value = d?.recovery?.let { "${it.roundToInt()}" }
@@ -4324,7 +4343,7 @@ private fun MetricGrid(
                     ?: lastScoredCharge?.let { "${it.value.roundToInt()}" } ?: NO_DATA,
                 unit = if (d?.recovery != null || lastScoredCharge != null) "%" else "",
                 tint = v?.let { Palette.recoveryColor(it) } ?: Palette.chargeColor,
-                frac = v?.let { (it / 100.0).coerceIn(0.0, 1.0) },
+                frac = progress?.coerceIn(0.0, 1.0),
                 spark = w.recovery,
             )
         },
@@ -4354,7 +4373,7 @@ private fun MetricGrid(
                 value = v?.let { "${it.roundToInt()}" } ?: NO_DATA,
                 unit = if (v != null) "ms" else "",
                 tint = Palette.metricCyan,
-                frac = v?.let { (it / 120.0).coerceIn(0.0, 1.0) },
+                frac = null,
                 spark = w.hrv,
             )
         },
@@ -4365,7 +4384,7 @@ private fun MetricGrid(
                 value = v?.toString() ?: NO_DATA,
                 unit = if (v != null) "bpm" else "",
                 tint = Palette.metricRose,
-                frac = v?.let { (it / 100.0).coerceIn(0.0, 1.0) },
+                frac = null,
                 spark = w.rhr,
             )
         },
@@ -4376,7 +4395,7 @@ private fun MetricGrid(
                 value = v?.let { String.format(Locale.US, "%.0f", it) } ?: NO_DATA,
                 unit = if (v != null) "%" else "",
                 tint = Palette.metricCyan,
-                frac = v?.let { (it / 100.0).coerceIn(0.0, 1.0) },
+                frac = null,
                 spark = w.spo2,
             )
         },
@@ -4387,7 +4406,7 @@ private fun MetricGrid(
                 value = v?.let { String.format(Locale.US, "%.1f", it) } ?: NO_DATA,
                 unit = if (v != null) "rpm" else "",
                 tint = Palette.accent,
-                frac = v?.let { (it / 24.0).coerceIn(0.0, 1.0) },
+                frac = null,
                 spark = w.resp,
             )
         },
@@ -4400,7 +4419,7 @@ private fun MetricGrid(
                 value = steps?.let { intString(it.toDouble()) } ?: NO_DATA,
                 unit = "",
                 tint = Palette.metricCyan,
-                frac = steps?.let { (it / 10000.0).coerceIn(0.0, 1.0) },
+                frac = null,
                 spark = w.steps,   // #616: was missing → no trend line under the tile
             )
         },
@@ -4423,7 +4442,7 @@ private fun MetricGrid(
                 value = kcal?.let { intString(it) } ?: NO_DATA,
                 unit = if (kcal != null) "kcal" else "",
                 tint = Palette.metricAmber,
-                frac = kcal?.let { (it / 800.0).coerceIn(0.0, 1.0) },
+                frac = null,
                 spark = caloriesSpark,   // #616: imported-first trend (was missing → no trend line)
             )
         },
@@ -4468,6 +4487,7 @@ private fun MetricGrid(
                 rowTiles.forEach { (metric, tile) ->
                     LiquidKeyTile(
                         tile,
+                        showsBoundedProgress = metric.isBoundedProgress,
                         detailed = detailed,
                         onClick = tapFor(metric),
                         modifier = Modifier.weight(1f).then(if (detailed) Modifier.fillMaxHeight() else Modifier),
@@ -4500,9 +4520,9 @@ private fun MetricGrid(
     }
 }
 
-/** One compact Key-Metrics tile's data: iOS `ktile`(label, value, unit, tint, frac). [spark] is the
- *  14-day trend series (oldest→newest) the DETAILED tile style graphs; empty hides the graph (a metric
- *  with no windowed series — Steps/Weight/Calories — stays tube-only even in detailed mode). */
+/** One compact Key-Metrics tile's data: iOS `ktile`(label, value, unit, tint, frac). [frac] is meaningful
+ *  only for a [KeyMetric.isBoundedProgress] score; raw measurements leave it null. [spark] is the 14-day
+ *  trend series (oldest→newest) the DETAILED tile style graphs; empty hides the graph. */
 private data class KeyTileData(
     val label: String,
     val value: String,
@@ -4513,10 +4533,11 @@ private data class KeyTileData(
 )
 
 /**
- * One iOS `ktile`: a compact 3-column tile — a 9sp / +1.2 overline label, the value (number 17) + small
- * unit (caption), and a thin 8dp [LiquidTube] fill bar tinted [KeyTileData.tint] to [KeyTileData.frac].
- * Flat surfaceRaised fill + a 16dp-corner hairline (iOS ktile background), padding 12h / 11v. Replaces the
- * old tall 2-column SparkStatTile. A No-Data value dims and the tube reads empty.
+ * One iOS `ktile`: a compact 3-column tile — a 9sp / +1.2 overline label and the value (number 17) + small
+ * unit (caption). A bounded score gets a thin 8dp [LiquidTube] tinted [KeyTileData.tint] to
+ * [KeyTileData.frac]; a raw vital reserves the same height but draws no fake progress. Flat surfaceRaised
+ * fill + a 16dp-corner hairline (iOS ktile background), padding 12h / 11v. Replaces the old tall 2-column
+ * SparkStatTile. A No-Data bounded score dims and its tube reads empty.
  *
  * [detailed] (the #251 editor's "Detailed tiles" switch): the tile grows a 14-day trend [Sparkline] in the
  * metric's tint under the fill bar — taller/squarer, per the tester mock. A metric with no windowed series
@@ -4525,6 +4546,7 @@ private data class KeyTileData(
 @Composable
 private fun LiquidKeyTile(
     data: KeyTileData,
+    showsBoundedProgress: Boolean,
     detailed: Boolean = false,
     onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
@@ -4575,13 +4597,19 @@ private fun LiquidKeyTile(
         // Detailed rows are height-equalised (fillMaxHeight): pin the bar + graph to the bottom edge so a
         // graph-less tile's bar lines up with its neighbours' bars rather than floating mid-card.
         if (detailed) Spacer(Modifier.weight(1f))
-        LiquidTube(
-            frac = data.frac ?: 0.0,
-            tint = data.tint,
-            height = 8.dp,
-            animated = false,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        if (showsBoundedProgress) {
+            LiquidTube(
+                frac = data.frac ?: 0.0,
+                tint = data.tint,
+                height = 8.dp,
+                animated = false,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            // Keep every grid row aligned without drawing an arbitrary "health progress" bar for a raw
+            // measurement. The value + optional sparkline carry the raw metric honestly.
+            Spacer(Modifier.height(8.dp))
+        }
         // Detailed tiles: the 14-day trend graph under the bar (same Sparkline leaf the Sleep tiles use,
         // at the shared tile spark height), tinted to the metric so the graph reads as the same signal.
         if (detailed) {

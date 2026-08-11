@@ -44,6 +44,10 @@ public struct FrostedCardSurface: View {
     public var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         let op = max(0.0, min(1.0, Double(cardOpacityPercent) / 100.0))
+        // Reduced Transparency is an accessibility override, so it must win over the decorative
+        // card-opacity preference. Otherwise a user could ask for opaque surfaces and still receive
+        // a partially transparent card because the final modifier faded it again.
+        let effectiveOpacity = reduceTransparency ? 1.0 : op
         let increasedContrast = accessibilityContrast == .increased
         let baseFill = reduceTransparency
             ? AnyShapeStyle(StrandPalette.surfaceRaised)
@@ -55,7 +59,7 @@ public struct FrostedCardSurface: View {
                 // health data readable. Reduced Transparency gets an opaque surface.
                 shape.fill(
                     StrandPalette.surfaceRaised.opacity(
-                        reduceTransparency ? 1 : (scheme == .dark ? 0.76 : 0.84)
+                        reduceTransparency ? 1 : (scheme == .dark ? 0.76 : 0.76)
                     )
                 )
             )
@@ -66,7 +70,7 @@ public struct FrostedCardSurface: View {
                             Color.white.opacity(
                                 scheme == .dark
                                     ? (increasedContrast ? 0.10 : 0.065)
-                                    : (increasedContrast ? 0.50 : 0.38)
+                                    : (increasedContrast ? 0.42 : 0.24)
                             ),
                             .clear,
                             Color.black.opacity(scheme == .dark ? 0.22 : 0.035)
@@ -96,7 +100,7 @@ public struct FrostedCardSurface: View {
                             Color.white.opacity(
                                 scheme == .dark
                                     ? (increasedContrast ? 0.34 : 0.20)
-                                    : 0.90
+                                    : (increasedContrast ? 0.82 : 0.68)
                             ),
                             StrandPalette.bevelSide.opacity(increasedContrast ? 0.78 : 0.52),
                             StrandPalette.bevelBottom.opacity(scheme == .dark ? 0.88 : 0.28)
@@ -113,7 +117,7 @@ public struct FrostedCardSurface: View {
                     .strokeBorder(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(scheme == .dark ? 0.055 : 0.38),
+                                Color.white.opacity(scheme == .dark ? 0.055 : 0.24),
                                 .clear,
                                 Color.black.opacity(scheme == .dark ? 0.24 : 0.035),
                             ],
@@ -124,13 +128,13 @@ public struct FrostedCardSurface: View {
                     )
             )
             .shadow(
-                color: Color.black.opacity(scheme == .light ? 0.10 : 0.30),
+                color: Color.black.opacity(scheme == .light ? 0.08 : 0.30),
                 radius: scheme == .light ? 12 : 20,
                 x: 0, y: scheme == .light ? 4 : 9
             )
             // "Card transparency": fade the whole glass surface. The card's content sits above this
             // background, so it stays fully readable regardless.
-            .opacity(op)
+            .opacity(effectiveOpacity)
     }
 }
 

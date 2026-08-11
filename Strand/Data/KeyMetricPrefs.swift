@@ -29,6 +29,17 @@ enum KeyMetric: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Whether the metric has a truthful, fixed progress scale. Raw physiology is deliberately false:
+    /// HRV/heart rate/respiration/SpO₂ are readings to compare with a personal baseline, not goals where
+    /// a fuller bar means healthier. Steps and calories also stay false until the user owns an explicit
+    /// goal rather than NOOP silently assuming 10,000 steps or 800 kcal.
+    var isBoundedProgress: Bool {
+        switch self {
+        case .charge, .effort, .rest: return true
+        case .hrv, .restingHr, .bloodOxygen, .respiratory, .steps, .weight, .calories: return false
+        }
+    }
+
     /// The tile's display label — matches the `StatTile(label:)` text rendered on the grid.
     var title: String {
         switch self {

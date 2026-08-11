@@ -134,11 +134,11 @@ final class MoreListParityTests: XCTestCase {
                       "Both scroll implementations need the DEBUG runtime bottom-reachability proof.")
     }
 
-    /// The reference interaction is an Instagram-style smoked island: labelled at rest, compact while
+    /// The reference interaction is an Instagram-style glass island: labelled at rest, compact while
     /// advancing through content, and expanded again when the finger moves back toward the top. Pin the
     /// direction and accessibility contracts because a visual-only refactor can otherwise reintroduce
     /// the opaque white plate or hide navigation names from assistive technology.
-    func testiPhoneTabBarIsAdaptiveSmokedGlass() throws {
+    func testiPhoneTabBarIsAdaptiveGlass() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
 
         XCTAssertTrue(shell.contains(".simultaneousGesture(adaptiveTabBarGesture)"))
@@ -151,8 +151,16 @@ final class MoreListParityTests: XCTestCase {
         XCTAssertTrue(shell.contains("--demo-compact-tab-bar"),
                       "The real compact state needs a deterministic visual-regression route.")
         XCTAssertTrue(shell.contains(".glassEffect(.clear.tint(tint)"))
-        XCTAssertTrue(shell.contains(".black.opacity(0.54)"),
-                      "Light mode must render smoked glass instead of another opaque white card.")
+        XCTAssertTrue(shell.contains(".white.opacity(0.08)"),
+                      "Light mode must preserve a pearl-clear lens instead of a solid grey plate.")
+        XCTAssertTrue(shell.contains(".black.opacity(0.035)"),
+                      "Light mode may use only a restrained contrast scrim over the live page.")
+        XCTAssertTrue(shell.contains("navigationInk(active: active)"),
+                      "Navigation ink must adapt to light and dark glass.")
+        XCTAssertTrue(shell.contains(".opacity(navigationGlassOpacity)"),
+                      "Light mode must fade only the material layer, never the navigation ink.")
+        XCTAssertTrue(shell.contains("accessibilityReduceTransparency"),
+                      "The glass island needs an opaque accessibility fallback.")
         XCTAssertTrue(shell.contains("compact && !dynamicTypeSize.isAccessibilitySize"),
                       "Accessibility Dynamic Type must retain visible labels.")
         XCTAssertTrue(shell.contains(".frame(minHeight: 44)"))

@@ -850,6 +850,7 @@ private struct FloatingTabBar: View {
     /// Fires when the user taps the ALREADY-active tab (2026-07-02: re-tap should refresh).
     var onReselect: (Int) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -861,13 +862,29 @@ private struct FloatingTabBar: View {
 
     private var visuallyCompact: Bool { compact && !dynamicTypeSize.isAccessibilitySize }
     private var navigationGlassTint: Color {
-        // The reference behaviour is a smoked optical island, not a second white card. Keeping the
-        // glass dark in both appearances gives it a deliberate black-and-white identity while Clear
-        // Glass still refracts the live page underneath.
-        colorScheme == .dark ? .black.opacity(0.64) : .black.opacity(0.54)
+        // Dark keeps the smoked optical island. Light uses a pearl-clear lens so the page remains
+        // visibly continuous under the bar instead of stacking two black layers into a grey slab.
+        // Reduced Transparency receives a deliberately opaque neutral surface below.
+        if reduceTransparency {
+            return colorScheme == .dark ? .black.opacity(0.94) : .white.opacity(0.96)
+        }
+        return colorScheme == .dark ? .black.opacity(0.64) : .white.opacity(0.08)
     }
     private var navigationScrim: Color {
-        colorScheme == .dark ? .black.opacity(0.18) : .black.opacity(0.20)
+        guard !reduceTransparency else { return .clear }
+        return colorScheme == .dark ? .black.opacity(0.18) : .black.opacity(0.035)
+    }
+    private var navigationGlassOpacity: Double {
+        // Clear Glass still carries a strong milk-white optical body over a pearl canvas. Fade only
+        // that material layer in Light mode (never the labels or tap targets) so the island reads as a
+        // lens over the page rather than another white card. Dark and Reduced Transparency stay solid.
+        reduceTransparency || colorScheme == .dark ? 1 : 0.68
+    }
+    private func navigationInk(active: Bool) -> Color {
+        if colorScheme == .dark {
+            return active ? .white : .white.opacity(0.68)
+        }
+        return active ? .black.opacity(0.90) : .black.opacity(0.56)
     }
 
     var body: some View {
@@ -882,20 +899,25 @@ private struct FloatingTabBar: View {
         .padding(.vertical, visuallyCompact ? 2 : 6)
         .padding(.horizontal, visuallyCompact ? 7 : 8)
         .frame(height: visuallyCompact ? 48 : 62)
-        .navigationGlass(in: Capsule(), tint: navigationGlassTint)
+        .background {
+            Capsule()
+                .fill(.clear)
+                .navigationGlass(in: Capsule(), tint: navigationGlassTint)
+                .opacity(navigationGlassOpacity)
+        }
         .background(navigationScrim, in: Capsule())
         // A quiet optical rim defines the glass without turning it into an opaque white slab.
         .overlay(
             Capsule().strokeBorder(
                 LinearGradient(colors: [
-                    .white.opacity(colorScheme == .dark ? 0.24 : 0.52),
-                    .white.opacity(colorScheme == .dark ? 0.045 : 0.12),
-                    .black.opacity(colorScheme == .dark ? 0.32 : 0.10),
+                    .white.opacity(colorScheme == .dark ? 0.24 : 0.74),
+                    .white.opacity(colorScheme == .dark ? 0.045 : 0.20),
+                    .black.opacity(colorScheme == .dark ? 0.32 : 0.08),
                 ],
                                startPoint: .top, endPoint: .bottom),
                 lineWidth: 0.7)
         )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.30 : 0.14),
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.30 : 0.10),
                 radius: visuallyCompact ? 11 : 16, x: 0, y: visuallyCompact ? 5 : 8)
         // The compact state also narrows the island, not just its height. Four 44pt hit regions still
         // fit comfortably inside the 56pt side insets on every supported iPhone width.
@@ -924,23 +946,27 @@ private struct FloatingTabBar: View {
                     .offset(y: active && !visuallyCompact ? -1 : 0)
                 if !visuallyCompact {
                     Text(item.title)
-                        .font(.system(size: 10, weight: active ? .semibold : .medium))
+                        .font(StrandFont.footnote.weight(active ? .semibold : .medium))
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                         .transition(.opacity.combined(with: .scale(scale: 0.88, anchor: .top)))
                 }
             }
-            .foregroundStyle(active ? Color.white : Color.white.opacity(0.68))
+            .foregroundStyle(navigationInk(active: active))
             .frame(maxWidth: .infinity)
             .frame(minHeight: 44)
             .padding(.horizontal, visuallyCompact ? 3 : 2)
             .background(
                 Capsule(style: .continuous)
-                    .fill(active ? Color.white.opacity(colorScheme == .dark ? 0.15 : 0.18) : .clear)
+                    .fill(active
+                          ? (colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.055))
+                          : .clear)
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .strokeBorder(active ? Color.white.opacity(colorScheme == .dark ? 0.13 : 0.22) : .clear,
+                    .strokeBorder(active
+                                  ? (colorScheme == .dark ? Color.white.opacity(0.13) : Color.black.opacity(0.075))
+                                  : .clear,
                                   lineWidth: 0.6)
             )
             .contentShape(Capsule(style: .continuous))
@@ -972,8 +998,12 @@ private extension View {
         if #available(iOS 26.0, *) {
             self.glassEffect(.clear.tint(tint), in: shape)
         } else {
-            self.background(.ultraThinMaterial, in: shape)
-                .background(tint, in: shape)
+            // Tint overlays the sampled material. Putting the tint behind the material made the
+            // fallback read as a flat plate, especially when Light mode used a dark tint.
+            self.background {
+                shape.fill(.ultraThinMaterial)
+                    .overlay(shape.fill(tint))
+            }
         }
     }
 }

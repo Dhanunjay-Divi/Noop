@@ -149,8 +149,14 @@ enum LiquidRender {
         let w = size.width, h = size.height, r = h / 2
         let outline = Path(roundedRect: CGRect(x: 0.5, y: 0.5, width: w - 1, height: h - 1), cornerRadius: r)
         let ctx = base
-        ctx.fill(outline, with: .color(Color(.sRGB, red: 14/255, green: 14/255, blue: 18/255, opacity: 1)))
-        ctx.stroke(outline, with: .color(.white.opacity(0.07)), lineWidth: 1)
+        // Dynamic neutral track: the old hard-coded black capsule looked like a heavy divider on
+        // pearl cards. Palette tokens retain the recessed vessel in both appearances.
+        ctx.fill(outline, with: .color(StrandPalette.surfaceInset))
+        ctx.stroke(outline, with: .color(StrandPalette.hairline.opacity(0.72)), lineWidth: 1)
+
+        // A true zero is an empty track. The rounded minimum cap used for positive fills otherwise
+        // leaves a coloured sliver that looks like data even when progress is exactly zero.
+        guard frac > 0 else { return }
 
         var clip = ctx
         clip.clip(to: outline)

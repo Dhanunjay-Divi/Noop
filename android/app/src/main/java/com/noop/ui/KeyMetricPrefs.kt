@@ -18,10 +18,17 @@ import android.content.Context
  * One of the Today screen's Key-Metric tiles. The [raw] is the stable persisted identifier — keep it
  * byte-identical to the macOS `KeyMetric` enum so a backup/restore reads the same layout on either OS.
  */
-enum class KeyMetric(val raw: String, val title: String) {
-    CHARGE("charge", "Recovery"),
-    EFFORT("effort", "Effort"),
-    REST("rest", "Sleep"),
+enum class KeyMetric(
+    val raw: String,
+    val title: String,
+    /** True only when the tile's value has a real, bounded progress axis. Raw vitals deliberately stay
+     *  false: mapping HRV, resting HR, respiration, etc. to an arbitrary ceiling makes a decorative fill
+     *  look like "more is better" health progress. */
+    val isBoundedProgress: Boolean = false,
+) {
+    CHARGE("charge", "Recovery", isBoundedProgress = true),
+    EFFORT("effort", "Effort", isBoundedProgress = true),
+    REST("rest", "Sleep", isBoundedProgress = true),
     HRV("hrv", "HRV"),
     RESTING_HR("restingHr", "Resting HR"),
     BLOOD_OXYGEN("bloodOxygen", "Blood Oxygen"),

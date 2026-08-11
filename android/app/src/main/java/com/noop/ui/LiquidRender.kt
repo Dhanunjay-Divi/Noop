@@ -40,9 +40,9 @@ import kotlin.math.sin
 
 object LiquidRender {
 
-    // Structural near-blacks (ported as-is from the Swift renderer's literal rgba wells).
+    // Structural near-black for the circular well. Tube tracks are supplied by the wrapper from the
+    // active palette so they stay quiet on dark and become a pale inset rail on light.
     private val wellInk = Color(red = 10f / 255f, green = 11f / 255f, blue = 16f / 255f, alpha = 0.55f)
-    private val tubeTrack = Color(red = 14f / 255f, green = 14f / 255f, blue = 18f / 255f, alpha = 1f)
 
     // Colour helpers on `tint` (mirror LiquidCore.swift's liquidDarker / liquidMix). These operate
     // on the passed-in tint colour, not on any physics — kept here so the renderer is self-contained.
@@ -261,7 +261,15 @@ object LiquidRender {
     }
 
     /** A horizontal capsule tube filled to `frac`; tilt pushes the liquid along it. */
-    fun DrawScope.tube(size: Size, sim: LiquidSim, now: Double, frac: Double, tint: Color) {
+    fun DrawScope.tube(
+        size: Size,
+        sim: LiquidSim,
+        now: Double,
+        frac: Double,
+        tint: Color,
+        trackColor: Color,
+        trackBorderColor: Color,
+    ) {
         val w = size.width.toDouble()
         val h = size.height.toDouble()
         val r = h / 2.0
@@ -273,8 +281,8 @@ object LiquidRender {
                 ),
             )
         }
-        drawPath(outline, color = tubeTrack)
-        drawPath(outline, color = Color.White.copy(alpha = 0.07f), style = Stroke(width = 1f))
+        drawPath(outline, color = trackColor)
+        drawPath(outline, color = trackBorderColor, style = Stroke(width = 1f))
 
         clipPath(outline) {
             val shift = -sim.a * h * 1.3

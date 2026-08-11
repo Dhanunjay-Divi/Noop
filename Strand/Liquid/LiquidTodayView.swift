@@ -604,7 +604,10 @@ struct LiquidTodayView: View {
                 HeroScoreCell(label: String(localized: "Recovery"), score: chargeDisplay.pct, tint: StrandPalette.chargeColor,
                               animated: dataLoaded,
                               onOpen: { openHeroMetric("recovery") },
-                              onExplain: { explainHeroMetric("recovery") })
+                              onExplain: { explainHeroMetric("recovery") },
+                              fillFraction: chargeDisplay.calibrationFraction,
+                              emptyText: chargeDisplay.calibrationCompactText ?? "–",
+                              accessibilityValueOverride: chargeDisplay.calibrationDetail)
                 // #45: the hero Effort must honour the user's Effort scale like every other Effort read-out.
                 HeroScoreCell(label: String(localized: "Effort"),
                               score: displayDay?.strain.map { UnitFormatter.effortValue($0, scale: effortScale) },
@@ -1087,22 +1090,22 @@ struct LiquidTodayView: View {
             ktile(String(localized: "Sleep"), intText(restScore), "%", StrandPalette.restColor,
                   frac(restScore), symbol: metric.icon, key: "sleep_performance")
         case .hrv:
-            ktile("HRV", intText(hrv), "ms", StrandPalette.metricCyan, fracOver(hrv, 120),
+            ktile("HRV", intText(hrv), "ms", StrandPalette.metricCyan, nil,
                   symbol: metric.icon, key: "hrv")
         case .restingHr:
-            ktile(String(localized: "Resting HR"), intText(rhr), "bpm", StrandPalette.metricRose,
-                  fracOver(rhr, 100), symbol: metric.icon, key: "rhr")
+            ktile(String(localized: "Resting HR"), intText(rhr), "bpm", StrandPalette.metricRose, nil,
+                  symbol: metric.icon, key: "rhr")
         case .bloodOxygen:
             let spo2 = displayDay?.spo2Pct ?? vitalsDay?.spo2Pct
-            ktile(String(localized: "Blood Oxygen"), intText(spo2), "%", StrandPalette.metricCyan,
-                  fracOver(spo2, 100), symbol: metric.icon, key: "spo2")
+            ktile(String(localized: "Blood Oxygen"), intText(spo2), "%", StrandPalette.metricCyan, nil,
+                  symbol: metric.icon, key: "spo2")
         case .respiratory:
             let resp = displayDay?.respRateBpm ?? vitalsDay?.respRateBpm
             ktile(String(localized: "Respiratory"), resp.map { String(format: "%.1f", $0) } ?? "—",
-                  "rpm", StrandPalette.accent, fracOver(resp, 24), symbol: metric.icon, key: "resp_rate")
+                  "rpm", StrandPalette.accent, nil, symbol: metric.icon, key: "resp_rate")
         case .steps:
             ktile(String(localized: "Steps"), stepsText, "", StrandPalette.chargeColor,
-                  fracOver(stepCount, 10000), symbol: metric.icon, key: stepsDetailKey,
+                  nil, symbol: metric.icon, key: stepsDetailKey,
                   detailMetric: stepsDetailMetric)
         case .weight:
             ktile(String(localized: "Weight"), "—", "", StrandPalette.metricAmber, nil,
@@ -1111,7 +1114,7 @@ struct LiquidTodayView: View {
             // #616: imported-first value (imported ?: activeKcalEst) + route the tap to the matching
             // detail source, so the number, its sparkline and the chart it opens all agree.
             ktile(String(localized: "Calories"), intText(caloriesCount), "kcal", StrandPalette.metricAmber,
-                  fracOver(caloriesCount, 800), symbol: metric.icon, key: "energy_kcal",
+                  nil, symbol: metric.icon, key: "energy_kcal",
                   detailMetric: caloriesDetailMetric)
         }
     }
@@ -1135,7 +1138,16 @@ struct LiquidTodayView: View {
                 .foregroundStyle(StrandPalette.textPrimary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-            LiquidTube(frac: frac ?? 0, tint: tint, height: 7, animated: false)
+            if let frac {
+                // Only real bounded scores earn a progress rail. Raw vital signs use their value and
+                // optional trend below; normalizing RHR/HRV/respiration to arbitrary maxima makes a
+                // fuller bar look "better" when it is not a health-goal scale.
+                LiquidTube(frac: frac, tint: tint, height: 7, animated: false)
+                    .accessibilityHidden(true)
+            } else {
+                // Preserve the two-column baseline without drawing a fake zero/progress sliver.
+                Color.clear.frame(height: 7).accessibilityHidden(true)
+            }
             // #430 parity: DETAILED tiles grow the trend graph under the bar, tinted to the metric and
             // windowed to the editor's 2-day / 1-week / 2-week choice (the Android twin). A metric with no
             // windowed series keeps a clear placeholder of the same height so every tile in a detailed row
@@ -2041,10 +2053,19 @@ private struct HeroScoreCell: View {
     // Decimal places for the displayed number. 0 keeps the whole-number scores; the WHOOP 0–21 Effort
     // scale passes 1 to match the app-wide one-decimal `effortDisplay` convention (#45).
     var decimals: Int = 0
+    /// A real bounded progress value used when no score exists yet (currently baseline calibration).
+    /// This fills the vessel without inventing a provisional Recovery number.
+    var fillFraction: Double? = nil
+    /// Honest non-score readout shown inside the vessel, e.g. "2/4" calibration nights.
+    var emptyText: String = "–"
+    var accessibilityValueOverride: String? = nil
 
     @State private var shown: Double = 0
 
-    private var frac: Double? { score.map { max(0, min(1, $0 / maxValue)) } }
+    private var frac: Double? {
+        if let fillFraction { return max(0, min(1, fillFraction)) }
+        return score.map { max(0, min(1, $0 / maxValue)) }
+    }
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -2056,7 +2077,7 @@ private struct HeroScoreCell: View {
                         if score != nil {
                             CountUpNumber(value: shown, font: StrandFont.rounded(26), decimals: decimals)
                         } else {
-                            Text("–").font(StrandFont.rounded(26))
+                            Text(emptyText).font(StrandFont.rounded(emptyText == "–" ? 26 : 19))
                         }
                     }
                     .foregroundStyle(.white)
@@ -2092,7 +2113,7 @@ private struct HeroScoreCell: View {
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(Text(label))
-            .accessibilityValue(Text(score.map {
+            .accessibilityValue(Text(accessibilityValueOverride ?? score.map {
                 decimals > 0 ? String(format: "%.\(decimals)f of %.0f", $0, maxValue)
                     : String(localized: "\(Int($0.rounded())) of \(Int(maxValue.rounded()))")
             } ?? String(localized: "No data yet")))
@@ -2538,6 +2559,20 @@ extension LiquidTodayView {
         var calibrationDetail: String? {
             guard case .calibrating(let nights) = self else { return nil }
             return String(localized: "Learning your baseline, \(nights) of \(Baselines.minNightsSeed) nights.")
+        }
+
+        /// Bounded learning progress for the liquid vessel. The score remains nil: a half-filled
+        /// vessel means "2 of 4 calibration nights", never a fabricated 50% Recovery.
+        var calibrationFraction: Double? {
+            guard case .calibrating(let nights) = self else { return nil }
+            let required = max(1, Baselines.minNightsSeed)
+            return Double(max(0, min(nights, required))) / Double(required)
+        }
+
+        var calibrationCompactText: String? {
+            guard case .calibrating(let nights) = self else { return nil }
+            let required = max(1, Baselines.minNightsSeed)
+            return "\(max(0, min(nights, required)))/\(required)"
         }
 
         @MainActor

@@ -179,12 +179,32 @@ fun LiquidTube(
 
         Canvas(modifier = modifier.height(height)) {
             sim.step(now = seconds, tilt = LiquidMotion.shared.tilt, target = frac)
-            with(LiquidRender) { tube(size = size, sim = sim, now = seconds, frac = clamped, tint = tint) }
+            with(LiquidRender) {
+                tube(
+                    size = size,
+                    sim = sim,
+                    now = seconds,
+                    frac = clamped,
+                    tint = tint,
+                    trackColor = Palette.surfaceInset,
+                    trackBorderColor = Palette.hairline,
+                )
+            }
         }
     } else {
         val posed = remember(frac) { LiquidSim.posed(frac) }
         Canvas(modifier = modifier.height(height)) {
-            with(LiquidRender) { tube(size = size, sim = posed, now = 0.0, frac = clamped, tint = tint) }
+            with(LiquidRender) {
+                tube(
+                    size = size,
+                    sim = posed,
+                    now = 0.0,
+                    frac = clamped,
+                    tint = tint,
+                    trackColor = Palette.surfaceInset,
+                    trackBorderColor = Palette.hairline,
+                )
+            }
         }
     }
 }
