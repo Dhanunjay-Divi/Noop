@@ -995,7 +995,7 @@ object AppChangelog {
         ),
         Release(
             version = "4.0.0",
-            title = "Your Fitness Age, Vitality & Wellness Age",
+            title = uiString(R.string.changelog_fitness_vitality_wellness_age_title),
             date = "June 2026",
             items = listOf(
                 "Fitness Age - a weekly number for how fit your heart is. NOOP now estimates your Fitness Age from your resting heart rate and recent activity, and shows it against your real age. Built on the published Nes/HUNT VO₂max model. Tap \"How accurate is this?\" to see exactly which inputs went in, grouped by what each one unlocks - it's a fitness comparison, not a biological age.",

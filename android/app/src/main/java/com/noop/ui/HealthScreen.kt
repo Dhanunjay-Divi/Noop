@@ -860,7 +860,7 @@ private fun VitalityHero(
                 Text(uiString(R.string.l10n_health_screen_holding_you_back_worst_label_863a1809, worst.label), style = NoopType.footnote, color = Palette.statusWarning)
             }
             Text(
-                "Experimental lifestyle estimate · not biological, medical, or WHOOP Age.",
+                uiString(R.string.wellness_age_experimental_disclaimer),
                 style = NoopType.footnote, color = Palette.textTertiary,
             )
         }
@@ -993,7 +993,7 @@ private fun FitnessAgeHero(
             }
 
             Text(
-                text = "Approx. model uncertainty ± $modelBandYears yr · a fitness comparison, not a biological age",
+                text = uiString(R.string.fitness_age_model_uncertainty, modelBandYears),
                 style = NoopType.footnote,
                 color = Palette.textTertiary,
             )

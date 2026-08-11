@@ -315,7 +315,11 @@ fun AutoWorkoutNudgeCard(
             val hintConfidence = w.suggestionConfidence
             if (hint != null && hintConfidence != null) {
                 Text(
-                    "Experimental type hint · ${className(hint)} · ${(hintConfidence * 100).roundToInt()}% signal confidence",
+                    uiString(
+                        R.string.auto_workout_type_hint,
+                        className(hint),
+                        (hintConfidence * 100).roundToInt(),
+                    ),
                     style = NoopType.caption,
                     color = Palette.textTertiary,
                 )
@@ -364,7 +368,7 @@ fun AutoWorkoutNudgeCard(
                         containerColor = Palette.accent, contentColor = Palette.surfaceBase,
                     ),
                 ) {
-                    Text(w.suggestedClass?.let { "Save as ${className(it)}" }
+                    Text(w.suggestedClass?.let { uiString(R.string.auto_workout_save_as, className(it)) }
                         ?: uiString(R.string.l10n_auto_workout_nudge_save_it_01d23661))
                 }
 
@@ -380,7 +384,7 @@ fun AutoWorkoutNudgeCard(
             }
             if (saveFailed) {
                 Text(
-                    "Could not save locally. Your suggestion is still here - try again.",
+                    uiString(R.string.auto_workout_save_failed),
                     style = NoopType.footnote,
                     color = Palette.statusCritical,
                 )
@@ -407,16 +411,22 @@ private fun AutoSavedWorkoutReviewCard(
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(8.dp))
-                Text("Workout saved automatically", style = NoopType.headline, color = Palette.textPrimary)
+                Text(uiString(R.string.auto_workout_saved_automatically), style = NoopType.headline, color = Palette.textPrimary)
             }
             Text(
-                "NOOP detected ${review.sport} from ${hhmm(review.startSec)} - ${hhmm(review.endSec)} " +
-                    "(avg HR ${review.avgBpm}, $durationMin min).",
+                uiString(
+                    R.string.auto_workout_detected_summary,
+                    review.sport,
+                    hhmm(review.startSec),
+                    hhmm(review.endSec),
+                    review.avgBpm,
+                    durationMin,
+                ),
                 style = NoopType.footnote,
                 color = Palette.textSecondary,
             )
             Text(
-                "Keep it here, mark it as not a workout, or edit its time and activity type anytime in Workouts. Detected workouts are labelled NOOP, not Manual.",
+                uiString(R.string.auto_workout_review_help),
                 style = NoopType.caption,
                 color = Palette.textTertiary,
             )
@@ -431,9 +441,9 @@ private fun AutoSavedWorkoutReviewCard(
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Palette.accent, contentColor = Palette.surfaceBase,
                     ),
-                ) { Text("Keep") }
+                ) { Text(uiString(R.string.auto_workout_keep)) }
                 OutlinedButton(onClick = onUndo, enabled = !saving) {
-                    Text("Not a workout", color = Palette.textSecondary)
+                    Text(uiString(R.string.l10n_auto_workout_nudge_not_a_workout_15c5f784), color = Palette.textSecondary)
                 }
             }
         }

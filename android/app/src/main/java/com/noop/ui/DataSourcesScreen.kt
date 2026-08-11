@@ -491,7 +491,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
                 // explicit affordance to add the two new read permissions when the user chooses.
                 if (hcHasAnyReadAccess && hcMissingTemperaturePermissions.isNotEmpty()) {
                     Text(
-                        "Body-temperature access is off. Tap to review the missing Health Connect permissions.",
+                        uiString(R.string.health_connect_temperature_permission_missing),
                         style = NoopType.footnote,
                         color = Palette.accent,
                         modifier = Modifier
@@ -559,9 +559,9 @@ fun DataSourcesScreen(vm: AppViewModel) {
                     val backgroundSupported = HealthConnectBackgroundPolicy.runtimeSupportsBackground()
                     Text(
                         when {
-                            hcBackgroundAccess -> "Background Health Connect access granted · periodic sync is best effort."
-                            backgroundSupported -> "On-open sync is active. Tap to allow optional background access."
-                            else -> "This Android version supports on-open sync only."
+                            hcBackgroundAccess -> uiString(R.string.health_connect_background_granted)
+                            backgroundSupported -> uiString(R.string.health_connect_on_open_tap_background)
+                            else -> uiString(R.string.health_connect_on_open_only)
                         },
                         style = NoopType.footnote,
                         color = if (hcBackgroundAccess) Palette.statusPositive else Palette.textTertiary,

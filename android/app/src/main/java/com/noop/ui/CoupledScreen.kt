@@ -290,7 +290,7 @@ private fun HeroCard(
     onTap: () -> Unit,
 ) {
     val a11y = when {
-        recovery != null -> "Recovery ${recovery.roundToInt()} percent. See what shaped your Recovery"
+        recovery != null -> uiString(R.string.coupled_recovery_accessibility, recovery.roundToInt())
         calibrationNights != null ->
             "Recovery calibrating, $calibrationNights of ${Baselines.minNightsSeed} nights"
         else -> "Recovery, no data yet"

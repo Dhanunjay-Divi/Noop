@@ -742,7 +742,7 @@ private fun ProfileStep() {
                 // Independent controls support mixed choices such as height in ft/in and weight in kg.
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Overline("Units", color = Palette.textTertiary)
-                    Text("Weight", style = NoopType.footnote, color = Palette.textSecondary)
+                    Text(uiString(R.string.l10n_today_screen_weight_69c0b815), style = NoopType.footnote, color = Palette.textSecondary)
                     SegmentedPillControl(
                         items = listOf(MassUnit.KILOGRAMS, MassUnit.POUNDS),
                         selection = massUnit,
@@ -753,7 +753,7 @@ private fun ProfileStep() {
                         },
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Text("Height", style = NoopType.footnote, color = Palette.textSecondary)
+                    Text(uiString(R.string.l10n_settings_screen_height_3f608b49), style = NoopType.footnote, color = Palette.textSecondary)
                     SegmentedPillControl(
                         items = listOf(HeightUnit.CENTIMETERS, HeightUnit.FEET_INCHES),
                         selection = heightUnit,

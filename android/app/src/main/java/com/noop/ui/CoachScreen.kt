@@ -168,7 +168,7 @@ private fun CoachSetup(vm: CoachViewModel) {
                         onSelect = { vm.setCustomAuthHeader(context, it) },
                     )
                     Text(
-                        "Use Bearer for most local servers; use x-api-key for gateways that require that header.",
+                        uiString(R.string.coach_custom_auth_header_help),
                         style = NoopType.footnote,
                         color = Palette.textSecondary,
                     )

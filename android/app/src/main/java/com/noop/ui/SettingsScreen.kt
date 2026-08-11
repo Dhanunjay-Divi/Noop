@@ -1036,7 +1036,7 @@ fun SettingsScreen(
             blurb = "Choose how distances, weights, heights, temperatures and Effort are shown. Your data is always stored the same way. This only changes the display.",
         ) {
             Column {
-                FormRow(label = "Distance") {
+                FormRow(label = uiString(R.string.l10n_live_screen_distance_42320809)) {
                     SegmentedPillControl(
                         items = listOf(UnitSystem.METRIC, UnitSystem.IMPERIAL),
                         selection = unitSystem,
@@ -1048,7 +1048,7 @@ fun SettingsScreen(
                     )
                 }
                 RowDivider()
-                FormRow(label = "Weight") {
+                FormRow(label = uiString(R.string.l10n_today_screen_weight_69c0b815)) {
                     SegmentedPillControl(
                         items = listOf(MassUnit.KILOGRAMS, MassUnit.POUNDS),
                         selection = massUnit,
@@ -1060,7 +1060,7 @@ fun SettingsScreen(
                     )
                 }
                 RowDivider()
-                FormRow(label = "Height") {
+                FormRow(label = uiString(R.string.l10n_settings_screen_height_3f608b49)) {
                     SegmentedPillControl(
                         items = listOf(HeightUnit.CENTIMETERS, HeightUnit.FEET_INCHES),
                         selection = heightUnit,
@@ -2293,7 +2293,7 @@ fun SettingsScreen(
                     },
                 )
                 RowDivider()
-                FormRow(label = "Automatic activity") {
+                FormRow(label = uiString(R.string.settings_automatic_activity)) {
                     SegmentedPillControl(
                         items = listOf(AutoWorkoutMode.OFF, AutoWorkoutMode.ASK, AutoWorkoutMode.AUTO_SAVE),
                         selection = autoWorkoutMode,
@@ -2312,7 +2312,7 @@ fun SettingsScreen(
                     )
                 }
                 Text(
-                    "After a sync, NOOP looks for a finalized, sustained rise in heart rate with sufficient signal coverage and motion confirmation when available. Ask always waits for you. Auto-save writes only stronger 15+ minute candidates as Detected, then lets you keep, edit or dismiss them. This is a conservative on-device heuristic, not WHOOP's proprietary detector, so it can miss or misread activities. On this phone only.",
+                    uiString(R.string.settings_automatic_activity_help),
                     style = NoopType.caption,
                     color = Palette.textTertiary,
                     modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),

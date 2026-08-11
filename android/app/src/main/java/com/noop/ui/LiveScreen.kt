@@ -703,7 +703,7 @@ private fun LiveTrackingControl(
                 )
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        if (tracking) "Live Tracking is on" else "Live Tracking",
+                        if (tracking) uiString(R.string.live_tracking_on) else uiString(R.string.live_tracking_title),
                         style = NoopType.headline,
                         color = Palette.textPrimary,
                     )
@@ -726,7 +726,10 @@ private fun LiveTrackingControl(
                     contentDescription = null,
                     modifier = Modifier.size(18.dp).padding(end = 4.dp),
                 )
-                Text(if (tracking) "Stop Live Tracking" else "Start Live Tracking", style = NoopType.headline)
+                Text(
+                    if (tracking) uiString(R.string.live_tracking_stop) else uiString(R.string.live_tracking_start),
+                    style = NoopType.headline,
+                )
             }
         }
     }

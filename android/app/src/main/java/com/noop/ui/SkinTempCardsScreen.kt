@@ -303,10 +303,10 @@ internal fun CycleTrackerSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Cycle tracker", style = NoopType.title2, color = Palette.textPrimary)
-                    Text("Private period-start dates", style = NoopType.footnote, color = Palette.textTertiary)
+                    Text(uiString(R.string.cycle_tracker_title), style = NoopType.title2, color = Palette.textPrimary)
+                    Text(uiString(R.string.cycle_tracker_private_dates), style = NoopType.footnote, color = Palette.textTertiary)
                 }
-                TextButton(onClick = onDismiss) { Text("Done") }
+                TextButton(onClick = onDismiss) { Text(uiString(R.string.l10n_whoop_model_comparison_screen_done_e9b450d1)) }
             }
 
             NoopCard(tint = Palette.restColor) {
@@ -368,10 +368,13 @@ internal fun CycleTrackerSheet(
                             )
                             Spacer(Modifier.width(8.dp))
                         }
-                        Text(if (alreadyLogged) "Already logged" else "Log period start")
+                        Text(
+                            if (alreadyLogged) uiString(R.string.cycle_tracker_already_logged)
+                            else uiString(R.string.l10n_skin_temp_cards_screen_log_period_start_c97241d0),
+                        )
                     }
                     Text(
-                        "This optional date anchors cycle day 1 and is checked against your nightly temperature pattern.",
+                        uiString(R.string.cycle_tracker_period_start_help),
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
                     )
@@ -387,12 +390,12 @@ internal fun CycleTrackerSheet(
                             TextButton(
                                 enabled = !operationInFlight,
                                 onClick = { confirmDeleteAll = true },
-                            ) { Text("Delete all", color = Palette.statusCritical) }
+                            ) { Text(uiString(R.string.cycle_tracker_delete_all), color = Palette.statusCritical) }
                         }
                     }
 
                     if (starts.isEmpty()) {
-                        Text("No period starts logged yet.", style = NoopType.subhead, color = Palette.textSecondary)
+                        Text(uiString(R.string.cycle_tracker_empty), style = NoopType.subhead, color = Palette.textSecondary)
                     } else {
                         starts.forEachIndexed { index, day ->
                             if (index > 0) HorizontalDivider(color = Palette.hairline)
@@ -419,7 +422,7 @@ internal fun CycleTrackerSheet(
                                 ) {
                                     Icon(
                                         Icons.Filled.Delete,
-                                        contentDescription = "Delete ${prettyPeriodStartDay(day)}",
+                                        contentDescription = uiString(R.string.cycle_tracker_delete_date, prettyPeriodStartDay(day)),
                                         tint = Palette.statusCritical,
                                     )
                                 }
@@ -441,10 +444,10 @@ internal fun CycleTrackerSheet(
     if (confirmDeleteAll) {
         AlertDialog(
             onDismissRequest = { if (!operationInFlight) confirmDeleteAll = false },
-            title = { Text("Delete all logged period starts?") },
-            text = { Text("This permanently removes period-start history. Sensor history is unchanged.") },
+            title = { Text(uiString(R.string.cycle_tracker_delete_all_title)) },
+            text = { Text(uiString(R.string.cycle_tracker_delete_all_message)) },
             dismissButton = {
-                TextButton(onClick = { confirmDeleteAll = false }) { Text("Cancel") }
+                TextButton(onClick = { confirmDeleteAll = false }) { Text(uiString(R.string.l10n_sleep_screen_cancel_77dfd213)) }
             },
             confirmButton = {
                 TextButton(
@@ -452,7 +455,7 @@ internal fun CycleTrackerSheet(
                         confirmDeleteAll = false
                         runMutation { onDeleteAllPeriodStarts() }
                     },
-                ) { Text("Delete all", color = Palette.statusCritical) }
+                ) { Text(uiString(R.string.cycle_tracker_delete_all), color = Palette.statusCritical) }
             },
         )
     }
@@ -460,8 +463,8 @@ internal fun CycleTrackerSheet(
     if (operationFailed) {
         AlertDialog(
             onDismissRequest = { operationFailed = false },
-            title = { Text("Couldn’t update cycle history") },
-            text = { Text("Nothing was changed. Please try again after the local database finishes opening.") },
+            title = { Text(uiString(R.string.cycle_tracker_update_failed_title)) },
+            text = { Text(uiString(R.string.cycle_tracker_update_failed_message)) },
             confirmButton = {
                 TextButton(onClick = { operationFailed = false }) { Text("OK") }
             },
