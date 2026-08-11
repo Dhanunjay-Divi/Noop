@@ -1,5 +1,20 @@
 package com.noop.protocol
 
+/** Fully decoded 21-byte configuration header for one layout-v20 optical block. */
+data class Whoop5OpticalBlockConfig(
+    val sampleCount: Int,
+    val sourceA: Int,
+    val driveA: Int,
+    val sourceB: Int,
+    val driveB: Int,
+    val detectorASelect: Int,
+    val rangeA: Long,
+    val offsetA: Int,
+    val detectorBSelect: Int,
+    val rangeB: Long,
+    val offsetB: Int,
+)
+
 /** A single raw readout channel in a WHOOP 5/MG layout-v20 optical block. */
 data class RawOpticalChannel(
     /** Seven raw per-channel header bytes. No register or wavelength semantics are asserted. */
@@ -18,15 +33,22 @@ data class Whoop5OpticalBlock(
     val channels: List<RawOpticalChannel>,
     /** Final byte of the block; zero throughout the current capture corpus. */
     val reserved: Int,
+    /** Named interpretation of the same bytes retained by [rawHeader]. */
+    val config: Whoop5OpticalBlockConfig,
 ) {
     val rawHeader: List<Int>
         get() = listOf(sampleCount) + sharedMetadata + channels.flatMap { it.metadata }
+
+    val readingsA: List<Int> get() = channels.getOrNull(0)?.samples ?: emptyList()
+    val readingsB: List<Int> get() = channels.getOrNull(1)?.samples ?: emptyList()
 }
 
 data class Whoop5OpticalFrame(
     val recordIndex: Long,
     val baseTs: Long,
     val blocks: List<Whoop5OpticalBlock>,
+    val layoutVersion: Int = Whoop5RawOptical.LAYOUT_VERSION,
+    val checksum: Long = 0L,
 )
 
 /**
@@ -55,11 +77,16 @@ object Whoop5RawOptical {
     const val HEADER_LENGTH = 21
     const val CHANNEL_SLOT_LENGTH = 200
     const val CHANNEL_CAPACITY = 50
+    const val LAYOUT_VERSION = 20
+    const val RECORD_CLASS = 0x2F
+    const val CHECKSUM_OFFSET = 2136
+    const val SAMPLE_MIN = -524_288
+    const val SAMPLE_MAX = 524_287
 
     fun decode(frame: ByteArray): Whoop5OpticalFrame? {
-        if (frame.size != BUFFER_LENGTH || frame.u8(0) != 0xAA ||
-            frame.u8(8) != 0x2F || frame.u8(9) != 20
-        ) return null
+        if (frame.size != BUFFER_LENGTH || frame.u8(0) != 0xAA) return null
+        if (!Framing.frameCrcOk(frame, DeviceFamily.WHOOP5)) return null
+        if (frame.u8(8) != RECORD_CLASS || frame.u8(9) != LAYOUT_VERSION) return null
 
         val blocks = ArrayList<Whoop5OpticalBlock>(BLOCK_COUNT)
         for (index in 0 until BLOCK_COUNT) {
@@ -82,6 +109,19 @@ object Whoop5RawOptical {
                 sharedMetadata = sharedMetadata,
                 channels = channels,
                 reserved = frame.u8(start + BLOCK_LENGTH - 1),
+                config = Whoop5OpticalBlockConfig(
+                    sampleCount = sampleCount,
+                    sourceA = frame.u8(start + 1),
+                    driveA = frame.u16(start + 2),
+                    sourceB = frame.u8(start + 4),
+                    driveB = frame.u16(start + 5),
+                    detectorASelect = frame.u8(start + 7),
+                    rangeA = frame.u32(start + 8),
+                    offsetA = frame.i16(start + 12),
+                    detectorBSelect = frame.u8(start + 14),
+                    rangeB = frame.u32(start + 15),
+                    offsetB = frame.i16(start + 19),
+                ),
             )
         }
 
@@ -89,10 +129,16 @@ object Whoop5RawOptical {
             recordIndex = frame.u32(11),
             baseTs = frame.u32(15),
             blocks = blocks,
+            layoutVersion = frame.u8(9),
+            checksum = frame.u32(CHECKSUM_OFFSET),
         )
     }
 
     private fun ByteArray.u8(offset: Int): Int = this[offset].toInt() and 0xFF
+
+    private fun ByteArray.u16(offset: Int): Int = u8(offset) or (u8(offset + 1) shl 8)
+
+    private fun ByteArray.i16(offset: Int): Int = u16(offset).toShort().toInt()
 
     private fun ByteArray.u32(offset: Int): Long =
         (u8(offset).toLong() or

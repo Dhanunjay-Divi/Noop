@@ -25,6 +25,29 @@ import WhoopProtocol
 
 /// A candidate workout window the user can accept (Save) or reject (dismiss). All fields are
 /// derived purely from the HR samples inside the window. Mirrors the Kotlin `DetectedWorkout`.
+public enum AutoWorkoutEvidenceProvenance: String, Equatable, Sendable {
+    case heartRateOnly = "heart_rate_only"
+    case heartRateAndMotion = "heart_rate_and_motion"
+}
+
+public enum AutoWorkoutConfidenceStatus: String, Equatable, Sendable {
+    /// No held-out cohort has calibrated this rules engine into an event probability yet.
+    case uncalibrated
+
+    /// Exhaustive by design: adding a future validated status forces an explicit decision here before
+    /// that status can ever authorize an unattended write.
+    public var permitsUnattendedSave: Bool {
+        switch self {
+        case .uncalibrated: false
+        }
+    }
+}
+
+public enum AutoWorkoutTypeSuggestionStatus: String, Equatable, Sendable {
+    case unknown
+    case suggested
+}
+
 public struct DetectedWorkout: Equatable, Sendable {
     public let startSec: Int
     public let endSec: Int
@@ -35,10 +58,24 @@ public struct DetectedWorkout: Equatable, Sendable {
     /// Optional, explicitly advisory broad-type hint added by the repository after the window detector
     /// reads the stored activity-class/motion streams. The detector itself always emits nil here.
     public let suggestedClass: CoarseWorkoutClass?
+    /// Confidence in the optional broad-type hint, not confidence that a workout happened.
     public let suggestionConfidence: Double?
+    /// Stable ruleset identifier carried through the suggestion path for reproducible feedback.
+    public let detectorVersion: String
+    /// Event probability is intentionally absent until held-out validation calibrates it.
+    public let eventConfidence: Double?
+    public let confidenceStatus: AutoWorkoutConfidenceStatus
+    public let evidenceProvenance: AutoWorkoutEvidenceProvenance
+    public var typeSuggestionStatus: AutoWorkoutTypeSuggestionStatus {
+        suggestedClass == nil ? .unknown : .suggested
+    }
 
     public init(startSec: Int, endSec: Int, avgBpm: Int, peakBpm: Int, durationMin: Int,
-                suggestedClass: CoarseWorkoutClass? = nil, suggestionConfidence: Double? = nil) {
+                suggestedClass: CoarseWorkoutClass? = nil, suggestionConfidence: Double? = nil,
+                detectorVersion: String = AutoWorkoutDetector.detectorVersion,
+                eventConfidence: Double? = nil,
+                confidenceStatus: AutoWorkoutConfidenceStatus = .uncalibrated,
+                evidenceProvenance: AutoWorkoutEvidenceProvenance = .heartRateOnly) {
         self.startSec = startSec
         self.endSec = endSec
         self.avgBpm = avgBpm
@@ -46,6 +83,10 @@ public struct DetectedWorkout: Equatable, Sendable {
         self.durationMin = durationMin
         self.suggestedClass = suggestedClass
         self.suggestionConfidence = suggestionConfidence
+        self.detectorVersion = detectorVersion
+        self.eventConfidence = eventConfidence
+        self.confidenceStatus = confidenceStatus
+        self.evidenceProvenance = evidenceProvenance
     }
 }
 
@@ -64,6 +105,9 @@ public struct SavedWorkoutSpan: Equatable, Sendable {
 public enum AutoWorkoutDetector {
 
     // MARK: - Constants (keep byte-identical with the Kotlin twin)
+
+    /// Bump whenever rules or data-quality gates change; never infer a probability from this label.
+    public static let detectorVersion = "noop-auto-workout-v1"
 
     /// Elevated gate: bpm must be at least restingHR + this margin to count as "working".
     public static let elevatedMarginBPM = 30
@@ -86,6 +130,7 @@ public enum AutoWorkoutDetector {
     /// negative from missing sensor data.
     public static let motionConfirmationMinSamples = 30
     public static let motionConfirmationMinSpanS = 60
+    public static let motionConfirmationMaxGapS = 60
     /// A candidate needs enough actual HR observations to justify its wall-clock span. This prevents a
     /// handful of samples separated by radio/off-wrist gaps from looking like a sustained workout.
     public static let maxHRSampleGapS = 60
@@ -107,14 +152,28 @@ public enum AutoWorkoutDetector {
     public static func hasSufficientHRCoverage(_ window: [(ts: Int, bpm: Int)],
                                                start: Int, end: Int) -> Bool {
         guard end > start else { return false }
-        let ordered = window.sorted { $0.ts < $1.ts }
+        let ordered = cleanHR(window)
+        let spanSeconds = Double(end) - Double(start)
+        guard spanSeconds.isFinite, spanSeconds > 0,
+              spanSeconds <= Double(Int.max) * Double(maxSecondsPerHRSample) else { return false }
         let required = max(minHRSamples,
-                           Int(ceil(Double(end - start) / Double(maxSecondsPerHRSample))))
+                           Int(ceil(spanSeconds / Double(maxSecondsPerHRSample))))
         guard ordered.count >= required else { return false }
-        for (a, b) in zip(ordered, ordered.dropFirst()) where b.ts - a.ts > maxHRSampleGapS {
+        for (a, b) in zip(ordered, ordered.dropFirst())
+            where Double(b.ts) - Double(a.ts) > Double(maxHRSampleGapS) {
             return false
         }
         return true
+    }
+
+    /// Reject impossible BPM values and collapse conflicting same-second samples conservatively.
+    /// This prevents duplicate cross-source rows from manufacturing apparent coverage.
+    static func cleanHR(_ hr: [(ts: Int, bpm: Int)]) -> [(ts: Int, bpm: Int)] {
+        var byTimestamp: [Int: Int] = [:]
+        for sample in hr where (30...220).contains(sample.bpm) {
+            byTimestamp[sample.ts] = min(byTimestamp[sample.ts] ?? sample.bpm, sample.bpm)
+        }
+        return byTimestamp.map { (ts: $0.key, bpm: $0.value) }.sorted { $0.ts < $1.ts }
     }
 
     // MARK: - Inputs
@@ -143,12 +202,24 @@ public enum AutoWorkoutDetector {
     /// the workout. Sparse/missing motion is `.unavailable` and therefore cannot veto an HR candidate.
     public static func motionConfirmation(_ motion: [MotionPoint], start: Int, end: Int) -> MotionConfirmation {
         guard end > start else { return .unavailable }
-        let inWindow = motion.filter { $0.ts >= start && $0.ts <= end }
+        var grouped: [Int: (sum: Double, count: Int)] = [:]
+        for point in motion where point.ts >= start && point.ts <= end && point.intensity.isFinite {
+            let old = grouped[point.ts] ?? (0, 0)
+            grouped[point.ts] = (old.sum + point.intensity, old.count + 1)
+        }
+        let inWindow = grouped.map {
+            MotionPoint(ts: $0.key, intensity: $0.value.sum / Double($0.value.count))
+        }.sorted { $0.ts < $1.ts }
         guard inWindow.count >= motionConfirmationMinSamples,
               let first = inWindow.first?.ts,
               let last = inWindow.last?.ts else { return .unavailable }
-        let requiredSpan = min(5 * 60, max(motionConfirmationMinSpanS, (end - start) / 4))
-        guard last - first >= requiredSpan else { return .unavailable }
+        let spanSeconds = Double(end) - Double(start)
+        let requiredSpan = min(5.0 * 60.0,
+                               max(Double(motionConfirmationMinSpanS), spanSeconds / 4.0))
+        guard Double(last) - Double(first) >= requiredSpan else { return .unavailable }
+        guard !zip(inWindow, inWindow.dropFirst()).contains(where: {
+            Double($1.ts) - Double($0.ts) > Double(motionConfirmationMaxGapS)
+        }) else { return .unavailable }
         let mean = inWindow.reduce(0.0) { $0 + $1.intensity } / Double(inWindow.count)
         return mean >= motionConfirmMean ? .confirmed(mean: mean) : .rejected(mean: mean)
     }
@@ -158,7 +229,8 @@ public enum AutoWorkoutDetector {
     /// `WorkoutDetector.activitySeries`) so a caller can build the optional `motion` argument.
     public static func motionPoints(_ gravity: [GravitySample]) -> [MotionPoint] {
         if gravity.isEmpty { return [] }
-        let rows = gravity.sorted { $0.ts < $1.ts }
+        let rows = gravity.filter { $0.x.isFinite && $0.y.isFinite && $0.z.isFinite }
+            .sorted { $0.ts < $1.ts }
         var out: [MotionPoint] = []
         out.reserveCapacity(rows.count)
         var prev: GravitySample? = nil
@@ -166,7 +238,8 @@ public enum AutoWorkoutDetector {
             let intensity: Double
             if i == 0, prev == nil {
                 intensity = 0.0
-            } else if let p = prev {
+            } else if let p = prev,
+                      Double(row.ts) - Double(p.ts) <= Double(motionConfirmationMaxGapS) {
                 let dx = row.x - p.x, dy = row.y - p.y, dz = row.z - p.z
                 intensity = (dx * dx + dy * dy + dz * dz).squareRoot()
             } else {
@@ -176,6 +249,62 @@ public enum AutoWorkoutDetector {
             prev = row
         }
         return out
+    }
+
+    /// Finalized spans only. A telemetry gap abandons an open span rather than silently counting the
+    /// missing wall-clock time; a later dense bout can still be detected independently.
+    static func finalizedElevatedSpans(_ seg: [(ts: Int, bpm: Int)], floor: Int) -> [(start: Int, end: Int)] {
+        var spans: [(start: Int, end: Int)] = []
+        var spanStart: Int? = nil
+        var spanEnd = 0
+        var dipStart: Int? = nil
+        var previousTimestamp: Int? = nil
+
+        func closeSpan() {
+            if let s = spanStart,
+               Double(spanEnd) - Double(s) >= minSustainedMin * 60.0 {
+                spans.append((s, spanEnd))
+            }
+            spanStart = nil
+            dipStart = nil
+        }
+
+        for sample in seg {
+            if let previousTimestamp,
+               Double(sample.ts) - Double(previousTimestamp) > Double(maxHRSampleGapS) {
+                spanStart = nil
+                dipStart = nil
+            }
+            previousTimestamp = sample.ts
+
+            if sample.bpm >= floor {
+                if spanStart == nil { spanStart = sample.ts }
+                spanEnd = sample.ts
+                dipStart = nil
+            } else if spanStart != nil {
+                if dipStart == nil { dipStart = sample.ts }
+                if let d = dipStart, Double(sample.ts) - Double(d) > Double(maxDipS) { closeSpan() }
+            }
+        }
+        return spans
+    }
+
+    static func mergeSpans(_ spans: [(start: Int, end: Int)]) -> [(start: Int, end: Int)] {
+        guard let first = spans.first else { return [] }
+        var merged: [(start: Int, end: Int)] = []
+        var curStart = first.start
+        var curEnd = first.end
+        for next in spans.dropFirst() {
+            if Double(next.start) - Double(curEnd) <= Double(mergeGapS) {
+                curEnd = max(curEnd, next.end)
+            } else {
+                merged.append((curStart, curEnd))
+                curStart = next.start
+                curEnd = next.end
+            }
+        }
+        merged.append((curStart, curEnd))
+        return merged
     }
 
     // MARK: - Public API
@@ -206,7 +335,7 @@ public enum AutoWorkoutDetector {
                               restingBpm: Int?,
                               motion: [MotionPoint]? = nil,
                               savedSpans: [SavedWorkoutSpan] = []) -> [DetectedWorkout] {
-        let seg = hr.sorted { $0.ts < $1.ts }
+        let seg = cleanHR(hr)
         if seg.isEmpty { return [] }
 
         let floor = effectiveRestingBPM(restingBpm, hr: seg) + elevatedMarginBPM
@@ -214,31 +343,7 @@ public enum AutoWorkoutDetector {
         // --- 1 + 2 + 3: grow sustained spans tolerating brief dips ---
         // A span is [spanStart, spanEnd] over ELEVATED-sample timestamps. `dipStart` marks where the
         // current sub-threshold run began (nil = not in a dip); a dip longer than maxDipS closes the span.
-        var spans: [(start: Int, end: Int)] = []
-        var spanStart: Int? = nil
-        var spanEnd = 0
-        var dipStart: Int? = nil
-
-        func closeSpan() {
-            if let s = spanStart, Double(spanEnd - s) >= minSustainedMin * 60.0 {
-                spans.append((s, spanEnd))
-            }
-            spanStart = nil
-            dipStart = nil
-        }
-
-        for sample in seg {
-            if sample.bpm >= floor {
-                if spanStart == nil { spanStart = sample.ts }
-                spanEnd = sample.ts
-                dipStart = nil   // the dip (if any) is bridged
-            } else if spanStart != nil {
-                // In a span: tolerate the dip until it runs longer than maxDipS. `dipStart` is the
-                // first sub-threshold sample of the current dip (set once, cleared on the next elevated).
-                if dipStart == nil { dipStart = sample.ts }
-                if let d = dipStart, sample.ts - d > maxDipS { closeSpan() }
-            }
-        }
+        let spans = finalizedElevatedSpans(seg, floor: floor)
         // Deliberately DO NOT close an open span at end-of-input. Until a below-threshold tail lasts
         // longer than maxDipS, the workout may still be in progress and its endpoint is not stable.
         // The next scan will close it once enough post-session HR has arrived.
@@ -246,20 +351,7 @@ public enum AutoWorkoutDetector {
         if spans.isEmpty { return [] }
 
         // --- 4: merge spans whose gap is <= mergeGapS (spans are start-ascending by build) ---
-        var merged: [(start: Int, end: Int)] = []
-        var curStart = spans[0].start
-        var curEnd = spans[0].end
-        for k in 1..<spans.count {
-            let next = spans[k]
-            if next.start - curEnd <= mergeGapS {
-                curEnd = max(curEnd, next.end)
-            } else {
-                merged.append((curStart, curEnd))
-                curStart = next.start
-                curEnd = next.end
-            }
-        }
-        merged.append((curStart, curEnd))
+        let merged = mergeSpans(spans)
 
         // --- 5 + 6 + 7 ---
         let motionSeries = (motion?.isEmpty ?? true) ? nil : motion
@@ -274,16 +366,22 @@ public enum AutoWorkoutDetector {
 
             // 5: motion confirmation when a sufficiently-covered series was supplied. Sparse motion
             // cannot honestly say the wearer was still, so it falls back to HR-only.
-            if let motionSeries = motionSeries {
-                if case .rejected = motionConfirmation(motionSeries, start: start, end: end) { continue }
+            let motionVerdict = motionSeries.map { motionConfirmation($0, start: start, end: end) }
+            if case .rejected? = motionVerdict { continue }
+            let provenance: AutoWorkoutEvidenceProvenance
+            if case .confirmed? = motionVerdict {
+                provenance = .heartRateAndMotion
+            } else {
+                provenance = .heartRateOnly
             }
 
             let bpms = window.map { $0.bpm }
             let avg = Int((Double(bpms.reduce(0, +)) / Double(bpms.count)).rounded())
             let peak = bpms.max() ?? avg
-            let durMin = (end - start) / 60
+            let durMin = Int((Double(end) - Double(start)) / 60.0)
             results.append(DetectedWorkout(startSec: start, endSec: end,
-                                           avgBpm: avg, peakBpm: peak, durationMin: durMin))
+                                           avgBpm: avg, peakBpm: peak, durationMin: durMin,
+                                           evidenceProvenance: provenance))
         }
         return results
     }

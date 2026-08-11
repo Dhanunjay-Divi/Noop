@@ -273,7 +273,7 @@ struct AppleWatchSetupView: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                 case .unknown, .denied:
-                    Text("NOOP reads your heart rate, HRV, resting heart rate, sleep, steps, energy and VO₂ max from Apple Health to compute your scores. It all stays on this iPhone, and you pick exactly what to share on the next screen.")
+                    Text("NOOP reads heart rate, HRV, resting heart rate, sleep, steps, energy and VO₂ max to compute your scores. The core request can also share sleep, workouts and compatible nightly vitals back. Body measurements and detailed continuous write-back stay separate. It all remains on this iPhone, and you pick what to allow on Apple's next screen.")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)

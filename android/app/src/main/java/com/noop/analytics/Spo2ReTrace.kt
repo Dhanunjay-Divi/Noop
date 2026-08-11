@@ -33,9 +33,9 @@ object Spo2ReTrace {
      * Takes already-extracted ints (ConnectionTrace's primitive style, matching the Swift signature);
      * the caller reads them off its decoded record map.
      */
-    fun recordLine(frame: ByteArray, version: Int?, unix: Int?, red: Int?, ir: Int?, skinRaw: Int?): String {
+    fun recordLine(frame: ByteArray, version: Int?, unix: Long?, red: Int?, ir: Int?, skinRaw: Int?): String {
         val hex = frame.joinToString("") { String.format("%02x", it.toInt() and 0xFF) }
-        fun f(v: Int?): String = v?.toString() ?: "null"
+        fun f(v: Any?): String = v?.toString() ?: "null"
         return "spo2re v=${f(version)} unix=${f(unix)} red=${f(red)} ir=${f(ir)} " +
             "skinRaw=${f(skinRaw)} len=${frame.size} raw=$hex"
     }

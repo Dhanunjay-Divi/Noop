@@ -15,7 +15,7 @@
     "'expect' map is simply not asserted (decoders legitimately emit supersets per family).",
     "Frames carry only biometrics + timestamp (no serial / name / token), so they are safe to commit."
   ],
-  "tolerance": 1e-4,
+  "tolerance": 0.0001,
   "frames": [
     {
       "name": "whoop4_v24_real_worn",
@@ -27,8 +27,11 @@
         "unix": 1780928574,
         "heart_rate": 109,
         "rr_count": 2,
-        "rr_intervals": [555, 564],
-        "gravity_mag": 1.0
+        "rr_intervals": [
+          555,
+          564
+        ],
+        "gravity_mag": 1
       }
     },
     {
@@ -41,12 +44,14 @@
         "unix": 1700000000,
         "heart_rate": 63,
         "rr_count": 1,
-        "rr_intervals": [850],
+        "rr_intervals": [
+          850
+        ],
         "spo2_red": 18000,
         "spo2_ir": 17000,
         "skin_temp_raw": 900,
         "resp_rate_raw": 3000,
-        "gravity_mag": 1.0
+        "gravity_mag": 1
       }
     },
     {
@@ -58,7 +63,7 @@
         "hist_version": 25,
         "unix": 1781202813,
         "rr_intervals": [],
-        "gravity_mag": 1.0
+        "gravity_mag": 1
       }
     },
     {
@@ -70,7 +75,7 @@
         "hist_version": 25,
         "unix": 1781202814,
         "rr_intervals": [],
-        "gravity_mag": 1.0
+        "gravity_mag": 1
       }
     },
     {
@@ -82,7 +87,7 @@
         "hist_version": 25,
         "unix": 1781202815,
         "rr_intervals": [],
-        "gravity_mag": 1.0
+        "gravity_mag": 1
       }
     },
     {
@@ -98,7 +103,10 @@
         "unix": 1780916150,
         "heart_rate": 102,
         "rr_count": 2,
-        "rr_intervals": [602, 613],
+        "rr_intervals": [
+          602,
+          613
+        ],
         "skin_temp_raw": 3057,
         "step_motion_counter": 50,
         "motion_wear_quality": 0,
@@ -119,7 +127,7 @@
         "temp_aux_1_raw": 247,
         "temp_aux_2_raw": 265,
         "unknown_f32_113": -5.2307,
-        "gravity_mag": 1.0
+        "gravity_mag": 1
       }
     },
     {
@@ -132,7 +140,9 @@
         "unix": 1780916152,
         "heart_rate": 101,
         "rr_count": 1,
-        "rr_intervals": [595]
+        "rr_intervals": [
+          595
+        ]
       }
     },
     {
@@ -164,7 +174,7 @@
         "temp_aux_2_raw": 310,
         "status_word_1": 3073,
         "status_word_2": 3074,
-        "gravity_mag": 1.0
+        "gravity_mag": 1
       }
     },
     {
@@ -197,6 +207,112 @@
         "hist_version": 18,
         "unix": 1781124622,
         "heart_rate": 63
+      }
+    },
+    {
+      "name": "whoop5_v18_synthetic_record_index_high_bit",
+      "family": "whoop5",
+      "synthetic": true,
+      "note": [
+        "whoop5_v18_real_worn with ONLY the u32 record_index@11 replaced by 0xC0A7619D (bit 31 set)",
+        "and the CRC32 trailer recomputed; every other byte is the real capture, which is why the",
+        "unix/heart_rate anchors below are identical to that frame's.",
+        "WHY: a u32 whose high bit is set is where Swift and Kotlin stop agreeing. Swift's Int is",
+        "64-bit, Kotlin's is 32-bit, so a decoder that narrows the value reads 3232194973 on one",
+        "platform and -1062772323 on the other from byte-identical bytes. That divergence is invisible",
+        "to a per-platform fixture-hex test (the wire bytes match and each suite asserts its own",
+        "answer) and it shipped in PR #848's first pass. Asserting the same decimal literal on both",
+        "sides is what catches it. No real capture reaches bit 31 (the observed lifetime counters are",
+        "~8-25 million), so the value has to be synthesised to be covered at all."
+      ],
+      "hex": "aa01740001003fb12f12809d61a7c0b69f266a66460066025a0265020000000000007b0a8d656463ff0012163cf6a439bf2924fd3ed763fe3e3200aa000000000000000000f7000901f10b0007010c020c00000000000000000000000000000000000000000000000100656f1e1e0000009d61a7c000000074fc28e0",
+      "expect": {
+        "record_index": 3232194973,
+        "hist_version": 18,
+        "unix": 1780916150,
+        "heart_rate": 102,
+        "rr_count": 2,
+        "rr_intervals": [
+          602,
+          613
+        ]
+      }
+    },
+    {
+      "name": "whoop4_v24_synthetic_unix_high_bit",
+      "family": "whoop4",
+      "synthetic": true,
+      "note": [
+        "whoop4_v24_real_worn with ONLY the u32 unix@11 replaced by 0x80000000 = 2147483648 and the",
+        "CRC32 trailer recomputed (whoop4 checksums frame[4:length] into a trailer at frame[length]);",
+        "every other byte is the real capture, which is why the heart_rate/R-R/gravity anchors below",
+        "are identical to that frame's.",
+        "WHY 0x80000000: it is 2038-01-19T03:14:08Z, the exact second bit 31 of a unix u32 first sets.",
+        "That is the boundary where a decoder narrowing the u32 to Kotlin's 32-bit Int reads -2147483648",
+        "while Swift's 64-bit Int reads 2147483648, from byte-identical bytes. For `unix` specifically",
+        "the consequence is worse than a wrong number: the negative value fails the #547 MIN_PLAUSIBLE_UNIX",
+        "floor, so extractHistoricalStreams DROPS the record and the strap's entire banked history goes",
+        "silently missing on Android while macOS/iOS keeps ingesting it. The paired stream batch",
+        "`whoop4_v24_high_bit_unix_survives` pins that consequence; this frame pins the decoded value.",
+        "No real capture can reach bit 31 before 2038, so the value has to be synthesised to be covered."
+      ],
+      "hex": "aa6400a12f18054c1c0a02000000805037805418016d022b0234020000000000006b07ff0085593c1f65cebed7b3e63eb85a5f3f000080401f65cebed7b3e63eb85a5f3f500264025d03640229014009010c020c00000000000f0001c402000000000000ee3e8ed0",
+      "expect": {
+        "hist_version": 24,
+        "unix": 2147483648,
+        "heart_rate": 109,
+        "rr_count": 2,
+        "rr_intervals": [
+          555,
+          564
+        ],
+        "gravity_mag": 1
+      }
+    },
+    {
+      "name": "whoop4_v25_synthetic_unix_high_bit",
+      "family": "whoop4",
+      "synthetic": true,
+      "note": [
+        "whoop4_v25_real_a with ONLY the u32 unix@11 replaced by 0x80000000 and the CRC32 trailer",
+        "recomputed; every other byte is the real capture. Same boundary and same failure mode as",
+        "whoop4_v24_synthetic_unix_high_bit — this one covers the SEPARATE v25 decode path, which reads",
+        "unix at its own offset in its own branch and would have to be narrowed (or widened) on its own.",
+        "v25 stores no per-second HR (it is PPG-derived on-device), so gravity is the only stream it",
+        "yields; the paired batch `whoop4_v25_high_bit_unix_survives` pins that it still yields it."
+      ],
+      "hex": "aa50000c2f1900006800000000008020430900433103007e026502ba026c022eff70f996f879fad6fd8300d6017e0267027201be00290258030e05c507f00c030ead11cb15791500d2553c90030000000d237e0c",
+      "expect": {
+        "hist_version": 25,
+        "unix": 2147483648,
+        "rr_intervals": [],
+        "gravity_mag": 1
+      }
+    },
+    {
+      "name": "whoop5_v18_synthetic_unix_high_bit",
+      "family": "whoop5",
+      "synthetic": true,
+      "note": [
+        "whoop5_v18_real_worn with ONLY the u32 unix@15 replaced by 0x80000000 and the CRC32 trailer",
+        "recomputed (whoop5 checksums frame[8:payloadEnd], payloadEnd = declaredLength + 8 - 4 — a",
+        "DIFFERENT range from whoop4's, which is why each family needs its own patched frame).",
+        "Same boundary and same failure mode as the two whoop4 frames; this covers the third and last",
+        "narrowing site, the WHOOP 5/MG v18 decoder. record_index below is the frame's REAL value,",
+        "unchanged, so this frame also proves the patch touched unix@15 and nothing else — the two u32",
+        "fields sit four bytes apart and a decoder reading the wrong one would surface here."
+      ],
+      "hex": "aa01740001003fb12f1280733d84010000008066460066025a0265020000000000007b0a8d656463ff0012163cf6a439bf2924fd3ed763fe3e3200aa000000000000000000f7000901f10b0007010c020c00000000000000000000000000000000000000000000000100656f1e1e0000009d61a7c000000074c9fb37",
+      "expect": {
+        "hist_version": 18,
+        "unix": 2147483648,
+        "record_index": 25443699,
+        "heart_rate": 102,
+        "rr_count": 2,
+        "rr_intervals": [
+          602,
+          613
+        ]
       }
     }
   ]

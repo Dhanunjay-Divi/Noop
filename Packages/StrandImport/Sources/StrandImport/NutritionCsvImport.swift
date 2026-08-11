@@ -7,9 +7,11 @@ import Foundation
 // under the dedicated source id `nutrition-csv`. Header shapes recognised:
 //   • Cronometer daily summary:  "Day"|"Date", "Energy (kcal)", "Protein (g)", "Carbs (g)", "Fat (g)"
 //   • MacroFactor:               Date, Calories, Protein, Carbs, Fat
-//   • Generic fallback (case-insensitive): date|day, energy|calories|kcal, protein, carb*, fat, weight
+//   • Generic fallback (case-insensitive): date|day, energy|calories|kcal, protein, carb*, fat,
+//     weight/body-mass with an explicit kg/lb header or unit-bearing cell
 // Dates must be `yyyy-MM-dd` (a trailing time component is tolerated). Malformed rows are skipped
-// and counted, never fatal — mirroring the tolerant ethos of the WHOOP/Apple importers.
+// and counted, never fatal. Bare numeric weight values under an ambiguous `Weight` header are not
+// guessed: silently treating pounds as kilograms would corrupt every downstream weight metric.
 
 /// One parsed day of nutrition totals. `day` is canonical `yyyy-MM-dd`.
 public struct NutritionDayRow: Sendable, Equatable {
@@ -18,7 +20,7 @@ public struct NutritionDayRow: Sendable, Equatable {
     public var proteinG: Double?
     public var carbsG: Double?
     public var fatG: Double?
-    /// Optional body weight, stored as-is (the export's own unit).
+    /// Optional body weight, always normalized to kilograms.
     public var weight: Double?
 
     public init(
@@ -63,12 +65,22 @@ public struct NutritionImportResult: Sendable, Equatable {
     public var rows: [NutritionDayRow]
     /// Data rows dropped: unparseable/missing date, or no usable numeric value.
     public var skippedRows: Int
+    /// Non-empty weight cells skipped because neither the header nor the cell declared kg/lb, or
+    /// because the two declarations conflicted. These values are never guessed or emitted.
+    public var ambiguousWeightRows: Int
     public var earliestDay: String?
     public var latestDay: String?
 
-    public init(rows: [NutritionDayRow], skippedRows: Int, earliestDay: String?, latestDay: String?) {
+    public init(
+        rows: [NutritionDayRow],
+        skippedRows: Int,
+        ambiguousWeightRows: Int = 0,
+        earliestDay: String?,
+        latestDay: String?
+    ) {
         self.rows = rows
         self.skippedRows = skippedRows
+        self.ambiguousWeightRows = ambiguousWeightRows
         self.earliestDay = earliestDay
         self.latestDay = latestDay
     }
@@ -96,6 +108,9 @@ public enum NutritionCsvImporter {
     /// Provenance/source id the app uses as the metric-series `deviceId`.
     public static let sourceId = "nutrition-csv"
 
+    /// Exact avoirdupois pounds-to-kilograms conversion.
+    public static let poundsToKilograms = 0.45359237
+
     /// Metric-series keys this importer emits.
     public enum Keys {
         public static let caloriesIn = "calories_in"
@@ -103,6 +118,24 @@ public enum NutritionCsvImporter {
         public static let carbsG = "carbs_g"
         public static let fatG = "fat_g"
         public static let weight = "weight"
+    }
+
+    /// Unit declared by a normalized weight header or by a unit-bearing cell.
+    enum WeightUnit: Sendable, Hashable {
+        case kilograms
+        case pounds
+        case ambiguous
+    }
+
+    struct WeightColumn: Sendable, Equatable {
+        let header: String
+        let unit: WeightUnit
+    }
+
+    enum WeightValue: Sendable, Equatable {
+        case kilograms(Double)
+        case missingOrInvalid
+        case ambiguous
     }
 
     /// Parse raw CSV bytes (UTF-8, BOM-tolerant, latin-1 fallback — same as `CSVTable`).
@@ -137,10 +170,11 @@ public enum NutritionCsvImporter {
                              exact: ["fat_g", "fat"],
                              contains: ["fat"],
                              excluding: ["saturated", "trans", "mono", "poly"])
-        let weightCol = resolve(headers, exact: ["weight_kg", "weight"], contains: ["weight"])
+        let weightCol = resolveWeightColumn(headers)
 
         var byDay: [String: NutritionDayRow] = [:]
         var skipped = 0
+        var ambiguousWeights = 0
 
         for row in table.rows {
             guard let dateCol,
@@ -153,7 +187,16 @@ public enum NutritionCsvImporter {
             if let c = proteinCol { parsed.proteinG = row.double(c) }
             if let c = carbsCol { parsed.carbsG = row.double(c) }
             if let c = fatCol { parsed.fatG = row.double(c) }
-            if let c = weightCol { parsed.weight = row.double(c) }
+            if let weightCol, let rawWeight = row.cell(weightCol.header) {
+                switch parseWeightKilograms(rawWeight, headerUnit: weightCol.unit, numeric: row.double(weightCol.header)) {
+                case let .kilograms(value):
+                    parsed.weight = value
+                case .ambiguous:
+                    ambiguousWeights += 1
+                case .missingOrInvalid:
+                    break
+                }
+            }
 
             guard parsed.hasAnyValue else { skipped += 1; continue }
 
@@ -176,6 +219,7 @@ public enum NutritionCsvImporter {
         return NutritionImportResult(
             rows: days.compactMap { byDay[$0] },
             skippedRows: skipped,
+            ambiguousWeightRows: ambiguousWeights,
             earliestDay: days.first,
             latestDay: days.last
         )
@@ -197,6 +241,82 @@ public enum NutritionCsvImporter {
             if contains.contains(where: { h.contains($0) }) { return h }
         }
         return nil
+    }
+
+    /// Resolve the first body-weight/body-mass column. The unit is inferred only from complete
+    /// normalized tokens (`kg`, `lbs`, `pounds`, etc.); a bare `weight`/`body_weight` header remains
+    /// ambiguous and therefore requires a unit-bearing cell.
+    static func resolveWeightColumn(_ headers: [String]) -> WeightColumn? {
+        let candidates = headers.filter {
+            ($0.contains("weight") || $0.contains("body_mass")) && !$0.contains("goal")
+        }
+        guard !candidates.isEmpty else { return nil }
+
+        // Prefer a column that explicitly declares its unit. If a file offers conflicting explicit
+        // weight columns, refuse to choose between them; selecting either silently is unsafe.
+        let explicit = candidates.compactMap { header -> WeightColumn? in
+            let unit = weightUnitFromNormalizedText(header)
+            return unit == .ambiguous ? nil : WeightColumn(header: header, unit: unit)
+        }
+        let explicitUnits = Set(explicit.map(\.unit))
+        if explicitUnits.count > 1 { return WeightColumn(header: candidates[0], unit: .ambiguous) }
+        if let first = explicit.first { return first }
+        return WeightColumn(header: candidates[0], unit: .ambiguous)
+    }
+
+    /// Parse a weight cell to kilograms. Header/cell disagreement and unitless numeric values under
+    /// an ambiguous header are rejected; they are never range-guessed as kg or lb.
+    static func parseWeightKilograms(
+        _ raw: String,
+        headerUnit: WeightUnit,
+        numeric: Double?
+    ) -> WeightValue {
+        guard let numeric, numeric.isFinite, numeric > 0 else { return .missingOrInvalid }
+        let cellUnit = weightUnitFromCell(raw)
+
+        let resolved: WeightUnit
+        switch (headerUnit, cellUnit) {
+        case let (header, cell) where header != .ambiguous && cell != .ambiguous && header != cell:
+            return .ambiguous
+        case let (header, _) where header != .ambiguous:
+            resolved = header
+        case let (_, cell) where cell != .ambiguous:
+            resolved = cell
+        default:
+            return .ambiguous
+        }
+
+        switch resolved {
+        case .kilograms:
+            return .kilograms(numeric)
+        case .pounds:
+            return .kilograms(numeric * poundsToKilograms)
+        case .ambiguous:
+            return .ambiguous
+        }
+    }
+
+    private static func weightUnitFromNormalizedText(_ text: String) -> WeightUnit {
+        let tokens = Set(text.split(separator: "_").map(String.init))
+        let kilograms = tokens.contains { ["kg", "kgs", "kilogram", "kilograms"].contains($0) }
+        let pounds = tokens.contains { ["lb", "lbs", "pound", "pounds"].contains($0) }
+        if kilograms == pounds { return .ambiguous }
+        return kilograms ? .kilograms : .pounds
+    }
+
+    private static func weightUnitFromCell(_ raw: String) -> WeightUnit {
+        let lowered = raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = HeaderNorm.normalize(lowered)
+        let tokenUnit = weightUnitFromNormalizedText(normalized)
+        if tokenUnit != .ambiguous { return tokenUnit }
+
+        // Header normalization cannot split compact forms such as `180lb` or `81.5kg`; suffix
+        // matching covers those common exports while remaining scoped to a weight cell.
+        let compact = lowered.replacingOccurrences(of: " ", with: "")
+        let kgSuffix = ["kg", "kgs", "kilogram", "kilograms"].contains { compact.hasSuffix($0) }
+        let lbSuffix = ["lb", "lbs", "pound", "pounds"].contains { compact.hasSuffix($0) }
+        if kgSuffix == lbSuffix { return .ambiguous }
+        return kgSuffix ? .kilograms : .pounds
     }
 
     // MARK: - Date handling

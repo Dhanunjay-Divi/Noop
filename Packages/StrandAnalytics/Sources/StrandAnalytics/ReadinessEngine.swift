@@ -13,8 +13,10 @@ import WhoopStore
 /// - **Resting-HR drift** — elevated resting HR vs baseline is a classic overtraining / illness
 ///   signal (Lamberts et al. 2004).
 /// - **Respiratory-rate drift** — a rise in sleeping respiratory rate is an early illness signal.
-/// - **Training Stress Balance (ACWR)** — acute (7-day) vs chronic (28-day) strain. The 0.8–1.3
-///   band is the "sweet spot"; >1.5 is associated with higher injury risk (Gabbett 2016).
+/// - **Recent-load ratio (ACWR)** — a fixed-window 7-day/28-day ratio of recorded daily strain.
+///   It is retained as descriptive context and is not Training Stress Balance, an injury predictor,
+///   or a universal safe-load prescription. `TrainingLoadModel` separately implements ATL/CTL/TSB
+///   for additive load units.
 /// - **Training monotony** — mean/SD of daily strain over a week; high monotony (low variety) is
 ///   associated with higher strain and illness (Foster 1998).
 ///
@@ -25,9 +27,9 @@ public enum ReadinessEngine {
     // MARK: Output types
 
     public enum Level: String, Sendable, Equatable {
-        case primed       // signals aligned, load supported
+        case primed       // measured recovery signals aligned
         case balanced     // nothing notable either way
-        case strained     // one meaningful signal down / load high
+        case strained     // one meaningful recovery signal down
         case rundown      // several recovery signals down
         case insufficient // not enough history yet
     }
@@ -53,7 +55,7 @@ public enum ReadinessEngine {
         public let headline: String
         public let summary: String
         public let signals: [Signal]
-        /// Acute:chronic workload ratio (nil if not enough strain history).
+        /// Seven-day mean / 28-day mean of recorded nonlinear strain (nil with insufficient history).
         public let acwr: Double?
         /// Foster training monotony over the last week (nil if not enough strain history).
         public let monotony: Double?
@@ -61,6 +63,18 @@ public enum ReadinessEngine {
                     signals: [Signal], acwr: Double?, monotony: Double?) {
             self.level = level; self.headline = headline; self.summary = summary
             self.signals = signals; self.acwr = acwr; self.monotony = monotony
+        }
+    }
+
+    /// Readiness plus optional additive-load context. The existing daily `strain` field is deliberately
+    /// not used for ATL/CTL: it is a bounded nonlinear score, not an additive training impulse.
+    public struct Context: Sendable, Equatable {
+        public let readiness: Readiness
+        public let trainingLoad: TrainingLoadModel.Point?
+
+        public init(readiness: Readiness, trainingLoad: TrainingLoadModel.Point?) {
+            self.readiness = readiness
+            self.trainingLoad = trainingLoad
         }
     }
 
@@ -89,6 +103,23 @@ public enum ReadinessEngine {
         return evaluateCache.value(key) { evaluateUncached(days: days, today: today) }
     }
 
+    /// Evaluate readiness and, only when a caller has a genuine additive load source, expose the
+    /// matching ATL/CTL/TSB point. Valid inputs include session-RPE minutes, TRIMP, or MET-minutes in
+    /// one consistent unit. Empty input stays absent; daily Effort/strain is never substituted.
+    public static func evaluate(days: [DailyMetric], today: String? = nil,
+                                additiveLoadEntries: [TrainingLoadModel.Entry],
+                                trainingLoadConfiguration: TrainingLoadModel.Configuration = .init()) -> Context {
+        let readiness = evaluate(days: days, today: today)
+        guard !additiveLoadEntries.isEmpty else {
+            return Context(readiness: readiness, trainingLoad: nil)
+        }
+        let series = TrainingLoadModel.evaluate(entries: additiveLoadEntries,
+                                                configuration: trainingLoadConfiguration)
+        let load = today.flatMap { selected in series.points.first { $0.day == selected } } ??
+            (today == nil ? series.latest : nil)
+        return Context(readiness: readiness, trainingLoad: load)
+    }
+
     private struct ReadinessKey: Hashable { let today: String?; let rows: StreamFingerprint }
     private static let evaluateCache = AnalyticsMemoCache<ReadinessKey, Readiness>(capacity: 16)
 
@@ -106,7 +137,11 @@ public enum ReadinessEngine {
             h = (h &* 1099511628211) ^ (d.restingHr.map { UInt64(bitPattern: Int64($0)) } ?? .max)
             h = (h &* 1099511628211) ^ (d.respRateBpm ?? -1).bitPattern
             h = (h &* 1099511628211) ^ (d.strain ?? -1).bitPattern
-            sum ^= h                                   // commutative fold → order-independent
+            // Finalize after the last field, then use wrapping addition as the commutative fold. A raw
+            // XOR here cancels an even number of identical strain changes because strain is the final
+            // field (`oldBits ^ newBits` is then identical for every changed row), returning stale cache.
+            h = (h ^ (h >> 32)) &* 1099511628211
+            sum &+= h                                  // commutative fold → order-independent
             let dh = d.day.hashValue
             if i == 0 { minDayHash = dh; maxDayHash = dh } else { minDayHash = min(minDayHash, dh); maxDayHash = max(maxDayHash, dh) }
         }
@@ -182,7 +217,7 @@ public enum ReadinessEngine {
             }
         }
 
-        // Training Stress Balance (ACWR) + monotony --------------------------
+        // Fixed-window recent-load ratio (ACWR) + monotony ------------------
         var acwr: Double? = nil
         var monotony: Double? = nil
         // Anchor load windows to the selected/latest calendar day. The old `sorted.compactMap` path
@@ -247,24 +282,13 @@ public enum ReadinessEngine {
     private static func acwrSignal(_ ratio: Double, acute: Double, chronic: Double) -> Signal {
         let pct = String(format: "%.2f", ratio)
         let evidence = "7d \(String(format: "%.1f", acute)) / 28d \(String(format: "%.1f", chronic))"
-        switch ratio {
-        case ..<0.8:
-            return Signal(key: "acwr", label: "Training load",
-                evidence: evidence,
-                detail: "ramping down (acute:chronic \(pct)) - room to build", flag: .watch)
-        case 0.8..<1.3:
-            return Signal(key: "acwr", label: "Training load",
-                evidence: evidence,
-                detail: "in the sweet spot (acute:chronic \(pct))", flag: .good)
-        case 1.3..<1.5:
-            return Signal(key: "acwr", label: "Training load",
-                evidence: evidence,
-                detail: "building fast (acute:chronic \(pct)) - watch fatigue", flag: .watch)
-        default:
-            return Signal(key: "acwr", label: "Training load",
-                evidence: evidence,
-                detail: "spiking (acute:chronic \(pct)) - higher injury risk", flag: .bad)
-        }
+        // This ratio has no validated universal "good", "bad", or injury-risk bands. Keep the legacy
+        // Signal/Flag API shape, but always emit `.neutral` and state only the arithmetic relationship.
+        // `synthesize` also excludes this key so the number cannot change readiness or prescribe training.
+        return Signal(key: "acwr", label: "Recent-load ratio",
+                      evidence: evidence,
+                      detail: "7-day mean is \(pct)x the 28-day mean of recorded strain",
+                      flag: .neutral)
     }
 
     private static func evidence(value: Double, baseline: Double, unit: String, decimals: Int) -> String {
@@ -301,27 +325,32 @@ public enum ReadinessEngine {
     // MARK: Synthesis
 
     private static func synthesize(signals: [Signal], hasHistory: Bool) -> (Level, String, String) {
-        guard hasHistory, !signals.isEmpty else {
+        // The recent-load ratio is display-only context. Excluding it here is intentional even though
+        // the producer currently gives it a neutral flag: future wording/band changes must not silently
+        // turn a descriptive statistic into a readiness verdict or training prescription.
+        let evaluativeSignals = signals.filter { $0.key != "acwr" }
+        guard hasHistory, !evaluativeSignals.isEmpty else {
             return (.insufficient, "Readiness",
                     "A few more nights of data and your readiness read will sharpen.")
         }
-        let bad = signals.filter { $0.flag == .bad }
-        let watch = signals.filter { $0.flag == .watch }
-        let good = signals.filter { $0.flag == .good }
-        let recoveryDown = signals.contains { ["hrv", "rhr", "respRate"].contains($0.key) && ($0.flag == .bad) }
-        let loadHigh = signals.contains { $0.key == "acwr" && $0.flag == .bad }
+        let bad = evaluativeSignals.filter { $0.flag == .bad }
+        let watch = evaluativeSignals.filter { $0.flag == .watch }
+        let good = evaluativeSignals.filter { $0.flag == .good }
+        let recoveryDown = evaluativeSignals.contains {
+            ["hrv", "rhr", "respRate"].contains($0.key) && $0.flag == .bad
+        }
 
-        if bad.count >= 2 || (recoveryDown && loadHigh) {
+        if bad.count >= 2 {
             return (.rundown, "Run down",
                     "Several signals are down at once. Treat today as recovery - easy movement, real sleep tonight.")
         }
-        if recoveryDown || loadHigh || bad.count >= 1 {
+        if recoveryDown || bad.count >= 1 {
             return (.strained, "Strained",
                     "One of your signals is flagging. You can train, but keep it controlled and bank the recovery.")
         }
         if good.count >= 2 && watch.isEmpty {
             return (.primed, "Primed",
-                    "Your signals are aligned and your load is supported. A harder session is well backed today.")
+                    "Your measured recovery trends are aligned with your recent baseline.")
         }
         return (.balanced, "Balanced",
                 "Nothing's flagging. Train to feel - your body's holding steady.")

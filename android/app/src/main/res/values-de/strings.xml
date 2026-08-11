@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="nutrition_weight_unit_missing_failure">Kein Gewicht importiert: Beschrifte die Gewichtsspalte mit kg oder lb.</string>
+    <plurals name="nutrition_weight_values_skipped">
+        <item quantity="one">1 Gewichtswert übersprungen (kg oder lb zur Spaltenüberschrift hinzufügen).</item>
+        <item quantity="other">%d Gewichtswerte übersprungen (kg oder lb zur Spaltenüberschrift hinzufügen).</item>
+    </plurals>
     <!-- German (de). App name stays untranslated (brand). Nav terms mirror the iOS German pass where
          one exists, so the two platforms read the same. -->
     <string name="widget_description">Heutige Erholung, Anstrengung und Schlaf, mit Live-Herzfrequenz und Band-Akku auf einen Blick.</string>
@@ -69,6 +74,10 @@
     <string name="terms_point_warranty_head">Keine Gewährleistung; Haftung begrenzt</string>
     <string name="terms_point_warranty_body">NOOP ist kostenlos und wird „wie besehen“ bereitgestellt, ohne Gewährleistung. Die Haftung ist im maximal zulässigen Umfang des für dich geltenden Rechts begrenzt, und nichts hier nimmt dir Schutz, den dein lokales Recht uns nicht zu nehmen erlaubt.</string>
     <string name="terms_footer">Die vollständigen Bedingungen stehen in TERMS.md, das mit NOOP ausgeliefert wird. Das ist keine Rechtsberatung.</string>
+    <string name="terms_read_full">Vollständige Bedingungen lesen</string>
+    <string name="terms_full_title">Nutzungsbedingungen</string>
+    <string name="terms_close">Fertig</string>
+    <string name="terms_load_failed">Die enthaltenen Bedingungen konnten nicht geöffnet werden. Akzeptiere sie erst, wenn du TERMS.md im NOOP-Quellpaket gelesen hast.</string>
     <string name="terms_attest_head">Bitte bestätige jeden dieser Punkte:</string>
     <string name="terms_attest_not_affiliated">Ich bin kein Mitarbeiter, Auftragnehmer oder Partner von WHOOP und nutze NOOP nicht im Auftrag von WHOOP.</string>
     <string name="terms_attest_own_device">Das WHOOP-Gerät, das ich mit NOOP verwende, gehört mir, und ich nutze es nur, um auf meine eigenen Daten zuzugreifen. Das ist meine Entscheidung und mein Risiko, einschließlich etwaiger Auswirkungen auf mein WHOOP-Konto, mein Abonnement, mein Gerät oder meine Garantie, und es kann gegen die Nutzungsbedingungen von WHOOP verstoßen.</string>
@@ -1639,7 +1648,7 @@
     <string name="skin_temp_reason_summary">%1$s: %2$s</string>
     <string name="stress_score_accessibility">Stress %1$s von 3, %2$s</string>
     <string name="stress_peak_summary">Spitze %1$s · %2$s</string>
-    <string name="today_load_ratio">Belastung %1$s</string>
+    <string name="today_load_ratio">Verhältnis %1$s</string>
     <!-- #453 data-driven metric labels that do not appear directly in Compose calls. -->
     <string name="timeline_metric_heart_rate">Herzfrequenz</string>
     <string name="timeline_metric_rmssd">rMSSD (5 Min.)</string>

@@ -40,6 +40,11 @@ class AutoWorkoutDetectorTest {
         assertEquals(120, w.peakBpm)
         assertTrue("duration ${w.durationMin} min", w.durationMin >= 19)
         assertEquals(start, w.startSec)
+        assertEquals(AutoWorkoutDetector.detectorVersion, w.detectorVersion)
+        assertEquals(null, w.eventConfidence)
+        assertEquals(AutoWorkoutDetector.ConfidenceStatus.UNCALIBRATED, w.confidenceStatus)
+        assertEquals(AutoWorkoutDetector.EvidenceProvenance.HEART_RATE_ONLY, w.evidenceProvenance)
+        assertEquals(AutoWorkoutDetector.TypeSuggestionStatus.UNKNOWN, w.typeSuggestionStatus)
     }
 
     @Test fun briefDipIsTolerated() {
@@ -133,7 +138,10 @@ class AutoWorkoutDetectorTest {
         assertEquals(1, AutoWorkoutDetector.detect(hr, restingHR = rest).size)
         // Moving gravity (alternating x) confirms motion → detected.
         val moving = (start until start + 1200).map { grav(it, ((it - start) % 2).toDouble() * 0.5) }
-        assertEquals(1, AutoWorkoutDetector.detect(hr, restingHR = rest, gravity = moving).size)
+        val movingOut = AutoWorkoutDetector.detect(hr, restingHR = rest, gravity = moving)
+        assertEquals(1, movingOut.size)
+        assertEquals(AutoWorkoutDetector.EvidenceProvenance.HEART_RATE_AND_MOTION,
+            movingOut.first().evidenceProvenance)
     }
 
     @Test fun sparseMotionCannotVetoAnHrCandidate() {
@@ -193,5 +201,50 @@ class AutoWorkoutDetectorTest {
         assertEquals(1, out.size)
         assertEquals(start, out[0].startSec)
         assertEquals(start + 20 * 60 - 1, out[0].endSec)
+    }
+
+    @Test fun duplicateTimestampsCannotManufactureCoverage() {
+        val start = 14_000_000L
+        val sparse = (start..start + 20 * 60 step 60).flatMap { ts ->
+            List(4) { hr(ts, 120) }
+        }
+        val samples = sparse + block(start + 20 * 60 + 1, AutoWorkoutDetector.maxDipS.toInt() + 2, 65)
+        assertTrue(AutoWorkoutDetector.detect(samples, restingHR = 60).isEmpty())
+    }
+
+    @Test fun telemetryGapDoesNotEraseLaterDenseBout() {
+        val start = 15_000_000L
+        val secondStart = start + 17 * 60
+        val samples = block(start, 12 * 60, 120) +
+            block(secondStart, 12 * 60, 120) +
+            block(secondStart + 12 * 60, AutoWorkoutDetector.maxDipS.toInt() + 2, 65)
+        val out = AutoWorkoutDetector.detect(samples, restingHR = 60)
+        assertEquals(1, out.size)
+        assertEquals(secondStart, out.first().startSec)
+    }
+
+    @Test fun clumpedMotionIsUnavailableAndCannotVetoHr() {
+        val start = 16_000_000L
+        val end = start + 20 * 60 - 1
+        val samples = block(start, 20 * 60, 120) +
+            block(start + 20 * 60, AutoWorkoutDetector.maxDipS.toInt() + 2, 65)
+        val clumped = (0 until 15).map { grav(start + it, 0.0) } +
+            (0 until 15).map { grav(end - 14 + it, 0.0) }
+        val motion = AutoWorkoutDetector.motionIntensityByTs(clumped)
+        assertEquals(AutoWorkoutDetector.MotionConfirmation.Unavailable,
+            AutoWorkoutDetector.motionConfirmation(motion, start, end))
+        val out = AutoWorkoutDetector.detect(samples, restingHR = 60, gravity = clumped)
+        assertEquals(1, out.size)
+        assertEquals(AutoWorkoutDetector.EvidenceProvenance.HEART_RATE_ONLY,
+            out.first().evidenceProvenance)
+    }
+
+    @Test fun invalidBpmAndExtremeTimestampSpanAreRejectedSafely() {
+        val start = 17_000_000L
+        val invalid = block(start, 20 * 60, 1_000) +
+            block(start + 20 * 60, AutoWorkoutDetector.maxDipS.toInt() + 2, 65)
+        assertTrue(AutoWorkoutDetector.detect(invalid, restingHR = 60).isEmpty())
+        assertTrue(!AutoWorkoutDetector.hasSufficientHRCoverage(
+            listOf(hr(Long.MIN_VALUE, 120), hr(Long.MAX_VALUE, 120)), Long.MIN_VALUE, Long.MAX_VALUE))
     }
 }

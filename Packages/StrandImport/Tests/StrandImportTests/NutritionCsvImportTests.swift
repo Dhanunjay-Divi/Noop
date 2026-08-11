@@ -67,7 +67,7 @@ final class NutritionCsvImportTests: XCTestCase {
 
     func testGenericHeadersCaseInsensitiveWithWeight() {
         let csv = """
-        DAY,kcal,PROTEIN,Total Carbohydrates,Total Fat,Saturated Fat,Body Weight
+        DAY,kcal,PROTEIN,Total Carbohydrates,Total Fat,Saturated Fat,Body Weight (kg)
         2024-04-10,1750.5,110.2,190.4,58.8,20.1,81.3
         """
         let result = NutritionCsvImporter.parse(text: csv)
@@ -120,7 +120,7 @@ final class NutritionCsvImportTests: XCTestCase {
 
     func testMetricPointsProjection() {
         let csv = """
-        Date,Calories,Protein,Carbs,Fat,Weight
+        Date,Calories,Protein,Carbs,Fat,Weight (kg)
         2024-06-01,2000,140,210,68,80.5
         2024-06-02,1900,,200,,
         """
@@ -143,6 +143,80 @@ final class NutritionCsvImportTests: XCTestCase {
         XCTAssertNil(value("2024-06-02", NutritionCsvImporter.Keys.proteinG))
 
         XCTAssertEqual(NutritionCsvImporter.sourceId, "nutrition-csv")
+    }
+
+    // MARK: - Weight units are explicit and always normalized to kilograms
+
+    func testKilogramHeadersKeepKilogramsAcrossCommonFormats() {
+        let fixtures: [(header: String, value: Double)] = [
+            ("Weight (kg)", 81.3),
+            ("weight_kg", 79.5),
+            ("Body Mass [kilograms]", 76.2),
+            ("Bodyweight kgs", 72.0),
+        ]
+
+        for fixture in fixtures {
+            let result = NutritionCsvImporter.parse(text: """
+            Date,\(fixture.header)
+            2024-06-03,\(fixture.value)
+            """)
+            XCTAssertEqual(result.rows.single!.weight!, fixture.value, accuracy: 1e-9, fixture.header)
+            XCTAssertEqual(result.ambiguousWeightRows, 0, fixture.header)
+        }
+    }
+
+    func testPoundHeadersConvertToKilogramsAcrossCommonFormats() {
+        let headers = ["Weight (lb)", "weight_lbs", "Body Weight [pounds]", "Bodyweight lbs"]
+
+        for header in headers {
+            let result = NutritionCsvImporter.parse(text: """
+            Date,\(header)
+            2024-06-04,180
+            """)
+            XCTAssertEqual(
+                result.rows.single!.weight!,
+                180 * NutritionCsvImporter.poundsToKilograms,
+                accuracy: 1e-9,
+                header
+            )
+            XCTAssertEqual(result.ambiguousWeightRows, 0, header)
+        }
+    }
+
+    func testBareWeightHeaderAcceptsUnitBearingCells() {
+        let result = NutritionCsvImporter.parse(text: """
+        Date,Weight
+        2024-06-05,180lb
+        2024-06-06,81.5 kg
+        """)
+
+        XCTAssertEqual(result.rows[0].weight!, 180 * NutritionCsvImporter.poundsToKilograms, accuracy: 1e-9)
+        XCTAssertEqual(result.rows[1].weight!, 81.5, accuracy: 1e-9)
+        XCTAssertEqual(result.ambiguousWeightRows, 0)
+    }
+
+    func testBareNumericWeightIsSkippedRatherThanGuessed() {
+        let result = NutritionCsvImporter.parse(text: """
+        Date,Calories,Weight
+        2024-06-07,2000,180
+        """)
+
+        XCTAssertEqual(result.importedDays, 1, "the unambiguous nutrition value still imports")
+        XCTAssertEqual(result.rows[0].caloriesIn, 2000)
+        XCTAssertNil(result.rows[0].weight)
+        XCTAssertEqual(result.ambiguousWeightRows, 1)
+        XCTAssertFalse(result.metricPoints.contains { $0.key == NutritionCsvImporter.Keys.weight })
+    }
+
+    func testConflictingHeaderAndCellUnitsAreRejected() {
+        let result = NutritionCsvImporter.parse(text: """
+        Date,Calories,Weight (kg)
+        2024-06-08,1900,180 lb
+        """)
+
+        XCTAssertEqual(result.rows[0].caloriesIn, 1900)
+        XCTAssertNil(result.rows[0].weight)
+        XCTAssertEqual(result.ambiguousWeightRows, 1)
     }
 
     // MARK: - Duplicate days: latest value wins (mirrors store upsert)
@@ -172,4 +246,8 @@ final class NutritionCsvImportTests: XCTestCase {
         XCTAssertNil(NutritionCsvImporter.canonicalDay("01-08-2024"))
         XCTAssertNil(NutritionCsvImporter.canonicalDay(""))
     }
+}
+
+private extension Array {
+    var single: Element? { count == 1 ? self[0] : nil }
 }

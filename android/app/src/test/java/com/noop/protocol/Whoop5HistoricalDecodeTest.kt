@@ -32,7 +32,7 @@ class Whoop5HistoricalDecodeTest {
         assertNotNull(p)
         p!!
         assertEquals(18, p["hist_version"])
-        assertEquals(1780916150, p["unix"])
+        assertEquals(1780916150L, p["unix"])
         assertEquals(102, p["heart_rate"])
         assertEquals(2, p["rr_count"])
         assertEquals(listOf(602, 613), p["rr_intervals"])
@@ -86,7 +86,7 @@ class Whoop5HistoricalDecodeTest {
         // Fields read off the same real worn frame, justified by observed behaviour (parity with the
         // Swift Whoop5HistoricalTests.testHistoricalV18ObservedFields).
         val p = decodeHistorical(bytes(wornV18), DeviceFamily.WHOOP5)!!
-        assertEquals(25443699, p["record_index"])               // @11 per-record counter
+        assertEquals(25443699L, p["record_index"])              // @11 per-record counter
         assertEquals(25997, p["hr_fixed_8_8"])                  // @36 value/256 ≈ HR (101.55 ≈ 102)
         assertEquals(101, (p["hr_fixed_8_8"] as Int) / 256)
         assertEquals(170, p["step_cadence"])                    // @59 cadence-like byte (raw)
@@ -231,7 +231,7 @@ class Whoop5HistoricalDecodeTest {
         assertNotNull(p)
         p!!
         assertEquals(18, p["hist_version"])
-        assertEquals(1781047486, p["unix"])
+        assertEquals(1781047486L, p["unix"])
         assertEquals(66, p["heart_rate"])
         assertEquals(3238, p["skin_temp_raw"]) // 32.38 °C on the wrist
         val gx = p["gravity_x"] as Double
@@ -251,8 +251,8 @@ class Whoop5HistoricalDecodeTest {
     @Test
     fun decodesV18FromASecondDevice() {
         for ((hex, expectHR, expectUnix) in listOf(
-            Triple(secondDeviceHR57, 57, 1781120109),
-            Triple(secondDeviceHR63, 63, 1781124622),
+            Triple(secondDeviceHR57, 57, 1781120109L),
+            Triple(secondDeviceHR63, 63, 1781124622L),
         )) {
             val p = decodeHistorical(bytes(hex), DeviceFamily.WHOOP5)
             assertNotNull(p); p!!

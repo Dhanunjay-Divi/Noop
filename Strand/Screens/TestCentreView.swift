@@ -118,7 +118,7 @@ struct TestCentreView: View {
                     Text("STRAP LOG").font(StrandFont.overline).tracking(StrandFont.overlineTracking)
                         .foregroundStyle(StrandPalette.textSecondary)
                     Spacer()
-                    Button("Copy") { PlatformPasteboard.copy(live.exportableLogText()) }
+                    Button("Copy") { FileExport.copyDiagnosticText(live.exportableLogText()) }
                         .buttonStyle(.plain).font(StrandFont.mono).foregroundStyle(StrandPalette.accent)
                     Button("Save…") {
                         Task {
@@ -149,7 +149,7 @@ struct TestCentreView: View {
                 // Environment dump: the IOSDiagnostics-backed block exportableLogText already carries,
                 // surfaced as a copyable readout (spec section 3.4).
                 NoopButton("Copy environment dump", systemImage: "info.circle", kind: .secondary) {
-                    PlatformPasteboard.copy(live.exportableLogText())
+                    FileExport.copyDiagnosticText(live.exportableLogText())
                 }
             }
         }

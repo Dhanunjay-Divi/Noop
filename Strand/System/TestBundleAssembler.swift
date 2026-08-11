@@ -11,6 +11,13 @@ import StrandAnalytics
 /// can trust the scrub. Redaction stays the only scrub point; we just guarantee it covers the whole bundle.
 enum TestBundleAssembler {
 
+    /// Result of the diagnostics-only privacy boundary used by every standalone log/raw/support export.
+    /// These exports are intentionally separate from the user's normal health-data backup/CSV flows.
+    struct PreparedDiagnostics: Equatable {
+        let entries: [FileExport.BundleEntry]
+        let truncated: Bool
+    }
+
     /// The redaction stamp written into meta.json so a maintainer knows the whole-bundle scrub ran.
     static let redactionVersion = "v2"
 
@@ -53,6 +60,72 @@ enum TestBundleAssembler {
             }
             return FileExport.BundleEntry(name: entry.name, data: Data(scrubbed.utf8))
         }
+    }
+
+    /// Fail-closed redaction and total-size bounding for standalone diagnostic/support text exports.
+    ///
+    /// Unlike the Test Centre bundle, whose binary screenshot is deliberately allowed and named by its
+    /// review gate, a standalone diagnostic export is text-only. A caller that accidentally supplies a
+    /// binary/raw payload gets `nil` instead of silently sharing bytes that could not be inspected or
+    /// redacted. When the total exceeds the cap, every entry receives a proportional budget and keeps its
+    /// newest complete-line tail with an explicit truncation marker. The returned bytes are the *only*
+    /// bytes a share/save/copy path may stage.
+    static func prepareDiagnostics(_ entries: [FileExport.BundleEntry],
+                                   capBytes: Int = 20 * 1024 * 1024) -> PreparedDiagnostics? {
+        guard capBytes > 0, !entries.isEmpty,
+              entries.allSatisfy({ entry in
+                  guard let text = String(data: entry.data, encoding: .utf8) else { return false }
+                  return !text.unicodeScalars.contains { scalar in
+                      (CharacterSet.controlCharacters.contains(scalar)
+                          && scalar.value != 10 && scalar.value != 13 && scalar.value != 9)
+                  }
+              }) else { return nil }
+
+        let redacted = redactEntries(entries)
+        let total = redacted.reduce(0) { $0 + $1.data.count }
+        guard total > capBytes else { return PreparedDiagnostics(entries: redacted, truncated: false) }
+
+        var remaining = capBytes
+        var remainingOriginal = total
+        var bounded: [FileExport.BundleEntry] = []
+        bounded.reserveCapacity(redacted.count)
+        for (index, entry) in redacted.enumerated() {
+            let budget: Int
+            if index == redacted.count - 1 {
+                budget = remaining
+            } else if remainingOriginal > 0 {
+                budget = min(remaining, Int(Double(remaining) * Double(entry.data.count) /
+                                            Double(remainingOriginal)))
+            } else {
+                budget = 0
+            }
+            bounded.append(FileExport.BundleEntry(
+                name: entry.name,
+                data: boundedDiagnosticText(entry.data, budget: budget)
+            ))
+            remaining -= budget
+            remainingOriginal -= entry.data.count
+        }
+        return PreparedDiagnostics(entries: bounded, truncated: true)
+    }
+
+    /// Keep a valid UTF-8, newest-line tail inside `budget`. The marker makes truncation visible even when
+    /// the file is later detached from its surrounding bundle or renamed by a share target.
+    private static func boundedDiagnosticText(_ data: Data, budget: Int) -> Data {
+        guard budget > 0 else { return Data() }
+        guard data.count > budget else { return data }
+        let marker = Data("# NOOP diagnostic export truncated: older content was removed before sharing.\n".utf8)
+        guard budget > marker.count else { return Data(marker.prefix(budget)) }
+
+        let rawTail = data.suffix(budget - marker.count)
+        var tail = String(decoding: rawTail, as: UTF8.self)
+        // The byte suffix may begin in the middle of a UTF-8 scalar or record. Drop the first partial line;
+        // a diagnostic tail is more useful and safer when every retained JSONL/CSV/log record is complete.
+        guard let newline = tail.firstIndex(of: "\n") else { return marker }
+        tail = String(tail[tail.index(after: newline)...])
+        var out = marker
+        out.append(Data(tail.utf8))
+        return Data(out.prefix(budget))
     }
 
     /// Hard cap the bundle at `capBytes` (20 MB default, under GitHub's 25 MB; spec section 5.4). The

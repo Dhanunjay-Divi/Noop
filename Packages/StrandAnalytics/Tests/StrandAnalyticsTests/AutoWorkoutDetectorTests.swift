@@ -33,6 +33,11 @@ final class AutoWorkoutDetectorTests: XCTestCase {
         XCTAssertEqual(w.peakBpm, 120)
         XCTAssertGreaterThanOrEqual(w.durationMin, 19)
         XCTAssertEqual(w.startSec, start)
+        XCTAssertEqual(w.detectorVersion, AutoWorkoutDetector.detectorVersion)
+        XCTAssertNil(w.eventConfidence)
+        XCTAssertEqual(w.confidenceStatus, .uncalibrated)
+        XCTAssertEqual(w.evidenceProvenance, .heartRateOnly)
+        XCTAssertEqual(w.typeSuggestionStatus, .unknown)
     }
 
     func testBriefDipIsTolerated() {
@@ -120,8 +125,10 @@ final class AutoWorkoutDetectorTests: XCTestCase {
         XCTAssertEqual(AutoWorkoutDetector.detect(hr: hr, restingBpm: 60).count, 1)
         // Moving gravity (alternating x) confirms motion → detected.
         let moving = (start..<(start + 1200)).map { grav($0, Double(($0 - start) % 2) * 0.5) }
-        XCTAssertEqual(AutoWorkoutDetector.detect(hr: hr, restingBpm: 60,
-                                                  motion: AutoWorkoutDetector.motionPoints(moving)).count, 1)
+        let movingOut = AutoWorkoutDetector.detect(hr: hr, restingBpm: 60,
+                                                   motion: AutoWorkoutDetector.motionPoints(moving))
+        XCTAssertEqual(movingOut.count, 1)
+        XCTAssertEqual(movingOut.first?.evidenceProvenance, .heartRateAndMotion)
     }
 
     func testSparseMotionCannotVetoAnHrCandidate() {
@@ -181,5 +188,46 @@ final class AutoWorkoutDetectorTests: XCTestCase {
         XCTAssertEqual(out.count, 1)
         XCTAssertEqual(out[0].startSec, start)
         XCTAssertEqual(out[0].endSec, start + 20 * 60 - 1)
+    }
+
+    func testDuplicateTimestampsCannotManufactureCoverage() {
+        let start = 14_000_000
+        let sparse = stride(from: start, through: start + 20 * 60, by: 60)
+            .flatMap { ts in Array(repeating: (ts: ts, bpm: 120), count: 4) }
+        let hr = sparse + block(start + 20 * 60 + 1, AutoWorkoutDetector.maxDipS + 2, 65)
+        XCTAssertTrue(AutoWorkoutDetector.detect(hr: hr, restingBpm: 60).isEmpty)
+    }
+
+    func testTelemetryGapDoesNotEraseLaterDenseBout() {
+        let start = 15_000_000
+        let secondStart = start + 17 * 60
+        let hr = block(start, 12 * 60, 120)
+            + block(secondStart, 12 * 60, 120)
+            + block(secondStart + 12 * 60, AutoWorkoutDetector.maxDipS + 2, 65)
+        let out = AutoWorkoutDetector.detect(hr: hr, restingBpm: 60)
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out.first?.startSec, secondStart)
+    }
+
+    func testClumpedMotionIsUnavailableAndCannotVetoHR() {
+        let start = 16_000_000
+        let end = start + 20 * 60 - 1
+        let hr = block(start, 20 * 60, 120)
+            + block(start + 20 * 60, AutoWorkoutDetector.maxDipS + 2, 65)
+        let clumped = (0..<15).map { AutoWorkoutDetector.MotionPoint(ts: start + $0, intensity: 0) }
+            + (0..<15).map { AutoWorkoutDetector.MotionPoint(ts: end - 14 + $0, intensity: 0) }
+        XCTAssertEqual(AutoWorkoutDetector.motionConfirmation(clumped, start: start, end: end), .unavailable)
+        let out = AutoWorkoutDetector.detect(hr: hr, restingBpm: 60, motion: clumped)
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out.first?.evidenceProvenance, .heartRateOnly)
+    }
+
+    func testInvalidBPMAndExtremeTimestampSpanAreRejectedSafely() {
+        let start = 17_000_000
+        let invalid = block(start, 20 * 60, 1_000)
+            + block(start + 20 * 60, AutoWorkoutDetector.maxDipS + 2, 65)
+        XCTAssertTrue(AutoWorkoutDetector.detect(hr: invalid, restingBpm: 60).isEmpty)
+        XCTAssertFalse(AutoWorkoutDetector.hasSufficientHRCoverage(
+            [(ts: Int.min, bpm: 120), (ts: Int.max, bpm: 120)], start: Int.min, end: Int.max))
     }
 }

@@ -7,7 +7,7 @@
 # CURRENT_PROJECT_VERSION) — and commits that to the dispatched branch, so the built app actually
 # REPORTS the new version. Then it publishes a fixed, non-prerelease `v<VERSION>` release with the
 # version-stamped artifacts. A new release remains a draft until every platform
-# artifact is attached and the AltStore source is verified on `main`; only then
+# artifact is attached and a publicly fetchable AltStore source is verified on `main`; only then
 # is it published as latest, so a failed build cannot strand users on an
 # empty/incomplete release. UpdateCheck finds the
 # published release (isNewer strips the `-staging` suffix, so an installed
@@ -53,6 +53,25 @@ jobs:
           # the original SHA can determine the idempotent target version below.
           ref: ${{ github.ref_name }}
           fetch-depth: 0
+      - name: Require private Android staging signing secrets
+        env:
+          ANDROID_STAGING_KEYSTORE_BASE64: ${{ secrets.ANDROID_STAGING_KEYSTORE_BASE64 }}
+          ANDROID_STAGING_STORE_PASSWORD: ${{ secrets.ANDROID_STAGING_STORE_PASSWORD }}
+          ANDROID_STAGING_KEY_ALIAS: ${{ secrets.ANDROID_STAGING_KEY_ALIAS }}
+          ANDROID_STAGING_KEY_PASSWORD: ${{ secrets.ANDROID_STAGING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in \
+            ANDROID_STAGING_KEYSTORE_BASE64 \
+            ANDROID_STAGING_STORE_PASSWORD \
+            ANDROID_STAGING_KEY_ALIAS \
+            ANDROID_STAGING_KEY_PASSWORD
+          do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing required Actions secret ${name}; refusing to publish an Android artifact with a public/debug signing identity."
+              exit 1
+            fi
+          done
       - id: b
         env:
           GH_TOKEN: ${{ github.token }}
@@ -174,8 +193,8 @@ jobs:
               echo "First release (no prior release tag) — skipping the auto PR breakdown."
             fi
             {
-              printf '\n---\n\n**Downloads** — NOOP Staging identity, installs **beside** the official app (separate data):\n'
-              printf -- '- **Android** — `NOOP-android-v%s.apk` (`com.noop.whoop.staging`)\n' "$NEW"
+              printf '\n---\n\n**Downloads** — access follows repository visibility; private-repository assets require an authenticated collaborator:\n'
+              printf -- '- **Android** — `NOOP-android-v%s.apk` (privately signed staging identity, `com.noop.whoop.staging`, non-debuggable and unminified)\n' "$NEW"
               printf -- '- **macOS** — `NOOP-macos-v%s.zip` (unzip, then right-click → Open)\n' "$NEW"
               printf -- '- **iOS** — `NOOP-ios-unsigned-v%s.ipa` (AltStore / Sideloadly)\n' "$NEW"
             } >> "$BODY"
@@ -201,11 +220,20 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/wrapper-validation@v4
       - uses: gradle/actions/setup-gradle@v4
-      # Release-only (no debug APK). Signed with the committed fork-debug.keystore via the debug
-      # signingConfig storeFile (release falls back to it when no keystore.properties is present).
-      # That key and password are PUBLIC: anyone can sign this identity. It is therefore staging-only,
-      # never a production trust anchor. -PstagingRelease enforces the separate .staging app id.
-      - name: Build staging-release APK
+      - name: Prepare private staging signing key
+        env:
+          ANDROID_STAGING_KEYSTORE_BASE64: ${{ secrets.ANDROID_STAGING_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$ANDROID_STAGING_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/noop-staging.jks"
+          test -s "$RUNNER_TEMP/noop-staging.jks"
+      - name: Build privately signed staging-release APK
+        env:
+          NOOP_RELEASE_STORE_FILE: ${{ runner.temp }}/noop-staging.jks
+          NOOP_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_STAGING_STORE_PASSWORD }}
+          NOOP_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_STAGING_KEY_ALIAS }}
+          NOOP_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_STAGING_KEY_PASSWORD }}
         run: ./gradlew assembleFullRelease -PstagingRelease
       - name: Version the filename + attach
         env:
@@ -348,9 +376,9 @@ jobs:
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
             --draft=false --prerelease=false --latest
 
-  # Prepend this release to the AltStore / SideStore source manifest — the one AltStore reads from
-  # raw.githubusercontent.com/<repo>/main/altstore-source.json (docs/IOS.md) — so a sideload user is
-  # offered this version automatically. This is a required publication gate:
+  # Prepend this release to the AltStore / SideStore source manifest only when GitHub reports the
+  # repository as public. AltStore cannot authenticate to private raw/release URLs. This is a
+  # required publication gate:
   # the GitHub release remains a draft unless the manifest is updated and
   # verified on main.
   altstore:
@@ -359,8 +387,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main   # AltStore reads the manifest from main, so commit there regardless of the release branch.
+          ref: main   # Public AltStore clients read the manifest from main.
           fetch-depth: 0
+      - name: Require anonymously fetchable GitHub distribution
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VISIBILITY=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.visibility')
+          if [ "$VISIBILITY" != "public" ]; then
+            echo "::error::Repository visibility is ${VISIBILITY}. AltStore/SideStore cannot authenticate to private raw GitHub files or private release assets; refusing to publish a misleading source entry. Make the repository public or move the manifest, icon, and IPA to an intentionally public HTTPS host first."
+            exit 1
+          fi
       - name: Add this release to the AltStore source
         env:
           GH_TOKEN: ${{ github.token }}

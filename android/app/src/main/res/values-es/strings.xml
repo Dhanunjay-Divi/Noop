@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="nutrition_weight_unit_missing_failure">No se importó ningún peso: indica kg o lb en la columna de peso.</string>
+    <plurals name="nutrition_weight_values_skipped">
+        <item quantity="one">Se omitió 1 valor de peso (añade kg o lb a la columna).</item>
+        <item quantity="other">Se omitieron %d valores de peso (añade kg o lb a la columna).</item>
+    </plurals>
 
     <!-- #453 generated Compose literal migration -->
     <string name="l10n_add_device_wizard_0123456789abcdef0123456789abcdef_b1775a78">0123456789abcdef0123456789abcdef</string>
@@ -1479,7 +1484,7 @@
     <string name="skin_temp_reason_summary">%1$s: %2$s</string>
     <string name="stress_score_accessibility">Estrés %1$s de 3, %2$s</string>
     <string name="stress_peak_summary">pico %1$s · %2$s</string>
-    <string name="today_load_ratio">carga %1$s</string>
+    <string name="today_load_ratio">proporción %1$s</string>
 
     <!-- #453 base-catalog locale completion -->
     <string name="app_name">NOOP</string>
@@ -1541,6 +1546,10 @@
     <string name="terms_point_warranty_head">Ninguna garantía; limitación de responsabilidad</string>
     <string name="terms_point_warranty_body">NOOP es gratuito y proporciona \"as es\", sin garantía. La responsabilidad se limita a la máxima medida que la ley que se aplica a usted permite, y nada aquí elimina las protecciones que su derecho local no nos deja eliminar.</string>
     <string name="terms_footer">Los términos completos están en TERMS.md, incluido con NOOP. Esto no es asesoría legal.</string>
+    <string name="terms_read_full">Leer los términos completos</string>
+    <string name="terms_full_title">Términos de uso</string>
+    <string name="terms_close">Listo</string>
+    <string name="terms_load_failed">No se pudieron abrir los términos incluidos. No aceptes hasta poder revisar TERMS.md en el paquete de código fuente de NOOP.</string>
     <string name="terms_attest_head">Por favor, confirme cada uno de estos:</string>
     <string name="terms_attest_not_affiliated">No soy un empleado, contratista o afiliado de WHOOP, y no estoy usando NOOP en nombre de WHOOP.</string>
     <string name="terms_attest_own_device">Soy dueño del dispositivo WHOOP que usaré con NOOP y sólo lo usaré para acceder a mis propios datos. Hacerlo es mi decisión y mi riesgo, incluyendo cualquier efecto en mi cuenta WHOOP, suscripción, dispositivo o garantía, y puede violar los Términos de servicio de WHOOP\.</string>

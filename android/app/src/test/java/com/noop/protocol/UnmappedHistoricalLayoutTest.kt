@@ -56,7 +56,7 @@ class UnmappedHistoricalLayoutTest {
     @Test fun unmappedLayoutIsArchivedEvenThoughItsBytesDecodeCleanlyAsV18() {
         // Precondition: read as its true version, this record decodes everything the old screen wanted.
         val asV18 = decodeHistorical(bytes(whoop5V18Hex), DeviceFamily.WHOOP5)!!
-        assertEquals("precondition: these bytes DO decode a unix", 1780916150, asV18["unix"])
+        assertEquals("precondition: these bytes DO decode a unix", 1780916150L, asV18["unix"])
         assertEquals("precondition: these bytes DO decode a heart rate", 102, asV18["heart_rate"])
         assertTrue("precondition: these bytes DO decode a gravity vector", asV18["gravity_x"] is Double)
 

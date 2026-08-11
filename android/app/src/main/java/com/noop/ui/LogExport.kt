@@ -7,9 +7,12 @@ import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.noop.BuildConfig
 import com.noop.ble.PuffinExperiment
+import com.noop.testcentre.ReportReviewGate
+import com.noop.testcentre.TestBundleAssembler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.coroutines.resume
 
 /**
  * Shares the strap connection log as a plain-text file so users can attach it to a bug report.
@@ -139,9 +142,7 @@ object LogExport {
                 appendLine("─".repeat(40))
             }
             val text = body.ifBlank { "(rolling strap-log buffer is empty; connect to your strap so lines accrue)" }
-            val logFile = File(dir, strapLogFilename(nowMs))
-            logFile.writeText(header + "\n" + text)
-            out.add(logFile)
+            val inputs = arrayListOf("report.txt" to (header + "\n" + text).toByteArray())
 
             // The raw 5/MG capture (JSONL of every backfilled frame) copied alongside as a matching `.bin`
             // so the scheduled drop is a self-contained pair, mirroring the interactive shareRawAndLog. Only
@@ -149,11 +150,24 @@ object LogExport {
             val main = File(context.filesDir, com.noop.ble.WhoopBleClient.WHOOP5_CAPTURE_FILE)
             val prev = File(context.filesDir, "${com.noop.ble.WhoopBleClient.WHOOP5_CAPTURE_FILE}.1")
             if (main.exists() || prev.exists()) {
-                val rawFile = File(dir, rawCaptureFilename(nowMs))
-                rawFile.outputStream().bufferedWriter().use { w ->
-                    for (f in listOf(prev, main)) if (f.exists()) f.bufferedReader().use { r -> r.copyTo(w) }
+                val raw = java.io.ByteArrayOutputStream()
+                for (f in listOf(prev, main)) if (f.exists()) raw.write(f.readBytes())
+                inputs += "raw-capture.jsonl" to raw.toByteArray()
+            }
+
+            // A scheduled drop is not an external share, so it has no foreground confirmation. It still
+            // crosses the same privacy boundary: only redacted, total-size-bounded bytes reach the durable
+            // export folder. A malformed/non-text capture fails closed instead of silently copying raw data.
+            val prepared = TestBundleAssembler.prepareDiagnostics(inputs)
+                ?: return@runCatching emptyList<File>()
+            for ((name, data) in prepared.entries) {
+                val file = when (name) {
+                    "report.txt" -> File(dir, strapLogFilename(nowMs))
+                    "raw-capture.jsonl" -> File(dir, rawCaptureFilename(nowMs))
+                    else -> continue
                 }
-                out.add(rawFile)
+                file.writeBytes(data)
+                out.add(file)
             }
             out.toList()
         }.getOrDefault(emptyList())
@@ -219,16 +233,115 @@ object LogExport {
     private fun fileUri(context: Context, file: File) =
         FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
 
+    /** The mandatory second-tap gate for every standalone diagnostic/log/raw/support share. The bytes have
+     * already passed [TestBundleAssembler.prepareDiagnostics]; the preview names large raw attachments and
+     * shows smaller redacted text. Normal user health-data export never enters this helper. */
+    private suspend fun confirmDiagnosticShare(
+        context: Context,
+        prepared: TestBundleAssembler.PreparedDiagnostics,
+        actionLabel: String = "Share",
+    ): Boolean = withContext(Dispatchers.Main.immediate) {
+        val gate = ReportReviewGate(prepared.entries)
+        val files = prepared.entries.joinToString("\n") { (name, data) ->
+            "• $name (${android.text.format.Formatter.formatShortFileSize(context, data.size.toLong())})"
+        }
+        var preview = gate.previewText
+        if (preview.length > 12_000) {
+            preview = preview.take(12_000) + "\n…preview shortened; the bounded file is listed above."
+        }
+        val truncated = if (prepared.truncated) {
+            "\nOlder diagnostic content was removed to stay below the 20 MB share limit."
+        } else {
+            ""
+        }
+        val message = """
+            NOOP removed device identifiers before preparing these diagnostics. Raw biometric readings and
+            timestamps may still be present. Confirm the recipient before continuing.$truncated
+
+            $files
+
+            $preview
+        """.trimIndent()
+        kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+            val alert = android.app.AlertDialog.Builder(context)
+            .setTitle("Review diagnostic export")
+            .setMessage(message)
+            .setNegativeButton("Cancel") { _, _ ->
+                gate.cancel()
+                if (continuation.isActive) continuation.resume(false)
+            }
+            .setPositiveButton(actionLabel) { _, _ ->
+                gate.confirm()
+                if (continuation.isActive) continuation.resume(gate.isCleared)
+            }
+            .setOnCancelListener {
+                gate.cancel()
+                if (continuation.isActive) continuation.resume(false)
+            }
+            .create()
+            continuation.invokeOnCancellation { alert.dismiss() }
+            alert.show()
+        }
+    }
+
+    private fun startFileShare(
+        context: Context,
+        file: File,
+        mime: String,
+        subject: String,
+        chooserTitle: String,
+    ) {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = mime
+            putExtra(Intent.EXTRA_STREAM, fileUri(context, file))
+            putExtra(Intent.EXTRA_SUBJECT, subject)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(send, chooserTitle))
+    }
+
+    /** Share a producer-created diagnostic text file only after fail-closed redaction, total-size bounding,
+     * and explicit review. The original private source is never placed in an ACTION_SEND intent. */
+    suspend fun shareDiagnosticFile(
+        context: Context,
+        source: File,
+        normalizedName: String,
+        suggestedName: String,
+        mime: String,
+        subject: String,
+        chooserTitle: String,
+    ): Boolean {
+        val prepared = withContext(Dispatchers.IO) {
+            if (!source.exists()) null else TestBundleAssembler.prepareDiagnostics(
+                listOf(normalizedName to source.readBytes()),
+            )
+        } ?: return false
+        val staged = withContext(Dispatchers.IO) {
+            val dir = File(context.cacheDir, "logs").apply { mkdirs() }
+            File(dir, suggestedName).also { it.writeBytes(prepared.entries.single().second) }
+        }
+        if (confirmDiagnosticShare(context, prepared)) {
+            withContext(Dispatchers.Main.immediate) {
+                startFileShare(context, staged, mime, subject, chooserTitle)
+            }
+        }
+        return true
+    }
+
     suspend fun shareStrapLog(context: Context, logText: String) {
         runCatching {
             val file = withContext(Dispatchers.IO) { writeStrapLogFile(context, logText) }
-            val send = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_STREAM, fileUri(context, file))
-                putExtra(Intent.EXTRA_SUBJECT, "NOOP strap log")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val prepared = withContext(Dispatchers.IO) {
+                TestBundleAssembler.prepareDiagnostics(listOf("report.txt" to file.readBytes()))
+            } ?: error("The diagnostic log was not valid UTF-8")
+            withContext(Dispatchers.IO) {
+                file.writeBytes(prepared.entries.single().second)
             }
-            context.startActivity(Intent.createChooser(send, "Share strap log"))
+            if (confirmDiagnosticShare(context, prepared)) {
+                withContext(Dispatchers.Main.immediate) {
+                    startFileShare(context, file, "text/plain", "NOOP strap log", "Share strap log")
+                }
+            }
         }.onFailure {
             Toast.makeText(context, "Couldn't share the log: ${it.message}", Toast.LENGTH_LONG).show()
         }
@@ -264,13 +377,17 @@ object LogExport {
                 Toast.makeText(context, noCaptureMsg(context, whoop5Connected, sharingLog = false), Toast.LENGTH_LONG).show()
                 return
             }
-            val send = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_STREAM, fileUri(context, out))
-                putExtra(Intent.EXTRA_SUBJECT, "NOOP 5/MG protocol capture")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val prepared = withContext(Dispatchers.IO) {
+                TestBundleAssembler.prepareDiagnostics(listOf("raw-capture.jsonl" to out.readBytes()))
+            } ?: error("The raw capture was not valid UTF-8")
+            withContext(Dispatchers.IO) {
+                out.writeBytes(prepared.entries.single().second)
             }
-            context.startActivity(Intent.createChooser(send, "Share 5/MG capture"))
+            if (confirmDiagnosticShare(context, prepared)) {
+                withContext(Dispatchers.Main.immediate) {
+                    startFileShare(context, out, "text/plain", "NOOP 5/MG protocol capture", "Share 5/MG capture")
+                }
+            }
         }.onFailure {
             Toast.makeText(context, "Couldn't share the capture: ${it.message}", Toast.LENGTH_LONG).show()
         }
@@ -296,7 +413,18 @@ object LogExport {
                 Toast.makeText(context, noCaptureMsg(context, whoop5Connected, sharingLog = true), Toast.LENGTH_LONG).show()
             }
             val name = "noop-export-${timestamp()}.zip"
-            exportBundle(context, entries, name)
+            val prepared = TestBundleAssembler.prepareDiagnostics(entries)
+                ?: error("The diagnostic pair contained a non-text payload")
+            val file = withContext(Dispatchers.IO) {
+                val bytes = zipEntries(prepared.entries) ?: error("The diagnostic pair was empty")
+                val dir = File(context.cacheDir, "logs").apply { mkdirs() }
+                File(dir, name).also { it.writeBytes(bytes) }
+            }
+            if (confirmDiagnosticShare(context, prepared)) {
+                withContext(Dispatchers.Main.immediate) {
+                    startFileShare(context, file, "application/zip", name, "Share diagnostic bundle")
+                }
+            }
         }.onFailure {
             Toast.makeText(context, "Couldn't export the pair: ${it.message}", Toast.LENGTH_LONG).show()
         }

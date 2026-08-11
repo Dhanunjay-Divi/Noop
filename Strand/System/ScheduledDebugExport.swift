@@ -165,18 +165,32 @@ enum ScheduledDebugExport {
         }
         let stamp = FileExport.timestamp()
         let logURL = docs.appendingPathComponent("noop-strap-log-\(stamp).txt")
+        var inputs = [FileExport.BundleEntry(
+            name: "report.txt",
+            data: Data(LiveState.scheduledExportText(
+                extraHeaderLines: DebugDataDiagnostics.strapStateLines()).utf8)
+        )]
+        // A scheduled drop is not a share, so it has no foreground confirmation. It still crosses the
+        // diagnostics privacy boundary now: only a redacted, total-size-bounded copy reaches Documents.
+        if let capture = captureURL, FileManager.default.fileExists(atPath: capture.path),
+           let data = try? Data(contentsOf: capture) {
+            inputs.append(FileExport.BundleEntry(name: "raw-capture.jsonl", data: data))
+        }
+        guard let prepared = TestBundleAssembler.prepareDiagnostics(inputs) else { return nil }
         do {
-            try LiveState.scheduledExportText(extraHeaderLines: DebugDataDiagnostics.strapStateLines())
-                .write(to: logURL, atomically: true, encoding: .utf8)
+            for entry in prepared.entries {
+                switch entry.name {
+                case "report.txt":
+                    try entry.data.write(to: logURL, options: .atomic)
+                case "raw-capture.jsonl":
+                    let dest = docs.appendingPathComponent("noop-raw-capture-\(stamp).json")
+                    try entry.data.write(to: dest, options: .atomic)
+                default:
+                    continue
+                }
+            }
         } catch {
             return nil
-        }
-        // Best-effort: copy the supplied raw 5/MG capture alongside, so a "Run now" drop carries the same
-        // matched pair the one-tap "Export raw + log" does. The background timer path passes nil (no live
-        // session), so it writes just the log — honest about what's available with no session open.
-        if let capture = captureURL, FileManager.default.fileExists(atPath: capture.path) {
-            let dest = docs.appendingPathComponent("noop-raw-capture-\(stamp).json")
-            try? FileManager.default.copyItem(at: capture, to: dest)
         }
         if markDay {
             UserDefaults.standard.set(dayKey(Date()), forKey: K.lastRun)

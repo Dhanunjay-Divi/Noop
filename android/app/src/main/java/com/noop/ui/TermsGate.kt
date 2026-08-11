@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -15,15 +16,20 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.noop.R
 
 /**
@@ -32,7 +38,7 @@ import com.noop.R
  * `Terms.currentVersion`. The full text ships in TERMS.md.
  */
 object Terms {
-    const val CURRENT_VERSION = "2.0"
+    const val CURRENT_VERSION = "2.1"
 
     /**
      * Plain-English summary of TERMS.md §1–§6 — kept identical to the macOS `Terms.points`. Each is
@@ -75,6 +81,42 @@ fun TermsGateScreen(onAccept: () -> Unit) {
     // One flag per Terms.attestations entry; every one must be ticked before Accept enables.
     val checks = remember { mutableStateListOf(*Array(Terms.attestations.size) { false }) }
     val allChecked = checks.all { it }
+    val context = LocalContext.current
+    val showingFullTerms = remember { mutableStateOf(false) }
+    val fullTerms = remember {
+        runCatching {
+            context.assets.open("TERMS.md").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        }.getOrElse { context.getString(R.string.terms_load_failed) }
+    }
+
+    if (showingFullTerms.value) {
+        Dialog(
+            onDismissRequest = { showingFullTerms.value = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(0.94f).fillMaxHeight(0.92f),
+                color = Palette.surfaceBase,
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(stringResource(R.string.terms_full_title), style = NoopType.title2,
+                        color = Palette.textPrimary)
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        fullTerms,
+                        style = NoopType.footnote,
+                        color = Palette.textPrimary,
+                        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = { showingFullTerms.value = false },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(stringResource(R.string.terms_close)) }
+                }
+            }
+        }
+    }
     Surface(modifier = Modifier.fillMaxSize(), color = Palette.surfaceBase) {
         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
             Spacer(Modifier.height(40.dp))
@@ -115,6 +157,13 @@ fun TermsGateScreen(onAccept: () -> Unit) {
                             modifier = Modifier.padding(top = 12.dp),
                         )
                     }
+                }
+
+                OutlinedButton(
+                    onClick = { showingFullTerms.value = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.terms_read_full))
                 }
 
                 Text(

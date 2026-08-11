@@ -49,6 +49,35 @@ class TestBundleAssemblerTest {
         assertArrayEquals("tiny".toByteArray(), capped.first().second)
     }
 
+    @Test fun standaloneDiagnosticsAreRedactedAndBounded() {
+        val serial = "4C1594026"
+        val source = ("old WHOOP $serial\n".repeat(200) + "newest WHOOP $serial\n").toByteArray()
+        val prepared = requireNotNull(TestBundleAssembler.prepareDiagnostics(
+            listOf("raw-sensors.csv" to source), capBytes = 512,
+        ))
+        assertTrue(prepared.truncated)
+        assertTrue(prepared.entries.sumOf { it.second.size } <= 512)
+        val text = String(prepared.entries.single().second)
+        assertTrue(text.contains("diagnostic export truncated"))
+        assertTrue(text.contains("newest WHOOP <serial>"))
+        assertFalse(text.contains(serial))
+    }
+
+    @Test fun standaloneDiagnosticsRejectMalformedUtf8() {
+        assertEquals(
+            null,
+            TestBundleAssembler.prepareDiagnostics(
+                listOf("opaque.bin" to byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x00, 0x01)),
+            ),
+        )
+        assertEquals(
+            null,
+            TestBundleAssembler.prepareDiagnostics(
+                listOf("opaque.bin" to byteArrayOf('a'.code.toByte(), 0x00, 'b'.code.toByte())),
+            ),
+        )
+    }
+
     @Test fun redactLeavesScreenshotPngBytesUntouched() {
         // The Display screenshot is BINARY: redactEntries must NOT decode it as text and re-encode (that
         // would corrupt the PNG). It passes through byte-identical; only text entries are scrubbed.

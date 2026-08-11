@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="nutrition_weight_unit_missing_failure">Nenhum peso importado: indique kg ou lb na coluna de peso.</string>
+    <plurals name="nutrition_weight_values_skipped">
+        <item quantity="one">1 valor de peso ignorado (adicione kg ou lb à coluna).</item>
+        <item quantity="other">%d valores de peso ignorados (adicione kg ou lb à coluna).</item>
+    </plurals>
 
     <!-- Portuguese (Portugal) localization. -->
     <string name="app_name">NOOP</string>
@@ -61,6 +66,10 @@
     <string name="terms_point_warranty_head">Sem garantia; responsabilidade limitada</string>
     <string name="terms_point_warranty_body">O NOOP é gratuito e fornecido “tal como está”, sem garantia. A responsabilidade é limitada até ao máximo permitido pela lei aplicável, e nada aqui remove proteções que a tua lei local não permita remover.</string>
     <string name="terms_footer">Os termos completos estão em TERMS.md, incluído com o NOOP. Isto não é aconselhamento jurídico.</string>
+    <string name="terms_read_full">Ler os termos completos</string>
+    <string name="terms_full_title">Termos de utilização</string>
+    <string name="terms_close">Concluído</string>
+    <string name="terms_load_failed">Não foi possível abrir os termos incluídos. Não aceite até poder consultar TERMS.md no pacote de código-fonte do NOOP.</string>
     <string name="terms_attest_head">Confirma cada um deles:</string>
     <string name="terms_attest_not_affiliated">Não sou funcionário, contratado ou afiliado do WHOOP e não utilizo o NOOP em nome do WHOOP.</string>
     <string name="terms_attest_own_device">Sou proprietário do dispositivo WHOOP que irei usar com o NOOP e só o usarei para aceder aos meus próprios dados. Fazê-lo é uma decisão minha e um risco meu, incluindo qualquer efeito na minha conta WHOOP, subscrição, dispositivo ou garantia, e pode violar os Termos de Serviço da WHOOP.</string>
@@ -1619,7 +1628,7 @@
     <string name="skin_temp_reason_summary">%1$s: %2$s</string>
     <string name="stress_score_accessibility">Stress %1$s de 3, %2$s</string>
     <string name="stress_peak_summary">pico %1$s · %2$s</string>
-    <string name="today_load_ratio">carregar %1$s</string>
+    <string name="today_load_ratio">rácio %1$s</string>
     <string name="timeline_metric_heart_rate">Frequência cardíaca</string>
     <string name="timeline_metric_rmssd">rMSSD (5 min)</string>
     <string name="timeline_metric_spo2">SpO₂</string>

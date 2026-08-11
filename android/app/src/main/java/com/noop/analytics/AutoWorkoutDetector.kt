@@ -33,6 +33,9 @@ object AutoWorkoutDetector {
 
     // ---- Constants (keep byte-identical with the Swift twin) ----
 
+    /** Bump whenever rules or data-quality gates change; never infer a probability from this label. */
+    const val detectorVersion: String = "noop-auto-workout-v1"
+
     /** Elevated gate: bpm must be at least restingHR + this margin to count as "working". */
     const val elevatedMarginBPM: Int = 30
 
@@ -63,6 +66,7 @@ object AutoWorkoutDetector {
     /** Sparse motion cannot honestly veto an otherwise-valid HR candidate. */
     const val motionConfirmationMinSamples: Int = 30
     const val motionConfirmationMinSpanS: Long = 60L
+    const val motionConfirmationMaxGapS: Long = 60L
 
     const val maxHRSampleGapS: Long = 60L
     const val minHRSamples: Int = 60
@@ -81,14 +85,35 @@ object AutoWorkoutDetector {
 
     internal fun hasSufficientHRCoverage(window: List<HrSample>, start: Long, end: Long): Boolean {
         if (end <= start) return false
-        val ordered = window.sortedBy { it.ts }
+        val ordered = cleanHR(window)
+        val spanSeconds = end.toDouble() - start.toDouble()
+        if (!spanSeconds.isFinite() || spanSeconds <= 0.0 ||
+            spanSeconds > Int.MAX_VALUE.toDouble() * maxSecondsPerHRSample.toDouble()) return false
         val required = maxOf(
             minHRSamples,
-            kotlin.math.ceil((end - start).toDouble() / maxSecondsPerHRSample.toDouble()).toInt(),
+            kotlin.math.ceil(spanSeconds / maxSecondsPerHRSample.toDouble()).toInt(),
         )
         if (ordered.size < required) return false
-        return ordered.zipWithNext().all { (a, b) -> b.ts - a.ts <= maxHRSampleGapS }
+        return ordered.zipWithNext().all { (a, b) ->
+            b.ts.toDouble() - a.ts.toDouble() <= maxHRSampleGapS.toDouble()
+        }
     }
+
+    enum class EvidenceProvenance(val wireValue: String) {
+        HEART_RATE_ONLY("heart_rate_only"),
+        HEART_RATE_AND_MOTION("heart_rate_and_motion"),
+    }
+
+    enum class ConfidenceStatus {
+        UNCALIBRATED;
+
+        /** Adding a validated status requires an explicit unattended-save decision here. */
+        val permitsUnattendedSave: Boolean
+            get() = when (this) {
+                UNCALIBRATED -> false
+            }
+    }
+    enum class TypeSuggestionStatus { UNKNOWN, SUGGESTED }
 
     /**
      * A detected workout window. All fields are derived purely from the HR samples inside the window.
@@ -103,8 +128,17 @@ object AutoWorkoutDetector {
         val durationMin: Int,
         /** Advisory broad-type hint attached after detection; null means the evidence was unclear. */
         val suggestedClass: CoarseWorkoutClass? = null,
+        /** Confidence in the optional broad-type hint, not confidence that a workout happened. */
         val suggestionConfidence: Double? = null,
-    )
+        val detectorVersion: String = AutoWorkoutDetector.detectorVersion,
+        /** Intentionally null until held-out validation calibrates this rules engine. */
+        val eventConfidence: Double? = null,
+        val confidenceStatus: ConfidenceStatus = ConfidenceStatus.UNCALIBRATED,
+        val evidenceProvenance: EvidenceProvenance = EvidenceProvenance.HEART_RATE_ONLY,
+    ) {
+        val typeSuggestionStatus: TypeSuggestionStatus
+            get() = if (suggestedClass == null) TypeSuggestionStatus.UNKNOWN else TypeSuggestionStatus.SUGGESTED
+    }
 
     sealed interface MotionConfirmation {
         data object Unavailable : MotionConfirmation
@@ -122,17 +156,28 @@ object AutoWorkoutDetector {
         end: Long,
     ): MotionConfirmation {
         if (end <= start) return MotionConfirmation.Unavailable
-        val inWindow = motion.entries.filter { it.key in start..end }.sortedBy { it.key }
+        val inWindow = motion.entries.filter { it.key in start..end && it.value.isFinite() }.sortedBy { it.key }
         if (inWindow.size < motionConfirmationMinSamples) return MotionConfirmation.Unavailable
-        val requiredSpan = minOf(5L * 60L, maxOf(motionConfirmationMinSpanS, (end - start) / 4L))
-        if (inWindow.last().key - inWindow.first().key < requiredSpan) return MotionConfirmation.Unavailable
+        val spanSeconds = end.toDouble() - start.toDouble()
+        val requiredSpan = minOf(5.0 * 60.0, maxOf(motionConfirmationMinSpanS.toDouble(), spanSeconds / 4.0))
+        if (inWindow.last().key.toDouble() - inWindow.first().key.toDouble() < requiredSpan) {
+            return MotionConfirmation.Unavailable
+        }
+        if (inWindow.zipWithNext().any { (a, b) ->
+                b.key.toDouble() - a.key.toDouble() > motionConfirmationMaxGapS.toDouble()
+            }) return MotionConfirmation.Unavailable
         val mean = inWindow.sumOf { it.value } / inWindow.size.toDouble()
         return if (mean >= motionConfirmMean) MotionConfirmation.Confirmed(mean)
         else MotionConfirmation.Rejected(mean)
     }
 
     /** Sorted (ts, bpm) HR pairs, ascending by ts. */
-    private fun cleanHR(hr: List<HrSample>): List<HrSample> = hr.sortedBy { it.ts }
+    internal fun cleanHR(hr: List<HrSample>): List<HrSample> = hr
+        .asSequence()
+        .filter { it.bpm in 30..220 }
+        .groupBy { it.ts }
+        .map { (_, samples) -> samples.minBy { it.bpm } }
+        .sortedBy { it.ts }
 
     /**
      * Per-second motion intensity = L2 magnitude of the gravity change vs the previous record.
@@ -140,23 +185,80 @@ object AutoWorkoutDetector {
      */
     internal fun motionIntensityByTs(gravity: List<GravitySample>): Map<Long, Double> {
         if (gravity.isEmpty()) return emptyMap()
-        val rows = gravity.sortedBy { it.ts }
+        val rows = gravity.filter { it.x.isFinite() && it.y.isFinite() && it.z.isFinite() }
+            .sortedBy { it.ts }
         val out = LinkedHashMap<Long, Double>(rows.size)
         var prev: GravitySample? = null
         for ((i, row) in rows.withIndex()) {
             val p = prev
             val intensity = if (i == 0 || p == null) {
                 0.0
-            } else {
+            } else if (row.ts.toDouble() - p.ts.toDouble() <= motionConfirmationMaxGapS.toDouble()) {
                 val dx = row.x - p.x
                 val dy = row.y - p.y
                 val dz = row.z - p.z
                 sqrt(dx * dx + dy * dy + dz * dz)
-            }
+            } else 0.0
             out[row.ts] = intensity
             prev = row
         }
         return out
+    }
+
+    /** A telemetry gap abandons an open span; missing wall-clock time never counts as activity. */
+    internal fun finalizedElevatedSpans(seg: List<HrSample>, floor: Int): List<Pair<Long, Long>> {
+        val spans = ArrayList<Pair<Long, Long>>()
+        var spanStart: Long? = null
+        var spanEnd = 0L
+        var dipStart: Long? = null
+        var previousTimestamp: Long? = null
+
+        fun closeSpan() {
+            val s = spanStart
+            if (s != null && spanEnd.toDouble() - s.toDouble() >= minSustainedMin * 60.0) {
+                spans.add(s to spanEnd)
+            }
+            spanStart = null
+            dipStart = null
+        }
+
+        for (sample in seg) {
+            val previous = previousTimestamp
+            if (previous != null &&
+                sample.ts.toDouble() - previous.toDouble() > maxHRSampleGapS.toDouble()) {
+                spanStart = null
+                dipStart = null
+            }
+            previousTimestamp = sample.ts
+
+            if (sample.bpm >= floor) {
+                if (spanStart == null) spanStart = sample.ts
+                spanEnd = sample.ts
+                dipStart = null
+            } else if (spanStart != null) {
+                val d = dipStart ?: sample.ts.also { dipStart = it }
+                if (sample.ts.toDouble() - d.toDouble() > maxDipS.toDouble()) closeSpan()
+            }
+        }
+        return spans
+    }
+
+    internal fun mergeSpans(spans: List<Pair<Long, Long>>): List<Pair<Long, Long>> {
+        if (spans.isEmpty()) return emptyList()
+        val merged = ArrayList<Pair<Long, Long>>()
+        var curStart = spans[0].first
+        var curEnd = spans[0].second
+        for (next in spans.drop(1)) {
+            if (next.first.toDouble() - curEnd.toDouble() <= mergeGapS.toDouble()) {
+                curEnd = maxOf(curEnd, next.second)
+            } else {
+                merged.add(curStart to curEnd)
+                curStart = next.first
+                curEnd = next.second
+            }
+        }
+        merged.add(curStart to curEnd)
+        return merged
     }
 
     /**
@@ -195,32 +297,7 @@ object AutoWorkoutDetector {
         // --- 1+2+3: grow sustained spans tolerating brief dips ---
         // A span is [spanStart, spanEnd] over ELEVATED-sample timestamps. `dipStart` marks where the
         // current sub-threshold run began (0 = not in a dip); a dip longer than maxDipS closes the span.
-        val spans = ArrayList<Pair<Long, Long>>()
-        var spanStart: Long? = null
-        var spanEnd = 0L
-        var dipStart: Long? = null
-
-        fun closeSpan() {
-            val s = spanStart
-            if (s != null && (spanEnd - s) >= minSustainedMin * 60.0) {
-                spans.add(s to spanEnd)
-            }
-            spanStart = null
-            dipStart = null
-        }
-
-        for (sample in seg) {
-            val elevated = sample.bpm >= floor
-            if (elevated) {
-                if (spanStart == null) spanStart = sample.ts
-                spanEnd = sample.ts
-                dipStart = null // the dip (if any) is bridged
-            } else if (spanStart != null) {
-                // In a span: tolerate the dip until it runs longer than maxDipS.
-                val d = dipStart ?: sample.ts.also { dipStart = it }
-                if ((sample.ts - d) > maxDipS) closeSpan()
-            }
-        }
+        val spans = finalizedElevatedSpans(seg, floor)
         // Deliberately DO NOT close an open span at end-of-input. Until a below-threshold tail lasts
         // longer than maxDipS, the workout may still be in progress and its endpoint is not stable.
         // The next scan will close it once enough post-session HR has arrived.
@@ -228,20 +305,7 @@ object AutoWorkoutDetector {
         if (spans.isEmpty()) return emptyList()
 
         // --- 4: merge spans whose gap is <= mergeGapS (spans are start-ascending by build) ---
-        val merged = ArrayList<Pair<Long, Long>>()
-        var curStart = spans[0].first
-        var curEnd = spans[0].second
-        for (k in 1 until spans.size) {
-            val next = spans[k]
-            if ((next.first - curEnd) <= mergeGapS) {
-                curEnd = maxOf(curEnd, next.second)
-            } else {
-                merged.add(curStart to curEnd)
-                curStart = next.first
-                curEnd = next.second
-            }
-        }
-        merged.add(curStart to curEnd)
+        val merged = mergeSpans(spans)
 
         // --- 5+6+7 ---
         val motion = if (gravity.isEmpty()) emptyMap() else motionIntensityByTs(gravity)
@@ -255,16 +319,20 @@ object AutoWorkoutDetector {
             if (!hasSufficientHRCoverage(window, start, end)) continue
 
             // 5: sufficiently-covered motion can confirm or reject. Sparse motion falls back to HR-only.
-            if (motion.isNotEmpty()) {
-                if (motionConfirmation(motion, start, end) is MotionConfirmation.Rejected) continue
-            }
+            val motionVerdict = if (motion.isEmpty()) MotionConfirmation.Unavailable
+                else motionConfirmation(motion, start, end)
+            if (motionVerdict is MotionConfirmation.Rejected) continue
+            val provenance = if (motionVerdict is MotionConfirmation.Confirmed) {
+                EvidenceProvenance.HEART_RATE_AND_MOTION
+            } else EvidenceProvenance.HEART_RATE_ONLY
 
             val bpms = window.map { it.bpm }
             val avg = Math.round(bpms.sum().toDouble() / bpms.size.toDouble()).toInt()
             // window is non-empty so max() always exists; `?: avg` mirrors the Swift twin's fallback exactly.
             val peak = bpms.maxOrNull() ?: avg
-            val durMin = ((end - start) / 60L).toInt()
-            results.add(DetectedWorkout(startSec = start, endSec = end, avgBpm = avg, peakBpm = peak, durationMin = durMin))
+            val durMin = ((end.toDouble() - start.toDouble()) / 60.0).toInt()
+            results.add(DetectedWorkout(startSec = start, endSec = end, avgBpm = avg, peakBpm = peak,
+                durationMin = durMin, evidenceProvenance = provenance))
         }
         return results
     }

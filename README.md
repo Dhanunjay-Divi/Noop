@@ -55,10 +55,13 @@ artifacts may also appear under
 [`Dhanunjay-Divi/Noop` Releases](https://github.com/Dhanunjay-Divi/Noop/releases).
 Verify that an artifact URL belongs to that repository; older `ryanbr/noop`
 artifacts are upstream builds and do not contain this fork's self-hosted sync
-and comparison work.
+and comparison work. While this repository is private, its release page and
+assets require an authenticated collaborator; those URLs are not an anonymous
+friend-install channel, and its raw AltStore manifest cannot be fetched by a
+sideloader.
 
 Want to test a downloadable build against WHOOP or another wearable? Read the
-[public beta testing guide](docs/BETA_TESTING.md), then submit aggregate,
+[beta testing guide](docs/BETA_TESTING.md), then submit aggregate,
 same-day results with the
 [metric difference form](https://github.com/Dhanunjay-Divi/Noop/issues/new?template=metric_difference.yml).
 Never upload a raw health export, account credential, database, or another
@@ -165,7 +168,7 @@ HR** are separate destinations; Mac exposes the same Circle in its sidebar.
 |---|---|
 | **Today** (Control Center) | Home dashboard: recovery ring, a "today's synthesis" insight, a grid of stat tiles (recovery, strain, sleep, HRV, RHR, SpO₂, respiratory, steps, weight, calories) each with a 14-day sparkline, live strap **battery %** and HR trend, recent workouts, and a data-sources footer. |
 | **Friends** (Circle; iPhone and Mac) | Invitation-only sharing through a server the circle operates. Accepted friends can see the latest daily Recovery, Effort, and Sleep Score values; sleep duration, HRV, and resting HR are separate per-friend opt-ins. There is no public profile, discovery, follower count, team ranking, or raw-data view. |
-| **Readiness** | An on-device "should you push today?" read that synthesizes established sports-science signals from your own history — HRV vs your baseline (Plews/Buchheit), resting-HR drift (Lamberts), sleeping respiratory-rate drift, training-load balance (acute:chronic workload ratio, Gabbett) and training monotony (Foster) — into a single headline (Primed / Balanced / Strained / Run down) with the drivers behind it. Pure local math, not medical advice. |
+| **Readiness** | An on-device trend read that synthesizes HRV vs your baseline, resting-HR drift, sleeping respiratory-rate drift, and training monotony into a headline (Primed / Balanced / Strained / Run down) with the drivers behind it. A separate 7-day/28-day recorded-strain ratio is shown as neutral arithmetic context only: it does not affect the headline or prescribe training, and is not Training Stress Balance or an injury-risk prediction. Pure local math, not medical advice. |
 | **Live HR** | Real-time view of the connected strap — heart rate and beat-to-beat signal as they arrive. Pairing and band switching live in the separate Devices screen. |
 | **Breathe** | **HRV haptic breathing biofeedback.** The strap both *measures* HRV (R-R intervals) and *buzzes* its haptic motor, so NOOP paces your breath with felt cues (one buzz inhale, two exhale) and shows live HR + rolling RMSSD responding as the session deepens. Presets: Relax 4-6, Coherence 5.5, Box 4-4. Each session reports a **pre/post HRV outcome** so you can see how much you settled. |
 | **Intervals** | **Silent haptic HIIT timer.** The strap buzzes every transition (triple-buzz into WORK, single into REST, 3-2-1 tick at phase ends, long buzz on finish) so you train hands-free. Falls back to a glanceable visual timer with no strap. |
@@ -180,11 +183,19 @@ HR** are separate destinations; Mac exposes the same Circle in its sidebar.
 | **Stress** | Day-level stress / autonomic load visualization. |
 | **Mind** | A quick **daily mood check-in** that correlates how you feel against your own recovery, sleep and HRV over time — so you can see what actually moves your mood. On-device and **non-clinical**: a self-reflection log, not a mental-health assessment. |
 | **Apple Health** | Browse and reconcile data imported from your Apple Health export. |
+
 | **Data Sources** | One-tap import of a WHOOP CSV export, an Apple Health export, or a **nutrition CSV** (Cronometer / MacroFactor), plus live-strap status. "Bring your history in once, then it's yours." |
 | **Notifications** | Configure local notifications and thresholds (`Strand/Data/NotificationSettingsStore.swift`). |
 | **Automations** | Turn the strap's physical inputs and live biometrics into Mac actions — all on-device (see below). |
 | **Coach** | An optional **AI Coach** you can ask about your data in plain language. Like self-hosted sync and Oura cloud import, it is an explicit opt-in network feature: off until you add your own key — Anthropic, OpenAI, or any OpenAI-compatible endpoint including a local/self-hosted model (Ollama, LM Studio) — and it sends only a short text summary of recent metrics plus your question, never raw streams or identifiers. With a local model the conversation never leaves your machine. Available on macOS, Android, and iOS. See [`docs/PRIVACY_SECURITY.md`](docs/PRIVACY_SECURITY.md). |
 | **Settings** | Profile, preferences, **step calibration** (tune the stride/step estimate to your own walking), unit choices, the in-app **What's new** changelog, and an opt-in **Experimental** section (WHOOP 5/MG protocol probes). On **iOS**, also **Export for Shortcuts** — a HealthKit-free path that hands your metrics to Apple Health via the Shortcuts app. |
+
+**ATL / CTL / TSB availability:** the shared analytics layer now has a transparent additive-load
+model (7-day ATL, 42-day CTL, `TSB = CTL - ATL`, coverage and missing-day status), exposed through
+`ReadinessEngine.Context`. It is intentionally not shown as a user score yet: NOOP's current daily
+Effort/strain value is bounded and nonlinear, so summing it would create a convincing but invalid
+training-load history. The context remains absent until an importer or session pipeline supplies one
+consistent additive unit such as TRIMP, session-RPE minutes, or MET-minutes.
 
 There is also a **menu-bar extra** (`Strand/MenuBar/MenuBarContent.swift`) with a
 glanceable live HR readout and a compact popover, a first-run **onboarding wizard**

@@ -1,12 +1,11 @@
 package com.noop.ingest
 
 import android.content.Context
-import android.content.Intent
 import android.os.Build
 import android.widget.Toast
-import androidx.core.content.FileProvider
 import com.noop.BuildConfig
 import com.noop.data.WhoopRepository
+import com.noop.ui.LogExport
 import java.io.File
 import java.util.Locale
 
@@ -155,14 +154,15 @@ object RawSensorExport {
                 writeCsv(w, repo, deviceId, now - 86_400, now)
             }
 
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-            val send = Intent(Intent.ACTION_SEND).apply {
-                type = "text/csv"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, "NOOP raw sensor export")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(Intent.createChooser(send, "Export raw sensor data"))
+            check(LogExport.shareDiagnosticFile(
+                context = context,
+                source = file,
+                normalizedName = "raw-sensors.csv",
+                suggestedName = "noop-raw-sensors.csv",
+                mime = "text/csv",
+                subject = "NOOP raw sensor export",
+                chooserTitle = "Export raw sensor data",
+            )) { "The raw-sensor diagnostic was not valid UTF-8" }
 
             val total = counts.values.sum()
             val summary = if (total == 0) {

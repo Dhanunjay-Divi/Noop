@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">NOOP</string>
+    <string name="nutrition_weight_unit_missing_failure">No weight imported: label the weight column kg or lb.</string>
+    <plurals name="nutrition_weight_values_skipped">
+        <item quantity="one">1 weight value skipped (add kg or lb to the column).</item>
+        <item quantity="other">%d weight values skipped (add kg or lb to the column).</item>
+    </plurals>
     <string name="widget_description">Today\'s Sleep, Recovery and Effort, with live heart rate and strap battery at a glance.</string>
     <string name="widget_compact_name">NOOP Compact</string>
     <string name="widget_compact_description">Compact Sleep, Recovery and Effort widget, with live heart rate and strap battery.</string>
@@ -75,6 +80,10 @@
     <string name="terms_point_warranty_head">No warranty; liability limited</string>
     <string name="terms_point_warranty_body">NOOP is free and provided \"as is\", with no warranty. Liability is limited to the maximum extent the law that applies to you allows, and nothing here removes protections your local law won\'t let us remove.</string>
     <string name="terms_footer">The full terms are in TERMS.md, shipped with NOOP. This is not legal advice.</string>
+    <string name="terms_read_full">Read the full terms</string>
+    <string name="terms_full_title">Terms of use</string>
+    <string name="terms_close">Done</string>
+    <string name="terms_load_failed">The bundled terms could not be opened. Do not accept until you can review TERMS.md in the NOOP source package.</string>
     <!-- Affirmative attestations: each is a SEPARATE tick, all required before Accept enables. English is
          the binding wording (mirrors macOS `Terms.attestations`); TERMS.md is the full text. -->
     <string name="terms_attest_head">Please confirm each of these:</string>
@@ -1648,7 +1657,7 @@
     <string name="skin_temp_reason_summary">%1$s: %2$s</string>
     <string name="stress_score_accessibility">Stress %1$s of 3, %2$s</string>
     <string name="stress_peak_summary">peak %1$s · %2$s</string>
-    <string name="today_load_ratio">load %1$s</string>
+    <string name="today_load_ratio">ratio %1$s</string>
     <!-- #453 data-driven metric labels that do not appear directly in Compose calls. -->
     <string name="timeline_metric_heart_rate">Heart Rate</string>
     <string name="timeline_metric_rmssd">rMSSD (5 min)</string>

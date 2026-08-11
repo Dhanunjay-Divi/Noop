@@ -163,6 +163,14 @@ object StrainScorer {
 
     // ---- TRIMP accumulation ----
 
+    /**
+     * Longest span (minutes) a single reading may be credited with. A wear or connection dropout
+     * leaves a gap with no data in it; without a ceiling the last reading before the gap would be
+     * credited with the whole hole, so one high-HR sample could invent hours of effort. Two minutes
+     * is four times the sparsest expected WHOOP 5/MG cadence (~30 s), so real samples are preserved.
+     */
+    const val maxSampleGapMin: Double = 2.0
+
     /** One never-decreasing Effort value shared by every Today read-out. */
     fun effectiveEffort(live: Double?, stored: Double?): Double? {
         if (live == null) return stored
@@ -173,37 +181,81 @@ object StrainScorer {
     /**
      * Infer per-sample duration (minutes) from the first two timestamps. Falls
      * back to 1 s when fewer than two samples or coincident timestamps.
+     *
+     * Production TRIMP uses [sampleDurationsMinutes]; this helper remains so the uniform-cadence
+     * regression can compare the new integration against the previously shipped formula.
      */
     fun sampleDurationMinutes(hr: List<HrSample>): Double {
         if (hr.size < 2) return fallbackSampleMin
-        val deltaS = abs((hr[1].ts - hr[0].ts).toDouble())
+        // Convert before subtraction so adversarial Long endpoints cannot overflow.
+        val deltaS = abs(hr[1].ts.toDouble() - hr[0].ts.toDouble())
         return if (deltaS > 0) deltaS / 60.0 else fallbackSampleMin
+    }
+
+    /**
+     * Give every sample its own adjacent interval. Each reading covers the gap to its successor,
+     * capped at [maxSampleGapMin]; the final reading reuses the preceding real cadence because it has
+     * no successor. Coincident timestamps retain the historical one-second fallback.
+     *
+     * A single duration inferred from the first pair is incorrect for NOOP's mixed live (~1 s),
+     * banked (~30 s), and dropout-prone streams. Per-interval integration also keeps a workout window
+     * comparable with the day containing it even when the two windows begin at different cadences.
+     */
+    fun sampleDurationsMinutes(hr: List<HrSample>): List<Double> {
+        if (hr.isEmpty()) return emptyList()
+        if (hr.size == 1) return listOf(fallbackSampleMin)
+
+        val durations = ArrayList<Double>(hr.size)
+        for (index in 0 until hr.size - 1) {
+            // Convert before subtraction so adversarial Long endpoints cannot overflow.
+            val deltaS = abs(hr[index + 1].ts.toDouble() - hr[index].ts.toDouble())
+            val minutes = if (deltaS > 0) deltaS / 60.0 else fallbackSampleMin
+            durations.add(kotlin.math.min(minutes, maxSampleGapMin))
+        }
+        durations.add(durations.last())
+        return durations
+    }
+
+    /** Seconds represented by genuinely adjacent samples; gaps past the hold ceiling are missing. */
+    fun observedCoverageSeconds(hr: List<HrSample>): Double {
+        if (hr.size < 2) return 0.0
+        val maximumGapSeconds = maxSampleGapMin * 60.0
+        var total = 0.0
+        for (index in 0 until hr.size - 1) {
+            val gap = hr[index + 1].ts.toDouble() - hr[index].ts.toDouble()
+            if (gap > 0.0 && gap <= maximumGapSeconds) total += gap
+        }
+        return total
     }
 
     fun edwardsTRIMP(
         hr: List<HrSample>,
         restingHR: Double,
         hrReserve: Double,
-        sampleDurationMin: Double,
+        durations: List<Double>,
     ): Double {
-        var weighted = 0
-        for (s in hr) {
-            weighted += zoneWeight(s.bpm.toDouble(), restingHR, hrReserve)
+        val pairedCount = minOf(hr.size, durations.size)
+        if (pairedCount == 0) return 0.0
+        var accumulated = 0.0
+        for (index in 0 until pairedCount) {
+            accumulated += zoneWeight(hr[index].bpm.toDouble(), restingHR, hrReserve) * durations[index]
         }
-        return weighted.toDouble() * sampleDurationMin
+        return accumulated
     }
 
     fun banisterTRIMP(
         hr: List<HrSample>,
         restingHR: Double,
         hrReserve: Double,
-        sampleDurationMin: Double,
+        durations: List<Double>,
         b: Double,
     ): Double {
+        val pairedCount = minOf(hr.size, durations.size)
+        if (pairedCount == 0) return 0.0
         var acc = 0.0
-        for (s in hr) {
-            val x = pctHRR(s.bpm.toDouble(), restingHR, hrReserve) / 100.0
-            if (x > 0) acc += sampleDurationMin * x * banisterScale * exp(b * x)
+        for (index in 0 until pairedCount) {
+            val x = pctHRR(hr[index].bpm.toDouble(), restingHR, hrReserve) / 100.0
+            if (x > 0) acc += durations[index] * x * banisterScale * exp(b * x)
         }
         return acc
     }
@@ -267,28 +319,22 @@ object StrainScorer {
         denominator: Double = strainDenominator,
     ): Double? {
         val effMax = maxHR ?: defaultMaxHR().toDouble()
-        // Enough data to trust the score: a dense stream (≥ minReadings) OR a sparse-but-sustained
-        // one spanning ≥ minSpanSeconds with a sample floor (#482 — the 5/MG's ~30 s HR cadence).
-        val enoughData = when {
-            hr.size >= minReadings -> true
-            hr.size >= minSparseReadings -> {
-                val tss = hr.map { it.ts }
-                (tss.maxOrNull() ?: 0L) - (tss.minOrNull() ?: 0L) >= minSpanSeconds
-            }
-            else -> false
-        }
+        // Dense and sparse streams both need roughly ten minutes of genuinely adjacent coverage.
+        // A count/span-only gate lets isolated hourly readings masquerade as continuous wear.
+        val enoughData = hr.size >= minSparseReadings &&
+            observedCoverageSeconds(hr) >= (minSpanSeconds - 1).toDouble()
         if (!enoughData || effMax <= restingHR) return null
 
-        val sampleDur = sampleDurationMinutes(hr)
+        val durations = sampleDurationsMinutes(hr)
         val hrReserve = effMax - restingHR
 
         val trimp: Double = when (method) {
             Method.BANISTER -> {
                 val b = if (sex.lowercase().startsWith("f")) banisterBWomen else banisterBMen
-                banisterTRIMP(hr, restingHR, hrReserve, sampleDur, b)
+                banisterTRIMP(hr, restingHR, hrReserve, durations, b)
             }
             Method.EDWARDS -> {
-                edwardsTRIMP(hr, restingHR, hrReserve, sampleDur)
+                edwardsTRIMP(hr, restingHR, hrReserve, durations)
             }
         }
         return trimpToStrain(trimp, denominator)

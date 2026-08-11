@@ -4,10 +4,11 @@ import WhoopProtocol
 @testable import Strand
 
 /// Pins the pure logic behind the #155 Shortcuts drop file (Documents/noop_sync.txt): the exact
-/// `HR,HRV,Steps,yyyy-MM-dd HH:mm` line shape the reporter's pre-built Siri Shortcut parses (empty
-/// fields keep their commas, 1-decimal HRV, LOCAL-zone timestamp), the 15-minute windowing, the
-/// cumulative-u16 step delta math, and the advance-only-on-success watermark — a watermark that
-/// moved past a failed write would silently drop that span from Apple Health forever.
+/// `HR,[reserved],Steps,yyyy-MM-dd HH:mm` line shape the reporter's pre-built Siri Shortcut parses
+/// (the old HRV field stays blank because RMSSD is not Apple SDNN; commas preserve compatibility),
+/// the LOCAL-zone timestamp, 15-minute windowing,
+/// cumulative-u16 step delta math, and the advance-only-on-nonempty-success watermark — a watermark
+/// that moved past a failed or empty-before-late-data write would silently drop that span forever.
 final class ShortcutHealthExportTests: XCTestCase {
 
     private let utc = TimeZone(secondsFromGMT: 0)!
@@ -50,6 +51,23 @@ final class ShortcutHealthExportTests: XCTestCase {
         }
     }
 
+    private actor RecordingReads: ShortcutExportReads {
+        private(set) var requestedStepFrom: Int?
+        let steps: [StepSample]
+
+        init(steps: [StepSample]) { self.steps = steps }
+
+        func hrBuckets(deviceId: String, from: Int, to: Int,
+                       bucketSeconds: Int) async throws -> [HRBucket] { [] }
+        func rrIntervals(deviceId: String, from: Int, to: Int,
+                         limit: Int) async throws -> [RRInterval] { [] }
+        func stepSamples(deviceId: String, from: Int, to: Int,
+                         limit: Int) async throws -> [StepSample] {
+            requestedStepFrom = from
+            return steps
+        }
+    }
+
     private func fileText() throws -> String {
         try String(contentsOf: dir.appendingPathComponent(ShortcutHealthExport.fileName), encoding: .utf8)
     }
@@ -58,26 +76,26 @@ final class ShortcutHealthExportTests: XCTestCase {
 
     func testLineAllFields() {
         let w = Window(start: 0, hr: 62, hrvMs: 45.27, steps: 120)
-        XCTAssertEqual(ShortcutHealthExport.line(w, timeZone: utc), "62,45.3,120,1970-01-01 00:00")
+        XCTAssertEqual(ShortcutHealthExport.line(w, timeZone: utc), "62,,120,1970-01-01 00:00")
     }
 
     // Empty fields MUST keep their commas — the Shortcut splits by comma and relies on fixed
     // column positions.
     func testEmptyFieldsKeepCommas() {
         XCTAssertEqual(ShortcutHealthExport.line(Window(start: 0, hrvMs: 45.27, steps: 120), timeZone: utc),
-                       ",45.3,120,1970-01-01 00:00")
+                       ",,120,1970-01-01 00:00")
         XCTAssertEqual(ShortcutHealthExport.line(Window(start: 0, hr: 62, steps: 120), timeZone: utc),
                        "62,,120,1970-01-01 00:00")
         XCTAssertEqual(ShortcutHealthExport.line(Window(start: 0, hr: 62, hrvMs: 45.27), timeZone: utc),
-                       "62,45.3,,1970-01-01 00:00")
+                       "62,,,1970-01-01 00:00")
         XCTAssertEqual(ShortcutHealthExport.line(Window(start: 0, hr: 62), timeZone: utc),
                        "62,,,1970-01-01 00:00")
     }
 
-    // HRV always renders with exactly 1 decimal, even when whole.
-    func testHRVOneDecimal() {
+    // RMSSD must never populate the reserved Apple-Health field: Apple's writable HRV type is SDNN.
+    func testRMSSDColumnRemainsBlank() {
         XCTAssertEqual(ShortcutHealthExport.line(Window(start: 0, hrvMs: 33.0), timeZone: utc),
-                       ",33.0,,1970-01-01 00:00")
+                       ",,,1970-01-01 00:00")
     }
 
     // ISO date order, in the GIVEN zone — production passes the device-local zone, so the same
@@ -175,6 +193,32 @@ final class ShortcutHealthExportTests: XCTestCase {
         XCTAssertEqual(windows, [Window(start: 900, steps: 80)])
     }
 
+    // Incremental exports read one pre-watermark counter so the first new sample can retain the
+    // boundary-crossing delta, while earlier deltas remain outside the emitted coverage.
+    func testStepPredecessorBridgesWatermarkWithoutEmittingEarlierDeltas() {
+        let steps = [
+            StepSample(ts: 8_800, counter: 100),
+            StepSample(ts: 9_100, counter: 130),
+            StepSample(ts: 9_950, counter: 170),
+        ]
+        let windows = ShortcutHealthExport.aggregate(
+            hr: [], rr: [], steps: steps, end: 10_800, from: 9_900)
+        XCTAssertEqual(windows, [Window(start: 9_900, steps: 40)])
+    }
+
+    func testIncrementalExportQueriesOneStepWindowBeforeWatermark() async {
+        defaults.set(9_900, forKey: ShortcutHealthExport.watermarkKey)
+        let source = RecordingReads(steps: [
+            StepSample(ts: 9_100, counter: 130),
+            StepSample(ts: 9_950, counter: 170),
+        ])
+        _ = await ShortcutHealthExport.export(
+            source: source, deviceId: "dev", now: Date(timeIntervalSince1970: 20_000),
+            defaults: defaults, directory: dir, timeZone: utc)
+        let requestedStepFrom = await source.requestedStepFrom
+        XCTAssertEqual(requestedStepFrom, 9_000)
+    }
+
     // MARK: - Coverage span
 
     func testCoverageSpanExcludesOpenWindow() {
@@ -208,6 +252,18 @@ final class ShortcutHealthExportTests: XCTestCase {
         XCTAssertEqual(outcome, .written(lines: 1))
         XCTAssertEqual(try fileText(), "62,,,1970-01-01 00:00")
         XCTAssertEqual(defaults.integer(forKey: ShortcutHealthExport.watermarkKey), 9_900)
+    }
+
+    func testProductionExportDoesNotEmitStrapRMSSD() async throws {
+        let rr = (0..<30).map { RRInterval(ts: 10 + $0, rrMs: $0 % 2 == 0 ? 800 : 810) }
+        let outcome = await ShortcutHealthExport.export(
+            source: FakeReads(rr: rr), deviceId: "dev",
+            now: Date(timeIntervalSince1970: 10_000), defaults: defaults,
+            directory: dir, timeZone: utc)
+        XCTAssertEqual(outcome, .written(lines: 0))
+        XCTAssertEqual(try fileText(), "")
+        XCTAssertEqual(defaults.integer(forKey: ShortcutHealthExport.watermarkKey), 0,
+                       "An empty export must remain retryable so late-arriving strap data is not lost.")
     }
 
     func testExportReadFailureLeavesWatermarkAndFile() async {

@@ -53,6 +53,30 @@ final class TestBundleAssemblerTests: XCTestCase {
         XCTAssertEqual(capped, entries)
     }
 
+    func testStandaloneDiagnosticsAreRedactedAndBounded() throws {
+        let serial = "4C1594026"
+        let old = String(repeating: "old WHOOP \(serial)\n", count: 200)
+        let newest = "newest WHOOP \(serial)\n"
+        let source = FileExport.BundleEntry(name: "raw-sensors.csv", data: Data((old + newest).utf8))
+
+        let prepared = try XCTUnwrap(TestBundleAssembler.prepareDiagnostics([source], capBytes: 512))
+        XCTAssertTrue(prepared.truncated)
+        XCTAssertLessThanOrEqual(prepared.entries.reduce(0) { $0 + $1.data.count }, 512)
+        let text = try XCTUnwrap(String(data: prepared.entries[0].data, encoding: .utf8))
+        XCTAssertTrue(text.contains("diagnostic export truncated"))
+        XCTAssertTrue(text.contains("newest WHOOP <serial>"), "the newest complete diagnostic line survives")
+        XCTAssertFalse(text.contains(serial), "the standalone path must run the same redaction sink")
+    }
+
+    func testStandaloneDiagnosticsRejectBinaryPayloads() {
+        let binary = FileExport.BundleEntry(name: "opaque.bin", data: Data([0xFF, 0xFE, 0x00, 0x01]))
+        XCTAssertNil(TestBundleAssembler.prepareDiagnostics([binary]),
+                     "a raw payload that cannot be reviewed/redacted must fail closed")
+        let validUTF8WithNul = FileExport.BundleEntry(name: "opaque.bin", data: Data([0x61, 0x00, 0x62]))
+        XCTAssertNil(TestBundleAssembler.prepareDiagnostics([validUTF8WithNul]),
+                     "binary bytes must not pass merely because they decode as UTF-8")
+    }
+
     // MARK: - Oura diagnostics attachment (#Test-Centre Oura sidecars)
 
     func testNormalizedOuraEntryNameDropsRingId() {

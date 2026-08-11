@@ -13,8 +13,14 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            RootView()
-            if !onboarded {
+            // RootView starts repository refresh, backup catch-up and optional remote sync from its task.
+            // Keep those operational side effects outside the pre-acceptance view hierarchy.
+            if acceptedTerms == Terms.currentVersion {
+                RootView()
+            } else {
+                StrandPalette.surfaceBase.ignoresSafeArea()
+            }
+            if acceptedTerms == Terms.currentVersion && !onboarded {
                 OnboardingWizard(onFinished: {
                     onboarded = true
                     // A brand-new user just saw the expectations in onboarding — don't also pop the
@@ -24,7 +30,7 @@ struct ContentView: View {
                 .transition(.opacity)
                 .zIndex(1)
             }
-            // Terms acknowledgment gate — over EVERYTHING (before onboarding/pairing/Bluetooth) until
+            // Terms acknowledgment gate — before onboarding or the operational shell until
             // the current terms version is accepted; re-appears if the terms materially change.
             if acceptedTerms != Terms.currentVersion {
                 TermsGateView(onAccept: {

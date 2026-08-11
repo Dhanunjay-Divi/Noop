@@ -1,6 +1,7 @@
 #if os(iOS)
 import Foundation
 import HealthKit
+import WhoopProtocol
 import WhoopStore
 import StrandAnalytics
 import StrandImport
@@ -10,7 +11,8 @@ import StrandImport
 /// iOS has HealthKit (macOS does not), so the iOS target can do far more than parse a static export:
 /// it reads the user's own Health data live and maps it onto the **same** `WhoopStore` rows the
 /// macOS importer produces (under the `apple-health` source id), and it writes NOOP-computed metrics
-/// back into Apple Health. Everything stays on-device and strictly opt-in.
+/// back into Apple Health. NOOP does not upload this data to a NOOP-operated cloud and every access is
+/// strictly opt-in; samples written to Apple Health follow the user's Apple Health/iCloud settings.
 @MainActor
 final class HealthKitBridge: ObservableObject {
 
@@ -28,6 +30,11 @@ final class HealthKitBridge: ObservableObject {
     @Published private(set) var auth: AuthState = .unknown
     @Published private(set) var lastSync: Date?
     @Published private(set) var syncing = false
+    /// These optional scopes are deliberately separate from the first Apple Health connection.
+    /// HealthKit does not reveal read authorization, so these flags mean only that the user tapped
+    /// NOOP's dedicated rationale/action and the staged system request completed.
+    @Published private(set) var bodyCompositionAccessRequested = false
+    @Published private(set) var highResolutionWritebackRequested = false
     /// The most recent failure surfaced by `sync` / `writeBack`. Cleared on a successful run. UI binds
     /// here so an Apple Health auth revoke, quota hit, or invalid sample is visible instead of silent.
     @Published private(set) var lastError: String?
@@ -62,6 +69,10 @@ final class HealthKitBridge: ObservableObject {
         self.profile = profile
         self.appleDeviceId = appleDeviceId
         self.noopDeviceId = noopDeviceId
+        bodyCompositionAccessRequested = UserDefaults.standard.bool(
+            forKey: HealthKitBridge.bodyCompositionAuthorizationRequestedKey)
+        highResolutionWritebackRequested = UserDefaults.standard.bool(
+            forKey: HealthKitBridge.highResolutionWritebackAuthorizationRequestedKey)
         // Order matters: a free-signed build with no HealthKit entitlement is dead in the water even
         // where the hardware supports Health, so surface that first. `.unavailable` (no HealthKit at
         // all, e.g. iPad without the framework) still wins where it applies because we only reach the
@@ -87,7 +98,7 @@ final class HealthKitBridge: ObservableObject {
 
     private var writeTypes: Set<HKSampleType> {
         var s = Set<HKSampleType>()
-        for id in HealthKitBridge.quantityWriteIds + HealthKitBridge.highResQuantityWriteIds {
+        for id in HealthKitBridge.quantityWriteIds {
             if let t = HKObjectType.quantityType(forIdentifier: id) { s.insert(t) }
         }
         if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) { s.insert(sleep) }
@@ -95,13 +106,36 @@ final class HealthKitBridge: ObservableObject {
         return s
     }
 
-    /// The write set as it existed before the high-res write-back (4 nightly vitals + sleep). A
-    /// returning user granted THIS set; `refreshAuthIfPreviouslyGranted` must resume off it — checking
-    /// the full `writeTypes` would leave every pre-existing grant stuck at `.unknown` after the update
-    /// because the new types are still `.notDetermined`.
+    /// Slow-changing body measurements are useful but not necessary to compute the first dashboard.
+    /// Keep them behind their own in-app explanation and explicit action instead of bundling them into
+    /// the initial watch/recovery request.
+    private var bodyCompositionReadTypes: Set<HKObjectType> {
+        var types = Set<HKObjectType>()
+        for id in HealthKitBridge.bodyCompositionReadIds {
+            if let type = HKObjectType.quantityType(forIdentifier: id) { types.insert(type) }
+        }
+        return types
+    }
+
+    /// Continuous HR and workout energy/distance are materially higher-volume writes than the small
+    /// nightly/sleep/workout core. They are requested only from the dedicated write-back action.
+    private var highResolutionWriteTypes: Set<HKSampleType> {
+        var types = Set<HKSampleType>()
+        for id in HealthKitBridge.highResQuantityWriteIds {
+            if let type = HKObjectType.quantityType(forIdentifier: id) { types.insert(type) }
+        }
+        return types
+    }
+
+    /// The write set requested by older releases. It includes HRV solely so a returning user's prior
+    /// explicit Health connection can be recognized. It is never used for a new request or write:
+    /// the legacy `avgHrv` column mixes WHOOP RMSSD with Apple SDNN and therefore cannot safely be
+    /// emitted as `heartRateVariabilitySDNN`.
     private var legacyCoreWriteTypes: Set<HKSampleType> {
         var s = Set<HKSampleType>()
-        for id in HealthKitBridge.quantityWriteIds { if let t = HKObjectType.quantityType(forIdentifier: id) { s.insert(t) } }
+        for id in HealthKitBridge.legacyQuantityWriteIds {
+            if let t = HKObjectType.quantityType(forIdentifier: id) { s.insert(t) }
+        }
         if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) { s.insert(sleep) }
         return s
     }
@@ -113,12 +147,18 @@ final class HealthKitBridge: ObservableObject {
         .heartRate, .restingHeartRate, .heartRateVariabilitySDNN, .oxygenSaturation,
         .respiratoryRate, .bodyTemperature, .appleSleepingWristTemperature,
         .stepCount, .activeEnergyBurned,
-        .basalEnergyBurned, .vo2Max,
-        // Body composition — READ-ONLY (#20). Imported under the apple-health source like the file
-        // importer already ingests; deliberately NOT in quantityWriteIds (we never write these back).
+        .basalEnergyBurned, .vo2Max
+    ]
+    private static let bodyCompositionReadIds: [HKQuantityTypeIdentifier] = [
         .bodyMass, .bodyFatPercentage, .leanBodyMass, .bodyMassIndex
     ]
+    // `heartRateVariabilitySDNN` is intentionally absent. Strap/WHOOP `avgHrv` is RMSSD, and the
+    // current mixed schema cannot prove a row is SDNN. Reading Apple SDNN remains supported; writing
+    // any ambiguous HRV value under Apple's SDNN identifier would silently corrupt Health data.
     private static let quantityWriteIds: [HKQuantityTypeIdentifier] = [
+        .restingHeartRate, .oxygenSaturation, .respiratoryRate
+    ]
+    private static let legacyQuantityWriteIds: [HKQuantityTypeIdentifier] = [
         .restingHeartRate, .heartRateVariabilitySDNN, .oxygenSaturation, .respiratoryRate
     ]
     // High-res write-back shares: the continuous 1-minute HR stream, and the energy/distance samples
@@ -166,6 +206,43 @@ final class HealthKitBridge: ObservableObject {
         enableLiveDelivery()
     }
 
+    /// Stage 2 read consent: body mass, body-fat percentage, lean mass and BMI only. The calling UI
+    /// presents a plain-language rationale before invoking this method. A completed HealthKit request
+    /// does not prove which read boxes were granted, so the published flag is named `...Requested`.
+    func requestBodyCompositionAccess() async {
+        guard auth == .authorized, HKHealthStore.isHealthDataAvailable() else { return }
+        guard HealthKitBridge.hasHealthKitEntitlement else { auth = .entitlementMissing; return }
+        do {
+            try await store.requestAuthorization(
+                toShare: Set<HKSampleType>(), read: bodyCompositionReadTypes)
+            bodyCompositionAccessRequested = true
+            UserDefaults.standard.set(
+                true, forKey: HealthKitBridge.bodyCompositionAuthorizationRequestedKey)
+            lastError = nil
+            enableLiveDelivery()
+        } catch {
+            lastError = String(localized: "Apple Health body-composition access failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Stage 2 write consent: continuous minute HR and workout energy/distance only. Core connection
+    /// never asks for these high-volume share types. The write path additionally checks this local
+    /// explicit-action marker, so an old broad grant cannot silently turn the feature back on.
+    func requestHighResolutionWritebackAccess() async {
+        guard auth == .authorized, HKHealthStore.isHealthDataAvailable() else { return }
+        guard HealthKitBridge.hasHealthKitEntitlement else { auth = .entitlementMissing; return }
+        do {
+            try await store.requestAuthorization(
+                toShare: highResolutionWriteTypes, read: Set<HKObjectType>())
+            highResolutionWritebackRequested = true
+            UserDefaults.standard.set(
+                true, forKey: HealthKitBridge.highResolutionWritebackAuthorizationRequestedKey)
+            lastError = nil
+        } catch {
+            lastError = String(localized: "Apple Health detailed write-back access failed: \(error.localizedDescription)")
+        }
+    }
+
     /// Resume a prior grant on launch without re-prompting. `auth` is a fresh `.unknown` every
     /// process (the bridge isn't persisted), so a user who already enabled Apple Health would
     /// otherwise have to re-tap "Enable" each session before the scenePhase sync runs. HealthKit
@@ -200,14 +277,14 @@ final class HealthKitBridge: ObservableObject {
 
     /// Read types with observer + background delivery. Keep this aligned with what `sync(days:)`
     /// actually consumes: a connected watch, scale, or health app should not require the user to open
-    /// NOOP before its SpO₂, temperature, steps, workout, or body-composition reading appears. HealthKit
-    /// still owns scheduling and may coalesce wakes; the foreground catch-up remains the final safety net.
+    /// NOOP before its SpO₂, temperature, steps or workout appears. Optional body-composition types
+    /// are appended only after their dedicated consent action. HealthKit still owns scheduling and may
+    /// coalesce wakes; the foreground catch-up remains the final safety net.
     private static let liveQuantityIds: [HKQuantityTypeIdentifier] = [
         .heartRate, .restingHeartRate, .heartRateVariabilitySDNN, .oxygenSaturation,
         .respiratoryRate, .bodyTemperature, .appleSleepingWristTemperature,
         .stepCount, .activeEnergyBurned,
-        .basalEnergyBurned, .vo2Max, .bodyMass, .bodyFatPercentage, .leanBodyMass,
-        .bodyMassIndex
+        .basalEnergyBurned, .vo2Max
     ]
 
     /// Long-lived observer queries, retained so HealthKit doesn't tear them down. Keyed by the sample
@@ -218,6 +295,10 @@ final class HealthKitBridge: ObservableObject {
     /// retain the widest requested window and perform one coalesced follow-up instead of advancing the
     /// other types' anchors and silently dropping their refresh request.
     private var pendingSyncDays: Int?
+
+    /// Per-sync query health. HealthKit read authorization is intentionally opaque, but an actual query
+    /// error is not an empty dataset and must prevent persistence/anchor advancement.
+    private var currentReadQueryFailed = false
 
     /// Local proof that the user explicitly requested the sensitive menstrual-flow read. HealthKit
     /// deliberately does not expose read-authorization status, so this marker is the only honest way
@@ -240,7 +321,9 @@ final class HealthKitBridge: ObservableObject {
         guard auth == .authorized, HKHealthStore.isHealthDataAvailable() else { return }
 
         var types: [HKSampleType] = []
-        for id in HealthKitBridge.liveQuantityIds {
+        let liveIds = HealthKitBridge.liveQuantityIds
+            + (bodyCompositionAccessRequested ? HealthKitBridge.bodyCompositionReadIds : [])
+        for id in liveIds {
             if let t = HKObjectType.quantityType(forIdentifier: id) { types.append(t) }
         }
         if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) { types.append(sleep) }
@@ -379,40 +462,48 @@ final class HealthKitBridge: ObservableObject {
     /// keeps every per-day average correct and idempotent — `sync` upserts are keyed by day.
     private func syncFromObserver(type: HKSampleType) async {
         guard auth == .authorized else { return }
-        let touched = await fetchTouchedDayWindow(type: type)
-        // No new samples since the last anchor (a spurious wake): nothing to do.
-        guard let touched else { return }
+        guard let delta = await fetchTouchedDayWindow(type: type) else { return }
+        // A successful empty delta has no persistence dependency; advancing its cursor avoids walking
+        // the same empty query again. Changed deltas commit only after their aggregate sync succeeds.
+        guard let touched = delta.oldestTouched else {
+            if let anchorData = delta.anchorData {
+                UserDefaults.standard.set(anchorData, forKey: delta.defaultsKey)
+            }
+            return
+        }
         let cal = Calendar.current
         let daysBack = cal.dateComponents([.day], from: cal.startOfDay(for: touched),
                                           to: cal.startOfDay(for: Date())).day ?? 0
         // Clamp to a sane window: at least today, and never re-walk more than a month from one wake.
         let window = max(1, min(31, daysBack + 1))
-        await sync(days: window)
+        if await sync(days: window), let anchorData = delta.anchorData {
+            UserDefaults.standard.set(anchorData, forKey: delta.defaultsKey)
+        }
     }
 
-    /// Advance this type's stored anchor over any new samples and return the OLDEST sample date seen,
-    /// or nil when there were no new samples. Anchors are persisted in UserDefaults per type so live
-    /// deltas are neither re-ingested nor missed across launches. We don't consume the samples here —
-    /// `sync(days:)` re-reads the aggregate for the affected window — the anchor's only job is to tell
-    /// us how far back the change reached.
-    private func fetchTouchedDayWindow(type: HKSampleType) async -> Date? {
+    private struct ObserverDelta {
+        let oldestTouched: Date?
+        let anchorData: Data?
+        let defaultsKey: String
+    }
+
+    /// Read this type's delta and stage (but do not persist) its next anchor. A changed delta's anchor is
+    /// committed by `syncFromObserver` only after the database/write-back round trip succeeds, so a
+    /// disk or HealthKit failure cannot consume unseen work. A query failure returns nil and preserves
+    /// the prior cursor.
+    private func fetchTouchedDayWindow(type: HKSampleType) async -> ObserverDelta? {
         let key = HealthKitBridge.anchorDefaultsKey(for: type)
         let priorAnchor: HKQueryAnchor? = {
             guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
             return try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: data)
         }()
 
-        return await withCheckedContinuation { (cont: CheckedContinuation<Date?, Never>) in
+        return await withCheckedContinuation { (cont: CheckedContinuation<ObserverDelta?, Never>) in
             let q = HKAnchoredObjectQuery(
                 type: type, predicate: Self.notNoopAuthored,
                 anchor: priorAnchor, limit: HKObjectQueryNoLimit
-            ) { _, samples, deletedObjects, newAnchor, _ in
-                // Persist the advanced anchor so the next wake only sees genuinely-new samples. Skip the
-                // write on a query error (newAnchor nil) so we don't blow away a good cursor.
-                if let newAnchor,
-                   let data = try? NSKeyedArchiver.archivedData(withRootObject: newAnchor, requiringSecureCoding: true) {
-                    UserDefaults.standard.set(data, forKey: key)
-                }
+            ) { _, samples, deletedObjects, newAnchor, error in
+                guard error == nil else { cont.resume(returning: nil); return }
                 // HKDeletedObject carries no sample timestamp. A deletion-only wake therefore
                 // re-aggregates the same bounded 31-day observer window rather than doing nothing.
                 // Older deletions remain covered by an explicit wider Sync/import; HealthKit does not
@@ -422,7 +513,12 @@ final class HealthKitBridge: ObservableObject {
                         ? Calendar.current.date(byAdding: .day, value: -30,
                                                 to: Calendar.current.startOfDay(for: Date()))
                         : nil)
-                cont.resume(returning: oldest)
+                let anchorData = newAnchor.flatMap {
+                    try? NSKeyedArchiver.archivedData(withRootObject: $0, requiringSecureCoding: true)
+                }
+                cont.resume(returning: ObserverDelta(oldestTouched: oldest,
+                                                     anchorData: anchorData,
+                                                     defaultsKey: key))
             }
             store.execute(q)
         }
@@ -439,14 +535,16 @@ final class HealthKitBridge: ObservableObject {
     /// Pull the last `days` of Apple Health into the on-device store under the `apple-health` source,
     /// then write NOOP's own computed metrics back into Health. Safe to call repeatedly (idempotent
     /// upserts keyed by day).
-    func sync(days: Int = 30) async {
-        guard auth == .authorized else { return }
+    @discardableResult
+    func sync(days: Int = 30) async -> Bool {
+        guard auth == .authorized else { return false }
         let requestedDays = max(1, days)
         if syncing {
             pendingSyncDays = max(pendingSyncDays ?? 0, requestedDays)
-            return
+            return false
         }
         syncing = true
+        currentReadQueryFailed = false
         defer {
             syncing = false
             if let pending = pendingSyncDays {
@@ -454,12 +552,12 @@ final class HealthKitBridge: ObservableObject {
                 Task { @MainActor [weak self] in await self?.sync(days: pending) }
             }
         }
-        guard let store = await repo.storeHandle() else { return }
+        guard let store = await repo.storeHandle() else { return false }
 
         let cal = Calendar.current
         let end = Date()
         guard let start = cal.date(byAdding: .day, value: -requestedDays,
-                                   to: cal.startOfDay(for: end)) else { return }
+                                   to: cal.startOfDay(for: end)) else { return false }
 
         var byDay: [String: DayAgg] = [:]
         func agg(_ day: String) -> DayAgg { byDay[day] ?? DayAgg() }
@@ -502,20 +600,22 @@ final class HealthKitBridge: ObservableObject {
             var a = agg(day); a.vo2max = v; byDay[day] = a
         }
 
-        // Body composition — READ-ONLY import under the apple-health source (#20). Weight, lean mass
-        // and BMI are point-in-time readings, so take the latest-of-day; body-fat reads fine as a
-        // daily average. Body-fat HealthKit gives a 0…1 fraction, scaled to percent like spo2 above.
-        await collect(.bodyMass, unit: .gramUnit(with: .kilo), start: start, end: end, op: .mostRecent) { day, v in
-            var a = agg(day); a.weightKg = v; byDay[day] = a
-        }
-        await collect(.bodyFatPercentage, unit: .percent(), start: start, end: end, op: .discreteAverage) { day, v in
-            var a = agg(day); a.bodyFatPct = v * 100; byDay[day] = a   // 0…1 → percent
-        }
-        await collect(.leanBodyMass, unit: .gramUnit(with: .kilo), start: start, end: end, op: .mostRecent) { day, v in
-            var a = agg(day); a.leanMassKg = v; byDay[day] = a
-        }
-        await collect(.bodyMassIndex, unit: .count(), start: start, end: end, op: .mostRecent) { day, v in
-            var a = agg(day); a.bmi = v; byDay[day] = a
+        // Body composition is a separate, optional consent stage. Do not even query these types until
+        // the user taps the dedicated action; permission denial is intentionally indistinguishable
+        // from no samples, but the local action marker makes NOOP's own access boundary unambiguous.
+        if bodyCompositionAccessRequested {
+            await collect(.bodyMass, unit: .gramUnit(with: .kilo), start: start, end: end, op: .mostRecent) { day, v in
+                var a = agg(day); a.weightKg = v; byDay[day] = a
+            }
+            await collect(.bodyFatPercentage, unit: .percent(), start: start, end: end, op: .discreteAverage) { day, v in
+                var a = agg(day); a.bodyFatPct = v * 100; byDay[day] = a   // 0…1 → percent
+            }
+            await collect(.leanBodyMass, unit: .gramUnit(with: .kilo), start: start, end: end, op: .mostRecent) { day, v in
+                var a = agg(day); a.leanMassKg = v; byDay[day] = a
+            }
+            await collect(.bodyMassIndex, unit: .count(), start: start, end: end, op: .mostRecent) { day, v in
+                var a = agg(day); a.bmi = v; byDay[day] = a
+            }
         }
 
         // Sleep minutes per day (asleep stages summed; attributed to wake day).
@@ -524,13 +624,44 @@ final class HealthKitBridge: ObservableObject {
             a.asleepMin = asleepMin; a.deepMin = deepMin; a.remMin = remMin; a.coreMin = coreMin
             byDay[day] = a
         }
+        guard !currentReadQueryFailed else {
+            lastError = String(localized: "Apple Health sync failed while reading authorized data. Nothing was updated; try again.")
+            return false
+        }
 
         // Build + upsert the store rows under the apple-health source.
-        let appleRows = byDay.map { (day, a) in
+        var appleRows = byDay.map { (day, a) in
             AppleDaily(day: day, steps: a.steps.map { Int($0) },
                        activeKcal: a.activeKcal, basalKcal: a.basalKcal, vo2max: a.vo2max,
                        avgHr: a.avgHr.map { Int($0.rounded()) }, maxHr: a.maxHr.map { Int($0.rounded()) },
                        walkingHr: nil, weightKg: a.weightKg)
+        }
+        // `upsertAppleDaily` replaces nullable columns. Preserve a previously imported weight when
+        // this staged sync did not request body composition (or HealthKit returned no visible sample),
+        // otherwise connecting only the core scopes would silently erase historical scale data.
+        do {
+            let existingAppleRows = try await store.appleDaily(
+                deviceId: appleDeviceId,
+                from: HealthKitBridge.dayString(start),
+                to: HealthKitBridge.dayString(end)
+            )
+            let existingWeightByDay = Dictionary(
+                existingAppleRows.compactMap { row in row.weightKg.map { (row.day, $0) } },
+                uniquingKeysWith: { _, newer in newer }
+            )
+            appleRows = appleRows.map { row in
+                guard row.weightKg == nil, let existing = existingWeightByDay[row.day] else {
+                    return row
+                }
+                return AppleDaily(
+                    day: row.day, steps: row.steps, activeKcal: row.activeKcal,
+                    basalKcal: row.basalKcal, vo2max: row.vo2max, avgHr: row.avgHr,
+                    maxHr: row.maxHr, walkingHr: row.walkingHr, weightKg: existing
+                )
+            }
+        } catch {
+            lastError = String(localized: "Apple Health sync failed while preserving existing body measurements: \(error.localizedDescription)")
+            return false
         }
         let dmRows = byDay.map { (day, a) in
             DailyMetric(day: day, totalSleepMin: a.asleepMin, efficiency: nil,
@@ -543,9 +674,10 @@ final class HealthKitBridge: ObservableObject {
         // sparklines, and the Metric Explorer read from — repo.series(key:source:"apple-health")
         // queries ONLY metricSeries, so without this every tile/chart renders "—" after a successful
         // sync. Reuse the importer's canonical key mapping so the keys match the macOS path exactly.
-        // Body composition (weight/body_fat/lean_mass/bmi) now reads live on iOS (#20) and flows
-        // through the same metricPoints keys as the file importer. iOS still doesn't collect
-        // awake/in-bed minutes, so those stay nil and emit no points — correct.
+        // Once its separate consent stage has been requested, body composition
+        // (weight/body_fat/lean_mass/bmi) flows through the same metricPoints keys as the file
+        // importer. iOS still doesn't collect awake/in-bed minutes, so those stay nil and emit no
+        // points — correct.
         let aggregates = byDay.map { (day, a) in
             AppleDailyAggregate(
                 day: day,
@@ -578,11 +710,74 @@ final class HealthKitBridge: ObservableObject {
         // imports these from a static Health export and Android reads them from Health Connect; iOS now
         // reads them live on-device too, so the platforms reach parity. ON-DEVICE ONLY: this is a plain
         // HealthKit read of workouts NOOP did NOT author, never any cloud/3rd-party API. (#835)
-        let workoutRows = await collectWorkouts(start: start, end: end)
-        // Query one point sample (not a daily statistic) so profile projection keeps the exact
-        // measurement timestamp and originating Health source. The profile API independently rejects
-        // invalid, stale, future, or manual-overridden values.
-        let newestWeight = await newestBodyMassReading()
+        // HealthKit does not reveal whether a read returned no samples because none exist or because
+        // the user later withheld that particular read scope. Keep the prior nullable enrichment in
+        // the latter case instead of turning an already-imported workout back into a row of dashes.
+        // A store read failure aborts the sync before any write, preserving the same all-or-nothing
+        // advancement rule used below.
+        let existingWorkoutRows: [WorkoutRow]
+        do {
+            existingWorkoutRows = try await store.workouts(
+                deviceId: appleDeviceId,
+                from: Int(start.timeIntervalSince1970),
+                to: Int(end.timeIntervalSince1970),
+                limit: 50_000
+            )
+        } catch {
+            lastError = String(localized: "Apple Health sync failed: \(error.localizedDescription)")
+            return false
+        }
+        let existingWorkoutsByKey = Dictionary(
+            existingWorkoutRows.map { (Self.workoutNaturalKey($0), $0) },
+            uniquingKeysWith: { _, newer in newer }
+        )
+
+        let restingHRByDay = byDay.compactMapValues(\.restingHr)
+        let freshWorkoutRows: [WorkoutRow]
+        do {
+            freshWorkoutRows = try await collectWorkouts(
+                start: start,
+                end: end,
+                restingHRByDay: restingHRByDay
+            )
+        } catch {
+            // A partial workout/HR query is not a successful sync. In particular, do not advance
+            // lastSync or an observer anchor after HealthKit reports an error.
+            lastError = String(localized: "Apple Health sync failed: \(error.localizedDescription)")
+            return false
+        }
+        let workoutRows = freshWorkoutRows.map { fresh in
+            guard let existing = existingWorkoutsByKey[Self.workoutNaturalKey(fresh)] else {
+                return fresh
+            }
+            return WorkoutRow(
+                    startTs: fresh.startTs,
+                    endTs: fresh.endTs,
+                    sport: fresh.sport,
+                    source: fresh.source,
+                    durationS: fresh.durationS ?? existing.durationS,
+                    energyKcal: fresh.energyKcal ?? existing.energyKcal,
+                    avgHr: fresh.avgHr ?? existing.avgHr,
+                    maxHr: fresh.maxHr ?? existing.maxHr,
+                    strain: fresh.strain ?? existing.strain,
+                    distanceM: fresh.distanceM ?? existing.distanceM,
+                    zonesJSON: fresh.zonesJSON ?? existing.zonesJSON,
+                    notes: fresh.notes ?? existing.notes,
+                    // HealthKit's workout object has no generic per-session steps property. Preserve a
+                    // value previously imported from an Apple Health export instead of erasing it.
+                    steps: fresh.steps ?? existing.steps
+            )
+        }
+        // Query an exact weight sample only after the separate body-composition action. The profile API
+        // independently rejects invalid, stale, future, or manual-overridden values.
+        var newestWeight: BodyMassReading?
+        if bodyCompositionAccessRequested {
+            newestWeight = await newestBodyMassReading()
+            guard !currentReadQueryFailed else {
+                lastError = String(localized: "Apple Health sync failed while reading body mass. Nothing was updated; try again.")
+                return false
+            }
+        }
 
         // Persist all the apple-health rows AND write back, advancing lastSync only when the WHOLE
         // round-trip succeeds. The three read-side upserts used to be swallowed by `try?`, so a failed
@@ -602,8 +797,10 @@ final class HealthKitBridge: ObservableObject {
             try await writeBack(whoopStore: store)
             lastSync = Date()
             lastError = nil
+            return true
         } catch {
             lastError = String(localized: "Apple Health sync failed: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -627,8 +824,10 @@ final class HealthKitBridge: ObservableObject {
     // MARK: - Write back (NOOP → Health)
 
     /// Write NOOP's strap-derived data into Apple Health: sleep sessions with full stage segments,
-    /// the continuous 1-minute heart-rate stream, strap/manual workouts, and the nightly vitals
-    /// (resting HR, HRV, SpO₂, respiratory rate) stamped at that day's wake time.
+    /// strap/manual workouts, and compatible nightly vitals (resting HR, SpO₂, respiratory rate)
+    /// stamped at that day's wake time. Continuous 1-minute HR and workout energy/distance require
+    /// the separate detailed-write action. HRV is read-only until the store distinguishes RMSSD from
+    /// SDNN; writing an ambiguous `avgHrv` as Apple's SDNN would be semantic corruption.
     ///
     /// Each feature saves independently and guards on ITS OWN type's share status, so one declined
     /// Health checkbox (or a save error) skips that feature without sinking the rest; the first error
@@ -651,8 +850,10 @@ final class HealthKitBridge: ObservableObject {
         // Sleep sessions drive both the sleep write and the vitals' wake-time stamps: computed
         // sessions (deviceId + "-noop") first, imported rows override on startTs collision — the
         // same source precedence as the dailies union below and IntelligenceEngine's sleep reads.
-        let computedSleeps = (try? await whoopStore.sleepSessions(deviceId: computedDeviceId, from: fromTs, to: nowTs, limit: 200)) ?? []
-        let importedSleeps = (try? await whoopStore.sleepSessions(deviceId: noopDeviceId, from: fromTs, to: nowTs, limit: 200)) ?? []
+        let computedSleeps = try await whoopStore.sleepSessions(
+            deviceId: computedDeviceId, from: fromTs, to: nowTs, limit: 200)
+        let importedSleeps = try await whoopStore.sleepSessions(
+            deviceId: noopDeviceId, from: fromTs, to: nowTs, limit: 200)
         var sleepsByStart: [Int: CachedSleepSession] = [:]
         for s in computedSleeps { sleepsByStart[s.startTs] = s }
         for s in importedSleeps { sleepsByStart[s.startTs] = s }
@@ -664,7 +865,9 @@ final class HealthKitBridge: ObservableObject {
         }
         await attempt { try await writeVitals(whoopStore: whoopStore, days: days, sessions: sessions) }
         await attempt { try await writeSleep(sessions: sessions) }
-        await attempt { try await writeHeartRate(whoopStore: whoopStore, fromTs: fromTs, nowTs: nowTs) }
+        if highResolutionWritebackRequested {
+            await attempt { try await writeHeartRate(whoopStore: whoopStore, fromTs: fromTs, nowTs: nowTs) }
+        }
         await attempt { try await writeWorkouts(whoopStore: whoopStore, fromTs: fromTs, toTs: nowTs) }
         if let firstError { throw firstError }
     }
@@ -673,6 +876,12 @@ final class HealthKitBridge: ObservableObject {
     /// that day has a sleep session — a real timestamp inside the night the value describes, instead
     /// of a fabricated noon. Keys are unchanged, so re-stamped samples replace their noon ancestors.
     private func writeVitals(whoopStore: WhoopStore, days: Int, sessions: [CachedSleepSession]) async throws {
+        // Releases before the RMSSD/SDNN safety fix could write strap RMSSD under HealthKit's SDNN
+        // identifier. Remove every sample authored by this app for that type once; `HKSource.default()`
+        // scopes deletion to NOOP, never Apple Watch or another app. If Health access is unavailable,
+        // leave the marker unset and retry after the user restores permission.
+        try await removeLegacyMislabelledHrvIfPossible()
+
         let cal = Calendar.current
         let to = HealthKitBridge.dayString(Date())
         guard let fromDate = cal.date(byAdding: .day, value: -days, to: Date()) else { return }
@@ -689,8 +898,10 @@ final class HealthKitBridge: ObservableObject {
         // user's recovery/HRV/RHR/SpO₂/resp lives, then union with any imported `noopDeviceId` rows so
         // a user who ALSO imported a WHOOP export still gets the imported values. Imported overrides
         // computed per day, matching the dashboard's source precedence.
-        let computed = (try? await whoopStore.dailyMetrics(deviceId: computedDeviceId, from: from, to: to)) ?? []
-        let imported = (try? await whoopStore.dailyMetrics(deviceId: noopDeviceId, from: from, to: to)) ?? []
+        let computed = try await whoopStore.dailyMetrics(
+            deviceId: computedDeviceId, from: from, to: to)
+        let imported = try await whoopStore.dailyMetrics(
+            deviceId: noopDeviceId, from: from, to: to)
         var byDay: [String: DailyMetric] = [:]
         for r in computed { byDay[r.day] = r }   // computed first
         for r in imported { byDay[r.day] = r }   // imported overrides
@@ -718,9 +929,6 @@ final class HealthKitBridge: ObservableObject {
             if let rhr = row.restingHr {
                 add(.restingHeartRate, HKUnit.count().unitDivided(by: .minute()), Double(rhr), row.day, at)
             }
-            if let hrv = row.avgHrv {
-                add(.heartRateVariabilitySDNN, .secondUnit(with: .milli), hrv, row.day, at)
-            }
             if let spo2 = row.spo2Pct {
                 add(.oxygenSaturation, .percent(), spo2 / 100, row.day, at)
             }
@@ -744,6 +952,20 @@ final class HealthKitBridge: ObservableObject {
             _ = try? await self.store.deleteObjects(of: type, predicate: pred)
         }
         try await self.store.save(candidates.map { $0.sample })
+    }
+
+    /// One-time cleanup for the old mixed-unit HRV write. There is deliberately no replacement write:
+    /// `DailyMetric.avgHrv` can be WHOOP RMSSD or imported Apple SDNN, and provenance alone does not
+    /// establish the mathematical statistic. A future typed schema can re-enable only proven SDNN.
+    private func removeLegacyMislabelledHrvIfPossible() async throws {
+        guard !UserDefaults.standard.bool(
+            forKey: HealthKitBridge.mislabelledHrvCleanupCompletedKey),
+              let type = HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN),
+              store.authorizationStatus(for: type) == .sharingAuthorized else { return }
+        let authoredByNoop = HKQuery.predicateForObjects(from: HKSource.default())
+        _ = try await store.deleteObjects(of: type, predicate: authoredByNoop)
+        UserDefaults.standard.set(
+            true, forKey: HealthKitBridge.mislabelledHrvCleanupCompletedKey)
     }
 
     /// Write each BRIDGED NIGHT (#364) as one `.inBed` sample plus one category sample per stage
@@ -826,8 +1048,8 @@ final class HealthKitBridge: ObservableObject {
               store.authorizationStatus(for: type) == .sharingAuthorized else { return }
         let cursor = UserDefaults.standard.integer(forKey: hrWriteCursorKey)
         let windowStart = cursor > 0 ? max(fromTs, cursor - 48 * 3600) : fromTs
-        let buckets = (try? await whoopStore.hrBuckets(deviceId: noopDeviceId, from: windowStart,
-                                                       to: nowTs, bucketSeconds: 60)) ?? []
+        let buckets = try await whoopStore.hrBuckets(deviceId: noopDeviceId, from: windowStart,
+                                                     to: nowTs, bucketSeconds: 60)
         guard !buckets.isEmpty else { return }
 
         let pred = NSCompoundPredicate(andPredicateWithSubpredicates: [
@@ -875,8 +1097,10 @@ final class HealthKitBridge: ObservableObject {
     /// metadata; delete-then-write scoped to our own source, like sleep and the vitals.
     private func writeWorkouts(whoopStore: WhoopStore, fromTs: Int, toTs: Int) async throws {
         guard store.authorizationStatus(for: .workoutType()) == .sharingAuthorized else { return }
-        let mine = (try? await whoopStore.workouts(deviceId: noopDeviceId, from: fromTs, to: toTs, limit: 500)) ?? []
-        let computed = (try? await whoopStore.workouts(deviceId: computedDeviceId, from: fromTs, to: toTs, limit: 500)) ?? []
+        let mine = try await whoopStore.workouts(
+            deviceId: noopDeviceId, from: fromTs, to: toTs, limit: 500)
+        let computed = try await whoopStore.workouts(
+            deviceId: computedDeviceId, from: fromTs, to: toTs, limit: 500)
         var byKey: [String: WorkoutRow] = [:]
         for w in computed + mine where w.source != HealthKitBridge.appleWorkoutSource {
             byKey["\(w.startTs):\(w.sport)"] = w
@@ -903,13 +1127,15 @@ final class HealthKitBridge: ObservableObject {
                 try await builder.beginCollection(at: start)
                 try await builder.addMetadata([HKMetadataKeyExternalUUID: key(row)])
                 var extras: [HKSample] = []
-                if let kcal = row.energyKcal, kcal > 0,
+                if highResolutionWritebackRequested,
+                   let kcal = row.energyKcal, kcal > 0,
                    let t = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned),
                    store.authorizationStatus(for: t) == .sharingAuthorized {
                     extras.append(HKQuantitySample(type: t, quantity: .init(unit: .kilocalorie(), doubleValue: kcal),
                                                    start: start, end: end))
                 }
-                if let meters = row.distanceM, meters > 0,
+                if highResolutionWritebackRequested,
+                   let meters = row.distanceM, meters > 0,
                    let id = Self.distanceTypeId(forSport: row.sport),
                    let t = HKQuantityType.quantityType(forIdentifier: id),
                    store.authorizationStatus(for: t) == .sharingAuthorized {
@@ -997,28 +1223,36 @@ final class HealthKitBridge: ObservableObject {
     /// provenance/freshness policy. NOOP-authored samples are excluded by the common predicate.
     private func newestBodyMassReading() async -> BodyMassReading? {
         guard let type = HKQuantityType.quantityType(forIdentifier: .bodyMass) else { return nil }
-        return await withCheckedContinuation { (cont: CheckedContinuation<BodyMassReading?, Never>) in
+        let result = await withCheckedContinuation {
+            (cont: CheckedContinuation<Result<BodyMassReading?, Error>, Never>) in
             let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
             let query = HKSampleQuery(sampleType: type, predicate: Self.notNoopAuthored,
-                                      limit: 1, sortDescriptors: [sort]) { _, samples, _ in
+                                      limit: 1, sortDescriptors: [sort]) { _, samples, error in
+                if let error { cont.resume(returning: .failure(error)); return }
                 guard let sample = samples?.first as? HKQuantitySample else {
-                    cont.resume(returning: nil)
+                    cont.resume(returning: .success(nil))
                     return
                 }
                 let kg = sample.quantity.doubleValue(for: .gramUnit(with: .kilo))
                 guard kg.isFinite else {
-                    cont.resume(returning: nil)
+                    cont.resume(returning: .success(nil))
                     return
                 }
                 let source = sample.sourceRevision.source
                 let origin = source.bundleIdentifier.isEmpty ? source.name : source.bundleIdentifier
-                cont.resume(returning: BodyMassReading(
+                cont.resume(returning: .success(BodyMassReading(
                     kg: kg,
                     measuredAt: sample.endDate,
                     source: "apple-health:\(origin)"
-                ))
+                )))
             }
             store.execute(query)
+        }
+        switch result {
+        case let .success(reading): return reading
+        case .failure:
+            currentReadQueryFailed = true
+            return nil
         }
     }
 
@@ -1039,11 +1273,12 @@ final class HealthKitBridge: ObservableObject {
             HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate),
             Self.notNoopAuthored,
         ])
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+        let succeeded = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
             let q = HKStatisticsCollectionQuery(quantityType: type, quantitySamplePredicate: predicate,
                                                 options: op, anchorDate: anchor,
                                                 intervalComponents: DateComponents(day: 1))
-            q.initialResultsHandler = { _, results, _ in
+            q.initialResultsHandler = { _, results, error in
+                guard error == nil else { cont.resume(returning: false); return }
                 results?.enumerateStatistics(from: start, to: end) { stats, _ in
                     let q: HKQuantity?
                     switch op {
@@ -1055,10 +1290,11 @@ final class HealthKitBridge: ObservableObject {
                     }
                     if let q { sink(HealthKitBridge.dayString(stats.startDate), q.doubleValue(for: unit)) }
                 }
-                cont.resume()
+                cont.resume(returning: true)
             }
             store.execute(q)
         }
+        if !succeeded { currentReadQueryFailed = true }
     }
 
     private func collectSleep(start: Date, end: Date,
@@ -1068,8 +1304,9 @@ final class HealthKitBridge: ObservableObject {
             HKQuery.predicateForSamples(withStart: start, end: end, options: []),
             Self.notNoopAuthored,
         ])
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            let q = HKSampleQuery(sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, _ in
+        let succeeded = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            let q = HKSampleQuery(sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, error in
+                guard error == nil else { cont.resume(returning: false); return }
                 var asleep: [String: Double] = [:], deep: [String: Double] = [:]
                 var rem: [String: Double] = [:], core: [String: Double] = [:]
                 for case let s as HKCategorySample in samples ?? [] {
@@ -1089,10 +1326,11 @@ final class HealthKitBridge: ObservableObject {
                 for day in Set(asleep.keys) {
                     sink(day, asleep[day], deep[day], rem[day], core[day])
                 }
-                cont.resume()
+                cont.resume(returning: true)
             }
             store.execute(q)
         }
+        if !succeeded { currentReadQueryFailed = true }
     }
 
     /// Read only cycle-day-one anchors from Apple Health. Apple's contract requires every menstrual-
@@ -1135,45 +1373,169 @@ final class HealthKitBridge: ObservableObject {
 
     // MARK: - Workouts (#835)
 
-    /// Read the workouts the user logged in Apple Health over `[start, end)` and map each to a
-    /// `WorkoutRow` under the apple-health source. ON-DEVICE ONLY: a straight HealthKit `HKWorkout` query,
-    /// no cloud or third-party API. NOOP-authored workouts are excluded (the same `notNoopAuthored`
-    /// predicate the metric reads use) so our own write-back never re-imports as "Apple Health". Mirrors
-    /// the macOS export importer and the Android Health Connect importer, which already ingest workouts,
-    /// closing the iOS gap. The upsert is idempotent on (deviceId, startTs), so re-running a sync window
-    /// refreshes rather than duplicates.
-    private func collectWorkouts(start: Date, end: Date) async -> [WorkoutRow] {
+    private struct WorkoutHRStatistics: Sendable {
+        let average: Double?
+        let maximum: Double?
+    }
+
+    /// Read the workouts the user logged in Apple Health over `[start, end)` and enrich each with only
+    /// data explicitly associated with that `HKWorkout`: source-native Avg/Max HR statistics and the
+    /// scoped HR series for NOOP's shared zones/Effort engines. NOOP does not request workout-route
+    /// access as part of general Health authorization; precise location needs its own future opt-in and
+    /// protected storage design. NOOP-authored workouts are excluded so write-back never re-imports.
+    /// Any HealthKit query error throws and aborts the sync instead of masquerading as successful emptiness.
+    private func collectWorkouts(start: Date, end: Date,
+                                 restingHRByDay: [String: Double]) async throws -> [WorkoutRow] {
         let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
             HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate),
             Self.notNoopAuthored,
         ])
-        return await withCheckedContinuation { (cont: CheckedContinuation<[WorkoutRow], Never>) in
+        let workoutResult = await withCheckedContinuation {
+            (cont: CheckedContinuation<Result<[HKWorkout], Error>, Never>) in
             let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
             let q = HKSampleQuery(sampleType: HKObjectType.workoutType(), predicate: predicate,
-                                  limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, samples, _ in
-                var rows: [WorkoutRow] = []
-                for case let workout as HKWorkout in samples ?? [] {
-                    let startTs = Int(workout.startDate.timeIntervalSince1970)
-                    let endTs = max(Int(workout.endDate.timeIntervalSince1970), startTs)
-                    let duration = workout.duration > 0 ? workout.duration : Double(endTs - startTs)
-                    rows.append(WorkoutRow(
-                        startTs: startTs,
-                        endTs: endTs,
-                        sport: Self.sportName(workout.workoutActivityType),
-                        source: HealthKitBridge.appleWorkoutSource,
-                        durationS: duration,
-                        energyKcal: workout.totalEnergyBurned?.doubleValue(for: .kilocalorie()),
-                        avgHr: nil,
-                        maxHr: nil,
-                        strain: nil,
-                        distanceM: workout.totalDistance?.doubleValue(for: .meter()),
-                        zonesJSON: nil,
-                        notes: nil))
-                }
-                cont.resume(returning: rows)
+                                  limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, samples, error in
+                if let error { cont.resume(returning: .failure(error)); return }
+                cont.resume(returning: .success((samples ?? []).compactMap { $0 as? HKWorkout }))
             }
             store.execute(q)
         }
+        let workouts = try workoutResult.get()
+
+        var rows: [WorkoutRow] = []
+        rows.reserveCapacity(workouts.count)
+        for workout in workouts {
+            // These independent reads start together, avoiding two serial round trips per workout while
+            // retaining the bridge's MainActor
+            // ownership for all published state and persistence.
+            async let statistics = collectWorkoutHeartRateStatistics(workout)
+            async let samples = collectWorkoutHeartRateSamples(workout)
+            let (scopedStatistics, scopedSamples) = try await (statistics, samples)
+
+            let startTs = Int(workout.startDate.timeIntervalSince1970)
+            let endTs = max(Int(workout.endDate.timeIntervalSince1970), startTs)
+            let duration = workout.duration > 0 ? workout.duration : Double(endTs - startTs)
+            let day = Self.dayString(workout.startDate)
+            let hr = WorkoutHeartRateEnrichment.summarize(
+                samples: scopedSamples,
+                workoutStart: startTs,
+                workoutEnd: endTs,
+                maxHR: Double(profile.hrMax),
+                restingHR: restingHRByDay[day],
+                sex: profile.sex,
+                statisticsAverage: scopedStatistics?.average,
+                statisticsMaximum: scopedStatistics?.maximum
+            )
+            rows.append(WorkoutRow(
+                startTs: startTs,
+                endTs: endTs,
+                sport: Self.sportName(workout.workoutActivityType),
+                source: HealthKitBridge.appleWorkoutSource,
+                durationS: duration,
+                energyKcal: Self.finitePositive(
+                    workout.totalEnergyBurned?.doubleValue(for: .kilocalorie())),
+                avgHr: hr.avgHR,
+                maxHr: hr.maxHR,
+                strain: hr.strain,
+                distanceM: Self.finitePositive(
+                    workout.totalDistance?.doubleValue(for: .meter())),
+                zonesJSON: hr.zonesJSON,
+                notes: Self.workoutNotes(from: workout.metadata)
+            ))
+        }
+        return rows
+    }
+
+    /// Source-native Avg/Max over HR samples linked to this workout. The association predicate matters:
+    /// a plain date predicate can mix a phone app's background HR or an overlapping workout into the row.
+    private func collectWorkoutHeartRateStatistics(_ workout: HKWorkout) async throws -> WorkoutHRStatistics? {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .heartRate) else { return nil }
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            HKQuery.predicateForObjects(from: workout),
+            Self.notNoopAuthored,
+        ])
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        let result = await withCheckedContinuation {
+            (cont: CheckedContinuation<Result<WorkoutHRStatistics?, Error>, Never>) in
+            let query = HKStatisticsQuery(quantityType: type, quantitySamplePredicate: predicate,
+                                          options: [.discreteAverage, .discreteMax]) { _, stats, error in
+                if let error { cont.resume(returning: .failure(error)); return }
+                guard let stats else { cont.resume(returning: .success(nil)); return }
+                cont.resume(returning: .success(WorkoutHRStatistics(
+                    average: stats.averageQuantity()?.doubleValue(for: unit),
+                    maximum: stats.maximumQuantity()?.doubleValue(for: unit)
+                )))
+            }
+            store.execute(query)
+        }
+        return try result.get()
+    }
+
+    /// Exact workout-associated samples for zones and Effort. We retain only Unix second + rounded bpm;
+    /// source metadata and UUIDs are neither persisted nor exposed to any sync/export path.
+    private func collectWorkoutHeartRateSamples(_ workout: HKWorkout) async throws -> [HRSample] {
+        guard let type = HKQuantityType.quantityType(forIdentifier: .heartRate) else { return [] }
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            HKQuery.predicateForObjects(from: workout),
+            Self.notNoopAuthored,
+        ])
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        let result = await withCheckedContinuation {
+            (cont: CheckedContinuation<Result<[HRSample], Error>, Never>) in
+            let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+            let query = HKSampleQuery(sampleType: type, predicate: predicate,
+                                      // >55 hours at 1 Hz; bounds memory against a corrupt provider.
+                                      limit: 200_000, sortDescriptors: [sort]) {
+                _, samples, error in
+                if let error { cont.resume(returning: .failure(error)); return }
+                let mapped = (samples ?? []).compactMap { object -> HRSample? in
+                    guard let sample = object as? HKQuantitySample else { return nil }
+                    let value = sample.quantity.doubleValue(for: unit)
+                    guard value.isFinite,
+                          value >= Double(WorkoutHeartRateEnrichment.plausibleBPMRange.lowerBound),
+                          value <= Double(WorkoutHeartRateEnrichment.plausibleBPMRange.upperBound) else {
+                        return nil
+                    }
+                    return HRSample(ts: Int(sample.startDate.timeIntervalSince1970),
+                                    bpm: Int(value.rounded()))
+                }
+                cont.resume(returning: .success(mapped))
+            }
+            store.execute(query)
+        }
+        return try result.get()
+    }
+
+    /// Preserve only a small allow-list of explicitly user-visible workout metadata. Never serialize the
+    /// metadata dictionary wholesale: it can contain private custom keys, UUIDs, device data, or tokens.
+    private static func workoutNotes(from metadata: [String: Any]?) -> String? {
+        guard let metadata else { return nil }
+        func bool(_ key: String) -> Bool {
+            (metadata[key] as? Bool) ?? (metadata[key] as? NSNumber)?.boolValue ?? false
+        }
+        var parts: [String] = []
+        if bool(HKMetadataKeyIndoorWorkout) { parts.append("Indoor") }
+        if bool(HKMetadataKeyCoachedWorkout) { parts.append("Coached") }
+        if bool(HKMetadataKeyGroupFitness) { parts.append("Group workout") }
+        if let rawBrand = metadata[HKMetadataKeyWorkoutBrandName] as? String {
+            // Custom providers can put arbitrary text here. Remove control characters before applying
+            // the small display cap so metadata can never smuggle terminal/log formatting into notes.
+            let visibleBrand = rawBrand.unicodeScalars.map {
+                CharacterSet.controlCharacters.contains($0) ? " " : String($0)
+            }.joined()
+            let brand = visibleBrand.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            if !brand.isEmpty { parts.append("Brand: \(String(brand.prefix(80)))") }
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private static func workoutNaturalKey(_ row: WorkoutRow) -> String {
+        "\(row.startTs)|\(row.sport)"
+    }
+
+    private static func finitePositive(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, value > 0 else { return nil }
+        return value
     }
 
     /// Source tag stamped on workouts imported from Apple Health. Matches the macOS importer's
@@ -1280,6 +1642,12 @@ final class HealthKitBridge: ObservableObject {
     }()
 
     private static let authorizationRequestedKey = "healthkit.authorizationRequested.v1"
+    private static let bodyCompositionAuthorizationRequestedKey =
+        "healthkit.bodyCompositionAuthorizationRequested.v1"
+    private static let highResolutionWritebackAuthorizationRequestedKey =
+        "healthkit.highResolutionWritebackAuthorizationRequested.v1"
+    private static let mislabelledHrvCleanupCompletedKey =
+        "healthkit.mislabelledHrvCleanupCompleted.v1"
     private static let cycleAuthorizationRequestedKey = "healthkit.cycleAuthorizationRequested.v1"
 
     // MARK: - Date helpers

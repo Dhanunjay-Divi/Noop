@@ -391,7 +391,7 @@ class Backfiller(
                 for (f in frames) {
                     if (spo2Dumped >= com.noop.analytics.Spo2ReTrace.MAX_SAMPLES) break
                     val d = decodeHistorical(f, family) ?: continue
-                    val recUnix = d["unix"] as? Int ?: continue
+                    val recUnix = d["unix"] as? Long ?: continue
                     connectionLog(
                         com.noop.analytics.Spo2ReTrace.recordLine(
                             frame = f,

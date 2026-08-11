@@ -2,6 +2,7 @@ package com.noop.ingest
 
 import android.content.Context
 import android.net.Uri
+import com.noop.R
 import com.noop.data.ImportSummary
 import com.noop.data.MetricSeriesRow
 import com.noop.data.WhoopRepository
@@ -20,7 +21,7 @@ import java.time.ZoneOffset
  *
  * Three header shapes are recognised explicitly (after [HeaderNorm] normalization):
  *
- *   1. NOOP native      — `date, calories_in, protein_g, carbs_g, fat_g, weight`
+ *   1. NOOP native      — `date, calories_in, protein_g, carbs_g, fat_g, weight_kg`
  *   2. MyFitnessPal     — `Date, Meal, Calories, Protein (g), Carbohydrates (g), Fat (g)`
  *                          (per-meal rows; intake values are SUMMED per day)
  *   3. Cronometer daily — `Date, Completed, Energy (kcal), Protein (g), Carbs (g), Fat (g)`
@@ -28,8 +29,9 @@ import java.time.ZoneOffset
  * plus a tolerant fallback: any CSV with a recognisable date column and at least one column
  * whose normalized header *contains* calorie/energy, protein, carb, fat or weight imports too.
  * "Saturated/trans/poly/mono/body fat" are never mistaken for total fat, and "burned"/"goal"
- * energy columns are never mistaken for intake. A weight column whose header says lb/lbs is
- * converted to kilograms so the stored `weight` key is always kg.
+ * energy columns are never mistaken for intake. Weight requires kg/lb in either its header or cell,
+ * and pounds are converted to kilograms so the stored `weight` key is always kg. Bare numeric
+ * values under an ambiguous `Weight` header are rejected rather than silently assumed to be kg.
  *
  * The whole pipeline is tolerant: rows without a parsable date are skipped, blank cells
  * contribute nothing, duplicate-day intake rows (meal logs) sum, and the last weight of a
@@ -51,6 +53,16 @@ object NutritionCsvImporter {
 
     /** Pounds → kilograms (exact avoirdupois definition). */
     internal const val LB_TO_KG = 0.45359237
+
+    internal enum class WeightUnit { KILOGRAMS, POUNDS, AMBIGUOUS }
+
+    internal data class WeightColumn(val header: String, val unit: WeightUnit)
+
+    internal sealed class WeightValue {
+        data class Kilograms(val value: Double) : WeightValue()
+        object MissingOrInvalid : WeightValue()
+        object Ambiguous : WeightValue()
+    }
 
     /** Input ceiling — a nutrition CSV is tiny; 64 MB is already absurdly generous. */
     private const val MAX_BYTES = 64L shl 20
@@ -85,8 +97,15 @@ object NutritionCsvImporter {
             )
         }
 
-        val rows = parse(table, deviceId)
+        val parsed = parseDetailed(table, deviceId)
+        val rows = parsed.rows
         if (rows.isEmpty()) {
+            if (parsed.ambiguousWeightRows > 0) {
+                return ImportSummary.failure(
+                    SOURCE_LABEL,
+                    context.getString(R.string.nutrition_weight_unit_missing_failure),
+                )
+            }
             return ImportSummary.failure(
                 SOURCE_LABEL,
                 "No usable nutrition rows (check the date column format).",
@@ -111,6 +130,16 @@ object NutritionCsvImporter {
                 if (dayCount != 1) append("s")
                 if (firstDay != null && lastDay != null) append(" ($firstDay → $lastDay)")
                 append(".")
+                if (parsed.ambiguousWeightRows > 0) {
+                    append(" ")
+                    append(
+                        context.resources.getQuantityString(
+                            R.plurals.nutrition_weight_values_skipped,
+                            parsed.ambiguousWeightRows,
+                            parsed.ambiguousWeightRows,
+                        )
+                    )
+                }
             },
         )
     }
@@ -125,8 +154,8 @@ object NutritionCsvImporter {
         val carbs: String?,
         val fat: String?,
         val weight: String?,
-        /** True when the weight header declares pounds — values convert to kg on import. */
-        val weightIsPounds: Boolean,
+        /** Declared header unit; AMBIGUOUS requires a unit-bearing value cell. */
+        val weightUnit: WeightUnit,
     )
 
     /**
@@ -168,17 +197,78 @@ object NutritionCsvImporter {
                     "mono" !in it && "body" !in it && "goal" !in it
             }
 
-        val weight = exact(
-            "weight", "weight_kg", "body_weight", "bodyweight", "body_weight_kg",
-            "weight_lb", "weight_lbs", "body_mass", "body_mass_kg",
-        ) ?: fallback { "weight" in it && "goal" !in it }
-        val weightIsPounds = weight != null &&
-            (weight.endsWith("_lb") || weight.endsWith("_lbs") || "_lb_" in weight || "pound" in weight)
+        val weightColumn = resolveWeightColumn(headers)
+        val weight = weightColumn?.header
 
         if (calories == null && protein == null && carbs == null && fat == null && weight == null) {
             return null
         }
-        return NutritionColumns(date, calories, protein, carbs, fat, weight, weightIsPounds)
+        return NutritionColumns(
+            date, calories, protein, carbs, fat, weight,
+            weightColumn?.unit ?: WeightUnit.AMBIGUOUS,
+        )
+    }
+
+    /**
+     * Resolve body-weight/body-mass without guessing its unit. Explicit-unit columns win over a bare
+     * `weight`; conflicting kg/lb columns make the selected column ambiguous and therefore safe-skip
+     * plain numeric cells.
+     */
+    internal fun resolveWeightColumn(headers: List<String>): WeightColumn? {
+        val candidates = headers.filter {
+            ("weight" in it || "body_mass" in it) && "goal" !in it
+        }
+        if (candidates.isEmpty()) return null
+
+        val explicit = candidates.mapNotNull { header ->
+            val unit = weightUnitFromNormalizedText(header)
+            if (unit == WeightUnit.AMBIGUOUS) null else WeightColumn(header, unit)
+        }
+        if (explicit.map { it.unit }.toSet().size > 1) {
+            return WeightColumn(candidates.first(), WeightUnit.AMBIGUOUS)
+        }
+        return explicit.firstOrNull() ?: WeightColumn(candidates.first(), WeightUnit.AMBIGUOUS)
+    }
+
+    /**
+     * Parse one weight cell into kilograms. A unitless value under an ambiguous header, or a cell
+     * whose explicit unit conflicts with its header, returns [WeightValue.Ambiguous] and is never
+     * written. Invalid/non-positive numerics remain a separate non-warning result.
+     */
+    internal fun parseWeightKilograms(raw: String, headerUnit: WeightUnit, numeric: Double?): WeightValue {
+        if (numeric == null || !numeric.isFinite() || numeric <= 0) return WeightValue.MissingOrInvalid
+        val cellUnit = weightUnitFromCell(raw)
+        val resolved = when {
+            headerUnit != WeightUnit.AMBIGUOUS &&
+                cellUnit != WeightUnit.AMBIGUOUS &&
+                headerUnit != cellUnit -> return WeightValue.Ambiguous
+            headerUnit != WeightUnit.AMBIGUOUS -> headerUnit
+            cellUnit != WeightUnit.AMBIGUOUS -> cellUnit
+            else -> return WeightValue.Ambiguous
+        }
+        val kilograms = if (resolved == WeightUnit.POUNDS) numeric * LB_TO_KG else numeric
+        return WeightValue.Kilograms(kilograms)
+    }
+
+    private fun weightUnitFromNormalizedText(text: String): WeightUnit {
+        val tokens = text.split('_').toSet()
+        val kilograms = tokens.any { it == "kg" || it == "kgs" || it == "kilogram" || it == "kilograms" }
+        val pounds = tokens.any { it == "lb" || it == "lbs" || it == "pound" || it == "pounds" }
+        if (kilograms == pounds) return WeightUnit.AMBIGUOUS
+        return if (kilograms) WeightUnit.KILOGRAMS else WeightUnit.POUNDS
+    }
+
+    private fun weightUnitFromCell(raw: String): WeightUnit {
+        val lowered = raw.lowercase().trim()
+        val tokenUnit = weightUnitFromNormalizedText(HeaderNorm.normalize(lowered))
+        if (tokenUnit != WeightUnit.AMBIGUOUS) return tokenUnit
+
+        // Compact forms such as `180lb` and `81.5kg` do not produce a standalone normalized token.
+        val compact = lowered.replace(" ", "")
+        val kgSuffix = listOf("kg", "kgs", "kilogram", "kilograms").any(compact::endsWith)
+        val lbSuffix = listOf("lb", "lbs", "pound", "pounds").any(compact::endsWith)
+        if (kgSuffix == lbSuffix) return WeightUnit.AMBIGUOUS
+        return if (kgSuffix) WeightUnit.KILOGRAMS else WeightUnit.POUNDS
     }
 
     // MARK: - Pure row parsing (JVM unit-testable)
@@ -191,15 +281,27 @@ object NutritionCsvImporter {
         var weight: Double? = null
     }
 
+    internal data class NutritionParseResult(
+        val rows: List<MetricSeriesRow>,
+        val ambiguousWeightRows: Int,
+    )
+
     /**
      * CSV table → long-format metricSeries rows. Intake values SUM across rows that share a
      * day (per-meal exports); weight takes the day's last non-blank value. Rows with no
      * parsable date and blank/negative/non-finite cells are skipped.
      */
     internal fun parse(table: CsvTable, deviceId: String): List<MetricSeriesRow> {
-        val cols = resolveColumns(table.normalizedHeaders) ?: return emptyList()
+        return parseDetailed(table, deviceId).rows
+    }
+
+    /** Detailed parse result used by import UI to disclose rejected ambiguous weight values. */
+    internal fun parseDetailed(table: CsvTable, deviceId: String): NutritionParseResult {
+        val cols = resolveColumns(table.normalizedHeaders)
+            ?: return NutritionParseResult(emptyList(), ambiguousWeightRows = 0)
 
         val byDay = LinkedHashMap<String, DayAcc>()
+        var ambiguousWeightRows = 0
         for (row in table.rows) {
             val day = parseDay(row.cell(cols.date)) ?: continue
             val acc = byDay.getOrPut(day) { DayAcc() }
@@ -216,9 +318,13 @@ object NutritionCsvImporter {
             intake(cols.fat, { acc.fat }) { acc.fat = it }
 
             cols.weight?.let { header ->
-                val raw = row.double(header)
-                if (raw != null && raw.isFinite() && raw > 0) {
-                    acc.weight = if (cols.weightIsPounds) raw * LB_TO_KG else raw
+                val rawCell = row.cell(header)
+                if (rawCell != null) {
+                    when (val weight = parseWeightKilograms(rawCell, cols.weightUnit, row.double(header))) {
+                        is WeightValue.Kilograms -> acc.weight = weight.value
+                        WeightValue.Ambiguous -> ambiguousWeightRows += 1
+                        WeightValue.MissingOrInvalid -> Unit
+                    }
                 }
             }
         }
@@ -234,7 +340,7 @@ object NutritionCsvImporter {
             add(KEY_FAT_G, acc.fat)
             add(KEY_WEIGHT, acc.weight)
         }
-        return out
+        return NutritionParseResult(out, ambiguousWeightRows)
     }
 
     // MARK: - Day parsing

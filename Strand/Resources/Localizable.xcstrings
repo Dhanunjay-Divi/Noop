@@ -1,6 +1,354 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Add body composition": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Körperzusammensetzung hinzufügen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Añadir composición corporal" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Ajouter la composition corporelle" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Adicionar composição corporal" } }
+      }
+    },
+    "Add detailed write-back": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Detailliertes Zurückschreiben hinzufügen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Añadir escritura detallada" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Ajouter l’écriture détaillée" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Adicionar escrita detalhada" } }
+      }
+    },
+    "Attribution": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Namensnennung" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Atribución" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Attribution" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Atribuição" } }
+      }
+    },
+    "Body composition requested": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Körperzusammensetzung angefordert" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Composición corporal solicitada" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Composition corporelle demandée" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Composição corporal solicitada" } }
+      }
+    },
+    "Detailed write-back requested": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Detailliertes Zurückschreiben angefordert" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Escritura detallada solicitada" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Écriture détaillée demandée" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Escrita detalhada solicitada" } }
+      }
+    },
+    "Disclaimer": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Haftungsausschluss" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Descargo de responsabilidad" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Clause de non-responsabilité" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Aviso de responsabilidade" } }
+      }
+    },
+    "HRV is read-only. NOOP will not label strap RMSSD as Apple Health SDNN; they are different HRV statistics.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "HRV ist schreibgeschützt. NOOP bezeichnet den RMSSD des Bands nicht als Apple-Health-SDNN; es sind unterschiedliche HRV-Statistiken." } },
+        "es": { "stringUnit": { "state": "translated", "value": "La VFC es de solo lectura. NOOP no etiquetará el RMSSD de la pulsera como SDNN de Apple Health; son estadísticas de VFC diferentes." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "La VFC est en lecture seule. NOOP ne présente pas le RMSSD du bracelet comme le SDNN d’Apple Santé : ce sont deux statistiques de VFC différentes." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "A VFC é apenas de leitura. O NOOP não identifica o RMSSD da pulseira como SDNN da Apple Saúde; são estatísticas de VFC diferentes." } }
+      }
+    },
+    "NOOP reads heart rate, HRV, resting heart rate, sleep, steps, energy and VO₂ max to compute your scores. The core request can also share sleep, workouts and compatible nightly vitals back. Body measurements and detailed continuous write-back stay separate. It all remains on this iPhone, and you pick what to allow on Apple's next screen.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "NOOP liest Herzfrequenz, HRV, Ruheherzfrequenz, Schlaf, Schritte, Energie und VO₂max, um deine Werte zu berechnen. Die Kernanfrage kann auch Schlaf, Trainings und kompatible nächtliche Vitalwerte zurückschreiben. Körpermessungen und detailliertes kontinuierliches Zurückschreiben bleiben separat. Alles bleibt auf diesem iPhone, und du entscheidest im nächsten Apple-Bildschirm, was erlaubt ist." } },
+        "es": { "stringUnit": { "state": "translated", "value": "NOOP lee la frecuencia cardíaca, la VFC, la frecuencia en reposo, el sueño, los pasos, la energía y el VO₂ máx. para calcular tus puntuaciones. La solicitud básica también puede compartir sueño, entrenamientos y constantes nocturnas compatibles. Las medidas corporales y la escritura continua detallada se solicitan por separado. Todo permanece en este iPhone y tú eliges qué permitir en la siguiente pantalla de Apple." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "NOOP lit la fréquence cardiaque, la VFC, la fréquence au repos, le sommeil, les pas, l’énergie et la VO₂ max pour calculer vos scores. La demande principale peut aussi partager le sommeil, les entraînements et les constantes nocturnes compatibles. Les mensurations et l’écriture continue détaillée restent séparées. Tout reste sur cet iPhone et vous choisissez les autorisations sur l’écran Apple suivant." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "O NOOP lê frequência cardíaca, VFC, frequência em repouso, sono, passos, energia e VO₂ máx. para calcular as tuas pontuações. O pedido principal também pode partilhar sono, treinos e sinais vitais noturnos compatíveis. As medições corporais e a escrita contínua detalhada ficam separadas. Tudo permanece neste iPhone e escolhes o que permitir no ecrã seguinte da Apple." } }
+      }
+    },
+    "Optional access": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Optionaler Zugriff" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Acceso opcional" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Accès facultatif" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Acesso opcional" } }
+      }
+    },
+    "Optionally read weight, body-fat percentage, lean mass and BMI. These slow-changing measurements are not required for Recovery, Sleep Score or Effort.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Lies optional Gewicht, Körperfettanteil, fettfreie Masse und BMI. Diese langsam veränderlichen Messwerte sind für Erholung, Schlafwert oder Belastung nicht erforderlich." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Lee opcionalmente el peso, el porcentaje de grasa corporal, la masa magra y el IMC. Estas mediciones de cambio lento no son necesarias para Recuperación, Puntuación de sueño ni Esfuerzo." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Lisez facultativement le poids, le pourcentage de masse grasse, la masse maigre et l’IMC. Ces mesures évoluant lentement ne sont pas nécessaires pour la Récupération, le Score de sommeil ou l’Effort." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Lê opcionalmente o peso, a percentagem de gordura corporal, a massa magra e o IMC. Estas medições de alteração lenta não são necessárias para Recuperação, Pontuação do sono ou Esforço." } }
+      }
+    },
+    "Optionally share NOOP's minute-level heart rate plus workout energy and distance into Apple Health. This can create many more Health samples.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Teile optional NOOPs minütliche Herzfrequenz sowie Trainingsenergie und -distanz mit Apple Health. Dadurch können deutlich mehr Health-Datenpunkte entstehen." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Comparte opcionalmente con Apple Health la frecuencia cardíaca por minuto de NOOP, además de la energía y la distancia de los entrenamientos. Esto puede crear muchas más muestras de Salud." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Partagez facultativement dans Apple Santé la fréquence cardiaque minute par minute de NOOP, ainsi que l’énergie et la distance des entraînements. Cela peut créer beaucoup plus d’échantillons Santé." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Partilha opcionalmente com a Apple Saúde a frequência cardíaca por minuto do NOOP, além da energia e distância dos treinos. Isto pode criar muito mais amostras de Saúde." } }
+      }
+    },
+    "Project documents included with this build. Available offline.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Projektdokumente in diesem Build. Offline verfügbar." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Documentos del proyecto incluidos en esta compilación. Disponibles sin conexión." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Documents du projet inclus dans cette version. Disponibles hors ligne." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Documentos do projeto incluídos nesta versão. Disponíveis offline." } }
+      }
+    },
+    "Project notices": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Projekthinweise" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Avisos del proyecto" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Avis du projet" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Avisos do projeto" } }
+      }
+    },
+    "Project terms, source license, current notices and attribution. Available offline.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Projektbedingungen, Quelllizenz, aktuelle Hinweise und Namensnennung. Offline verfügbar." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Términos del proyecto, licencia del código fuente, avisos actuales y atribución. Disponible sin conexión." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Conditions du projet, licence du code source, avis actuels et attribution. Disponible hors ligne." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Termos do projeto, licença do código-fonte, avisos atuais e atribuição. Disponível offline." } }
+      }
+    },
+    "Requested means NOOP showed Apple's permission sheet; Apple does not reveal which read choices you granted. You can change them in Settings › Health › Data Access & Devices.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "„Angefordert“ bedeutet, dass NOOP Apples Berechtigungsdialog gezeigt hat; Apple teilt nicht mit, welche Leserechte du erteilt hast. Du kannst sie unter Einstellungen › Health › Datenzugriff & Geräte ändern." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Solicitado significa que NOOP mostró la hoja de permisos de Apple; Apple no revela qué opciones de lectura concediste. Puedes cambiarlas en Ajustes › Salud › Acceso a datos y dispositivos." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Demandé signifie que NOOP a affiché la feuille d’autorisations d’Apple ; Apple ne révèle pas les accès en lecture accordés. Vous pouvez les modifier dans Réglages › Santé › Accès aux données et appareils." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Solicitado significa que o NOOP apresentou o ecrã de permissões da Apple; a Apple não revela quais opções de leitura autorizaste. Podes alterá-las em Definições › Saúde › Acesso a dados e dispositivos." } }
+      }
+    },
+    "Source license": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Quelllizenz" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Licencia del código fuente" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Licence du code source" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Licença do código-fonte" } }
+      }
+    },
+    "Start by reading heart rate, HRV, blood oxygen, body and wrist temperature, respiratory rate, sleep, workouts and activity. The core request can also share sleep, workouts, resting heart rate, oxygen and respiratory rate back. Body composition and detailed continuous write-back are separate choices after connecting. NOOP does not upload this data to a NOOP-operated cloud; samples shared into Apple Health follow your Apple Health and iCloud settings.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Beginne mit Herzfrequenz, HRV, Blutsauerstoff, Körper- und Handgelenktemperatur, Atemfrequenz, Schlaf, Trainings und Aktivität. Die Kernanfrage kann auch Schlaf, Trainings, Ruheherzfrequenz, Sauerstoff und Atemfrequenz zurückschreiben. Körperzusammensetzung und detailliertes kontinuierliches Zurückschreiben sind nach dem Verbinden separate Optionen. NOOP lädt diese Daten nicht in eine von NOOP betriebene Cloud hoch; in Apple Health geteilte Daten folgen deinen Apple-Health- und iCloud-Einstellungen." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Empieza leyendo la frecuencia cardíaca, la VFC, el oxígeno en sangre, la temperatura corporal y de la muñeca, la frecuencia respiratoria, el sueño, los entrenamientos y la actividad. La solicitud básica también puede compartir sueño, entrenamientos, frecuencia en reposo, oxígeno y frecuencia respiratoria. La composición corporal y la escritura continua detallada son opciones separadas tras conectar. NOOP no sube estos datos a una nube operada por NOOP; las muestras compartidas con Apple Health se rigen por tus ajustes de Apple Health e iCloud." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Commencez par lire la fréquence cardiaque, la VFC, l’oxygène sanguin, la température corporelle et du poignet, la fréquence respiratoire, le sommeil, les entraînements et l’activité. La demande principale peut aussi partager le sommeil, les entraînements, la fréquence au repos, l’oxygène et la fréquence respiratoire. La composition corporelle et l’écriture continue détaillée sont des choix séparés après la connexion. NOOP n’envoie pas ces données vers un cloud exploité par NOOP ; les échantillons partagés avec Apple Santé suivent vos réglages Apple Santé et iCloud." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Começa por ler frequência cardíaca, VFC, oxigénio no sangue, temperatura corporal e do pulso, frequência respiratória, sono, treinos e atividade. O pedido principal também pode partilhar sono, treinos, frequência cardíaca em repouso, oxigénio e frequência respiratória. A composição corporal e a escrita contínua detalhada são opções separadas após a ligação. O NOOP não envia estes dados para uma nuvem operada pelo NOOP; as amostras partilhadas com a Apple Saúde seguem as tuas definições da Apple Saúde e do iCloud." } }
+      }
+    },
+    "This legal document is missing from the app bundle. Please report the build number from Settings so the packaging can be corrected.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Dieses Rechtsdokument fehlt im App-Bundle. Bitte melde die Build-Nummer aus den Einstellungen, damit die Paketierung korrigiert werden kann." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Falta este documento legal en el paquete de la app. Informa del número de compilación que aparece en Ajustes para que se pueda corregir el empaquetado." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Ce document juridique manque dans le paquet de l’app. Signalez le numéro de build indiqué dans Réglages afin que l’empaquetage puisse être corrigé." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Este documento legal não está incluído no pacote da app. Comunica o número da compilação apresentado nas Definições para que o empacotamento possa ser corrigido." } }
+      }
+    },
+    "When this is on, NOOP rewrites a plain-text file (On My iPhone › NOOP › noop_sync.txt) each time you leave the app: one line per 15 minutes of heart rate and steps, read straight from your strap. The legacy HRV field stays blank because strap RMSSD is not Apple Health's SDNN metric. Pair it with the Siri Shortcut that reads the file and logs the compatible values into Apple Health (no HealthKit entitlement needed), so it works on sideloaded installs. The setup guide and the pre-built Shortcut live in the project wiki on GitHub.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wenn dies aktiviert ist, schreibt NOOP bei jedem Verlassen der App eine Textdatei neu (Auf meinem iPhone › NOOP › noop_sync.txt): eine Zeile je 15 Minuten Herzfrequenz und Schritte, direkt vom Band gelesen. Das bisherige HRV-Feld bleibt leer, weil der RMSSD des Bands nicht Apples Health-SDNN entspricht. Kombiniere es mit dem Siri-Kurzbefehl, der die Datei liest und kompatible Werte in Apple Health protokolliert (keine HealthKit-Berechtigung nötig), sodass es auch bei Sideload-Installationen funktioniert. Anleitung und fertiger Kurzbefehl stehen im Projekt-Wiki auf GitHub." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Al activarlo, NOOP vuelve a escribir un archivo de texto (En mi iPhone › NOOP › noop_sync.txt) cada vez que sales de la app: una línea por cada 15 minutos de frecuencia cardíaca y pasos, leídos directamente de la pulsera. El antiguo campo de VFC queda vacío porque el RMSSD de la pulsera no es el SDNN de Apple Health. Úsalo con el atajo de Siri que lee el archivo y registra los valores compatibles en Apple Health (sin necesidad del permiso de HealthKit), por lo que funciona con instalaciones externas. La guía y el atajo preparado están en la wiki del proyecto en GitHub." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Lorsque cette option est activée, NOOP réécrit un fichier texte (Sur mon iPhone › NOOP › noop_sync.txt) chaque fois que vous quittez l’app : une ligne par tranche de 15 minutes pour la fréquence cardiaque et les pas, lus directement depuis le bracelet. L’ancien champ VFC reste vide, car le RMSSD du bracelet n’est pas le SDNN d’Apple Santé. Associez-le au raccourci Siri qui lit le fichier et consigne les valeurs compatibles dans Apple Santé (aucune autorisation HealthKit requise), ce qui fonctionne avec les installations sideloadées. Le guide et le raccourci prêt à l’emploi se trouvent dans le wiki du projet sur GitHub." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Quando esta opção está ativa, o NOOP reescreve um ficheiro de texto simples (No meu iPhone › NOOP › noop_sync.txt) sempre que sais da app: uma linha por cada 15 minutos de frequência cardíaca e passos, lidos diretamente da pulseira. O campo antigo de VFC fica vazio porque o RMSSD da pulseira não é o SDNN da Apple Saúde. Usa-o com o Atalho Siri que lê o ficheiro e regista os valores compatíveis na Apple Saúde (sem necessidade de permissão HealthKit), pelo que funciona em instalações externas. O guia e o Atalho preparado estão no wiki do projeto no GitHub." } }
+      }
+    },
+    "7-day mean divided by the 28-day mean of recorded strain. Descriptive context, not Training Stress Balance or an injury-risk threshold.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "7-Tage-Mittel geteilt durch das 28-Tage-Mittel der aufgezeichneten Belastung. Beschreibender Kontext, keine Trainingsbelastungsbilanz und keine Verletzungsrisiko-Schwelle."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Media de 7 días dividida por la media de 28 días del esfuerzo registrado. Es un contexto descriptivo, no un balance de carga de entrenamiento ni un umbral de riesgo de lesión."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Moyenne sur 7 jours divisée par la moyenne sur 28 jours de l’effort enregistré. Il s’agit d’un contexte descriptif, pas d’un équilibre de charge d’entraînement ni d’un seuil de risque de blessure."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Média de 7 dias dividida pela média de 28 dias do esforço registado. É um contexto descritivo, não um balanço da carga de treino nem um limiar de risco de lesão."
+          }
+        }
+      }
+    },
+    "Document": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dokument"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Documento"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Document"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Documento"
+          }
+        }
+      }
+    },
+    "Legal & acknowledgements": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rechtliches & Danksagungen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avisos legales y reconocimientos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mentions légales et remerciements"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Informação legal e agradecimentos"
+          }
+        }
+      }
+    },
+    "Legal and acknowledgements": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rechtliches und Danksagungen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avisos legales y reconocimientos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mentions légales et remerciements"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Informação legal e agradecimentos"
+          }
+        }
+      }
+    },
+    "Protocol research & lineage": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Protokollforschung & Herkunft"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Investigación del protocolo y procedencia"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recherche sur le protocole et filiation"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Investigação do protocolo e proveniência"
+          }
+        }
+      }
+    },
+    "See Legal & acknowledgements for exact provenance, notices and license scope.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unter „Rechtliches & Danksagungen“ findest du die genaue Herkunft, Hinweise und den Lizenzumfang."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Consulta Avisos legales y reconocimientos para ver la procedencia exacta, los avisos y el alcance de las licencias."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Consultez Mentions légales et remerciements pour connaître la provenance exacte, les avis et la portée des licences."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Consulta Informação legal e agradecimentos para veres a proveniência exata, os avisos e o âmbito das licenças."
+          }
+        }
+      }
+    },
+    "Terms, source license, third-party notices and attribution. Available offline.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nutzungsbedingungen, Quelllizenz, Hinweise Dritter und Namensnennungen. Offline verfügbar."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Términos, licencia del código fuente, avisos de terceros y atribuciones. Disponible sin conexión."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conditions, licence du code source, avis de tiers et attributions. Disponible hors ligne."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Termos, licença do código-fonte, avisos de terceiros e atribuições. Disponível offline."
+          }
+        }
+      }
+    },
     "%@ to %@ · error is Noop minus official · RMSE %@": {
       "localizations": {
         "de": {
@@ -11299,6 +11647,58 @@
         }
       }
     },
+    "%lld weight values skipped (add kg or lb to the column)": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Gewichtswerte übersprungen (kg oder lb zur Spaltenüberschrift hinzufügen)"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld valores de peso omitidos (añade kg o lb a la columna)"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld valeurs de poids ignorées (ajoutez kg ou lb à la colonne)"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld valori di peso ignorati (aggiungi kg o lb alla colonna)"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld valores de peso ignorados (adicione kg ou lb à coluna)"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld значений веса пропущено (добавьте kg или lb в заголовок столбца)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已跳过 %lld 个体重值（请在列名中添加 kg 或 lb）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已略過 %lld 個體重值（請在欄名中加入 kg 或 lb）"
+          }
+        }
+      }
+    },
     "%lld seconds remaining in %@": {
       "localizations": {
         "de": {
@@ -15064,6 +15464,58 @@
           "stringUnit": {
             "state": "translated",
             "value": "已略過 1 列"
+          }
+        }
+      }
+    },
+    "1 weight value skipped (add kg or lb to the column)": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 Gewichtswert übersprungen (kg oder lb zur Spaltenüberschrift hinzufügen)"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 valor de peso omitido (añade kg o lb a la columna)"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 valeur de poids ignorée (ajoutez kg ou lb à la colonne)"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 valore di peso ignorato (aggiungi kg o lb alla colonna)"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 valor de peso ignorado (adicione kg ou lb à coluna)"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 значение веса пропущено (добавьте kg или lb в заголовок столбца)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已跳过 1 个体重值（请在列名中添加 kg 或 lb）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已略過 1 個體重值（請在欄名中加入 kg 或 lb）"
           }
         }
       }
@@ -92574,6 +93026,58 @@
         }
       }
     },
+    "No weight imported: label the weight column kg or lb.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kein Gewicht importiert: Beschrifte die Gewichtsspalte mit kg oder lb."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se importó ningún peso: indica kg o lb en la columna de peso."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucun poids importé : indiquez kg ou lb dans la colonne de poids."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nessun peso importato: indica kg o lb nella colonna del peso."
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhum peso importado: indique kg ou lb na coluna de peso."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вес не импортирован: укажите kg или lb в заголовке столбца веса."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未导入体重：请在体重列中注明 kg 或 lb。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未匯入體重：請在體重欄中註明 kg 或 lb。"
+          }
+        }
+      }
+    },
     "No usable rows found. Check the file has a date column (yyyy-MM-dd) and daily totals.": {
       "localizations": {
         "de": {
@@ -133674,6 +134178,42 @@
         }
       }
     },
+    "Read the full terms": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Vollständige Bedingungen lesen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Leer los términos completos" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Lire les conditions complètes" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Leggi i termini completi" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Ler os termos completos" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Прочитать полные условия" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "阅读完整条款" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "閱讀完整條款" } }
+      }
+    },
+    "The full terms are included with this build and open offline. This is not legal advice.": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Die vollständigen Bedingungen sind in diesem Build enthalten und offline verfügbar. Dies ist keine Rechtsberatung." } },
+        "es": { "stringUnit": { "state": "translated", "value": "Los términos completos están incluidos en esta compilación y se pueden abrir sin conexión. Esto no es asesoramiento legal." } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Les conditions complètes sont incluses dans cette version et accessibles hors ligne. Ceci ne constitue pas un conseil juridique." } },
+        "it": { "stringUnit": { "state": "translated", "value": "I termini completi sono inclusi in questa build e disponibili offline. Questa non è una consulenza legale." } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Os termos completos estão incluídos nesta versão e podem ser abertos offline. Isto não é aconselhamento jurídico." } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Полные условия включены в эту сборку и доступны без подключения к сети. Это не юридическая консультация." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "完整条款已包含在此版本中，可离线打开。这不构成法律建议。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "完整條款已包含在此版本中，可離線開啟。這不構成法律建議。" } }
+      }
+    },
+    "Terms of use": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Nutzungsbedingungen" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Términos de uso" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Conditions d’utilisation" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Termini di utilizzo" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Termos de utilização" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Условия использования" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "使用条款" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "使用條款" } }
+      }
+    },
     "The honest catch: a watch isn't a chest strap. It's brilliant at sleep, steps, workouts and fitness, and lighter on the dense heart-rate-variability a strap measures all night. So recovery takes about a week to calibrate, and a couple of metrics depend on your watch model. NOOP is upfront about all of it. Every watch-derived number carries a confidence, and where the watch can't be honest, NOOP shows nothing instead of a made-up figure.": {
       "localizations": {
         "de": {
@@ -158351,60 +158891,60 @@
         }
       }
     },
-    "load %@": {
+    "ratio %@": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Last %@"
+            "value": "Verhältnis %@"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "load %@"
+            "value": "ratio %@"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "carga %@"
+            "value": "proporción %@"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "charge %@"
+            "value": "ratio %@"
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "carico %@"
+            "value": "rapporto %@"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "carregar %@"
+            "value": "rácio %@"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "нагрузка %@"
+            "value": "соотношение %@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "负荷 %@"
+            "value": "比值 %@"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "負荷 %@"
+            "value": "比值 %@"
           }
         }
       }

@@ -1593,7 +1593,7 @@ private struct LiveLogCard: View {
     // The strap-log text builder lives on LiveState (`exportableLogText()`) so the macOS Settings
     // shortcut shares the exact same output (#17 / #507). These stay as thin wrappers.
     private func copyStrapLog() {
-        PlatformPasteboard.copy(live.exportableLogText())
+        FileExport.copyDiagnosticText(live.exportableLogText())
     }
 
     private func saveStrapLog() {

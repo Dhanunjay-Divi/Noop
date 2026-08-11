@@ -32,13 +32,14 @@ final class WorkoutSourceTests: XCTestCase {
                        .ask, "a corrupt raw value falls back to the user's legacy choice")
     }
 
-    func testUnattendedSaveUsesAStricterDurationGate() {
+    func testUncalibratedCandidatesNeverSaveUnattended() {
         let short = DetectedWorkout(startSec: 1_000, endSec: 1_840, avgBpm: 130,
                                     peakBpm: 160, durationMin: 14)
-        let confident = DetectedWorkout(startSec: 1_000, endSec: 1_900, avgBpm: 130,
-                                        peakBpm: 160, durationMin: 15)
+        let longButUncalibrated = DetectedWorkout(
+            startSec: 1_000, endSec: 1_900, avgBpm: 130, peakBpm: 160, durationMin: 15,
+            eventConfidence: 0.99, confidenceStatus: .uncalibrated)
         XCTAssertFalse(AutoWorkoutAutomationPolicy.shouldAutoSave(short))
-        XCTAssertTrue(AutoWorkoutAutomationPolicy.shouldAutoSave(confident))
+        XCTAssertFalse(AutoWorkoutAutomationPolicy.shouldAutoSave(longButUncalibrated))
     }
 
     private func row(start: Int, end: Int, sport: String, source: String,

@@ -132,6 +132,12 @@ public enum StrainScorer {
 
     // MARK: - TRIMP accumulation
 
+    /// Longest span (minutes) a single reading may be credited with. A wear or connection dropout
+    /// leaves a gap with no data in it; without a ceiling the last reading before the gap would be
+    /// credited with the whole hole, so one high-HR sample could invent hours of effort. Two minutes
+    /// is four times the sparsest expected WHOOP 5/MG cadence (~30 s), so real samples are preserved.
+    public static let maxSampleGapMin: Double = 2.0
+
     /// Resolve the one Effort value every Today read-out must show. Today's live recompute can lead a
     /// stale daily row, but it can also under-read sparse HR; Effort accrues, so never drop below the
     /// value already stored for the day. Past days pass `nil` for `live`.
@@ -143,25 +149,73 @@ public enum StrainScorer {
 
     /// Infer per-sample duration (minutes) from the first two timestamps. Falls
     /// back to 1 s when fewer than two samples or coincident timestamps.
+    ///
+    /// Production TRIMP uses `sampleDurationsMinutes`; this helper remains so the uniform-cadence
+    /// regression can compare the new integration against the previously shipped formula.
     static func sampleDurationMinutes(_ hr: [HRSample]) -> Double {
         guard hr.count >= 2 else { return fallbackSampleMin }
-        let deltaS = abs(Double(hr[1].ts - hr[0].ts))
+        // Convert before subtraction so adversarial Int64 endpoints cannot overflow.
+        let deltaS = abs(Double(hr[1].ts) - Double(hr[0].ts))
         return deltaS > 0 ? deltaS / 60.0 : fallbackSampleMin
     }
 
+    /// Give every sample its own adjacent interval. Each reading covers the gap to its successor,
+    /// capped at `maxSampleGapMin`; the final reading reuses the preceding real cadence because it has
+    /// no successor. Coincident timestamps retain the historical one-second fallback.
+    ///
+    /// A single duration inferred from the first pair is incorrect for NOOP's mixed live (~1 s),
+    /// banked (~30 s), and dropout-prone streams. Per-interval integration also keeps a workout window
+    /// comparable with the day containing it even when the two windows begin at different cadences.
+    static func sampleDurationsMinutes(_ hr: [HRSample]) -> [Double] {
+        if hr.isEmpty { return [] }
+        if hr.count == 1 { return [fallbackSampleMin] }
+
+        var durations: [Double] = []
+        durations.reserveCapacity(hr.count)
+        for index in 0..<(hr.count - 1) {
+            // Convert before subtraction so adversarial Int64 endpoints cannot overflow.
+            let deltaS = abs(Double(hr[index + 1].ts) - Double(hr[index].ts))
+            let minutes = deltaS > 0 ? deltaS / 60.0 : fallbackSampleMin
+            durations.append(min(minutes, maxSampleGapMin))
+        }
+        durations.append(durations[durations.count - 1])
+        return durations
+    }
+
+    /// Seconds represented by genuinely adjacent samples. Gaps beyond the hold ceiling are treated as
+    /// missing, not as observed coverage. This prevents a handful of isolated readings spread across
+    /// hours from satisfying the ten-minute quality gate.
+    static func observedCoverageSeconds(_ hr: [HRSample]) -> Double {
+        guard hr.count >= 2 else { return 0 }
+        let maximumGapSeconds = maxSampleGapMin * 60
+        return zip(hr, hr.dropFirst()).reduce(0.0) { total, pair in
+            let gap = Double(pair.1.ts) - Double(pair.0.ts)
+            guard gap > 0, gap <= maximumGapSeconds else { return total }
+            return total + gap
+        }
+    }
+
     static func edwardsTRIMP(_ hr: [HRSample], restingHR: Double, hrReserve: Double,
-                             sampleDurationMin: Double) -> Double {
-        var weighted = 0
-        for s in hr { weighted += zoneWeight(Double(s.bpm), restingHR: restingHR, hrReserve: hrReserve) }
-        return Double(weighted) * sampleDurationMin
+                             durations: [Double]) -> Double {
+        let pairedCount = min(hr.count, durations.count)
+        guard pairedCount > 0 else { return 0 }
+        var accumulated = 0.0
+        for index in 0..<pairedCount {
+            accumulated += Double(zoneWeight(Double(hr[index].bpm),
+                                             restingHR: restingHR,
+                                             hrReserve: hrReserve)) * durations[index]
+        }
+        return accumulated
     }
 
     static func banisterTRIMP(_ hr: [HRSample], restingHR: Double, hrReserve: Double,
-                              sampleDurationMin: Double, b: Double) -> Double {
+                              durations: [Double], b: Double) -> Double {
+        let pairedCount = min(hr.count, durations.count)
+        guard pairedCount > 0 else { return 0 }
         var acc = 0.0
-        for s in hr {
-            let x = pctHRR(Double(s.bpm), restingHR: restingHR, hrReserve: hrReserve) / 100.0
-            if x > 0 { acc += sampleDurationMin * x * banisterScale * exp(b * x) }
+        for index in 0..<pairedCount {
+            let x = pctHRR(Double(hr[index].bpm), restingHR: restingHR, hrReserve: hrReserve) / 100.0
+            if x > 0 { acc += durations[index] * x * banisterScale * exp(b * x) }
         }
         return acc
     }
@@ -234,6 +288,40 @@ public enum StrainScorer {
         }
     }
 
+    /// Workout-bounded Effort using an explicit per-sample duration vector. The general public scorer
+    /// keeps its inferred-tail behavior for day/live callers; imported workouts instead pass their one
+    /// half-open `[start, end)` vector so TRIMP cannot extend beyond the workout boundary.
+    static func strain(_ hr: [HRSample],
+                       durationsMinutes: [Double],
+                       maxHR: Double? = nil,
+                       restingHR: Double = defaultRestingHR,
+                       method: Method = .edwards,
+                       sex: String = "male",
+                       denominator: Double = strainDenominator) -> Double? {
+        guard durationsMinutes.count == hr.count else { return nil }
+        let coverageSeconds = durationsMinutes.reduce(0.0) { total, duration in
+            guard duration.isFinite, duration > 0 else { return total }
+            return total + duration * 60.0
+        }
+        let effMax = maxHR ?? Double(defaultMaxHR())
+        let enoughData = hr.count >= minSparseReadings
+            && coverageSeconds >= Double(minSpanSeconds - 1)
+        guard enoughData, effMax > restingHR else { return nil }
+
+        let hrReserve = effMax - restingHR
+        let trimp: Double
+        switch method {
+        case .banister:
+            let b = sex.lowercased().hasPrefix("f") ? banisterBWomen : banisterBMen
+            trimp = banisterTRIMP(hr, restingHR: restingHR, hrReserve: hrReserve,
+                                  durations: durationsMinutes, b: b)
+        case .edwards:
+            trimp = edwardsTRIMP(hr, restingHR: restingHR, hrReserve: hrReserve,
+                                 durations: durationsMinutes)
+        }
+        return trimpToStrain(trimp, denominator: denominator)
+    }
+
     /// Key folds `sex` to the single bit the recipe reads (`hasPrefix("f")`) so "female"/"f"/"F" all hit.
     private struct StrainKey: Hashable {
         let hr: StreamFingerprint
@@ -245,20 +333,13 @@ public enum StrainScorer {
     private static func strainUncached(_ hr: [HRSample], maxHR: Double?, restingHR: Double,
                                        method: Method, sex: String, denominator: Double) -> Double? {
         let effMax = maxHR ?? Double(defaultMaxHR())
-        // Enough data to trust the score: a dense stream (≥ minReadings) OR a sparse-but-sustained
-        // one spanning ≥ minSpanSeconds with a sample floor (#482 — the 5/MG's ~30 s HR cadence).
-        let enoughData: Bool
-        if hr.count >= minReadings {
-            enoughData = true
-        } else if hr.count >= minSparseReadings {
-            let tss = hr.map { $0.ts }
-            enoughData = ((tss.max() ?? 0) - (tss.min() ?? 0)) >= minSpanSeconds
-        } else {
-            enoughData = false
-        }
+        // Dense and sparse streams both need roughly ten minutes of genuinely adjacent coverage.
+        // A count/span-only gate lets isolated hourly readings masquerade as continuous wear.
+        let enoughData = hr.count >= minSparseReadings
+            && observedCoverageSeconds(hr) >= Double(minSpanSeconds - 1)
         if !enoughData || effMax <= restingHR { return nil }
 
-        let sampleDur = sampleDurationMinutes(hr)
+        let durations = sampleDurationsMinutes(hr)
         let hrReserve = effMax - restingHR
 
         let trimp: Double
@@ -266,10 +347,10 @@ public enum StrainScorer {
         case .banister:
             let b = sex.lowercased().hasPrefix("f") ? banisterBWomen : banisterBMen
             trimp = banisterTRIMP(hr, restingHR: restingHR, hrReserve: hrReserve,
-                                  sampleDurationMin: sampleDur, b: b)
+                                  durations: durations, b: b)
         case .edwards:
             trimp = edwardsTRIMP(hr, restingHR: restingHR, hrReserve: hrReserve,
-                                 sampleDurationMin: sampleDur)
+                                 durations: durations)
         }
         return trimpToStrain(trimp, denominator: denominator)
     }

@@ -1,14 +1,15 @@
 import SwiftUI
 import StrandDesign
 
-/// First-run acknowledgment gate (clickwrap). Shown over EVERYTHING — before onboarding, pairing, or
-/// any Bluetooth access — until the current `Terms.currentVersion` is accepted, and again if the
+/// First-run acknowledgment gate (clickwrap). Shown over the operational app shell — before onboarding
+/// or any user-initiated pairing — until the current `Terms.currentVersion` is accepted, and again if the
 /// terms materially change. The user must tick the (un-pre-checked) box and tap Accept; the accepted
 /// version is then stored locally, the on-device equivalent of a consent record. See `Terms` / `TERMS.md`.
 struct TermsGateView: View {
     let onAccept: () -> Void
     /// One flag per `Terms.attestations` entry; every one must be ticked before Accept enables.
     @State private var checks: [Bool] = Array(repeating: false, count: Terms.attestations.count)
+    @State private var showingFullTerms = false
 
     private var allChecked: Bool { checks.allSatisfy { $0 } }
 
@@ -65,10 +66,17 @@ struct TermsGateView: View {
                             #endif
                         }
 
-                        Text("The full terms are in TERMS.md, shipped with NOOP. This is not legal advice.")
+                        Button {
+                            showingFullTerms = true
+                        } label: {
+                            Label("Read the full terms", systemImage: "doc.text")
+                                .font(StrandFont.headline)
+                        }
+                        .buttonStyle(.bordered)
+
+                        Text("The full terms are included with this build and open offline. This is not legal advice.")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
-                            .padding(.top, 2)
                     }
                     .padding(.horizontal, 30)
                     .padding(.bottom, 18)
@@ -98,6 +106,41 @@ struct TermsGateView: View {
             #else
             .frame(maxWidth: 560, maxHeight: 720)
             #endif
+        }
+        .sheet(isPresented: $showingFullTerms) {
+            BundledTermsView()
+        }
+    }
+}
+
+private struct BundledTermsView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    private var terms: String {
+        guard let url = Bundle.main.url(forResource: "TERMS", withExtension: "md"),
+              let text = try? String(contentsOf: url, encoding: .utf8) else {
+            return String(localized: "The bundled terms could not be opened. Do not accept until you can review TERMS.md in the NOOP source package.")
+        }
+        return text
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                Text(terms)
+                    .font(StrandFont.mono(11))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(24)
+            }
+            .background(StrandPalette.surfaceBase.ignoresSafeArea())
+            .navigationTitle("Terms of use")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
     }
 }

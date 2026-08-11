@@ -292,6 +292,13 @@ internal fun Map<String, Any?>.intOrNull(key: String): Int? = when (val v = this
     else -> null
 }
 
+/** Read an integral parsed value without narrowing an unsigned-u32-backed Long. */
+internal fun Map<String, Any?>.longOrNull(key: String): Long? = when (val v = this[key]) {
+    is Long -> v
+    is Int -> v.toLong()
+    else -> null
+}
+
 internal fun Map<String, Any?>.doubleOrNull(key: String): Double? = when (val v = this[key]) {
     is Double -> v
     is Int -> v.toDouble()

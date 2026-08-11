@@ -28,6 +28,7 @@ struct StrandiOSApp: App {
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
     /// Chart data-colour style (Titanium / Classic throwback). Re-colours gauges + charts.
     @AppStorage(ChartStyle.storageKey) private var chartStyleRaw = ChartStyle.titanium.rawValue
+    @AppStorage("noop.acceptedTermsVersion") private var acceptedTermsVersion = ""
 
     init() {
         PuffinExperiment.migrateContinuousHrvOvernightDefault()
@@ -72,7 +73,16 @@ struct StrandiOSApp: App {
         WindowGroup {
             iOSRootView()
                 .environmentObject(model)
-                .onAppear { model.setRealtimeForeground(scenePhase == .active) }
+                .onAppear {
+                    model.setRealtimeForeground(
+                        acceptedTermsVersion == Terms.currentVersion && scenePhase == .active
+                    )
+                }
+                .onChange(of: acceptedTermsVersion) { _, version in
+                    model.setRealtimeForeground(
+                        version == Terms.currentVersion && scenePhase == .active
+                    )
+                }
                 .environmentObject(model.ble)   // #334: Today pull-to-sync reads BLEManager (no HR churn)
                 .environmentObject(model.live)
                 .environmentObject(model.repo)
@@ -209,6 +219,10 @@ struct StrandiOSApp: App {
             // Dense Live/workout/session streaming is foreground-only. Logical leases survive so the
             // same visible opted-in session resumes on return; connection/history sync and the separate
             // Continuous HRV background preference are intentionally unaffected.
+            guard acceptedTermsVersion == Terms.currentVersion else {
+                model.setRealtimeForeground(false)
+                return
+            }
             model.setRealtimeForeground(phase == .active)
             if phase == .active {
                 model.drainPendingIntents()
@@ -254,6 +268,7 @@ private struct iOSRootView: View {
     @AppStorage("noop.onboarded") private var onboarded = false
     @AppStorage("noop.lastSeenChangelogVersion") private var lastSeenChangelog = ""
     @AppStorage("noop.acceptedTermsVersion") private var acceptedTerms = ""
+    @AppStorage("noop.acceptedTermsAt") private var acceptedTermsAt = ""
     /// Intentionally process-scoped: the trial disclosure appears on every cold launch,
     /// without creating an account or persisting another consent identifier.
     @State private var trialNoticeAcknowledgedThisLaunch = false
@@ -281,8 +296,14 @@ private struct iOSRootView: View {
 
     private var shell: some View {
         ZStack {
-            RootTabView()
-            if !onboarded && !demoBypass {
+            // Do not mount the operational shell before clickwrap acceptance. RootTabView starts repository
+            // refresh, backup catch-up and optional remote sync from its task modifier.
+            if acceptedTerms == Terms.currentVersion || demoBypass {
+                RootTabView()
+            } else {
+                StrandPalette.surfaceBase.ignoresSafeArea()
+            }
+            if acceptedTerms == Terms.currentVersion && !onboarded && !demoBypass {
                 OnboardingWizard(onFinished: {
                     onboarded = true
                     // A brand-new user just saw the expectations in onboarding — don't also pop the
@@ -292,10 +313,13 @@ private struct iOSRootView: View {
                 .transition(.opacity)
                 .zIndex(1)
             }
-            // Terms acknowledgment gate — over EVERYTHING (before onboarding/pairing/Bluetooth) until
+            // Terms acknowledgment gate — before onboarding or the operational shell until
             // the current terms version is accepted; re-appears if the terms materially change.
             if acceptedTerms != Terms.currentVersion && !demoBypass {
-                TermsGateView(onAccept: { acceptedTerms = Terms.currentVersion })
+                TermsGateView(onAccept: {
+                    acceptedTermsAt = ISO8601DateFormatter().string(from: Date())
+                    acceptedTerms = Terms.currentVersion
+                })
                     .transition(.opacity)
                     .zIndex(2)
             }

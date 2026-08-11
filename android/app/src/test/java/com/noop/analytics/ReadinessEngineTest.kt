@@ -2,6 +2,7 @@ package com.noop.analytics
 
 import com.noop.data.DailyMetric
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -65,7 +66,13 @@ class ReadinessEngineTest {
         assertEquals(ReadinessEngine.Level.PRIMED, r.level)
         assertEquals(ReadinessEngine.Flag.GOOD, r.signals.firstOrNull { it.key == "hrv" }?.flag)
         assertEquals(ReadinessEngine.Flag.GOOD, r.signals.firstOrNull { it.key == "rhr" }?.flag)
-        assertEquals(ReadinessEngine.Flag.GOOD, r.signals.firstOrNull { it.key == "acwr" }?.flag)
+        assertEquals(ReadinessEngine.Flag.NEUTRAL, r.signals.firstOrNull { it.key == "acwr" }?.flag)
+        assertEquals(
+            "Your measured recovery trends are aligned with your recent baseline.",
+            r.summary,
+        )
+        assertFalse(r.summary.contains("load", ignoreCase = true))
+        assertFalse(r.summary.contains("train", ignoreCase = true))
     }
 
     @Test
@@ -76,17 +83,41 @@ class ReadinessEngineTest {
     }
 
     @Test
-    fun acwrSpikeStrains() {
-        // Recovery signals neutral, but acute load spikes above chronic.
+    fun recentLoadSpikeIsDescriptiveOnly() {
+        // With no evaluable recovery signals, even an extreme ratio remains context—not readiness.
         val days = mutableListOf<DailyMetric>()
         for (i in 1..21) days.add(d(i, hrv = 60.0, rhr = 52, strain = 5.0))
         for (i in 22..28) days.add(d(i, hrv = 60.0, rhr = 52, strain = 15.0))
         days.add(d(29, hrv = 60.0, rhr = 52, strain = 15.0))
         val r = ReadinessEngine.evaluate(days)
-        assertEquals(ReadinessEngine.Flag.BAD, r.signals.firstOrNull { it.key == "acwr" }?.flag)
-        assertEquals(ReadinessEngine.Level.STRAINED, r.level)
+        assertEquals(ReadinessEngine.Flag.NEUTRAL, r.signals.firstOrNull { it.key == "acwr" }?.flag)
+        assertEquals(ReadinessEngine.Level.INSUFFICIENT, r.level)
         assertNotNull(r.acwr)
         assertTrue(r.acwr!! > 1.5)
+        val load = r.signals.firstOrNull { it.key == "acwr" }
+        assertEquals("Recent-load ratio", load?.label)
+        assertTrue(load?.detail?.contains("7-day mean is") == true)
+        assertFalse(load?.detail?.contains("injury", ignoreCase = true) == true)
+        assertFalse(load?.detail?.contains("sweet spot", ignoreCase = true) == true)
+        assertFalse(r.summary.contains("train", ignoreCase = true))
+    }
+
+    @Test
+    fun recentLoadRatioCannotChangeRecoveryDrivenReadiness() {
+        val steady = baseline(todayHrv = 72.0, todayRhr = 46, todayStrain = 10.0)
+        val spiking = steady.mapIndexed { index, row ->
+            // Eight identical final-field changes used to cancel in the XOR cache fingerprint.
+            if (index >= 21) row.copy(strain = 100.0) else row
+        }
+
+        val steadyReadiness = ReadinessEngine.evaluate(steady)
+        val spikeReadiness = ReadinessEngine.evaluate(spiking)
+        assertEquals(ReadinessEngine.Level.PRIMED, steadyReadiness.level)
+        assertEquals(steadyReadiness.level, spikeReadiness.level)
+        assertEquals(steadyReadiness.headline, spikeReadiness.headline)
+        assertEquals(steadyReadiness.summary, spikeReadiness.summary)
+        assertEquals(ReadinessEngine.Flag.NEUTRAL, spikeReadiness.signals.first { it.key == "acwr" }.flag)
+        assertTrue(spikeReadiness.acwr!! > steadyReadiness.acwr!!)
     }
 
     @Test
@@ -121,6 +152,70 @@ class ReadinessEngineTest {
         assertTrue(ReadinessEngine.evaluate(days, today = "2024-03-29").level != ReadinessEngine.Level.INSUFFICIENT)
         // The legacy no-`today` path is unchanged — still falls back to the most recent row.
         assertTrue(ReadinessEngine.evaluate(days).level != ReadinessEngine.Level.INSUFFICIENT)
+    }
+
+    @Test
+    fun historicalReadinessIgnoresFutureLoadRows() {
+        val days = baseline(todayHrv = 60.0, todayRhr = 52, todayStrain = 10.0).toMutableList()
+        val historical = ReadinessEngine.evaluate(days, today = "2024-03-29")
+        days.add(
+            DailyMetric(
+                deviceId = "test", day = "2024-03-30", restingHr = 52, avgHrv = 60.0,
+                strain = 100.0, respRateBpm = 14.0,
+            )
+        )
+
+        val withFuture = ReadinessEngine.evaluate(days, today = "2024-03-29")
+        assertEquals(historical.acwr, withFuture.acwr)
+        assertEquals(
+            historical.signals.firstOrNull { it.key == "acwr" },
+            withFuture.signals.firstOrNull { it.key == "acwr" },
+        )
+    }
+
+    @Test
+    fun sparseRowsAcrossMonthsDoNotBecomeTwentyEightDayLoad() {
+        val days = mutableListOf<DailyMetric>()
+        for (month in 1..12) {
+            for (day in listOf(1, 15)) {
+                days.add(
+                    DailyMetric(
+                        deviceId = "test", day = "2024-%02d-%02d".format(month, day),
+                        restingHr = 52, avgHrv = 60.0, strain = 10.0, respRateBpm = 14.0,
+                    )
+                )
+            }
+        }
+
+        val result = ReadinessEngine.evaluate(days, today = "2024-12-15")
+        assertNull(result.acwr)
+        assertTrue(result.signals.none { it.key == "acwr" })
+    }
+
+    @Test
+    fun trainingLoadContextRequiresSeparateAdditiveInput() {
+        val days = baseline(todayHrv = 60.0, todayRhr = 52, todayStrain = 10.0)
+        // DailyMetric.strain exists, but a nonlinear score must never silently feed ATL/CTL.
+        val withoutAdditiveLoad = ReadinessEngine.evaluate(
+            days = days,
+            today = "2024-03-29",
+            additiveLoadEntries = emptyList(),
+        )
+        assertNull(withoutAdditiveLoad.trainingLoad)
+
+        val additive = (1..29).map {
+            TrainingLoadModel.Entry("2024-03-%02d".format(it), 50.0)
+        }
+        val withAdditiveLoad = ReadinessEngine.evaluate(
+            days = days,
+            today = "2024-03-29",
+            additiveLoadEntries = additive,
+        )
+        assertEquals(ReadinessEngine.evaluate(days, today = "2024-03-29"), withAdditiveLoad.readiness)
+        assertEquals("2024-03-29", withAdditiveLoad.trainingLoad?.day)
+        assertEquals(50.0, withAdditiveLoad.trainingLoad?.atl!!, 0.0)
+        assertEquals(50.0, withAdditiveLoad.trainingLoad?.ctl!!, 0.0)
+        assertEquals(0.0, withAdditiveLoad.trainingLoad?.tsb!!, 0.0)
     }
 
     @Test

@@ -7,9 +7,11 @@ import StrandAnalytics
 /// can't carry the HealthKit entitlement, so HealthKitBridge never runs for sideloaders. Instead,
 /// NOOP drops a plain-text file at Documents/noop_sync.txt (exposed to Files/Shortcuts via
 /// UIFileSharingEnabled) and the reporter's pre-built Siri Shortcut reads it and logs the rows into
-/// Apple Health. One line per 15-minute window — `HR,HRV,Steps,yyyy-MM-dd HH:mm` — en_US_POSIX,
-/// LOCAL time (the Shortcut parses dates in the device zone), empty fields keep their commas so
-/// column positions are fixed, NO header.
+/// Apple Health. One line per 15-minute window — `HR,[reserved],Steps,yyyy-MM-dd HH:mm` —
+/// en_US_POSIX, LOCAL time (the Shortcut parses dates in the device zone), empty fields keep their
+/// commas so column positions are fixed, NO header. The legacy HRV column is always blank: strap HRV
+/// here is RMSSD, while Apple's writable HealthKit type is SDNN, and relabelling one as the other is
+/// semantic data corruption.
 ///
 /// Reads ONLY the strap source (`repo.deviceId`) — never `apple-health` (a Shortcut-logged value
 /// must not round-trip back in on the next HealthKit/export import) and never the `-noop` computed
@@ -34,8 +36,7 @@ enum ShortcutHealthExport {
     /// daily-steps math (a reset is byte-indistinguishable from a wrap; a huge corrected delta
     /// is a reset, not steps).
     static let maxStepDelta = 30_000
-    /// Row cap for the RR/step reads. 7 days of ~1 Hz RR is ~600k rows; this never truncates a
-    /// real window.
+    /// Row cap retained for bounded sensor reads (currently the cumulative step stream).
     static let readLimit = 2_000_000
 
     enum Outcome: Equatable {
@@ -48,7 +49,9 @@ enum ShortcutHealthExport {
     struct Window: Equatable {
         let start: Int          // unix seconds, windowSeconds-aligned
         var hr: Int? = nil      // mean bpm over the window, rounded
-        var hrvMs: Double? = nil // RMSSD over the window's RR intervals (1 decimal at render)
+        // Legacy/internal RMSSD aggregate. The Apple-Health renderer always suppresses this field;
+        // retained only so the analyzer/windowing contract remains testable during format migration.
+        var hrvMs: Double? = nil
         var steps: Int? = nil   // wrap-corrected positive-delta sum
     }
 
@@ -94,16 +97,27 @@ enum ShortcutHealthExport {
         do {
             let hr = try await source.hrBuckets(deviceId: deviceId, from: span.from,
                                                 to: span.end - 1, bucketSeconds: windowSeconds)
-            let rr = try await source.rrIntervals(deviceId: deviceId, from: span.from,
-                                                  to: span.end - 1, limit: readLimit)
-            let steps = try await source.stepSamples(deviceId: deviceId, from: span.from,
+            // Step samples are cumulative counters, so computing the first delta in this coverage
+            // needs one sample from before the watermark. Without this overlap, every incremental
+            // export silently drops the steps between the last prior sample and the first new one.
+            // One full aggregation window is bounded and covers the normal strap sampling cadence.
+            let stepReadFrom = max(0, span.from - windowSeconds)
+            let steps = try await source.stepSamples(deviceId: deviceId, from: stepReadFrom,
                                                      to: span.end - 1, limit: readLimit)
-            let windows = aggregate(hr: hr, rr: rr, steps: steps, end: span.end)
+            // Do not read or export strap RMSSD for the Apple Health Shortcut. Keep the empty second
+            // column for compatibility with existing Shortcuts, which then skip that value.
+            let windows = aggregate(hr: hr, rr: [], steps: steps, end: span.end,
+                                    from: span.from)
             // Full-file replace even when 0 windows: the Shortcut has no dedup, so stale lines left
             // behind would be double-logged on its next run.
             try Data(render(windows, timeZone: timeZone).utf8)
                 .write(to: directory.appendingPathComponent(fileName), options: .atomic)
-            defaults.set(span.end, forKey: watermarkKey)   // only after the write landed
+            // Do not consume an empty interval. Strap/offload data can land after this background
+            // export runs; keeping the old watermark lets the next export recover that late data.
+            // The file is still replaced with an empty file above, preventing stale re-imports.
+            if !windows.isEmpty {
+                defaults.set(span.end, forKey: watermarkKey)   // only after the write landed
+            }
             return .written(lines: windows.count)
         } catch {
             return .failure("Shortcut export failed: \(error.localizedDescription)")
@@ -126,8 +140,10 @@ enum ShortcutHealthExport {
     }
 
     /// Fold the three streams into windowSeconds-aligned windows below `end`, ascending. Only
-    /// windows holding ≥1 value are returned. Callers bound the lower edge at the store query.
-    static func aggregate(hr: [HRBucket], rr: [RRInterval], steps: [StepSample], end: Int) -> [Window] {
+    /// windows holding ≥1 value are returned. `from` lets cumulative steps consume one earlier
+    /// predecessor without emitting deltas whose later sample is outside the requested coverage.
+    static func aggregate(hr: [HRBucket], rr: [RRInterval], steps: [StepSample], end: Int,
+                          from: Int = Int.min) -> [Window] {
         var byStart: [Int: Window] = [:]
         func update(_ start: Int, _ mutate: (inout Window) -> Void) {
             var w = byStart[start] ?? Window(start: start)
@@ -163,6 +179,9 @@ enum ShortcutHealthExport {
                 var delta = sorted[i].counter - sorted[i - 1].counter
                 if delta < 0 { delta += 65_536 }  // u16 wraparound
                 guard delta >= 1 && delta <= maxStepDelta else { continue }  // drop resets
+                // A pre-watermark sample is read only as the cumulative-counter predecessor. Never
+                // emit its own earlier deltas; only the first sample at/after `from` may bridge it.
+                guard sorted[i].ts >= from else { continue }
                 let start = windowStart(sorted[i].ts)
                 guard start < end else { continue }
                 update(start) { $0.steps = ($0.steps ?? 0) + delta }
@@ -172,13 +191,13 @@ enum ShortcutHealthExport {
         return byStart.values.sorted { $0.start < $1.start }
     }
 
-    /// `HR,HRV,Steps,yyyy-MM-dd HH:mm` — empty fields keep their commas; HRV to 1 decimal; the
-    /// timestamp is the window START in the given (device-local) zone.
+    /// `HR,[reserved],Steps,yyyy-MM-dd HH:mm` — empty fields keep their commas. The second field was
+    /// historically RMSSD labelled generically as HRV; it remains blank so the companion Shortcut
+    /// cannot write RMSSD into Apple Health's SDNN type. Timestamp is the window START in local time.
     static func line(_ w: Window, timeZone: TimeZone) -> String {
         let hr = w.hr.map(String.init) ?? ""
-        let hrv = w.hrvMs.map { String(format: "%.1f", $0) } ?? ""
         let steps = w.steps.map(String.init) ?? ""
-        return "\(hr),\(hrv),\(steps),\(timestamp(w.start, timeZone: timeZone))"
+        return "\(hr),,\(steps),\(timestamp(w.start, timeZone: timeZone))"
     }
 
     /// No header, no trailing newline — a trailing "\n" would give the Shortcut's split-by-newline

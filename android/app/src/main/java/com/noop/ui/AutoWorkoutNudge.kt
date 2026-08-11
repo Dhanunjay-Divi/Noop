@@ -48,14 +48,15 @@ import kotlin.math.roundToInt
  * Today surface for Off / Ask / confidence-gated Auto-save automatic activity modes.
  *
  * Android twin of iOS `AutoWorkoutCard` (Strand/Screens/AutoWorkoutCard.swift), wired to the byte-parity
- * [AutoWorkoutDetector]. [AutoWorkoutMode.OFF] runs nothing; Ask presents an approval card; Auto-save
- * writes only a stronger 15+ minute candidate as Detected and presents a Keep/undo review. It scans the last
+ * [AutoWorkoutDetector]. [AutoWorkoutMode.OFF] runs nothing; Ask presents an approval card. Until detector
+ * confidence is calibrated, Auto-save also presents candidates for approval rather than writing unattended.
+ * It scans the last
  * couple of days of strap HR through the pure detector, excludes any window that OVERLAPS a saved workout
  * (any source) or was previously dismissed, and surfaces ONE card — the most recent candidate:
  *
  *   "Looks like a workout around <start>–<end> (avg HR <avg>, <dur> min). Save it?"
  *
- * SAVE or Auto-save → builds a `<strap>-noop` Detected row (avg HR filled). DISMISS (× or "Not a
+ * SAVE (or a future calibrated Auto-save) → builds a `<strap>-noop` Detected row (avg HR filled). DISMISS (× or "Not a
  * workout") records the window in the durable, SEPARATE [AutoWorkoutPrefs] dismissed set so it never
  * re-prompts. Every saved row remains editable/relabelable/dismissible in Workouts.
  *
@@ -70,7 +71,10 @@ internal object AutoWorkoutAutomationPolicy {
     const val minimumAutoSaveMinutes = 15
 
     fun shouldAutoSave(candidate: AutoWorkoutDetector.DetectedWorkout): Boolean {
-        if (candidate.startSec <= 0L || candidate.endSec <= candidate.startSec ||
+        val eventConfidence = candidate.eventConfidence
+        if (!candidate.confidenceStatus.permitsUnattendedSave ||
+            eventConfidence == null || !eventConfidence.isFinite() || eventConfidence !in 0.0..1.0 ||
+            candidate.startSec <= 0L || candidate.endSec <= candidate.startSec ||
             candidate.durationMin < minimumAutoSaveMinutes || candidate.avgBpm !in 30..220 ||
             candidate.peakBpm !in candidate.avgBpm..250
         ) return false

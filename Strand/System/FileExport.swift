@@ -41,28 +41,43 @@ enum FileExport {
         "noop-\(profile)-\(platform)-v\(version)-\(timestamp(date)).zip"
     }
 
-    /// Write `text` to a file and let the user choose where it goes.
+    /// Redact and bound a diagnostics/log text file, show the mandatory review confirmation, then let the
+    /// user choose where it goes. This API is intentionally diagnostics-only; normal health-data exports
+    /// continue to use their purpose-built exporters and consent surfaces.
     @MainActor
     static func exportText(_ text: String, suggestedName: String) {
-        #if os(macOS)
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = suggestedName
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        try? text.write(to: url, atomically: true, encoding: .utf8)
-        #else
-        // Write to a temp file FIRST and only present the share sheet if the file actually exists.
-        // The previous `try?` swallowed write failures, then handed an empty/missing path to the
-        // share sheet — the user saw a broken export with no error. Clean up the temp file after the
-        // share sheet closes so the temporaryDirectory doesn't accumulate dead exports across runs.
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(suggestedName)
-        do {
-            try text.write(to: url, atomically: true, encoding: .utf8)
-        } catch {
-            return
+        let input = BundleEntry(name: suggestedName, data: Data(text.utf8))
+        guard let prepared = TestBundleAssembler.prepareDiagnostics([input]) else { return }
+        confirmDiagnosticShare(prepared: prepared) {
+            savePreparedDiagnosticEntries(prepared.entries, suggestedName: suggestedName)
         }
-        present(activityItems: [url], cleanup: [url])
-        #endif
+    }
+
+    /// Clipboard is an export boundary too: scrub and bound first, then require the same explicit review.
+    /// The caller never receives the unredacted intermediate bytes.
+    @MainActor
+    static func copyDiagnosticText(_ text: String, suggestedName: String = "report.txt") {
+        let input = BundleEntry(name: suggestedName, data: Data(text.utf8))
+        guard let prepared = TestBundleAssembler.prepareDiagnostics([input]),
+              let safe = prepared.entries.first.flatMap({ String(data: $0.data, encoding: .utf8) }) else { return }
+        confirmDiagnosticShare(prepared: prepared, actionLabel: "Copy") {
+            PlatformPasteboard.copy(safe)
+        }
+    }
+
+    /// Read an existing diagnostics/raw/support text file off-main, then share only the fail-closed,
+    /// redacted and bounded copy. The source remains private and is never handed to the share sheet.
+    @MainActor
+    static func exportDiagnosticFile(at src: URL, suggestedName: String,
+                                     normalizedName: String) async {
+        guard let data = await Task.detached(priority: .userInitiated, operation: {
+            try? Data(contentsOf: src)
+        }).value else { return }
+        let input = BundleEntry(name: normalizedName, data: data)
+        guard let prepared = TestBundleAssembler.prepareDiagnostics([input]) else { return }
+        confirmDiagnosticShare(prepared: prepared) {
+            savePreparedDiagnosticEntries(prepared.entries, suggestedName: suggestedName)
+        }
     }
 
     /// Let the user save / share an existing file at `src`. On macOS this copies to a chosen
@@ -87,44 +102,131 @@ enum FileExport {
         #endif
     }
 
-    /// Export an existing file AND a block of text together as a matched pair (#510, raw capture plus the
-    /// strap log that produced it). Now a 2-entry case of `exportBundle`: both ride in one `.zip` so a
-    /// reporter saves them in a single gesture on every platform (the old macOS path opened two save
-    /// panels back-to-back; the bundle is one panel). The caller's text is already redacted by its sink;
-    /// the file's bytes are passed through unchanged here. If the source file is absent, falls back to a
-    /// single-entry bundle (just the text) so the tap is never a dead end.
+    /// Export an existing diagnostic file and log together. Both inputs pass through the same fail-closed
+    /// redaction + total-size cap, and the resulting file list/preview must be explicitly confirmed before
+    /// the zip is staged for sharing. If the source is absent, the bounded log still ships on its own.
     @MainActor
     static func exportPair(file src: URL, fileSuggestedName: String,
                            text: String, textSuggestedName: String) async {
+        let normalizedFileName = fileSuggestedName.lowercased().contains("raw-capture")
+            ? "raw-capture.jsonl" : fileSuggestedName
+        let normalizedTextName = textSuggestedName.lowercased().contains("strap-log")
+            ? "report.txt" : textSuggestedName
         let entries = await Task.detached(priority: .userInitiated) { () -> [BundleEntry] in
-            var entries = [BundleEntry(name: textSuggestedName, data: Data(text.utf8))]
+            var entries = [BundleEntry(name: normalizedTextName, data: Data(text.utf8))]
             if FileManager.default.fileExists(atPath: src.path), let fileData = try? Data(contentsOf: src) {
-                entries.insert(BundleEntry(name: fileSuggestedName, data: fileData), at: 0)
+                entries.insert(BundleEntry(name: normalizedFileName, data: fileData), at: 0)
             }
             return entries
         }.value
+        guard let prepared = TestBundleAssembler.prepareDiagnostics(entries) else { return }
         let zipName = timestampedName("noop-export", ext: "zip")
-        _ = await exportBundle(entries: entries, suggestedName: zipName)
+        confirmDiagnosticShare(prepared: prepared) {
+            Task { @MainActor in
+                _ = await exportBundle(entries: prepared.entries, suggestedName: zipName)
+            }
+        }
+    }
+
+    /// Review summary for standalone diagnostics. Large raw streams are named rather than laid out; small
+    /// text is previewed after redaction. The explicit second tap is the only path to save/share/copy.
+    @MainActor
+    private static func confirmDiagnosticShare(prepared: TestBundleAssembler.PreparedDiagnostics,
+                                               actionLabel: String = "Share",
+                                               action: @escaping @MainActor () -> Void) {
+        let gate = ReportReviewGate(entries: prepared.entries)
+        let fileLines = prepared.entries.map {
+            "• \($0.name) (\(ByteCountFormatter.string(fromByteCount: Int64($0.data.count), countStyle: .file)))"
+        }.joined(separator: "\n")
+        var preview = gate.previewText
+        let previewLimit = 12_000
+        if preview.count > previewLimit {
+            preview = String(preview.prefix(previewLimit)) + "\n…preview shortened; the bounded file is listed above."
+        }
+        let truncation = prepared.truncated
+            ? "\nOlder diagnostic content was removed to stay below the 20 MB share limit."
+            : ""
+        let message = """
+        NOOP removed device identifiers before preparing these diagnostics. Raw biometric readings and \
+        timestamps may still be present. Confirm the recipient before continuing.\(truncation)
+
+        \(fileLines)
+
+        \(preview)
+        """
+
+        #if os(macOS)
+        let alert = NSAlert()
+        alert.messageText = "Review diagnostic export"
+        alert.informativeText = message
+        alert.addButton(withTitle: actionLabel)
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        action()
+        #else
+        guard let presenter = topViewController() else { return }
+        let alert = UIAlertController(title: "Review diagnostic export", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: actionLabel, style: .default) { [weak alert] _ in
+            // Wait for the review alert to leave the presentation stack before opening the share sheet;
+            // otherwise UIKit can reject the second presentation as "already presenting".
+            alert?.dismiss(animated: true) {
+                Task { @MainActor in action() }
+            }
+        })
+        presenter.present(alert, animated: true)
+        #endif
+    }
+
+    /// Persist only already-prepared bytes. A multi-entry diagnostic is a zip; a single entry retains the
+    /// requested friendly filename. This helper is reachable only after the confirmation above.
+    @MainActor
+    private static func savePreparedDiagnosticEntries(_ entries: [BundleEntry], suggestedName: String) {
+        guard !entries.isEmpty else { return }
+        if entries.count > 1 {
+            let zipName = suggestedName.hasSuffix(".zip") ? suggestedName : timestampedName("noop-export", ext: "zip")
+            Task { @MainActor in _ = await exportBundle(entries: entries, suggestedName: zipName) }
+            return
+        }
+        let data = entries[0].data
+        #if os(macOS)
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = suggestedName
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        try? data.write(to: url, options: .atomic)
+        #else
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(suggestedName)
+        do { try data.write(to: url, options: .atomic) } catch { return }
+        present(activityItems: [url], cleanup: [url])
+        #endif
     }
 
     #if os(iOS)
-    /// Present `UIActivityViewController` and, once it closes, best-effort remove the URLs in
-    /// `cleanup` so staged exports don't accumulate in `temporaryDirectory` across runs.
     @MainActor
-    private static func present(activityItems: [Any], cleanup: [URL], completion: (() -> Void)? = nil) {
+    private static func topViewController() -> UIViewController? {
         guard let scene = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene })
                 .first(where: { $0.activationState == .foregroundActive }) ?? UIApplication.shared
                 .connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
               let root = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController
-                ?? scene.windows.first?.rootViewController else { completion?(); return }
+                ?? scene.windows.first?.rootViewController else { return nil }
+        var presenter = root
+        while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
+        return presenter
+    }
+
+    /// Present `UIActivityViewController` and, once it closes, best-effort remove the URLs in
+    /// `cleanup` so staged exports don't accumulate in `temporaryDirectory` across runs.
+    @MainActor
+    private static func present(activityItems: [Any], cleanup: [URL], completion: (() -> Void)? = nil) {
+        guard let root = topViewController() else { completion?(); return }
         // Present from the TOP-MOST controller, not the root (#455). When the caller is itself inside a
         // SwiftUI sheet — e.g. the Trends report is shown via `.sheet` — root already has that sheet
         // presented, so `root.present(...)` is a no-op ("already presenting…") and the share sheet never
         // appears. Climb the presentedViewController chain so the share sheet stacks on top of whatever's
         // up. (The Share-strap-log path worked only because Settings isn't a sheet — root had nothing on it.)
-        var presenter = root
-        while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
+        let presenter = root
         let vc = UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
         if !cleanup.isEmpty || completion != nil {
             // Fires after the share sheet is dismissed (saved or cancelled). We clean up staged files and

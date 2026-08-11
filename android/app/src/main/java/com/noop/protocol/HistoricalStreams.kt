@@ -190,7 +190,7 @@ fun decodeHistorical(frame: ByteArray, family: DeviceFamily = DeviceFamily.WHOOP
     if (version == 25 && frame.size >= 79) {
         val out = LinkedHashMap<String, Any?>()
         out["hist_version"] = version
-        frame.histU32(11)?.let { out["unix"] = it.toInt() }
+        frame.histU32(11)?.let { out["unix"] = it }
         fun grav(off: Int): Double? {
             val u = frame.histU16(off) ?: return null
             return (if (u >= 32768) u - 65536 else u).toDouble() / 16384.0   // i16 LE, ±2 g full-scale
@@ -221,7 +221,7 @@ fun decodeHistorical(frame: ByteArray, family: DeviceFamily = DeviceFamily.WHOOP
     out["hist_version"] = version
 
     // unix is the record's REAL unix seconds (no clock offset needed for type-47).
-    frame.histU32(layout.unixOff)?.let { out["unix"] = it.toInt() }
+    frame.histU32(layout.unixOff)?.let { out["unix"] = it }
     frame.histU8(layout.hrOff)?.let { out["heart_rate"] = it }
     val rrn = frame.histU8(layout.rrCountOff) ?: 0
     out["rr_count"] = rrn
@@ -318,8 +318,8 @@ private fun decodeWhoop5Historical(frame: ByteArray): Map<String, Any?>? {
     out["hist_version"] = version
     // @11 a per-record counter: +1 every record, independent of unix (advances across gaps); seen on
     // two straps. @11 is only the low byte — read the full u32 LE.
-    frame.histU32(11)?.let { out["record_index"] = it.toInt() }
-    frame.histU32(15)?.let { out["unix"] = it.toInt() }
+    frame.histU32(11)?.let { out["record_index"] = it }
+    frame.histU32(15)?.let { out["unix"] = it }
     frame.histU8(22)?.let { out["heart_rate"] = it }
     val rrn = frame.histU8(23) ?: 0
     out["rr_count"] = rrn
@@ -429,12 +429,12 @@ private fun decodeWhoop5Historical(frame: ByteArray): Map<String, Any?>? {
  * the raw per-burst counter @21 — `burst_index`, NOT a channel id; PR#553) and the footer after [75]
  * are intentionally not mapped here: the Android offload path needs only [unix] + the waveform for HR.
  */
-private data class V26Record(val unix: Int, val samples: List<Int>)
+private data class V26Record(val unix: Long, val samples: List<Int>)
 
 private fun decodeWhoop5HistoricalV26(frame: ByteArray): V26Record? {
     if (frame.histU8(8) != PacketType.HISTORICAL_DATA.rawValue) return null
     if (frame.histU8(9) != 26) return null
-    val unix = frame.histU32(15)?.toInt() ?: return null
+    val unix = frame.histU32(15) ?: return null
     val samples = ArrayList<Int>(24)
     var off = 27
     while (off < 75) {
@@ -694,7 +694,7 @@ fun extractHistoricalStreams(
                     decodeWhoop5HistoricalV26(frame)?.let { rec ->
                         // #547: skip a v26 PPG buffer whose unix is implausible (correctedWall → null) so a
                         // bad-clock strap can't seed the derived-HR estimator with garbage-timestamped samples.
-                        val baseTs = correctedWall(rec.unix.toLong() and 0xFFFFFFFFL)
+                        val baseTs = correctedWall(rec.unix)
                         if (baseTs != null) {
                             for (v in rec.samples) ppgSamples.add(PpgHr.Sample(ts = baseTs, value = v))
                             // Persist the raw waveform itself too (#156 follow-up), keyed on the record's
@@ -710,7 +710,7 @@ fun extractHistoricalStreams(
                 // #547: correctedWall is now nullable — it returns null for an implausible (far-past /
                 // future-dated) record, so the `?: continue` below skips a bad-clock record entirely
                 // instead of letting its garbage `unix` enter the DB and pollute the day-windowed analytics.
-                val ts = (p.intOrNull("unix")?.toLong())?.let { correctedWall(it) } ?: continue
+                val ts = p.longOrNull("unix")?.let { correctedWall(it) } ?: continue
 
                 // skip startup hr=0 (matches Swift `bpm != 0`).
                 p.intOrNull("heart_rate")?.let { bpm -> if (bpm != 0) hr.add(HrRow(ts, bpm)) }

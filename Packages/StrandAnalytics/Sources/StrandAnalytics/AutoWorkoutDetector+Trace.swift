@@ -39,56 +39,41 @@ extension AutoWorkoutDetector {
         let results = detect(hr: hr, restingBpm: restingBpm, motion: motion, savedSpans: savedSpans)
 
         var lines: [String] = []
-        let effectiveResting = effectiveRestingBPM(restingBpm, hr: hr)
+        let seg = cleanHR(hr)
+        let effectiveResting = effectiveRestingBPM(restingBpm, hr: seg)
         let floor = effectiveResting + elevatedMarginBPM
         let hasMotion = !(motion?.isEmpty ?? true)
         let restingLabel = restingBpm.map(String.init) ?? "observedLowerDecile(\(effectiveResting))"
 
         // Inputs the detector saw.
-        lines.append("autoDetect path=\(path) hrSamples=\(hr.count) "
+        lines.append("autoDetect path=\(path) hrSamples=\(hr.count) validUniqueHr=\(seg.count) "
             + "restingBpm=\(restingLabel) "
-            + "elevatedFloor=\(floor)bpm motion=\(hasMotion ? "supplied" : "hrOnly") savedSpans=\(savedSpans.count)")
+            + "elevatedFloor=\(floor)bpm motion=\(hasMotion ? "supplied" : "hrOnly") savedSpans=\(savedSpans.count) "
+            + "detectorVersion=\(detectorVersion) eventConfidence=uncalibrated")
 
         // Thresholds applied (the autoDetectThresholds capture). Stated once so a report carries the
         // calibration the windows were judged against.
         lines.append("autoDetect thresholds elevatedMargin=\(elevatedMarginBPM)bpm "
             + "minSustainedMin=\(minSustainedMin) maxDipS=\(maxDipS) finalizationQuietS=>\(maxDipS) "
             + "mergeGapS=\(mergeGapS) "
-            + "motionConfirmMean=\(motionConfirmMean) maxHrGapS=\(maxHRSampleGapS) "
+            + "motionConfirmMean=\(motionConfirmMean) maxMotionGapS=\(motionConfirmationMaxGapS) "
+            + "maxHrGapS=\(maxHRSampleGapS) "
             + "maxSecondsPerHrSample=\(maxSecondsPerHRSample)")
 
         // Rebuild the SAME merged windows the detector forms (sustained spans tolerating dips, then merge),
         // so we can name why each survived or dropped WITHOUT changing the returned `results`. This mirrors
         // detect(...)'s steps 1-4 exactly; the per-window verdict below mirrors steps 5-6.
-        let seg = hr.sorted { $0.ts < $1.ts }
         if seg.isEmpty {
             lines.append("autoDetect result windows=0 (no HR samples)")
             return (results, lines)
         }
 
-        var spans: [(start: Int, end: Int)] = []
-        var spanStart: Int? = nil
-        var spanEnd = 0
-        var dipStart: Int? = nil
-        func closeSpan() {
-            if let s = spanStart, Double(spanEnd - s) >= minSustainedMin * 60.0 { spans.append((s, spanEnd)) }
-            spanStart = nil
-            dipStart = nil
-        }
-        for sample in seg {
-            if sample.bpm >= floor {
-                if spanStart == nil { spanStart = sample.ts }
-                spanEnd = sample.ts
-                dipStart = nil
-            } else if spanStart != nil {
-                if dipStart == nil { dipStart = sample.ts }
-                if let d = dipStart, sample.ts - d > maxDipS { closeSpan() }
-            }
-        }
+        let spans = finalizedElevatedSpans(seg, floor: floor)
         // Match detect(...): an open EOF span is still in progress, not a finalized candidate.
 
         if spans.isEmpty {
-            let reason = spanStart == nil ? "noSustainedSpan" : "awaitingQuietTail"
+            let reason = seg.contains(where: { $0.bpm >= floor })
+                ? "awaitingQuietTailOrContinuousCoverage" : "noSustainedSpan"
             lines.append("autoDetect why=\(reason) "
                 + "(requires >=\(minSustainedMin)min above \(floor)bpm then >\(maxDipS)s below it)")
             lines.append("autoDetect result windows=0")
@@ -96,25 +81,12 @@ extension AutoWorkoutDetector {
         }
 
         // Merge spans whose gap is <= mergeGapS (same as detect step 4).
-        var merged: [(start: Int, end: Int)] = []
-        var curStart = spans[0].start
-        var curEnd = spans[0].end
-        for k in 1..<spans.count {
-            let next = spans[k]
-            if next.start - curEnd <= mergeGapS {
-                curEnd = max(curEnd, next.end)
-            } else {
-                merged.append((curStart, curEnd))
-                curStart = next.start
-                curEnd = next.end
-            }
-        }
-        merged.append((curStart, curEnd))
+        let merged = mergeSpans(spans)
 
         // Per-window verdict (the autoDetectWhy capture), mirroring detect steps 5-6.
         let motionSeries = hasMotion ? motion : nil
         for (start, end) in merged {
-            let durMin = (end - start) / 60
+            let durMin = Int((Double(end) - Double(start)) / 60.0)
             if savedSpans.contains(where: { overlaps(start, end, $0.startSec, $0.endSec) }) {
                 lines.append("autoDetect window durMin=\(durMin) verdict=dropped why=overlapsSavedWorkout")
                 continue
@@ -136,7 +108,14 @@ extension AutoWorkoutDetector {
                     break
                 }
             }
-            lines.append("autoDetect window durMin=\(durMin) verdict=offered")
+            let provenance: String
+            if let motionSeries,
+               case .confirmed = motionConfirmation(motionSeries, start: start, end: end) {
+                provenance = AutoWorkoutEvidenceProvenance.heartRateAndMotion.rawValue
+            } else {
+                provenance = AutoWorkoutEvidenceProvenance.heartRateOnly.rawValue
+            }
+            lines.append("autoDetect window durMin=\(durMin) verdict=offered provenance=\(provenance)")
         }
         lines.append("autoDetect result windows=\(results.count) "
             + "(offered the most recent that is not saved or dismissed)")

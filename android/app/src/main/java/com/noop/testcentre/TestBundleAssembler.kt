@@ -5,6 +5,9 @@ import android.os.Build
 import com.noop.BuildConfig
 import com.noop.CrashCapture
 import com.noop.ble.redactStrapLogPii
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
+import java.nio.charset.StandardCharsets
 
 /**
  * Twin of the Swift TestBundleAssembler: gathers the bundle files, re-runs the redaction pass over EVERY
@@ -17,6 +20,13 @@ import com.noop.ble.redactStrapLogPii
 object TestBundleAssembler {
 
     const val REDACTION_VERSION = "v2"
+
+    /** Output of the standalone diagnostics-only privacy boundary. Normal user health-data export does
+     * not use this type and keeps its existing purpose-built consent/export behavior. */
+    data class PreparedDiagnostics(
+        val entries: List<Pair<String, ByteArray>>,
+        val truncated: Boolean,
+    )
 
     /**
      * Re-run the redaction sink over every entry. Text entries are decoded UTF-8, scrubbed via the same
@@ -35,6 +45,64 @@ object TestBundleAssembler {
                 name to redactStrapLogPii(String(data)).toByteArray()
             }
         }
+
+    /**
+     * Fail-closed redaction and total-size bounding for standalone raw/log/support *text* exports.
+     * A binary or malformed UTF-8 payload is rejected instead of being silently handed to ACTION_SEND.
+     * Oversized entries share the cap proportionally and retain their newest complete-line tails with an
+     * explicit marker. Callers must stage/share only the returned bytes.
+     */
+    fun prepareDiagnostics(
+        entries: List<Pair<String, ByteArray>>,
+        capBytes: Int = 20 * 1024 * 1024,
+    ): PreparedDiagnostics? {
+        if (entries.isEmpty() || capBytes <= 0 || entries.any { !isReviewableUtf8(it.second) }) return null
+        val redacted = redactEntries(entries)
+        val total = redacted.sumOf { it.second.size.toLong() }
+        if (total <= capBytes.toLong()) return PreparedDiagnostics(redacted, truncated = false)
+
+        var remaining = capBytes
+        var remainingOriginal = total
+        val bounded = ArrayList<Pair<String, ByteArray>>(redacted.size)
+        redacted.forEachIndexed { index, (name, data) ->
+            val budget = if (index == redacted.lastIndex) {
+                remaining
+            } else if (remainingOriginal > 0) {
+                minOf(remaining, (remaining.toLong() * data.size.toLong() / remainingOriginal).toInt())
+            } else {
+                0
+            }
+            bounded += name to boundedDiagnosticText(data, budget)
+            remaining -= budget
+            remainingOriginal -= data.size.toLong()
+        }
+        return PreparedDiagnostics(bounded, truncated = true)
+    }
+
+    private fun isReviewableUtf8(data: ByteArray): Boolean = runCatching {
+        val decoded = StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(data))
+        decoded.none { ch -> (ch.code < 0x20 && ch != '\n' && ch != '\r' && ch != '\t') || ch.code == 0x7F }
+    }.getOrDefault(false)
+
+    /** Keep a valid UTF-8 newest-line tail within [budget]. The newline boundary discards any leading
+     * partial UTF-8 scalar and partial JSONL/CSV/log record from the byte suffix. */
+    private fun boundedDiagnosticText(data: ByteArray, budget: Int): ByteArray {
+        if (budget <= 0) return byteArrayOf()
+        if (data.size <= budget) return data
+        val marker = "# NOOP diagnostic export truncated: older content was removed before sharing.\n".toByteArray()
+        if (budget <= marker.size) return marker.copyOf(budget)
+        val rawTail = data.copyOfRange(data.size - (budget - marker.size), data.size)
+        val newline = rawTail.indexOf('\n'.code.toByte())
+        val tail = if (newline >= 0 && newline + 1 < rawTail.size) {
+            rawTail.copyOfRange(newline + 1, rawTail.size)
+        } else {
+            byteArrayOf()
+        }
+        return marker + tail
+    }
 
     /** A bundle entry that is binary (image bytes), never text to scrub. screenshot.png is the only one
      *  today; raw-capture.jsonl stays text (JSON lines) and is still scrubbed. */

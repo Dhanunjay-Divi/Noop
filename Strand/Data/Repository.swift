@@ -36,13 +36,17 @@ enum AutoWorkoutSuggestionIdentity {
 
 /// A deliberately stricter gate for unattended saves than for a visible suggestion. The detector has
 /// already required a finalized elevated-HR window, dense HR coverage, no saved overlap, and motion
-/// confirmation whenever enough motion exists. Auto-save adds a 15-minute floor so the least certain
-/// 10-14 minute edge candidates still ask instead of being written silently.
+/// confirmation whenever enough motion exists. Uncalibrated rules can only surface a visible suggestion;
+/// even a longer candidate cannot be written unattended until event confidence is genuinely calibrated.
 enum AutoWorkoutAutomationPolicy {
     static let minimumAutoSaveMinutes = 15
 
     static func shouldAutoSave(_ candidate: DetectedWorkout) -> Bool {
-        guard candidate.startSec > 0,
+        guard candidate.confidenceStatus.permitsUnattendedSave,
+              let eventConfidence = candidate.eventConfidence,
+              eventConfidence.isFinite,
+              (0...1).contains(eventConfidence),
+              candidate.startSec > 0,
               candidate.endSec > candidate.startSec,
               candidate.durationMin >= minimumAutoSaveMinutes,
               (30...220).contains(candidate.avgBpm),
@@ -2690,7 +2694,11 @@ final class Repository: ObservableObject {
             avgBpm: candidate.avgBpm, peakBpm: candidate.peakBpm,
             durationMin: candidate.durationMin,
             suggestedClass: prediction.predictedClass,
-            suggestionConfidence: prediction.confidence)
+            suggestionConfidence: prediction.confidence,
+            detectorVersion: candidate.detectorVersion,
+            eventConfidence: candidate.eventConfidence,
+            confidenceStatus: candidate.confidenceStatus,
+            evidenceProvenance: candidate.evidenceProvenance)
     }
 
     /// Persist a detector-qualified window under the computed `<strap>-noop` source so it is honestly

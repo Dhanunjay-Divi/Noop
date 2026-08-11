@@ -426,7 +426,7 @@ struct AppleHealthView: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                 case .unknown, .denied:
-                    Text("Read heart rate, HRV, blood oxygen, body and wrist temperature, respiratory rate, sleep, workouts, activity and body composition from Apple Health, and write supported NOOP strap data back. Everything stays on \(Platform.deviceNounPhrase).")
+                    Text("Start by reading heart rate, HRV, blood oxygen, body and wrist temperature, respiratory rate, sleep, workouts and activity. The core request can also share sleep, workouts, resting heart rate, oxygen and respiratory rate back. Body composition and detailed continuous write-back are separate choices after connecting. NOOP does not upload this data to a NOOP-operated cloud; samples shared into Apple Health follow your Apple Health and iCloud settings.")
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -483,6 +483,75 @@ struct AppleHealthView: View {
                     .buttonStyle(.bordered)
                     .tint(StrandPalette.textSecondary)
                     .disabled(health.syncing)
+
+                    Divider().overlay(StrandPalette.hairline)
+
+                    Text("Optional access")
+                        .font(StrandFont.caption.weight(.semibold))
+                        .foregroundStyle(StrandPalette.textSecondary)
+
+                    if health.bodyCompositionAccessRequested {
+                        HStack {
+                            Label("Body composition requested", systemImage: "scalemass")
+                                .font(StrandFont.subhead)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                            Spacer()
+                            StatePill("Requested", tone: .neutral, showsDot: false)
+                        }
+                    } else {
+                        Text("Optionally read weight, body-fat percentage, lean mass and BMI. These slow-changing measurements are not required for Recovery, Sleep Score or Effort.")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button {
+                            Task {
+                                await health.requestBodyCompositionAccess()
+                                await health.sync()
+                                await load()
+                            }
+                        } label: {
+                            Label("Add body composition", systemImage: "scalemass")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(StrandPalette.metricCyan)
+                        .disabled(health.syncing)
+                    }
+
+                    if health.highResolutionWritebackRequested {
+                        HStack {
+                            Label("Detailed write-back requested", systemImage: "waveform.path.ecg")
+                                .font(StrandFont.subhead)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                            Spacer()
+                            StatePill("Requested", tone: .neutral, showsDot: false)
+                        }
+                    } else {
+                        Text("Optionally share NOOP's minute-level heart rate plus workout energy and distance into Apple Health. This can create many more Health samples.")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button {
+                            Task {
+                                await health.requestHighResolutionWritebackAccess()
+                                await health.sync()
+                                await load()
+                            }
+                        } label: {
+                            Label("Add detailed write-back", systemImage: "waveform.path.ecg")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(StrandPalette.metricCyan)
+                        .disabled(health.syncing)
+                    }
+
+                    Text("HRV is read-only. NOOP will not label strap RMSSD as Apple Health SDNN; they are different HRV statistics.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Requested means NOOP showed Apple's permission sheet; Apple does not reveal which read choices you granted. You can change them in Settings › Health › Data Access & Devices.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if let err = health.lastError {

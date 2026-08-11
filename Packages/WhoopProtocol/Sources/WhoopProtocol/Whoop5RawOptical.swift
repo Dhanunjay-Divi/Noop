@@ -1,5 +1,38 @@
 import Foundation
 
+/// The fully decoded 21-byte configuration header for one layout-v20 optical block.
+/// Names are intentionally neutral: captures establish the offsets and signedness, not units or
+/// wavelength semantics.
+public struct Whoop5OpticalBlockConfig: Equatable, Codable, Sendable {
+    public let sampleCount: Int
+    public let sourceA: UInt8
+    public let driveA: UInt16
+    public let sourceB: UInt8
+    public let driveB: UInt16
+    public let detectorASelect: UInt8
+    public let rangeA: UInt32
+    public let offsetA: Int16
+    public let detectorBSelect: UInt8
+    public let rangeB: UInt32
+    public let offsetB: Int16
+
+    public init(sampleCount: Int, sourceA: UInt8, driveA: UInt16, sourceB: UInt8, driveB: UInt16,
+                detectorASelect: UInt8, rangeA: UInt32, offsetA: Int16,
+                detectorBSelect: UInt8, rangeB: UInt32, offsetB: Int16) {
+        self.sampleCount = sampleCount
+        self.sourceA = sourceA
+        self.driveA = driveA
+        self.sourceB = sourceB
+        self.driveB = driveB
+        self.detectorASelect = detectorASelect
+        self.rangeA = rangeA
+        self.offsetA = offsetA
+        self.detectorBSelect = detectorBSelect
+        self.rangeB = rangeB
+        self.offsetB = offsetB
+    }
+}
+
 // WHOOP 5.0/MG historical layout-v20 (2,140-byte) optical-buffer decoder.
 //
 // The record body is five repeated 422-byte blocks beginning at frame offset 26. Each block is:
@@ -43,31 +76,43 @@ public struct Whoop5OpticalBlock: Equatable, Codable, Sendable {
     public let channels: [RawOpticalChannel]
     /// The final byte of the 422-byte block; zero throughout the current corpus.
     public let reserved: UInt8
+    /// Named interpretation of the same bytes retained by `rawHeader`.
+    public let config: Whoop5OpticalBlockConfig
 
     public init(index: Int, sampleCount: Int, sharedMetadata: [UInt8],
-                channels: [RawOpticalChannel], reserved: UInt8) {
+                channels: [RawOpticalChannel], reserved: UInt8,
+                config: Whoop5OpticalBlockConfig) {
         self.index = index
         self.sampleCount = sampleCount
         self.sharedMetadata = sharedMetadata
         self.channels = channels
         self.reserved = reserved
+        self.config = config
     }
 
     /// The complete 21-byte header reconstructed losslessly.
     public var rawHeader: [UInt8] {
         [UInt8(sampleCount)] + sharedMetadata + channels.flatMap(\.metadata)
     }
+
+    public var readingsA: [Int32] { channels.first?.samples ?? [] }
+    public var readingsB: [Int32] { channels.count > 1 ? channels[1].samples : [] }
 }
 
 public struct Whoop5OpticalFrame: Equatable, Codable, Sendable {
     public let recordIndex: Int
     public let baseTs: Int
     public let blocks: [Whoop5OpticalBlock]
+    public let layoutVersion: UInt8
+    public let checksum: UInt32
 
-    public init(recordIndex: Int, baseTs: Int, blocks: [Whoop5OpticalBlock]) {
+    public init(recordIndex: Int, baseTs: Int, blocks: [Whoop5OpticalBlock],
+                layoutVersion: UInt8 = Whoop5RawOptical.layoutVersion, checksum: UInt32 = 0) {
         self.recordIndex = recordIndex
         self.baseTs = baseTs
         self.blocks = blocks
+        self.layoutVersion = layoutVersion
+        self.checksum = checksum
     }
 }
 
@@ -79,14 +124,20 @@ public enum Whoop5RawOptical {
     public static let headerLength = 21
     public static let channelSlotLength = 200
     public static let channelCapacity = 50
+    public static let layoutVersion: UInt8 = 20
+    public static let recordClass: UInt8 = 0x2F
+    public static let checksumOffset = 2136
+    /// Samples are signed 20-bit values already sign-extended into their i32 wire containers.
+    public static let sampleMin: Int32 = -524_288
+    public static let sampleMax: Int32 = 524_287
 
-    /// Decode a complete layout-v20 historical record. This performs strict structural gating; callers
-    /// receiving bytes from the wire should also use the normal envelope CRC verification path.
+    /// Decode a complete layout-v20 record only after the WHOOP 5 envelope's CRC16 and CRC32 pass.
     public static func decode(_ frame: [UInt8]) -> Whoop5OpticalFrame? {
         guard frame.count == bufferLength,
               frame[0] == 0xAA,
-              frame[8] == 0x2F,
-              frame[9] == 20 else { return nil }
+              verifyFrame(frame, family: .whoop5).ok,
+              frame[8] == recordClass,
+              frame[9] == layoutVersion else { return nil }
 
         var blocks: [Whoop5OpticalBlock] = []
         blocks.reserveCapacity(blockCount)
@@ -116,13 +167,35 @@ public enum Whoop5RawOptical {
                 sampleCount: sampleCount,
                 sharedMetadata: sharedMetadata,
                 channels: channels,
-                reserved: frame[start + blockLength - 1]))
+                reserved: frame[start + blockLength - 1],
+                config: Whoop5OpticalBlockConfig(
+                    sampleCount: sampleCount,
+                    sourceA: frame[start + 1],
+                    driveA: u16(frame, start + 2),
+                    sourceB: frame[start + 4],
+                    driveB: u16(frame, start + 5),
+                    detectorASelect: frame[start + 7],
+                    rangeA: u32(frame, start + 8),
+                    offsetA: i16(frame, start + 12),
+                    detectorBSelect: frame[start + 14],
+                    rangeB: u32(frame, start + 15),
+                    offsetB: i16(frame, start + 19))))
         }
 
         return Whoop5OpticalFrame(
             recordIndex: Int(u32(frame, 11)),
             baseTs: Int(u32(frame, 15)),
-            blocks: blocks)
+            blocks: blocks,
+            layoutVersion: frame[9],
+            checksum: u32(frame, checksumOffset))
+    }
+
+    @inline(__always) private static func u16(_ frame: [UInt8], _ offset: Int) -> UInt16 {
+        UInt16(frame[offset]) | (UInt16(frame[offset + 1]) << 8)
+    }
+
+    @inline(__always) private static func i16(_ frame: [UInt8], _ offset: Int) -> Int16 {
+        Int16(bitPattern: u16(frame, offset))
     }
 
     @inline(__always) private static func u32(_ frame: [UInt8], _ offset: Int) -> UInt32 {

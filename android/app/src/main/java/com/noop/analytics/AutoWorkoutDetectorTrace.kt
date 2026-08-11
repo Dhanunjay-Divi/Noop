@@ -37,57 +37,41 @@ object AutoWorkoutDetectorTrace {
         val results = AutoWorkoutDetector.detect(hr, restingHR, gravity, savedWorkouts)
 
         val lines = ArrayList<String>()
-        val effectiveResting = AutoWorkoutDetector.effectiveRestingBPM(restingHR, hr)
+        val seg = AutoWorkoutDetector.cleanHR(hr)
+        val effectiveResting = AutoWorkoutDetector.effectiveRestingBPM(restingHR, seg)
         val floor = effectiveResting + AutoWorkoutDetector.elevatedMarginBPM
         val hasMotion = gravity.isNotEmpty()
         val restingLabel = restingHR?.toString() ?: "observedLowerDecile($effectiveResting)"
 
         lines.add(
-            "autoDetect path=$path hrSamples=${hr.size} " +
+            "autoDetect path=$path hrSamples=${hr.size} validUniqueHr=${seg.size} " +
                 "restingBpm=$restingLabel " +
                 "elevatedFloor=${floor}bpm motion=${if (hasMotion) "supplied" else "hrOnly"} " +
-                "savedSpans=${savedWorkouts.size}",
+                "savedSpans=${savedWorkouts.size} detectorVersion=${AutoWorkoutDetector.detectorVersion} " +
+                "eventConfidence=uncalibrated",
         )
         lines.add(
             "autoDetect thresholds elevatedMargin=${AutoWorkoutDetector.elevatedMarginBPM}bpm " +
                 "minSustainedMin=${AutoWorkoutDetector.minSustainedMin} maxDipS=${AutoWorkoutDetector.maxDipS} " +
                 "finalizationQuietS=>${AutoWorkoutDetector.maxDipS} " +
                 "mergeGapS=${AutoWorkoutDetector.mergeGapS} motionConfirmMean=${AutoWorkoutDetector.motionConfirmMean} " +
+                "maxMotionGapS=${AutoWorkoutDetector.motionConfirmationMaxGapS} " +
                 "maxHrGapS=${AutoWorkoutDetector.maxHRSampleGapS} " +
                 "maxSecondsPerHrSample=${AutoWorkoutDetector.maxSecondsPerHRSample}",
         )
 
         // Rebuild the SAME merged windows the detector forms (steps 1-4), to name each verdict (steps 5-6).
-        val seg = hr.sortedBy { it.ts }
         if (seg.isEmpty()) {
             lines.add("autoDetect result windows=0 (no HR samples)")
             return results to lines
         }
 
-        val spans = ArrayList<Pair<Long, Long>>()
-        var spanStart: Long? = null
-        var spanEnd = 0L
-        var dipStart: Long? = null
-        fun closeSpan() {
-            val s = spanStart
-            if (s != null && (spanEnd - s) >= AutoWorkoutDetector.minSustainedMin * 60.0) spans.add(s to spanEnd)
-            spanStart = null
-            dipStart = null
-        }
-        for (sample in seg) {
-            if (sample.bpm >= floor) {
-                if (spanStart == null) spanStart = sample.ts
-                spanEnd = sample.ts
-                dipStart = null
-            } else if (spanStart != null) {
-                val d = dipStart ?: sample.ts.also { dipStart = it }
-                if ((sample.ts - d) > AutoWorkoutDetector.maxDipS) closeSpan()
-            }
-        }
+        val spans = AutoWorkoutDetector.finalizedElevatedSpans(seg, floor)
         // Match detect(...): an open EOF span is still in progress, not a finalized candidate.
 
         if (spans.isEmpty()) {
-            val reason = if (spanStart == null) "noSustainedSpan" else "awaitingQuietTail"
+            val reason = if (seg.any { it.bpm >= floor }) "awaitingQuietTailOrContinuousCoverage"
+                else "noSustainedSpan"
             lines.add(
                 "autoDetect why=$reason " +
                     "(requires >=${AutoWorkoutDetector.minSustainedMin}min above ${floor}bpm " +
@@ -97,26 +81,13 @@ object AutoWorkoutDetectorTrace {
             return results to lines
         }
 
-        val merged = ArrayList<Pair<Long, Long>>()
-        var curStart = spans[0].first
-        var curEnd = spans[0].second
-        for (k in 1 until spans.size) {
-            val next = spans[k]
-            if ((next.first - curEnd) <= AutoWorkoutDetector.mergeGapS) {
-                curEnd = maxOf(curEnd, next.second)
-            } else {
-                merged.add(curStart to curEnd)
-                curStart = next.first
-                curEnd = next.second
-            }
-        }
-        merged.add(curStart to curEnd)
+        val merged = AutoWorkoutDetector.mergeSpans(spans)
 
         // Per-window verdict (the autoDetectWhy capture), mirroring detect steps 5-6. The motion series is
         // built the SAME way detect does (motionIntensityByTs), so the mean comparison matches exactly.
         val motion = if (hasMotion) AutoWorkoutDetector.motionIntensityByTs(gravity) else emptyMap()
         for ((start, end) in merged) {
-            val durMin = ((end - start) / 60L).toInt()
+            val durMin = ((end.toDouble() - start.toDouble()) / 60.0).toInt()
             if (savedWorkouts.any { AutoWorkoutDetector.overlaps(start, end, it.first, it.second) }) {
                 lines.add("autoDetect window durMin=$durMin verdict=dropped why=overlapsSavedWorkout")
                 continue
@@ -140,7 +111,12 @@ object AutoWorkoutDetectorTrace {
                     is AutoWorkoutDetector.MotionConfirmation.Confirmed -> Unit
                 }
             }
-            lines.add("autoDetect window durMin=$durMin verdict=offered")
+            val provenance = if (motion.isNotEmpty() &&
+                AutoWorkoutDetector.motionConfirmation(motion, start, end) is
+                    AutoWorkoutDetector.MotionConfirmation.Confirmed) {
+                AutoWorkoutDetector.EvidenceProvenance.HEART_RATE_AND_MOTION.wireValue
+            } else AutoWorkoutDetector.EvidenceProvenance.HEART_RATE_ONLY.wireValue
+            lines.add("autoDetect window durMin=$durMin verdict=offered provenance=$provenance")
         }
         lines.add(
             "autoDetect result windows=${results.size} " +

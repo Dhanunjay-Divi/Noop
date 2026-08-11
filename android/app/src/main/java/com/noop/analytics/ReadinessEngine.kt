@@ -1,6 +1,7 @@
 package com.noop.analytics
 
 import com.noop.data.DailyMetric
+import java.time.LocalDate
 import java.util.Locale
 import kotlin.math.sqrt
 
@@ -21,8 +22,10 @@ import kotlin.math.sqrt
  * - **Resting-HR drift** — elevated resting HR vs baseline is a classic overtraining / illness
  *   signal (Lamberts et al. 2004).
  * - **Respiratory-rate drift** — a rise in sleeping respiratory rate is an early illness signal.
- * - **Training Stress Balance (ACWR)** — acute (7-day) vs chronic (28-day) strain. The 0.8–1.3
- *   band is the "sweet spot"; >1.5 is associated with higher injury risk (Gabbett 2016).
+ * - **Recent-load ratio (ACWR)** — a fixed-window 7-day/28-day ratio of recorded daily strain.
+ *   It is retained as descriptive context and is not Training Stress Balance, an injury predictor,
+ *   or a universal safe-load prescription. [TrainingLoadModel] separately implements ATL/CTL/TSB
+ *   for additive load units.
  * - **Training monotony** — mean/SD of daily strain over a week; high monotony (low variety) is
  *   associated with higher strain and illness (Foster 1998).
  *
@@ -34,9 +37,9 @@ object ReadinessEngine {
     // MARK: Output types
 
     enum class Level {
-        PRIMED,       // signals aligned, load supported
+        PRIMED,       // measured recovery signals aligned
         BALANCED,     // nothing notable either way
-        STRAINED,     // one meaningful signal down / load high
+        STRAINED,     // one meaningful recovery signal down
         RUNDOWN,      // several recovery signals down
         INSUFFICIENT, // not enough history yet
     }
@@ -58,10 +61,19 @@ object ReadinessEngine {
         val headline: String,
         val summary: String,
         val signals: List<Signal>,
-        /** Acute:chronic workload ratio (null if not enough strain history). */
+        /** Seven-day mean / 28-day mean of recorded nonlinear strain (null with insufficient history). */
         val acwr: Double?,
         /** Foster training monotony over the last week (null if not enough strain history). */
         val monotony: Double?,
+    )
+
+    /**
+     * Readiness plus optional additive-load context. Daily `strain` is intentionally not used for
+     * ATL/CTL because it is a bounded nonlinear score, not an additive training impulse.
+     */
+    data class Context(
+        val readiness: Readiness,
+        val trainingLoad: TrainingLoadModel.Point?,
     )
 
     // MARK: Tunables (named so the thresholds are auditable)
@@ -70,6 +82,7 @@ object ReadinessEngine {
     private const val minBaseline = 7       // need at least this many baseline nights
     private const val acuteWindow = 7
     private const val chronicWindow = 28
+    private const val minAcute = 4        // do not call one or two sparse readings a seven-day mean
     private const val minChronic = 14       // need at least this much strain history for ACWR
 
     // Resp-rate signal is sourced from either clean cloud RR or a higher-variance on-device RSA
@@ -103,6 +116,24 @@ object ReadinessEngine {
         return result
     }
 
+    /**
+     * Evaluate readiness and expose ATL/CTL/TSB only when a caller supplies a genuine additive load
+     * series such as session-RPE minutes, TRIMP, or MET-minutes. Empty input stays absent; this path
+     * never manufactures load from the daily Effort/strain field.
+     */
+    fun evaluate(
+        days: List<DailyMetric>,
+        today: String? = null,
+        additiveLoadEntries: List<TrainingLoadModel.Entry>,
+        trainingLoadConfiguration: TrainingLoadModel.Configuration = TrainingLoadModel.Configuration(),
+    ): Context {
+        val readiness = evaluate(days, today)
+        if (additiveLoadEntries.isEmpty()) return Context(readiness, null)
+        val series = TrainingLoadModel.evaluate(additiveLoadEntries, trainingLoadConfiguration)
+        val load = if (today == null) series.latest else series.points.firstOrNull { it.day == today }
+        return Context(readiness, load)
+    }
+
     private data class ReadinessKey(
         val today: String?, val count: Int, val minDay: Int, val maxDay: Int, val checksum: Long,
     )
@@ -132,7 +163,10 @@ object ReadinessEngine {
             h = h * 1099511628211L xor (d.restingHr?.toLong() ?: Long.MAX_VALUE)
             h = h * 1099511628211L xor (d.respRateBpm ?: -1.0).toRawBits()
             h = h * 1099511628211L xor (d.strain ?: -1.0).toRawBits()
-            sum = sum xor h   // commutative fold → order-independent
+            // Finalize after strain and add rather than XORing raw row hashes. Raw XOR cancels an even
+            // number of identical final-field changes and can return stale readiness from the cache.
+            h = (h xor (h ushr 32)) * 1099511628211L
+            sum += h           // wrapping, commutative fold → order-independent
             val dh = d.day.hashCode()
             if (i == 0) { minDay = dh; maxDay = dh } else { minDay = minOf(minDay, dh); maxDay = maxOf(maxDay, dh) }
         }
@@ -223,20 +257,27 @@ object ReadinessEngine {
             }
         }
 
-        // Training Stress Balance (ACWR) + monotony --------------------------
-        val strainSeries = sorted.mapNotNull { it.strain }
+        // Fixed-window recent-load ratio (ACWR) + monotony ------------------
         var acwr: Double? = null
         var monotony: Double? = null
-        if (strainSeries.size >= minChronic) {
-            val acute = mean(strainSeries.takeLast(acuteWindow))!!
-            val chronic = mean(strainSeries.takeLast(chronicWindow))!!
+        // Anchor both windows to the selected/latest calendar day. Counting the last N populated rows
+        // leaks future rows into a historical selection and turns sparse readings across months into a
+        // fictional 28-day block. This mirrors the Swift calendar-bounded, one-value-per-day path.
+        val loadRows = sorted.filter { it.day <= latest.day }
+        val acuteSeries = calendarWindowStrains(loadRows, ending = latest.day, days = acuteWindow)
+        val chronicSeries = calendarWindowStrains(loadRows, ending = latest.day, days = chronicWindow)
+        if (acuteSeries != null && chronicSeries != null &&
+            acuteSeries.size >= minAcute && chronicSeries.size >= minChronic
+        ) {
+            val acute = mean(acuteSeries)!!
+            val chronic = mean(chronicSeries)!!
             if (chronic > 0) {
                 val ratio = acute / chronic
                 acwr = ratio
                 signals.add(acwrSignal(ratio, acute = acute, chronic = chronic))
             }
             // Foster monotony over the last week of strain.
-            val week = strainSeries.takeLast(acuteWindow)
+            val week = acuteSeries
             val sd = sampleSD(week)
             val m = mean(week)
             if (week.size >= 4 && sd != null && sd > 0 && m != null) {
@@ -310,52 +351,64 @@ object ReadinessEngine {
         val pct = fmt(ratio, 2)
         // Evidence: the two strain loads the ratio is built from, 1 dp each.
         val evidence = "7d ${fmt(acute, 1)} / 28d ${fmt(chronic, 1)}"
-        return when {
-            ratio < 0.8 -> Signal(
-                key = "acwr", label = "Training load",
-                detail = "ramping down (acute:chronic $pct) - room to build", flag = Flag.WATCH,
-                evidence = evidence,
-            )
-            ratio < 1.3 -> Signal(
-                key = "acwr", label = "Training load",
-                detail = "in the sweet spot (acute:chronic $pct)", flag = Flag.GOOD,
-                evidence = evidence,
-            )
-            ratio < 1.5 -> Signal(
-                key = "acwr", label = "Training load",
-                detail = "building fast (acute:chronic $pct) - watch fatigue", flag = Flag.WATCH,
-                evidence = evidence,
-            )
-            else -> Signal(
-                key = "acwr", label = "Training load",
-                detail = "spiking (acute:chronic $pct) - higher injury risk", flag = Flag.BAD,
-                evidence = evidence,
-            )
+        // No universal "good", "bad", or injury-risk bands are validated for this ratio. Keep the
+        // legacy Signal/Flag API shape, but always emit NEUTRAL and state only the arithmetic relation.
+        // [synthesize] independently excludes this key from readiness and training recommendations.
+        return Signal(
+            key = "acwr", label = "Recent-load ratio",
+            detail = "7-day mean is ${pct}x the 28-day mean of recorded strain",
+            flag = Flag.NEUTRAL, evidence = evidence,
+        )
+    }
+
+    /** Values inside a real calendar window, deduplicated to one recorded strain per ISO day. */
+    private fun calendarWindowStrains(
+        rows: List<DailyMetric>,
+        ending: String,
+        days: Int,
+    ): List<Double>? {
+        val end = runCatching {
+            LocalDate.parse(ending).takeIf { it.toString() == ending }
+        }.getOrNull() ?: return null
+        val start = runCatching { end.minusDays((days - 1).toLong()) }.getOrNull() ?: return null
+        val byDay = mutableMapOf<String, Double>()
+        for (row in rows) {
+            val parsed = runCatching {
+                LocalDate.parse(row.day).takeIf { it.toString() == row.day }
+            }.getOrNull() ?: continue
+            if (!parsed.isBefore(start) && !parsed.isAfter(end)) {
+                row.strain?.let { byDay[row.day] = it }
+            }
         }
+        return byDay.toSortedMap().values.toList()
     }
 
     // MARK: Synthesis
 
     private fun synthesize(signals: List<Signal>, hasHistory: Boolean): Triple<Level, String, String> {
-        if (!hasHistory || signals.isEmpty()) {
+        // ACWR is display-only context. Exclude it even though its producer currently marks it neutral,
+        // so a future wording/band change cannot silently make the ratio a readiness verdict.
+        val evaluativeSignals = signals.filter { it.key != "acwr" }
+        if (!hasHistory || evaluativeSignals.isEmpty()) {
             return Triple(
                 Level.INSUFFICIENT, "Readiness",
                 "A few more nights of data and your readiness read will sharpen.",
             )
         }
-        val bad = signals.filter { it.flag == Flag.BAD }
-        val watch = signals.filter { it.flag == Flag.WATCH }
-        val good = signals.filter { it.flag == Flag.GOOD }
-        val recoveryDown = signals.any { it.key in listOf("hrv", "rhr", "respRate") && it.flag == Flag.BAD }
-        val loadHigh = signals.any { it.key == "acwr" && it.flag == Flag.BAD }
+        val bad = evaluativeSignals.filter { it.flag == Flag.BAD }
+        val watch = evaluativeSignals.filter { it.flag == Flag.WATCH }
+        val good = evaluativeSignals.filter { it.flag == Flag.GOOD }
+        val recoveryDown = evaluativeSignals.any {
+            it.key in listOf("hrv", "rhr", "respRate") && it.flag == Flag.BAD
+        }
 
-        if (bad.size >= 2 || (recoveryDown && loadHigh)) {
+        if (bad.size >= 2) {
             return Triple(
                 Level.RUNDOWN, "Run down",
                 "Several signals are down at once. Treat today as recovery - easy movement, real sleep tonight.",
             )
         }
-        if (recoveryDown || loadHigh || bad.size >= 1) {
+        if (recoveryDown || bad.size >= 1) {
             return Triple(
                 Level.STRAINED, "Strained",
                 "One of your signals is flagging. You can train, but keep it controlled and bank the recovery.",
@@ -364,7 +417,7 @@ object ReadinessEngine {
         if (good.size >= 2 && watch.isEmpty()) {
             return Triple(
                 Level.PRIMED, "Primed",
-                "Your signals are aligned and your load is supported. A harder session is well backed today.",
+                "Your measured recovery trends are aligned with your recent baseline.",
             )
         }
         return Triple(

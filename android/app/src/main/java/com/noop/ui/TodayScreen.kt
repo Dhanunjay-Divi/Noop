@@ -5588,7 +5588,7 @@ private fun SourceRow(
 //
 // On-device training-readiness synthesis. Calls the analytics ReadinessEngine over the
 // view model's day history and renders the macOS card: a colored level dot + headline,
-// an optional acute:chronic "load X.XX" read-out, the plain-English summary, then one
+// an optional acute:chronic "ratio X.XX" read-out, the plain-English summary, then one
 // row per driving signal (a small flag-colored dot + label + detail). The whole card is
 // suppressed until there is enough history (level == INSUFFICIENT), matching macOS.
 
@@ -5610,7 +5610,7 @@ private fun ReadinessSection(days: List<DailyMetric>, carriedDay: DailyMetric? =
     SectionHeader("Readiness", overline = overline)
     NoopCard {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            // Headline row: level dot + headline, then the ACWR load read-out.
+            // Headline row: level dot + headline, then the fixed-window ratio read-out.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier

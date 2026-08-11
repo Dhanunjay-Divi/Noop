@@ -6,16 +6,59 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
-// Optional release signing. Credentials live in `keystore.properties` (git-ignored, never
-// committed); when it's absent — clones, CI without secrets — release falls back to the debug
-// key so `assembleRelease` always produces an installable APK. See docs/BUILD.md.
+// Release signing is fail-closed. Credentials live in `keystore.properties` (git-ignored, never
+// committed) or the four NOOP_RELEASE_* environment variables used by CI. Debug builds continue
+// to use Gradle's per-machine debug key; the tracked historical fork-debug.keystore is deliberately
+// not referenced because its public credentials cannot establish a trusted update identity.
 val keystorePropsFile = rootProject.file("keystore.properties")
 val keystoreProps = Properties().apply {
     if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
 }
+val releaseStoreFile = keystoreProps.getProperty("storeFile")
+    ?: System.getenv("NOOP_RELEASE_STORE_FILE")
+val releaseStorePassword = keystoreProps.getProperty("storePassword")
+    ?: System.getenv("NOOP_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = keystoreProps.getProperty("keyAlias")
+    ?: System.getenv("NOOP_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = keystoreProps.getProperty("keyPassword")
+    ?: System.getenv("NOOP_RELEASE_KEY_PASSWORD")
+val releaseSigningValues = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+)
+val hasReleaseSigning = releaseSigningValues.all { !it.isNullOrBlank() }
+val hasPartialReleaseSigning = releaseSigningValues.any { !it.isNullOrBlank() } && !hasReleaseSigning
 val isStagingRelease = project.hasProperty("stagingRelease")
 val requestedReleaseBuild = gradle.startParameter.taskNames.any {
     it.contains("Release", ignoreCase = true)
+}
+val releaseSigningFailureMessage =
+    "Refusing to build a release without private signing credentials. " +
+        "Configure gitignored keystore.properties or all four NOOP_RELEASE_* environment variables. " +
+        "-PstagingRelease changes the app ID; it does not permit public debug-key signing."
+if (hasPartialReleaseSigning) {
+    throw GradleException(
+        "Incomplete release signing configuration. Provide storeFile, storePassword, keyAlias, " +
+            "and keyPassword together (or all four NOOP_RELEASE_* environment variables)."
+    )
+}
+// Aggregate tasks such as `assemble` do not contain "Release" in the command-line task name.
+// Inspect the resolved task graph as a second gate so they cannot silently emit an unsigned release.
+gradle.taskGraph.whenReady {
+    val includesAppRelease = allTasks.any {
+        it.project.path == project.path && it.name.contains("Release", ignoreCase = true)
+    }
+    if (!hasReleaseSigning && includesAppRelease) {
+        throw GradleException(releaseSigningFailureMessage)
+    }
+}
+val legalAssetsDir = layout.buildDirectory.dir("generated/legalAssets")
+val prepareLegalAssets = tasks.register<Sync>("prepareLegalAssets") {
+    // Keep one binding source of truth at the repository root while still packaging an offline copy.
+    from(rootProject.file("../TERMS.md"))
+    into(legalAssetsDir)
 }
 
 android {
@@ -36,21 +79,12 @@ android {
     }
 
     signingConfigs {
-        getByName("debug") {
-            val forkDebugKeystore = rootProject.file("fork-debug.keystore")
-            if (forkDebugKeystore.exists()) {
-                storeFile = forkDebugKeystore
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
-            }
-        }
         create("release") {
-            if (keystorePropsFile.exists()) {
-                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
-                storePassword = keystoreProps.getProperty("storePassword")
-                keyAlias = keystoreProps.getProperty("keyAlias")
-                keyPassword = keystoreProps.getProperty("keyPassword")
+            if (hasReleaseSigning) {
+                storeFile = rootProject.file(requireNotNull(releaseStoreFile))
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
             }
         }
     }
@@ -73,22 +107,15 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            if (!keystorePropsFile.exists() && !isStagingRelease && requestedReleaseBuild) {
-                throw GradleException(
-                    "Refusing to build a real release without keystore.properties. " +
-                        "Use -PstagingRelease for debug-key staging artifacts only."
-                )
+            if (!hasReleaseSigning && requestedReleaseBuild) {
+                throw GradleException(releaseSigningFailureMessage)
             }
-            // Real release key when keystore.properties is present. The debug-key fallback is allowed
-            // only for explicit fork/staging artifacts that install under their own application id.
-            signingConfig = if (keystorePropsFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            // Never fall back to a debug key for a distributable variant.
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
             }
-            // Fork staging release: built with -PstagingRelease (the fork testing-build CI only), the
-            // release APK gets its own id/name so it installs BESIDE both the official app and the
-            // .debug staging build. A real release (no property) keeps the true com.noop.whoop id.
+            // A staging release still requires a private signing identity. The property only gives it a
+            // separate id/name so it installs beside the real app and a local .debug build.
             if (isStagingRelease) {
                 applicationIdSuffix = ".staging"
                 versionNameSuffix = "-staging"
@@ -142,6 +169,12 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    sourceSets.getByName("main").assets.srcDir(legalAssetsDir)
+}
+
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach {
+    dependsOn(prepareLegalAssets)
 }
 
 // Room<->GRDB parity oracle. KSP exports Room's exact generated schema into the build tree; unit tests

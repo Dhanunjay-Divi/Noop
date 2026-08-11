@@ -70,6 +70,77 @@ final class AppleHealthAutomaticIngestionContractTests: XCTestCase {
         XCTAssertTrue(optIn.contains("never flow intensity, symptoms, fertility or contraception data"))
     }
 
+    func testCoreHealthConsentExcludesOptionalBodyAndHighVolumeScopes() throws {
+        let bridge = try text("StrandiOS/Health/HealthKitBridge.swift")
+        let view = try text("Strand/Screens/AppleHealthView.swift")
+
+        let coreReadStart = try XCTUnwrap(bridge.range(of: "private static let quantityReadIds"))
+        let bodyReadStart = try XCTUnwrap(
+            bridge.range(of: "private static let bodyCompositionReadIds",
+                         range: coreReadStart.upperBound..<bridge.endIndex)
+        )
+        let coreReadBody = String(bridge[coreReadStart.lowerBound..<bodyReadStart.lowerBound])
+        XCTAssertFalse(coreReadBody.contains(".bodyMass"))
+        XCTAssertFalse(coreReadBody.contains(".bodyFatPercentage"))
+        XCTAssertFalse(coreReadBody.contains(".leanBodyMass"))
+        XCTAssertFalse(coreReadBody.contains(".bodyMassIndex"))
+
+        let coreWriteStart = try XCTUnwrap(bridge.range(of: "private static let quantityWriteIds"))
+        let legacyWriteStart = try XCTUnwrap(
+            bridge.range(of: "private static let legacyQuantityWriteIds",
+                         range: coreWriteStart.upperBound..<bridge.endIndex)
+        )
+        let coreWriteBody = String(bridge[coreWriteStart.lowerBound..<legacyWriteStart.lowerBound])
+        XCTAssertFalse(coreWriteBody.contains(".heartRateVariabilitySDNN"))
+        XCTAssertFalse(coreWriteBody.contains(".heartRate"))
+        XCTAssertFalse(coreWriteBody.contains(".activeEnergyBurned"))
+
+        XCTAssertTrue(bridge.contains("func requestBodyCompositionAccess() async"))
+        XCTAssertTrue(bridge.contains("func requestHighResolutionWritebackAccess() async"))
+        XCTAssertTrue(bridge.contains("if bodyCompositionAccessRequested"))
+        XCTAssertTrue(bridge.contains("if highResolutionWritebackRequested"))
+        XCTAssertTrue(view.contains("Add body composition"))
+        XCTAssertTrue(view.contains("Add detailed write-back"))
+        XCTAssertTrue(view.contains("separate choices after connecting"))
+    }
+
+    func testAmbiguousRMSSDIsNeverWrittenAsHealthKitSDNN() throws {
+        let bridge = try text("StrandiOS/Health/HealthKitBridge.swift")
+        let view = try text("Strand/Screens/AppleHealthView.swift")
+
+        let vitalsStart = try XCTUnwrap(bridge.range(of: "private func writeVitals("))
+        let sleepStart = try XCTUnwrap(
+            bridge.range(of: "private func writeSleep(", range: vitalsStart.upperBound..<bridge.endIndex)
+        )
+        let vitalsBody = String(bridge[vitalsStart.lowerBound..<sleepStart.lowerBound])
+        XCTAssertFalse(vitalsBody.contains("add(.heartRateVariabilitySDNN"),
+                       "The mixed avgHrv column must never be emitted as Apple SDNN.")
+        XCTAssertTrue(vitalsBody.contains("removeLegacyMislabelledHrvIfPossible"))
+        XCTAssertTrue(bridge.contains("HKQuery.predicateForObjects(from: HKSource.default())"),
+                      "Legacy cleanup must remain scoped to samples authored by NOOP.")
+        XCTAssertTrue(view.contains("HRV is read-only"))
+        XCTAssertTrue(view.contains("strap RMSSD as Apple Health SDNN"))
+
+        let shortcut = try text("Strand/Data/ShortcutHealthExport.swift")
+        XCTAssertTrue(shortcut.contains("return \"\\(hr),,\\(steps),"),
+                      "The HealthKit-free Shortcut path must leave its legacy HRV field empty too.")
+    }
+
+    func testWritebackDoesNotHideLocalStoreReadFailuresOrOverclaimCloudIsolation() throws {
+        let bridge = try text("StrandiOS/Health/HealthKitBridge.swift")
+        let view = try text("Strand/Screens/AppleHealthView.swift")
+
+        let writebackStart = try XCTUnwrap(bridge.range(of: "private func writeBack("))
+        let helpersEnd = try XCTUnwrap(
+            bridge.range(of: "private struct DayAgg", range: writebackStart.upperBound..<bridge.endIndex)
+        )
+        let writebackBody = String(bridge[writebackStart.lowerBound..<helpersEnd.lowerBound])
+        XCTAssertFalse(writebackBody.contains("try? await whoopStore"),
+                       "A failed local read must fail the round trip instead of becoming empty data.")
+        XCTAssertTrue(view.contains("NOOP does not upload this data to a NOOP-operated cloud"))
+        XCTAssertTrue(view.contains("follow your Apple Health and iCloud settings"))
+    }
+
     private func text(_ relativePath: String) throws -> String {
         let here = URL(fileURLWithPath: #filePath)
         let root = here.deletingLastPathComponent().deletingLastPathComponent()

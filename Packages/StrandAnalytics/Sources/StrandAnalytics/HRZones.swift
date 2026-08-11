@@ -179,6 +179,31 @@ public enum HRZones {
         return TimeInZone(seconds: zoneSeconds, belowZone1: below)
     }
 
+    /// Bucket an already time-ordered HR stream using caller-supplied per-sample durations. This is
+    /// intentionally an internal overload: bounded contexts such as an imported workout know their
+    /// exact end instant, while the public general-purpose API above must infer a tail interval. Keeping
+    /// the supplied vector intact ensures zones use the same half-open coverage as average and Effort.
+    static func timeInZone(_ hr: [HRSample], durationsSeconds: [Double],
+                           zoneSet: HRZoneSet) -> TimeInZone {
+        var zoneSeconds = [Double](repeating: 0, count: 5)
+        var below = 0.0
+        let pairedCount = min(hr.count, durationsSeconds.count)
+        guard pairedCount > 0 else {
+            return TimeInZone(seconds: zoneSeconds, belowZone1: below)
+        }
+        for index in 0..<pairedCount {
+            let duration = durationsSeconds[index]
+            guard duration.isFinite, duration > 0 else { continue }
+            let zone = zoneSet.zoneNumber(forBPM: Double(hr[index].bpm))
+            if zone >= 1 {
+                zoneSeconds[zone - 1] += duration
+            } else {
+                below += duration
+            }
+        }
+        return TimeInZone(seconds: zoneSeconds, belowZone1: below)
+    }
+
     /// Median spacing between consecutive timestamps, restricted to plausible
     /// (0, 300 s] gaps. Falls back to 1.0 s when no plausible gap exists.
     static func medianInterval(_ sorted: [HRSample]) -> Double {

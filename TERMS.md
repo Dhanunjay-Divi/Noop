@@ -1,6 +1,6 @@
 # NOOP — Terms of Use & Acknowledgment
 
-**Version 1.1**
+**Version 2.1**
 
 > **This is not legal advice.** This document was drafted with the help of an AI tool, not a lawyer.
 > It is offered honestly and in good faith, but the NOOP maintainers are not lawyers and nothing here
@@ -16,10 +16,15 @@ remove it.
 
 ## 1. What NOOP is — and who provides it
 
-NOOP is a free, independent, **non-commercial** application for macOS, Android and iOS that pairs directly
-with a WHOOP® strap you own over Bluetooth and stores your data **only on your own device**. There is
-no NOOP server, no NOOP account, and no telemetry — the maintainers cannot see your data and never
-receive it.
+NOOP is a free, independent, **non-commercial**, local-first application for macOS, Android and iOS
+that can read supported wearables and health stores. Its core database stays on your device by default;
+NOOP does not require a NOOP account or automatic NOOP-operated cloud storage.
+
+Some features deliberately send selected data to a destination you enable or invoke. These include a
+self-hosted server, Friends sharing, Oura import, an AI provider, Apple Health, and files or share-sheet
+exports. Each destination has its own operator and privacy terms. Review its screen before enabling it;
+do not configure a destination you do not trust. The maintainers cannot promise that an external
+destination will handle data as NOOP's local store does.
 
 NOOP is published anonymously by an unpaid hobbyist maintainer and contributors, referred to
 throughout as **"the maintainers."** No personal identity is asserted or implied. "You" means the
@@ -47,15 +52,15 @@ You accept that NOOP is **experimental software that talks to your device's firm
 unofficial, reverse-engineered protocol.** As with any such tool, there is a residual risk to the
 device, its data, and its connection to official services. **You assume that risk.**
 
-## 4. No proprietary material
+## 4. Source provenance and proprietary material
 
-NOOP contains **only original work** plus **uncopyrightable factual notes** about how data appears on
-the wire, observed by the author from a device the author owns. NOOP does **not** contain, bundle,
-mirror, link to, or redistribute any WHOOP application, firmware, decompiled or disassembled code,
-source, logos, artwork, credentials, or server endpoints, and does **not** circumvent any access
-control, DRM, paywall, or login. Any reverse engineering is undertaken **solely to achieve
-interoperability** of an independently created program, to the extent permitted by the laws that
-apply to you.
+NOOP does not intentionally bundle WHOOP application binaries, firmware, logos, artwork, credentials,
+or extracted proprietary source. Protocol interoperability work is based on observed wire behavior and
+community research. Parts of the protocol, storage, and collection lineage were adapted from earlier
+community repositories; `ATTRIBUTION.md`, `NOTICE`, and `docs/REFERENCE_REPOSITORY_AUDIT.md` record
+that lineage. One inherited source lineage does not currently carry an explicit upstream software
+license. Attribution is not permission, and clean redistribution rights for that expression must not be
+claimed unless written permission is obtained or the affected code is independently replaced.
 
 ## 5. Not a medical device
 
@@ -78,11 +83,13 @@ This covers **every** feature. A few in particular:
 - **Nutrition import.** Importing nutrition data (e.g. a Cronometer or MacroFactor CSV) only displays
   figures **you** recorded elsewhere. It is **informational only** and is **not dietary,
   nutritional, or medical advice.**
-- **Apple Health / "Export for Shortcuts" (iOS).** When you export metrics to Apple Health — including
-  the HealthKit-free "Export for Shortcuts" path — NOOP writes **only** the data you choose, **on your
-  own device**, and only when you trigger it. **You are responsible for the data you push into Apple
-  Health** and for whatever you, or any Shortcut you run, do with it afterwards. The values are the
-  same uncertified approximations described above.
+- **Apple Health / "Export for Shortcuts" (iOS).** After you explicitly enable Apple Health permissions,
+  NOOP may read authorized categories and may automatically write or update NOOP-authored samples during
+  foreground or background sync. You can review or revoke access in Apple Health. NOOP manages only the
+  samples it authored; it does not control samples written by other apps. The separate HealthKit-free
+  "Export for Shortcuts" path runs when you invoke and share it. **You are responsible for the data you
+  authorize or push into Apple Health** and for whatever you or a Shortcut does with it afterwards. The
+  values are the same uncertified approximations described above.
 
 ## 6. Warranty and liability — honestly stated
 
@@ -143,5 +150,5 @@ apply. A failure to enforce any part is not a waiver of it.
 
 ---
 
-*NOOP is free, on-device, and independent. Thank you for using it responsibly. See also `LICENSE`
+*NOOP is free, local-first, and independent. Thank you for using it responsibly. See also `LICENSE`
 (PolyForm Noncommercial) and `DISCLAIMER.md`.*

@@ -205,6 +205,12 @@ object Framing {
         return FrameCheck(ok = headerOk && (crc32Ok == true), length = declaredLength, headerCrcOk = headerOk, crc32Ok = crc32Ok)
     }
 
+    /** Strict envelope check for specialized decoders that must reject corrupt payload bytes. */
+    internal fun frameCrcOk(frame: ByteArray, family: DeviceFamily): Boolean = when (family) {
+        DeviceFamily.WHOOP4 -> verifyWhoop4(frame).ok
+        DeviceFamily.WHOOP5 -> verifyWhoop5(frame).ok
+    }
+
     // MARK: - type / enum naming
 
     /** Canonical packet-type name, aliasing the Whoop 5.0 "puffin" types onto their base names. */

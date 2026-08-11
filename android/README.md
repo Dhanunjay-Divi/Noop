@@ -118,12 +118,24 @@ The debug APK lands at `app/build/outputs/apk/debug/app-debug.apk`.
 A normal release build refuses to run without a gitignored
 `android/keystore.properties` pointing at a private signing key you control.
 
-Repository release workflows deliberately use `-PstagingRelease` instead. That
-variant has the separate `com.noop.whoop.staging` application ID and is signed
-with the checked-in `fork-debug.keystore` so community builds can update one
-another. The keystore and its password are public: **this is a reproducible
-staging identity, not a private production trust anchor, and anyone can sign an
-APK with it.** Never use that key for a production application ID.
+`-PstagingRelease` gives a release the separate
+`com.noop.whoop.staging` application ID, but it does **not** weaken the signing
+gate. Both staging and non-staging release builds require either the gitignored
+`keystore.properties` values or all four `NOOP_RELEASE_*` environment variables.
+Repository workflows obtain a private staging identity from Actions secrets.
+
+Ordinary local debug builds still work without release secrets and use Gradle's
+per-machine debug identity. The tracked `fork-debug.keystore` is retained only as
+a historical artifact and is no longer referenced by Gradle or release workflows:
+its credentials are public, so any APK bearing that signature is forgeable and
+must be treated as disposable. It cannot be a trusted update or production
+identity.
+
+Changing away from the historical public signature means a privately signed
+`com.noop.whoop.staging` APK cannot update an older public-key staging install.
+Export and verify an in-app backup before uninstalling the old app, then restore
+after installing the new build. Preserve and back up the private staging key;
+rotating or losing it prevents future in-place updates.
 
 ---
 

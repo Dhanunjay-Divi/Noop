@@ -399,9 +399,11 @@ struct DataSourcesView: View {
                 let data = try Data(contentsOf: url)
                 let result = NutritionCsvImporter.parse(data: data)
                 guard result.importedDays > 0 else {
-                    nutritionSummary = String(localized: "No usable rows found. Check the file has a date column (yyyy-MM-dd) and daily totals.")
+                    nutritionSummary = result.ambiguousWeightRows > 0
+                        ? String(localized: "No weight imported: label the weight column kg or lb.")
+                        : String(localized: "No usable rows found. Check the file has a date column (yyyy-MM-dd) and daily totals.")
                     nutritionFailed = true
-                    logImport("Nutrition CSV: no usable rows (\(result.skippedRows) skipped)")
+                    logImport("Nutrition CSV: no usable rows (\(result.skippedRows) skipped, \(result.ambiguousWeightRows) ambiguous weights)")
                     nutritionImporting = false
                     return
                 }
@@ -422,9 +424,14 @@ struct DataSourcesView: View {
                                     ? String(localized: "1 row skipped")
                                     : String(localized: "\(result.skippedRows) rows skipped"))
                 }
+                if result.ambiguousWeightRows > 0 {
+                    msg += " · " + (result.ambiguousWeightRows == 1
+                                    ? String(localized: "1 weight value skipped (add kg or lb to the column)")
+                                    : String(localized: "\(result.ambiguousWeightRows) weight values skipped (add kg or lb to the column)"))
+                }
                 nutritionSummary = msg
                 nutritionFailed = false
-                logImport("Nutrition CSV: \(result.importedDays) days, \(points.count) values, \(result.skippedRows) rejected")
+                logImport("Nutrition CSV: \(result.importedDays) days, \(points.count) values, \(result.skippedRows) rejected, \(result.ambiguousWeightRows) ambiguous weights")
             } catch {
                 nutritionSummary = String(localized: "Import failed: \(error.localizedDescription)")
                 nutritionFailed = true

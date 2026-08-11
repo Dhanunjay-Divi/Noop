@@ -15,14 +15,15 @@ their respective owners.
 applies to you.** This software does not encourage or require you to violate any terms you have
 agreed to; how you use hardware you own is your responsibility.
 
-## 2. No proprietary material is contained or redistributed
+## 2. Proprietary material and source provenance
 
-This repository contains **only original work** authored by the project's contributors, plus
-factual protocol observations. Some protocol facts were confirmed by examining the official app
-**for the sole purpose of interoperability** — an activity expressly permitted by
-**17 U.S.C. § 1201(f)** and analogous interoperability provisions (see §3). **No** such material
-is reproduced, redistributed, or included here. Specifically, this repository does **NOT**
-contain, bundle, mirror, or link to any of the following:
+This repository does not intentionally include WHOOP proprietary application source or assets.
+Protocol facts were investigated for interoperability. Parts of the protocol, storage, and collection
+lineage were adapted from earlier community work, as recorded in `ATTRIBUTION.md`, `NOTICE`, and the
+reference audit. One inherited lineage has no explicit upstream software license; attribution alone is
+not permission, so clean redistribution rights must not be claimed unless permission is obtained or the
+affected expression is independently replaced. Specifically, this repository does **NOT** intentionally
+contain or bundle any of the following:
 
 - WHOOP application binaries, APKs, IPAs, or installers;
 - WHOOP firmware, firmware images, or extracted firmware;
@@ -96,13 +97,13 @@ supplements, or any condition affected by nutrition, consult a qualified profess
 
 ### 5.3 Apple Health & "Export for Shortcuts" — your data, your choice
 
-On iOS, NOOP can prepare metrics for Apple Health (including the HealthKit-free **"Export for
-Shortcuts"** path). NOOP writes **only** the data you explicitly choose to export, **on your own
-device**, and only when you trigger it. **You are responsible for the data you push into Apple
-Health** and for anything you, or Shortcuts you run, then do with it. NOOP cannot see, retrieve, or
-manage data once it is in Apple Health — that store and its sharing settings are governed by Apple
-and by you. NOOP-prepared values are the same uncertified approximations described above; do not
-treat them as clinical records.
+On iOS, after you explicitly enable Apple Health permissions, NOOP may read authorized categories and
+automatically write or update NOOP-authored samples during foreground or background sync. You can
+review or revoke access in Apple Health. NOOP can replace or delete only samples it authored; it does
+not control other apps' records. The separate HealthKit-free **"Export for Shortcuts"** path runs when
+you invoke and share it. **You are responsible for the data you authorize or push into Apple Health**
+and for anything you or a Shortcut then does with it. NOOP-prepared values are the same uncertified
+approximations described above; do not treat them as clinical records.
 
 ## 6. Good-faith takedown contact
 

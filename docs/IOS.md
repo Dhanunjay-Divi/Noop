@@ -3,7 +3,9 @@
 Building and signing the app yourself remains the highest-trust iOS path.
 Unsigned community `.ipa` files may also be published under
 [`Dhanunjay-Divi/Noop`](https://github.com/Dhanunjay-Divi/Noop/releases) and
-prepended to this fork's `altstore-source.json`. Historical entries in that
+prepended to this fork's `altstore-source.json`. This repository is currently
+private, so its Releases page requires authenticated collaborator access and its
+raw manifest is not a usable AltStore/SideStore feed. Historical entries in the
 manifest point to upstream builds; only a download URL under
 `Dhanunjay-Divi/Noop` contains this fork's self-hosted-sync changes.
 
@@ -20,26 +22,28 @@ the widget; iOS still will not run it until the sideloader signs it on your devi
 
 1. Install [AltStore](https://altstore.io), [SideStore](https://sidestore.io),
    or another sideloader and complete its one-time setup.
-2. Download `NOOP-ios-unsigned-v<version>.ipa` from this fork's
-   [Releases](https://github.com/Dhanunjay-Divi/Noop/releases) page.
+2. If your GitHub account is an authorized repository collaborator, download
+   `NOOP-ios-unsigned-v<version>.ipa` from this fork's
+   [Releases](https://github.com/Dhanunjay-Divi/Noop/releases) page. Otherwise,
+   there is no anonymous download from the private repository.
 3. Open the `.ipa` with the sideloader. First launch may require trusting your
    Apple ID under **Settings → General → VPN & Device Management**.
 
-### Add NOOP as a source (recommended — auto-updates)
+### AltStore/SideStore source status
 
-So you never have to manually re-download, add NOOP's **source** to AltStore/SideStore once — new
-releases then show up (and re-sign) automatically:
+The repository contains an `altstore-source.json` publication template. Its
+current URL is deliberately **not advertised as an install path**:
 
-**Source URL:** `https://raw.githubusercontent.com/Dhanunjay-Divi/Noop/main/altstore-source.json`
+**Dormant template URL (not usable while private):**
+`https://raw.githubusercontent.com/Dhanunjay-Divi/Noop/main/altstore-source.json`
 
-> Make sure you copy the **raw** URL above exactly. If a sideloader says **"given data not valid
-> JSON"** when you add the source, you've pasted a normal web page URL (which returns HTML) instead of
-> the raw file — use the `raw.githubusercontent.com` URL above.
-
-- **AltStore:** open AltStore → **Browse** tab → tap **＋** (top-left) → paste the URL → **Add Source**.
-  NOOP appears under the source; tap **Free** / **Get** to install. From then on it updates itself on
-  AltStore's background refresh (you can also pull-to-refresh **My Apps**).
-- **SideStore:** open SideStore → **Browse** / **Sources** → **＋ Add Source** → paste the same URL → add.
+AltStore/SideStore does not send GitHub collaborator credentials when fetching a
+source or an IPA. Consequently the private raw URL and private release URLs return
+an authentication failure to the sideloader. The source can be enabled only after
+the manifest, icon, and every advertised IPA are moved to intentionally public
+HTTPS hosting (or the repository itself is made public). Until then, authorized
+testers must download the IPA in an authenticated browser and import that local
+file into their sideloader.
 
 Only entries whose download URL points to `Dhanunjay-Divi/Noop` contain this
 fork's self-hosted-sync changes. Older manifest entries may still identify their
@@ -47,8 +51,9 @@ historical upstream release.
 
 > ### Two honest limitations of free-Apple-ID sideloading
 > - **7-day expiry.** Apps signed with a *free* Apple ID stop launching after 7 days and need
->   re-signing. **AltStore/SideStore refresh this automatically** in the background — keep the
->   sideloader installed and NOOP keeps working.
+>   re-signing. AltStore/SideStore can attempt refreshes when their server/VPN and iOS background
+>   conditions permit, but refresh is not guaranteed. Open the sideloader periodically and refresh
+>   manually before expiry if needed.
 > - **Apple-only features require their extensions and capabilities.** The release IPA retains
 >   `NOOPWidgets.appex` and requests matching App Group capabilities for app and extension. Keep the
 >   extension enabled when AltStore/SideStore asks so it can provision the additional app ID and shared

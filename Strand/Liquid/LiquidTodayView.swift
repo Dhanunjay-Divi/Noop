@@ -1597,8 +1597,8 @@ private struct TodaySignalPatternsCard: View {
                           detail: "below your usual range", flag: .bad),
                     .init(key: "rhr", label: "Resting HR", evidence: "61 vs 54 bpm",
                           detail: "above your usual range", flag: .bad),
-                    .init(key: "acwr", label: "Training load", evidence: "7d 14.8 / 28d 9.5",
-                          detail: "building quickly", flag: .bad),
+                    .init(key: "acwr", label: "Recent-load ratio", evidence: "7d 14.8 / 28d 9.5",
+                          detail: "7-day mean is 1.56x the 28-day mean", flag: .neutral),
                 ],
                 acwr: 1.56,
                 monotony: nil

@@ -19,6 +19,9 @@ class NutritionCsvImporterTest {
     private fun parse(csv: String) =
         NutritionCsvImporter.parse(CsvTable.fromData(csv.trimIndent().toByteArray()), source)
 
+    private fun parseDetailed(csv: String) =
+        NutritionCsvImporter.parseDetailed(CsvTable.fromData(csv.trimIndent().toByteArray()), source)
+
     private fun List<com.noop.data.MetricSeriesRow>.value(day: String, key: String): Double =
         first { it.day == day && it.key == key }.value
 
@@ -33,7 +36,7 @@ class NutritionCsvImporterTest {
     fun nativeHeaderShapeMapsAllFiveKeys() {
         val rows = parse(
             """
-            date,calories_in,protein_g,carbs_g,fat_g,weight
+            date,calories_in,protein_g,carbs_g,fat_g,weight_kg
             2026-06-01,2150,160,220,70,81.4
             """
         )
@@ -101,6 +104,84 @@ class NutritionCsvImporterTest {
         assertEquals(180.0, rows.value("2026-06-03", "carbs_g"), 1e-9)
         assertEquals(60.0, rows.value("2026-06-03", "fat_g"), 1e-9)
         assertEquals(180 * NutritionCsvImporter.LB_TO_KG, rows.value("2026-06-03", "weight"), 1e-6)
+    }
+
+    @Test
+    fun kilogramHeadersKeepKilogramsAcrossCommonFormats() {
+        val headers = listOf("Weight (kg)", "weight_kg", "Body Mass [kilograms]", "Bodyweight kgs")
+        for (header in headers) {
+            val rows = parse(
+                """
+                Date,$header
+                2026-06-05,81.3
+                """
+            )
+            assertEquals(header, 81.3, rows.value("2026-06-05", "weight"), 1e-9)
+        }
+    }
+
+    @Test
+    fun poundHeadersConvertAcrossCommonFormats() {
+        val headers = listOf("Weight (lb)", "weight_lbs", "Body Weight [pounds]", "Bodyweight lbs")
+        for (header in headers) {
+            val rows = parse(
+                """
+                Date,$header
+                2026-06-06,180
+                """
+            )
+            assertEquals(
+                header,
+                180 * NutritionCsvImporter.LB_TO_KG,
+                rows.value("2026-06-06", "weight"),
+                1e-9,
+            )
+        }
+    }
+
+    @Test
+    fun bareWeightHeaderAcceptsUnitBearingCells() {
+        val rows = parse(
+            """
+            Date,Weight
+            2026-06-07,180lb
+            2026-06-08,81.5 kg
+            """
+        )
+        assertEquals(180 * NutritionCsvImporter.LB_TO_KG, rows.value("2026-06-07", "weight"), 1e-9)
+        assertEquals(81.5, rows.value("2026-06-08", "weight"), 1e-9)
+    }
+
+    @Test
+    fun bareNumericWeightIsSkippedRatherThanGuessed() {
+        val parsed = parseDetailed(
+            """
+            Date,Calories,Weight
+            2026-06-09,2000,180
+            """
+        )
+        val rows = parsed.rows
+        assertEquals(2000.0, rows.value("2026-06-09", "calories_in"), 1e-9)
+        assertTrue(rows.none { it.key == "weight" })
+        assertEquals(1, parsed.ambiguousWeightRows)
+        assertEquals(
+            NutritionCsvImporter.WeightUnit.AMBIGUOUS,
+            NutritionCsvImporter.resolveColumns(listOf("date", "calories", "weight"))!!.weightUnit,
+        )
+    }
+
+    @Test
+    fun conflictingHeaderAndCellUnitsAreRejected() {
+        val parsed = parseDetailed(
+            """
+            Date,Calories,Weight (kg)
+            2026-06-10,1900,180 lb
+            """
+        )
+        val rows = parsed.rows
+        assertEquals(1900.0, rows.value("2026-06-10", "calories_in"), 1e-9)
+        assertTrue(rows.none { it.key == "weight" })
+        assertEquals(1, parsed.ambiguousWeightRows)
     }
 
     @Test
@@ -178,7 +259,7 @@ class NutritionCsvImporterTest {
     fun lastWeightOfTheDayWinsAndNegativesAreIgnored() {
         val rows = parse(
             """
-            date,weight,calories_in
+            date,weight_kg,calories_in
             2026-06-01,82.0,-5
             2026-06-01,81.2,
             """

@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="nutrition_weight_unit_missing_failure">Aucun poids importé : indiquez kg ou lb dans la colonne de poids.</string>
+    <plurals name="nutrition_weight_values_skipped">
+        <item quantity="one">1 valeur de poids ignorée (ajoutez kg ou lb à la colonne).</item>
+        <item quantity="other">%d valeurs de poids ignorées (ajoutez kg ou lb à la colonne).</item>
+    </plurals>
 
     <!-- #453 generated Compose literal migration -->
     <string name="l10n_add_device_wizard_0123456789abcdef0123456789abcdef_b1775a78">0123456789abcdef0123456789abcdef</string>
@@ -1479,7 +1484,7 @@
     <string name="skin_temp_reason_summary">%1$s : %2$s</string>
     <string name="stress_score_accessibility">Stress %1$s sur 3, %2$s</string>
     <string name="stress_peak_summary">pic %1$s · %2$s</string>
-    <string name="today_load_ratio">charge %1$s</string>
+    <string name="today_load_ratio">ratio %1$s</string>
 
     <!-- #453 base-catalog locale completion -->
     <string name="app_name">NOOP</string>
@@ -1541,6 +1546,10 @@
     <string name="terms_point_warranty_head">Aucune garantie ; responsabilité limitée</string>
     <string name="terms_point_warranty_body">NOOP est gratuit et fourni \"as is\", sans garantie. La responsabilité est limitée dans la mesure maximale que la loi qui s\'applique à vous permet, et rien ici ne supprime les protections de votre loi locale ne nous permet pas de supprimer.</string>
     <string name="terms_footer">Les conditions complètes se trouvent dans TERMS.md, fourni avec NOOP. Ceci n\'est pas un conseil juridique.</string>
+    <string name="terms_read_full">Lire les conditions complètes</string>
+    <string name="terms_full_title">Conditions d’utilisation</string>
+    <string name="terms_close">Terminé</string>
+    <string name="terms_load_failed">Impossible d’ouvrir les conditions incluses. N’acceptez pas avant d’avoir consulté TERMS.md dans le paquet source de NOOP.</string>
     <string name="terms_attest_head">Veuillez confirmer chacun de ces éléments :</string>
     <string name="terms_attest_not_affiliated">Je ne suis pas un employé, entrepreneur ou affilié de WHOOP, et je n\'utilise pas NOOP au nom de WHOOP\.</string>
     <string name="terms_attest_own_device">Je possède l\'appareil WHOOP que je vais utiliser avec NOOP et je ne l\'utiliserai que pour accéder à mes propres données. Ce faisant est ma décision et mon risque, y compris tout effet sur mon compte WHOOP, abonnement, appareil, ou garantie, et il peut enfreindre les Conditions de service de WHOOP\.</string>

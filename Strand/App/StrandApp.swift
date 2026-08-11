@@ -29,6 +29,7 @@ struct StrandApp: App {
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
     /// Chart data-colour style (Titanium / Classic throwback). Re-colours gauges + charts.
     @AppStorage(ChartStyle.storageKey) private var chartStyleRaw = ChartStyle.titanium.rawValue
+    @AppStorage("noop.acceptedTermsVersion") private var acceptedTermsVersion = ""
 
     var body: some Scene {
         WindowGroup {
@@ -46,7 +47,16 @@ struct StrandApp: App {
                 // v5 L3: the shared stress check-in nudge surface, so the Breathe screen's passive
                 // card observes the SAME instance the central detector (AppModel.evaluateStress) posts to.
                 .environment(\.stressNudgeCenter, model.stressNudgeCenter)
-                .onAppear { model.setRealtimeForeground(scenePhase == .active) }
+                .onAppear {
+                    model.setRealtimeForeground(
+                        acceptedTermsVersion == Terms.currentVersion && scenePhase == .active
+                    )
+                }
+                .onChange(of: acceptedTermsVersion) { version in
+                    model.setRealtimeForeground(
+                        version == Terms.currentVersion && scenePhase == .active
+                    )
+                }
                 .frame(minWidth: 1000, minHeight: 700)
                 .preferredColorScheme(AppearanceMode.resolve(appearanceRaw).colorScheme)
                 .chartStyle(chartStyleRaw)
@@ -63,6 +73,10 @@ struct StrandApp: App {
                 .onChange(of: scenePhase) { phase in
                     // Dense Live/workout/session streaming is foreground-only. This does not drop the
                     // BLE connection, history sync, or the separate Continuous HRV background opt-in.
+                    guard acceptedTermsVersion == Terms.currentVersion else {
+                        model.setRealtimeForeground(false)
+                        return
+                    }
                     model.setRealtimeForeground(phase == .active)
                     if phase == .active {
                         model.ble.requestSync(.foreground)

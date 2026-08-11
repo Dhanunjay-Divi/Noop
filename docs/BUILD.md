@@ -225,8 +225,10 @@ swift run backfill
 ## iOS (source build or unsigned community IPA)
 
 iOS has no App Store or TestFlight build. Build and sign it yourself in Xcode,
-or re-sign an unsigned community IPA from this fork's Releases page with
-AltStore, SideStore, Sideloadly, or your own signing identity.
+or, if you are an authenticated collaborator on this private repository, download
+and re-sign an unsigned community IPA from this fork's Releases page with AltStore,
+SideStore, Sideloadly, or your own signing identity. Private GitHub raw/release URLs
+are not an anonymous AltStore source.
 The iOS app is **newer and less battle-tested** than macOS and Android: live BLE on a real iPhone
 isn't yet fully validated. It shares the same analytics packages, so once data is in, results match
 macOS.

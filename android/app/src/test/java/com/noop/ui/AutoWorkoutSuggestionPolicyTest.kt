@@ -16,11 +16,15 @@ class AutoWorkoutSuggestionPolicyTest {
     }
 
     @Test
-    fun autoSave_usesStricterDurationGate() {
+    fun autoSave_neverPersistsUncalibratedCandidates() {
         val short = AutoWorkoutDetector.DetectedWorkout(1_000, 1_840, 130, 160, 14)
-        val confident = AutoWorkoutDetector.DetectedWorkout(1_000, 1_900, 130, 160, 15)
+        val longButUncalibrated = AutoWorkoutDetector.DetectedWorkout(
+            1_000, 1_900, 130, 160, 15,
+            eventConfidence = 0.99,
+            confidenceStatus = AutoWorkoutDetector.ConfidenceStatus.UNCALIBRATED,
+        )
         assertEquals(false, AutoWorkoutAutomationPolicy.shouldAutoSave(short))
-        assertEquals(true, AutoWorkoutAutomationPolicy.shouldAutoSave(confident))
+        assertEquals(false, AutoWorkoutAutomationPolicy.shouldAutoSave(longButUncalibrated))
     }
 
     @Test

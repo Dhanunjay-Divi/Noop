@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="nutrition_weight_unit_missing_failure">未导入体重：请在体重列中注明 kg 或 lb。</string>
+    <plurals name="nutrition_weight_values_skipped">
+        <item quantity="one">已跳过 1 个体重值（请在列名中添加 kg 或 lb）。</item>
+        <item quantity="other">已跳过 %d 个体重值（请在列名中添加 kg 或 lb）。</item>
+    </plurals>
     <string name="app_name">NOOP</string>
     <string name="widget_description">今日的恢复、负荷与睡眠情况，以及实时心率和手环电量，一目了然。</string>
     <string name="widget_compact_name">NOOP 迷你组件</string>
@@ -59,6 +64,10 @@
     <string name="terms_point_warranty_head">无保修及责任限制</string>
     <string name="terms_point_warranty_body">NOOP 是免费且“按原样”提供的，不提供任何形式的保修。我们的责任在适用法律允许的最大范围内受到限制，但这并不排除您当地法律赋予您的不可剥夺的权利。</string>
     <string name="terms_footer">完整的条款请参阅 NOOP 附带的 TERMS.md 文件。此内容不构成法律建议。</string>
+    <string name="terms_read_full">阅读完整条款</string>
+    <string name="terms_full_title">使用条款</string>
+    <string name="terms_close">完成</string>
+    <string name="terms_load_failed">无法打开随附条款。在查看 NOOP 源代码包中的 TERMS.md 之前，请勿接受。</string>
     <string name="terms_attest_head">请确认以下每一项：</string>
     <string name="terms_attest_not_affiliated">我不是 WHOOP 的员工、承包商或附属人员，我也不是代表 WHOOP 使用 NOOP。</string>
     <string name="terms_attest_own_device">我拥有将与 NOOP 一起使用的 WHOOP 设备，并且仅用于访问我自己的数据。这样做是我个人的决定并由我承担风险，包括对我的 WHOOP 账户、订阅、设备或保修的任何影响，且我了解这可能违反 WHOOP 的服务条款。</string>
@@ -1600,7 +1609,7 @@
     <string name="skin_temp_reason_summary">%1$s: %2$s</string>
     <string name="stress_score_accessibility">压力值 %1$s / 3，%2$s</string>
     <string name="stress_peak_summary">峰值 %1$s · %2$s</string>
-    <string name="today_load_ratio">心肺负荷量 %1$s</string>
+    <string name="today_load_ratio">比值 %1$s</string>
     <string name="timeline_metric_heart_rate">心率</string>
     <string name="timeline_metric_rmssd">rMSSD (5分钟)</string>
     <string name="timeline_metric_spo2">血氧(SpO₂)</string>

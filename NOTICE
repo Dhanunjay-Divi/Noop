@@ -12,6 +12,12 @@ checked-in manifests. Exact resolved versions are authoritative in
 `android/gradle/verification-metadata.xml`, and `server/requirements.txt`.
 Transitive dependencies retain their own notices and licenses.
 
+Release gate: this inventory does not yet reproduce every required copyright,
+permission, Apache NOTICE, and transitive component text. It must not be treated
+as a complete redistribution acknowledgment. Generate and verify the full
+acknowledgments from the exact resolved release graph before distributing a
+binary outside the private research trial.
+
 Apple / Swift dependencies
 --------------------------
 

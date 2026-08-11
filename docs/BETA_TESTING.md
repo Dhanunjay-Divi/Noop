@@ -1,4 +1,4 @@
-# NOOP public beta testing
+# NOOP beta testing
 
 NOOP's beta program is for people who want to test the app with hardware and
 data they own, compare its results with another app or wearable, and report
@@ -12,24 +12,35 @@ proprietary models.
 ## Install a build
 
 Use only artifacts hosted by the
-[Dhanunjay-Divi/Noop releases page](https://github.com/Dhanunjay-Divi/Noop/releases).
-Check the release notes and filename before installing.
+[Dhanunjay-Divi/Noop releases page](https://github.com/Dhanunjay-Divi/Noop/releases),
+and check the release notes and filename before installing. **This repository is
+private today:** that page and every release asset require an authenticated GitHub
+account with collaborator access. A release URL is not a public friend-download
+link, even if someone who already has access can open it.
 
 | Platform | Artifact | Installation |
 |---|---|---|
-| Android | `NOOP-android-*.apk` | Download on the phone, allow installation from the browser or file manager for this install, then open the APK. A staging build uses a separate app identity and can be installed beside another NOOP build. |
+| Android | `NOOP-android-*.apk` | Download on the phone, allow installation from the browser or file manager for this install, then open the APK. A staging build uses a separate app identity and can be installed beside another NOOP build. Distributable staging APKs require the repository's private CI signing key; local debug APKs are disposable and are not a trusted update channel. |
 | macOS | `NOOP-macos-*.zip` | Download, unzip, move NOOP to Applications, then right-click it and choose **Open** the first time. Community builds are ad-hoc signed and are not notarized. |
-| iPhone | `NOOP-ios-unsigned-*.ipa` | This is an unsigned community build. Add NOOP's AltStore/SideStore source for convenient installs and updates, or re-sign the IPA with another sideloading tool. A normal App Store-style beta will require a separately signed TestFlight build. |
+| iPhone | `NOOP-ios-unsigned-*.ipa` | This is an unsigned community build. Download it while authenticated, then import the local file into AltStore, SideStore, or another sideloading tool. A normal App Store-style beta requires a separately signed TestFlight build. |
 
 The fixed version tags are stable releases. When present, `testing-latest` is a
 rolling prerelease for testers. It is replaced in place, may contain unfinished
 work, and should not be treated as a backup of your data.
 
-For AltStore or SideStore, add this source URL:
+Older staging APKs signed with the historical public debug key cannot be updated
+in place by the new privately signed staging APK, even though the application ID
+is the same. Android will report a signature mismatch. Before replacing one,
+create and verify an in-app local backup; uninstalling the old app erases its
+local sandbox. Keep the new private staging key stable after the first build or
+the same update break will recur.
 
-```text
-https://raw.githubusercontent.com/Dhanunjay-Divi/Noop/main/altstore-source.json
-```
+The checked-in `altstore-source.json` is a publication template, not a working
+private distribution channel. AltStore and SideStore cannot authenticate to a
+private `raw.githubusercontent.com` manifest or its private GitHub release URLs.
+Do not advertise or add that source URL while this repository is private. It
+becomes usable only after the manifest, icon, and IPA assets all live at
+intentionally public HTTPS URLs.
 
 See the [iPhone installation guide](IOS.md) for the exact setup and the
 limitations of free Apple-ID signing.

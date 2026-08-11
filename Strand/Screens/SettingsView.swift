@@ -152,10 +152,8 @@ struct SettingsView: View {
         UnitPrefs.resolveTemperature(system: unitSystem, override: temperatureRaw)
     }
 
-    /// Raw-sensor CSV export (experimental diagnostic, #308/#276/#322). Holds the last-written file so
-    /// macOS can "Reveal in Finder" after a share, mirroring the puffin-capture export.
+    /// Raw-sensor CSV export (experimental diagnostic, #308/#276/#322).
     @State private var rawCsvBusy = false
-    @State private var lastRawCsvURL: URL?
     @State private var rawAndLogBusy = false
 
     /// Confirm gate for the "Recalibrate Charge baseline" action (it re-learns the HRV anchor from tonight).
@@ -905,7 +903,7 @@ struct SettingsView: View {
                     Text("STRAP LOG").font(StrandFont.overline).tracking(StrandFont.overlineTracking)
                         .foregroundStyle(StrandPalette.textSecondary)
                     Spacer()
-                    Button("Copy") { PlatformPasteboard.copy(live.exportableLogText()) }
+                    Button("Copy") { FileExport.copyDiagnosticText(live.exportableLogText()) }
                         .buttonStyle(.plain).font(StrandFont.mono).foregroundStyle(StrandPalette.accent)
                     Button("Save…") {
                         Task {
@@ -1586,11 +1584,6 @@ struct SettingsView: View {
                             exportPuffinCaptures()
                         }
 
-                        #if os(macOS)
-                        NoopButton("Reveal in Finder", systemImage: "folder", kind: .secondary) {
-                            revealPuffinCaptures()
-                        }
-                        #endif
                         Spacer(minLength: 0)
                     }
                     // One-tap "matched pair" export (#510): hands a reporter BOTH the raw capture file
@@ -1646,14 +1639,6 @@ struct SettingsView: View {
                 .buttonStyle(NoopButtonStyle(.secondary))
                 .disabled(rawCsvBusy)
 
-                #if os(macOS)
-                if let url = lastRawCsvURL {
-                    NoopButton("Reveal in Finder", systemImage: "folder", kind: .secondary) {
-                        NSWorkspace.shared.activateFileViewerSelecting([url])
-                    }
-                }
-                #endif
-
                 Text("Dumps the last 24 hours of decoded per-sample sensor streams (heart rate, R-R, motion, steps, SpO₂, skin temperature, respiration, events) to a single CSV. All on \(Platform.deviceNounPhrase), nothing uploaded. Share it to help prototype and test sleep, activity and strength algorithms.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
@@ -1682,26 +1667,12 @@ struct SettingsView: View {
                 let url = try await store.exportRawCSV(deviceId: model.deviceId, since: since)
                 await MainActor.run {
                     rawCsvBusy = false
-                    lastRawCsvURL = url
-                    #if os(macOS)
-                    let panel = NSSavePanel()
-                    panel.allowedContentTypes = [.commaSeparatedText]
-                    panel.nameFieldStringValue = url.lastPathComponent
-                    panel.canCreateDirectories = true
-                    guard panel.runModal() == .OK, let dest = panel.url else { return }
-                    let fm = FileManager.default
-                    do {
-                        if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
-                        try fm.copyItem(at: url, to: dest)
-                    } catch {
-                        backupAlertTitle = String(localized: "Export failed")
-                        backupAlertMessage = error.localizedDescription
-                        showBackupAlert = true
-                    }
-                    #else
-                    FileExport.exportFile(at: url)
-                    #endif
                 }
+                await FileExport.exportDiagnosticFile(
+                    at: url,
+                    suggestedName: url.lastPathComponent,
+                    normalizedName: "raw-sensors.csv"
+                )
             } catch {
                 await MainActor.run {
                     rawCsvBusy = false
@@ -1721,24 +1692,13 @@ struct SettingsView: View {
         // Suggest a friendly, timestamped name so a reporter saving several captures gets sortable,
         // non-colliding files (#510) — e.g. noop-raw-capture-260617-1042.json.
         let suggested = FileExport.timestampedName("noop-raw-capture", ext: "json")
-        #if os(macOS)
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = suggested
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let dest = panel.url else { return }
-        let fm = FileManager.default
-        do {
-            if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
-            try fm.copyItem(at: src, to: dest)
-        } catch {
-            backupAlertTitle = String(localized: "Export failed")
-            backupAlertMessage = error.localizedDescription
-            showBackupAlert = true
+        Task {
+            await FileExport.exportDiagnosticFile(
+                at: src,
+                suggestedName: suggested,
+                normalizedName: "raw-capture.jsonl"
+            )
         }
-        #else
-        FileExport.exportFile(at: src, suggestedName: suggested)
-        #endif
     }
 
     /// One-tap matched-pair export (#510): export the raw puffin capture AND the strap log together,
@@ -1761,15 +1721,6 @@ struct SettingsView: View {
             file: capture, fileSuggestedName: "noop-raw-capture-\(stamp).json",
             text: live.exportableLogText(), textSuggestedName: "noop-strap-log-\(stamp).txt")
     }
-
-    #if os(macOS)
-    /// Flush, then reveal the capture file in Finder so the user can grab it directly.
-    private func revealPuffinCaptures() {
-        model.ble.flushPuffinCaptures()
-        guard let url = live.puffinCaptureURL else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([url])
-    }
-    #endif
 
     private var backupCard: some View {
         SettingsSection(
@@ -2075,6 +2026,37 @@ struct SettingsView: View {
                 .buttonStyle(LiquidPressStyle())
                 .accessibilityLabel("Storage")
 
+                // The exact root legal files copied into this app bundle by project.yml. This stays
+                // available offline and satisfies the Terms gate's promise that the complete terms,
+                // license, notices and attribution ship with the binary rather than existing only on
+                // GitHub.
+                NavigationLink {
+                    LegalDocumentsView()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "doc.text")
+                            .foregroundStyle(StrandPalette.accent)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Legal & acknowledgements")
+                                .font(StrandFont.body)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Text("Project terms, source license, current notices and attribution. Available offline.")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .accessibilityHidden(true)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(LiquidPressStyle())
+                .accessibilityLabel("Legal and acknowledgements")
+
                 #if os(iOS)
                 // iOS reality & diagnostics — honest expectations for a sideloaded iPhone build, plus a
                 // one-tap environment dump (device, iOS+build, Data Protection, background refresh,
@@ -2207,12 +2189,12 @@ struct SettingsView: View {
                 rowDivider
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Built on").strandOverline()
-                    attribution(repo: "johnmiddleton12/my-whoop", note: String(localized: "WHOOP 4.0 protocol"))
-                    attribution(repo: "b-nnett/goose", note: String(localized: "WHOOP 5.0 protocol"))
+                    Text("Protocol research & lineage").strandOverline()
+                    attribution(repo: "johnmiddleton12/wearable", note: String(localized: "WHOOP 4.0 reference"))
+                    attribution(repo: "b-nnett/goose", note: String(localized: "WHOOP 5.0 reference"))
                 }
 
-                Text("Open-source BLE reverse-engineering work. Thank you.")
+                Text("See Legal & acknowledgements for exact provenance, notices and license scope.")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
             }

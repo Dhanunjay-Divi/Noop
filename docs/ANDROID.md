@@ -210,7 +210,7 @@ cd android
 ./gradlew installDebug
 adb shell am start -n com.noop.whoop.debug/com.noop.ui.MainActivity
 
-# Reproducible community staging release (separate app ID, public debug key).
+# Staging release (separate app ID; still requires private signing credentials).
 ./gradlew -PstagingRelease assembleFullRelease
 
 # A non-staging release requires gitignored keystore.properties and a private key.
@@ -226,10 +226,23 @@ the `app` configuration on a physical device.
 
 The repository's downloadable Android artifact is a **source-available staging
 APK**, not a Play Store build. It uses the separate
-`com.noop.whoop.staging` application ID and the checked-in
-`android/fork-debug.keystore`. That key is intentionally public so community
-builds can update each other; it is **not** a private production trust anchor,
-and anyone can produce an APK bearing that staging signature.
+`com.noop.whoop.staging` application ID and release workflows require a private
+staging key stored in Actions secrets. Because the repository is private, its
+release URL also requires an authenticated collaborator; it is not an anonymous
+friend-download link.
+
+The tracked `android/fork-debug.keystore` is a historical artifact and is not
+used by Gradle or the release workflows. Its credentials are public, so APKs
+signed with it are forgeable and disposable, not a trusted update channel. Local
+debug builds use Gradle's per-machine debug identity and likewise must not be
+redistributed as trusted releases.
+
+This intentionally rotates away from the historical public signature. Android
+therefore will not install a new privately signed `com.noop.whoop.staging` APK as
+an update over an old public-key staging APK. Export and verify a local backup
+before uninstalling the old app, because uninstalling erases its sandbox, then
+install the new build and restore. The private staging keystore must remain
+durable and backed up; losing or rotating it breaks future in-place updates.
 
 Because the APK comes from outside Google Play, Play Protect may still warn or
 block on install — most stubbornly on stock Pixel / recent Android. Verify the
@@ -239,7 +252,7 @@ release digest and source revision before installing:
 2. **If that button is missing** — it can vanish after a first install + uninstall — grant the source
    directly: **Settings → Apps → Special app access → Install unknown apps → [the browser or file
    manager you're installing from] → Allow from this source**, then reopen the APK.
-3. **If Play Protect still refuses**, it's your call for an unsigned app you trust: **Play Store →
+3. **If Play Protect still refuses**, it's your call for a sideloaded app you trust: **Play Store →
    profile icon → Play Protect → ⚙ Settings → "Scan apps with Play Protect" off**, install NOOP,
    then switch it **back on**.
 4. **Uninstalling erases local app data.** The app sets
@@ -651,8 +664,8 @@ should be re-verified against a real build, a real device, and a real strap befo
       `app/proguard-rules.pro`.
 - [x] `./gradlew :app:testDebugUnitTest` is green (analytics vectors).
 - [x] `./gradlew assembleDebug` produces `app-debug.apk`.
-- [x] `./gradlew -PstagingRelease assembleFullRelease` succeeds with the separate staging identity.
-- [x] A non-staging release refuses to build without gitignored private signing configuration.
+- [x] `./gradlew -PstagingRelease assembleFullRelease` uses the separate staging identity when private signing configuration is supplied.
+- [x] Staging and non-staging releases refuse to build without private signing configuration.
 - [x] APK declares `INTERNET` only for explicit opt-in features; fresh-install Self-hosted Sync is disabled.
 
 **Protocol parity (JVM, no device)**

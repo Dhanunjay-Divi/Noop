@@ -1581,10 +1581,10 @@ struct TodayView: View {
                                 .accessibilityLabel("Readiness: \(levelWord(r.level)). \(r.headline)")
                             Spacer()
                             if let acwr = r.acwr {
-                                Text("load \(String(format: "%.2f", acwr))")
+                                Text("ratio \(String(format: "%.2f", acwr))")
                                     .font(StrandFont.captionNumber)
                                     .foregroundStyle(StrandPalette.textTertiary)
-                                    .help("Acute (7-day) vs chronic (28-day) training load. 0.8-1.3 is the sweet spot.")
+                                    .help("7-day mean divided by the 28-day mean of recorded strain. Descriptive context, not Training Stress Balance or an injury-risk threshold.")
                             }
                         }
                         Text(LocalizedStringKey(r.summary)).font(StrandFont.subhead)

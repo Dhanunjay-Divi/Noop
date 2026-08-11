@@ -982,35 +982,6 @@ object NoopPrefs {
 fun NoopRoot() {
     val context = LocalContext.current
     val prefs = remember { NoopPrefs.of(context) }
-    val appViewModel: AppViewModel = viewModel()
-
-    // #267: app-wide "came to foreground" hook, mirrors the iOS/macOS scenePhase == .active trigger.
-    // requestSync(FOREGROUND) is a safe no-op when nothing's connected/bonded yet (e.g. during
-    // onboarding), so this is placed above the onboarding/terms gates rather than duplicated below them.
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    androidx.compose.runtime.DisposableEffect(lifecycleOwner, appViewModel) {
-        // Observe from a conservative state immediately; an observer added after an already-delivered
-        // event is not guaranteed to receive that old event on every Lifecycle implementation.
-        appViewModel.setRealtimeForeground(
-            lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED),
-        )
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            when (event) {
-                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
-                    appViewModel.setRealtimeForeground(true)
-                    appViewModel.ble.onForeground()
-                }
-                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> {
-                    // Release only the high-rate UI/session lease. The lightweight connection,
-                    // historical sync, and separate Continuous HRV opt-in remain independently owned.
-                    appViewModel.setRealtimeForeground(false)
-                }
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
 
     var onboarded by remember {
         mutableStateOf(prefs.getBoolean(NoopPrefs.KEY_ONBOARDED, false))
@@ -1040,6 +1011,30 @@ fun NoopRoot() {
             acceptedTerms = Terms.CURRENT_VERSION
         })
         return
+    }
+
+    // Construct the operational model only after clickwrap acceptance. AppViewModel owns BLE clients
+    // and long-lived jobs, so creating it above the gate would make the visual consent screen a lie.
+    val appViewModel: AppViewModel = viewModel()
+
+    // #267: app-wide foreground hook, now scoped to the accepted operational app shell.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner, appViewModel) {
+        appViewModel.setRealtimeForeground(
+            lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED),
+        )
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
+                    appViewModel.setRealtimeForeground(true)
+                    appViewModel.ble.onForeground()
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> appViewModel.setRealtimeForeground(false)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     if (!onboarded) {
