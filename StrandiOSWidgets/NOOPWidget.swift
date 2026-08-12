@@ -688,8 +688,12 @@ struct NOOPWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: NOOPProvider()) { entry in
             NOOPDailyWidgetView(entry: entry)
+                .noopAppearance(WidgetAppearancePreference.load())
                 .privacySensitive()
-                .containerBackground(for: .widget) { NOOPWidgetCanvas(accent: StrandPalette.chargeColor) }
+                .containerBackground(for: .widget) {
+                    NOOPWidgetCanvas(accent: StrandPalette.chargeColor)
+                        .noopAppearance(WidgetAppearancePreference.load())
+                }
                 .widgetURL(NOOPWidgetDestination.today.url)
         }
         .configurationDisplayName("NOOP Daily Signal")
@@ -708,8 +712,12 @@ struct NOOPVitalsWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: NOOPProvider()) { entry in
             NOOPVitalsWidgetView(entry: entry)
+                .noopAppearance(WidgetAppearancePreference.load())
                 .privacySensitive()
-                .containerBackground(for: .widget) { NOOPWidgetCanvas(accent: StrandPalette.statusCritical) }
+                .containerBackground(for: .widget) {
+                    NOOPWidgetCanvas(accent: StrandPalette.statusCritical)
+                        .noopAppearance(WidgetAppearancePreference.load())
+                }
                 .widgetURL(NOOPWidgetDestination.live.url)
         }
         .configurationDisplayName("NOOP Vitals")
@@ -728,8 +736,12 @@ struct NOOPSleepWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: NOOPProvider()) { entry in
             NOOPSleepWidgetView(entry: entry)
+                .noopAppearance(WidgetAppearancePreference.load())
                 .privacySensitive()
-                .containerBackground(for: .widget) { NOOPWidgetCanvas(accent: StrandPalette.restColor) }
+                .containerBackground(for: .widget) {
+                    NOOPWidgetCanvas(accent: StrandPalette.restColor)
+                        .noopAppearance(WidgetAppearancePreference.load())
+                }
                 .widgetURL(NOOPWidgetDestination.sleep.url)
         }
         .configurationDisplayName("NOOP Sleep")

@@ -955,10 +955,10 @@ private fun NotificationsStep() {
     }
 }
 
-// A late step that tells new users NOOP's look is theirs to set — the same System / Light / Dark
+// A late step that tells new users NOOP's look is theirs to set — the same System / Light / Dark / Black
 // choice that lives in Settings → Appearance, with a live preview. Writing the choice flips the whole
 // app immediately (AppearancePrefs.mode is snapshot state; Palette re-resolves live), so the picker
-// IS the preview — and two mini swatches show both the warm-paper Light and dark blue-grey looks.
+// IS the preview — and three mini swatches show Light, dimensional Dark, and true OLED Black.
 @Composable
 private fun AppearanceStep() {
     val context = LocalContext.current
@@ -966,49 +966,60 @@ private fun AppearanceStep() {
 
     StepShell(
         title = uiString(R.string.l10n_onboarding_screen_make_it_yours_54135155),
-        subtitle = "NOOP follows your system by default, or pick Light or Dark. You can change this any time in Settings → Appearance.",
+        subtitle = uiString(R.string.appearance_onboarding_subtitle),
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            // Two mini look-swatches so the choice is concrete: warm-paper Light and dark blue-grey.
-            // The one matching the live theme carries an accent (blue) rim; System shows whichever
-            // the phone is currently on.
+            // Three mini look-swatches so the choice is concrete: warm-paper Light, dark blue-grey,
+            // and true OLED Black.
+            // An explicit choice carries the neutral accent rim. System leaves all three previews
+            // unselected so it never appears as two simultaneous choices.
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(Metrics.gap),
             ) {
                 ThemeSwatch(
-                    title = uiString(R.string.l10n_onboarding_screen_light_a36ef8ab),
+                    title = uiString(AppearanceMode.LIGHT.labelRes),
                     tokens = LightTokens,
-                    selected = Palette.isLight,
+                    selected = isAppearancePreviewSelected(mode, AppearanceMode.LIGHT),
                     modifier = Modifier.weight(1f),
                 )
                 ThemeSwatch(
-                    title = uiString(R.string.l10n_onboarding_screen_dark_ae1ef014),
+                    title = uiString(AppearanceMode.DARK.labelRes),
                     tokens = DarkTokens,
-                    selected = !Palette.isLight,
+                    selected = isAppearancePreviewSelected(mode, AppearanceMode.DARK),
+                    modifier = Modifier.weight(1f),
+                )
+                ThemeSwatch(
+                    title = uiString(AppearanceMode.BLACK.labelRes),
+                    tokens = BlackTokens,
+                    selected = isAppearancePreviewSelected(mode, AppearanceMode.BLACK),
                     modifier = Modifier.weight(1f),
                 )
             }
 
             NoopCard(padding = 18.dp) {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    ProfileFieldRow(label = uiString(R.string.l10n_onboarding_screen_theme_a797e309)) {
-                        SegmentedPillControl(
-                            items = listOf(AppearanceMode.SYSTEM, AppearanceMode.LIGHT, AppearanceMode.DARK),
-                            selection = mode,
-                            label = { it.label },
-                            onSelect = {
-                                mode = it
-                                // Persist + flip live — the rest of the onboarding (and the app) re-themes
-                                // instantly, so the user sees their choice land before tapping Continue.
-                                AppearancePrefs.set(context, it)
-                            },
-                        )
-                    }
+                    Text(
+                        uiString(R.string.l10n_onboarding_screen_theme_a797e309),
+                        style = NoopType.body,
+                        color = Palette.textPrimary,
+                    )
+                    SegmentedPillControl(
+                        items = AppearanceMode.entries,
+                        selection = mode,
+                        label = { uiString(it.labelRes) },
+                        onSelect = {
+                            mode = it
+                            // Persist + flip live — the rest of the onboarding (and the app) re-themes
+                            // instantly, so the user sees their choice land before tapping Continue.
+                            AppearancePrefs.set(context, it)
+                        },
+                        adaptsToAvailableWidth = true,
+                    )
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1020,11 +1031,7 @@ private fun AppearanceStep() {
                             modifier = Modifier.size(17.dp),
                         )
                         Text(
-                            when (mode) {
-                                AppearanceMode.SYSTEM -> "Following your phone's light/dark setting."
-                                AppearanceMode.LIGHT -> "Deep blue accent on warm paper."
-                                AppearanceMode.DARK -> "Deep blue accent on a dark blue-grey canvas."
-                            },
+                            uiString(mode.detailRes),
                             style = NoopType.footnote,
                             color = Palette.textTertiary,
                         )
@@ -1036,8 +1043,8 @@ private fun AppearanceStep() {
 }
 
 /** A small fixed-palette look-swatch (a surface chip + accent ring + hairline) so the user can see a
- *  theme without switching to it. Uses the passed token set directly (not the live Palette) so Light
- *  always renders Light and Dark always renders Dark, whatever the current theme. */
+ *  theme without switching to it. Uses the passed token set directly (not the live Palette) so each
+ *  finish stays visible whatever the current theme. */
 @Composable
 private fun ThemeSwatch(
     title: String,
@@ -1045,6 +1052,7 @@ private fun ThemeSwatch(
     selected: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val previewAccent = themeSwatchAccent(tokens)
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1058,7 +1066,7 @@ private fun ThemeSwatch(
                 .background(tokens.surfaceBase)
                 .border(
                     width = if (selected) 2.dp else 1.dp,
-                    color = if (selected) Palette.accent else tokens.hairline,
+                    color = if (selected) previewAccent else tokens.hairline,
                     shape = RoundedCornerShape(14.dp),
                 )
                 .padding(12.dp),
@@ -1068,26 +1076,24 @@ private fun ThemeSwatch(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                // A mini score bead in the live accent (reset blue — gold is killed), on the theme's
-                // raised card. Uses the live Palette.accent, not tokens.gold (whose LIGHT value is still
-                // the retired gold), so the bead reads as the reset accent on both swatches.
+                // A mini score bead in this PREVIEW's accent, not the currently selected app accent.
                 Box(
                     modifier = Modifier
-                        .size(26.dp)
+                        .size(24.dp)
                         .clip(CircleShape)
-                        .background(Palette.accent),
+                        .background(previewAccent),
                 )
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Box(
                         modifier = Modifier
-                            .width(46.dp)
+                            .width(30.dp)
                             .height(7.dp)
                             .clip(RoundedCornerShape(50))
                             .background(tokens.surfaceRaised),
                     )
                     Box(
                         modifier = Modifier
-                            .width(32.dp)
+                            .width(20.dp)
                             .height(7.dp)
                             .clip(RoundedCornerShape(50))
                             .background(tokens.hairlineStrong),

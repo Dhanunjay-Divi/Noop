@@ -147,8 +147,7 @@ struct IntelligenceView: View {
         let frac = min(max(f.charge / 100.0, 0), 1)
         return VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Tomorrow's Recovery", overline: "Evening forecast",
-                          trailing: String(localized: "Estimate"),
-                          onDark: showDayCycleBackground)
+                          trailing: String(localized: "Estimate"))
             NoopCard(padding: 20, tint: StrandPalette.chargeColor) {
                 VStack(spacing: 14) {
                     // The signature liquid gauge: a filling vessel tinted to the forecast Charge, with the

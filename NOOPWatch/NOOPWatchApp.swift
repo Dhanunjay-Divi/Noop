@@ -33,9 +33,9 @@ struct NOOPWatchApp: App {
             rootView
                 .environmentObject(store)
                 .environmentObject(liveHR)
-                // The watch app is dark-only to match the Apple-Fitness-x-WHOOP look. StrandPalette
-                // tokens resolve their dark values here, so the rings read on the near-black canvas.
-                .preferredColorScheme(.dark)
+                // OLED Black is intentional on the watch: true-black negative space preserves contrast
+                // and lets the score rings carry the information without a glowing grey canvas.
+                .noopAppearance(AppearanceMode.black.rawValue)
         }
     }
 

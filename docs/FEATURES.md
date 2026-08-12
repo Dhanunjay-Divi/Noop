@@ -478,7 +478,7 @@ NOOP watches for the classic early-illness/strain signature on-device. It compar
 days against a ~28-day baseline (ending 3 days ago) for resting HR, HRV, skin-temperature
 deviation and respiration. When **two or more** anomalies appear — e.g. resting HR up ≥5 bpm,
 HRV down ≥20%, skin temp up ≥0.6 °C, respiration up — a banner appears on **Control Center**:
-*"Your body looks strained — … Consider taking it easy."*
+*"Several signals shifted together … Many things can cause this pattern; review how you feel."*
 
 On a banner transition from clear to raised, NOOP also posts a **system notification** (at most
 once per local day) so the warning reaches you when the window is closed. The toggle lives in

@@ -53355,54 +53355,54 @@
         }
       }
     },
-    "Early warning: take it easy": {
+    "Private wellness check-in": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Frühwarnung: Nimm es locker"
+            "value": "Privater Wellness-Check-in"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Aviso temprano: tómatelo con calma"
+            "value": "Revisión privada de bienestar"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Alerte précoce : allez-y doucement"
+            "value": "Bilan privé de bien-être"
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Avviso precoce: vacci piano"
+            "value": "Controllo privato del benessere"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Aviso prévio: vá com calma"
+            "value": "Verificação privada de bem-estar"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Раннее предупреждение: не перенапрягайтесь"
+            "value": "Приватная проверка самочувствия"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "早期预警：放轻松"
+            "value": "私密健康状态提示"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "早期警訊：放輕鬆"
+            "value": "私密健康狀態提示"
           }
         }
       }
@@ -70474,54 +70474,54 @@
         }
       }
     },
-    "Illness early-warning": {
+    "Multi-signal change": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Krankheits-Frühwarnung"
+            "value": "Multi-Signal-Veränderung"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Alerta temprana de enfermedad"
+            "value": "Cambio en varias señales"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Alerte précoce de maladie"
+            "value": "Variation de plusieurs signaux"
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Allerta precoce di malattia"
+            "value": "Variazione di più segnali"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Alerta precoce de doença"
+            "value": "Alteração em vários sinais"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Раннее предупреждение о болезни"
+            "value": "Изменение нескольких показателей"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "疾病早期预警"
+            "value": "多项信号变化"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "疾病早期預警"
+            "value": "多項訊號變化"
           }
         }
       }
@@ -88972,54 +88972,54 @@
         }
       }
     },
-    "Needs at least 14 days of history. When two or more signals drift together you get a banner on the dashboard and a notification, at most once a day.": {
+    "Needs at least 14 days of history. When two or more signals move together, NOOP shows a private in-app check-in and a detail-free notification at most once a day.": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Braucht mindestens 14 Tage Verlauf. Wenn zwei oder mehr Signale gemeinsam driften, bekommst du ein Banner auf dem Dashboard und eine Mitteilung, höchstens einmal am Tag."
+            "value": "Benötigt mindestens 14 Tage Verlauf. Wenn sich zwei oder mehr Signale gemeinsam verändern, zeigt NOOP einen privaten Check-in in der App und höchstens einmal täglich eine Benachrichtigung ohne Details."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Necesita al menos 14 días de historial. Cuando dos o más señales se desvían a la vez, verás un aviso en el panel y una notificación, como máximo una vez al día."
+            "value": "Necesita al menos 14 días de historial. Cuando dos o más señales cambian a la vez, NOOP muestra una revisión privada en la app y una notificación sin detalles como máximo una vez al día."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nécessite au moins 14 jours d'historique. Quand deux signaux ou plus dérivent ensemble, vous obtenez une bannière sur le tableau de bord et une notification, au plus une fois par jour."
+            "value": "Nécessite au moins 14 jours d’historique. Lorsque deux signaux ou plus évoluent ensemble, NOOP affiche un bilan privé dans l’app et une notification sans détails, au maximum une fois par jour."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Richiede almeno 14 giorni di cronologia. Quando due o più segnali deviano insieme ricevi un banner sulla dashboard e una notifica, al massimo una volta al giorno."
+            "value": "Richiede almeno 14 giorni di cronologia. Quando due o più segnali cambiano insieme, NOOP mostra un controllo privato nell’app e una notifica senza dettagli al massimo una volta al giorno."
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Necessita de pelo menos 14 dias de histórico. Quando dois ou mais sinais se juntam, recebe um banner no painel e uma notificação, no máximo uma vez por dia."
+            "value": "Necessita de pelo menos 14 dias de histórico. Quando dois ou mais sinais mudam em conjunto, a NOOP mostra uma verificação privada na app e uma notificação sem detalhes, no máximo uma vez por dia."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Требуется как минимум 14 дней истории. Когда два или более сигналов начинают меняться согласованно, вы получаете баннер на главном экране и уведомление, не чаще одного раза в день."
+            "value": "Требуется не менее 14 дней истории. Когда два или больше показателей меняются вместе, NOOP показывает приватную карточку в приложении и уведомление без подробностей не чаще раза в день."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "需要至少 14 天的历史数据。当两项或以上信号一起偏移时，你会在仪表盘看到横幅并收到通知，每天最多一次。"
+            "value": "需要至少 14 天的历史数据。当两项或更多信号一起变化时，NOOP 会在应用内显示私密提示，并且每天最多发送一次不含详情的通知。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "需要至少 14 天的歷史記錄。當兩個以上的訊號同時偏移時，你會在儀表板上看到橫幅並收到通知，每天最多一次。"
+            "value": "需要至少 14 天的歷史資料。當兩項或更多訊號一起變化時，NOOP 會在 App 內顯示私密提示，並且每天最多傳送一次不含詳情的通知。"
           }
         }
       }
@@ -97973,54 +97973,54 @@
         }
       }
     },
-    "On-device estimate (approximate), not a diagnosis.": {
+    "Open NOOP to review it.": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Schätzung auf dem Gerät (ungefähr), keine Diagnose."
+            "value": "Öffne NOOP, um die Details anzusehen."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Estimación en el dispositivo (aproximada), no un diagnóstico."
+            "value": "Abre NOOP para revisarlo."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Estimation sur l'appareil (approximative), pas un diagnostic."
+            "value": "Ouvrez NOOP pour le consulter."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Stima sul dispositivo (approssimativa), non una diagnosi."
+            "value": "Apri NOOP per controllare."
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Estimativa no dispositivo (aproximada), não um diagnóstico."
+            "value": "Abre a NOOP para rever."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Оценка на устройстве (приблизительная), не диагноз."
+            "value": "Откройте NOOP, чтобы посмотреть."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "设备端估算（近似值），不是诊断。"
+            "value": "打开 NOOP 查看。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "裝置上的估算（近似值），並非診斷。"
+            "value": "開啟 NOOP 查看。"
           }
         }
       }
@@ -145988,54 +145988,54 @@
         }
       }
     },
-    "Watch for early-illness signs": {
+    "Watch for baseline shifts": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Auf frühe Krankheitszeichen achten"
+            "value": "Auf Veränderungen zur Basislinie achten"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Vigilar señales tempranas de enfermedad"
+            "value": "Observar cambios respecto a la línea base"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Surveiller les signes précoces de maladie"
+            "value": "Surveiller les écarts par rapport à la référence"
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tieni d'occhio i primi segnali di malattia"
+            "value": "Osserva gli scostamenti dalla linea di base"
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Esteja atento aos sinais precoces de doença"
+            "value": "Observar alterações face à referência"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Следить за ранними признаками болезни"
+            "value": "Следить за отклонениями от нормы"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "留意疾病早期迹象"
+            "value": "关注基线变化"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "留意疾病早期徵兆"
+            "value": "留意基準變化"
           }
         }
       }
@@ -146092,54 +146092,54 @@
         }
       }
     },
-    "Watches your resting HR, HRV, skin temperature and respiration against your own 28-day baseline. On-device and approximate: informational only, not a diagnosis.": {
+    "Watches resting HR, HRV, skin temperature and respiration against your own baseline. Many factors can move these signals; this is a wellness check-in, not a diagnosis.": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Beobachtet deine Ruhe-HF, HRV, Hauttemperatur und Atmung gegen deine eigene 28-Tage-Basislinie. Auf dem Gerät und ungefähr: nur zur Information, keine Diagnose."
+            "value": "Beobachtet Ruhepuls, HRV, Hauttemperatur und Atmung im Vergleich zu deiner eigenen Basislinie. Viele Faktoren können diese Signale verändern; dies ist ein Wellness-Check-in, keine Diagnose."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Vigila tu FC en reposo, VFC, temperatura de la piel y respiración frente a tu propia línea base de 28 días. En el dispositivo y aproximado: solo informativo, no un diagnóstico."
+            "value": "Compara tu FC en reposo, VFC, temperatura de la piel y respiración con tu propia línea base. Muchos factores pueden cambiar estas señales; es una revisión de bienestar, no un diagnóstico."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Surveille votre FC au repos, votre VFC, votre température cutanée et votre respiration par rapport à votre propre référence sur 28 jours. Sur l'appareil et approximatif : à titre informatif uniquement, pas un diagnostic."
+            "value": "Compare votre FC au repos, votre VFC, votre température cutanée et votre respiration à votre propre référence. De nombreux facteurs peuvent faire varier ces signaux ; il s’agit d’un bilan de bien-être, pas d’un diagnostic."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Monitora la tua FC a riposo, HRV, temperatura cutanea e respirazione rispetto alla tua linea di base di 28 giorni. Sul dispositivo e approssimativo: solo a scopo informativo, non è una diagnosi."
+            "value": "Confronta la FC a riposo, l’HRV, la temperatura cutanea e la respirazione con la tua linea di base. Molti fattori possono cambiare questi segnali; è un controllo del benessere, non una diagnosi."
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Observa a tua FC em repouso, VFC, temperatura da pele e respiração em relação ao teu valor inicial de 28 dias. No dispositivo e aproximado: apenas informativo, não um diagnóstico."
+            "value": "Compara a tua FC em repouso, VFC, temperatura da pele e respiração com o teu próprio valor de referência. Muitos fatores podem alterar estes sinais; é uma verificação de bem-estar, não um diagnóstico."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Отслеживает пульс в покое, ВСР, температуру кожи и дыхание относительно вашей собственной 28-дневной нормы. Вычисляется на устройстве и приблизительно: только для информации, не диагноз."
+            "value": "Сравнивает пульс в покое, ВСР, температуру кожи и частоту дыхания с вашей личной нормой. На эти показатели влияют многие факторы; это проверка самочувствия, а не диагноз."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "将你的静息心率、HRV、皮肤温度和呼吸与你自己的 28 天基线进行比对。在设备本地运行且为近似值：仅供参考，并非诊断。"
+            "value": "将静息心率、HRV、皮肤温度和呼吸与你自己的基线进行比较。这些信号可能受多种因素影响；这是健康状态提示，并非诊断。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "將你的靜息心率、HRV、皮膚溫度和呼吸與你自己的 28 天基線做比對。在裝置上運算且僅為近似值：僅供參考，並非診斷。"
+            "value": "將靜息心率、HRV、皮膚溫度和呼吸與你自己的基準進行比較。這些訊號可能受多種因素影響；這是健康狀態提示，並非診斷。"
           }
         }
       }

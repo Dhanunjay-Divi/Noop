@@ -1860,8 +1860,8 @@ final class AppModel: ObservableObject {
         // The amber banner string reflects the raised / already-unwell levels only (the calmer levels
         // surface in the Health hub's Heads-Up card, never as a scary banner).
         healthAlert = (result.level == .raised || result.level == .alreadyUnwell) ? result.copy : nil
-        if let alert = healthAlert, previous == nil {
-            IllnessNotifier.post(alert)
+        if healthAlert != nil, previous == nil {
+            IllnessNotifier.post()
         }
     }
 

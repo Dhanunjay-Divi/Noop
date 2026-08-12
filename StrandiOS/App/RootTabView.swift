@@ -56,6 +56,9 @@ struct RootTabView: View {
     /// `Set<String>` through `MoreSectionPrefs` so the section logic below is unchanged.
     @AppStorage(MoreSectionPrefs.storageKey) private var expandedMoreSectionsCSV = MoreSectionPrefs.defaultCSV
     private var expandedMoreSections: Set<String> { MoreSectionPrefs.decode(expandedMoreSectionsCSV) }
+    /// A discoverable quick finish control in the More header. The full visual selector remains in
+    /// Settings; this menu changes the same shared preference without adding clutter to Today's masthead.
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
     /// V8 liquid redesign is the default Today; the Settings toggle lets a user fall back to the classic
     /// Today if they prefer it (keyed identically to the SettingsView toggle). Default ON.
     @AppStorage("noop.liquidTodayEnabled") private var liquidTodayEnabled = true
@@ -153,9 +156,9 @@ struct RootTabView: View {
             }
             .tint(StrandPalette.accent)
             .toolbar(.hidden, for: .tabBar)
-            // Tab crossfade — README §Motion: ~240ms opacity swap between tab roots, global calm
-            // easing cubic-bezier(0.22,1,0.36,1).
-            .animation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24), value: selectedTab)
+            // Keep the page switch native and deterministic. Selection motion belongs to the floating
+            // island below; animating the entire TabView also interpolates label geometry and can clip
+            // neighbouring tab titles during a transition frame.
             // Tabs change through the persistent bar. A root-level horizontal drag recognizer used to
             // steal gestures from Trends' year strip (and other horizontally scrolling controls), while
             // pushed pages already need the system edge-swipe for Back. Native iOS tab bars do not require
@@ -491,7 +494,8 @@ struct RootTabView: View {
         NavigationStack(path: path) {
             ScreenScaffold(title: "More", subtitle: "Everything else, one tap away",
                            onRefresh: { await repo.refresh() },
-                           topBackground: liquidScaffoldSky()) {
+                           topBackground: liquidScaffoldSky(),
+                           trailing: { appearanceQuickMenu }) {
                 moreSection("Insights") {
                     MoreRow("What Moves You", "wand.and.sparkles", .insightsHub)
                     MoreRow("Intelligence", "brain.head.profile", .intelligence)
@@ -560,6 +564,37 @@ struct RootTabView: View {
         // Scroll the More index to the top on an at-root re-tap (#198 follow-up); read by its ScreenScaffold.
         .environment(\.scrollToTopSignal, scrollSignal)
         .tabItem { Label("More", systemImage: "ellipsis.circle.fill") }
+    }
+
+    /// Quick access belongs in More's header: it is always reachable, but it does not compete with
+    /// health data or pretend to be a primary destination in the bottom navigation.
+    private var appearanceQuickMenu: some View {
+        let current = AppearanceMode.resolve(appearanceRaw)
+        return Menu {
+            Section("App appearance") {
+                ForEach(AppearanceMode.allCases) { mode in
+                    Button {
+                        appearanceRaw = mode.rawValue
+                    } label: {
+                        HStack {
+                            Label(mode.label, systemImage: mode.symbol)
+                            if current == mode { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: current.symbol)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(StrandPalette.textPrimary)
+                .frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().strokeBorder(StrandPalette.hairlineStrong.opacity(0.78), lineWidth: 0.8))
+                .contentShape(Circle())
+        }
+        .accessibilityLabel("App appearance")
+        .accessibilityValue(current.label)
+        .accessibilityHint("Choose System, Light, Dark, or Black")
     }
 
     /// One titled, COLLAPSIBLE group in the More index (S2): the app's overline (UPPERCASE) becomes a
@@ -702,8 +737,24 @@ private struct MoreRow: View {
                 // Pin the icon to the accent explicitly. A plain inherited tint gets re-resolved by iOS to
                 // its default blue a beat after first render — so the icons flashed green→blue (#184). The
                 // explicit foregroundStyle on the image overrides that; the title keeps the primary colour.
-                DepthGlyph(icon, size: 36)
-                    .frame(width: 38, alignment: .center)
+                // Dense destination lists need quieter symbols than primary feature cards. Keeping the
+                // extruded plates for heroes/shortcuts restores hierarchy and prevents More from reading
+                // like a wall of app icons.
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(StrandPalette.surfaceInset.opacity(0.86))
+                    Image(systemName: icon)
+                        .symbolRenderingMode(.monochrome)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(StrandPalette.textPrimary)
+                }
+                .frame(width: 32, height: 32)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(StrandPalette.hairline, lineWidth: 0.8)
+                )
+                .accessibilityHidden(true)
+                .frame(width: 34, alignment: .center)
                 Text(title)
                     .font(StrandFont.body)
                     .foregroundStyle(StrandPalette.textPrimary)
@@ -845,6 +896,8 @@ private struct FloatingTabBar: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.noopAppearanceMode) private var appearanceMode
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private struct Item: Identifiable { let title: LocalizedStringKey; let icon: String; let tag: Int; var id: Int { tag } }
@@ -861,26 +914,32 @@ private struct FloatingTabBar: View {
         // Dark keeps the smoked optical island. Light uses a pearl-clear lens so the page remains
         // visibly continuous under the bar instead of stacking two black layers into a grey slab.
         // Reduced Transparency receives a deliberately opaque neutral surface below.
-        if reduceTransparency {
+        if reduceTransparency || colorSchemeContrast == .increased {
             return colorScheme == .dark ? .black.opacity(0.94) : .white.opacity(0.96)
         }
-        return colorScheme == .dark ? .black.opacity(0.64) : .white.opacity(0.08)
+        if colorScheme == .dark {
+            return .black.opacity(appearanceMode == .black ? 0.76 : 0.52)
+        }
+        return Color(hex: "#D6DAE0").opacity(0.10)
     }
     private var navigationScrim: Color {
-        guard !reduceTransparency else { return .clear }
-        return colorScheme == .dark ? .black.opacity(0.18) : .black.opacity(0.035)
+        guard !reduceTransparency, colorSchemeContrast != .increased else { return .clear }
+        if colorScheme == .dark {
+            return .black.opacity(appearanceMode == .black ? 0.22 : 0.12)
+        }
+        return .black.opacity(0.018)
     }
     private var navigationGlassOpacity: Double {
         // Clear Glass still carries a strong milk-white optical body over a pearl canvas. Fade only
         // that material layer in Light mode (never the labels or tap targets) so the island reads as a
         // lens over the page rather than another white card. Dark and Reduced Transparency stay solid.
-        reduceTransparency || colorScheme == .dark ? 1 : 0.68
+        reduceTransparency || colorSchemeContrast == .increased || colorScheme == .dark ? 1 : 0.48
     }
     private func navigationInk(active: Bool) -> Color {
         if colorScheme == .dark {
-            return active ? .white : .white.opacity(0.68)
+            return active ? .white : .white.opacity(colorSchemeContrast == .increased ? 0.82 : 0.70)
         }
-        return active ? .black.opacity(0.90) : .black.opacity(0.56)
+        return active ? .black.opacity(0.92) : .black.opacity(colorSchemeContrast == .increased ? 0.76 : 0.62)
     }
 
     var body: some View {
@@ -903,15 +962,15 @@ private struct FloatingTabBar: View {
         .overlay(
             Capsule().strokeBorder(
                 LinearGradient(colors: [
-                    .white.opacity(colorScheme == .dark ? 0.24 : 0.74),
-                    .white.opacity(colorScheme == .dark ? 0.045 : 0.20),
-                    .black.opacity(colorScheme == .dark ? 0.32 : 0.08),
+                    .white.opacity(colorScheme == .dark ? (appearanceMode == .black ? 0.16 : 0.22) : 0.58),
+                    .white.opacity(colorScheme == .dark ? 0.040 : 0.13),
+                    .black.opacity(colorScheme == .dark ? 0.30 : 0.065),
                 ],
                                startPoint: .top, endPoint: .bottom),
                 lineWidth: 0.7)
         )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.30 : 0.10),
-                radius: visuallyCompact ? 11 : 16, x: 0, y: visuallyCompact ? 5 : 8)
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.26 : 0.075),
+                radius: visuallyCompact ? 10 : 14, x: 0, y: visuallyCompact ? 4 : 7)
         // The compact state also narrows the island, not just its height. Keep enough width for five
         // primary destinations to retain at least 44pt hit regions on the narrowest supported iPhone.
         .padding(.horizontal, visuallyCompact ? IPhonePrimaryTab.compactOuterHorizontalPadding : 18)
@@ -926,7 +985,7 @@ private struct FloatingTabBar: View {
             if active {
                 onReselect(item.tag)
             } else {
-                withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selection = item.tag }
+                selection = item.tag
             }
         } label: {
             VStack(spacing: 3) {
@@ -957,8 +1016,10 @@ private struct FloatingTabBar: View {
             .background(
                 Capsule(style: .continuous)
                     .fill(active
-                          ? (colorScheme == .dark ? Color.white.opacity(0.15) : Color.black.opacity(0.055))
+                          ? (colorScheme == .dark ? Color.white.opacity(0.14) : Color.black.opacity(0.045))
                           : .clear)
+                    .padding(.horizontal, visuallyCompact ? 0 : 4)
+                    .padding(.vertical, visuallyCompact ? 0 : 2)
             )
             .overlay(
                 Capsule(style: .continuous)
@@ -966,6 +1027,8 @@ private struct FloatingTabBar: View {
                                   ? (colorScheme == .dark ? Color.white.opacity(0.13) : Color.black.opacity(0.075))
                                   : .clear,
                                   lineWidth: 0.6)
+                    .padding(.horizontal, visuallyCompact ? 0 : 4)
+                    .padding(.vertical, visuallyCompact ? 0 : 2)
             )
             .contentShape(Capsule(style: .continuous))
             .animation(NoopMotion.gated(NoopMotion.value, reduced: reduceMotion), value: active)

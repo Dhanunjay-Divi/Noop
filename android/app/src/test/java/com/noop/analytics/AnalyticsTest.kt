@@ -127,6 +127,7 @@ class AnalyticsTest {
         assertTrue(msg!!.contains("resting HR"))
         assertTrue(msg.contains("HRV"))
         assertTrue(msg.contains("skin temp"))
+        assertTrue(msg.contains("Many things can cause this pattern"))
     }
 
     @Test

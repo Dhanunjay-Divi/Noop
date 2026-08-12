@@ -263,9 +263,9 @@ struct TrendsView: View {
                         weeklyDigestNav
                             .staggeredAppear(index: 0)
                         // The Charge / Effort / Rest trio, presented in NOOP's pip language.
-                        weekInReview(charge: recovery, effort: strain, rest: rest)
-                            .staggeredAppear(index: 1)
                         rangeBar(recovery: recovery)
+                            .staggeredAppear(index: 1)
+                        selectedRangeSummary(charge: recovery, effort: strain, rest: rest)
                             .staggeredAppear(index: 2)
                         heroRecovery(recovery: recovery)
                             .staggeredAppear(index: 3)
@@ -369,8 +369,8 @@ struct TrendsView: View {
             .buttonStyle(.plain)
             .foregroundStyle(
                 atOldest
-                    ? (showDayCycleBackground ? StrandPalette.onDarkTertiary : StrandPalette.textTertiary)
-                    : (showDayCycleBackground ? StrandPalette.onDarkPrimary : StrandPalette.accent)
+                    ? StrandPalette.textTertiary
+                    : StrandPalette.accent
             )
             .disabled(atOldest)
             .accessibilityLabel("Previous week")
@@ -379,16 +379,12 @@ struct TrendsView: View {
             VStack(spacing: 2) {
                 Text(weekOffset == 0 ? String(localized: "This week") : weekOffsetLabel)
                     .font(StrandFont.headline)
-                    .foregroundStyle(showDayCycleBackground
-                                     ? StrandPalette.onDarkPrimary
-                                     : StrandPalette.textPrimary)
+                    .foregroundStyle(StrandPalette.textPrimary)
                 Text("Week in review")
                     .font(StrandFont.overline)
                     .tracking(StrandFont.overlineTracking)
                     .textCase(.uppercase)
-                    .foregroundStyle(showDayCycleBackground
-                                     ? StrandPalette.onDarkSecondary
-                                     : StrandPalette.textSecondary)
+                    .foregroundStyle(StrandPalette.textSecondary)
             }
             Spacer()
 
@@ -398,8 +394,8 @@ struct TrendsView: View {
             .buttonStyle(.plain)
             .foregroundStyle(
                 atNewest
-                    ? (showDayCycleBackground ? StrandPalette.onDarkTertiary : StrandPalette.textTertiary)
-                    : (showDayCycleBackground ? StrandPalette.onDarkPrimary : StrandPalette.accent)
+                    ? StrandPalette.textTertiary
+                    : StrandPalette.accent
             )
             .disabled(atNewest)
             .accessibilityLabel("Next week")
@@ -423,14 +419,15 @@ struct TrendsView: View {
     /// `CountUpText`; the segmented `PipBar` cascades on appear. Self-
     /// hides when none of the three carry a window mean, so an empty history shows nothing here.
     @ViewBuilder
-    private func weekInReview(charge: ResolvedMetric, effort: ResolvedMetric, rest: ResolvedMetric) -> some View {
+    private func selectedRangeSummary(charge: ResolvedMetric, effort: ResolvedMetric, rest: ResolvedMetric) -> some View {
         let chargeAvg = mean(charge.points)
         let effortAvg = mean(effort.points)   // stored 0–100 internal Effort scale
         let restAvg = mean(rest.points)
         if chargeAvg != nil || effortAvg != nil || restAvg != nil {
             NoopCard(tint: StrandPalette.chargeColor) {
                 VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
-                    SectionHeader("Week in review", overline: "Recovery · Effort · Sleep")
+                    SectionHeader("Selected range", overline: "Recovery · Effort · Sleep",
+                                  trailing: rangeSubtitle)
                     if let v = chargeAvg {
                         pipScoreRow(label: "Recovery", value: v, range: 0...100,
                                     tint: StrandPalette.chargeColor, frac: v / 100,

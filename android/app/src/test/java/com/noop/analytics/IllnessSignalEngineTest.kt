@@ -40,7 +40,7 @@ class IllnessSignalEngineTest {
         assertTrue(suppressed.score < raised.score)
         assertEquals(raised.score * IllnessSignalEngine.confounderDampen, suppressed.score, 1e-9)
         assertTrue(suppressed.copy.contains("alcohol"))
-        assertTrue(suppressed.copy.contains("not illness"))
+        assertTrue(suppressed.copy.contains("can move the same signals"))
         assertTrue(suppressed.copy.contains("not a diagnosis"))
     }
 
@@ -76,7 +76,7 @@ class IllnessSignalEngineTest {
             inputs, IllnessSignalEngine.Context(alreadyUnwell = true), labels)
         assertEquals(IllnessSignalEngine.Level.ALREADY_UNWELL, r.level)
         assertTrue(r.copy.contains("Rest up"))
-        assertTrue(r.copy.contains("numbers agree"))
+        assertTrue(r.copy.contains("signals also shifted"))
         assertFalse(r.copy.contains("Heads-up"))
     }
 

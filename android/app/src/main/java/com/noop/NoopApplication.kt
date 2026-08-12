@@ -2,6 +2,7 @@ package com.noop
 
 import android.app.Application
 import android.content.Context
+import android.content.res.Configuration
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import android.util.Log
@@ -14,6 +15,10 @@ import com.noop.data.WhoopDatabase
 import com.noop.data.WhoopRepository
 import com.noop.sync.RemoteSyncService
 import com.noop.ui.NoopPrefs
+import com.noop.ui.AppearanceMode
+import com.noop.ui.AppearancePrefs
+import com.noop.widget.WidgetSnapshotStore
+import com.noop.widget.shouldRefreshSystemWidgetsForNightMode
 import com.noop.location.GpsSession
 import kotlinx.coroutines.runBlocking
 
@@ -32,6 +37,8 @@ import kotlinx.coroutines.runBlocking
  */
 class NoopApplication : Application() {
 
+    private var lastWidgetNightMode: Boolean? = null
+
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
         // UI resource lookup is intentionally available before onCreate: data-driven presentation
@@ -43,6 +50,7 @@ class NoopApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        lastWidgetNightMode = resources.configuration.isNightMode()
         // Restore any process-killed, actively-recording GPS workout before the foreground service or
         // ViewModel reads GpsSession. The checkpoint is local-only and expires after 24 hours.
         GpsSession.initialize(this)
@@ -56,6 +64,21 @@ class NoopApplication : Application() {
         // Record any uncaught crash to a file so it rides along in the shareable strap log — a
         // device-specific crash (e.g. Insights #224/#267) is otherwise lost to an unreachable logcat.
         CrashCapture.install(this)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val currentNightMode = newConfig.isNightMode()
+        if (
+            shouldRefreshSystemWidgetsForNightMode(
+                previousDark = lastWidgetNightMode,
+                currentDark = currentNightMode,
+                followsSystem = AppearancePrefs.persistedMode(this) == AppearanceMode.SYSTEM,
+            )
+        ) {
+            WidgetSnapshotStore.requestRefresh(this)
+        }
+        lastWidgetNightMode = currentNightMode
     }
 
     /** Process-wide Room-backed store. One instance shared by the UI and the background service. */
@@ -162,3 +185,6 @@ class NoopApplication : Application() {
         }
     }
 }
+
+private fun Configuration.isNightMode(): Boolean =
+    (uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES

@@ -2,11 +2,17 @@ package com.noop.widget
 
 import android.content.Context
 import android.content.res.Configuration
+import android.widget.RemoteViews
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.glance.action.Action
 import androidx.glance.appwidget.action.actionStartActivity
+import androidx.glance.color.ColorProvider as DayNightColorProvider
 import androidx.glance.unit.ColorProvider
 import com.noop.R
+import com.noop.ui.BlackTokens
+import com.noop.ui.DarkTokens
+import com.noop.ui.LightTokens
 import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NotificationRouteBridge
 import java.text.DateFormat
@@ -28,28 +34,101 @@ internal data class NoopWidgetColors(
     val effort: ColorProvider,
 )
 
-internal fun noopWidgetColors(dark: Boolean): NoopWidgetColors = NoopWidgetColors(
-    surface = ColorProvider(if (dark) Color(0xFF080808) else Color(0xFFF4F4F1)),
-    inset = ColorProvider(if (dark) Color(0xFF181818) else Color(0xFFFFFFFF)),
-    primary = ColorProvider(if (dark) Color(0xFFF8F8F6) else Color(0xFF0B0B0B)),
-    secondary = ColorProvider(if (dark) Color(0xFFA0A0A0) else Color(0xFF686868)),
-    hairline = ColorProvider(if (dark) Color(0xFF2B2B2B) else Color(0xFFE3E3DF)),
-    positive = ColorProvider(if (dark) Color(0xFF31D9A2) else Color(0xFF087A58)),
-    warning = ColorProvider(if (dark) Color(0xFFFFC45A) else Color(0xFF9A6410)),
-    critical = ColorProvider(if (dark) Color(0xFFFF765D) else Color(0xFFA93825)),
-    sleep = ColorProvider(if (dark) Color(0xFF76AFFF) else Color(0xFF275FAE)),
-    effort = ColorProvider(if (dark) Color(0xFFA28BFF) else Color(0xFF6346BE)),
+/** SYSTEM stays distinct so Glance can emit day/night-aware RemoteViews instead of freezing whichever
+ * mode happened to be active during the last widget recomposition. */
+internal enum class NoopWidgetAppearance { SYSTEM, LIGHT, DARK, BLACK }
+
+internal data class NoopWidgetTokenPair(
+    val day: com.noop.ui.PaletteTokens,
+    val night: com.noop.ui.PaletteTokens,
 )
 
-internal fun Context.noopWidgetDarkMode(): Boolean = runCatching {
-    when (getSharedPreferences("noop_prefs", Context.MODE_PRIVATE)
-        .getString("theme.appearance", "system")) {
-        "light" -> false
-        "dark" -> true
-        else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
-            Configuration.UI_MODE_NIGHT_YES
+internal fun noopWidgetTokenPair(appearance: NoopWidgetAppearance): NoopWidgetTokenPair = when (appearance) {
+    NoopWidgetAppearance.SYSTEM -> NoopWidgetTokenPair(LightTokens, DarkTokens)
+    NoopWidgetAppearance.LIGHT -> NoopWidgetTokenPair(LightTokens, LightTokens)
+    NoopWidgetAppearance.DARK -> NoopWidgetTokenPair(DarkTokens, DarkTokens)
+    NoopWidgetAppearance.BLACK -> NoopWidgetTokenPair(BlackTokens, BlackTokens)
+}
+
+/** Raw values make exact app/widget parity testable before Glance wraps them in providers. */
+internal data class NoopWidgetColorValues(
+    val surface: Color,
+    val inset: Color,
+    val primary: Color,
+    val secondary: Color,
+    val hairline: Color,
+    val positive: Color,
+    val warning: Color,
+    val critical: Color,
+    val sleep: Color,
+    val effort: Color,
+)
+
+internal fun noopWidgetColorValues(
+    appearance: NoopWidgetAppearance,
+    systemDark: Boolean = false,
+): NoopWidgetColorValues {
+    val pair = noopWidgetTokenPair(appearance)
+    val tokens = if (systemDark) pair.night else pair.day
+    return NoopWidgetColorValues(
+        surface = tokens.surfaceBase,
+        inset = tokens.surfaceRaised,
+        primary = tokens.textPrimary,
+        secondary = tokens.textSecondary,
+        hairline = tokens.hairline,
+        positive = tokens.statusPositive,
+        warning = tokens.statusWarning,
+        critical = tokens.statusCritical,
+        sleep = tokens.restColor,
+        effort = tokens.effortColor,
+    )
+}
+
+internal fun noopWidgetColors(appearance: NoopWidgetAppearance): NoopWidgetColors {
+    val day = noopWidgetColorValues(appearance, systemDark = false)
+    val night = noopWidgetColorValues(appearance, systemDark = true)
+    fun adaptive(dayColor: Color, nightColor: Color): ColorProvider =
+        if (dayColor == nightColor) ColorProvider(dayColor)
+        else DayNightColorProvider(day = dayColor, night = nightColor)
+    return NoopWidgetColors(
+        surface = adaptive(day.surface, night.surface),
+        inset = adaptive(day.inset, night.inset),
+        primary = adaptive(day.primary, night.primary),
+        secondary = adaptive(day.secondary, night.secondary),
+        hairline = adaptive(day.hairline, night.hairline),
+        positive = adaptive(day.positive, night.positive),
+        warning = adaptive(day.warning, night.warning),
+        critical = adaptive(day.critical, night.critical),
+        sleep = adaptive(day.sleep, night.sleep),
+        effort = adaptive(day.effort, night.effort),
+    )
+}
+
+/** Resolve the persisted value without collapsing System into a one-time configuration snapshot. */
+internal fun resolveNoopWidgetAppearance(raw: String?): NoopWidgetAppearance = when (raw) {
+    "light" -> NoopWidgetAppearance.LIGHT
+    "dark" -> NoopWidgetAppearance.DARK
+    "black" -> NoopWidgetAppearance.BLACK
+    else -> NoopWidgetAppearance.SYSTEM
+}
+
+internal fun Context.noopWidgetAppearance(): NoopWidgetAppearance = runCatching {
+    resolveNoopWidgetAppearance(
+        getSharedPreferences("noop_prefs", Context.MODE_PRIVATE)
+            .getString("theme.appearance", "system"),
+    )
+}.getOrDefault(NoopWidgetAppearance.DARK)
+
+/** Composition-failure fallback that still honors explicit Light/Dark/Black app appearance. */
+internal fun Context.noopWidgetErrorRemoteViews(): RemoteViews {
+    val systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+        Configuration.UI_MODE_NIGHT_YES
+    val values = noopWidgetColorValues(noopWidgetAppearance(), systemDark)
+    return RemoteViews(packageName, R.layout.noop_widget_error).apply {
+        setInt(R.id.noop_widget_error_root, "setBackgroundColor", values.surface.toArgb())
+        setTextColor(R.id.noop_widget_error_root, values.secondary.toArgb())
     }
-}.getOrDefault(true)
+}
 
 internal fun recoveryWidgetColor(score: Int?, colors: NoopWidgetColors): ColorProvider = when {
     score == null -> colors.secondary

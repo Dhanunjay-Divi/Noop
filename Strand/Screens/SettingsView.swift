@@ -105,7 +105,7 @@ struct SettingsView: View {
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
     // "Sky behind cards" (default ON): extend the day-cycle sky behind the whole Today scroll so
     // Card transparency reveals it under every card. User-toggleable below. Mirrors Kotlin NoopPrefs.skyBehindCards.
-    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = true
+    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
     // Card-surface opacity percent (100 = solid). Reactive — moving the slider live-updates every card.
     @AppStorage(CardAppearancePrefs.opacityKey) private var cardOpacityPercent = CardAppearancePrefs.defaultPercent
     /// Poses all never-settling decorative animations and disables the liquid tilt sensor.
@@ -737,27 +737,18 @@ struct SettingsView: View {
 
     // MARK: - Appearance (Theme everywhere; alternate app icon iOS-only)
 
-    /// Theme (System / Light / Dark) on every platform, plus the iOS app-icon choice. The Theme picker
-    /// writes `AppearanceMode.storageKey`, which both app roots read via `.preferredColorScheme`; because
-    /// every palette token is a dynamic `Color(light:dark:)`, the whole UI re-resolves on change.
+    /// App finish on every platform, plus the iOS app-icon choice. System remains the respectful default;
+    /// Graphite and OLED Black are intentionally different surface systems rather than duplicate labels.
     private var appearanceCard: some View {
         SettingsSection(
             icon: "circle.lefthalf.filled",
             title: "Appearance",
-            blurb: "Choose Light, Dark, or follow your system. Dark is the signature near-black; Light keeps the same clean look on a bright canvas."
+            blurb: "Choose a finish for the app. System follows your device, Dark uses softer graphite, and Black uses a true OLED canvas."
         ) {
             VStack(spacing: 0) {
-                FormRow(label: "Theme") {
-                    Picker("Theme", selection: $appearanceRaw) {
-                        ForEach(AppearanceMode.allCases) { mode in
-                            Text(mode.label).tag(mode.rawValue)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .tint(StrandPalette.accent)
-                    .accessibilityLabel("Theme")
-                }
+                AppearancePickerGrid(selection: $appearanceRaw)
+                    .padding(.bottom, 14)
+                    .accessibilityElement(children: .contain)
                 rowDivider   // #79: the segmented rows sat flush against each other (missing separator)
                 FormRow(label: "Chart colours") {
                     // Default = NOOP's clean metric ramps; Classic = the throwback red→amber→green

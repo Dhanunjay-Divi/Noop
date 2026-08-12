@@ -849,15 +849,15 @@ private fun VitalityHero(
                         else "${kotlin.math.abs(delta)} ${yearWord(delta)} ${if (younger) "younger" else "older"}",
                         style = NoopType.footnote,
                         color = if (delta == 0) Palette.textSecondary
-                        else if (younger) Palette.statusPositive else Palette.statusWarning,
+                        else if (younger) Palette.statusPositiveText else Palette.statusWarningText,
                     )
                 }
             }
             if (best != null && best.lnHazard < 0) {
-                Text(uiString(R.string.l10n_health_screen_helping_most_best_label_edee8773, best.label), style = NoopType.footnote, color = Palette.statusPositive)
+                Text(uiString(R.string.l10n_health_screen_helping_most_best_label_edee8773, best.label), style = NoopType.footnote, color = Palette.statusPositiveText)
             }
             if (worst != null && worst.lnHazard > 0) {
-                Text(uiString(R.string.l10n_health_screen_holding_you_back_worst_label_863a1809, worst.label), style = NoopType.footnote, color = Palette.statusWarning)
+                Text(uiString(R.string.l10n_health_screen_holding_you_back_worst_label_863a1809, worst.label), style = NoopType.footnote, color = Palette.statusWarningText)
             }
             Text(
                 uiString(R.string.wellness_age_experimental_disclaimer),
@@ -980,7 +980,7 @@ private fun FitnessAgeHero(
                         text = deltaWord,
                         style = NoopType.subhead,
                         color = if (deltaYears == 0) Palette.textSecondary
-                        else if (younger) Palette.statusPositive else Palette.statusWarning,
+                        else if (younger) Palette.statusPositiveText else Palette.statusWarningText,
                     )
                 }
                 if (vo2max != null) {

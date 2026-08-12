@@ -638,14 +638,14 @@ struct AutomationsView: View {
         .frame(minHeight: 42).padding(.vertical, 4)
     }
 
-    // MARK: - Illness early-warning
+    // MARK: - Multi-signal wellness check-in
 
     private var illnessCard: some View {
-        Section2(icon: "waveform.path.ecg", title: String(localized: "Illness early-warning"),
-                 blurb: String(localized: "Watches your resting HR, HRV, skin temperature and respiration against your own 28-day baseline. On-device and approximate: informational only, not a diagnosis."),
+        Section2(icon: "waveform.path.ecg", title: String(localized: "Multi-signal change"),
+                 blurb: String(localized: "Watches resting HR, HRV, skin temperature and respiration against your own baseline. Many factors can move these signals; this is a wellness check-in, not a diagnosis."),
                  active: behavior.illnessWatch) {
-            ToggleRow(label: String(localized: "Watch for early-illness signs"),
-                      help: String(localized: "Needs at least 14 days of history. When two or more signals drift together you get a banner on the dashboard and a notification, at most once a day."),
+            ToggleRow(label: String(localized: "Watch for baseline shifts"),
+                      help: String(localized: "Needs at least 14 days of history. When two or more signals move together, NOOP shows a private in-app check-in and a detail-free notification at most once a day."),
                       isOn: $behavior.illnessWatch)
                 .onChangeCompat(of: behavior.illnessWatch) { _ in
                     model.reevaluateIllness()

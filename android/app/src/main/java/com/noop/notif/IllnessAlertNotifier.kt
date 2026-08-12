@@ -19,10 +19,10 @@ internal object IllnessAlertPolicy {
 }
 
 /**
- * Posts the illness early-warning as a real system notification — previously it was silent
+ * Posts a private multi-signal check-in as a real system notification — previously it was silent
  * unless the app was open. Called from BOTH the AppViewModel collector (app open) and
  * WhoopConnectionService (background); the persisted day gate makes the dual call sites safe.
- * The message is the on-device APPROXIMATE summary — informational, not a diagnosis.
+ * Measurements and inferred state stay inside the unlocked app; previews are intentionally generic.
  */
 object IllnessAlertNotifier {
     private const val CHANNEL_ID = "noop_illness_watch"
@@ -43,16 +43,13 @@ object IllnessAlertNotifier {
             )
             val n = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_heart)
-                .setContentTitle("Early warning: take it easy")
-                .setContentText(alert)
-                .setStyle(
-                    NotificationCompat.BigTextStyle()
-                        .bigText("$alert\nOn-device estimate (approximate), not a diagnosis."),
-                )
+                .setContentTitle("Private wellness check-in")
+                .setContentText("Open NOOP to review it.")
                 .setContentIntent(openApp)
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                 .build()
             NotificationManagerCompat.from(context).notify(NOTIF_ID, n)
             NoopPrefs.setIllnessLastNotifiedDay(context, today)
@@ -63,13 +60,14 @@ object IllnessAlertNotifier {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         runCatching {
             val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            if (mgr.getNotificationChannel(CHANNEL_ID) != null) return
+            // Re-registering an existing ID is safe: Android preserves the person's importance/sound
+            // choices while accepting our revised privacy-first name and description.
             mgr.createNotificationChannel(
                 NotificationChannel(
-                    CHANNEL_ID, "Illness early-warning",
+                    CHANNEL_ID, "Private wellness check-ins",
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ).apply {
-                    description = "A heads-up when resting HR, HRV, skin temp or respiration drift together vs your baseline."
+                    description = "A private prompt to review a multi-signal baseline shift inside NOOP."
                 },
             )
         }

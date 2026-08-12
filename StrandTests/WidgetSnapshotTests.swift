@@ -1,6 +1,10 @@
 import XCTest
 
 final class WidgetSnapshotTests: XCTestCase {
+    func testWidgetAppearanceUsesTheAppStorageContract() {
+        XCTAssertEqual(WidgetAppearancePreference.storageKey, "theme.appearance")
+    }
+
     func testProvisionedAltStoreGroupWins() {
         let configured = "group.com.noopapp.noop.staging"
         XCTAssertEqual(WidgetSnapshot.resolveSuiteName(infoDictionary: [

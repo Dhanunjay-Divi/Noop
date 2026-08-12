@@ -43,7 +43,7 @@ final class IllnessSignalEngineTests: XCTestCase {
         XCTAssertLessThan(suppressed.score, raised.score)
         XCTAssertEqual(suppressed.score, raised.score * IllnessSignalEngine.confounderDampen, accuracy: 1e-9)
         XCTAssertTrue(suppressed.copy.contains("alcohol"))
-        XCTAssertTrue(suppressed.copy.contains("not illness"))
+        XCTAssertTrue(suppressed.copy.contains("can move the same signals"))
         XCTAssertTrue(suppressed.copy.contains("not a diagnosis"))
     }
 
@@ -81,7 +81,7 @@ final class IllnessSignalEngineTests: XCTestCase {
             inputs, context: .init(alreadyUnwell: true), firedLabels: labels)
         XCTAssertEqual(r.level, .alreadyUnwell)
         XCTAssertTrue(r.copy.contains("Rest up"))
-        XCTAssertTrue(r.copy.contains("numbers agree"))
+        XCTAssertTrue(r.copy.contains("signals also shifted"))
         XCTAssertFalse(r.copy.contains("Heads-up"))
     }
 

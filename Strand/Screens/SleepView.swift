@@ -379,8 +379,7 @@ struct SleepView: View {
         let score = performanceScore(for: night)
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Sleep performance", overline: nightRelativeLabel,
-                          trailing: String(localized: "Sleep Score"),
-                          onDark: showDayCycleBackground)
+                          trailing: String(localized: "Sleep Score"))
             // A subtle night atmosphere sits behind the sleep hero ONLY (the Rest world's whisper:
             // faint indigo wash + crescent moon over the near-black canvas, no glow), clipped to the
             // card. Replaces the now-flat ScenicHeroBackground here.
@@ -393,7 +392,7 @@ struct SleepView: View {
                     VStack(spacing: NoopMetrics.space3) {
                         ZStack {
                             LiquidVessel(value: heroFraction, tint: StrandPalette.restColor, animated: true)
-                                .frame(width: 184, height: 184)
+                                .frame(width: 164, height: 164)
                             VStack(spacing: 0) {
                                 CountUpText(
                                     value: score,
@@ -437,6 +436,10 @@ struct SleepView: View {
             .padding(NoopMetrics.cardInnerPadding + NoopMetrics.space1)
             .frame(maxWidth: .infinity)
             .timeOfDayBackground(.night)
+            // The Rest hero is intentionally a fixed-dark focus surface in every app appearance.
+            // Forcing only this subtree dark keeps its liquid score legible on Pearl without turning
+            // the page-level section title into white-on-white text.
+            .environment(\.colorScheme, .dark)
             .clipShape(RoundedRectangle(cornerRadius: NoopMetrics.cardRadius, style: .continuous))
         }
     }
@@ -2648,7 +2651,7 @@ private struct SleepMarkCard: View {
     @EnvironmentObject private var repo: Repository
     @EnvironmentObject private var live: LiveState
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
-    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = true
+    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
 
     /// The most recent sleep-mark the user tapped, shown as a transient confirmation line under the
     /// two buttons. Drives the SwiftUI haptic landing too. LOGGING-ONLY: a mark never feeds the sleep
@@ -2658,8 +2661,7 @@ private struct SleepMarkCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Sleep marks", overline: "Tap to log",
-                          trailing: String(localized: "Phase 1"),
-                          onDark: showDayCycleBackground && skyBehindCards)
+                          trailing: String(localized: "Phase 1"))
             NoopCard(tint: StrandPalette.restColor) {
                 VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
                     Text("Tap when you're heading to bed or when you wake. Each tap is logged with the time. It doesn't change tonight's detected sleep.")

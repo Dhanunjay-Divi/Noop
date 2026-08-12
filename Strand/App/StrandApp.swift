@@ -25,7 +25,7 @@ struct StrandApp: App {
     /// #267: drives a foreground sync kick when the window becomes active (no scenePhase hook
     /// existed on macOS before this).
     @Environment(\.scenePhase) private var scenePhase
-    /// Appearance preference (System/Light/Dark). Default follows the OS; the Settings picker writes it.
+    /// Appearance preference (System/Pearl/Graphite/OLED Black). Default follows the OS; Settings writes it.
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
     /// Chart data-colour style (Titanium / Classic throwback). Re-colours gauges + charts.
     @AppStorage(ChartStyle.storageKey) private var chartStyleRaw = ChartStyle.titanium.rawValue
@@ -58,7 +58,7 @@ struct StrandApp: App {
                     )
                 }
                 .frame(minWidth: 1000, minHeight: 700)
-                .preferredColorScheme(AppearanceMode.resolve(appearanceRaw).colorScheme)
+                .noopAppearance(appearanceRaw)
                 .chartStyle(chartStyleRaw)
                 // Dynamic Type now scales the prose/label roles (StrandFont). Cap the upper end so the
                 // fixed-geometry tiles/gauges stay legible at the largest accessibility sizes rather than

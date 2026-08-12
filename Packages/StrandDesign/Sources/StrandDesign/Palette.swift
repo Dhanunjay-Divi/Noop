@@ -65,30 +65,88 @@ public extension Color {
 
 public enum StrandPalette {
 
-    // MARK: Surfaces — pearl canvas / obsidian canvas
-    public static let surfaceBase    = Color(light: "#F4F4F2", dark: "#050505")
-    public static let surfaceRaised  = Color(light: "#FFFFFF", dark: "#111111")
-    public static let surfaceOverlay = Color(light: "#FBFBFA", dark: "#171717")
-    public static let surfaceInset   = Color(light: "#EAEAE7", dark: "#0B0B0B")
-    public static let hairline       = Color(light: "#D7D7D2", dark: "#2A2A2A")
-    public static let hairlineStrong = Color(light: "#B8B8B2", dark: "#4A4A4A")
+    // MARK: Appearance surface variant
+
+    // `ColorScheme` only distinguishes light and dark. NOOP's OLED Black finish is a deliberately
+    // different dark surface system, so the app-root appearance modifier publishes the full mode here.
+    // Keep the tiny process-wide value synchronized just like `chartStyle` below; app scenes share the
+    // same persisted preference, while widgets/watch run in their own processes.
+    private static let appearanceModeLock = NSLock()
+    nonisolated(unsafe) private static var storedAppearanceMode: AppearanceMode = .system
+    public static var appearanceMode: AppearanceMode {
+        get {
+            appearanceModeLock.lock()
+            defer { appearanceModeLock.unlock() }
+            return storedAppearanceMode
+        }
+        set {
+            appearanceModeLock.lock()
+            storedAppearanceMode = newValue
+            appearanceModeLock.unlock()
+        }
+    }
+
+    public static var usesOLEDBlack: Bool { appearanceMode == .black }
+
+    /// Three-way chrome token. The OS still resolves light versus dark dynamically; only the dark
+    /// component branches between the dimensional Graphite and true-black OLED finishes.
+    private static func chrome(light: String, dark: String, black: String) -> Color {
+        Color(light: light, dark: usesOLEDBlack ? black : dark)
+    }
+
+    // MARK: Surfaces — titanium pearl / graphite / OLED black
+    // Light avoids pure white over the full canvas (less glare); Dark is a dimensional charcoal; Black
+    // preserves true-black negative space while keeping raised cards visible by luminance, not shadow.
+    public static var surfaceBase: Color {
+        chrome(light: "#EEF0F2", dark: "#0A0B0D", black: "#000000")
+    }
+    public static var surfaceRaised: Color {
+        chrome(light: "#FAFBFC", dark: "#15171A", black: "#0A0A0B")
+    }
+    public static var surfaceOverlay: Color {
+        chrome(light: "#F6F7F9", dark: "#1B1D21", black: "#111113")
+    }
+    public static var surfaceInset: Color {
+        chrome(light: "#E5E8EB", dark: "#0F1114", black: "#050506")
+    }
+    public static var hairline: Color {
+        chrome(light: "#CDD1D6", dark: "#2D3137", black: "#242427")
+    }
+    public static var hairlineStrong: Color {
+        chrome(light: "#AEB4BC", dark: "#4B515A", black: "#414147")
+    }
 
     // MARK: Dimensional chrome — shared by glass, cards and extruded glyphs
-    public static let atmosphereLift = Color(light: "#E6E6E2", dark: "#17181C")
-    public static let glassScrim      = Color(light: "#FFFFFF", dark: "#070708")
+    public static var atmosphereLift: Color {
+        chrome(light: "#DFE3E8", dark: "#1D2025", black: "#111216")
+    }
+    public static var glassScrim: Color {
+        chrome(light: "#FFFFFF", dark: "#090A0C", black: "#000000")
+    }
     public static let bevelTop        = Color(light: "#FFFFFF", dark: "#FFFFFF")
-    public static let bevelSide       = Color(light: "#D4D4CF", dark: "#55565A")
-    public static let bevelBottom     = Color(light: "#A9A9A4", dark: "#020203")
-    public static let glyphFaceTop    = Color(light: "#FFFFFF", dark: "#292A2D")
-    public static let glyphFaceBottom = Color(light: "#DEDED9", dark: "#0B0C0E")
-    public static let glyphExtrusion  = Color(light: "#BEBEB8", dark: "#030304")
-    public static let glyphInkTop     = Color(light: "#343431", dark: "#F5F5F2")
-    public static let glyphInkBottom  = Color(light: "#050505", dark: "#B8B8B2")
+    public static var bevelSide: Color {
+        chrome(light: "#CCD0D5", dark: "#5B5E65", black: "#4B4C50")
+    }
+    public static var bevelBottom: Color {
+        chrome(light: "#A8ADB5", dark: "#050506", black: "#000000")
+    }
+    public static var glyphFaceTop: Color {
+        chrome(light: "#FFFFFF", dark: "#303237", black: "#242426")
+    }
+    public static var glyphFaceBottom: Color {
+        chrome(light: "#E0E3E7", dark: "#101114", black: "#080809")
+    }
+    public static var glyphExtrusion: Color {
+        chrome(light: "#B9BEC5", dark: "#050607", black: "#000000")
+    }
+    public static let glyphInkTop     = Color(light: "#34373B", dark: "#F5F5F2")
+    public static let glyphInkBottom  = Color(light: "#07090B", dark: "#B8B8B2")
 
     // MARK: Text — neutral ink on pearl / soft white on obsidian
-    public static let textPrimary    = Color(light: "#111111", dark: "#F7F7F5")
-    public static let textSecondary  = Color(light: "#4F4F4C", dark: "#C7C7C2")
-    public static let textTertiary   = Color(light: "#7D7D78", dark: "#8F8F89")
+    public static let textPrimary    = Color(light: "#111317", dark: "#F7F7F5")
+    public static let textSecondary  = Color(light: "#4A4E54", dark: "#C7C7C2")
+    // Darkened from #7D7D78: this now clears 4.5:1 for normal-size text on the pearl canvas.
+    public static let textTertiary   = Color(light: "#686D75", dark: "#989893")
 
     // MARK: Text ON a permanently-dark surface (scheme-invariant)
     // Use these — NOT textPrimary/Secondary/Tertiary — for labels/pills drawn over a fill that is pinned
@@ -106,7 +164,9 @@ public enum StrandPalette {
     // MARK: Accent — monochrome chrome. Data colours remain below.
     public static let accent         = Color(light: "#111111", dark: "#F7F7F5")
     public static let accentHover    = Color(light: "#2C2C2A", dark: "#FFFFFF")
-    public static let accentMuted    = Color(light: "#E5E5E1", dark: "#202020")
+    public static var accentMuted: Color {
+        chrome(light: "#E1E4E8", dark: "#24262B", black: "#171719")
+    }
     public static let focusRing      = Color(light: "#333330", dark: "#E7E7E2")
     /// Ink placed on the dynamic accent fill: white on light-mode black, black on dark-mode white.
     public static let accentInk      = Color(light: "#FFFFFF", dark: "#070707")
@@ -247,6 +307,18 @@ public enum StrandPalette {
     public static var statusWarning:  Color { isClassic ? Color(light: "#CFA528", dark: "#F2C53D") : Color(light: "#C2792E", dark: "#F0A020") }
     public static var statusCritical: Color { isClassic ? Color(light: "#CB3A2F", dark: "#E5483B") : Color(light: "#C84E1E", dark: "#E0662F") }
 
+    // Small semantic copy needs stronger Pearl ink than the brighter data/status accents above.
+    // These light values each clear WCAG AA (4.5:1) on `surfaceRaised` #FAFBFC; the dark values
+    // deliberately remain identical to their existing status colours. Use these for captions,
+    // footnotes and short status sentences, while gauges, fills and glyphs keep `status*`.
+    static let statusPositiveTextLightHex = "#19734A"
+    static let statusWarningTextLightHex = "#895900"
+    static let statusCriticalTextLightHex = "#A83D21"
+    static let classicStatusCriticalTextLightHex = "#B33A2F"
+    public static var statusPositiveText: Color { isClassic ? Color(light: statusPositiveTextLightHex, dark: "#46B45A") : Color(light: statusPositiveTextLightHex, dark: "#03E095") }
+    public static var statusWarningText:  Color { isClassic ? Color(light: statusWarningTextLightHex, dark: "#F2C53D") : Color(light: statusWarningTextLightHex, dark: "#F0A020") }
+    public static var statusCriticalText: Color { isClassic ? Color(light: classicStatusCriticalTextLightHex, dark: "#E5483B") : Color(light: statusCriticalTextLightHex, dark: "#E0662F") }
+
     // MARK: Per-metric accents — HRV / SpO₂ / energy / risk. Classic leans the traditional hues (purple HRV, red risk).
     public static var metricCyan:   Color { isClassic ? Color(light: "#2E92B4", dark: "#3FA9C9") : Color(light: "#2E92B4", dark: "#3FA9C9") }
     public static var metricPurple: Color { isClassic ? Color(light: "#6A4FC0", dark: "#8E6FD6") : Color(light: "#3A80D6", dark: "#4A90E2") }
@@ -295,15 +367,24 @@ public enum StrandPalette {
     public static var stressGradient: Gradient { Gradient(colors: [stressDeep, stressColor, stressBright]) }
 
     // MARK: Scenic background (NEW) — detail-screen hero gradient + starfield.
-    /// Radial canvas: lit center → deep edge. Used by `ScenicHeroBackground` (warm-lit on light).
-    public static let scenicCenter     = Color(light: "#FBF6EA", dark: "#1C2128")
-    public static let scenicEdge       = Color(light: "#EDE6D6", dark: "#121518")
+    /// Radial canvas: cool titanium light → deep graphite edge. Keeping the light finish neutral avoids
+    /// a yellow paper cast beside Pearl cards while domain tint still communicates the metric world.
+    public static var scenicCenter: Color {
+        chrome(light: "#F5F7F9", dark: "#1C2128", black: "#0A0A0B")
+    }
+    public static var scenicEdge: Color {
+        chrome(light: "#E4E8ED", dark: "#121518", black: "#000000")
+    }
     /// Star tint for the scenic starfield (very faint on light; the hero suppresses stars there).
-    public static let scenicStar       = Color(light: "#D8CDB6", dark: "#C8CFD8")
+    public static let scenicStar       = Color(light: "#BAC3CF", dark: "#C8CFD8")
 
-    /// Frosted-card tint endpoints (white→warm on light; the accent wash sits over them).
-    public static let cardFillTop      = Color(light: "#FFFFFF", dark: "#15243C")
-    public static let cardFillBottom   = Color(light: "#FAF7F0", dark: "#0B1424")
+    /// Frosted-card tint endpoints (white→cool pearl on light; the accent wash sits over them).
+    public static var cardFillTop: Color {
+        chrome(light: "#FFFFFF", dark: "#15243C", black: "#111113")
+    }
+    public static var cardFillBottom: Color {
+        chrome(light: "#F2F5F8", dark: "#0B1424", black: "#050506")
+    }
 
     // MARK: - Titanium & Gold core tokens (NEW)
     //
@@ -451,17 +532,19 @@ enum ColorComponentCache {
         let appearance: Int
     }
 
-    /// A small integer identifying the current resolved appearance (light vs dark), matching the trait
-    /// that `UIColor(color)` / `NSColor(color)` resolves against at this call site.
+    /// A small integer identifying the current resolved appearance (light, graphite dark, OLED black),
+    /// matching both the platform trait and NOOP's extra dark-surface variant.
     private static var appearanceToken: Int {
         #if os(watchOS)
-        // No UITraitCollection on watchOS; the watch app is always dark, so the cache key is constant.
-        return 1
+        // The watch root opts into OLED Black; preserve a distinct key if a preview has not yet applied it.
+        return StrandPalette.usesOLEDBlack ? 2 : 1
         #elseif canImport(UIKit)
-        return UITraitCollection.current.userInterfaceStyle == .dark ? 1 : 0
+        guard UITraitCollection.current.userInterfaceStyle == .dark else { return 0 }
+        return StrandPalette.usesOLEDBlack ? 2 : 1
         #elseif canImport(AppKit)
         let match = NSAppearance.currentDrawing().bestMatch(from: [.aqua, .darkAqua])
-        return match == .darkAqua ? 1 : 0
+        guard match == .darkAqua else { return 0 }
+        return StrandPalette.usesOLEDBlack ? 2 : 1
         #else
         return 0
         #endif

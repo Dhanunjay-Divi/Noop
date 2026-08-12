@@ -16,6 +16,7 @@ public struct ObsidianFlowBackground: View {
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.noopAppearanceMode) private var appearanceMode
 
     public init(compact: Bool = false, intensity: Double = 1) {
         self.compact = compact
@@ -31,7 +32,11 @@ public struct ObsidianFlowBackground: View {
                     flowImage(size: geo.size)
                         .saturation(0.42)
                         .contrast(1.05)
-                        .opacity((contrast == .increased ? 0.52 : 0.72) * intensity)
+                        .opacity(
+                            (appearanceMode == .black
+                                ? (contrast == .increased ? 0.26 : 0.36)
+                                : (contrast == .increased ? 0.50 : 0.66)) * intensity
+                        )
 
                     // Keep the centre quiet for white text and let the generated
                     // material dissolve into the canonical canvas near the bottom.
@@ -51,7 +56,7 @@ public struct ObsidianFlowBackground: View {
                         .colorInvert()
                         .grayscale(1)
                         .blendMode(.multiply)
-                        .opacity(0.08 * intensity)
+                        .opacity(0.12 * intensity)
 
                     LinearGradient(
                         colors: [
@@ -68,7 +73,9 @@ public struct ObsidianFlowBackground: View {
                 RadialGradient(
                     colors: [
                         StrandPalette.atmosphereLift.opacity(
-                            scheme == .dark ? 0.17 * intensity : 0.10 * intensity
+                            scheme == .dark
+                                ? (appearanceMode == .black ? 0.07 : 0.15) * intensity
+                                : 0.12 * intensity
                         ),
                         .clear,
                     ],

@@ -3,6 +3,10 @@ package com.noop.widget
 import android.content.Context
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.updateAll
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * The handful of numbers the home-screen widget shows, persisted to SharedPreferences so the
@@ -55,6 +59,17 @@ internal enum class WidgetScoreSource(val storageKey: String) {
 /** Honest state used by every widget footer. It describes snapshot freshness, not sensor cadence. */
 internal enum class WidgetFreshness { LIVE, RECENT, STALE, EMPTY }
 
+/**
+ * A live process explicitly asks Glance to rebuild when a System-following day/night configuration
+ * flips. A killed process remains safe because [noopWidgetColors] also embeds day+night providers in
+ * the RemoteViews itself.
+ */
+internal fun shouldRefreshSystemWidgetsForNightMode(
+    previousDark: Boolean?,
+    currentDark: Boolean,
+    followsSystem: Boolean,
+): Boolean = previousDark != null && previousDark != currentDark && followsSystem
+
 internal fun WidgetSnapshot.freshness(
     nowMs: Long,
     liveWindowMs: Long = 2 * 60_000L,
@@ -79,6 +94,7 @@ internal fun WidgetSnapshot.freshness(
  */
 object WidgetSnapshotStore {
     private const val FILE = "noop_widget"
+    private val refreshScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     suspend fun push(context: Context, snap: WidgetSnapshot) {
         val app = context.applicationContext
@@ -91,19 +107,33 @@ object WidgetSnapshotStore {
         save(app, snap)
         PushGate.markPushed(snap)
 
+        refresh(app)
+    }
+
+    /**
+     * Recompose placed widgets after a non-snapshot preference change (notably appearance). Glance
+     * providers intentionally use `updatePeriodMillis=0`, so waiting for the OS would leave stale
+     * chrome on screen. The caller remains non-blocking and failures stay isolated from app UI.
+     */
+    fun requestRefresh(context: Context) {
+        val app = context.applicationContext
+        refreshScope.launch { refresh(app) }
+    }
+
+    internal suspend fun refresh(context: Context) {
         val standardIds = runCatching {
-            GlanceAppWidgetManager(app).getGlanceIds(NoopGlanceWidget::class.java)
+            GlanceAppWidgetManager(context).getGlanceIds(NoopGlanceWidget::class.java)
         }.getOrDefault(emptyList())
         val compactIds = runCatching {
-            GlanceAppWidgetManager(app).getGlanceIds(NoopCompactGlanceWidget::class.java)
+            GlanceAppWidgetManager(context).getGlanceIds(NoopCompactGlanceWidget::class.java)
         }.getOrDefault(emptyList())
         val wideIds = runCatching {
-            GlanceAppWidgetManager(app).getGlanceIds(NoopWideGlanceWidget::class.java)
+            GlanceAppWidgetManager(context).getGlanceIds(NoopWideGlanceWidget::class.java)
         }.getOrDefault(emptyList())
         if (standardIds.isEmpty() && compactIds.isEmpty() && wideIds.isEmpty()) return
-        runCatching { NoopGlanceWidget().updateAll(app) }
-        runCatching { NoopCompactGlanceWidget().updateAll(app) }
-        runCatching { NoopWideGlanceWidget().updateAll(app) }
+        runCatching { NoopGlanceWidget().updateAll(context) }
+        runCatching { NoopCompactGlanceWidget().updateAll(context) }
+        runCatching { NoopWideGlanceWidget().updateAll(context) }
     }
 
     fun save(context: Context, snap: WidgetSnapshot) {

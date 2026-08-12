@@ -73,9 +73,9 @@ import java.util.Locale
 // tube), the flat cards keep the frosted surface. All data bindings, the pure HydrationGoal engine, and the
 // local-only HydrationStore reads/writes are UNCHANGED — this is a restyle only. Mirrors the iOS HydrationView.
 
-/** The reset accent blue (matches NoopButton's pinned iOS `StrandPalette.accent`: #234F9E / #60A0E0). */
+/** Neutral app chrome; hydration/data colour remains inside the liquid visualization. */
 private val hydrationAccent: Color
-    @Composable get() = if (Palette.isLight) Color(0xFF234F9E) else Color(0xFF60A0E0)
+    @Composable get() = Palette.accent
 
 // MARK: - Liquid hero tokens (shared with the liquid Today hero card)
 //

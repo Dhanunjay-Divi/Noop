@@ -270,7 +270,7 @@
     <string name="l10n_automations_screen_hydration_reminders_a4e4defb">Hydration reminders</string>
     <string name="l10n_automations_screen_hydration_reminders_end_1b524ef4">Hydration reminders end</string>
     <string name="l10n_automations_screen_hydration_reminders_start_6640d85d">Hydration reminders start</string>
-    <string name="l10n_automations_screen_illness_early_warning_453ab477">Illness early-warning</string>
+    <string name="l10n_automations_screen_illness_early_warning_453ab477">Multi-signal change</string>
     <string name="l10n_automations_screen_inactivity_reminder_ca49b1ba">Inactivity reminder</string>
     <string name="l10n_automations_screen_min_b6c935d4">min</string>
     <string name="l10n_automations_screen_nap_detection_ca2dedf5">Nap detection</string>
@@ -292,7 +292,7 @@
     <string name="l10n_automations_screen_to_4374aaee">to</string>
     <string name="l10n_automations_screen_uses_a_local_android_reminder_it_31de6a42">Uses a local Android reminder. It is best-effort and may arrive late under Doze or battery restrictions.</string>
     <string name="l10n_automations_screen_value_suffix_26985180">%1$s %2$s</string>
-    <string name="l10n_automations_screen_watch_for_early_illness_signs_4c22e127">Watch for early-illness signs</string>
+    <string name="l10n_automations_screen_watch_for_early_illness_signs_4c22e127">Watch for baseline shifts</string>
     <string name="l10n_automations_screen_when_i_double_tap_a1f1e04d">When I double-tap</string>
     <string name="l10n_automations_screen_whoop_haptics_are_unavailable_until_the_6b2fe1c5">WHOOP haptics are unavailable until the strap has a live encrypted bond. The phone reminder remains independent.</string>
     <string name="l10n_automations_screen_whoop_is_ready_a_buzz_still_d887f71f">WHOOP is ready. A buzz still needs a fresh live stream at the reminder time.</string>
@@ -1870,4 +1870,14 @@
     <string name="noop_legal_notices">Notices</string>
     <string name="noop_legal_attribution">Attribution</string>
     <string name="noop_legal_document_error">This bundled document could not be opened. Reinstall this build and try again.</string>
+    <string name="appearance_system">System</string>
+    <string name="appearance_light">Light</string>
+    <string name="appearance_dark">Dark</string>
+    <string name="appearance_black">Black</string>
+    <string name="appearance_detail_system">Follows your device’s appearance</string>
+    <string name="appearance_detail_light">Soft pearl with black controls</string>
+    <string name="appearance_detail_dark">Dimensional graphite with pearl controls</string>
+    <string name="appearance_detail_black">True OLED black with pearl controls</string>
+    <string name="appearance_settings_blurb">Choose the app finish. System follows your device; Dark uses dimensional graphite; Black uses a true OLED-black canvas.</string>
+    <string name="appearance_onboarding_subtitle">NOOP follows your system by default. Choose Light, Dark, or true Black here, and change it any time in Settings → Appearance.</string>
 </resources>

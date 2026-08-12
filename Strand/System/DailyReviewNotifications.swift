@@ -57,7 +57,8 @@ enum DailyReviewNotifications {
     private static let morningRequestID = "daily-review-morning"
     private static let eveningRequestID = "daily-review-evening"
     private static let requestIDs = [morningRequestID, eveningRequestID]
-    private static let privacyCategoryID = "noop.daily-review.private"
+    /// Shared by every wellness notification that must keep detail out of hidden lock-screen previews.
+    static let privacyCategoryID = "noop.daily-review.private"
 
     static var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: enabledKey)
@@ -206,7 +207,7 @@ enum DailyReviewNotifications {
     /// Notification categories are process-global, so merge instead of replacing categories registered
     /// by alarms or future features. The category-level placeholder is what iOS uses when the user has
     /// chosen to hide notification previews; individual notification content has no such property.
-    private static func registerPrivacyCategory(on center: UNUserNotificationCenter) {
+    static func registerPrivacyCategory(on center: UNUserNotificationCenter) {
         Task { @MainActor in
             let existing = await center.notificationCategories()
             let category = privacyCategory()

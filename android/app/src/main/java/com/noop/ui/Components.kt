@@ -64,6 +64,7 @@ import android.content.Context
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -73,7 +74,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -569,6 +574,14 @@ fun InsightCard(
 
 // MARK: - SegmentedPillControl — the ONE segmented control
 
+/**
+ * The control keeps a compact 36dp painted track while every option owns at least the Android
+ * accessibility minimum 48×48dp hit region. Keeping these values separate prevents a future visual
+ * tightening from shrinking the actual touch/semantics target.
+ */
+internal val SegmentedControlTouchTarget = 48.dp
+internal val SegmentedControlVisualHeight = 36.dp
+
 @Composable
 fun <T> SegmentedPillControl(
     items: List<T>,
@@ -585,46 +598,68 @@ fun <T> SegmentedPillControl(
     // history builds. Defaulted so every existing call site is untouched.
     enabled: (T) -> Boolean = { true },
 ) {
-    val outerShape = RoundedCornerShape(50)
     val scrollsForLargeText = adaptsToAvailableWidth && LocalDensity.current.fontScale > 1f
     val usesEqualWidth = adaptsToAvailableWidth && !scrollsForLargeText
     val rangeScrollState = rememberScrollState()
-    // The track is a fixed-height pill; the selected pill FILLS that height so its inset is EQUAL on
-    // every side (container padding 4, pill horizontal padding only). The old compact pill inside a
-    // taller row left more vertical margin than horizontal — it read as off-centre. Mirrors iOS's
-    // SegmentedPillControl refresh (segment height 36, pill fills it for an even inset).
+    // The layout is 48dp high for touch/accessibility, while drawBehind keeps the visible track at
+    // 36dp and the selected pill at 28dp. This preserves the compact instrument look without making
+    // the tappable/semantic bounds too small.
     Row(
         modifier = modifier
             .then(if (scrollsForLargeText) Modifier.horizontalScroll(rangeScrollState) else Modifier)
             .then(if (usesEqualWidth) Modifier.fillMaxWidth() else Modifier)
-            .height(36.dp)
-            .clip(outerShape)
-            .background(Palette.surfaceInset)
-            .border(1.dp, Palette.hairline, outerShape)
-            .padding(4.dp),
+            .height(SegmentedControlTouchTarget)
+            .drawBehind {
+                val trackHeight = SegmentedControlVisualHeight.toPx().coerceAtMost(size.height)
+                val trackTop = (size.height - trackHeight) / 2f
+                val trackRadius = CornerRadius(trackHeight / 2f, trackHeight / 2f)
+                drawRoundRect(
+                    color = Palette.surfaceInset,
+                    topLeft = Offset(0f, trackTop),
+                    size = Size(size.width, trackHeight),
+                    cornerRadius = trackRadius,
+                )
+                drawRoundRect(
+                    color = Palette.hairline,
+                    topLeft = Offset(0f, trackTop),
+                    size = Size(size.width, trackHeight),
+                    cornerRadius = trackRadius,
+                    style = Stroke(width = 1.dp.toPx()),
+                )
+            }
+            .padding(horizontal = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         items.forEach { item ->
             val selected = item == selection
             val itemEnabled = enabled(item)
-            // Selected segment is SELECTION CHROME → follows the accent: a gold gradient + gold-deep ink
-            // on dark; a flat blue accent + white ink on light (so light selection matches the blue
-            // chrome, not gold). Unselected stays clear with tertiary text; disabled dims further.
-            val pillShape = RoundedCornerShape(50)
-            val pillBg = if (selected) {
-                if (Palette.isLight) Modifier.background(Palette.accent, pillShape)
-                else Modifier.background(Brush.linearGradient(*Palette.goldGradient.toTypedArray()), pillShape)
-            } else {
-                Modifier
-            }
+            // Selection is neutral chrome in every appearance. Physiological colour is reserved for
+            // data and status, while accentInk guarantees contrast on black/pearl selected fills.
+            val selectedFill = Palette.accent
             Box(
                 modifier = Modifier
-                    // Fill the track height so the pill's inset is equal top/bottom/left/right.
                     .then(if (usesEqualWidth) Modifier.weight(1f) else Modifier)
+                    .widthIn(min = SegmentedControlTouchTarget)
                     .fillMaxHeight()
-                    .clip(pillShape)
-                    .then(pillBg)
+                    .drawBehind {
+                        if (selected) {
+                            val pillHeight = (SegmentedControlVisualHeight - 8.dp).toPx()
+                                .coerceAtMost(size.height)
+                            val pillTop = (size.height - pillHeight) / 2f
+                            drawRoundRect(
+                                color = selectedFill,
+                                topLeft = Offset(0f, pillTop),
+                                size = Size(size.width, pillHeight),
+                                cornerRadius = CornerRadius(pillHeight / 2f, pillHeight / 2f),
+                            )
+                        }
+                    }
+                    .semantics {
+                        this.selected = selected
+                        role = Role.RadioButton
+                        if (!itemEnabled) disabled()
+                    }
                     .then(if (itemEnabled) Modifier.clickableNoRipple { onSelect(item) } else Modifier)
                     .padding(horizontal = if (usesEqualWidth) Metrics.space4 else 12.dp),
                 contentAlignment = Alignment.Center,
@@ -635,8 +670,7 @@ fun <T> SegmentedPillControl(
                     maxLines = if (adaptsToAvailableWidth) 1 else Int.MAX_VALUE,
                     overflow = if (adaptsToAvailableWidth) TextOverflow.Ellipsis else TextOverflow.Clip,
                     color = when {
-                        selected && Palette.isLight -> androidx.compose.ui.graphics.Color.White
-                        selected -> Palette.goldDeepText
+                        selected -> Palette.accentInk
                         !itemEnabled -> Palette.textTertiary.copy(alpha = 0.45f)
                         else -> Palette.textTertiary
                     },

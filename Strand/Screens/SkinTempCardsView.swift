@@ -661,9 +661,9 @@ struct HeadsUpCard: View {
                 if !result.firedSignals.isEmpty {
                     whyRow(label: "Signals up", values: result.firedSignals, tint: hue)
                 }
-                // ...and what was ruled out (the differentiating part vs a black-box warning).
+                // Nearby context can move the same signals; surface it without claiming causation.
                 if !result.suppressedBy.isEmpty {
-                    whyRow(label: "Explained by", values: result.suppressedBy, tint: StrandPalette.textTertiary)
+                    whyRow(label: "Also logged", values: result.suppressedBy, tint: StrandPalette.textTertiary)
                 }
                 // Optional confidence read from the parallel Mahalanobis distance, only when the level is
                 // raised. Subtle by design: it augments, never gates (the engine already decided to raise).
@@ -715,7 +715,7 @@ struct HeadsUpCard: View {
         switch result.level {
         case .raised:        return String(localized: "Heads-up")
         case .alreadyUnwell: return String(localized: "Rest up")
-        case .suppressed:    return String(localized: "Probably not illness")
+        case .suppressed:    return String(localized: "Related context found")
         case .mild:          return String(localized: "A few signals are up")
         case .quiet:         return String(localized: "Nothing notable")
         }
@@ -819,7 +819,7 @@ private func prettyDay(_ key: String) -> String {
                 score: 64, level: .raised,
                 firedSignals: ["RHR +6", "HRV −22%", "skin temp +0.7 °C"],
                 suppressedBy: [], signalCount: 3,
-                copy: "Heads-up — your body looks strained. RHR +6, HRV −22%, skin temp +0.7 °C. With no alcohol or travel logged, consider taking it easy. On-device estimate — not a diagnosis."))
+                copy: "Several signals shifted together — RHR +6, HRV −22%, skin temp +0.7 °C. Many things can cause this pattern; review how you feel and consider a gentler day."))
 
             HeadsUpCard(result: IllnessSignalEngine.Result(
                 score: 28, level: .suppressed,

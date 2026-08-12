@@ -243,7 +243,7 @@
     <string name="l10n_automations_screen_hydration_reminders_a4e4defb">Lembretes de hidratação</string>
     <string name="l10n_automations_screen_hydration_reminders_end_1b524ef4">Fim dos lembretes de hidratação</string>
     <string name="l10n_automations_screen_hydration_reminders_start_6640d85d">Início dos lembretes de hidratação</string>
-    <string name="l10n_automations_screen_illness_early_warning_453ab477">Alerta precoce de doença</string>
+    <string name="l10n_automations_screen_illness_early_warning_453ab477">Alteração em vários sinais</string>
     <string name="l10n_automations_screen_inactivity_reminder_ca49b1ba">Lembrete de inatividade</string>
     <string name="l10n_automations_screen_min_b6c935d4">min</string>
     <string name="l10n_automations_screen_nap_detection_ca2dedf5">Detecção de sesta</string>
@@ -265,7 +265,7 @@
     <string name="l10n_automations_screen_to_4374aaee">a</string>
     <string name="l10n_automations_screen_uses_a_local_android_reminder_it_31de6a42">Usa um lembrete local do Android. A entrega é feita mediante melhor esforço e pode atrasar-se devido ao modo Doze ou a restrições da bateria.</string>
     <string name="l10n_automations_screen_value_suffix_26985180">%1$s %2$s</string>
-    <string name="l10n_automations_screen_watch_for_early_illness_signs_4c22e127">Esteja atento aos sinais precoces de doença</string>
+    <string name="l10n_automations_screen_watch_for_early_illness_signs_4c22e127">Observar alterações face à referência</string>
     <string name="l10n_automations_screen_when_i_double_tap_a1f1e04d">Quando toco duas vezes</string>
     <string name="l10n_automations_screen_whoop_haptics_are_unavailable_until_the_6b2fe1c5">A resposta háptica da WHOOP só está disponível quando a pulseira tem uma ligação encriptada ativa. O lembrete do telemóvel funciona de forma independente.</string>
     <string name="l10n_automations_screen_whoop_is_ready_a_buzz_still_d887f71f">A WHOOP está pronta. Para vibrar, continua a precisar de um fluxo em direto recente no momento do lembrete.</string>
@@ -1838,4 +1838,14 @@
     <string name="noop_legal_notices">Avisos</string>
     <string name="noop_legal_attribution">Atribuição</string>
     <string name="noop_legal_document_error">Não foi possível abrir este documento incluído. Reinstala esta compilação e tenta novamente.</string>
+    <string name="appearance_system">Sistema</string>
+    <string name="appearance_light">Claro</string>
+    <string name="appearance_dark">Escuro</string>
+    <string name="appearance_black">Preto</string>
+    <string name="appearance_detail_system">Segue o aspeto do dispositivo</string>
+    <string name="appearance_detail_light">Pérola suave com controlos pretos</string>
+    <string name="appearance_detail_dark">Grafite dimensional com controlos claros</string>
+    <string name="appearance_detail_black">Preto OLED puro com controlos claros</string>
+    <string name="appearance_settings_blurb">Escolha o acabamento da app. Sistema segue o dispositivo; Escuro usa grafite dimensional; Preto usa um fundo OLED totalmente preto.</string>
+    <string name="appearance_onboarding_subtitle">A NOOP segue o sistema por predefinição. Escolha Claro, Escuro ou Preto puro aqui e altere-o quando quiser em Definições → Aspeto.</string>
 </resources>

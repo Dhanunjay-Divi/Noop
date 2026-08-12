@@ -118,7 +118,7 @@ private struct CompareSeries: Identifiable {
 struct CompareView: View {
     @EnvironmentObject var repo: Repository
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
-    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = true
+    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
     @EnvironmentObject var intelligence: IntelligenceEngine
 
     // Effort display scale (#268) — routes the Effort metric's min/max + hover read-outs onto WHOOP's
@@ -349,7 +349,7 @@ struct CompareView: View {
     private var officialReferenceSection: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Official reference", overline: "Your WHOOP export vs Noop",
-                          onDark: showDayCycleBackground && skyBehindCards)
+                          onDark: false)
             NoopCard {
                 VStack(alignment: .leading, spacing: NoopMetrics.gap) {
                     Picker("Reference metric", selection: $referenceMetric) {
@@ -698,7 +698,7 @@ struct CompareView: View {
     private var metricSection: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Metrics", overline: "Overlay 2-4 signals",
-                          onDark: showDayCycleBackground)
+                          onDark: false)
             NoopCard {
                 VStack(alignment: .leading, spacing: NoopMetrics.gap) {
                     // Responsive: range pills + the Add menu side-by-side when there's room, else

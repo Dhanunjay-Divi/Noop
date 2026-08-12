@@ -102,8 +102,7 @@ private struct DevicesContent: View {
             // multi-WHOOP reality reads at a glance.
             sectionHead("YOUR BANDS", trailing: activeDevices.count == 1
                         ? String(localized: "1 paired")
-                        : String(localized: "\(activeDevices.count) paired"),
-                        onDark: showDayCycleBackground)
+                        : String(localized: "\(activeDevices.count) paired"))
             ForEach(Array(activeDevices.enumerated()), id: \.element.id) { idx, device in
                 // Shared read-only probe gate (Test Centre → Connection + a live WHOOP), hoisted so the two
                 // probe closures below don't each re-inline a 4-term && chain — which tips the iOS Swift

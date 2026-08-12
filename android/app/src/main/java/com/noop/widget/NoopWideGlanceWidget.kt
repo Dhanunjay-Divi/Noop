@@ -32,7 +32,7 @@ import com.noop.ui.NoopNotificationRoute
 class NoopWideGlanceWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val snap = runCatching { WidgetSnapshotStore.load(context) }.getOrDefault(WidgetSnapshot())
-        provideContent { WideWidgetContent(context, snap, context.noopWidgetDarkMode()) }
+        provideContent { WideWidgetContent(context, snap, context.noopWidgetAppearance()) }
     }
 
     override fun onCompositionError(
@@ -42,15 +42,15 @@ class NoopWideGlanceWidget : GlanceAppWidget() {
         throwable: Throwable,
     ) {
         runCatching {
-            val rv = android.widget.RemoteViews(context.packageName, R.layout.noop_widget_error)
+            val rv = context.noopWidgetErrorRemoteViews()
             android.appwidget.AppWidgetManager.getInstance(context).updateAppWidget(appWidgetId, rv)
         }
     }
 }
 
 @Composable
-private fun WideWidgetContent(context: Context, snap: WidgetSnapshot, dark: Boolean) {
-    val colors = noopWidgetColors(dark)
+private fun WideWidgetContent(context: Context, snap: WidgetSnapshot, appearance: NoopWidgetAppearance) {
+    val colors = noopWidgetColors(appearance)
     val today = widgetRouteAction(context, NoopNotificationRoute.TODAY)
     val sleep = widgetRouteAction(context, NoopNotificationRoute.SLEEP)
     val health = widgetRouteAction(context, NoopNotificationRoute.HEALTH)

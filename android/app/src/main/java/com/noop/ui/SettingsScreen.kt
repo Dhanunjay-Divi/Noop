@@ -655,7 +655,7 @@ fun SettingsScreen(
     // enables exactly one launcher alias via PackageManager (see setAppIcon below).
     var appIconNavy by remember { mutableStateOf(NoopPrefs.appIconNavy(context)) }
 
-    // Theme (System / Light / Dark) — drives NoopTheme; AppearancePrefs mirrors it in snapshot state.
+    // Theme (System / Light / Dark / Black) — drives NoopTheme; AppearancePrefs mirrors it in snapshot state.
     var themeMode by remember { mutableStateOf(AppearancePrefs.mode) }
     // Chart colours (Titanium / Classic) — re-colours gauges + charts; ChartStylePrefs mirrors it live.
     var chartStyle by remember { mutableStateOf(ChartStylePrefs.style) }
@@ -1252,17 +1252,28 @@ fun SettingsScreen(
         SettingsSection(
             icon = Icons.Filled.Brightness6,
             title = uiString(R.string.l10n_settings_screen_appearance_41def7a0),
-            blurb = "Choose Light, Dark, or follow your system. Dark is the signature near-black; Light keeps the same clean look on a bright canvas.",
+            blurb = uiString(R.string.appearance_settings_blurb),
         ) {
-            FormRow(label = uiString(R.string.l10n_settings_screen_theme_a797e309)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    uiString(R.string.l10n_settings_screen_theme_a797e309),
+                    style = NoopType.body,
+                    color = Palette.textPrimary,
+                )
                 SegmentedPillControl(
-                    items = listOf(AppearanceMode.SYSTEM, AppearanceMode.LIGHT, AppearanceMode.DARK),
+                    items = AppearanceMode.entries,
                     selection = themeMode,
-                    label = { it.label },
+                    label = { uiString(it.labelRes) },
                     onSelect = { mode ->
                         themeMode = mode
                         AppearancePrefs.set(context, mode)
                     },
+                    adaptsToAvailableWidth = true,
+                )
+                Text(
+                    uiString(themeMode.detailRes),
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
                 )
             }
             RowDivider()   // #79 parity: the hairline every other section has between FormRows (Android rows

@@ -142,13 +142,12 @@ fun UpdatesInboxScreen(
                 Button(
                     onClick = { store.markAllRead() },
                     enabled = store.unreadCount > 0,
-                    // Filled accent PILL, matching the iOS "Mark all read" button (blue in light, gold in
-                    // dark). Icon + label inherit the button's contentColor.
+                    // Filled neutral-chrome pill. Icon + label inherit contrast-safe accent ink.
                     shape = RoundedCornerShape(percent = 50),
                     contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Palette.accent,
-                        contentColor = if (Palette.isLight) Color.White else Palette.goldDeepText,
+                        contentColor = Palette.accentInk,
                         disabledContainerColor = Palette.surfaceInset,
                         disabledContentColor = Palette.textTertiary,
                     ),
@@ -252,7 +251,7 @@ private fun SwipeBackground(direction: SwipeToDismissBoxValue) {
     }
     val washColor =
         if (direction == SwipeToDismissBoxValue.Settled) Color.Transparent else Palette.accent
-    val contentColor = if (Palette.isLight) Color.White else Palette.goldDeepText
+    val contentColor = Palette.accentInk
     Box(
         modifier = Modifier
             .fillMaxSize()

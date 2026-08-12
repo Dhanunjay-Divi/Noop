@@ -1,7 +1,7 @@
 import Foundation
 import UserNotifications
 
-/// Surfaces the illness early-warning as a macOS user notification when the banner transitions
+/// Surfaces a private multi-signal check-in when the in-app banner transitions
 /// from clear to raised — today it is silent unless the window is open (the menu-bar extra keeps
 /// NOOP alive). Rate-limited to once per local calendar day; the in-app banner stays the live
 /// surface. On-device only; the summary is APPROXIMATE — informational, not a diagnosis.
@@ -17,8 +17,9 @@ enum IllnessNotifier {
         }
     }
 
-    /// Post the early-warning, at most once per local calendar day.
-    static func post(_ message: String) {
+    /// Post the private check-in, at most once per local calendar day. Measurements and inferred
+    /// state deliberately stay inside the unlocked app; notification previews never expose them.
+    static func post() {
         let day = dayKey(Date())
         let d = UserDefaults.standard
         guard d.string(forKey: lastDayKey) != day else { return }
@@ -32,12 +33,15 @@ enum IllnessNotifier {
             // here we only check status (no second system prompt).
             let settings = await center.notificationSettings()
             guard settings.authorizationStatus == .authorized else { return }
+            DailyReviewNotifications.registerPrivacyCategory(on: center)
             let content = UNMutableNotificationContent()
-            content.title = String(localized: "Early warning: take it easy")
-            content.subtitle = String(localized: "On-device estimate (approximate), not a diagnosis.")
-            content.body = message
+            content.title = String(localized: "Private wellness check-in")
+            content.body = String(localized: "Open NOOP to review it.")
             content.sound = .default
-            try? await center.add(UNNotificationRequest(identifier: "illness-watch",
+            content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+            content.threadIdentifier = "noop.wellness-check-in"
+            content.userInfo = [NotificationRouteBridge.userInfoKey: NoopNotificationRoute.today.rawValue]
+            try? await center.add(UNNotificationRequest(identifier: "wellness-check-in",
                                                         content: content, trigger: nil))
         }
     }

@@ -572,9 +572,9 @@ fun HeadsUpCard(
             if (result.firedSignals.isNotEmpty()) {
                 WhyRow("Signals up", result.firedSignals, hue)
             }
-            // ...and what was ruled out (the differentiating part vs a black-box warning).
+            // Nearby context can move the same signals; surface it without claiming causation.
             if (result.suppressedBy.isNotEmpty()) {
-                WhyRow("Explained by", result.suppressedBy, Palette.textTertiary)
+                WhyRow("Also logged", result.suppressedBy, Palette.textTertiary)
             }
             // Optional confidence read from the parallel Mahalanobis distance, only when the level is
             // raised. Subtle by design: it augments, never gates (the engine already decided to raise).
@@ -705,7 +705,7 @@ private fun headsUpGlyph(level: IllnessSignalEngine.Level): ImageVector = when (
 private fun headsUpTitle(level: IllnessSignalEngine.Level): String = when (level) {
     IllnessSignalEngine.Level.RAISED -> "Heads-up"
     IllnessSignalEngine.Level.ALREADY_UNWELL -> "Rest up"
-    IllnessSignalEngine.Level.SUPPRESSED -> "Probably not illness"
+    IllnessSignalEngine.Level.SUPPRESSED -> "Related context found"
     IllnessSignalEngine.Level.MILD -> "A few signals are up"
     IllnessSignalEngine.Level.QUIET -> "Nothing notable"
 }

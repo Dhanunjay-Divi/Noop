@@ -28,12 +28,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// MARK: - Palette — the "Titanium & Gold" re-skin (mirrors StrandDesign/Palette.swift)
+// MARK: - Palette — Obsidian/Pearl chrome (mirrors StrandDesign/Palette.swift)
 //
-// A premium dark theme built on a deep NAVY canvas (NOT pure black) with per-domain
-// accent "colour worlds": Charge/recovery = GOLD, Effort/strain = amber, Rest/sleep =
-// blue, HRV = teal, high stress = burnt orange. Gold is the dominant brand anchor —
-// no greens anywhere.
+// Navigation, controls and identity stay monochrome. Colour is reserved for physiological meaning:
+// recovery, effort, sleep, stress, HR zones and alerts. The Black finish is true OLED black while
+// Dark remains dimensional graphite.
 //
 // PUBLIC API IS FROZEN: every token NAME below is depended on by screens across the
 // app, so the names never change — only the VALUES were re-themed to Titanium & Gold.
@@ -48,6 +47,8 @@ object Palette {
     internal var active by mutableStateOf(DarkTokens)
     /** True when the light scheme is active (surface code uses this for the per-scheme idiom). */
     val isLight: Boolean get() = active === LightTokens
+    /** True only for the user-selected OLED Black finish (Dark remains a distinct raised graphite). */
+    val isBlack: Boolean get() = active === BlackTokens
 
     // Chart style — when CLASSIC, the DATA accessors below return the throwback red→green ramps
     // (light/dark tuned). Reads ChartStylePrefs.style (snapshot state) so a flip re-colours live.
@@ -74,11 +75,12 @@ object Palette {
     // Glow.
     val glowAmbient get() = active.glowAmbient
 
-    // Accent — GOLD brand anchor.
+    // Monochrome control chrome.
     val accent get() = active.accent
     val accentHover get() = active.accentHover
     val accentMuted get() = active.accentMuted
     val focusRing get() = active.focusRing
+    val accentInk get() = active.accentInk
     const val disabledOpacity = 0.45f
 
     // Recovery / Charge gradient.
@@ -123,6 +125,12 @@ object Palette {
     val statusPositive get() = if (isClassic) classic.statusPositive else active.statusPositive
     val statusWarning get() = if (isClassic) classic.statusWarning else active.statusWarning
     val statusCritical get() = if (isClassic) classic.statusCritical else active.statusCritical
+
+    // Higher-contrast semantic ink for captions/footnotes on Pearl cards. Graphic status accents
+    // above remain intentionally brighter; dark/black values are unchanged.
+    val statusPositiveText get() = if (isClassic) classic.statusPositiveText else active.statusPositiveText
+    val statusWarningText get() = if (isClassic) classic.statusWarningText else active.statusWarningText
+    val statusCriticalText get() = if (isClassic) classic.statusCriticalText else active.statusCriticalText
 
     // Per-metric accents (Classic = purple HRV, red risk).
     val metricCyan get() = if (isClassic) classic.metricCyan else active.metricCyan
@@ -500,7 +508,7 @@ private fun noopColorScheme(t: PaletteTokens, dark: Boolean): ColorScheme {
     val base = if (dark) darkColorScheme() else lightColorScheme()
     return base.copy(
         primary = t.accent,
-        onPrimary = if (dark) t.surfaceBase else t.goldDeepText,
+        onPrimary = t.accentInk,
         primaryContainer = t.accentMuted,
         onPrimaryContainer = if (dark) t.accentHover else t.accent,
         secondary = t.metricPurple,
@@ -540,22 +548,19 @@ private val NoopShapes = Shapes(
 )
 
 /**
- * NoopTheme — instrument-grade, now System / Light / Dark. The chosen mode (default System) drives
+ * NoopTheme — instrument-grade, now System / Light / Dark / OLED Black. The chosen mode (default System) drives
  * both `Palette.active` (so every `Palette.*` read re-resolves) and the Material scheme. The write to
  * `Palette.active` is guarded + idempotent, and happens before children compose, so there's no flash
  * and no recomposition loop (NoopTheme itself never reads `active`).
  */
 @Composable
 fun NoopTheme(content: @Composable () -> Unit) {
-    val dark = when (AppearancePrefs.mode) {
-        AppearanceMode.LIGHT -> false
-        AppearanceMode.DARK -> true
-        AppearanceMode.SYSTEM -> isSystemInDarkTheme()
-    }
-    val tokens = if (dark) DarkTokens else LightTokens
+    val systemDark = isSystemInDarkTheme()
+    val tokens = appearanceTokens(AppearancePrefs.mode, systemDark)
+    val dark = tokens !== LightTokens
     if (Palette.active !== tokens) Palette.active = tokens
 
-    // Status-/nav-bar icon appearance: light icons on the dark theme, dark icons on the warm-paper
+    // Status-/nav-bar icon appearance: light icons on Dark and OLED Black, dark icons on the
     // light theme (otherwise the icons are invisible). Edge-to-edge keeps the bars transparent.
     val view = LocalView.current
     if (!view.isInEditMode) {
@@ -574,4 +579,12 @@ fun NoopTheme(content: @Composable () -> Unit) {
         shapes = NoopShapes,
         content = content,
     )
+}
+
+/** Pure resolver kept outside composition so persistence/fallback behaviour is cheap to unit-test. */
+internal fun appearanceTokens(mode: AppearanceMode, systemDark: Boolean): PaletteTokens = when (mode) {
+    AppearanceMode.SYSTEM -> if (systemDark) DarkTokens else LightTokens
+    AppearanceMode.LIGHT -> LightTokens
+    AppearanceMode.DARK -> DarkTokens
+    AppearanceMode.BLACK -> BlackTokens
 }

@@ -2,6 +2,7 @@
 import SwiftUI
 import StrandDesign
 import UserNotifications
+import WidgetKit
 
 /// iOS entry point. Unlike the macOS app (which adds a `MenuBarExtra` scene), iOS uses a single
 /// `WindowGroup`; the glanceable menu-bar role is filled by the Home/Lock-Screen widget instead.
@@ -24,7 +25,8 @@ struct StrandiOSApp: App {
     @StateObject private var router = NavRouter()
     @State private var liveActivity = LiveActivityController()
     @Environment(\.scenePhase) private var scenePhase
-    /// Appearance preference (System/Light/Dark). Default follows the OS; the Settings picker writes it.
+    /// Appearance preference (System/Pearl/Graphite/OLED Black). Default follows the OS; Settings and
+    /// the More-header shortcut write the same persisted value.
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
     /// Chart data-colour style (Titanium / Classic throwback). Re-colours gauges + charts.
     @AppStorage(ChartStyle.storageKey) private var chartStyleRaw = ChartStyle.titanium.rawValue
@@ -144,7 +146,14 @@ struct StrandiOSApp: App {
                 // v5 L3: the shared stress check-in nudge surface, so the Breathe screen's passive
                 // card observes the SAME instance the central detector (AppModel.evaluateStress) posts to.
                 .environment(\.stressNudgeCenter, model.stressNudgeCenter)
-                .preferredColorScheme(AppearanceMode.resolve(appearanceRaw).colorScheme)
+                .noopAppearance(appearanceRaw)
+                .onChange(of: appearanceRaw, initial: true) { _, rawValue in
+                    // The widget extension is a separate process, so mirror the complete preference to
+                    // the App Group and reload immediately. This preserves Graphite vs OLED Black rather
+                    // than making widgets merely follow the system scheme until the next data publish.
+                    WidgetAppearancePreference.save(AppearanceMode.resolve(rawValue).rawValue)
+                    WidgetCenter.shared.reloadAllTimelines()
+                }
                 .chartStyle(chartStyleRaw)
                 // Dynamic Type now scales the prose/label roles (StrandFont). Cap the upper end so the
                 // fixed-geometry tiles/gauges stay legible at the largest accessibility sizes rather than

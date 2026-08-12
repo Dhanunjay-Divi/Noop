@@ -428,17 +428,17 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         // dismiss. NEVER auto-written.
         item { NapDetectionSection(viewModel) }
 
-        // Illness early-warning (real + persisted; opt-OUT — the watch has always run on Android).
+        // Multi-signal wellness check-in (real + persisted; opt-OUT on Android).
         item {
         SettingsSection(
             icon = Icons.Filled.MonitorHeart,
             title = uiString(R.string.l10n_automations_screen_illness_early_warning_453ab477),
-            blurb = "Watches your resting HR, HRV, skin temperature and respiration against your own 28-day baseline. On-device and approximate: informational only, not a diagnosis.",
+            blurb = "Watches resting HR, HRV, skin temperature and respiration against your own baseline. Many factors can move these signals; this is a wellness check-in, not a diagnosis.",
             active = illnessWatch,
         ) {
             ToggleRow(
                 label = uiString(R.string.l10n_automations_screen_watch_for_early_illness_signs_4c22e127),
-                help = "Needs at least 14 days of history. When two or more signals drift together you get a banner on Today and a notification, at most once a day.",
+                help = "Needs at least 14 days of history. When two or more signals move together, NOOP shows a private in-app check-in and a detail-free notification at most once a day.",
                 checked = illnessWatch,
                 onChange = { viewModel.setIllnessWatchEnabled(it) },
             )

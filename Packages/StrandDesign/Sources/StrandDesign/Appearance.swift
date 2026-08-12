@@ -37,16 +37,18 @@ public extension View {
 }
 
 /// The user's appearance preference for the whole app. Persisted via
-/// `@AppStorage(AppearanceMode.storageKey)`. `.system` follows the OS (the default);
-/// `.light` / `.dark` force a scheme regardless of the system setting.
+/// `@AppStorage(AppearanceMode.storageKey)`. `.system` follows the OS (the default), `.light`
+/// uses NOOP's pearl finish, `.dark` uses dimensional graphite, and `.black` uses a true-black
+/// OLED canvas with quieter relief.
 ///
-/// Applied once at each app root via `.preferredColorScheme(mode.colorScheme)`. Because every
-/// `StrandPalette` token is a dynamic `Color(light:dark:)`, flipping this re-resolves the entire
-/// UI automatically — no per-view plumbing.
+/// Apply it once at each app root with `.noopAppearance(rawValue)`. Dark and Black both request
+/// the system dark colour scheme, while the full mode is also carried through the environment so
+/// shared surfaces can distinguish graphite from true black without resetting navigation state.
 public enum AppearanceMode: String, CaseIterable, Identifiable, Sendable {
     case system
     case light
     case dark
+    case black
 
     public var id: String { rawValue }
 
@@ -59,6 +61,17 @@ public enum AppearanceMode: String, CaseIterable, Identifiable, Sendable {
         case .system: return String(localized: "System", bundle: .module)
         case .light:  return String(localized: "Light", bundle: .module)
         case .dark:   return String(localized: "Dark", bundle: .module)
+        case .black:  return String(localized: "Black", bundle: .module)
+        }
+    }
+
+    /// Short material name shown beneath the theme label in the visual selector.
+    public var detail: String {
+        switch self {
+        case .system: return String(localized: "Follows device", bundle: .module)
+        case .light:  return String(localized: "Soft pearl", bundle: .module)
+        case .dark:   return String(localized: "Graphite", bundle: .module)
+        case .black:  return String(localized: "True black", bundle: .module)
         }
     }
 
@@ -68,6 +81,7 @@ public enum AppearanceMode: String, CaseIterable, Identifiable, Sendable {
         case .system: return "circle.lefthalf.filled"
         case .light:  return "sun.max"
         case .dark:   return "moon.stars"
+        case .black:  return "circle.inset.filled"
         }
     }
 
@@ -76,13 +90,179 @@ public enum AppearanceMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .system: return nil
         case .light:  return .light
-        case .dark:   return .dark
+        case .dark, .black: return .dark
         }
     }
 
     /// Resolve a stored raw value (tolerant of an unknown/missing value → `.system`).
     public static func resolve(_ raw: String) -> AppearanceMode {
         AppearanceMode(rawValue: raw) ?? .system
+    }
+}
+
+private struct NoopAppearanceEnvironmentKey: EnvironmentKey {
+    static let defaultValue = AppearanceMode.system
+}
+
+public extension EnvironmentValues {
+    /// The complete NOOP appearance, including the Dark-vs-OLED distinction that `ColorScheme`
+    /// cannot represent on its own.
+    var noopAppearanceMode: AppearanceMode {
+        get { self[NoopAppearanceEnvironmentKey.self] }
+        set { self[NoopAppearanceEnvironmentKey.self] = newValue }
+    }
+}
+
+private struct NoopAppearanceModifier: ViewModifier {
+    let rawValue: String
+
+    func body(content: Content) -> some View {
+        let mode = AppearanceMode.resolve(rawValue)
+        // Palette access is lock-protected. Set it while constructing the root so every computed
+        // surface token created in this update uses the same graphite/OLED variant.
+        StrandPalette.appearanceMode = mode
+        return content
+            .environment(\.noopAppearanceMode, mode)
+            .preferredColorScheme(mode.colorScheme)
+    }
+}
+
+public extension View {
+    /// Apply NOOP's complete appearance at an app/scene root. Unlike keying the whole root, this keeps
+    /// tab paths, sheets, and scroll positions alive when a person changes the finish in place.
+    func noopAppearance(_ rawValue: String) -> some View {
+        modifier(NoopAppearanceModifier(rawValue: rawValue))
+    }
+}
+
+/// A tactile, accessible four-finish selector shared by onboarding and Settings. Each option previews
+/// its actual base/elevated surface relationship; physiological colours intentionally do not change.
+public struct AppearancePickerGrid: View {
+    @Binding private var selection: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    public init(selection: Binding<String>) {
+        _selection = selection
+    }
+
+    public var body: some View {
+        LazyVGrid(columns: columns, spacing: 10) {
+            ForEach(AppearanceMode.allCases) { mode in
+                option(mode)
+            }
+        }
+    }
+
+    private var columns: [GridItem] {
+        if dynamicTypeSize.isAccessibilitySize {
+            return [GridItem(.flexible())]
+        }
+        return [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
+    }
+
+    private func option(_ mode: AppearanceMode) -> some View {
+        let selected = AppearanceMode.resolve(selection) == mode
+        return Button {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
+                selection = mode.rawValue
+            }
+        } label: {
+            HStack(spacing: 10) {
+                AppearanceSwatch(mode: mode)
+                    .frame(width: 38, height: 38)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(mode.label)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text(mode.detail)
+                        .font(.caption)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 2)
+
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(selected ? StrandPalette.accent : StrandPalette.textTertiary)
+            }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: dynamicTypeSize.isAccessibilitySize ? 72 : 58,
+                   alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(selected ? StrandPalette.accentMuted : StrandPalette.surfaceInset.opacity(0.72))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(selected ? StrandPalette.hairlineStrong : StrandPalette.hairline, lineWidth: selected ? 1.2 : 0.8)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(mode.label)
+        .accessibilityValue(selected ? String(localized: "Selected", bundle: .module) : mode.detail)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+private struct AppearanceSwatch: View {
+    let mode: AppearanceMode
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
+        ZStack {
+            shape.fill(base)
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(raised)
+                .frame(width: 22, height: 15)
+                .offset(x: 4, y: 5)
+            Circle()
+                .fill(ink)
+                .frame(width: 7, height: 7)
+                .offset(x: -8, y: -8)
+        }
+        .overlay(shape.strokeBorder(rim, lineWidth: 0.8))
+        .shadow(color: .black.opacity(mode == .light ? 0.10 : 0.28), radius: 3, y: 2)
+        .accessibilityHidden(true)
+    }
+
+    private var base: Color {
+        switch mode {
+        case .system:
+            return Color(light: "#EEF0F2", dark: "#0A0B0D")
+        case .light: return Color(hex: "#EEF0F2")
+        case .dark:  return Color(hex: "#0A0B0D")
+        case .black: return Color(hex: "#000000")
+        }
+    }
+
+    private var raised: Color {
+        switch mode {
+        case .system:
+            return Color(light: "#FAFBFC", dark: "#17191D")
+        case .light: return Color(hex: "#FAFBFC")
+        case .dark:  return Color(hex: "#17191D")
+        case .black: return Color(hex: "#0A0A0B")
+        }
+    }
+
+    private var ink: Color {
+        switch mode {
+        case .system: return Color(light: "#15171A", dark: "#F7F7F5")
+        case .light:  return Color(hex: "#15171A")
+        case .dark, .black: return Color(hex: "#F7F7F5")
+        }
+    }
+
+    private var rim: Color {
+        switch mode {
+        case .light: return Color.black.opacity(0.16)
+        default: return Color.white.opacity(0.20)
+        }
     }
 }
 
@@ -106,12 +286,13 @@ public enum CardAppearancePrefs {
     public static let defaultPercent = 100
 }
 
-/// "Sky behind cards" (opt-in, default OFF): extend the day-cycle sky behind the WHOLE Today scroll (not
+/// "Background behind cards" (default ON): extend the dimensional material behind the WHOLE scroll (not
 /// just the top band) so the Card-transparency setting reveals it under every card. Read in `LiquidTodayView`
 /// via `@AppStorage(SkyBehindCardsPrefs.enabledKey)` and toggled from Settings → Appearance. Mirror in
 /// Kotlin via `NoopPrefs.skyBehindCards`.
 public enum SkyBehindCardsPrefs {
     public static let enabledKey = "noop.skyBehindCards"
+    public static let defaultEnabled = true
 }
 
 // MARK: - Light-idiom helpers

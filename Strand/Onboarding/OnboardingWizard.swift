@@ -1334,16 +1334,11 @@ private struct DoneStep: View {
 
 // MARK: - Step shell (shared layout for each page)
 
-/// Lets a brand-new user pick the app's look up front (and learn it's changeable) — the same
-/// System / Light / Dark setting that lives in Settings → Appearance. Selecting re-themes the whole
-/// app live (the shared `@AppStorage(AppearanceMode.storageKey)` drives `preferredColorScheme`), so
-/// the wizard itself IS the preview.
+/// Lets a brand-new user pick the app's finish up front (and learn it's changeable) — the same
+/// System / Light / Graphite / OLED Black setting that lives in Settings → Appearance. The wizard
+/// itself is the live preview.
 private struct AppearanceStep: View {
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
-    private var binding: Binding<AppearanceMode> {
-        Binding(get: { AppearanceMode(rawValue: appearanceRaw) ?? .system },
-                set: { appearanceRaw = $0.rawValue })
-    }
     var body: some View {
         StepShell(title: String(localized: "Make it yours"),
                   subtitle: String(localized: "Choose how NOOP looks. The whole app updates as you tap. You can change this any time in Settings → Appearance.")) {
@@ -1352,9 +1347,9 @@ private struct AppearanceStep: View {
                     .font(.system(size: 56, weight: .light))
                     .foregroundStyle(StrandPalette.accent)
                     .frame(height: 96)
-                SegmentedPillControl(AppearanceMode.allCases, selection: binding) { $0.label }
-                    .frame(maxWidth: 320)
-                Text("System follows your \(Platform.deviceNoun)'s light or dark setting.")
+                AppearancePickerGrid(selection: $appearanceRaw)
+                    .frame(maxWidth: 420)
+                Text("System follows your \(Platform.deviceNoun)'s appearance. Black uses a true OLED canvas while keeping the same health-data colours.")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .multilineTextAlignment(.center)

@@ -36,7 +36,7 @@ class NoopCompactGlanceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val snap = runCatching { WidgetSnapshotStore.load(context) }.getOrDefault(WidgetSnapshot())
-        provideContent { CompactWidgetContent(context, snap, context.noopWidgetDarkMode()) }
+        provideContent { CompactWidgetContent(context, snap, context.noopWidgetAppearance()) }
     }
 
     override fun onCompositionError(
@@ -46,15 +46,15 @@ class NoopCompactGlanceWidget : GlanceAppWidget() {
         throwable: Throwable,
     ) {
         runCatching {
-            val rv = android.widget.RemoteViews(context.packageName, R.layout.noop_widget_error)
+            val rv = context.noopWidgetErrorRemoteViews()
             android.appwidget.AppWidgetManager.getInstance(context).updateAppWidget(appWidgetId, rv)
         }
     }
 }
 
 @Composable
-private fun CompactWidgetContent(context: Context, snap: WidgetSnapshot, dark: Boolean) {
-    val colors = noopWidgetColors(dark)
+private fun CompactWidgetContent(context: Context, snap: WidgetSnapshot, appearance: NoopWidgetAppearance) {
+    val colors = noopWidgetColors(appearance)
     val today = widgetRouteAction(context, NoopNotificationRoute.TODAY)
     val isLive = snap.freshness(System.currentTimeMillis()) == WidgetFreshness.LIVE
     Column(

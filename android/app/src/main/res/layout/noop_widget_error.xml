@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Fallback the widget shows if Glance composition ever fails (NoopGlanceWidget.onCompositionError)
-     instead of crashing the app process. Colours mirror the widget's Palette constants. -->
+<!-- Fallback the widget shows if Glance composition ever fails. Runtime code replaces these safe
+     Graphite defaults with the user's explicit Light / Dark / OLED Black app tokens. -->
 <TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/noop_widget_error_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:gravity="center"
     android:padding="12dp"
-    android:background="#0D1512"
-    android:textColor="#8B9690"
+    android:background="#0A0B0D"
+    android:textColor="#C7C7C2"
     android:textSize="12sp"
     android:text="@string/widget_error" />

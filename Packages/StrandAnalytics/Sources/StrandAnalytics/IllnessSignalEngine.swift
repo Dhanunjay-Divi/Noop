@@ -178,7 +178,7 @@ public enum IllnessSignalEngine {
         if context.alreadyUnwell {
             let agreeing = score >= mildThreshold && signalCount >= 1
             let copy = agreeing
-                ? "Rest up - you logged feeling unwell, and your numbers agree. \(disclaimerTail)"
+                ? "Rest up - you logged feeling unwell, and some of your signals also shifted. \(disclaimerTail)"
                 : "Rest up - you logged feeling unwell. Take it easy today. \(disclaimerTail)"
             return Result(score: score, level: .alreadyUnwell, firedSignals: firedSignals,
                           suppressedBy: [], signalCount: signalCount, copy: copy)
@@ -205,23 +205,22 @@ public enum IllnessSignalEngine {
         if !suppressedBy.isEmpty {
             let dampened = score * confounderDampen
             let reason = joinReasons(suppressedBy)
-            let copy = "Some signals are up (\(signalsPhrase)), but you logged \(reason) - likely that, "
-                + "not illness. \(disclaimerTail)"
+            let copy = "Some signals shifted (\(signalsPhrase)). You also logged \(reason), which can "
+                + "move the same signals. Review how you feel. \(disclaimerTail)"
             return Result(score: dampened, level: .suppressed, firedSignals: firedSignals,
                           suppressedBy: suppressedBy, signalCount: signalCount, copy: copy)
         }
 
         // No confounder. Mild stays in the detail view; a strong composite raises.
         if score < raiseThreshold {
-            let copy = "A few signals are mildly up (\(signalsPhrase)). Nothing alarming - worth a calmer "
-                + "day. \(disclaimerTail)"
+            let copy = "A few signals are mildly up (\(signalsPhrase)). The shift is small; keep monitoring "
+                + "how you feel. \(disclaimerTail)"
             return Result(score: score, level: .mild, firedSignals: firedSignals,
                           suppressedBy: [], signalCount: signalCount, copy: copy)
         }
 
-        let ruledOut = "no alcohol or travel logged"
-        let copy = "Heads-up - your body looks strained. \(signalsPhrase). With \(ruledOut), consider "
-            + "taking it easy. \(disclaimerTail)"
+        let copy = "Several signals shifted together (\(signalsPhrase)). Many things can cause this "
+            + "pattern; consider a gentler day and review how you feel. \(disclaimerTail)"
         return Result(score: score, level: .raised, firedSignals: firedSignals,
                       suppressedBy: [], signalCount: signalCount, copy: copy)
     }

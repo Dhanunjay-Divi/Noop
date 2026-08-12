@@ -181,8 +181,8 @@ fun RhythmConsentGate(
                 enabled = checked,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Palette.gold,
-                    contentColor = Palette.goldDeepText,
+                    containerColor = Palette.accent,
+                    contentColor = Palette.accentInk,
                 ),
             ) {
                 Text(uiString(R.string.l10n_rhythm_screen_turn_on_rhythm_2275168c), style = NoopType.body)

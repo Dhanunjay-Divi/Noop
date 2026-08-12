@@ -442,7 +442,7 @@ struct MetricDetailView: View {
     /// backgrounds are enabled, or the plain canvas when they are not. Keeping the persisted switches in
     /// lockstep means a metric tap never jumps from the black titanium shell to the old blue day-cycle sky.
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
-    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = true
+    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
     // Profile basics for the Fitness Age not-ready countdown (age/sex gate its readiness lead). Injected
     // app-wide at the root; previews supply their own. Only read on the fitness_age empty-state path.
     @EnvironmentObject var profile: ProfileStore

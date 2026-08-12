@@ -140,8 +140,8 @@ object IllnessWatch {
         }
 
         return if (flags.size >= 2) {
-            "Your body looks strained - " + flags.joinToString(", ") +
-                ". Consider taking it easy."
+            "Several signals shifted together — " + flags.joinToString(", ") +
+                ". Many things can cause this pattern; review how you feel and consider a gentler day."
         } else {
             null
         }

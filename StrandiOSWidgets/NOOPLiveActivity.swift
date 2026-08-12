@@ -31,6 +31,7 @@ struct NOOPLiveActivity: Widget {
                 }
             }
             .padding()
+            .noopAppearance(WidgetAppearancePreference.load())
             .activityBackgroundTint(StrandPalette.surfaceBase)
             .activitySystemActionForegroundColor(StrandPalette.textPrimary)
         } dynamicIsland: { context in

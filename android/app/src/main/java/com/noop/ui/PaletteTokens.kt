@@ -2,10 +2,13 @@ package com.noop.ui
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import com.noop.R
+import com.noop.widget.WidgetSnapshotStore
 
 // MARK: - PaletteTokens — the per-scheme colour set behind `object Palette`
 //
@@ -14,8 +17,8 @@ import androidx.compose.ui.graphics.Color
 // is snapshot state, so every `Palette.X` read (in a composable OR a Canvas DrawScope) re-resolves
 // automatically when the theme flips — ZERO call-site changes across the ~1,740 references.
 //
-// Dark values mirror StrandPalette.swift's dark; light values are the approved "Warm Paper" set
-// (docs/superpowers/specs/2026-06-16-light-theme-design.md). Names/order match the Swift palette.
+// Chrome values mirror StrandPalette.swift's Pearl/Graphite/Black finishes. Names/order match the
+// Swift palette; physiological data colours stay platform-consistent and do not change with chrome.
 
 data class PaletteTokens(
     val surfaceBase: Color,
@@ -32,6 +35,8 @@ data class PaletteTokens(
     val accentHover: Color,
     val accentMuted: Color,
     val focusRing: Color,
+    /** Ink placed on [accent]: white on light-mode black, near-black on dark-mode pearl. */
+    val accentInk: Color,
     val recovery000: Color,
     val recovery030: Color,
     val recovery055: Color,
@@ -53,6 +58,9 @@ data class PaletteTokens(
     val statusPositive: Color,
     val statusWarning: Color,
     val statusCritical: Color,
+    val statusPositiveText: Color,
+    val statusWarningText: Color,
+    val statusCriticalText: Color,
     val metricCyan: Color,
     val metricPurple: Color,
     val metricAmber: Color,
@@ -92,21 +100,23 @@ data class PaletteTokens(
     val tipCore: Color,
 )
 
-// WHOOP-reset dark palette (gold killed 2026-06-22). Values match StrandPalette.swift's DARK
-// Titanium column byte-for-byte: blue-grey canvas, WHOOP red→yellow→green recovery, green Charge,
-// blue Effort, slate Rest, amber Stress. NO gold anywhere — accent/gold tokens point to WHOOP blue.
+// Graphite palette. Values match StrandPalette.swift's DARK Titanium column byte-for-byte:
+// neutral chrome, WHOOP red→yellow→green recovery, green Charge, blue Effort, slate Rest,
+// amber Stress. The legacy `gold*` API remains blue for data-viz compatibility; chrome is monochrome.
 val DarkTokens = PaletteTokens(
-    surfaceBase = Color(0xFF121518), surfaceRaised = Color(0xFF25292C), surfaceOverlay = Color(0xFF1C1F26),
-    surfaceInset = Color(0xFF1F2229), hairline = Color(0xFF21304A), hairlineStrong = Color(0xFF2E3C57),
-    textPrimary = Color(0xFFF4F6F8), textSecondary = Color(0xFFC8CFD8), textTertiary = Color(0xFF8A94A4),
-    glowAmbient = Color(0xFF3A2D0A),
-    accent = Color(0xFF60A0E0), accentHover = Color(0xFF8FBEEC), accentMuted = Color(0xFF16233A), focusRing = Color(0xFF60A0E0),
+    surfaceBase = Color(0xFF0A0B0D), surfaceRaised = Color(0xFF15171A), surfaceOverlay = Color(0xFF1B1D21),
+    surfaceInset = Color(0xFF0F1114), hairline = Color(0xFF2D3137), hairlineStrong = Color(0xFF4B515A),
+    textPrimary = Color(0xFFF7F7F5), textSecondary = Color(0xFFC7C7C2), textTertiary = Color(0xFF989893),
+    glowAmbient = Color(0xFFFFFFFF),
+    accent = Color(0xFFF7F7F5), accentHover = Color(0xFFFFFFFF), accentMuted = Color(0xFF24262B), focusRing = Color(0xFFE7E7E2),
+    accentInk = Color(0xFF070707),
     recovery000 = Color(0xFFE0463C), recovery030 = Color(0xFFE8743C), recovery055 = Color(0xFFF9DF4A),
     recovery078 = Color(0xFF8FD86A), recovery100 = Color(0xFF03E095),
     strain000 = Color(0xFF9C5A14), strain033 = Color(0xFFC2762A), strain066 = Color(0xFFD98A3D), strain100 = Color(0xFFF0A85A),
-    sleepAwake = Color(0xFFC2CCDA), sleepLight = Color(0xFF4A90E2), sleepDeep = Color(0xFF2F6FCB), sleepREM = Color(0xFF6FA8E8),
+    sleepAwake = Color(0xFFCAC8CB), sleepLight = Color(0xFFA7A4F4), sleepDeep = Color(0xFFFD96FD), sleepREM = Color(0xFFAE5BEF),
     zone1 = Color(0xFF4A90E2), zone2 = Color(0xFF3FA9C9), zone3 = Color(0xFFE8B84B), zone4 = Color(0xFFD98A3D), zone5 = Color(0xFFE0662F),
     statusPositive = Color(0xFF03E095), statusWarning = Color(0xFFF0A020), statusCritical = Color(0xFFE0662F),
+    statusPositiveText = Color(0xFF03E095), statusWarningText = Color(0xFFF0A020), statusCriticalText = Color(0xFFE0662F),
     metricCyan = Color(0xFF3FA9C9), metricPurple = Color(0xFF4A90E2), metricAmber = Color(0xFFD98A3D), metricRose = Color(0xFFE0662F),
     chargeColor = Color(0xFF03E095), chargeDeep = Color(0xFF0B9D62), chargeBright = Color(0xFF6BF0B4), chargeGlow = Color(0xFF03E095),
     effortColor = Color(0xFF4090E0), effortDeep = Color(0xFF2A6FB0), effortBright = Color(0xFF74B6F0), effortGlow = Color(0xFF4090E0),
@@ -120,28 +130,46 @@ val DarkTokens = PaletteTokens(
     tipCore = Color(0xFFFFFFFF),
 )
 
+// OLED Black keeps every physiological/data colour identical to Dark and changes only the chrome.
+// The canvas is true black, while cards and dividers retain a small luminance step so hierarchy does
+// not collapse into a flat sheet. This is a real fourth appearance, not a renamed dark mode.
+val BlackTokens = DarkTokens.copy(
+    surfaceBase = Color(0xFF000000),
+    surfaceRaised = Color(0xFF0A0A0B),
+    surfaceOverlay = Color(0xFF111113),
+    surfaceInset = Color(0xFF050506),
+    hairline = Color(0xFF242427),
+    hairlineStrong = Color(0xFF414147),
+    accentMuted = Color(0xFF171719),
+    scenicCenter = Color(0xFF0A0A0B),
+    scenicEdge = Color(0xFF000000),
+    cardFillTop = Color(0xFF111113),
+    cardFillBottom = Color(0xFF050506),
+)
+
 val LightTokens = PaletteTokens(
-    surfaceBase = Color(0xFFEAE3D4), surfaceRaised = Color(0xFFFFFFFF), surfaceOverlay = Color(0xFFFFFFFF),
-    surfaceInset = Color(0xFFDFD8C8), hairline = Color(0xFFD8D0BD), hairlineStrong = Color(0xFFC7BCA4),
-    textPrimary = Color(0xFF1A2230), textSecondary = Color(0xFF4C5564), textTertiary = Color(0xFF7C8696),
-    glowAmbient = Color(0xFFF0E4C0),
-    // Light chrome accent shifts to the deep brand blue (gold reserved for the recovery world + FAB).
-    accent = Color(0xFF234F9E), accentHover = Color(0xFF1C3F80), accentMuted = Color(0xFFE4ECF6), focusRing = Color(0xFF2F6FCB),
-    recovery000 = Color(0xFF8F6212), recovery030 = Color(0xFFA87718), recovery055 = Color(0xFFC28E26),
-    recovery078 = Color(0xFFD2A23A), recovery100 = Color(0xFFE0B44C),
+    surfaceBase = Color(0xFFEEF0F2), surfaceRaised = Color(0xFFFAFBFC), surfaceOverlay = Color(0xFFF6F7F9),
+    surfaceInset = Color(0xFFE5E8EB), hairline = Color(0xFFCDD1D6), hairlineStrong = Color(0xFFAEB4BC),
+    textPrimary = Color(0xFF111317), textSecondary = Color(0xFF4A4E54), textTertiary = Color(0xFF686D75),
+    glowAmbient = Color(0xFFE8E8E4),
+    accent = Color(0xFF111111), accentHover = Color(0xFF2C2C2A), accentMuted = Color(0xFFE1E4E8), focusRing = Color(0xFF333330),
+    accentInk = Color(0xFFFFFFFF),
+    recovery000 = Color(0xFFC0392B), recovery030 = Color(0xFFD9682A), recovery055 = Color(0xFFC99A00),
+    recovery078 = Color(0xFF6FB23A), recovery100 = Color(0xFF0F9D62),
     strain000 = Color(0xFF7E460E), strain033 = Color(0xFFA4621B), strain066 = Color(0xFFC2792E), strain100 = Color(0xFFD89240),
-    sleepAwake = Color(0xFF97A2B2), sleepLight = Color(0xFF3A80D6), sleepDeep = Color(0xFF234F9E), sleepREM = Color(0xFF5790DA),
+    sleepAwake = Color(0xFF8E949E), sleepLight = Color(0xFF7B78E0), sleepDeep = Color(0xFFC13EC1), sleepREM = Color(0xFF8E3BD6),
     zone1 = Color(0xFF3A80D6), zone2 = Color(0xFF2E92B4), zone3 = Color(0xFFC28E26), zone4 = Color(0xFFC2792E), zone5 = Color(0xFFC84E1E),
-    statusPositive = Color(0xFFB07D17), statusWarning = Color(0xFFC2792E), statusCritical = Color(0xFFC84E1E),
+    statusPositive = Color(0xFF1F8A5B), statusWarning = Color(0xFFC2792E), statusCritical = Color(0xFFC84E1E),
+    statusPositiveText = Color(0xFF19734A), statusWarningText = Color(0xFF895900), statusCriticalText = Color(0xFFA83D21),
     metricCyan = Color(0xFF2E92B4), metricPurple = Color(0xFF3A80D6), metricAmber = Color(0xFFC2792E), metricRose = Color(0xFFC84E1E),
-    chargeColor = Color(0xFFB88421), chargeDeep = Color(0xFF8F6212), chargeBright = Color(0xFFE0B44C), chargeGlow = Color(0xFFC8902F),
-    effortColor = Color(0xFFB26A1C), effortDeep = Color(0xFF7E460E), effortBright = Color(0xFFD89240), effortGlow = Color(0xFFB26A1C),
-    restColor = Color(0xFF3A80D6), restDeep = Color(0xFF234F9E), restBright = Color(0xFF5790DA), restGlow = Color(0xFF3A80D6),
-    stressColor = Color(0xFFB88421), stressDeep = Color(0xFF3A80D6), stressBright = Color(0xFFC84E1E), stressGlow = Color(0xFFB88421),
-    scenicCenter = Color(0xFFFBF6EA), scenicEdge = Color(0xFFEDE6D6), scenicStar = Color(0xFFD8CDB6),
-    cardFillTop = Color(0xFFFFFFFF), cardFillBottom = Color(0xFFFAF7F0),
-    gold = Color(0xFFDBA52A), goldLight = Color(0xFFECC766), goldDeep = Color(0xFF9A6B12),
-    goldDeepText = Color(0xFF3A2708), signalYellow = Color(0xFFE8A800),
+    chargeColor = Color(0xFF0F9D62), chargeDeep = Color(0xFF0B7A4A), chargeBright = Color(0xFF5FD89A), chargeGlow = Color(0xFF0F9D62),
+    effortColor = Color(0xFF2A78C8), effortDeep = Color(0xFF1E5B96), effortBright = Color(0xFF5AA0E0), effortGlow = Color(0xFF2A78C8),
+    restColor = Color(0xFF5E7896), restDeep = Color(0xFF234F9E), restBright = Color(0xFF5790DA), restGlow = Color(0xFF3A80D6),
+    stressColor = Color(0xFFC7891A), stressDeep = Color(0xFF3A80D6), stressBright = Color(0xFFC84E1E), stressGlow = Color(0xFFC7891A),
+    scenicCenter = Color(0xFFF5F7F9), scenicEdge = Color(0xFFE4E8ED), scenicStar = Color(0xFFBAC3CF),
+    cardFillTop = Color(0xFFFFFFFF), cardFillBottom = Color(0xFFF2F5F8),
+    gold = Color(0xFF3A78C8), goldLight = Color(0xFF6FA8E0), goldDeep = Color(0xFF2A5C9E),
+    goldDeepText = Color(0xFFFFFFFF), signalYellow = Color(0xFFE8A800),
     titaniumTop = Color(0xFFDDE1E6), titaniumMid = Color(0xFFBBC2C9), titaniumLow = Color(0xFF98A0A8), titaniumDeep = Color(0xFF6B737B),
     tipCore = Color(0xFF241B06),
 )
@@ -187,6 +215,7 @@ data class ClassicRamp(
     val sleepAwake: Color, val sleepLight: Color, val sleepDeep: Color, val sleepREM: Color,
     val zone1: Color, val zone2: Color, val zone3: Color, val zone4: Color, val zone5: Color,
     val statusPositive: Color, val statusWarning: Color, val statusCritical: Color,
+    val statusPositiveText: Color, val statusWarningText: Color, val statusCriticalText: Color,
     val metricCyan: Color, val metricPurple: Color, val metricAmber: Color, val metricRose: Color,
     val chargeColor: Color, val chargeDeep: Color, val chargeBright: Color,
     val effortColor: Color, val effortDeep: Color, val effortBright: Color,
@@ -201,6 +230,7 @@ val ClassicDark = ClassicRamp(
     sleepAwake = Color(0xFFC9CCD6), sleepLight = Color(0xFF6FA8E8), sleepDeep = Color(0xFF2A4C8F), sleepREM = Color(0xFF8E6FD6),
     zone1 = Color(0xFF9AA7B5), zone2 = Color(0xFF46B45A), zone3 = Color(0xFFF2C53D), zone4 = Color(0xFFEE8B3C), zone5 = Color(0xFFE5483B),
     statusPositive = Color(0xFF46B45A), statusWarning = Color(0xFFF2C53D), statusCritical = Color(0xFFE5483B),
+    statusPositiveText = Color(0xFF46B45A), statusWarningText = Color(0xFFF2C53D), statusCriticalText = Color(0xFFE5483B),
     metricCyan = Color(0xFF3FA9C9), metricPurple = Color(0xFF8E6FD6), metricAmber = Color(0xFFF2C53D), metricRose = Color(0xFFE5483B),
     chargeColor = Color(0xFF46B45A), chargeDeep = Color(0xFF2E9E4F), chargeBright = Color(0xFF86D98E),
     effortColor = Color(0xFF4A90E2), effortDeep = Color(0xFF2F6FCB), effortBright = Color(0xFF7FB2E8),
@@ -215,6 +245,7 @@ val ClassicLight = ClassicRamp(
     sleepAwake = Color(0xFF8C95A3), sleepLight = Color(0xFF3A80D6), sleepDeep = Color(0xFF203E73), sleepREM = Color(0xFF6A4FC0),
     zone1 = Color(0xFF828D9B), zone2 = Color(0xFF2E9E4F), zone3 = Color(0xFFCFA528), zone4 = Color(0xFFD87328), zone5 = Color(0xFFCB3A2F),
     statusPositive = Color(0xFF2E9E4F), statusWarning = Color(0xFFCFA528), statusCritical = Color(0xFFCB3A2F),
+    statusPositiveText = Color(0xFF19734A), statusWarningText = Color(0xFF895900), statusCriticalText = Color(0xFFB33A2F),
     metricCyan = Color(0xFF2E92B4), metricPurple = Color(0xFF6A4FC0), metricAmber = Color(0xFFCFA528), metricRose = Color(0xFFCB3A2F),
     chargeColor = Color(0xFF2E9E4F), chargeDeep = Color(0xFF207A3C), chargeBright = Color(0xFF5FBE6E),
     effortColor = Color(0xFF3A74C4), effortDeep = Color(0xFF284F9C), effortBright = Color(0xFF5E92D6),
@@ -222,12 +253,17 @@ val ClassicLight = ClassicRamp(
     stressColor = Color(0xFFCFA528), stressDeep = Color(0xFF2E9E4F), stressBright = Color(0xFFCB3A2F),
 )
 
-// MARK: - Appearance preference (System / Light / Dark)
+// MARK: - Appearance preference (System / Light / Dark / OLED Black)
 
-enum class AppearanceMode(val storageValue: String, val label: String) {
-    SYSTEM("system", "System"),
-    LIGHT("light", "Light"),
-    DARK("dark", "Dark");
+enum class AppearanceMode(
+    val storageValue: String,
+    @StringRes val labelRes: Int,
+    @StringRes val detailRes: Int,
+) {
+    SYSTEM("system", R.string.appearance_system, R.string.appearance_detail_system),
+    LIGHT("light", R.string.appearance_light, R.string.appearance_detail_light),
+    DARK("dark", R.string.appearance_dark, R.string.appearance_detail_dark),
+    BLACK("black", R.string.appearance_black, R.string.appearance_detail_black);
 
     companion object {
         fun fromStorage(raw: String?): AppearanceMode =
@@ -248,12 +284,25 @@ object AppearancePrefs {
     var mode by mutableStateOf(AppearanceMode.SYSTEM)
         private set
 
+    internal fun persistedMode(ctx: Context): AppearanceMode =
+        AppearanceMode.fromStorage(prefs(ctx).getString(KEY, AppearanceMode.SYSTEM.storageValue))
+
     fun load(ctx: Context) {
-        mode = AppearanceMode.fromStorage(prefs(ctx).getString(KEY, AppearanceMode.SYSTEM.storageValue))
+        mode = persistedMode(ctx)
     }
 
     fun set(ctx: Context, value: AppearanceMode) {
         mode = value
         prefs(ctx).edit().putString(KEY, value.storageValue).apply()
+        // Widgets have no periodic update interval. Recompose them now so the selected finish lands
+        // immediately instead of waiting for the next sensor snapshot.
+        WidgetSnapshotStore.requestRefresh(ctx)
     }
 }
+
+/** System follows the device and therefore does not falsely double-select one explicit preview. */
+internal fun isAppearancePreviewSelected(selection: AppearanceMode, preview: AppearanceMode): Boolean =
+    selection != AppearanceMode.SYSTEM && selection == preview
+
+/** A preview must render the candidate finish, never the currently-active app finish. */
+internal fun themeSwatchAccent(tokens: PaletteTokens): Color = tokens.accent

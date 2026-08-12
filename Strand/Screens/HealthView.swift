@@ -141,8 +141,7 @@ private struct SyncStatusSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Sync", overline: "Strap history",
-                          trailing: live.connected ? (live.bonded ? String(localized: "Connected") : String(localized: "Pairing…")) : String(localized: "Offline"),
-                          onDark: showDayCycleBackground)
+                          trailing: live.connected ? (live.bonded ? String(localized: "Connected") : String(localized: "Pairing…")) : String(localized: "Offline"))
 
             NoopCard(tint: StrandPalette.chargeColor) {
                 VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
@@ -217,7 +216,7 @@ private struct HeartRateSection: View {
     @EnvironmentObject var profile: ProfileStore
     @EnvironmentObject var model: AppModel
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
-    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = true
+    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
 
     /// Rolling buffer of recently-streamed live HR (newest last), so the hero graph builds a real
     /// continuous time-series instead of collapsing to a 2-point flat line when the strap streams HR
@@ -302,8 +301,7 @@ private struct HeartRateSection: View {
 
         return VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Heart Rate", overline: "Live",
-                          trailing: hrIsDerived ? String(localized: "from R-R") : nil,
-                          onDark: showDayCycleBackground && skyBehindCards)
+                          trailing: hrIsDerived ? String(localized: "from R-R") : nil)
 
             // The live HR hero is a flat WHOOP card tinted rose — heart-rate's metric accent.
             // No scenic starfield / bloom: fill contrast carries the edge (Apple-flat).
@@ -815,7 +813,7 @@ private struct FitnessAgeSection: View {
                         Text("Fitness Age").strandOverline()
                         Text(ageDeltaLine(years: years, younger: younger))
                             .font(StrandFont.subhead)
-                            .foregroundStyle(younger ? StrandPalette.statusPositive : StrandPalette.statusWarning)
+                            .foregroundStyle(younger ? StrandPalette.statusPositiveText : StrandPalette.statusWarningText)
                     }
                     Spacer(minLength: 0)
                     if let vo2 = visibleVO2max {
@@ -1177,18 +1175,18 @@ private struct VitalitySection: View {
                                 color: StrandPalette.textPrimary)
                     Text(bodyAgeDeltaLine(yrs: yrs, younger: younger))
                         .font(StrandFont.footnote)
-                        .foregroundStyle(younger ? StrandPalette.statusPositive : StrandPalette.statusWarning)
+                        .foregroundStyle(younger ? StrandPalette.statusPositiveText : StrandPalette.statusWarningText)
                 }
             }
             if (best?.lnHazard ?? 0) < 0 || (worst?.lnHazard ?? 0) > 0 {
                 Divider().overlay(StrandPalette.hairline)
                 if let best, best.lnHazard < 0 {
                     Text("Helping most: \(best.label)")
-                        .font(StrandFont.footnote).foregroundStyle(StrandPalette.statusPositive)
+                        .font(StrandFont.footnote).foregroundStyle(StrandPalette.statusPositiveText)
                 }
                 if let worst, worst.lnHazard > 0 {
                     Text("Holding you back: \(worst.label)")
-                        .font(StrandFont.footnote).foregroundStyle(StrandPalette.statusWarning)
+                        .font(StrandFont.footnote).foregroundStyle(StrandPalette.statusWarningText)
                 }
             }
             Text("Experimental lifestyle estimate · not biological, medical, or WHOOP Age.")

@@ -742,7 +742,7 @@ private fun CoachPrimaryButton(label: String, enabled: Boolean, onClick: () -> U
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, style = NoopType.headline, color = Palette.surfaceBase)
+        Text(label, style = NoopType.headline, color = Palette.accentInk)
     }
 }
 
@@ -767,12 +767,16 @@ private fun SendButton(enabled: Boolean, sending: Boolean, onClick: () -> Unit) 
         contentAlignment = Alignment.Center,
     ) {
         if (sending) {
-            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Palette.accent)
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+                color = if (enabled) Palette.accentInk else Palette.textTertiary,
+            )
         } else {
             Icon(
                 Icons.AutoMirrored.Filled.Send,
                 contentDescription = null,
-                tint = if (enabled) Palette.surfaceBase else Palette.textTertiary,
+                tint = if (enabled) Palette.accentInk else Palette.textTertiary,
                 modifier = Modifier.size(20.dp),
             )
         }

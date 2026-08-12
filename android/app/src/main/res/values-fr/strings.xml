@@ -97,7 +97,7 @@
     <string name="l10n_automations_screen_hydration_reminders_a4e4defb">Rappels d\'hydratation</string>
     <string name="l10n_automations_screen_hydration_reminders_end_1b524ef4">Fin des rappels d\'hydratation</string>
     <string name="l10n_automations_screen_hydration_reminders_start_6640d85d">Début des rappels d\'hydratation</string>
-    <string name="l10n_automations_screen_illness_early_warning_453ab477">Alerte précoce de maladie</string>
+    <string name="l10n_automations_screen_illness_early_warning_453ab477">Variation de plusieurs signaux</string>
     <string name="l10n_automations_screen_inactivity_reminder_ca49b1ba">Rappel d\'inactivité</string>
     <string name="l10n_automations_screen_min_b6c935d4">min</string>
     <string name="l10n_automations_screen_nap_detection_ca2dedf5">Détection des naps</string>
@@ -119,7 +119,7 @@
     <string name="l10n_automations_screen_to_4374aaee">à</string>
     <string name="l10n_automations_screen_uses_a_local_android_reminder_it_31de6a42">Utilise un rappel Android local. La livraison est assurée au mieux et peut être retardée par le mode Doze ou les restrictions de batterie.</string>
     <string name="l10n_automations_screen_value_suffix_26985180">%1$s %2$s</string>
-    <string name="l10n_automations_screen_watch_for_early_illness_signs_4c22e127">Surveiller les signes précoces de maladie</string>
+    <string name="l10n_automations_screen_watch_for_early_illness_signs_4c22e127">Surveiller les écarts par rapport à la référence</string>
     <string name="l10n_automations_screen_when_i_double_tap_a1f1e04d">Quand je double-tape</string>
     <string name="l10n_automations_screen_whoop_haptics_are_unavailable_until_the_6b2fe1c5">Le retour haptique WHOOP n\'est disponible que lorsque le bracelet dispose d\'une connexion chiffrée active. Le rappel du téléphone reste indépendant.</string>
     <string name="l10n_automations_screen_whoop_is_ready_a_buzz_still_d887f71f">WHOOP est prêt. Une vibration nécessite toujours un flux en direct récent au moment du rappel.</string>
@@ -1844,4 +1844,14 @@
     <string name="noop_legal_notices">Avis</string>
     <string name="noop_legal_attribution">Attribution</string>
     <string name="noop_legal_document_error">Impossible d’ouvrir ce document inclus. Réinstallez cette version et réessayez.</string>
+    <string name="appearance_system">Système</string>
+    <string name="appearance_light">Clair</string>
+    <string name="appearance_dark">Sombre</string>
+    <string name="appearance_black">Noir</string>
+    <string name="appearance_detail_system">Suit l’apparence de l’appareil</string>
+    <string name="appearance_detail_light">Perle douce avec commandes noires</string>
+    <string name="appearance_detail_dark">Graphite profond avec commandes claires</string>
+    <string name="appearance_detail_black">Noir OLED absolu avec commandes claires</string>
+    <string name="appearance_settings_blurb">Choisissez la finition de l’app. Système suit votre appareil ; Sombre utilise un graphite profond ; Noir utilise un fond OLED totalement noir.</string>
+    <string name="appearance_onboarding_subtitle">NOOP suit le système par défaut. Choisissez Clair, Sombre ou Noir absolu ici, puis modifiez ce choix à tout moment dans Réglages → Apparence.</string>
 </resources>

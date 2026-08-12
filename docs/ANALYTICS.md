@@ -103,7 +103,7 @@ It then flags anomalies against simple, explainable thresholds using `DailyMetri
 | Skin temp ↑ | `skinTempDevC` | recent mean deviation **≥ +0.6 °C** |
 | Respiration ↑ | `respRateBpm` | recent mean ≥ baseline mean **+ 1.5 bpm** |
 
-A banner appears only when **two or more** anomalies fire together — the classic early-illness signature is *RHR up + HRV down + skin-temp up*. Requires `behavior.illnessWatch` on and at least 14 days of history. On-device only; the message is a plain-English summary like *"Your body looks strained — resting HR +6 bpm, HRV −22%. Consider taking it easy."*
+A banner appears only when **two or more** anomalies fire together, such as *RHR up + HRV down + skin-temp up*. Requires `behavior.illnessWatch` on and at least 14 days of history. It is an on-device wellness pattern—not a diagnosis or an illness detector—and uses uncertainty-aware wording such as *"Several signals shifted together … Many things can cause this pattern; review how you feel."*
 
 ---
 

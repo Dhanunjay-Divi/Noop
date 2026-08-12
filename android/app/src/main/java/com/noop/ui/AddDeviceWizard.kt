@@ -911,7 +911,7 @@ private fun PrepStep(type: DeviceType, onScan: () -> Unit) {
                 .background(Palette.accent)
                 .semantics { contentDescription = uiString(R.string.l10n_add_device_wizard_scan_for_type_title_be2c98fb, type.title) },
         ) {
-            Text(uiString(R.string.l10n_add_device_wizard_scan_28cba55d), style = NoopType.headline, color = Palette.goldDeepText)
+            Text(uiString(R.string.l10n_add_device_wizard_scan_28cba55d), style = NoopType.headline, color = Palette.accentInk)
         }
     }
 }
@@ -1178,7 +1178,7 @@ private fun OuraGateStep(
             Text(
                 uiString(R.string.l10n_add_device_wizard_continue_2e026239),
                 style = NoopType.headline,
-                color = if (consent) Palette.goldDeepText else Palette.textTertiary,
+                color = if (consent) Palette.accentInk else Palette.textTertiary,
             )
         }
         // Secondary: keep the Oura app (non-destructive file import) - always one tap away.
@@ -1244,7 +1244,7 @@ private fun OuraAdvancedKeyStep(
             Text(
                 uiString(R.string.l10n_add_device_wizard_scan_for_your_ring_e92b3a3b),
                 style = NoopType.headline,
-                color = if (parsed != null) Palette.goldDeepText else Palette.textTertiary,
+                color = if (parsed != null) Palette.accentInk else Palette.textTertiary,
             )
         }
     }
@@ -1287,7 +1287,7 @@ private fun OuraPrepStep(advanced: Boolean, onScan: () -> Unit) {
                 .background(Palette.accent)
                 .semantics { contentDescription = uiString(R.string.l10n_add_device_wizard_scan_for_your_ring_e92b3a3b) },
         ) {
-            Text(uiString(R.string.l10n_add_device_wizard_scan_for_your_ring_e92b3a3b), style = NoopType.headline, color = Palette.goldDeepText)
+            Text(uiString(R.string.l10n_add_device_wizard_scan_for_your_ring_e92b3a3b), style = NoopType.headline, color = Palette.accentInk)
         }
     }
 }
@@ -1409,7 +1409,7 @@ private fun OuraConfirmStep(
                     .background(Palette.accent)
                     .semantics { contentDescription = uiString(R.string.l10n_add_device_wizard_connect_to_this_ring_02b9442b) },
             ) {
-                Text(uiString(R.string.l10n_add_device_wizard_connect_to_this_ring_02b9442b), style = NoopType.headline, color = Palette.goldDeepText)
+                Text(uiString(R.string.l10n_add_device_wizard_connect_to_this_ring_02b9442b), style = NoopType.headline, color = Palette.accentInk)
             }
             Text(
                 uiString(R.string.l10n_add_device_wizard_both_noop_and_the_oura_app_4f219db3),
@@ -1492,7 +1492,7 @@ private fun OuraFailedStep(reason: String?, onTryAgain: () -> Unit, onUseFileImp
                     .clip(RoundedCornerShape(12.dp))
                     .background(Palette.accent),
             ) {
-                Text(uiString(R.string.l10n_add_device_wizard_try_again_042c862e), style = NoopType.headline, color = Palette.goldDeepText)
+                Text(uiString(R.string.l10n_add_device_wizard_try_again_042c862e), style = NoopType.headline, color = Palette.accentInk)
             }
             TextButton(
                 onClick = onUseFileImport,
@@ -1700,7 +1700,7 @@ private fun ConfirmStep(
             Text(
                 uiString(R.string.l10n_add_device_wizard_add_61cc55aa),
                 style = NoopType.headline,
-                color = if (name.trim().isNotEmpty()) Palette.goldDeepText else Palette.textTertiary,
+                color = if (name.trim().isNotEmpty()) Palette.accentInk else Palette.textTertiary,
             )
         }
     }

@@ -234,7 +234,7 @@
     <string name="l10n_automations_screen_from_3f66052a">自</string>
     <string name="l10n_automations_screen_haptic_coaching_e2fab286">震动指导</string>
     <string name="l10n_automations_screen_hr_zone_coaching_9306e6e1">心率区间震动指导</string>
-    <string name="l10n_automations_screen_illness_early_warning_453ab477">疾病预警</string>
+    <string name="l10n_automations_screen_illness_early_warning_453ab477">多项信号变化</string>
     <string name="l10n_automations_screen_inactivity_reminder_ca49b1ba">久坐提醒</string>
     <string name="l10n_automations_screen_nap_detection_ca2dedf5">小睡侦测</string>
     <string name="l10n_automations_screen_no_naps_to_review_detected_naps_2e82e9fc">暂无待回顾的小睡记录。手环同步历史数据后，这里将显示系统侦测到的小睡。</string>
@@ -249,7 +249,7 @@
     <string name="l10n_automations_screen_sitting_for_e464c472">已连续静坐</string>
     <string name="l10n_automations_screen_test_action_266df314">测试动作</string>
     <string name="l10n_automations_screen_value_suffix_26985180">%1$s %2$s</string>
-    <string name="l10n_automations_screen_watch_for_early_illness_signs_4c22e127">留意早期患病迹象</string>
+    <string name="l10n_automations_screen_watch_for_early_illness_signs_4c22e127">关注基线变化</string>
     <string name="l10n_automations_screen_when_i_double_tap_a1f1e04d">当我双击手环时</string>
     <string name="l10n_backup_sync_screen_backup_folder_2a33df93">备份文件夹</string>
     <string name="l10n_backup_sync_screen_backup_sync_81758ffa">备份与同步</string>
@@ -1817,4 +1817,14 @@
     <string name="noop_legal_notices">声明</string>
     <string name="noop_legal_attribution">来源说明</string>
     <string name="noop_legal_document_error">无法打开此内置文档。请重新安装当前版本后再试。</string>
+    <string name="appearance_system">跟随系统</string>
+    <string name="appearance_light">浅色</string>
+    <string name="appearance_dark">深色</string>
+    <string name="appearance_black">纯黑</string>
+    <string name="appearance_detail_system">跟随设备外观</string>
+    <string name="appearance_detail_light">柔和珍珠底配黑色控件</string>
+    <string name="appearance_detail_dark">立体石墨底配浅色控件</string>
+    <string name="appearance_detail_black">OLED 纯黑底配浅色控件</string>
+    <string name="appearance_settings_blurb">选择应用外观。跟随系统会采用设备设置；深色使用立体石墨色；纯黑使用真正的 OLED 黑色背景。</string>
+    <string name="appearance_onboarding_subtitle">NOOP 默认跟随系统。你可以在此选择浅色、深色或纯黑，并随时在“设置 → 外观”中更改。</string>
 </resources>

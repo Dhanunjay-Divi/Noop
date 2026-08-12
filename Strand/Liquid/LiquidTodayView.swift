@@ -144,7 +144,7 @@ struct LiquidTodayView: View {
     private var cardOpacity: Double { max(0, min(1, Double(cardOpacityPercent) / 100)) }
     /// "Background behind cards" (default ON): extend the obsidian field behind the WHOLE scroll so the
     /// Card-transparency slider reveals it under every card. The persisted key remains cross-platform.
-    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = true
+    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
     /// Dimensional scene backdrop. Default ON. When off, Today drops to the plain canvas.
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
     // MARK: - Day navigation (ported from classic Today: swipe + calendar, day-keyed reads)
@@ -467,18 +467,40 @@ struct LiquidTodayView: View {
                 LiquidWordmark(compact: true)
                 Spacer(minLength: 8)
                 HStack(spacing: 8) {
-                    // Profile pic (the one set in Settings) → opens Settings, matching the classic Today.
+                    // A real profile photo can carry identity beside the wordmark. With no photo, use a
+                    // quiet person glyph instead of repeating the NOOP logo twice in the same masthead.
                     Button { showSettings = true } label: {
-                        ProfileAvatarView(imageData: profile.avatarImageData, size: 34)
-                            .frame(width: 34, height: 34)
+                        if profile.hasAvatar {
+                            ProfileAvatarView(imageData: profile.avatarImageData, size: 34)
+                                .frame(width: 34, height: 34)
+                        } else {
+                            Image(systemName: "person.crop.circle")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(StrandPalette.textPrimary)
+                                .frame(width: 34, height: 34)
+                                .background(Circle().fill(StrandPalette.surfaceRaised.opacity(0.82)))
+                                .overlay(Circle().strokeBorder(StrandPalette.hairlineStrong.opacity(0.72), lineWidth: 1))
+                                .shadow(color: .black.opacity(0.14), radius: 8, y: 4)
+                        }
                     }
                     .buttonStyle(LiquidPressStyle())
                     .accessibilityLabel("Profile and settings")
                     LiquidAddButton()
                     LiquidBatteryButton()
-                    // #today-layout: opens the Arrange sheet (drag rows to reorder the Today sections).
-                    Button { showArrangeSheet = true } label: {
-                        Image(systemName: "arrow.up.arrow.down")
+                    // Keep page customisation in one conventional overflow instead of giving three
+                    // editing actions equal visual weight beside live health controls.
+                    Menu {
+                        Button { showArrangeSheet = true } label: {
+                            Label("Arrange sections", systemImage: "arrow.up.arrow.down")
+                        }
+                        Button { showCustomise = true } label: {
+                            Label("Dashboard cards", systemImage: "rectangle.grid.1x2")
+                        }
+                        Button { showKeyMetricsEditor = true } label: {
+                            Label("Key metrics", systemImage: "slider.horizontal.3")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
                             .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(StrandPalette.textPrimary)
                             .frame(width: 34, height: 34)
@@ -487,7 +509,7 @@ struct LiquidTodayView: View {
                             .shadow(color: .black.opacity(0.14), radius: 8, y: 4)
                     }
                     .buttonStyle(LiquidPressStyle())
-                    .accessibilityLabel("Arrange Today sections")
+                    .accessibilityLabel("Customize Today")
                 }
             }
 
@@ -2848,9 +2870,9 @@ private struct LiquidBatteryButton: View {
         case .charge(let pct, _):
             return "\(Int(pct.rounded()))%"
         case .pending(let charging):
-            return charging ? "CHG" : "—%"
+            return charging ? "CHG" : "SYNC"
         case .offline:
-            return "—%"
+            return "OFF"
         }
     }
 

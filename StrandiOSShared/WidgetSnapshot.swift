@@ -139,6 +139,21 @@ public struct WidgetSnapshot: Codable, Equatable {
     }()
 }
 
+/// Appearance hand-off for the widget extension, which runs in a separate process and therefore
+/// cannot see the app's ordinary `@AppStorage`. Keep the raw value string-based so this shared file
+/// remains independent of StrandDesign in the app, widget, and unit-test targets.
+public enum WidgetAppearancePreference {
+    public static let storageKey = "theme.appearance"
+
+    public static func load() -> String {
+        UserDefaults(suiteName: WidgetSnapshot.suiteName)?.string(forKey: storageKey) ?? "system"
+    }
+
+    public static func save(_ rawValue: String) {
+        UserDefaults(suiteName: WidgetSnapshot.suiteName)?.set(rawValue, forKey: storageKey)
+    }
+}
+
 /// Stable app routes used by every widget's tap target. Keeping parsing beside the snapshot makes the
 /// extension and app agree on one URL contract while remaining independent of the app-only `NavRouter`.
 public enum NOOPWidgetDestination: String, CaseIterable {

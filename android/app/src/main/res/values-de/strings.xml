@@ -261,7 +261,7 @@
     <string name="l10n_automations_screen_hydration_reminders_a4e4defb">Trinkerinnerungen</string>
     <string name="l10n_automations_screen_hydration_reminders_end_1b524ef4">Endzeit der Trinkerinnerungen</string>
     <string name="l10n_automations_screen_hydration_reminders_start_6640d85d">Startzeit der Trinkerinnerungen</string>
-    <string name="l10n_automations_screen_illness_early_warning_453ab477">Krankheits-Frühwarnung</string>
+    <string name="l10n_automations_screen_illness_early_warning_453ab477">Multi-Signal-Veränderung</string>
     <string name="l10n_automations_screen_inactivity_reminder_ca49b1ba">Inaktivitätserinnerung</string>
     <string name="l10n_automations_screen_min_b6c935d4">Min.</string>
     <string name="l10n_automations_screen_nap_detection_ca2dedf5">Lückenerkennung</string>
@@ -283,7 +283,7 @@
     <string name="l10n_automations_screen_to_4374aaee">bis</string>
     <string name="l10n_automations_screen_uses_a_local_android_reminder_it_31de6a42">Verwendet eine lokale Android-Erinnerung. Die Zustellung erfolgt nach bestem Bemühen und kann sich durch den Doze-Modus oder Akkubeschränkungen verzögern.</string>
     <string name="l10n_automations_screen_value_suffix_26985180">%1$s %2$s</string>
-    <string name="l10n_automations_screen_watch_for_early_illness_signs_4c22e127">Auf frühe Krankheitszeichen achten</string>
+    <string name="l10n_automations_screen_watch_for_early_illness_signs_4c22e127">Auf Veränderungen zur Basislinie achten</string>
     <string name="l10n_automations_screen_when_i_double_tap_a1f1e04d">Wenn ich doppelt tippe</string>
     <string name="l10n_automations_screen_whoop_haptics_are_unavailable_until_the_6b2fe1c5">WHOOP-Haptik ist erst verfügbar, wenn das Band eine aktive verschlüsselte Verbindung hat. Die Erinnerung auf dem Smartphone funktioniert unabhängig davon.</string>
     <string name="l10n_automations_screen_whoop_is_ready_a_buzz_still_d887f71f">WHOOP ist bereit. Für die Vibration muss zum Erinnerungszeitpunkt weiterhin ein aktueller Live-Datenstrom vorliegen.</string>
@@ -1860,4 +1860,14 @@
     <string name="noop_legal_notices">Hinweise</string>
     <string name="noop_legal_attribution">Namensnennung</string>
     <string name="noop_legal_document_error">Dieses enthaltene Dokument konnte nicht geöffnet werden. Installiere diesen Build neu und versuche es erneut.</string>
+    <string name="appearance_system">System</string>
+    <string name="appearance_light">Hell</string>
+    <string name="appearance_dark">Dunkel</string>
+    <string name="appearance_black">Schwarz</string>
+    <string name="appearance_detail_system">Folgt dem Erscheinungsbild des Geräts</string>
+    <string name="appearance_detail_light">Sanftes Perlmutt mit schwarzen Bedienelementen</string>
+    <string name="appearance_detail_dark">Räumliches Graphit mit hellen Bedienelementen</string>
+    <string name="appearance_detail_black">Echtes OLED-Schwarz mit hellen Bedienelementen</string>
+    <string name="appearance_settings_blurb">Wähle das Erscheinungsbild der App. System folgt deinem Gerät, Dunkel verwendet räumliches Graphit und Schwarz eine echte OLED-Schwarzfläche.</string>
+    <string name="appearance_onboarding_subtitle">NOOP folgt standardmäßig deinem System. Wähle hier Hell, Dunkel oder echtes Schwarz und ändere es jederzeit unter Einstellungen → Erscheinungsbild.</string>
 </resources>

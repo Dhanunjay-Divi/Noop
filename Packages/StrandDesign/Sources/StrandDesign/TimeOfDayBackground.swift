@@ -120,7 +120,7 @@ private struct AtmosphereWash: View {
         }
     }
 
-    // Light-mode ceiling: knock atmosphere back further so it reads as warm paper, not colour.
+    // Light-mode ceiling: knock atmosphere back further so it reads as soft pearl, not colour.
     private func cap(_ dark: Double, _ light: Double) -> Double { isLight ? light : dark }
 
     // MARK: Dawn — cool indigo up top, faint warm peach lift low-centre, soft low sun disc.

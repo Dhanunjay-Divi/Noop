@@ -30,7 +30,7 @@ import WhoopStore
 struct StressView: View {
     @EnvironmentObject var repo: Repository
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
-    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = true
+    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
 
     /// The stored 0–3 stress series ("my-whoop"), oldest→newest. Empty → derive.
     @State private var storedSeries: [(day: String, value: Double)] = []
@@ -155,8 +155,7 @@ struct StressView: View {
             // 2. Today's numbers — uniform tiles in one grid.
             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
                 SectionHeader("Today", overline: "Markers",
-                              trailing: String(localized: "vs 30-day baseline"),
-                              onDark: showDayCycleBackground && skyBehindCards)
+                              trailing: String(localized: "vs 30-day baseline"))
                 tileGrid(model)
             }
             .staggeredAppear(index: 1)

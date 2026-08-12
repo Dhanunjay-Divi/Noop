@@ -117,7 +117,7 @@ object IllnessSignalEngine {
         if (context.alreadyUnwell) {
             val agreeing = score >= mildThreshold && signalCount >= 1
             val copy = if (agreeing)
-                "Rest up - you logged feeling unwell, and your numbers agree. $disclaimerTail"
+                "Rest up - you logged feeling unwell, and some of your signals also shifted. $disclaimerTail"
             else
                 "Rest up - you logged feeling unwell. Take it easy today. $disclaimerTail"
             return Result(score, Level.ALREADY_UNWELL, firedSignals, emptyList(), signalCount, copy)
@@ -142,21 +142,20 @@ object IllnessSignalEngine {
         if (suppressedBy.isNotEmpty()) {
             val dampened = score * confounderDampen
             val reason = joinReasons(suppressedBy)
-            val copy = "Some signals are up ($signalsPhrase), but you logged $reason - likely that, " +
-                "not illness. $disclaimerTail"
+            val copy = "Some signals shifted ($signalsPhrase). You also logged $reason, which can " +
+                "move the same signals. Review how you feel. $disclaimerTail"
             return Result(dampened, Level.SUPPRESSED, firedSignals, suppressedBy, signalCount, copy)
         }
 
         // No confounder. Mild stays in the detail view; a strong composite raises.
         if (score < raiseThreshold) {
-            val copy = "A few signals are mildly up ($signalsPhrase). Nothing alarming - worth a calmer " +
-                "day. $disclaimerTail"
+            val copy = "A few signals are mildly up ($signalsPhrase). The shift is small; keep monitoring " +
+                "how you feel. $disclaimerTail"
             return Result(score, Level.MILD, firedSignals, emptyList(), signalCount, copy)
         }
 
-        val ruledOut = "no alcohol or travel logged"
-        val copy = "Heads-up - your body looks strained. $signalsPhrase. With $ruledOut, consider " +
-            "taking it easy. $disclaimerTail"
+        val copy = "Several signals shifted together ($signalsPhrase). Many things can cause this " +
+            "pattern; consider a gentler day and review how you feel. $disclaimerTail"
         return Result(score, Level.RAISED, firedSignals, emptyList(), signalCount, copy)
     }
 

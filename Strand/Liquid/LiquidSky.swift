@@ -156,7 +156,7 @@ struct LiquidSky: View {
 struct LiquidScaffoldSky: View {
     var height: CGFloat = 240
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
-    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = true
+    @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
 
     @ViewBuilder
     var body: some View {
@@ -194,16 +194,11 @@ struct LiquidSkyStatic: View {
     /// See `LiquidSky.settleStrength` — 1 = default seamless fade; <1 holds the atmosphere for the
     /// full-height "sky behind cards" backdrop.
     var settleStrength: Double = 1
-    @Environment(\.colorScheme) private var scheme
-
     var body: some View {
         let h = hour ?? liveHour()
-        let dark = scheme == .dark
-        let settle = Color(.sRGB,
-                           red: dark ? 18.0 / 255.0 : 242.0 / 255.0,
-                           green: dark ? 21.0 / 255.0 : 242.0 / 255.0,
-                           blue: dark ? 24.0 / 255.0 : 247.0 / 255.0,
-                           opacity: 1)
+        // Resolve through the shared surface token so Graphite, OLED Black, and Pearl each dissolve
+        // into their real canvas instead of a stale hard-coded two-theme approximation.
+        let settle = StrandPalette.surfaceBase
         Canvas { ctx, size in
             let S = liquidSkyAt(h)
             let w = size.width, hh = size.height

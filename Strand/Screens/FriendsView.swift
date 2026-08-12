@@ -52,7 +52,7 @@ struct FriendsView: View {
                 if !service.statusMessage.isEmpty {
                     Text(service.statusMessage)
                         .font(StrandFont.caption)
-                        .foregroundStyle(StrandPalette.onDarkSecondary)
+                        .foregroundStyle(StrandPalette.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
@@ -289,7 +289,7 @@ struct FriendsView: View {
 
     private var requestsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeader("Requests", trailing: "\(service.requests.count)", onDark: true)
+            SectionHeader("Requests", trailing: "\(service.requests.count)")
             ForEach(service.requests) { request in
                 StrandCard(padding: 16) {
                     HStack(spacing: 13) {
@@ -310,6 +310,8 @@ struct FriendsView: View {
                             .buttonStyle(.plain)
                             .font(StrandFont.caption)
                             .foregroundStyle(StrandPalette.textSecondary)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
 
                             Button {
                                 Task { await service.decide(request, accept: true, repo: model.repo) }
@@ -319,6 +321,8 @@ struct FriendsView: View {
                                     .foregroundStyle(StrandPalette.accentInk)
                                     .frame(width: 34, height: 34)
                                     .background(StrandPalette.accent, in: Circle())
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Circle())
                             }
                             .buttonStyle(LiquidPressStyle())
                             .accessibilityLabel("Accept \(request.displayName)")
@@ -331,7 +335,7 @@ struct FriendsView: View {
 
     private var friendsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionHeader("Today", trailing: friendsTrailing, onDark: true)
+            SectionHeader("Today", trailing: friendsTrailing)
             if service.friends.isEmpty {
                 StrandCard(padding: 22) {
                     VStack(alignment: .leading, spacing: 10) {
@@ -459,8 +463,24 @@ struct FriendsView: View {
         )
         if day == today { return "Shared today" }
         if day == yesterday { return "Shared yesterday" }
-        return "Last shared \(day)"
+        guard let date = Self.storageDayFormatter.date(from: day) else {
+            return String(localized: "Last shared")
+        }
+        let currentYear = Calendar.current.component(.year, from: Date())
+        let sharedYear = Calendar.current.component(.year, from: date)
+        let readable = sharedYear == currentYear
+            ? date.formatted(.dateTime.month(.abbreviated).day())
+            : date.formatted(.dateTime.month(.abbreviated).day().year())
+        return "Last shared \(readable)"
     }
+
+    private static let storageDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 
     private static func dayString(_ date: Date) -> String {
         let c = Calendar.current.dateComponents([.year, .month, .day], from: date)

@@ -29,6 +29,7 @@ public struct FrostedCardSurface: View {
     public var cornerRadius: CGFloat
     public var washStrength: Double
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.noopAppearanceMode) private var appearanceMode
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var accessibilityContrast
     // "Card transparency" setting (reactive): fades the whole glass surface toward the background. 100 =
@@ -49,6 +50,7 @@ public struct FrostedCardSurface: View {
         // a partially transparent card because the final modifier faded it again.
         let effectiveOpacity = reduceTransparency ? 1.0 : op
         let increasedContrast = accessibilityContrast == .increased
+        let oledBlack = appearanceMode == .black
         let baseFill = reduceTransparency
             ? AnyShapeStyle(StrandPalette.surfaceRaised)
             : AnyShapeStyle(.ultraThinMaterial)
@@ -59,7 +61,7 @@ public struct FrostedCardSurface: View {
                 // health data readable. Reduced Transparency gets an opaque surface.
                 shape.fill(
                     StrandPalette.surfaceRaised.opacity(
-                        reduceTransparency ? 1 : (scheme == .dark ? 0.76 : 0.76)
+                        reduceTransparency ? 1 : (scheme == .dark ? (oledBlack ? 0.84 : 0.70) : 0.58)
                     )
                 )
             )
@@ -69,11 +71,11 @@ public struct FrostedCardSurface: View {
                         colors: [
                             Color.white.opacity(
                                 scheme == .dark
-                                    ? (increasedContrast ? 0.10 : 0.065)
-                                    : (increasedContrast ? 0.42 : 0.24)
+                                    ? (increasedContrast ? 0.10 : (oledBlack ? 0.050 : 0.065))
+                                    : (increasedContrast ? 0.32 : 0.14)
                             ),
                             .clear,
-                            Color.black.opacity(scheme == .dark ? 0.22 : 0.035)
+                            Color.black.opacity(scheme == .dark ? (oledBlack ? 0.28 : 0.20) : 0.025)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -99,8 +101,8 @@ public struct FrostedCardSurface: View {
                         colors: [
                             Color.white.opacity(
                                 scheme == .dark
-                                    ? (increasedContrast ? 0.34 : 0.20)
-                                    : (increasedContrast ? 0.82 : 0.68)
+                                    ? (increasedContrast ? 0.34 : (oledBlack ? 0.16 : 0.20))
+                                    : (increasedContrast ? 0.74 : 0.54)
                             ),
                             StrandPalette.bevelSide.opacity(increasedContrast ? 0.78 : 0.52),
                             StrandPalette.bevelBottom.opacity(scheme == .dark ? 0.88 : 0.28)
@@ -117,7 +119,7 @@ public struct FrostedCardSurface: View {
                     .strokeBorder(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(scheme == .dark ? 0.055 : 0.24),
+                                Color.white.opacity(scheme == .dark ? (oledBlack ? 0.040 : 0.055) : 0.15),
                                 .clear,
                                 Color.black.opacity(scheme == .dark ? 0.24 : 0.035),
                             ],
@@ -128,9 +130,9 @@ public struct FrostedCardSurface: View {
                     )
             )
             .shadow(
-                color: Color.black.opacity(scheme == .light ? 0.08 : 0.30),
-                radius: scheme == .light ? 12 : 20,
-                x: 0, y: scheme == .light ? 4 : 9
+                color: Color.black.opacity(scheme == .light ? 0.065 : (oledBlack ? 0.20 : 0.26)),
+                radius: scheme == .light ? 14 : (oledBlack ? 14 : 18),
+                x: 0, y: scheme == .light ? 5 : (oledBlack ? 6 : 8)
             )
             // "Card transparency": fade the whole glass surface. The card's content sits above this
             // background, so it stays fully readable regardless.

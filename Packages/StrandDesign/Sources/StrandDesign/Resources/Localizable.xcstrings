@@ -1,6 +1,84 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Black": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Schwarz" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Black" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Negro" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Noir" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Nero" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Preto" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Чёрный" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "黑色" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "黑色" } }
+      }
+    },
+    "Follows device": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Wie auf dem Gerät" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Follows device" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Sigue al dispositivo" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Suit l’appareil" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Segue il dispositivo" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Segue o dispositivo" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Как на устройстве" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "跟随设备" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "跟隨裝置" } }
+      }
+    },
+    "Graphite": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Graphit" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Graphite" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Grafito" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Graphite" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Grafite" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Grafite" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Графит" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "石墨" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "石墨" } }
+      }
+    },
+    "Selected": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Ausgewählt" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Selected" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Seleccionado" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Sélectionné" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Selezionato" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Selecionado" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Выбрано" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "已选择" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "已選取" } }
+      }
+    },
+    "Soft pearl": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Sanftes Perlmutt" } },
+        "en": { "stringUnit": { "state": "translated", "value": "Soft pearl" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Perla suave" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Perle douce" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Perla tenue" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Pérola suave" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Мягкий жемчуг" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "柔和珍珠" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "柔和珍珠" } }
+      }
+    },
+    "True black": {
+      "localizations": {
+        "de": { "stringUnit": { "state": "translated", "value": "Echtes Schwarz" } },
+        "en": { "stringUnit": { "state": "translated", "value": "True black" } },
+        "es": { "stringUnit": { "state": "translated", "value": "Negro puro" } },
+        "fr": { "stringUnit": { "state": "translated", "value": "Noir absolu" } },
+        "it": { "stringUnit": { "state": "translated", "value": "Nero assoluto" } },
+        "pt-PT": { "stringUnit": { "state": "translated", "value": "Preto absoluto" } },
+        "ru": { "stringUnit": { "state": "translated", "value": "Абсолютный чёрный" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "纯黑" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "純黑" } }
+      }
+    },
     "%lld days ago": {
       "localizations": {
         "de": {
