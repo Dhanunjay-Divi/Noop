@@ -765,6 +765,16 @@ public final class BLEManager: NSObject, ObservableObject {
     /// callback (the settle resolved); if it fires instead, the state never settled — the wedged-grant
     /// shape (#429) — and the #295 re-grant banner is shown after all.
     private var unauthorizedSettleWork: DispatchWorkItem?
+    /// Connection-health notification state. A first `.poweredOff` callback is silent: CoreBluetooth
+    /// reports launch state before pairing context may be restored. Only a real powered-on -> powered-off
+    /// episode can raise the optional local alert, and the outage latch makes repeated callbacks one-shot.
+    private var radioWasPoweredOnSinceRecovery = false
+    private var bluetoothOutageActive = false
+    /// The immediate notification crosses Notification Center await points. Keep both the task and a
+    /// monotonic episode token so radio recovery, explicit disconnect/removal, or a newer outage can make
+    /// every older continuation prove itself obsolete before (and after) it asks the daemon to deliver.
+    private var bluetoothAvailabilityAlertTask: Task<Void, Never>?
+    private var bluetoothAvailabilityEpisode: UInt64 = 0
     private var cmdCharacteristic: CBCharacteristic?
     /// #613: true when a command would ACTUALLY reach the strap right now — the same condition `send()`
     /// requires (connected peripheral + a discovered command characteristic). The alarm-arm log and the
@@ -1246,6 +1256,7 @@ public final class BLEManager: NSObject, ObservableObject {
 
     public func disconnect() {
         intentionalDisconnect = true
+        stopBluetoothAvailabilityMonitoring()
         cancelScanFallback()
         // A user-initiated teardown is a clean slate: clear any #80 marginal-radio fallback so the next
         // (manual) reconnect attempts the full R10/R11 stream again rather than inheriting old suspicion.
@@ -1272,18 +1283,18 @@ public final class BLEManager: NSObject, ObservableObject {
     /// can't show its blue pairing LEDs). Stop auto-reconnect, drop the live link, and clear the targeting +
     /// restoration references that point at this strap so NOOP lets go for good — until the user deliberately
     /// reconnects (which clears `intentionalDisconnect` again via connect()).
-    public func forgetDevice(_ peripheralId: String?) {
-        let target = peripheralId.flatMap { UUID(uuidString: $0) }
-        let isCurrent = target == nil || peripheral?.identifier == target
+    public func forgetActiveWhoop() {
         intentionalDisconnect = true            // defuses the disconnect→3s-reconnect loop's guard
+        stopBluetoothAvailabilityMonitoring()
         cancelScanFallback()
         readoptingTo = nil                       // abandon any in-flight #52 pin handoff
-        // Clear the targeted-connect pin + the iOS state-restoration peripheral if they point at this strap,
-        // so connect()/restoration can't re-target it.
-        if target == nil || preferredPeripheralUUID == target { setPreferredPeripheral(nil) }
-        if target == nil || restoredPeripheral?.identifier == target { restoredPeripheral = nil }
+        // This API is deliberately identity-free: its only caller has already proved that the registry row
+        // is the ACTIVE WHOOP. A nil/malformed identifier on any secondary/non-WHOOP row can therefore
+        // never be confused with "release whatever WHOOP is live" again.
+        setPreferredPeripheral(nil)
+        restoredPeripheral = nil
         // Drop the live BLE link so the strap is free to enter pairing mode.
-        if isCurrent, let p = peripheral {
+        if let p = peripheral {
             central?.cancelPeripheralConnection(p)
             peripheral = nil
             resetCharacteristics()
@@ -1300,11 +1311,47 @@ public final class BLEManager: NSObject, ObservableObject {
         bondLoopPausedAt = nil
         pendingConnectModel = nil
         central?.stopScan()
-        if isCurrent {
-            UserDefaults.standard.removeObject(forKey: Self.bluetoothIntentKey)
-            UserDefaults.standard.set(true, forKey: Self.bluetoothReleasedKey)
-        }
+        UserDefaults.standard.removeObject(forKey: Self.bluetoothIntentKey)
+        UserDefaults.standard.set(true, forKey: Self.bluetoothReleasedKey)
         log("Device removed — released the strap: stopped auto-reconnect, dropped the link, cleared targeting. Put it in pairing mode (blue LEDs) to re-pair if you want it back. (#78)")
+    }
+
+    /// Invalidate any in-flight immediate alert and clear a delivered/pending copy. Incrementing before
+    /// cancellation is intentional: cancellation of a UserNotifications await is cooperative, while the
+    /// generation check is authoritative even if the daemon call itself does not cancel promptly.
+    private func invalidateBluetoothAvailabilityAlert() {
+        bluetoothAvailabilityEpisode &+= 1
+        bluetoothAvailabilityAlertTask?.cancel()
+        bluetoothAvailabilityAlertTask = nil
+        BluetoothAvailabilityNotifications.clear()
+    }
+
+    /// Explicit Disconnect/Remove means NOOP no longer expects to monitor this WHOOP. Persist that intent,
+    /// invalidate the active outage episode, and remove any banner in one ownership-local operation.
+    private func stopBluetoothAvailabilityMonitoring() {
+        bluetoothAvailabilityEpisode &+= 1
+        bluetoothAvailabilityAlertTask?.cancel()
+        bluetoothAvailabilityAlertTask = nil
+        BluetoothAvailabilityNotifications.setMonitoringExpected(false)
+    }
+
+    /// Final gate re-evaluated on every side of Notification Center's await points. It intentionally uses
+    /// the durable monitoring expectation as well as the live radio episode, so opt-out/removal while a
+    /// request is in flight cannot leave a stale notification behind.
+    private func bluetoothAvailabilityEpisodeIsCurrent(_ episode: UInt64) -> Bool {
+        let hasRelevantWearable = BluetoothAvailabilityNotifications.hasRelevantWearable(
+            pairedEvidence: state.bonded || lastBondedPeripheralUUID != nil,
+            explicitExpectation: BluetoothAvailabilityNotifications.monitoringExpected
+        )
+        return BluetoothAvailabilityNotifications.isEnabled
+            && !radioWasPoweredOnSinceRecovery
+            && BluetoothAvailabilityNotifications.isCurrentOutageEpisode(
+                expectedEpisode: episode,
+                currentEpisode: bluetoothAvailabilityEpisode,
+                outageActive: bluetoothOutageActive,
+                radioIsPoweredOff: central?.state == .poweredOff,
+                hasRelevantWearable: hasRelevantWearable
+            )
     }
 
     /// Switch which strap we'll connect to next: drop the current strap and clear the **sticky** bond
@@ -1447,6 +1494,7 @@ public final class BLEManager: NSObject, ObservableObject {
     /// the ordinary pre-bond `didConnect` publish (where `encryptedBond` is still false).
     private func noteGenuineBond(of p: CBPeripheral) {
         lastBondedPeripheralUUID = p.identifier
+        BluetoothAvailabilityNotifications.setMonitoringExpected(true)
         pinnedBondRefusals = 0
         if readoptingTo == p.identifier {
             readoptingTo = nil
@@ -3787,6 +3835,38 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
                 state.lastSyncError = "Bluetooth is off. Turn it on to connect to your strap."
                 log("Bluetooth is off — cannot scan or connect")
                 radioStateErrorShown = true
+                let startsNewOutage = radioWasPoweredOnSinceRecovery
+                if startsNewOutage {
+                    bluetoothAvailabilityEpisode &+= 1
+                    bluetoothAvailabilityAlertTask?.cancel()
+                    bluetoothAvailabilityAlertTask = nil
+                }
+                let hasRelevantWearable = BluetoothAvailabilityNotifications.hasRelevantWearable(
+                    pairedEvidence: state.bonded || lastBondedPeripheralUUID != nil,
+                    explicitExpectation: BluetoothAvailabilityNotifications.monitoringExpected
+                )
+                let shouldNotify = BluetoothAvailabilityNotifications.shouldPost(
+                    enabled: BluetoothAvailabilityNotifications.isEnabled,
+                    radioWasPoweredOn: radioWasPoweredOnSinceRecovery,
+                    hasPairedDevice: hasRelevantWearable,
+                    outageAlreadyHandled: bluetoothOutageActive
+                )
+                // Latch independently of authorization/settings. Enabling the preference while the radio
+                // is already off must not manufacture a new outage notification.
+                bluetoothOutageActive = radioWasPoweredOnSinceRecovery || bluetoothOutageActive
+                radioWasPoweredOnSinceRecovery = false
+                if shouldNotify {
+                    let episode = bluetoothAvailabilityEpisode
+                    bluetoothAvailabilityAlertTask = Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        await BluetoothAvailabilityNotifications.postIfAuthorized { [weak self] in
+                            self?.bluetoothAvailabilityEpisodeIsCurrent(episode) == true
+                        }
+                        if self.bluetoothAvailabilityEpisode == episode {
+                            self.bluetoothAvailabilityAlertTask = nil
+                        }
+                    }
+                }
             case .unsupported:
                 state.lastSyncError = "This device can't use Bluetooth Low Energy."
                 log("Bluetooth LE unsupported on this device")
@@ -3802,6 +3882,10 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
             state.lastSyncError = nil
             radioStateErrorShown = false
         }
+        // Re-arm the next genuine outage and remove any stale banner as soon as Bluetooth recovers.
+        radioWasPoweredOnSinceRecovery = true
+        bluetoothOutageActive = false
+        invalidateBluetoothAvailabilityAlert()
         // Bootstrap the async store once on first poweredOn (idempotent if already set).
         Task { @MainActor in await bootstrapStore() }
         if let p = restoredPeripheral {
@@ -4812,6 +4896,7 @@ extension BLEManager: @preconcurrency CBPeripheralDelegate {
             // otherwise the UI sits on "Connecting…" forever even though data is flowing (issue #8).
             if selectedModel.deviceFamily == .whoop5, !state.bonded {
                 state.bonded = true
+                BluetoothAvailabilityNotifications.setMonitoringExpected(true)
                 log("WHOOP 5/MG: live HR streaming — marking the link established (experimental).")
             }
         case BLEManager.batteryChar:

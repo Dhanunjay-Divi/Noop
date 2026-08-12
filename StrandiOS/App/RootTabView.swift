@@ -372,6 +372,8 @@ struct RootTabView: View {
             case .today:
                 tabPaths[IPhonePrimaryTab.today.rawValue] = NavigationPath()
                 selectedTab = IPhonePrimaryTab.today.rawValue
+            case .devices:
+                routeToMore(.devices)
             }
         }
     }
@@ -539,6 +541,7 @@ struct RootTabView: View {
                     // Automations screen instead. Its absence from the iPhone More list is correct.
                     MoreRow("Alarms", "alarm.fill", .alarms)
                     MoreRow("Automations", "wand.and.stars", .automations)
+                    MoreRow("Widgets", "rectangle.3.group.fill", .widgets)
                     // The Test Centre (the diagnostics + bug-report hub) gets a first-class home here, not
                     // just buried in Settings, so the feedback loop is one tap from the More tab.
                     MoreRow("Test Centre", "stethoscope", .testCentre)
@@ -667,7 +670,7 @@ private enum MoreDestination: Hashable {
     case insightsHub, intelligence, coach, insights, explore, compare
     case devices, live, workouts, health, labBook, stress, breathe, intervals, rhythm
     case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport
-    case alarms, automations, testCentre, siriShortcuts, settings
+    case alarms, automations, widgets, testCentre, siriShortcuts, settings
 
     @MainActor @ViewBuilder var destination: some View {
         switch self {
@@ -694,6 +697,7 @@ private enum MoreDestination: Hashable {
         case .shortcutsExport: ShortcutExportSettingsView()
         case .alarms:          SmartAlarmView()
         case .automations:     AutomationsView()
+        case .widgets:         WidgetSettingsView()
         case .testCentre:      TestCentreView()
         case .siriShortcuts:   SiriShortcutsSettingsView()
         case .settings:        SettingsView()
@@ -712,6 +716,7 @@ private enum MoreDestination: Hashable {
         case "explore": return .explore
         case "compare": return .compare
         case "settings": return .settings
+        case "widgets": return .widgets
         default: return nil
         }
     }

@@ -88,6 +88,35 @@ internal object AutoWorkoutAutomationPolicy {
     }
 }
 
+/**
+ * A completed background offload can contain old or borderline HR-only candidates. Keep those available
+ * on Today, but interrupt only for a recent, longer candidate backed by motion/activity evidence.
+ * HR-only candidates never create a lock-screen claim. Byte-parity twin of Swift policy.
+ */
+internal object AutoWorkoutBackgroundPolicy {
+    const val maximumCandidateAgeSeconds = 2 * 60 * 60L
+    const val futureToleranceSeconds = 5 * 60L
+    const val minimumCorroboratedMinutes = 15
+
+    fun shouldProcess(
+        candidate: AutoWorkoutDetector.DetectedWorkout,
+        nowSec: Long,
+    ): Boolean {
+        if (candidate.startSec <= 0L || candidate.endSec <= candidate.startSec ||
+            candidate.endSec > nowSec + futureToleranceSeconds ||
+            nowSec - candidate.endSec > maximumCandidateAgeSeconds ||
+            candidate.avgBpm !in 30..220 || candidate.peakBpm !in candidate.avgBpm..250
+        ) return false
+
+        // Keep HR-only candidates available for quiet in-app review, but never let stress, illness,
+        // optical noise, or an old backfill generate a lock-screen workout claim. A broad type hint is
+        // not independent evidence: still ticks plus a smooth HR trace can produce a confident label.
+        // Require the detector's separately confirmed motion stream.
+        return candidate.durationMin >= minimumCorroboratedMinutes &&
+            candidate.evidenceProvenance == AutoWorkoutDetector.EvidenceProvenance.HEART_RATE_AND_MOTION
+    }
+}
+
 internal fun buildDetectedAutoWorkoutRow(
     computedDeviceId: String,
     candidate: AutoWorkoutDetector.DetectedWorkout,

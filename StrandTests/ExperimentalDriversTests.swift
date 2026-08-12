@@ -160,4 +160,39 @@ final class ExperimentalDriversTests: XCTestCase {
         XCTAssertFalse(strapLogLines.contains(where: { $0.hasPrefix("HR-strap:") }),
                        "No StandardHRSource should be started for a HealthKit pseudo-device")
     }
+
+    /// Device removal must be classified while the full registry row is still available. In particular,
+    /// nil/malformed peripheral ids are common for Apple Watch, imports, and legacy rows; they must never
+    /// collapse into BLEManager's former "release whichever WHOOP is live" wildcard.
+    @MainActor
+    func testRemovalRoutingIsSourceAndActiveStateAware() {
+        let inactiveLegacyWhoop = PairedDevice(
+            id: "my-whoop", brand: "WHOOP", model: "WHOOP", peripheralId: nil,
+            sourceKind: .liveBLE, capabilities: [.hr], status: .paired, addedAt: 0, lastSeenAt: 0)
+        let activeWhoop = PairedDevice(
+            id: "whoop-active", brand: "WHOOP", model: "WHOOP 5.0", peripheralId: nil,
+            sourceKind: .liveBLE, capabilities: [.hr], status: .active, addedAt: 0, lastSeenAt: 0)
+        let inactiveWatch = PairedDevice(
+            id: "apple-health", brand: "Apple", model: "Apple Watch", peripheralId: nil,
+            sourceKind: .liveAppleWatch, capabilities: [.hr], status: .paired, addedAt: 0, lastSeenAt: 0)
+        let activeWatch = PairedDevice(
+            id: "apple-health", brand: "Apple", model: "Apple Watch", peripheralId: nil,
+            sourceKind: .liveAppleWatch, capabilities: [.hr], status: .active, addedAt: 0, lastSeenAt: 0)
+        let activeGenericWithMalformedID = PairedDevice(
+            id: "polar", brand: "Polar", model: "H10", peripheralId: "not-a-corebluetooth-uuid",
+            sourceKind: .liveBLE, capabilities: [.hr], status: .active, addedAt: 0, lastSeenAt: 0)
+        let inactiveGeneric = PairedDevice(
+            id: "garmin", brand: "Garmin", model: "HRM", peripheralId: nil,
+            sourceKind: .liveBLE, capabilities: [.hr], status: .paired, addedAt: 0, lastSeenAt: 0)
+
+        XCTAssertEqual(SourceCoordinator.removalAction(for: inactiveLegacyWhoop), .archiveOnly)
+        XCTAssertEqual(SourceCoordinator.removalAction(for: inactiveWatch), .archiveOnly)
+        XCTAssertEqual(SourceCoordinator.removalAction(for: activeWatch), .archiveOnly)
+        XCTAssertEqual(SourceCoordinator.removalAction(for: inactiveGeneric), .archiveOnly)
+        XCTAssertEqual(SourceCoordinator.removalAction(for: activeWhoop), .releaseActiveWhoop)
+        XCTAssertEqual(
+            SourceCoordinator.removalAction(for: activeGenericWithMalformedID),
+            .stopActiveNonWhoop
+        )
+    }
 }

@@ -6,6 +6,7 @@ import UserNotifications
 enum NoopNotificationRoute: String, Equatable, Sendable {
     case today
     case sleep
+    case devices
 }
 
 /// Durable hand-off between `UNUserNotificationCenterDelegate` and the SwiftUI app shells.
@@ -209,12 +210,20 @@ enum DailyReviewNotifications {
     /// chosen to hide notification previews; individual notification content has no such property.
     static func registerPrivacyCategory(on center: UNUserNotificationCenter) {
         Task { @MainActor in
-            let existing = await center.notificationCategories()
-            let category = privacyCategory()
-            var merged = existing.filter { $0.identifier != privacyCategoryID }
-            merged.insert(category)
-            center.setNotificationCategories(merged)
+            await ensurePrivacyCategory(on: center)
         }
+    }
+
+    /// Awaitable variant for an immediate notification. Repeating reminders can register in parallel
+    /// because their first fire is in the future; an immediate connection-health alert must install the
+    /// category before it is added or hidden-preview behavior depends on whether another feature happened
+    /// to register the shared category earlier in this process.
+    static func ensurePrivacyCategory(on center: UNUserNotificationCenter) async {
+        let existing = await center.notificationCategories()
+        let category = privacyCategory()
+        var merged = existing.filter { $0.identifier != privacyCategoryID }
+        merged.insert(category)
+        center.setNotificationCategories(merged)
     }
 
     static func privacyCategory() -> UNNotificationCategory {
@@ -225,6 +234,153 @@ enum DailyReviewNotifications {
             hiddenPreviewsBodyPlaceholder: String(localized: "Private NOOP check-in"),
             options: []
         )
+    }
+}
+
+/// A quiet, authorization-respecting alert for a real Bluetooth outage that pauses an already-paired
+/// wearable. The CoreBluetooth owner supplies the runtime episode gates; this helper owns preference,
+/// privacy-safe copy, delivery, and stale-notification cleanup.
+///
+/// Important consent boundary: this feature defaults on because it is operational rather than a wellness
+/// prompt, but it NEVER requests notification access. Without authorization the post is simply skipped.
+@MainActor
+enum BluetoothAvailabilityNotifications {
+    static let enabledKey = "connectionHealth.bluetoothOffAlert"
+    static let monitoringExpectedKey = "connectionHealth.monitoringExpected"
+    static let requestID = "bluetooth-powered-off"
+
+    /// Default ON without writing a migration value: an explicit false remains false across upgrades.
+    static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true
+    }
+
+    static func setEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: enabledKey)
+        if !enabled { clear() }
+    }
+
+    /// Tri-state on purpose. nil is an upgraded install that has not expressed monitoring intent in this
+    /// build yet, so BLEManager may conservatively use live pairing evidence. Explicit false (Disconnect /
+    /// Remove device) overrides a stale CoreBluetooth identifier; true survives a normal app relaunch.
+    static var monitoringExpected: Bool? {
+        UserDefaults.standard.object(forKey: monitoringExpectedKey) as? Bool
+    }
+
+    static func setMonitoringExpected(_ expected: Bool, pairedEvidence: Bool = false) {
+        // A secondary-device removal must not silence alerts for the still-active wearable. False is
+        // authoritative only when there is no live/persisted pairing evidence left; true always records
+        // a genuine bond or verified data stream.
+        let resolved = expected || pairedEvidence
+        UserDefaults.standard.set(resolved, forKey: monitoringExpectedKey)
+        if !resolved { clear() }
+    }
+
+    static func hasRelevantWearable(pairedEvidence: Bool, explicitExpectation: Bool?) -> Bool {
+        explicitExpectation ?? pairedEvidence
+    }
+
+    /// Pure policy seam used by BLEManager and tests. All four facts are required: explicit preference,
+    /// a powered-on observation (avoids launch-state false alarms), paired relevance, and episode de-dup.
+    static func shouldPost(
+        enabled: Bool,
+        radioWasPoweredOn: Bool,
+        hasPairedDevice: Bool,
+        outageAlreadyHandled: Bool
+    ) -> Bool {
+        enabled && radioWasPoweredOn && hasPairedDevice && !outageAlreadyHandled
+    }
+
+    /// Generation-aware counterpart used around asynchronous delivery. A matching token alone is not
+    /// enough: recovery clears the outage, a later CoreBluetooth state can cease to be powered-off, and
+    /// device removal can make the episode irrelevant before Notification Center answers.
+    static func isCurrentOutageEpisode(
+        expectedEpisode: UInt64,
+        currentEpisode: UInt64,
+        outageActive: Bool,
+        radioIsPoweredOff: Bool,
+        hasRelevantWearable: Bool
+    ) -> Bool {
+        expectedEpisode == currentEpisode
+            && outageActive
+            && radioIsPoweredOff
+            && hasRelevantWearable
+    }
+
+    static func postIfAuthorized(
+        stillRelevant: @escaping @MainActor () -> Bool = { true }
+    ) async {
+        guard deliveryStillAllowed(stillRelevant: stillRelevant) else { return }
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard canPost(using: settings.authorizationStatus),
+              deliveryStillAllowed(stillRelevant: stillRelevant) else { return }
+
+        // This alert is immediate, so defensively install the privacy category before adding it. Recheck
+        // after the await: Bluetooth may have recovered, the monitored device may have been removed, or
+        // the user may have opted out while Notification Center was answering.
+        await DailyReviewNotifications.ensurePrivacyCategory(on: center)
+        guard deliveryStillAllowed(stillRelevant: stillRelevant) else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "Bluetooth is off")
+        content.body = String(localized: "Wearable sync is paused. Turn Bluetooth on and NOOP will reconnect automatically.")
+        content.sound = .default
+        content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+        content.threadIdentifier = "noop.connection-health"
+        content.userInfo = [NotificationRouteBridge.userInfoKey: NoopNotificationRoute.devices.rawValue]
+
+        do {
+            try await center.add(
+                UNNotificationRequest(identifier: requestID, content: content, trigger: nil)
+            )
+            // `add` itself is an await point. If recovery/opt-out raced the daemon request, remove the
+            // just-added notification now instead of leaving a stale "Bluetooth is off" banner behind.
+            if !deliveryStillAllowed(stillRelevant: stillRelevant) { clear() }
+        } catch {
+            // A future radio episode may try again. Delivery failure never interrupts reconnect. A
+            // cancellation can still race a daemon-side add, so cleanup remains the safe final action.
+            if !deliveryStillAllowed(stillRelevant: stillRelevant) { clear() }
+        }
+    }
+
+    /// Pure seam for the pre/post-await gates. Keeping task cancellation separate from preference and
+    /// episode state lets tests pin all three ways an in-flight immediate alert becomes obsolete.
+    static func shouldContinueDelivery(
+        enabled: Bool,
+        episodeStillActive: Bool,
+        taskCancelled: Bool
+    ) -> Bool {
+        enabled && episodeStillActive && !taskCancelled
+    }
+
+    private static func deliveryStillAllowed(
+        stillRelevant: @MainActor () -> Bool
+    ) -> Bool {
+        shouldContinueDelivery(
+            enabled: isEnabled,
+            episodeStillActive: stillRelevant(),
+            taskCancelled: Task.isCancelled
+        )
+    }
+
+    /// Remove both not-yet-presented and already-presented copies on recovery or explicit opt-out.
+    static func clear() {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [requestID])
+        center.removeDeliveredNotifications(withIdentifiers: [requestID])
+    }
+
+    static func canPost(using status: UNAuthorizationStatus) -> Bool {
+        switch status {
+        case .authorized, .provisional:
+            return true
+#if os(iOS)
+        case .ephemeral:
+            return true
+#endif
+        default:
+            return false
+        }
     }
 }
 

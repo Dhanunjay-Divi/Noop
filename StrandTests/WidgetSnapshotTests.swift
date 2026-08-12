@@ -5,6 +5,37 @@ final class WidgetSnapshotTests: XCTestCase {
         XCTAssertEqual(WidgetAppearancePreference.storageKey, "theme.appearance")
     }
 
+    func testWidgetSupportingMetricDefaultsAreUsefulAndUnique() {
+        XCTAssertEqual(WidgetMetricPreference.defaultSelection,
+                       [.heartRate, .sleepDuration, .deviceBattery])
+        XCTAssertEqual(Set(WidgetMetricPreference.defaultSelection.map(\.rawValue)).count,
+                       WidgetMetricPreference.slotCount)
+    }
+
+    func testWidgetSupportingMetricsRepairDuplicatesAndUnknownValues() {
+        let repaired = WidgetMetricPreference.normalized([
+            WidgetMetric.hrv.rawValue,
+            WidgetMetric.hrv.rawValue,
+            "retiredMetric",
+            WidgetMetric.restingHeartRate.rawValue
+        ])
+        XCTAssertEqual(repaired, [.hrv, .restingHeartRate, .heartRate])
+        XCTAssertEqual(repaired.count, WidgetMetricPreference.slotCount)
+    }
+
+    func testWidgetSupportingMetricPreferenceRoundTrips() {
+        let suite = "WidgetSnapshotTests.metrics.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let selection: [WidgetMetric] = [.hrv, .restingHeartRate, .sleepDuration]
+        WidgetMetricPreference.save(selection, defaults: defaults)
+
+        XCTAssertEqual(WidgetMetricPreference.load(defaults: defaults), selection)
+        XCTAssertEqual(defaults.stringArray(forKey: WidgetMetricPreference.storageKey),
+                       selection.map(\.rawValue))
+    }
+
     func testProvisionedAltStoreGroupWins() {
         let configured = "group.com.noopapp.noop.staging"
         XCTAssertEqual(WidgetSnapshot.resolveSuiteName(infoDictionary: [

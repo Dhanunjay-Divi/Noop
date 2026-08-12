@@ -3,6 +3,8 @@ package com.noop.ui
 import com.noop.analytics.AutoWorkoutDetector
 import com.noop.analytics.CoarseWorkoutClass
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AutoWorkoutSuggestionPolicyTest {
@@ -42,6 +44,79 @@ class AutoWorkoutSuggestionPolicyTest {
         )
         assertEquals(false, AutoWorkoutAutomationPolicy.shouldAutoSave(short))
         assertEquals(false, AutoWorkoutAutomationPolicy.shouldAutoSave(longButUncalibrated))
+    }
+
+    @Test
+    fun backgroundProcessing_rejectsOldAndHeartRateOnlyCandidates() {
+        val now = 1_700_010_000L
+        val borderline = AutoWorkoutDetector.DetectedWorkout(
+            now - 25 * 60, now - 10 * 60, 102, 112, 15,
+        )
+        assertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(borderline, now))
+
+        val strongHeartRateOnly = AutoWorkoutDetector.DetectedWorkout(
+            now - 35 * 60, now - 10 * 60, 125, 150, 25,
+        )
+        assertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(strongHeartRateOnly, now))
+
+        val mislabeledStillWindow = AutoWorkoutDetector.DetectedWorkout(
+            startSec = now - 35 * 60,
+            endSec = now - 10 * 60,
+            avgBpm = 125,
+            peakBpm = 150,
+            durationMin = 25,
+            suggestedClass = CoarseWorkoutClass.CYCLE,
+            suggestionConfidence = 0.9,
+            evidenceProvenance = AutoWorkoutDetector.EvidenceProvenance.HEART_RATE_ONLY,
+        )
+        assertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(mislabeledStillWindow, now))
+
+        val stale = AutoWorkoutDetector.DetectedWorkout(
+            startSec = now - 4 * 3_600,
+            endSec = now - 3 * 3_600,
+            avgBpm = 145,
+            peakBpm = 175,
+            durationMin = 60,
+            evidenceProvenance = AutoWorkoutDetector.EvidenceProvenance.HEART_RATE_AND_MOTION,
+        )
+        assertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(stale, now))
+    }
+
+    @Test
+    fun motionCorroboration_allowsARecentFifteenMinuteCandidate() {
+        val now = 1_700_010_000L
+        val corroborated = AutoWorkoutDetector.DetectedWorkout(
+            startSec = now - 25 * 60,
+            endSec = now - 10 * 60,
+            avgBpm = 100,
+            peakBpm = 115,
+            durationMin = 15,
+            evidenceProvenance = AutoWorkoutDetector.EvidenceProvenance.HEART_RATE_AND_MOTION,
+        )
+        assertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(corroborated, now))
+    }
+
+    @Test
+    fun backgroundProcessing_honorsRecencyAndDurationBoundaries() {
+        val now = 1_700_010_000L
+        fun candidate(endOffset: Long, duration: Int): AutoWorkoutDetector.DetectedWorkout {
+            val end = now + endOffset
+            return AutoWorkoutDetector.DetectedWorkout(
+                startSec = end - duration * 60,
+                endSec = end,
+                avgBpm = 110,
+                peakBpm = 135,
+                durationMin = duration,
+                evidenceProvenance = AutoWorkoutDetector.EvidenceProvenance.HEART_RATE_AND_MOTION,
+            )
+        }
+
+        assertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(-600, 14), now))
+        assertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(-600, 15), now))
+        assertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(-7_200, 15), now))
+        assertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(-7_201, 15), now))
+        assertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(300, 15), now))
+        assertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(301, 15), now))
     }
 
     @Test

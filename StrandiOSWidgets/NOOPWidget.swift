@@ -6,16 +6,26 @@ import StrandDesign
 struct NOOPEntry: TimelineEntry {
     let date: Date
     let snapshot: WidgetSnapshot
+    let supportingMetrics: [WidgetMetric]
+
+    init(date: Date, snapshot: WidgetSnapshot,
+         supportingMetrics: [WidgetMetric] = WidgetMetricPreference.defaultSelection) {
+        self.date = date
+        self.snapshot = snapshot
+        self.supportingMetrics = WidgetMetricPreference.normalized(supportingMetrics.map(\.rawValue))
+    }
 }
 
 struct NOOPProvider: TimelineProvider {
     func placeholder(in context: Context) -> NOOPEntry {
-        NOOPEntry(date: Date(), snapshot: .placeholder)
+        NOOPEntry(date: Date(), snapshot: .placeholder,
+                  supportingMetrics: WidgetMetricPreference.defaultSelection)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (NOOPEntry) -> Void) {
         let fallback: WidgetSnapshot = context.isPreview ? .placeholder : .unavailable
-        completion(NOOPEntry(date: Date(), snapshot: WidgetSnapshot.load() ?? fallback))
+        completion(NOOPEntry(date: Date(), snapshot: WidgetSnapshot.load() ?? fallback,
+                             supportingMetrics: WidgetMetricPreference.load()))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<NOOPEntry>) -> Void) {
@@ -24,7 +34,18 @@ struct NOOPProvider: TimelineProvider {
         // changes, while high-frequency HR publishes are throttled before they reach the extension.
         let next = Calendar.current.date(byAdding: .minute, value: 15, to: Date())
             ?? Date().addingTimeInterval(900)
-        completion(Timeline(entries: [NOOPEntry(date: Date(), snapshot: snapshot)], policy: .after(next)))
+        let now = Date()
+        let metrics = WidgetMetricPreference.load()
+        var entries = [NOOPEntry(date: now, snapshot: snapshot, supportingMetrics: metrics)]
+        // Even if WidgetKit defers the requested 15-minute reload, publish an explicit expiry entry so
+        // a cached `connected=true` bit stops saying Live once the snapshot leaves the current bucket.
+        let liveExpiry = snapshot.updated.addingTimeInterval(20 * 60 + 1)
+        if snapshot.connected == true, liveExpiry > now {
+            entries.append(NOOPEntry(date: liveExpiry, snapshot: snapshot,
+                                     supportingMetrics: metrics))
+        }
+        completion(Timeline(entries: entries,
+                            policy: .after(next)))
     }
 }
 
@@ -65,17 +86,18 @@ struct NOOPDailyWidgetView: View {
 
     private var dailyInlineText: String {
         guard snapshot.hasDailySignal else { return String(localized: "NOOP · Open for your Daily Signal") }
-        return "C \(value(snapshot.recovery)) · E \(value(snapshot.effort)) · R \(value(snapshot.rest))"
+        return "R \(value(snapshot.recovery)) · E \(value(snapshot.effort)) · S \(value(snapshot.rest))"
     }
 
     private var small: some View {
         VStack(alignment: .leading, spacing: 8) {
-            WidgetHeader(title: "Daily Signal", symbol: "waveform.path.ecg", snapshot: snapshot)
+            WidgetHeader(title: "Daily Signal", symbol: "waveform.path.ecg",
+                         snapshot: snapshot, now: entry.date)
             Spacer(minLength: 0)
             HStack(spacing: 6) {
-                WidgetScoreRing(label: "Charge", value: snapshot.recovery, tint: chargeTint, diameter: 40)
-                WidgetScoreRing(label: "Effort", value: snapshot.effort, tint: effortTint, diameter: 40)
-                WidgetScoreRing(label: "Rest", value: snapshot.rest, tint: restTint, diameter: 40)
+                WidgetScoreRing(label: "Recovery", value: snapshot.recovery, tint: chargeTint, diameter: 38)
+                WidgetScoreRing(label: "Effort", value: snapshot.effort, tint: effortTint, diameter: 38)
+                WidgetScoreRing(label: "Sleep", value: snapshot.rest, tint: restTint, diameter: 38)
             }
             .frame(maxWidth: .infinity)
             Spacer(minLength: 0)
@@ -86,21 +108,19 @@ struct NOOPDailyWidgetView: View {
 
     private var medium: some View {
         VStack(alignment: .leading, spacing: 9) {
-            WidgetHeader(title: "Daily Signal", symbol: "waveform.path.ecg", snapshot: snapshot)
+            WidgetHeader(title: "Daily Signal", symbol: "waveform.path.ecg",
+                         snapshot: snapshot, now: entry.date)
             HStack(spacing: 10) {
                 HStack(spacing: 8) {
-                    WidgetScoreRing(label: "Charge", value: snapshot.recovery, tint: chargeTint, diameter: 50)
+                    WidgetScoreRing(label: "Recovery", value: snapshot.recovery, tint: chargeTint, diameter: 50)
                     WidgetScoreRing(label: "Effort", value: snapshot.effort, tint: effortTint, diameter: 50)
-                    WidgetScoreRing(label: "Rest", value: snapshot.rest, tint: restTint, diameter: 50)
+                    WidgetScoreRing(label: "Sleep", value: snapshot.rest, tint: restTint, diameter: 50)
                 }
                 Divider().overlay(StrandPalette.hairline)
                 VStack(alignment: .leading, spacing: 7) {
-                    WidgetMetricLine(symbol: "heart.fill", label: "Heart rate",
-                                     value: unitValue(snapshot.bpm, "bpm"), tint: StrandPalette.statusCritical)
-                    WidgetMetricLine(symbol: "bed.double.fill", label: "Sleep",
-                                     value: sleepDuration(snapshot.sleepMinutes), tint: StrandPalette.restColor)
-                    WidgetMetricLine(symbol: batterySymbol(snapshot.batteryPct), label: "Device",
-                                     value: percent(snapshot.batteryPct), tint: StrandPalette.chargeColor)
+                    ForEach(entry.supportingMetrics, id: \.rawValue) { metric in
+                        SupportingMetricLine(metric: metric, snapshot: snapshot)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -116,26 +136,25 @@ struct NOOPDailyWidgetView: View {
 
     private var large: some View {
         VStack(alignment: .leading, spacing: 12) {
-            WidgetHeader(title: "Daily Signal", symbol: "waveform.path.ecg", snapshot: snapshot)
+            WidgetHeader(title: "Daily Signal", symbol: "waveform.path.ecg",
+                         snapshot: snapshot, now: entry.date)
 
             HStack(spacing: 16) {
-                WidgetScoreRing(label: "Charge", value: snapshot.recovery, tint: chargeTint, diameter: 72)
+                WidgetScoreRing(label: "Recovery", value: snapshot.recovery, tint: chargeTint, diameter: 72)
                 WidgetScoreRing(label: "Effort", value: snapshot.effort, tint: effortTint, diameter: 72)
-                WidgetScoreRing(label: "Rest", value: snapshot.rest, tint: restTint, diameter: 72)
+                WidgetScoreRing(label: "Sleep", value: snapshot.rest, tint: restTint, diameter: 72)
             }
             .frame(maxWidth: .infinity)
 
             DailyGuidance(snapshot: snapshot)
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                WidgetMetricCard(symbol: "waveform.path.ecg", label: "HRV",
-                                 value: unitValue(snapshot.hrv, "ms"), tint: StrandPalette.chargeColor)
-                WidgetMetricCard(symbol: "heart.fill", label: "Resting HR",
-                                 value: unitValue(snapshot.restingHr, "bpm"), tint: StrandPalette.statusCritical)
-                WidgetMetricCard(symbol: "bed.double.fill", label: "Sleep duration",
-                                 value: sleepDuration(snapshot.sleepMinutes), tint: StrandPalette.restColor)
-                WidgetMetricCard(symbol: batterySymbol(snapshot.batteryPct), label: "Device battery",
-                                 value: percent(snapshot.batteryPct), tint: StrandPalette.chargeColor)
+                ForEach(entry.supportingMetrics, id: \.rawValue) { metric in
+                    SupportingMetricCard(metric: metric, snapshot: snapshot)
+                }
+                WidgetMetricCard(symbol: connectionSymbol(snapshot, at: entry.date), label: "Wearable",
+                                 value: connectionLabel(snapshot, at: entry.date),
+                                 tint: connectionColor(snapshot, at: entry.date))
             }
 
             HStack {
@@ -177,7 +196,8 @@ struct NOOPVitalsWidgetView: View {
 
     private var small: some View {
         VStack(alignment: .leading, spacing: 4) {
-            WidgetHeader(title: "Vitals", symbol: "heart.text.square.fill", snapshot: snapshot)
+            WidgetHeader(title: "Vitals", symbol: "heart.text.square.fill",
+                         snapshot: snapshot, now: entry.date)
             Spacer(minLength: 0)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(value(snapshot.bpm))
@@ -199,7 +219,8 @@ struct NOOPVitalsWidgetView: View {
 
     private var medium: some View {
         VStack(alignment: .leading, spacing: 9) {
-            WidgetHeader(title: "Vitals", symbol: "heart.text.square.fill", snapshot: snapshot)
+            WidgetHeader(title: "Vitals", symbol: "heart.text.square.fill",
+                         snapshot: snapshot, now: entry.date)
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -265,7 +286,7 @@ struct NOOPSleepWidgetView: View {
         case .accessoryCircular:
             WidgetScoreGauge(value: snapshot.rest, symbol: "moon.zzz.fill", tint: restTint)
         case .accessoryInline:
-            Text("Rest \(value(snapshot.rest)) · \(sleepDuration(snapshot.sleepMinutes))")
+            Text("Sleep \(value(snapshot.rest)) · \(sleepDuration(snapshot.sleepMinutes))")
         case .accessoryRectangular:
             accessoryRectangular
         case .systemMedium:
@@ -277,10 +298,11 @@ struct NOOPSleepWidgetView: View {
 
     private var small: some View {
         VStack(alignment: .leading, spacing: 4) {
-            WidgetHeader(title: "Sleep", symbol: "moon.zzz.fill", snapshot: snapshot)
+            WidgetHeader(title: "Sleep", symbol: "moon.zzz.fill",
+                         snapshot: snapshot, now: entry.date)
             Spacer(minLength: 0)
             HStack(spacing: 12) {
-                WidgetScoreRing(label: "Rest", value: snapshot.rest, tint: restTint, diameter: 60)
+                WidgetScoreRing(label: "Sleep", value: snapshot.rest, tint: restTint, diameter: 60)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(sleepDuration(snapshot.sleepMinutes))
                         .font(.system(size: 20, weight: .bold, design: .rounded))
@@ -298,9 +320,10 @@ struct NOOPSleepWidgetView: View {
 
     private var medium: some View {
         VStack(alignment: .leading, spacing: 6) {
-            WidgetHeader(title: "Sleep", symbol: "moon.zzz.fill", snapshot: snapshot)
+            WidgetHeader(title: "Sleep", symbol: "moon.zzz.fill",
+                         snapshot: snapshot, now: entry.date)
             HStack(spacing: 16) {
-                WidgetScoreRing(label: "Rest", value: snapshot.rest, tint: restTint, diameter: 68)
+                WidgetScoreRing(label: "Sleep", value: snapshot.rest, tint: restTint, diameter: 68)
                 VStack(alignment: .leading, spacing: 9) {
                     WidgetMetricLine(symbol: "clock.fill", label: "Duration",
                                      value: sleepDuration(snapshot.sleepMinutes), tint: StrandPalette.restColor)
@@ -321,7 +344,7 @@ struct NOOPSleepWidgetView: View {
         HStack(spacing: 10) {
             Image(systemName: "moon.zzz.fill")
             VStack(alignment: .leading, spacing: 1) {
-                Text("Rest \(value(snapshot.rest))").font(.headline)
+                Text("Sleep \(value(snapshot.rest))").font(.headline)
                 Text("Sleep \(sleepDuration(snapshot.sleepMinutes)) · HRV \(unitValue(snapshot.hrv, "ms"))")
                     .font(.caption2)
             }
@@ -336,6 +359,7 @@ private struct WidgetHeader: View {
     let title: LocalizedStringKey
     let symbol: String
     let snapshot: WidgetSnapshot
+    let now: Date
 
     var body: some View {
         HStack(spacing: 6) {
@@ -371,14 +395,14 @@ private struct WidgetHeader: View {
     }
 
     private var connectionText: LocalizedStringKey {
-        if isLive(snapshot, at: Date()) { return "Live" }
+        if isLive(snapshot, at: now) { return "Live" }
         if snapshot.bonded { return "Paired" }
         if snapshot.hasDailySignal || snapshot.hasVitals { return "Local data" }
         return "No device"
     }
 
     private var connectionTint: Color {
-        if isLive(snapshot, at: Date()) { return StrandPalette.statusPositive }
+        if isLive(snapshot, at: now) { return StrandPalette.statusPositive }
         if snapshot.bonded { return StrandPalette.statusWarning }
         return StrandPalette.textTertiary
     }
@@ -453,9 +477,9 @@ private struct DailyAccessoryRectangular: View {
                 Text(scoreDayShort(snapshot.scoreDay)).font(.caption2)
             }
             HStack(spacing: 10) {
-                accessoryScore("C", snapshot.recovery)
+                accessoryScore("R", snapshot.recovery)
                 accessoryScore("E", snapshot.effort)
-                accessoryScore("R", snapshot.rest)
+                accessoryScore("S", snapshot.rest)
             }
         }
         .widgetAccentable()
@@ -466,6 +490,32 @@ private struct DailyAccessoryRectangular: View {
             Text(label).font(.caption2)
             Text(value(score)).font(.headline)
         }
+    }
+}
+
+/// One user-selected supporting measurement. Keeping the mapping in the widget extension means the
+/// persisted preference is only a stable semantic identifier — never formatted text, units, or colour.
+private struct SupportingMetricLine: View {
+    let metric: WidgetMetric
+    let snapshot: WidgetSnapshot
+
+    var body: some View {
+        WidgetMetricLine(symbol: supportingMetricSymbol(metric, snapshot: snapshot),
+                         label: supportingMetricLabel(metric),
+                         value: supportingMetricValue(metric, snapshot: snapshot),
+                         tint: supportingMetricTint(metric))
+    }
+}
+
+private struct SupportingMetricCard: View {
+    let metric: WidgetMetric
+    let snapshot: WidgetSnapshot
+
+    var body: some View {
+        WidgetMetricCard(symbol: supportingMetricSymbol(metric, snapshot: snapshot),
+                         label: supportingMetricLabel(metric),
+                         value: supportingMetricValue(metric, snapshot: snapshot),
+                         tint: supportingMetricTint(metric))
     }
 }
 
@@ -491,6 +541,9 @@ private struct WidgetMetricLine: View {
                 .foregroundStyle(StrandPalette.textPrimary)
                 .lineLimit(1)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(label))
+        .accessibilityValue(Text(value == "–" ? String(localized: "Unavailable") : value))
     }
 }
 
@@ -697,7 +750,7 @@ struct NOOPWidget: Widget {
                 .widgetURL(NOOPWidgetDestination.today.url)
         }
         .configurationDisplayName("NOOP Daily Signal")
-        .description("Charge, Effort, Rest, sleep, heart signals, and device status in one honest glance.")
+        .description("Recovery, Effort, Sleep, and your three chosen supporting metrics in one honest glance.")
         .supportedFamilies([
             .systemSmall, .systemMedium, .systemLarge,
             .accessoryCircular, .accessoryInline, .accessoryRectangular
@@ -745,7 +798,7 @@ struct NOOPSleepWidget: Widget {
                 .widgetURL(NOOPWidgetDestination.sleep.url)
         }
         .configurationDisplayName("NOOP Sleep")
-        .description("Rest score, sleep duration, HRV, and resting heart rate from your latest sleep.")
+        .description("Sleep score, duration, HRV, and resting heart rate from your latest sleep.")
         .supportedFamilies([
             .systemSmall, .systemMedium,
             .accessoryCircular, .accessoryInline, .accessoryRectangular
@@ -771,6 +824,61 @@ private func sleepDuration(_ minutes: Int?) -> String {
     if hours == 0 { return "\(remainder)m" }
     if remainder == 0 { return "\(hours)h" }
     return "\(hours)h \(remainder)m"
+}
+
+private func supportingMetricLabel(_ metric: WidgetMetric) -> LocalizedStringKey {
+    switch metric {
+    case .heartRate: return "Heart rate"
+    case .hrv: return "HRV"
+    case .restingHeartRate: return "Resting HR"
+    case .sleepDuration: return "Sleep duration"
+    case .deviceBattery: return "Device battery"
+    }
+}
+
+private func supportingMetricSymbol(_ metric: WidgetMetric, snapshot: WidgetSnapshot) -> String {
+    switch metric {
+    case .heartRate, .restingHeartRate: return "heart.fill"
+    case .hrv: return "waveform.path.ecg"
+    case .sleepDuration: return "bed.double.fill"
+    case .deviceBattery: return batterySymbol(snapshot.batteryPct)
+    }
+}
+
+private func supportingMetricValue(_ metric: WidgetMetric, snapshot: WidgetSnapshot) -> String {
+    switch metric {
+    case .heartRate: return unitValue(snapshot.bpm, "bpm")
+    case .hrv: return unitValue(snapshot.hrv, "ms")
+    case .restingHeartRate: return unitValue(snapshot.restingHr, "bpm")
+    case .sleepDuration: return sleepDuration(snapshot.sleepMinutes)
+    case .deviceBattery: return percent(snapshot.batteryPct)
+    }
+}
+
+private func supportingMetricTint(_ metric: WidgetMetric) -> Color {
+    switch metric {
+    case .heartRate, .restingHeartRate: return StrandPalette.statusCritical
+    case .hrv, .deviceBattery: return StrandPalette.chargeColor
+    case .sleepDuration: return StrandPalette.restColor
+    }
+}
+
+private func connectionSymbol(_ snapshot: WidgetSnapshot, at now: Date) -> String {
+    if isLive(snapshot, at: now) { return "dot.radiowaves.left.and.right" }
+    if snapshot.bonded { return "link" }
+    return "link.slash"
+}
+
+private func connectionLabel(_ snapshot: WidgetSnapshot, at now: Date) -> String {
+    if isLive(snapshot, at: now) { return String(localized: "Connected") }
+    if snapshot.bonded { return String(localized: "Paired") }
+    return String(localized: "Not paired")
+}
+
+private func connectionColor(_ snapshot: WidgetSnapshot, at now: Date) -> Color {
+    if isLive(snapshot, at: now) { return StrandPalette.statusPositive }
+    if snapshot.bonded { return StrandPalette.statusWarning }
+    return StrandPalette.textTertiary
 }
 
 private func scoreTint(_ score: Int?, fallback: Color) -> Color {

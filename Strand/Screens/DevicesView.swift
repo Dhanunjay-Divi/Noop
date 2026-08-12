@@ -362,10 +362,10 @@ private struct DevicesContent: View {
     /// so the dialog's choices come from the still-paired devices.
     private func confirmRemove(_ device: PairedDevice) {
         let wasActive = device.status == .active
-        // #78: actually RELEASE the BLE link, not just archive the registry row — otherwise NOOP keeps
-        // re-grabbing the strap (reconnect timer + targeted-connect pin + iOS state restoration), holding
-        // it connected so it can never enter pairing mode to be re-paired.
-        model.ble.forgetDevice(device.peripheralId)
+        // #78: release only the LIVE owner represented by this exact row. AppModel still has the row's
+        // source/status context here, so a nil Apple Watch/import/inactive-WHOOP identifier can never be
+        // misread as "release whichever WHOOP happens to be connected."
+        model.prepareForDeviceRemoval(device)
         registry.archive(device.id)
         removeTarget = nil
         if wasActive {

@@ -397,6 +397,7 @@ struct RootView: View {
         switch route {
         case .sleep: selection = .sleep
         case .today: selection = .today
+        case .devices: selection = .devices
         }
     }
 

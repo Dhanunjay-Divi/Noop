@@ -44,7 +44,11 @@ struct AutomationsView: View {
     @AppStorage(HydrationReminders.activeEndMinutesKey) private var hydrationEndMinutes = 21 * 60
     @AppStorage(HydrationReminders.strapBuzzEnabledKey) private var hydrationStrapBuzzEnabled = false
     @State private var notificationPermissionDenied = false
+    @State private var notificationsAuthorized = false
     @State private var showNotificationPermissionAlert = false
+    /// Operational connection alert: default ON, but never requests notification authorization itself.
+    @AppStorage(BluetoothAvailabilityNotifications.enabledKey)
+    private var bluetoothAvailabilityAlerts = BluetoothAvailabilityNotifications.isEnabled
     /// Inactivity reminder (#419) — UI-local store, persisted in UserDefaults. The buzz itself fires
     /// from the BLE offload path (BLEManager.maybeBuzzInactivity → the shipped SedentaryDetector); this
     /// screen only edits the prefs the engine reads.
@@ -66,6 +70,7 @@ struct AutomationsView: View {
                        lazy: true) {
             dailyReviewCard
             hydrationReminderCard
+            connectionHealthCard
             #if os(iOS)
             wristAlertsCard
             #endif
@@ -92,6 +97,46 @@ struct AutomationsView: View {
         } message: {
             Text("Allow notifications in Settings to use optional review and water reminders. NOOP still works normally without them.")
         }
+    }
+
+    // MARK: - Connection health
+
+    private var connectionHealthCard: some View {
+        Section2(
+            icon: "antenna.radiowaves.left.and.right.slash",
+            title: String(localized: "Connection health"),
+            blurb: String(localized: "A single useful heads-up when Bluetooth is turned off and an already-paired wearable can no longer sync."),
+            active: bluetoothAvailabilityAlerts && notificationsAuthorized
+        ) {
+            VStack(spacing: 0) {
+                ToggleRow(
+                    label: String(localized: "Bluetooth-off alert"),
+                    help: String(localized: "On by default. It never asks for notification access, never alerts during first launch, and clears itself when Bluetooth returns."),
+                    isOn: bluetoothAvailabilityToggle
+                )
+                rowDivider
+                Text(notificationsAuthorized
+                     ? "One notification per outage, only after NOOP has seen Bluetooth working with a paired wearable. No repeated connection warnings."
+                     : "This alert uses notification access you already granted to NOOP. Enable a reminder below or allow notifications in Settings; this switch never prompts by itself.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(notificationsAuthorized
+                                     ? StrandPalette.textTertiary : StrandPalette.statusWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+            }
+        }
+    }
+
+    private var bluetoothAvailabilityToggle: Binding<Bool> {
+        Binding(
+            get: { bluetoothAvailabilityAlerts },
+            set: { enabled in
+                bluetoothAvailabilityAlerts = enabled
+                BluetoothAvailabilityNotifications.setEnabled(enabled)
+                refreshNotificationPermissionState()
+            }
+        )
     }
 
     // MARK: - Daily review reminders
@@ -176,6 +221,7 @@ struct AutomationsView: View {
                     case .scheduled:
                         dailyReviewEnabled = true
                         notificationPermissionDenied = false
+                        refreshNotificationPermissionState()
                     case .denied:
                         dailyReviewEnabled = false
                         notificationPermissionDenied = true
@@ -338,6 +384,7 @@ struct AutomationsView: View {
                     case .scheduled:
                         hydrationReminderEnabled = true
                         notificationPermissionDenied = false
+                        refreshNotificationPermissionState()
                     case .denied:
                         hydrationReminderEnabled = false
                         notificationPermissionDenied = true
@@ -397,6 +444,16 @@ struct AutomationsView: View {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             Task { @MainActor in
                 notificationPermissionDenied = settings.authorizationStatus == .denied
+                switch settings.authorizationStatus {
+                case .authorized, .provisional:
+                    notificationsAuthorized = true
+                #if os(iOS)
+                case .ephemeral:
+                    notificationsAuthorized = true
+                #endif
+                default:
+                    notificationsAuthorized = false
+                }
             }
         }
     }

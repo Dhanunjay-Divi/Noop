@@ -790,6 +790,22 @@ struct SettingsView: View {
                     .accessibilityLabel("App icon")
                     .onChangeCompat(of: useNavyIcon) { applyAppIcon($0) }
                 }
+                rowDivider
+                NavigationLink(destination: WidgetSettingsView()) {
+                    FormRow(label: "Home Screen widgets") {
+                        HStack(spacing: 8) {
+                            Text("Choose metrics")
+                                .font(StrandFont.caption)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(LiquidPressStyle())
+                .accessibilityLabel("Home Screen widgets. Choose metrics.")
                 #endif
 
                 Divider().overlay(StrandPalette.hairline).padding(.vertical, 4)

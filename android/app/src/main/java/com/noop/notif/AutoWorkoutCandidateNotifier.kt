@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat
 import com.noop.R
 import com.noop.data.WhoopRepository
 import com.noop.ui.AutoWorkoutAutomationPolicy
+import com.noop.ui.AutoWorkoutBackgroundPolicy
 import com.noop.ui.AutoWorkoutCandidateScan
 import com.noop.ui.AutoWorkoutMode
 import com.noop.ui.AutoWorkoutPrefs
@@ -89,11 +90,17 @@ object AutoWorkoutCandidateNotifier {
         val mode = NoopPrefs.autoWorkoutMode(appContext)
         if (mode == AutoWorkoutMode.OFF) return
 
+        val days = try {
+            repository.daysMerged(activeDeviceId)
+        } catch (t: Throwable) {
+            if (t is CancellationException) throw t
+            return
+        }
         val candidate = try {
             AutoWorkoutCandidateScan.latest(
                 repository = repository,
                 activeDeviceId = activeDeviceId,
-                days = repository.daysMerged(activeDeviceId),
+                days = days,
                 dismissedTokens = AutoWorkoutPrefs.dismissed(appContext),
                 traceSink = traceSink,
             )
@@ -101,6 +108,12 @@ object AutoWorkoutCandidateNotifier {
             if (t is CancellationException) throw t
             return // best effort: detection/DB/notification work must never break sync or scoring
         } ?: return
+
+        if (!AutoWorkoutBackgroundPolicy.shouldProcess(
+                candidate = candidate,
+                nowSec = System.currentTimeMillis() / 1_000L,
+            )
+        ) return
 
         if (mode == AutoWorkoutMode.AUTO_SAVE && AutoWorkoutAutomationPolicy.shouldAutoSave(candidate)) {
             val computedId = repository.computedDeviceId(activeDeviceId)

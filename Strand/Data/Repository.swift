@@ -60,6 +60,34 @@ enum AutoWorkoutAutomationPolicy {
     }
 }
 
+/// A background BLE offload can finish while the phone is locked and may contain two days of history.
+/// The in-app card may safely offer any detector-qualified candidate for review, but a lock-screen alert
+/// must not make an old or borderline HR-only window feel like a confident real-time claim. Background
+/// processing therefore requires recency plus motion/activity corroboration. HR-only candidates remain
+/// available for quiet in-app review but can never create a lock-screen claim by themselves.
+enum AutoWorkoutBackgroundPolicy {
+    static let maximumCandidateAgeSeconds = 2 * 60 * 60
+    static let futureToleranceSeconds = 5 * 60
+    static let minimumCorroboratedMinutes = 15
+
+    static func shouldProcess(_ candidate: DetectedWorkout, nowSec: Int) -> Bool {
+        guard candidate.startSec > 0,
+              candidate.endSec > candidate.startSec,
+              candidate.endSec <= nowSec + futureToleranceSeconds,
+              nowSec - candidate.endSec <= maximumCandidateAgeSeconds,
+              (30...220).contains(candidate.avgBpm),
+              (candidate.avgBpm...250).contains(candidate.peakBpm) else { return false }
+
+        // HR-only detection remains useful as a quiet Today suggestion, but it is not enough evidence
+        // for a lock-screen interruption: stress, illness, poor optical contact, and an old backfill can
+        // all produce a sustained rise. A broad type hint is not independent proof: the classifier can
+        // infer a type from a smooth HR trace plus non-locomotion ("still") ticks. Require the detector's
+        // separately confirmed motion stream before claiming a possible workout outside the app.
+        return candidate.durationMin >= minimumCorroboratedMinutes
+            && candidate.evidenceProvenance == .heartRateAndMotion
+    }
+}
+
 /// The latest unattended save waiting for a quick Keep / Not a workout review on Today. This contains
 /// only local workout metadata and lives in UserDefaults beside the mode preference; it never leaves the
 /// device. A newer auto-save replaces the review card, while all older rows remain editable in Workouts.

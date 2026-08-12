@@ -638,6 +638,13 @@ final class AppModel: ObservableObject {
     private func processAutomaticWorkoutAfterSync() async {
         let mode = PuffinExperiment.autoWorkoutMode
         guard mode != .off, let candidate = await repo.autoDetectCandidate() else { return }
+        guard AutoWorkoutBackgroundPolicy.shouldProcess(
+            candidate,
+            nowSec: Int(Date().timeIntervalSince1970)
+        ) else {
+            // Borderline and older candidates remain visible on Today without interrupting the user.
+            return
+        }
         if mode == .autoSave, AutoWorkoutAutomationPolicy.shouldAutoSave(candidate) {
             if await repo.saveDetectedWorkout(candidate, markForReview: true) {
                 await repo.refresh()
@@ -1158,6 +1165,21 @@ final class AppModel: ObservableObject {
 
     /// End the WHOOP present-scan (idempotent). Call on leaving the wizard's pick step / on dismiss.
     func stopWhoopScan() { ble.stopWhoopScan() }
+
+    /// Source-aware pre-archive teardown for Devices. The registry row still carries brand, source kind,
+    /// and active status here; after reducing it to `peripheralId` a nil Apple Watch/import/legacy id is
+    /// ambiguous and must never be allowed to mean "release the active WHOOP." Historical data is not
+    /// touched — this only stops the live owner for the row the user explicitly removed.
+    func prepareForDeviceRemoval(_ device: PairedDevice) {
+        switch SourceCoordinator.removalAction(for: device) {
+        case .archiveOnly:
+            break
+        case .releaseActiveWhoop:
+            ble.forgetActiveWhoop()
+        case .stopActiveNonWhoop:
+            sourceCoordinator?.prepareForRemoval(deviceId: device.id)
+        }
+    }
 
     /// Register a paired device and (optionally) make it the active one. The Add-a-device wizard's
     /// single write path: `add` upserts the row, and when `makeActive` is true `setActive` promotes it

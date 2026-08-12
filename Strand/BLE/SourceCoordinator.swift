@@ -31,6 +31,23 @@ import OuraProtocol
 @MainActor
 final class SourceCoordinator: ObservableObject {
 
+    /// Source-aware teardown chosen before a registry row is archived. The old Devices path forwarded
+    /// only an optional peripheral id to BLEManager; nil (Apple Watch/import/legacy rows) was therefore
+    /// indistinguishable from "release the active unpinned WHOOP." Keep identity classification here,
+    /// where brand/source/status are still available, and make the destructive WHOOP action explicit.
+    enum DeviceRemovalAction: Equatable {
+        case archiveOnly
+        case releaseActiveWhoop
+        case stopActiveNonWhoop
+    }
+
+    static func removalAction(for device: PairedDevice) -> DeviceRemovalAction {
+        guard device.status == .active else { return .archiveOnly }
+        if isWhoop(device) { return .releaseActiveWhoop }
+        if device.sourceKind == .liveAppleWatch { return .archiveOnly }
+        return .stopActiveNonWhoop
+    }
+
     // MARK: - Dependencies
 
     private let registry: DeviceRegistry
@@ -184,7 +201,8 @@ final class SourceCoordinator: ObservableObject {
     /// not streaming a strap that's no longer the active device, then mark ourselves off-strap so the
     /// next WHOOP activation resumes cleanly. The WHOOP, if it was active, is deliberately untouched.
     private func switchToAppleWatch(id: String) {
-        if onStrap {
+        let wasUsingBLESource = onStrap
+        if wasUsingBLESource {
             tearDownNonWhoopSource()
             activeStrapId = nil
             onStrap = false
@@ -205,7 +223,7 @@ final class SourceCoordinator: ObservableObject {
 
         if onStrap {
             // Coming back from a generic strap / FTMS machine: tear that source down first.
-            tearDownNonWhoopSource()
+            tearDownNonWhoopSource(clearMonitoringExpectation: false)
             activeStrapId = nil
             onStrap = false
             pointWhoop(at: id, peripheralId: peripheralId)
@@ -258,7 +276,7 @@ final class SourceCoordinator: ObservableObject {
         if !onStrap { stopWhoop() }
 
         // Switching source→source: stop the previous non-WHOOP source before starting the new one.
-        tearDownNonWhoopSource()
+        tearDownNonWhoopSource(clearMonitoringExpectation: false)
 
         // Build the isolated source for this device's registered kind (the ONE place that maps a kind to a
         // concrete driver), then bring it up. `.liveAppleWatch` never reaches here — it's short-circuited
@@ -276,6 +294,9 @@ final class SourceCoordinator: ObservableObject {
         activeSource = source
         activeStrapId = id
         onStrap = true
+        // All non-Watch sources owned here are BLE-backed. This durable expectation lets the shared WHOOP
+        // central's radio callback provide the same one-shot Bluetooth-off alert without another scanner.
+        BluetoothAvailabilityNotifications.setMonitoringExpected(true)
     }
 
     /// Build the isolated `LiveHRSource` for a device id from its registered `sourceKind` — the ONE place
@@ -408,10 +429,23 @@ final class SourceCoordinator: ObservableObject {
     /// the reference. Idempotent — exactly one source is ever live. Also nils the published `ouraSource`
     /// handle so the adopt mirror resets to `.idle` (when an Oura ring was live it is the same object as
     /// `activeSource`; otherwise it is already nil and this is a no-op).
-    private func tearDownNonWhoopSource() {
+    private func tearDownNonWhoopSource(clearMonitoringExpectation: Bool = true) {
         activeSource?.stop()
         activeSource = nil
         ouraSource = nil
+        if clearMonitoringExpectation {
+            BluetoothAvailabilityNotifications.setMonitoringExpected(false)
+        }
+    }
+
+    /// Stop an active generic/ring/machine source before its registry row is archived. Deliberately keep
+    /// `onStrap == true`: it records that WHOOP was paused for this source, so choosing a WHOOP next still
+    /// takes the resume branch even though the removed source reference is now nil. Inactive rows are a
+    /// strict no-op and can never disturb the currently selected device.
+    func prepareForRemoval(deviceId: String) {
+        guard activeStrapId == deviceId else { return }
+        tearDownNonWhoopSource()
+        activeStrapId = nil
     }
 
     // MARK: - Identity adoption

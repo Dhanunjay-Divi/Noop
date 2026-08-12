@@ -491,6 +491,7 @@ enum DemoScreens {
             return AnyView(MetricDetailView(metric: metric))
         case "compare":  return AnyView(CompareView())
         case "settings": return AnyView(SettingsView())
+        case "widgets": return AnyView(WidgetSettingsView())
         case "onboarding": return AnyView(OnboardingWizard(onFinished: {}))
         case "chargebreakdown": return AnyView(ChargeBreakdownDemoHost())
         case "devices":  return AnyView(DevicesView())

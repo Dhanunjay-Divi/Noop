@@ -154,6 +154,52 @@ public enum WidgetAppearancePreference {
     }
 }
 
+/// The three supporting measurements shown beside the Daily Signal scores. This is deliberately an
+/// app-wide preference rather than a per-widget App Intent: a user can make one clear choice inside NOOP,
+/// every already-placed widget updates immediately, and the extension stays compatible with sideloaded
+/// builds where configurable-widget intents are not always provisioned reliably.
+public enum WidgetMetric: String, CaseIterable, Codable, Equatable {
+    case heartRate
+    case hrv
+    case restingHeartRate
+    case sleepDuration
+    case deviceBattery
+}
+
+/// App Group hand-off for the Daily Signal widget's supporting measurements. The score row is fixed to
+/// Recovery / Effort / Sleep so it remains a stable daily summary; these preferences customize only the
+/// three detail rows and therefore can never duplicate a headline score.
+public enum WidgetMetricPreference {
+    public static let storageKey = "noop.widget.supportingMetrics"
+    public static let slotCount = 3
+    public static let defaultSelection: [WidgetMetric] = [.heartRate, .sleepDuration, .deviceBattery]
+
+    /// Resolve corrupt, old, duplicated, or partially-written preferences into exactly three unique
+    /// supported metrics. Valid user choices keep their order; defaults fill any gaps deterministically.
+    public static func normalized(_ rawValues: [String]) -> [WidgetMetric] {
+        var result: [WidgetMetric] = []
+        for raw in rawValues {
+            guard let metric = WidgetMetric(rawValue: raw), !result.contains(metric) else { continue }
+            result.append(metric)
+            if result.count == slotCount { return result }
+        }
+        for metric in defaultSelection + WidgetMetric.allCases where !result.contains(metric) {
+            result.append(metric)
+            if result.count == slotCount { break }
+        }
+        return result
+    }
+
+    public static func load(defaults: UserDefaults? = UserDefaults(suiteName: WidgetSnapshot.suiteName)) -> [WidgetMetric] {
+        normalized(defaults?.stringArray(forKey: storageKey) ?? [])
+    }
+
+    public static func save(_ metrics: [WidgetMetric],
+                            defaults: UserDefaults? = UserDefaults(suiteName: WidgetSnapshot.suiteName)) {
+        defaults?.set(normalized(metrics.map(\.rawValue)).map(\.rawValue), forKey: storageKey)
+    }
+}
+
 /// Stable app routes used by every widget's tap target. Keeping parsing beside the snapshot makes the
 /// extension and app agree on one URL contract while remaining independent of the app-only `NavRouter`.
 public enum NOOPWidgetDestination: String, CaseIterable {

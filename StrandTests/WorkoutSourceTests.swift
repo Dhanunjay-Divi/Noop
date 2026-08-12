@@ -73,6 +73,76 @@ final class WorkoutSourceTests: XCTestCase {
         XCTAssertFalse(defaults.bool(forKey: PuffinExperiment.autoDetectWorkoutsKey))
     }
 
+    func testBackgroundWorkoutRejectsOldAndHeartRateOnlyCandidates() {
+        let now = 1_700_010_000
+        let borderline = DetectedWorkout(
+            startSec: now - 25 * 60, endSec: now - 10 * 60,
+            avgBpm: 102, peakBpm: 112, durationMin: 15
+        )
+        XCTAssertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(
+            borderline, nowSec: now
+        ), "a detector-edge HR-only bout stays reviewable in-app but must not interrupt")
+
+        let strongHeartRateOnly = DetectedWorkout(
+            startSec: now - 35 * 60, endSec: now - 10 * 60,
+            avgBpm: 125, peakBpm: 150, durationMin: 25
+        )
+        XCTAssertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(
+            strongHeartRateOnly, nowSec: now
+        ), "even a strong HR-only rise stays in Today instead of becoming a false lock-screen claim")
+
+        let mislabeledStillWindow = DetectedWorkout(
+            startSec: now - 35 * 60, endSec: now - 10 * 60,
+            avgBpm: 125, peakBpm: 150, durationMin: 25,
+            suggestedClass: .cycle,
+            suggestionConfidence: 0.9,
+            evidenceProvenance: .heartRateOnly
+        )
+        XCTAssertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(
+            mislabeledStillWindow, nowSec: now
+        ), "a confident type hint derived from still ticks is not independent workout evidence")
+
+        let stale = DetectedWorkout(
+            startSec: now - 4 * 3_600, endSec: now - 3 * 3_600,
+            avgBpm: 145, peakBpm: 175, durationMin: 60,
+            evidenceProvenance: .heartRateAndMotion
+        )
+        XCTAssertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(
+            stale, nowSec: now
+        ), "historical backfill must not generate a real-time lock-screen alert")
+    }
+
+    func testMotionCorroborationAllowsARecentFifteenMinuteCandidate() {
+        let now = 1_700_010_000
+        let corroborated = DetectedWorkout(
+            startSec: now - 25 * 60, endSec: now - 10 * 60,
+            avgBpm: 100, peakBpm: 115, durationMin: 15,
+            evidenceProvenance: .heartRateAndMotion
+        )
+        XCTAssertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(
+            corroborated, nowSec: now
+        ), "motion evidence preserves timely notification for a real moderate workout")
+    }
+
+    func testBackgroundWorkoutRecencyAndDurationBoundaries() {
+        let now = 1_700_010_000
+        func candidate(endOffset: Int, duration: Int) -> DetectedWorkout {
+            let end = now + endOffset
+            return DetectedWorkout(
+                startSec: end - duration * 60, endSec: end,
+                avgBpm: 110, peakBpm: 135, durationMin: duration,
+                evidenceProvenance: .heartRateAndMotion
+            )
+        }
+
+        XCTAssertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: -600, duration: 14), nowSec: now))
+        XCTAssertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: -600, duration: 15), nowSec: now))
+        XCTAssertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: -7_200, duration: 15), nowSec: now))
+        XCTAssertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: -7_201, duration: 15), nowSec: now))
+        XCTAssertTrue(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: 300, duration: 15), nowSec: now))
+        XCTAssertFalse(AutoWorkoutBackgroundPolicy.shouldProcess(candidate(endOffset: 301, duration: 15), nowSec: now))
+    }
+
     func testAutomaticActivitySetterCannotRestoreRetiredAutoSaveMode() {
         let suite = "WorkoutSourceTests.autoWorkoutSetter.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
