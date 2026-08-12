@@ -1,6 +1,14 @@
 import SwiftUI
 import StrandDesign
 
+/// Plain-text invitation copy is shared with tests because recipients must be sent to the primary
+/// Friends tab. Keeping this outside the sheet prevents navigation changes from leaving stale setup
+/// instructions in messages that have already left the sender's phone.
+enum FriendsNavigationCopy {
+    static let invitationInstruction =
+        "In Noop, open the Friends tab → Enter invite details. Sharing starts only after I accept your request."
+}
+
 /// Private, mutual score sharing through a server the circle operates.
 ///
 /// This is intentionally a circle, not a leaderboard: friends see only the fields each relationship
@@ -555,7 +563,7 @@ private struct CircleInviteSheet: View {
                         ShareLink(
                             item: invitationText,
                             subject: Text("Join my private Noop circle"),
-                            message: Text("Enter the server address and one-time code in Noop Friends.")
+                            message: Text("Open the Friends tab in Noop and enter the server address and one-time code.")
                         ) {
                             Label("Share invitation", systemImage: "square.and.arrow.up")
                                 .font(StrandFont.headline)
@@ -590,7 +598,7 @@ private struct CircleInviteSheet: View {
         Server: \(invite.serverAddress)
         One-time code: \(invite.code)
 
-        In Noop, open More → Friends → Enter invite details. Sharing starts only after I accept your request.
+        \(FriendsNavigationCopy.invitationInstruction)
         """
     }
 }

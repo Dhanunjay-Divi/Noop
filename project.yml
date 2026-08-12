@@ -21,7 +21,7 @@ settings:
     # iOS build number (CFBundleVersion). GLOBAL so the iOS app AND its widget extension inherit the
     # SAME value — they must match or iOS warns "extension version must match parent app" (#416).
     # macOS inherits it too so every artifact from one source revision reports the same build.
-    CURRENT_PROJECT_VERSION: "222"
+    CURRENT_PROJECT_VERSION: "223"
     SWIFT_VERSION: "5.0"
     # Emit localizable strings so Xcode auto-extracts every LocalizedStringKey into the
     # String Catalog on build (the English (US) base entries).
@@ -280,12 +280,12 @@ targets:
           # launch in StrandiOSApp.init) or the submit fails gracefully and only the foreground/"Run now"
           # paths run.
           - fetch
-        # #510: permit the scheduled debug auto-export's BGAppRefreshTask identifier. Built from
-        # $(PRODUCT_BUNDLE_IDENTIFIER) so it tracks BUNDLE_ID_PREFIX automatically; MUST still match
-        # ScheduledDebugExport.bgTaskIdentifier EXACTLY (which derives it from Bundle.main the same
-        # way) and be registered at launch (StrandiOSApp.init), or iOS refuses to schedule/deliver it.
+        # Permit both single-shot BGAppRefresh lanes. Identifiers are built from the bundle id so they
+        # track BUNDLE_ID_PREFIX automatically and must exactly match their launch registrations.
+        # Delivery timing remains owned by iOS; neither lane is presented as a guaranteed timer.
         BGTaskSchedulerPermittedIdentifiers:
           - $(PRODUCT_BUNDLE_IDENTIFIER).debugexport
+          - $(PRODUCT_BUNDLE_IDENTIFIER).refresh
         NSBluetoothAlwaysUsageDescription: "NOOP connects directly to your wearable and standards-compatible Bluetooth health devices, including an explicitly paired weight scale, to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server."
         NSLocalNetworkUsageDescription: "NOOP connects to a self-hosted server on your local network only when you configure and enable that optional sync."
         NSLocationWhenInUseUsageDescription: "NOOP records your route during an outdoor workout to show distance, pace, and a map, and keeps recording while the screen is off. The route stays on your device. Nothing leaves it."

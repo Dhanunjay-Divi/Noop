@@ -335,12 +335,12 @@ enum MetricKnowledge {
                 related: ["vitality", "body_age", "fitness_age", "active_kcal"],
                 cadence: "Source dependent")
 
-        case "energy_kcal", "active_kcal", "total_kcal":
+        case "energy_kcal", "active_kcal", "basal_kcal", "total_kcal":
             return item(
-                what: "Energy is an estimate of calories expended over the selected period.",
+                what: "Energy describes calories expended over the selected period. Active energy is movement above rest; resting energy is baseline metabolism; total energy is their sum.",
                 why: "It gives broad activity context but is most useful as a consistent trend, not an exact food target.",
-                method: "Estimated from heart rate, motion, profile inputs or imported from the named source.",
-                limits: "Wearable calorie estimates can have large individual error.",
+                method: "Apple Health active and resting components stay separate and are summed only when both exist. A strap-only reading is shown as one combined HR-derived estimate; NOOP does not invent its split or add it to Apple Health.",
+                limits: "Wearable calorie estimates can have large individual error. A partial day or gaps in heart-rate wear can understate a combined estimate.",
                 influences: ["Activity duration", "Intensity", "Body profile", "Heart-rate coverage", "Source algorithm"],
                 actions: ["Use the same source for comparisons.", "Pair the estimate with activity and weight trends.", "Avoid matching food intake to a single-day number exactly."],
                 related: ["strain", "steps", "avg_hr", "weight"],

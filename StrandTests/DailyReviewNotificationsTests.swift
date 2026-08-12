@@ -42,12 +42,22 @@ final class DailyReviewNotificationsTests: XCTestCase {
         XCTAssertTrue(specs[0].body.contains("Sleep"))
         XCTAssertTrue(specs[0].body.contains("Recovery"))
         XCTAssertTrue(specs[1].body.contains("Effort"))
+        XCTAssertTrue(specs[0].body.localizedCaseInsensitiveContains("log"))
+        XCTAssertTrue(specs[1].body.localizedCaseInsensitiveContains("log"))
+        XCTAssertFalse(specs[0].body.localizedCaseInsensitiveContains("open NOOP"))
+        XCTAssertFalse(specs[1].body.localizedCaseInsensitiveContains("open NOOP"))
         for spec in specs {
             XCTAssertNil(
                 spec.body.rangeOfCharacter(from: .decimalDigits),
                 "Generic repeating reminders must not embed a score or health value."
             )
         }
+    }
+
+    func testScheduledContentKeepsHiddenPreviewsGeneric() {
+        let category = DailyReviewNotifications.privacyCategory()
+        XCTAssertEqual(category.identifier, "noop.daily-review.private")
+        XCTAssertEqual(category.hiddenPreviewsBodyPlaceholder, "Private NOOP check-in")
     }
 
     func testPendingNotificationRouteIsConsumedOnce() {

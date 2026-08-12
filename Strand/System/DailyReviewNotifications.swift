@@ -57,6 +57,7 @@ enum DailyReviewNotifications {
     private static let morningRequestID = "daily-review-morning"
     private static let eveningRequestID = "daily-review-evening"
     private static let requestIDs = [morningRequestID, eveningRequestID]
+    private static let privacyCategoryID = "noop.daily-review.private"
 
     static var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: enabledKey)
@@ -155,14 +156,14 @@ enum DailyReviewNotifications {
                 identifier: morningRequestID,
                 minuteOfDay: clampMinute(morning),
                 title: String(localized: "Morning check-in"),
-                body: String(localized: "After your latest sync, review last night’s Sleep and today’s Recovery in NOOP."),
+                body: String(localized: "Review Sleep and Recovery, then log how rested you feel."),
                 route: .sleep
             ),
             ReminderSpec(
                 identifier: eveningRequestID,
                 minuteOfDay: clampMinute(evening),
                 title: String(localized: "Evening check-in"),
-                body: String(localized: "After your latest sync, review today’s Effort and prepare for tonight’s recovery."),
+                body: String(localized: "Compare today’s Effort, then log what shaped your day."),
                 route: .today
             ),
         ]
@@ -175,12 +176,17 @@ enum DailyReviewNotifications {
     private static func schedule() {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: requestIDs)
+        registerPrivacyCategory(on: center)
 
         for spec in reminderSpecs(morning: morningMinutes, evening: eveningMinutes) {
             let content = UNMutableNotificationContent()
             content.title = spec.title
             content.body = spec.body
             content.sound = .default
+            // The normal copy contains no values or conditions. When the user hides previews, keep even
+            // the metric names off the lock screen while retaining a recognizable app-level placeholder.
+            content.categoryIdentifier = privacyCategoryID
+            content.threadIdentifier = "noop.daily-review"
             content.userInfo = [NotificationRouteBridge.userInfoKey: spec.route.rawValue]
 
             var components = DateComponents()
@@ -195,6 +201,29 @@ enum DailyReviewNotifications {
                 )
             )
         }
+    }
+
+    /// Notification categories are process-global, so merge instead of replacing categories registered
+    /// by alarms or future features. The category-level placeholder is what iOS uses when the user has
+    /// chosen to hide notification previews; individual notification content has no such property.
+    private static func registerPrivacyCategory(on center: UNUserNotificationCenter) {
+        Task { @MainActor in
+            let existing = await center.notificationCategories()
+            let category = privacyCategory()
+            var merged = existing.filter { $0.identifier != privacyCategoryID }
+            merged.insert(category)
+            center.setNotificationCategories(merged)
+        }
+    }
+
+    static func privacyCategory() -> UNNotificationCategory {
+        UNNotificationCategory(
+            identifier: privacyCategoryID,
+            actions: [],
+            intentIdentifiers: [],
+            hiddenPreviewsBodyPlaceholder: String(localized: "Private NOOP check-in"),
+            options: []
+        )
     }
 }
 

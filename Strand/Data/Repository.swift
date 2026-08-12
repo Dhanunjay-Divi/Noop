@@ -1542,6 +1542,19 @@ final class Repository: ObservableObject {
         let now = Date()
         let from = fullHistory ? "0000-01-01" : Self.dayString(now.addingTimeInterval(-Double(days) * 86_400))
         let to = fullHistory ? "9999-12-31" : Self.dayString(now.addingTimeInterval(86_400))
+        // Total Energy is a derived APPLE-ONLY series. Build it from paired active + basal points and
+        // omit every partial day; never fill a missing Apple component with the strap's combined
+        // `activeKcalEst` value, which would mix producers and double-count resting metabolism.
+        if source == Self.appleHealthSource, key == "total_kcal" {
+            let active = (try? await store.metricSeries(deviceId: source, key: "active_kcal",
+                                                        from: from, to: to)) ?? []
+            let resting = (try? await store.metricSeries(deviceId: source, key: "basal_kcal",
+                                                         from: from, to: to)) ?? []
+            return DailyEnergyBreakdown.appleTotalSeries(
+                active: active.map { ($0.day, $0.value) },
+                resting: resting.map { ($0.day, $0.value) }
+            )
+        }
         let pts: [MetricPoint]
         if source == canonicalDeviceId {
             pts = await unionMetricSeries(store: store, key: key, from: from, to: to)

@@ -2,6 +2,45 @@ import SwiftUI
 import Combine
 import Foundation
 
+/// Stable iPhone primary-tab identity shared with unit tests. Keeping the order here prevents a new
+/// primary destination from shifting Sleep notification or More deep-link indices in only one of the
+/// shell's several paths. macOS does not render these tabs, but compiling the model in the shared app
+/// target lets the routing contract be tested without brittle test-host reads of iOS source files.
+enum IPhonePrimaryTab: Int, CaseIterable, Equatable {
+    case today
+    case trends
+    case friends
+    case sleep
+    case more
+
+    /// Compact glass-rail geometry. The formula is deliberately testable at a conservative 320pt
+    /// viewport so five visible destinations never shrink below Apple's 44pt touch-target guidance.
+    static let compactOuterHorizontalPadding: CGFloat = 38
+    static let compactInnerHorizontalPadding: CGFloat = 7
+    static let itemSpacing: CGFloat = 2
+    static let minimumTouchDimension: CGFloat = 44
+    /// Compact buttons use their 44pt frame as the complete hit region. Adding padding outside that
+    /// frame would silently make a five-item rail wider than the narrow viewport this geometry protects.
+    static let compactItemHorizontalPadding: CGFloat = 0
+
+    static var compactMinimumViewportWidth: CGFloat {
+        let outer = compactOuterHorizontalPadding * 2
+        let inner = compactInnerHorizontalPadding * 2
+        let gaps = itemSpacing * CGFloat(max(allCases.count - 1, 0))
+        let items = CGFloat(allCases.count)
+            * (minimumTouchDimension + compactItemHorizontalPadding * 2)
+        return outer + inner + gaps + items
+    }
+
+    static func compactItemWidth(in viewportWidth: CGFloat) -> CGFloat {
+        let outer = compactOuterHorizontalPadding * 2
+        let inner = compactInnerHorizontalPadding * 2
+        let gaps = itemSpacing * CGFloat(max(allCases.count - 1, 0))
+        return (viewportWidth - outer - inner - gaps) / CGFloat(allCases.count)
+            - compactItemHorizontalPadding * 2
+    }
+}
+
 // MARK: - NavRouter
 //
 // A tiny shared navigation hook so a screen can ask the app shell to switch to another top-level

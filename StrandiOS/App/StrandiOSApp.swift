@@ -77,6 +77,44 @@ struct StrandiOSApp: App {
         // returning users only. The bridge checks NOOP's prior explicit-consent marker and never opens a
         // permission sheet, so a fresh install still reaches the in-app rationale first.
         bridge.registerObserversAtLaunchIfPreviouslyRequested()
+        // Register the general maintenance refresh while launch is still in progress. This is an
+        // opportunistic iOS wake, not a timer: CoreBluetooth restoration and HealthKit observers remain
+        // the primary background paths, and every foreground still performs the authoritative catch-up.
+        // The injected operation preserves each feature's existing privacy gate: Health reads require a
+        // prior explicit grant, self-hosted upload remains opt-in, and Friends needs an enrolled member.
+        BackgroundSyncScheduler.register { [weak model, weak bridge] in
+            guard UserDefaults.standard.string(forKey: "noop.acceptedTermsVersion")
+                    == Terms.currentVersion,
+                  let model,
+                  let bridge,
+                  await model.repo.storeHandle() != nil else { return false }
+
+            // If CoreBluetooth already restored/retained a bonded link, ask for the same rate-limited
+            // historical offload as the 15-minute connected timer. This never starts dense Live HR and
+            // is a no-op while disconnected, busy, recently synced, or backed off after empty history.
+            let strapSyncCompleted = await model.ble.requestSyncAndWait(.periodic)
+            guard !Task.isCancelled else { return false }
+            model.ble.pruneRaw()
+
+            bridge.refreshAuthIfPreviouslyGranted() // status-only; never opens the permission sheet
+            if bridge.auth == .authorized {
+                _ = await bridge.sync(days: 2)
+            }
+            guard !Task.isCancelled else { return false }
+
+            // A first/full self-hosted replay can be large and belongs in a foreground/manual run. Normal
+            // incremental delivery is bounded, cursor-backed, and only runs when the user enabled it.
+            if !RemoteSyncPreferences.needsFullReplay,
+               !RemoteSyncPreferences.replayInProgress {
+                await RemoteSyncService.catchUpIfDue(repo: model.repo)
+            }
+            guard !Task.isCancelled else { return false }
+
+            await FriendsService.catchUpIfDue(repo: model.repo)
+            guard !Task.isCancelled else { return false }
+            await WidgetSnapshot.publish(from: model)
+            return strapSyncCompleted && !Task.isCancelled
+        }
     }
 
     var body: some Scene {
@@ -261,6 +299,9 @@ struct StrandiOSApp: App {
                 }
                 Task { await FriendsService.catchUpIfDue(repo: model.repo) }
             } else if phase == .background {
+                // Single-shot and best-effort: iOS chooses whether/when this runs. The handler re-arms
+                // itself after delivery; every later background transition also repairs the schedule.
+                BackgroundSyncScheduler.scheduleNext()
                 // #114: capture the LAST in-app live state on the way out so the Home widget matches what
                 // the user just saw — its battery/HR/score otherwise lag to the last FOREGROUND refreshSeq
                 // bump. One reload per app-exit is low-frequency and well within WidgetKit's daily budget.

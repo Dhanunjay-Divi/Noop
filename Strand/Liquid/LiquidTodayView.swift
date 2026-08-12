@@ -65,7 +65,8 @@ struct LiquidTodayView: View {
     }
     @State private var stepsEst: Double?           // steps_est, day-keyed to the selected day (fallback)
     @State private var importedStepsDay: Int?      // Apple Health steps for the selected day (middle tier)
-    @State private var importedActiveKcalDay: Double?  // #616: Apple Health active energy for the day (calorie fallback)
+    @State private var importedActiveKcalDay: Double?  // Apple Health active component for the selected day
+    @State private var importedRestingKcalDay: Double? // Apple Health basal/resting component for the selected day
     @State private var hrValues: [Double] = []     // hrBuckets since midnight → 5-min means
     @State private var workouts: [WorkoutRow] = [] // newest-first
 
@@ -797,11 +798,7 @@ struct LiquidTodayView: View {
             cardLink(.metric("skin_temp"), title: card.title, sub: card.subtitle,
                      value: "–", symbol: card.icon, tint: StrandPalette.metricAmber, frac: nil)
         case .calories:
-            // #616: show the resolved imported-first value and route to the matching detail source, like
-            // the Steps card — was a "–" placeholder wired to the imported-only detail.
-            cardLink(.metricSourced(key: caloriesDetailKey, source: caloriesDetailSource), title: card.title, sub: card.subtitle,
-                     value: intText(caloriesCount), symbol: card.icon,
-                     tint: StrandPalette.metricAmber, frac: fracOver(caloriesCount, 800))
+            energyCardLink(card)
         case .sleep:
             cardLink(.sleep, title: card.title, sub: card.subtitle,
                      value: sleepText, symbol: card.icon,
@@ -850,6 +847,74 @@ struct LiquidTodayView: View {
             )
         }
         .buttonStyle(LiquidPressStyle())
+    }
+
+    /// Calories need more hierarchy than a one-number dashboard row. The large number is Total only
+    /// when Apple supplied BOTH components; otherwise its label says Active, Resting, or Combined
+    /// estimate. The two small KPIs never borrow a value from another source to fill a gap.
+    private func energyCardLink(_ card: DashboardCard) -> some View {
+        let breakdown = energyBreakdown
+        let metric = caloriesDetailMetric
+        return NavigationLink(value: TabRoute.metricSourced(
+            key: metric?.key ?? "energy_kcal", source: metric?.source ?? "my-whoop")) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    MetricGlyph(card.icon, size: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 5) {
+                            Text(card.title.uppercased())
+                                .font(StrandFont.overlineScaled(11)).tracking(1.0)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Image(systemName: "info.circle")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(StrandPalette.metricAmber)
+                                .accessibilityHidden(true)
+                        }
+                        Text(energyStateText)
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+
+                HStack(alignment: .bottom, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(kcalText(breakdown.headlineKcal))
+                            .font(StrandFont.number(24))
+                            .foregroundStyle(StrandPalette.textPrimary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.65)
+                        Text(energyHeadlineLabel.uppercased())
+                            .font(StrandFont.overlineScaled(8.5)).tracking(0.9)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                    Spacer(minLength: 4)
+                    energyMiniValue("ACTIVE", breakdown.activeKcal)
+                    energyMiniValue("RESTING", breakdown.restingKcal)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(FrostedCardSurface(tint: StrandPalette.metricAmber,
+                                           cornerRadius: 20, washStrength: 0.60))
+        }
+        .buttonStyle(LiquidPressStyle())
+        .accessibilityHint("Opens the energy breakdown, trend and explanation")
+    }
+
+    private func energyMiniValue(_ label: String, _ value: Double?) -> some View {
+        VStack(alignment: .trailing, spacing: 1) {
+            Text(kcalText(value, includesUnit: false))
+                .font(StrandFont.captionNumber)
+                .foregroundStyle(value == nil ? StrandPalette.textTertiary : StrandPalette.textPrimary)
+            Text(label)
+                .font(StrandFont.overlineScaled(7.5)).tracking(0.7)
+                .foregroundStyle(StrandPalette.textTertiary)
+        }
+        .frame(minWidth: 48, alignment: .trailing)
     }
 
     // MARK: - Synthesis (greeting + readiness pills + one-liner)
@@ -1111,12 +1176,88 @@ struct LiquidTodayView: View {
             ktile(String(localized: "Weight"), "—", "", StrandPalette.metricAmber, nil,
                   symbol: metric.icon, key: "weight")
         case .calories:
-            // #616: imported-first value (imported ?: activeKcalEst) + route the tap to the matching
-            // detail source, so the number, its sparkline and the chart it opens all agree.
-            ktile(String(localized: "Calories"), intText(caloriesCount), "kcal", StrandPalette.metricAmber,
-                  nil, symbol: metric.icon, key: "energy_kcal",
-                  detailMetric: caloriesDetailMetric)
+            energyKTile(symbol: metric.icon)
         }
+    }
+
+    /// A dense KPI treatment for energy: one large, correctly-labelled headline plus the two smaller
+    /// components. Missing values remain dashes, and a strap-only combined estimate keeps both component
+    /// slots empty instead of fabricating a split. Its tap opens the matching source-specific dossier.
+    private func energyKTile(symbol: String) -> some View {
+        let breakdown = energyBreakdown
+        let metric = caloriesDetailMetric
+        let spark = metric.map { windowedSpark($0.key) } ?? []
+        let tile = VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+            HStack(alignment: .center, spacing: NoopMetrics.space2) {
+                MetricGlyph(symbol, size: 28)
+                Text(String(localized: "Calories").uppercased())
+                    .font(StrandFont.overlineScaled(9.5)).tracking(1.1)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "info.circle")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(StrandPalette.metricAmber)
+                    .accessibilityHidden(true)
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(kcalText(breakdown.headlineKcal, includesUnit: false))
+                    .font(StrandFont.number(24))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .lineLimit(1).minimumScaleFactor(0.65)
+                Text("kcal").font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
+            }
+            Text(energyHeadlineLabel.uppercased())
+                .font(StrandFont.overlineScaled(7.5)).tracking(0.7)
+                .foregroundStyle(StrandPalette.textTertiary)
+
+            HStack(spacing: 8) {
+                energyKpiMini(String(localized: "Active"), breakdown.activeKcal)
+                Divider().overlay(StrandPalette.hairline).frame(height: 25)
+                energyKpiMini(String(localized: "Resting"), breakdown.restingKcal)
+            }
+
+            if keyMetricsDetailed {
+                if spark.count >= 2 {
+                    Sparkline(values: spark,
+                              gradient: Gradient(colors: [StrandPalette.metricAmber.opacity(0.5),
+                                                           StrandPalette.metricAmber]))
+                        .frame(height: 22).padding(.top, 2).accessibilityHidden(true)
+                } else {
+                    Color.clear.frame(height: 22).padding(.top, 2)
+                }
+            }
+        }
+        .padding(NoopMetrics.space3)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(FrostedCardSurface(tint: StrandPalette.metricAmber,
+                                       cornerRadius: 20, washStrength: 0.76))
+
+        return Group {
+            if let metric {
+                NavigationLink(value: TabRoute.metricSourced(key: metric.key, source: metric.source)) {
+                    tile
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens active, resting and total energy details")
+            } else {
+                tile
+            }
+        }
+    }
+
+    private func energyKpiMini(_ label: String, _ value: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label.uppercased())
+                .font(StrandFont.overlineScaled(7)).tracking(0.6)
+                .foregroundStyle(StrandPalette.textTertiary)
+            Text(kcalText(value, includesUnit: false))
+                .font(StrandFont.captionNumber)
+                .foregroundStyle(value == nil ? StrandPalette.textTertiary : StrandPalette.textPrimary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func ktile(_ label: String, _ value: String, _ unit: String, _ tint: Color, _ frac: Double?,
@@ -1166,7 +1307,7 @@ struct LiquidTodayView: View {
             }
         }
         .padding(NoopMetrics.space3)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             FrostedCardSurface(
                 tint: tint,
@@ -1387,13 +1528,18 @@ struct LiquidTodayView: View {
         // caloriesSpark (windowed caloriesByDay).
         let appleRowsForSpark = await appleA
         var winImportedKcal: [String: Double] = [:]
+        var winImportedRestingKcal: [String: Double] = [:]
         for r in appleRowsForSpark where r.day >= sparkCutoff && r.day <= selectedDayKey {
             if let k = r.activeKcal { winImportedKcal[r.day] = max(winImportedKcal[r.day] ?? 0, k) }
+            if let k = r.basalKcal { winImportedRestingKcal[r.day] = max(winImportedRestingKcal[r.day] ?? 0, k) }
         }
         var winOnDeviceKcal: [String: Double] = [:]
         for r in sparkRows { if let k = r.activeKcalEst { winOnDeviceKcal[r.day] = k } }
-        let energyKcalSpark: [(String, Double)] = Set(winImportedKcal.keys).union(winOnDeviceKcal.keys).sorted()
-            .compactMap { day in (winImportedKcal[day] ?? winOnDeviceKcal[day]).map { (day, $0) } }
+        let totalKcalSpark: [(String, Double)] = Set(winImportedKcal.keys)
+            .intersection(winImportedRestingKcal.keys).sorted().compactMap { day in
+                guard let active = winImportedKcal[day], let resting = winImportedRestingKcal[day] else { return nil }
+                return (day, active + resting)
+            }
         kSparks = [
             "recovery": sparkRows.compactMap { r in r.recovery.map { (r.day, $0) } },
             "strain": sparkRows.compactMap { r in r.strain.map { (r.day, $0) } },
@@ -1402,10 +1548,13 @@ struct LiquidTodayView: View {
             "spo2": sparkRows.compactMap { r in r.spo2Pct.map { (r.day, $0) } },
             "resp_rate": sparkRows.compactMap { r in r.respRateBpm.map { (r.day, $0) } },
             "steps": sparkRows.compactMap { r in r.steps.map { (r.day, Double($0)) } },
-            // #616: the Calories tile drew no trend line — this dict had no matching entry, so windowedSpark
-            // returned []. Bank the imported-first calorie series (built above) so the sparkline matches the
-            // tile's imported-first number and a Health-Connect / Apple-only user gets a trend.
-            "energy_kcal": energyKcalSpark,
+            // Energy series stay source-isolated. Apple Total contains paired days only; a partial day
+            // retains its one component; the strap key is its indivisible combined estimate. Never merge
+            // any of these into a synthetic cross-source number.
+            "total_kcal": totalKcalSpark,
+            "active_kcal": winImportedKcal.sorted { $0.key < $1.key }.map { ($0.key, $0.value) },
+            "basal_kcal": winImportedRestingKcal.sorted { $0.key < $1.key }.map { ($0.key, $0.value) },
+            "energy_kcal": winOnDeviceKcal.sorted { $0.key < $1.key }.map { ($0.key, $0.value) },
             "steps_est": stepsSeries.filter { $0.day >= sparkCutoff && $0.day <= selectedDayKey }
                 .map { ($0.day, $0.value) },
             "sleep_performance": restSeries.filter { $0.day >= sparkCutoff && $0.day <= selectedDayKey }
@@ -1428,10 +1577,12 @@ struct LiquidTodayView: View {
         // Imported Apple Health steps for the SELECTED day (max across rows), the middle tier between the
         // measured strap count and the motion estimate. Health Connect is Android-only, so apple-health is
         // the sole import source on iOS. Mirrors Android `stepsForDay` (#377).
-        importedStepsDay = (await appleA).filter { $0.day == selectedDayKey }.compactMap { $0.steps }.max()
-        // #616: same-day imported active energy — the calorie fallback when the strap banked no on-device
-        // HR estimate for the day, so the tile/card/detail agree (imported-first, mirrors steps).
-        importedActiveKcalDay = (await appleA).filter { $0.day == selectedDayKey }.compactMap { $0.activeKcal }.max()
+        importedStepsDay = appleRowsForSpark.filter { $0.day == selectedDayKey }.compactMap { $0.steps }.max()
+        // Keep the Apple Health components together. The derived Total is resolved later only when both
+        // exist; a partial row never borrows the strap's combined estimate to complete itself.
+        let selectedAppleEnergy = appleRowsForSpark.last(where: { $0.day == selectedDayKey })
+        importedActiveKcalDay = selectedAppleEnergy?.activeKcal
+        importedRestingKcalDay = selectedAppleEnergy?.basalKcal
         hrValues = (await hrA).map { $0.bpm }
         workouts = await wkA
 
@@ -1534,20 +1685,40 @@ struct LiquidTodayView: View {
     private var stepsDetailKey: String { stepsDetailMetric?.key ?? "steps_est" }
     private var stepsDetailSource: String { stepsDetailMetric?.source ?? "my-whoop" }
 
-    // #616: calories resolved IMPORTED-FIRST (the day's imported Apple active energy — the figure these
-    // surfaces already showed — else NOOP's on-device HR estimate `activeKcalEst`) — one number across the
-    // tile, card and the detail it taps to. Mirrors the steps precedence above.
-    private var caloriesCount: Double? {
-        importedActiveKcalDay ?? displayDay?.activeKcalEst
+    private var energyBreakdown: DailyEnergyBreakdown {
+        DailyEnergyBreakdown.resolve(
+            appleActiveKcal: importedActiveKcalDay,
+            appleRestingKcal: importedRestingKcalDay,
+            wearableCombinedKcal: displayDay?.activeKcalEst
+        )
     }
 
     private var caloriesDetailMetric: MetricDescriptor? {
-        MetricCatalog.todayCaloriesMetric(hasImportedKcal: importedActiveKcalDay != nil,
-                                          hasOnDeviceKcal: displayDay?.activeKcalEst != nil)
+        MetricCatalog.todayEnergyMetric(for: energyBreakdown)
     }
 
     private var caloriesDetailKey: String { caloriesDetailMetric?.key ?? "energy_kcal" }
     private var caloriesDetailSource: String { caloriesDetailMetric?.source ?? "my-whoop" }
+
+    private var energyHeadlineLabel: String {
+        switch energyBreakdown.coverage {
+        case .completeApple:        return String(localized: "Total kcal")
+        case .activeOnly:           return String(localized: "Active kcal")
+        case .restingOnly:          return String(localized: "Resting kcal")
+        case .combinedEstimateOnly: return String(localized: "Combined estimate")
+        case .unavailable:          return String(localized: "No energy data")
+        }
+    }
+
+    private var energyStateText: String {
+        switch energyBreakdown.coverage {
+        case .completeApple:        return String(localized: "Apple Health · active + resting")
+        case .activeOnly:           return String(localized: "Partial · resting energy unavailable")
+        case .restingOnly:          return String(localized: "Partial · active energy unavailable")
+        case .combinedEstimateOnly: return String(localized: "NOOP combined estimate · split unavailable")
+        case .unavailable:          return String(localized: "No complete energy source yet")
+        }
+    }
 
     private var liveHour: Double {
         let c = Calendar.current.dateComponents([.hour, .minute], from: Date())
@@ -1559,6 +1730,12 @@ struct LiquidTodayView: View {
     private func frac(_ v: Double?) -> Double? { v.map { max(0, min(1, $0 / 100)) } }
     private func fracOver(_ v: Double?, _ over: Double) -> Double? { v.map { max(0, min(1, $0 / over)) } }
     private func intText(_ v: Double?) -> String { v.map { String(Int($0.rounded())) } ?? "–" }
+
+    private func kcalText(_ v: Double?, includesUnit: Bool = true) -> String {
+        guard let v else { return "–" }
+        let n = v.formatted(.number.grouping(.automatic).precision(.fractionLength(0)))
+        return includesUnit ? "\(n) kcal" : n
+    }
 
     private func unitText(_ v: Double?, _ unit: String, decimals: Int = 0) -> String {
         guard let v else { return "–" }

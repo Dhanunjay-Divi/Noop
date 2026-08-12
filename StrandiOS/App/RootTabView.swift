@@ -48,7 +48,7 @@ struct RootTabView: View {
     /// at its root — the other half of the iOS convention #197/#198 left unserved (an at-root re-tap was
     /// a no-op). Threaded into each tab's root via `\.scrollToTopSignal`; ScreenScaffold / LiquidTodayView
     /// scroll to their top anchor when their tab's token changes.
-    @State private var scrollTop: [Int] = Array(repeating: 0, count: 4)
+    @State private var scrollTop: [Int] = Array(repeating: 0, count: IPhonePrimaryTab.allCases.count)
     /// Which More-tab groups are expanded (S2). Insights + Body stay open at rest; Data + App collapse to
     /// just their header until tapped. Persisted (#860 item 2): the user's open/closed choice must SURVIVE
     /// leaving and re-entering the More tab (and relaunch), not reset to the seed every visit. Backed by an
@@ -63,17 +63,18 @@ struct RootTabView: View {
     private static var initialSelectedTab: Int {
         #if DEBUG
         let args = CommandLine.arguments
-        if args.contains("--demo-more-route") { return 3 }
+        if args.contains("--demo-more-route") { return IPhonePrimaryTab.more.rawValue }
         if let i = args.firstIndex(of: "--demo-tab"), i + 1 < args.count {
             switch args[i + 1].lowercased() {
-            case "trends": return 1
-            case "sleep":  return 2
-            case "more":   return 3
-            default:       return 0
+            case "trends":  return IPhonePrimaryTab.trends.rawValue
+            case "friends": return IPhonePrimaryTab.friends.rawValue
+            case "sleep":   return IPhonePrimaryTab.sleep.rawValue
+            case "more":    return IPhonePrimaryTab.more.rawValue
+            default:        return IPhonePrimaryTab.today.rawValue
             }
         }
         #endif
-        return 0
+        return IPhonePrimaryTab.today.rawValue
     }
 
     /// Screenshot/visual-regression hook for the real compact navigation state. Production always
@@ -90,7 +91,7 @@ struct RootTabView: View {
     /// DEBUG can start on a real pushed More destination, which verifies the production shell and
     /// persistent bottom bar together rather than taking a misleading isolated-screen screenshot.
     private static var initialTabPaths: [NavigationPath] {
-        var paths = Array(repeating: NavigationPath(), count: 4)
+        var paths = Array(repeating: NavigationPath(), count: IPhonePrimaryTab.allCases.count)
         #if DEBUG
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--demo-more-route"),
@@ -98,7 +99,7 @@ struct RootTabView: View {
            let destination = MoreDestination.demo(named: args[i + 1]) {
             var path = NavigationPath()
             path.append(destination)
-            paths[3] = path
+            paths[IPhonePrimaryTab.more.rawValue] = path
         }
         #endif
         return paths
@@ -130,10 +131,25 @@ struct RootTabView: View {
         // LiquidToday / some pushed pages unable to expose their final card above the overlay.
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
-                tab(todayTabRoot, "Today", "square.grid.2x2", path: $tabPaths[0], scrollSignal: scrollTop[0]).tag(0)
-                tab(TrendsView(), "Trends", "chart.line.uptrend.xyaxis", path: $tabPaths[1], scrollSignal: scrollTop[1]).tag(1)
-                tab(SleepView(), "Sleep", "bed.double", path: $tabPaths[2], scrollSignal: scrollTop[2]).tag(2)
-                moreTab(path: $tabPaths[3], scrollSignal: scrollTop[3]).tag(3)
+                tab(todayTabRoot, "Today", "square.grid.2x2",
+                    path: $tabPaths[IPhonePrimaryTab.today.rawValue],
+                    scrollSignal: scrollTop[IPhonePrimaryTab.today.rawValue])
+                    .tag(IPhonePrimaryTab.today.rawValue)
+                tab(TrendsView(), "Trends", "chart.line.uptrend.xyaxis",
+                    path: $tabPaths[IPhonePrimaryTab.trends.rawValue],
+                    scrollSignal: scrollTop[IPhonePrimaryTab.trends.rawValue])
+                    .tag(IPhonePrimaryTab.trends.rawValue)
+                tab(FriendsView(), "Friends", "person.2.fill",
+                    path: $tabPaths[IPhonePrimaryTab.friends.rawValue],
+                    scrollSignal: scrollTop[IPhonePrimaryTab.friends.rawValue])
+                    .tag(IPhonePrimaryTab.friends.rawValue)
+                tab(SleepView(), "Sleep", "bed.double",
+                    path: $tabPaths[IPhonePrimaryTab.sleep.rawValue],
+                    scrollSignal: scrollTop[IPhonePrimaryTab.sleep.rawValue])
+                    .tag(IPhonePrimaryTab.sleep.rawValue)
+                moreTab(path: $tabPaths[IPhonePrimaryTab.more.rawValue],
+                        scrollSignal: scrollTop[IPhonePrimaryTab.more.rawValue])
+                    .tag(IPhonePrimaryTab.more.rawValue)
             }
             .tint(StrandPalette.accent)
             .toolbar(.hidden, for: .tabBar)
@@ -235,7 +251,7 @@ struct RootTabView: View {
             quickActionDestination(action)
         }
         // Honour a router request. Ordinary destinations enter through More's OWN NavigationStack so
-        // the persistent four-tab glass bar behaves identically whether a page was opened from the More
+        // the persistent five-tab glass bar behaves identically whether a page was opened from the More
         // index, a dashboard card, or a deep link. Only short tasks and immersive sessions use sheets.
         .onChange(of: router.requestedDestination) { _, dest in
             consumeRequestedDestination(dest)
@@ -298,11 +314,18 @@ struct RootTabView: View {
         guard let destination else { return }
         switch destination {
         case .today:
-            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selectedTab = 0 }
+            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
+                selectedTab = IPhonePrimaryTab.today.rawValue
+            }
         case .devices:
             routeToMore(.devices)
         case .friends:
-            routeToMore(.friends)
+            // Friends is a primary destination again. The screen itself remains explicit that sharing
+            // requires an invitation-only self-hosted server; selecting the tab does not create an
+            // account, upload anything, or imply a NOOP-operated social cloud.
+            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
+                selectedTab = IPhonePrimaryTab.friends.rawValue
+            }
         case .insightsHub:
             routeToMore(.insightsHub)
         case .labBook:
@@ -312,13 +335,19 @@ struct RootTabView: View {
         case .rhythm:
             routeToMore(.rhythm)
         case .trends:
-            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selectedTab = 1 }
+            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
+                selectedTab = IPhonePrimaryTab.trends.rawValue
+            }
         case .sleep:
-            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selectedTab = 2 }
+            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
+                selectedTab = IPhonePrimaryTab.sleep.rawValue
+            }
         case .live, .activeWorkout:
             routeToMore(.live)
         case .liveSession:
-            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) { selectedTab = 0 }
+            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
+                selectedTab = IPhonePrimaryTab.today.rawValue
+            }
         case .journal:
             routeToMore(.insights)
         }
@@ -335,11 +364,11 @@ struct RootTabView: View {
         withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
             switch route {
             case .sleep:
-                tabPaths[2] = NavigationPath()
-                selectedTab = 2
+                tabPaths[IPhonePrimaryTab.sleep.rawValue] = NavigationPath()
+                selectedTab = IPhonePrimaryTab.sleep.rawValue
             case .today:
-                tabPaths[0] = NavigationPath()
-                selectedTab = 0
+                tabPaths[IPhonePrimaryTab.today.rawValue] = NavigationPath()
+                selectedTab = IPhonePrimaryTab.today.rawValue
             }
         }
     }
@@ -366,14 +395,14 @@ struct RootTabView: View {
     /// start a fresh More stack. This preserves both the persistent bar and normal back-button semantics.
     private func openMore(_ destination: MoreDestination) {
         withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
-            if selectedTab == 3 {
-                tabPaths[3].append(destination)
+            if selectedTab == IPhonePrimaryTab.more.rawValue {
+                tabPaths[IPhonePrimaryTab.more.rawValue].append(destination)
             } else {
                 var path = NavigationPath()
                 path.append(destination)
-                tabPaths[3] = path
+                tabPaths[IPhonePrimaryTab.more.rawValue] = path
             }
-            selectedTab = 3
+            selectedTab = IPhonePrimaryTab.more.rawValue
         }
     }
 
@@ -463,9 +492,6 @@ struct RootTabView: View {
             ScreenScaffold(title: "More", subtitle: "Everything else, one tap away",
                            onRefresh: { await repo.refresh() },
                            topBackground: liquidScaffoldSky()) {
-                moreFixedSection("Circle") {
-                    MoreRow("Friends", "person.2.fill", .friends)
-                }
                 moreSection("Insights") {
                     MoreRow("What Moves You", "wand.and.sparkles", .insightsHub)
                     MoreRow("Intelligence", "brain.head.profile", .intelligence)
@@ -596,37 +622,6 @@ struct RootTabView: View {
         }
     }
 
-    /// The private Circle is a single primary destination, so it stays visible instead of consuming
-    /// another persisted disclosure state. This also leaves the cross-platform MoreSectionPrefs
-    /// Insights/Body default unchanged.
-    private func moreFixedSection<Rows: View>(
-        _ title: String,
-        @ViewBuilder rows: @escaping () -> Rows
-    ) -> some View {
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(title)
-                    .font(StrandFont.overline)
-                    .tracking(StrandFont.overlineTracking)
-                    .textCase(.uppercase)
-                    .foregroundStyle(StrandPalette.textSecondary)
-                Spacer()
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(StrandPalette.textTertiary)
-                    .accessibilityHidden(true)
-            }
-            NoopCard(padding: 0) {
-                VStack(spacing: 0) { rows() }
-                    .clipShape(
-                        RoundedRectangle(
-                            cornerRadius: NoopMetrics.cardRadius,
-                            style: .continuous
-                        )
-                    )
-            }
-        }
-    }
 }
 
 /// Every screen the More index links to, as a `Hashable` value the tab's `NavigationPath` can carry
@@ -634,14 +629,13 @@ struct RootTabView: View {
 /// per-screen chrome the old inline links applied lives at the single `navigationDestination(for:)`
 /// registration in `moreTab`.
 private enum MoreDestination: Hashable {
-    case friends, insightsHub, intelligence, coach, insights, explore, compare
+    case insightsHub, intelligence, coach, insights, explore, compare
     case devices, live, workouts, health, labBook, stress, breathe, intervals, rhythm
     case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport
     case alarms, automations, testCentre, siriShortcuts, settings
 
     @MainActor @ViewBuilder var destination: some View {
         switch self {
-        case .friends:         FriendsView()
         case .insightsHub:     InsightsHubView()
         case .intelligence:    IntelligenceView()
         case .coach:           CoachView()
@@ -675,7 +669,6 @@ private enum MoreDestination: Hashable {
     /// Deterministic screenshot routing for the real More navigation stack.
     static func demo(named rawName: String) -> Self? {
         switch rawName.lowercased() {
-        case "friends": return .friends
         case "devices": return .devices
         case "live": return .live
         case "workouts": return .workouts
@@ -855,10 +848,13 @@ private struct FloatingTabBar: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private struct Item: Identifiable { let title: LocalizedStringKey; let icon: String; let tag: Int; var id: Int { tag } }
-    private let nav = [Item(title: "Today", icon: "square.grid.2x2", tag: 0),
-                       Item(title: "Trends", icon: "chart.line.uptrend.xyaxis", tag: 1),
-                       Item(title: "Sleep", icon: "bed.double", tag: 2),
-                       Item(title: "More", icon: "ellipsis", tag: 3)]
+    private let nav = [
+        Item(title: "Today", icon: "square.grid.2x2", tag: IPhonePrimaryTab.today.rawValue),
+        Item(title: "Trends", icon: "chart.line.uptrend.xyaxis", tag: IPhonePrimaryTab.trends.rawValue),
+        Item(title: "Friends", icon: "person.2.fill", tag: IPhonePrimaryTab.friends.rawValue),
+        Item(title: "Sleep", icon: "bed.double", tag: IPhonePrimaryTab.sleep.rawValue),
+        Item(title: "More", icon: "ellipsis", tag: IPhonePrimaryTab.more.rawValue),
+    ]
 
     private var visuallyCompact: Bool { compact && !dynamicTypeSize.isAccessibilitySize }
     private var navigationGlassTint: Color {
@@ -888,16 +884,13 @@ private struct FloatingTabBar: View {
     }
 
     var body: some View {
-        // One frosted glass bar, four evenly-spaced tabs. The quick-action "+" now lives in the
+        // One frosted glass bar, five evenly-spaced tabs. The quick-action "+" now lives in the
         // top-right of each screen's header (balancing the profile avatar on the left).
-        HStack(spacing: 2) {
-            tabButton(nav[0])
-            tabButton(nav[1])
-            tabButton(nav[2])
-            tabButton(nav[3])
+        HStack(spacing: IPhonePrimaryTab.itemSpacing) {
+            ForEach(nav) { item in tabButton(item) }
         }
         .padding(.vertical, visuallyCompact ? 2 : 6)
-        .padding(.horizontal, visuallyCompact ? 7 : 8)
+        .padding(.horizontal, visuallyCompact ? IPhonePrimaryTab.compactInnerHorizontalPadding : 8)
         .frame(height: visuallyCompact ? 48 : 62)
         .background {
             Capsule()
@@ -919,9 +912,9 @@ private struct FloatingTabBar: View {
         )
         .shadow(color: .black.opacity(colorScheme == .dark ? 0.30 : 0.10),
                 radius: visuallyCompact ? 11 : 16, x: 0, y: visuallyCompact ? 5 : 8)
-        // The compact state also narrows the island, not just its height. Four 44pt hit regions still
-        // fit comfortably inside the 56pt side insets on every supported iPhone width.
-        .padding(.horizontal, visuallyCompact ? 56 : 18)
+        // The compact state also narrows the island, not just its height. Keep enough width for five
+        // primary destinations to retain at least 44pt hit regions on the narrowest supported iPhone.
+        .padding(.horizontal, visuallyCompact ? IPhonePrimaryTab.compactOuterHorizontalPadding : 18)
         .padding(.bottom, visuallyCompact ? 3 : 4)
         .animation(reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.28),
                    value: visuallyCompact)
@@ -954,8 +947,13 @@ private struct FloatingTabBar: View {
             }
             .foregroundStyle(navigationInk(active: active))
             .frame(maxWidth: .infinity)
-            .frame(minHeight: 44)
-            .padding(.horizontal, visuallyCompact ? 3 : 2)
+            .frame(minWidth: IPhonePrimaryTab.minimumTouchDimension)
+            .frame(minHeight: IPhonePrimaryTab.minimumTouchDimension)
+            // In compact mode the 44pt frame is the whole hit region. Padding outside it would make
+            // five buttons overflow the 320pt geometry even though each individual frame still tests 44pt.
+            .padding(.horizontal, visuallyCompact
+                ? IPhonePrimaryTab.compactItemHorizontalPadding
+                : 2)
             .background(
                 Capsule(style: .continuous)
                     .fill(active

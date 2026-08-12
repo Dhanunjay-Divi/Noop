@@ -122,13 +122,23 @@ struct AutomationsView: View {
                         minutes: eveningTimeBinding
                     )
                     rowDivider
-                    Text("Reminder banners never include scores or health values. They only invite you to open NOOP after a sync.")
+                    Text("Reminder banners never include scores or health values. Morning invites a Sleep and Recovery review; evening invites an Effort comparison and journal check-in.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 6)
                 }
+
+                #if os(iOS)
+                rowDivider
+                Text(backgroundRefreshSummary)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+                #endif
 
                 if notificationPermissionDenied {
                     rowDivider
@@ -214,6 +224,25 @@ struct AutomationsView: View {
         .frame(minHeight: 42)
         .padding(.vertical, 4)
     }
+
+    #if os(iOS)
+    private var backgroundRefreshSummary: String {
+        switch UIApplication.shared.backgroundRefreshStatus {
+        case .denied:
+            return String(localized: "Background App Refresh is off in iOS Settings. NOOP requests a catch-up when opened; Bluetooth events and Apple Health may still deliver separately when iOS permits.")
+        case .restricted:
+            return String(localized: "Background App Refresh is restricted on this iPhone. NOOP requests a catch-up when opened; Bluetooth events and Apple Health may still deliver separately when iOS permits.")
+        case .available:
+            break
+        @unknown default:
+            return String(localized: "Background refresh availability is unknown. NOOP requests a catch-up when opened.")
+        }
+        if let completed = BackgroundSyncScheduler.lastCompletedAt {
+            return String(localized: "Last background maintenance: \(relativeAgo(completed.timeIntervalSince1970)) ago. iOS controls future timing; opening NOOP requests a fresh catch-up.")
+        }
+        return String(localized: "Background refresh is best-effort and scheduled by iOS. Bluetooth and Apple Health may also deliver updates separately; opening NOOP requests a fresh catch-up.")
+    }
+    #endif
 
     // MARK: - Hydration reminders
 

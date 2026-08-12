@@ -54,7 +54,7 @@ private func metricAccent(_ m: MetricDescriptor) -> Color {
         return StrandPalette.metricRose
     case "spo2", "steps":
         return StrandPalette.metricCyan
-    case "energy_kcal", "active_kcal":
+    case "energy_kcal", "active_kcal", "basal_kcal", "total_kcal":
         return StrandPalette.metricAmber
     default:
         switch m.source {
@@ -478,6 +478,11 @@ struct MetricDetailView: View {
     @State private var heroAnimatedFraction: Double = 0
     /// Full ascending series for this metric — ALL history.
     @State private var series: [(day: String, value: Double)] = []
+    /// Source-isolated active/resting/total read for energy dossiers. Apple components are combined only
+    /// when both exist; a strap/wearable total remains one combined estimate with no invented split.
+    @State private var energyBreakdown = DailyEnergyBreakdown.resolve(
+        appleActiveKcal: nil, appleRestingKcal: nil, wearableCombinedKcal: nil)
+    @State private var energyBreakdownDay: String?
     /// day → the RAW source id that supplied that day's value (task #8). Loaded from `resolvedSeries`
     /// alongside `series` and used ONLY for the readings-table provenance column, so the plotted line
     /// (which rides `series`/`exploreSeries`) is never changed by adding source labels.
@@ -607,6 +612,9 @@ struct MetricDetailView: View {
 
     private var latest: (day: String, value: Double)? { series.last }
     private var education: MetricEducation { MetricKnowledge.education(for: metric) }
+    private var isEnergyMetric: Bool {
+        ["energy_kcal", "active_kcal", "basal_kcal", "total_kcal"].contains(metric.key)
+    }
 
     /// Daily physiology gets a seven-reading cold start. Weekly, slow-moving model estimates would take
     /// nearly two months at that threshold, so three prior weekly points is the honest useful minimum.
@@ -723,6 +731,7 @@ struct MetricDetailView: View {
                     // scores) or a big SF-Rounded headline, floated over the domain's starfield,
                     // with the range pill. Then the frosted chart / stat tiles / correlations.
                     heroHeader(effectiveRange: effRange, windowed: win, windowFellBack: fellBack)
+                    if isEnergyMetric { energyBreakdownCard }
                     personalReadCard
                     metricMeaningCard
                     guidanceCard
@@ -818,6 +827,11 @@ struct MetricDetailView: View {
         // chart still rides `series` above, so this only ADDS the source column, never moves the line.
         let resolution = await repo.resolvedSeries(key: metric.key, source: metric.source)
         guard !Task.isCancelled else { return }
+        if isEnergyMetric {
+            await loadEnergyBreakdown(for: selectedSeries.last?.day,
+                                      selectedValue: selectedSeries.last?.value)
+            guard !Task.isCancelled else { return }
+        }
         series = selectedSeries
         sourceByDay = Dictionary(resolution.points.map { ($0.day, $0.source) },
                                  uniquingKeysWith: { first, _ in first })
@@ -841,6 +855,27 @@ struct MetricDetailView: View {
             if !s.isEmpty, !others.contains(where: { $0.metric.id == other.id }) {
                 others.append((other, s))
             }
+        }
+    }
+
+    /// Load exactly the partition the dossier represents. Apple details resolve from the two AppleDaily
+    /// columns; every non-Apple detail treats its plotted value as one combined estimate. This deliberately
+    /// does not pull an Apple component into a strap dossier (or vice versa).
+    private func loadEnergyBreakdown(for day: String?, selectedValue: Double?) async {
+        energyBreakdownDay = day
+        guard let day else {
+            energyBreakdown = .resolve(appleActiveKcal: nil, appleRestingKcal: nil,
+                                       wearableCombinedKcal: nil)
+            return
+        }
+        if metric.source == Repository.appleHealthSource {
+            let row = (await repo.appleDailyRows()).last(where: { $0.day == day })
+            energyBreakdown = .resolve(appleActiveKcal: row?.activeKcal,
+                                       appleRestingKcal: row?.basalKcal,
+                                       wearableCombinedKcal: nil)
+        } else {
+            energyBreakdown = .resolve(appleActiveKcal: nil, appleRestingKcal: nil,
+                                       wearableCombinedKcal: selectedValue)
         }
     }
 
@@ -1002,6 +1037,124 @@ struct MetricDetailView: View {
     }
 
     // MARK: Personal read + education + safe guidance
+
+    /// A source-auditable calorie breakdown before the generic trend analysis. The large value uses the
+    /// same hierarchy as Today (Total when complete; otherwise the one real component or Combined estimate),
+    /// while the smaller Active/Resting KPIs expose exactly which pieces were present.
+    private var energyBreakdownCard: some View {
+        let breakdown = energyBreakdown
+        return NoopCard(tint: StrandPalette.metricAmber) {
+            VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                HStack(spacing: NoopMetrics.space2) {
+                    MetricGlyph("flame.circle.fill", size: 30)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(localized: "Calories").uppercased()).strandOverline()
+                        Text(energyBreakdownDay.map { String(localized: "as of \($0)") }
+                             ?? String(localized: "No data"))
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                    Spacer(minLength: NoopMetrics.space2)
+                    MetricInfoButton(title: String(localized: "More information: Energy"),
+                                     tint: StrandPalette.metricAmber) {
+                        showingMetricExplanation = true
+                    }
+                }
+
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(energyNumber(breakdown.headlineKcal))
+                        .font(StrandFont.number(38))
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                    Text(breakdown.headlineKcal == nil ? "" : "kcal")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    Spacer(minLength: 0)
+                }
+                Text(energyHeadlineLabel(breakdown).uppercased())
+                    .font(StrandFont.overline).tracking(StrandFont.overlineTracking)
+                    .foregroundStyle(StrandPalette.metricAmber)
+
+                HStack(spacing: NoopMetrics.space3) {
+                    energyComponentCard(title: String(localized: "Active"),
+                                        subtitle: String(localized: "Above resting burn"),
+                                        value: breakdown.activeKcal,
+                                        symbol: "figure.run")
+                    energyComponentCard(title: String(localized: "Resting"),
+                                        subtitle: String(localized: "Baseline metabolism"),
+                                        value: breakdown.restingKcal,
+                                        symbol: "bed.double.fill")
+                }
+
+                HStack(alignment: .top, spacing: NoopMetrics.space2) {
+                    Image(systemName: breakdown.isPartial ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(breakdown.isPartial
+                            ? StrandPalette.statusWarning : StrandPalette.metricAmber)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(energyStateText(breakdown))
+                            .font(StrandFont.subhead.weight(.semibold))
+                            .foregroundStyle(StrandPalette.textPrimary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func energyComponentCard(title: String, subtitle: String,
+                                     value: Double?, symbol: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(StrandPalette.metricAmber)
+                    .accessibilityHidden(true)
+                Text(title.uppercased())
+                    .font(StrandFont.overlineScaled(8)).tracking(0.7)
+                    .foregroundStyle(StrandPalette.textSecondary)
+            }
+            Text(energyNumber(value))
+                .font(StrandFont.number(21))
+                .foregroundStyle(value == nil ? StrandPalette.textTertiary : StrandPalette.textPrimary)
+                .lineLimit(1).minimumScaleFactor(0.65)
+            Text(value == nil ? String(localized: "Unavailable") : subtitle)
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .lineLimit(2)
+        }
+        .padding(NoopMetrics.space3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(StrandPalette.metricAmber.opacity(0.07),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .strokeBorder(StrandPalette.metricAmber.opacity(0.16), lineWidth: 1))
+    }
+
+    private func energyNumber(_ value: Double?) -> String {
+        guard let value else { return "—" }
+        return value.formatted(.number.grouping(.automatic).precision(.fractionLength(0)))
+    }
+
+    private func energyHeadlineLabel(_ breakdown: DailyEnergyBreakdown) -> String {
+        switch breakdown.coverage {
+        case .completeApple:        return String(localized: "Total kcal")
+        case .activeOnly:           return String(localized: "Active kcal")
+        case .restingOnly:          return String(localized: "Resting kcal")
+        case .combinedEstimateOnly: return String(localized: "Combined estimate")
+        case .unavailable:          return String(localized: "No energy data")
+        }
+    }
+
+    private func energyStateText(_ breakdown: DailyEnergyBreakdown) -> String {
+        switch breakdown.coverage {
+        case .completeApple:        return String(localized: "Complete Apple Health breakdown")
+        case .activeOnly:           return String(localized: "Partial: resting energy is unavailable")
+        case .restingOnly:          return String(localized: "Partial: active energy is unavailable")
+        case .combinedEstimateOnly: return String(localized: "Combined estimate: component split unavailable")
+        case .unavailable:          return String(localized: "No energy data for this day")
+        }
+    }
 
     private var personalReadCard: some View {
         let read = baselineRead

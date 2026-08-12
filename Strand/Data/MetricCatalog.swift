@@ -1,6 +1,91 @@
 import Foundation
 import StrandAnalytics
 
+/// One day's energy read, resolved without mixing source partitions.
+///
+/// Apple Health exposes two non-overlapping components (`activeEnergyBurned` and
+/// `basalEnergyBurned`). Their sum is a truthful total only when BOTH are present.
+/// `DailyMetric.activeKcalEst`, despite its legacy name, is a combined HR-derived
+/// estimate over observed seconds; it must never be labelled Active Energy or added
+/// to either Apple component. Keeping this rule in one pure value type prevents the
+/// Today cards and metric dossier from drifting into different calorie arithmetic.
+struct DailyEnergyBreakdown: Equatable {
+    enum Coverage: Equatable {
+        case completeApple
+        case activeOnly
+        case restingOnly
+        case combinedEstimateOnly
+        case unavailable
+    }
+
+    let activeKcal: Double?
+    let restingKcal: Double?
+    let totalKcal: Double?
+    let coverage: Coverage
+
+    /// The number that receives the large type in a compact KPI card. A partial
+    /// Apple read leads with the component that actually exists; it never invents
+    /// a total. Strap-only data leads with the combined estimate as one indivisible
+    /// number because its active/resting split is not mathematically available.
+    var headlineKcal: Double? {
+        totalKcal ?? activeKcal ?? restingKcal
+    }
+
+    var isPartial: Bool {
+        coverage == .activeOnly || coverage == .restingOnly
+    }
+
+    /// Resolve Apple Health first when it supplied either component. The wearable
+    /// total is used only when Apple supplied neither, which is the no-double-counting
+    /// boundary: values from different producers are never assembled into one total.
+    static func resolve(appleActiveKcal: Double?, appleRestingKcal: Double?,
+                        wearableCombinedKcal: Double?) -> DailyEnergyBreakdown {
+        let active = valid(appleActiveKcal, allowsZero: true)
+        let resting = valid(appleRestingKcal, allowsZero: false)
+        let combined = valid(wearableCombinedKcal, allowsZero: false)
+
+        switch (active, resting) {
+        case let (.some(a), .some(r)):
+            return DailyEnergyBreakdown(activeKcal: a, restingKcal: r,
+                                        totalKcal: a + r, coverage: .completeApple)
+        case let (.some(a), .none):
+            return DailyEnergyBreakdown(activeKcal: a, restingKcal: nil,
+                                        totalKcal: nil, coverage: .activeOnly)
+        case let (.none, .some(r)):
+            return DailyEnergyBreakdown(activeKcal: nil, restingKcal: r,
+                                        totalKcal: nil, coverage: .restingOnly)
+        case (.none, .none):
+            guard let combined else {
+                return DailyEnergyBreakdown(activeKcal: nil, restingKcal: nil,
+                                            totalKcal: nil, coverage: .unavailable)
+            }
+            return DailyEnergyBreakdown(activeKcal: nil, restingKcal: nil,
+                                        totalKcal: combined, coverage: .combinedEstimateOnly)
+        }
+    }
+
+    /// Sum only paired, finite Apple components. Kept as a pure seam for the
+    /// Repository's derived Total Energy trend and its no-double-counting tests.
+    static func appleTotalSeries(active: [(day: String, value: Double)],
+                                 resting: [(day: String, value: Double)]) -> [(day: String, value: Double)] {
+        let activeByDay = Dictionary(active.filter { valid($0.value, allowsZero: true) != nil }
+            .map { ($0.day, $0.value) }, uniquingKeysWith: { _, newer in newer })
+        let restingByDay = Dictionary(resting.filter { valid($0.value, allowsZero: false) != nil }
+            .map { ($0.day, $0.value) }, uniquingKeysWith: { _, newer in newer })
+        return Set(activeByDay.keys).intersection(restingByDay.keys).sorted().compactMap { day in
+            guard let a = activeByDay[day], let r = restingByDay[day] else { return nil }
+            return (day, a + r)
+        }
+    }
+
+    private static func valid(_ value: Double?, allowsZero: Bool) -> Double? {
+        guard let value, value.isFinite else { return nil }
+        let isValid = allowsZero ? value >= 0 : value > 0
+        guard isValid else { return nil }
+        return value
+    }
+}
+
 /// One interrogable metric: how to fetch it (key+source), how to label/format it, and whether
 /// higher is better (drives delta tinting). The Metric Explorer + Compare are built from this list.
 struct MetricDescriptor: Identifiable, Hashable {
@@ -201,6 +286,9 @@ enum MetricCatalog {
         d("hr_zones_all_min", String(localized: "HR Zones (All)"), "Effort", "min", "my-whoop", "heart.text.square", 0, nil),
         d("strength_min", String(localized: "Strength Activity Time"), "Effort", "min", "my-whoop", "dumbbell", 0, nil),
         d("active_kcal", String(localized: "Active Energy"), "Effort", "kcal", "apple-health", "flame.fill", 0, nil),
+        d("basal_kcal", String(localized: "Resting Energy"), "Effort", "kcal", "apple-health", "bed.double.fill", 0, nil),
+        d("total_kcal", String(localized: "Total Energy"), "Effort", "kcal", "apple-health", "flame.circle.fill", 0, nil,
+          String(localized: "Active plus resting energy, shown only when Apple Health supplied both components.")),
 
         // ── Health / Body
         d("weight", String(localized: "Weight"), "Health", "kg", "apple-health", "scalemass", 1, nil),
@@ -267,6 +355,22 @@ enum MetricCatalog {
         if hasImportedKcal { return metric(key: "active_kcal", source: "apple-health") }
         if hasOnDeviceKcal { return metric(key: "energy_kcal", source: "my-whoop") }
         return metric(key: "energy_kcal", source: "my-whoop")
+    }
+
+    /// Route an energy KPI to the series represented by its large number. A complete Apple split opens
+    /// Total Energy; a partial split opens its one real component; a strap-only combined estimate opens
+    /// the existing NOOP/strap energy series. This keeps card, chart title, units and arithmetic aligned.
+    static func todayEnergyMetric(for breakdown: DailyEnergyBreakdown) -> MetricDescriptor? {
+        switch breakdown.coverage {
+        case .completeApple:
+            return metric(key: "total_kcal", source: "apple-health")
+        case .activeOnly:
+            return metric(key: "active_kcal", source: "apple-health")
+        case .restingOnly:
+            return metric(key: "basal_kcal", source: "apple-health")
+        case .combinedEstimateOnly, .unavailable:
+            return metric(key: "energy_kcal", source: "my-whoop")
+        }
     }
 
     /// Localized display name for a catalog category, mapped AT THE RENDER SITE only. The

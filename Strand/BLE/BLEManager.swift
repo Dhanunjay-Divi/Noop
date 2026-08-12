@@ -3093,9 +3093,10 @@ public final class BLEManager: NSObject, ObservableObject {
     /// The single gated entry point for every historical-offload kick. Applies the connection/state
     /// gate AND the BackfillPolicy rate-limiter for the trigger. On a go: records the attempt time
     /// (persisted) and starts the offload.
-    func requestSync(_ trigger: BackfillTrigger) {
+    @discardableResult
+    func requestSync(_ trigger: BackfillTrigger) -> Bool {
         guard BLEManager.shouldRunPeriodicBackfill(
-            connected: state.connected, bonded: state.bonded, backfilling: backfilling) else { return }
+            connected: state.connected, bonded: state.bonded, backfilling: backfilling) else { return false }
         let now = Date().timeIntervalSince1970
         let last = UserDefaults.standard.object(forKey: BLEManager.backfillLastAtKey) as? Double
         // #160: a future-dated-clock strap's recurring automatic offloads (#928/#1012) are near-useless
@@ -3112,11 +3113,53 @@ public final class BLEManager: NSObject, ObservableObject {
                                            emptyOffloadStreak: consecutiveEmptyOffloads),
                                        clockUntrusted: clockUntrusted) else {
             log("Backfill: \(trigger) skipped (rate-limited; last \(last.map { Int(now - $0) } ?? -1)s ago)")
-            return
+            return false
         }
         if beginBackfill() {
             UserDefaults.standard.set(now, forKey: BLEManager.backfillLastAtKey)
+            return true
         }
+        return false
+    }
+
+    /// Request a rate-limited history offload and keep a caller's finite background execution window
+    /// alive until that offload completes or the supplied deadline/cancellation wins. A skipped request
+    /// is successful no-work (disconnected, already caught up, or rate-limited); a started transfer that
+    /// times out/disconnects returns false but is not cancelled—the CoreBluetooth restoration lane can
+    /// continue receiving it and the next foreground/background opportunity reconciles again.
+    func requestSyncAndWait(_ trigger: BackfillTrigger,
+                            timeoutSeconds: TimeInterval = 25) async -> Bool {
+        let priorCompletion = state.lastSyncedAt
+        let wasAlreadyRunning = state.backfilling
+        let started = wasAlreadyRunning || requestSync(trigger)
+        guard started else { return true }
+
+        let timeoutNanos = UInt64(max(1, timeoutSeconds) * 1_000_000_000)
+        let deadline = DispatchTime.now().uptimeNanoseconds &+ timeoutNanos
+        var idleSince: UInt64?
+
+        while DispatchTime.now().uptimeNanoseconds < deadline {
+            guard !Task.isCancelled else { return false }
+            if state.backfilling {
+                idleSince = nil
+            } else if state.lastSyncedAt != priorCompletion {
+                // Leave a short quiet window for the bounded auto-continue path to re-kick another slice.
+                // If it does, `backfilling` becomes true and the wait resumes; if not, this transfer is done.
+                let now = DispatchTime.now().uptimeNanoseconds
+                if let idleSince, now &- idleSince >= 1_000_000_000 { return true }
+                if idleSince == nil { idleSince = now }
+            } else {
+                // It stopped without HISTORY_COMPLETE (disconnect or idle watchdog).
+                return false
+            }
+
+            do {
+                try await Task.sleep(nanoseconds: 200_000_000)
+            } catch {
+                return false
+            }
+        }
+        return false
     }
 
     /// Periodic-timer callback: routes through the rate-limited requestSync entry point.

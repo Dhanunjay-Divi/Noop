@@ -172541,30 +172541,30 @@
         }
       }
     },
-    "Reminder banners never include scores or health values. They only invite you to open NOOP after a sync.": {
+    "Reminder banners never include scores or health values. Morning invites a Sleep and Recovery review; evening invites an Effort comparison and journal check-in.": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Erinnerungsbanner enthalten niemals Punkte oder Gesundheitswerte. Sie laden Sie erst nach einer Synchronisierung zum Öffnen von NOOP ein."
+            "value": "Erinnerungsbanner enthalten niemals Punktzahlen oder Gesundheitswerte. Morgens laden sie zur Überprüfung von Schlaf und Erholung ein; abends zum Vergleich der Anstrengung und zu einem Tagebuch-Check-in."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Los banners recordatorios nunca incluyen puntuaciones ni valores de salud. Sólo te invitan a abrir NOOP después de una sincronización."
+            "value": "Los avisos de recordatorio nunca incluyen puntuaciones ni valores de salud. Por la mañana invitan a revisar el sueño y la recuperación; por la noche, a comparar el esfuerzo y registrar una nota en el diario."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Les bannières de rappel n’incluent jamais de scores ou de valeurs de santé. Ils vous invitent uniquement à ouvrir NOOP après une synchronisation."
+            "value": "Les rappels n’incluent jamais de scores ni de valeurs de santé. Le matin, ils invitent à consulter le sommeil et la récupération ; le soir, à comparer l’effort et à noter votre journée."
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Os banners de lembrete nunca incluem pontuações ou valores de saúde. Apenas o convidam a abrir o NOOP após uma sincronização."
+            "value": "Os lembretes nunca incluem pontuações nem valores de saúde. De manhã, convidam a rever o Sono e a Recuperação; à noite, a comparar o Esforço e a registar o seu dia."
           }
         }
       }
@@ -174977,30 +174977,30 @@
         }
       }
     },
-    "Enter the server address and one-time code in Noop Friends.": {
+    "Open the Friends tab in Noop and enter the server address and one-time code.": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Geben Sie die Serveradresse und den Einmalcode in Noop Friends ein."
+            "value": "Öffne in Noop den Tab „Freunde“ und gib die Serveradresse sowie den Einmalcode ein."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ingrese la dirección del servidor y el código de un solo uso en Noop Friends."
+            "value": "Abre la pestaña Amigos en Noop e introduce la dirección del servidor y el código de un solo uso."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Entrez l'adresse du serveur et le code à usage unique dans Noop Friends."
+            "value": "Ouvrez l’onglet Amis dans Noop, puis saisissez l’adresse du serveur et le code à usage unique."
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Introduza o endereço do servidor e o código único em Noop Friends."
+            "value": "Abra o separador Amigos no Noop e introduza o endereço do servidor e o código de utilização única."
           }
         }
       }
