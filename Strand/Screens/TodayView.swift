@@ -3161,10 +3161,13 @@ struct TodayView: View {
     @ViewBuilder
     private var metricsSection: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            // The section header keeps its "14-day trend" trailing label; an Edit control sits beside it
-            // to open the local layout editor (#251). No new nav destination, a sheet over Today.
+            // This grid is the selected day's snapshot. Historical movement lives in Trends and metric
+            // detail; the editor beside it only chooses which snapshot tiles appear and their order.
             HStack(alignment: .firstTextBaseline) {
-                SectionHeader("Key Metrics", overline: "\(selectedDayOverline)", trailing: String(localized: "14-day trend"))
+                SectionHeader("Key Metrics", overline: "\(selectedDayOverline)",
+                              trailing: selectedDayOffset == 0
+                                ? String(localized: "Today's snapshot")
+                                : selectedLogicalDay.formatted(date: .abbreviated, time: .omitted))
                 Button {
                     showingMetricsEditor = true
                 } label: {
@@ -3279,7 +3282,7 @@ struct TodayView: View {
     @ViewBuilder
     private func keyMetricTile(_ metric: KeyMetric) -> some View {
         let d = displayDay
-        let aLatest = appleDays.last
+        let aSelected = appleDays.last(where: { $0.day == selectedDayKey })
         let systemImage = metric.icon
         switch metric {
         case .charge:
@@ -3302,9 +3305,7 @@ struct TodayView: View {
                     ?? carried.map { $0.caption }
                     ?? Self.needsStrapCaption,
                 accent: d?.recovery.map { StrandPalette.recoveryColor($0) }
-                    ?? carried.map { StrandPalette.recoveryColor($0.value) } ?? StrandPalette.textPrimary,
-                sparkline: sparks["recovery"],
-                sparkColor: StrandPalette.accent
+                    ?? carried.map { StrandPalette.recoveryColor($0.value) } ?? StrandPalette.textPrimary
             )
         case .effort:
             // Unscored TODAY → a short "building" hint instead of the "of N" axis caption, so a
@@ -3317,8 +3318,6 @@ struct TodayView: View {
                 caption: effort != nil ? String(localized: "of \(UnitFormatter.effortScaleMax(effortScale))")
                                           : (buildingHint(.effort) ?? String(localized: "of \(UnitFormatter.effortScaleMax(effortScale))")),
                 accent: effort.map { StrandPalette.effortTint(fraction: $0 / StrainScorer.maxStrain) } ?? StrandPalette.textPrimary,
-                sparkline: sparks["strain"],
-                sparkColor: StrandPalette.strain066,
                 // Inline ⓘ in the tile header (not a corner overlay) so it never sits over the value (#495).
                 accessory: { scoreInfoButton(.effort) }
             )
@@ -3335,9 +3334,6 @@ struct TodayView: View {
                 caption: restScore != nil ? restCaption(d)
                     : (buildingHint(.rest) ?? restCaption(d) ?? Self.needsStrapCaption),
                 accent: restScore.map { StrandPalette.recoveryColor($0) } ?? StrandPalette.textPrimary,
-                // The Rest composite (0–100) trend, not raw sleep minutes, tracks the score above (#614).
-                sparkline: sparks["sleep_performance"],
-                sparkColor: StrandPalette.metricPurple,
                 // Inline ⓘ in the tile header (not a corner overlay) so it never sits over the value (#495).
                 accessory: { scoreInfoButton(.rest) }
             )
@@ -3351,9 +3347,7 @@ struct TodayView: View {
                 value: hrv.value,
                 systemImage: systemImage,
                 caption: hrv.caption,
-                accent: hrv.value == "—" ? StrandPalette.textPrimary : StrandPalette.metricPurple,
-                sparkline: sparks["hrv"],
-                sparkColor: StrandPalette.metricPurple
+                accent: hrv.value == "—" ? StrandPalette.textPrimary : StrandPalette.metricPurple
             )
         case .restingHr:
             let rhr = carriedVital(unit: "bpm", today: d?.restingHr.map(Double.init),
@@ -3363,9 +3357,7 @@ struct TodayView: View {
                 value: rhr.value,
                 systemImage: systemImage,
                 caption: rhr.caption,
-                accent: rhr.value == "—" ? StrandPalette.textPrimary : StrandPalette.metricRose,
-                sparkline: sparks["rhr"],
-                sparkColor: StrandPalette.metricRose
+                accent: rhr.value == "—" ? StrandPalette.textPrimary : StrandPalette.metricRose
             )
         case .bloodOxygen:
             // PER-FIELD carry (perField: lastSpo2Day): the whole-row `lastScoredRecoveryDay` carry lands on a
@@ -3379,28 +3371,20 @@ struct TodayView: View {
                 value: spo2.value,
                 systemImage: systemImage,
                 caption: spo2.caption,
-                accent: spo2.value == "—" ? StrandPalette.textPrimary : StrandPalette.metricCyan,
-                sparkline: sparks["spo2"],
-                sparkColor: StrandPalette.metricCyan
+                accent: spo2.value == "—" ? StrandPalette.textPrimary : StrandPalette.metricCyan
             )
         case .respiratory:
-            // Respiratory keeps its sparkline-tail fallback for a NON-carrying today (a sparse-but-recent
-            // value still reads); when carrying, the prior scored night's respiratory is shown + stamped.
+            // Respiratory uses only the selected day (or the explicit overnight carry), never a trailing
+            // series tail that could belong to another date.
             let respCarry = carriedVital(unit: "rpm", today: d?.respRateBpm,
                                          prior: { $0.respRateBpm }, format: { String(format: "%.1f", $0) })
-            let respValue = respCarry.value == "—" && lastScoredRecoveryDay == nil
-                ? latestString("resp_rate", decimals: 1) : respCarry.value
+            let respValue = respCarry.value
             StatTile(
                 label: "Respiratory",
                 value: respValue,
                 systemImage: systemImage,
-                // When the sparkline-tail fallback surfaces a real value (respValue ≠ ", " while respCarry
-                // was empty), use the plain "rpm" caption, not carriedVital's empty "After tonight's sleep"
-                // state, so the caption matches the shown number (H10 mustn't mislabel a real value).
-                caption: (respValue != "—" && respCarry.value == "—") ? "rpm" : respCarry.caption,
-                accent: respValue == "—" ? StrandPalette.textPrimary : StrandPalette.accent,
-                sparkline: sparks["resp_rate"],
-                sparkColor: StrandPalette.accent
+                caption: respCarry.caption,
+                accent: respValue == "—" ? StrandPalette.textPrimary : StrandPalette.accent
             )
         case .steps:
             // Prefer a REAL step count: the strap's own @57 counter (DailyMetric.steps, WHOOP 5/MG),
@@ -3435,8 +3419,6 @@ struct TodayView: View {
                     : (estSteps != nil ? stepsEstimateCaption
                        : (needsCalibration ? stepsCalibrationCaption : String(localized: "today"))),
                 accent: (realSteps != nil || estSteps != nil) ? StrandPalette.metricCyan : StrandPalette.textPrimary,
-                sparkline: sparks["steps"],
-                sparkColor: StrandPalette.metricCyan,
                 // H6, an estimated (or awaiting-calibration) steps tile carries a small ⚙︎ that opens the
                 // steps-calibration sheet (the SAME one Settings hosts), so a WHOOP 4.0 user can tune or
                 // hand-set the estimate from here even before enough auto-fit days exist (#589).
@@ -3455,12 +3437,10 @@ struct TodayView: View {
         case .weight:
             StatTile(
                 label: "Weight",
-                value: weightTile(aLatest?.weightKg).value,
+                value: weightTile(aSelected?.weightKg).value,
                 systemImage: systemImage,
-                caption: weightTile(aLatest?.weightKg).caption,
-                accent: StrandPalette.accent,
-                sparkline: sparks["weight"],
-                sparkColor: StrandPalette.accent
+                caption: weightTile(aSelected?.weightKg).caption,
+                accent: StrandPalette.accent
             )
         case .calories:
             energyKeyMetricTile(systemImage: systemImage)
@@ -3518,16 +3498,48 @@ struct TodayView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: (c) LAST WORKOUTS, SAME grid, uniform 104pt workout tiles.
+    // MARK: (c) SELECTED-DAY WORKOUTS, SAME grid, uniform 104pt workout tiles.
+
+    private var selectedDayWorkouts: [WorkoutRow] {
+        (WorkoutDateWindow.localDay(dayKey: selectedDayKey)
+            ?? WorkoutDateWindow.localDay(containing: selectedLogicalDay))
+            .filter(workouts)
+            .sorted { $0.startTs > $1.startTs }
+    }
 
     @ViewBuilder
     private var workoutsSection: some View {
-        if !workouts.isEmpty {
-            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-                SectionHeader("Latest Workouts", overline: "Activity",
-                              trailing: String(localized: "\(workouts.count) total"))
+        let scoped = selectedDayWorkouts
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader(selectedDayOffset == 0 ? "Today's Workouts" : "Workouts",
+                          overline: "Activity",
+                          trailing: selectedDayOffset == 0
+                            ? (scoped.count == 1
+                                ? String(localized: "1 session")
+                                : String(localized: "\(scoped.count) sessions"))
+                            : selectedLogicalDay.formatted(date: .abbreviated, time: .omitted))
+            if scoped.isEmpty {
+                NoopCard(tint: StrandPalette.effortColor) {
+                    HStack(alignment: .top, spacing: NoopMetrics.space3) {
+                        MetricGlyph("figure.run", size: 36)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(selectedDayOffset == 0
+                                 ? String(localized: "No workout today")
+                                 : String(localized: "No workout logged that day"))
+                                .font(StrandFont.headline)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Text(selectedDayOffset == 0
+                                 ? String(localized: "A tracked or imported session will appear here automatically.")
+                                 : String(localized: "Choose another day or open Workouts to browse your log."))
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            } else {
                 LazyVGrid(columns: grid, alignment: .leading, spacing: NoopMetrics.gap) {
-                    ForEach(Array(workouts.prefix(6).enumerated()), id: \.offset) { _, w in
+                    ForEach(Array(scoped.enumerated()), id: \.offset) { _, w in
                         StatTile(
                             label: "\(WorkoutSource.displaySport(w.sport))",
                             value: workoutDuration(w),
@@ -4107,11 +4119,12 @@ struct TodayView: View {
         // full 24h to the next midnight. The logical day rolls at 04:00 (Repository.logicalDayStart), so
         // in the small hours after midnight today still starts at yesterday's midnight rather than
         // blanking to an empty new-calendar-day axis (#144).
-        let dayStart = Calendar.current.startOfDay(for: selectedLogicalDay)
-        let windowStart = Int(dayStart.timeIntervalSince1970)
+        let selectedCalendarWindow = WorkoutDateWindow.localDay(dayKey: selectedDayKey)
+            ?? WorkoutDateWindow.localDay(containing: selectedLogicalDay)
+        let windowStart = selectedCalendarWindow.lowerBound
         let windowEnd: Int = selectedDayOffset == 0
             ? Int(Date().timeIntervalSince1970)
-            : Int((Calendar.current.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart).timeIntervalSince1970)
+            : selectedCalendarWindow.upperBound
         let hrPointsLocal = await repo.hrBuckets(from: windowStart, to: windowEnd, bucketSeconds: 300)
             .map { TrendPoint(date: Date(timeIntervalSince1970: TimeInterval($0.ts)), value: $0.bpm) }
         hrPoints = hrPointsLocal
@@ -4266,16 +4279,16 @@ struct TodayView: View {
         return unit.isEmpty ? n : "\(n) \(unit)"
     }
 
-    /// The Weight tile's display string + an honest caption ("from profile" only on the fallback).
-    /// Prefers a real Apple-Health reading (today's daily, else the "weight" series' newest point so a
-    /// sparse-but-recent value still renders); when neither carries a weight, falls back to the user's
-    /// self-reported profile weight instead of ", " (#204). Always formatted through the shared
-    /// `UnitFormatter` so the Imperial/Metric toggle reaches this tile. Mirrors Android's `weightTile`.
+    /// The Weight tile is selected-day scoped like every other Today KPI. An older Health reading or the
+    /// static profile value belongs in detail/profile, not in a card labelled as today's snapshot.
     private func weightTile(_ appleWeightKg: Double?) -> (value: String, caption: String) {
-        if let kg = appleWeightKg ?? sparks["weight"]?.last {
-            return (UnitFormatter.massFromKilograms(kg, unit: massUnit), String(localized: "latest"))
+        if let kg = appleWeightKg {
+            return (UnitFormatter.massFromKilograms(kg, unit: massUnit),
+                    selectedDayOffset == 0 ? String(localized: "today") : selectedDayOverline)
         }
-        return (UnitFormatter.massFromKilograms(profile.weightKg, unit: massUnit), String(localized: "from profile"))
+        return ("—", selectedDayOffset == 0
+            ? String(localized: "No reading today")
+            : String(localized: "No reading that day"))
     }
 
     // MARK: - Derived text

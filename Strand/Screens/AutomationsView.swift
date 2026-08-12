@@ -297,16 +297,16 @@ struct AutomationsView: View {
             icon: "drop.fill",
             title: String(localized: "Water reminders"),
             blurb: String(localized: "Gentle, optional prompts during your chosen hours. iOS schedules the phone reminders; a WHOOP buzz needs a fresh, worn and encrypted live connection."),
-            active: hydrationReminderEnabled
+            active: hydrationReminderEnabled || hydrationStrapBuzzEnabled
         ) {
             VStack(spacing: 0) {
                 ToggleRow(
-                    label: String(localized: "Remind me to drink water"),
-                    help: String(localized: "Off by default. Turning this on asks for notification access. Water logging remains a separate choice."),
+                    label: String(localized: "Phone notification"),
+                    help: String(localized: "Shows a private reminder through iOS. Off by default; turning this on asks for notification access."),
                     isOn: hydrationReminderToggle
                 )
 
-                if hydrationReminderEnabled {
+                if hydrationReminderEnabled || hydrationStrapBuzzEnabled {
                     rowDivider
                     stepperRow(
                         label: String(localized: "Remind every"),
@@ -326,17 +326,11 @@ struct AutomationsView: View {
                         label: String(localized: "Active until"),
                         minutes: hydrationEndBinding
                     )
-                    rowDivider
-                    ToggleRow(
-                        label: String(localized: "Also buzz WHOOP"),
-                        help: String(localized: "Best effort only while NOOP has a fresh, worn, bonded and encrypted live connection. One short buzz; never a guaranteed background alert."),
-                        isOn: hydrationStrapBuzzToggle
-                    )
-                    if hydrationStrapBuzzEnabled && !notifMasterOn {
+                    if !hydrationReminderEnabled {
                         rowDivider
-                        Text("Wrist alerts are off. Turn on the master switch below before WHOOP can buzz; phone reminders remain independent.")
+                        Text("Strap-only reminders use the schedule below. They do not need notification permission, but iOS cannot guarantee a Bluetooth buzz while NOOP is suspended or terminated.")
                             .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.statusWarning)
+                            .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 6)
@@ -360,6 +354,21 @@ struct AutomationsView: View {
                     Text("The active start is included and the end is excluded. Choose matching times for an all-day schedule.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                }
+                rowDivider
+                ToggleRow(
+                    label: String(localized: "Buzz WHOOP"),
+                    help: String(localized: "A separate best-effort channel while NOOP has a fresh, worn, bonded and encrypted connection. One short buzz."),
+                    isOn: hydrationStrapBuzzToggle
+                )
+                if hydrationStrapBuzzEnabled && !notifMasterOn {
+                    rowDivider
+                    Text("Wrist alerts are off. Turn on the master switch below before WHOOP can buzz; phone reminders remain independent.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.statusWarning)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 6)

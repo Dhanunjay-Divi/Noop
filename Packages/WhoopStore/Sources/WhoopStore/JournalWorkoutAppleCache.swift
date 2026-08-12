@@ -251,6 +251,33 @@ extension WhoopStore {
         }
     }
 
+    /// Workouts whose recorded span overlaps the half-open interval `[from, to)`.
+    ///
+    /// The older `workouts` read is intentionally start-time based and remains unchanged for history
+    /// pagination. Daily dashboards need overlap semantics instead: a session that starts before local
+    /// midnight and ends after it belongs to both touched calendar days. Keeping this predicate in SQLite
+    /// avoids loading years of history merely to filter one selected day in Swift.
+    public func workoutsOverlapping(deviceId: String, from: Int, to: Int,
+                                    limit: Int) async throws -> [WorkoutRow] {
+        guard to > from else { return [] }
+        return try syncRead { db in
+            try Row.fetchAll(db, sql: """
+                SELECT startTs, endTs, sport, source, durationS, energyKcal, avgHr, maxHr,
+                       strain, distanceM, zonesJSON, notes, steps FROM workout
+                WHERE deviceId = ? AND startTs < ?
+                  AND (CASE WHEN endTs > startTs THEN endTs ELSE startTs + 1 END) > ?
+                ORDER BY startTs ASC LIMIT ?
+                """, arguments: [deviceId, to, from, limit])
+                .map {
+                    WorkoutRow(startTs: $0["startTs"], endTs: $0["endTs"], sport: $0["sport"],
+                               source: $0["source"], durationS: $0["durationS"],
+                               energyKcal: $0["energyKcal"], avgHr: $0["avgHr"], maxHr: $0["maxHr"],
+                               strain: $0["strain"], distanceM: $0["distanceM"],
+                               zonesJSON: $0["zonesJSON"], notes: $0["notes"], steps: $0["steps"])
+                }
+        }
+    }
+
     /// Sum per-session steps for one source in a half-open local-day interval. Because the workout
     /// natural key is upserted, importing the same file again replaces its session instead of double-counting.
     public func sumWorkoutSteps(deviceId: String, from: Int, to: Int) async throws -> Int {

@@ -27,7 +27,10 @@ final class LiveActivityController {
     /// live link, not the sticky "paired" flag) and a heart rate is present; ends the moment the link
     /// drops. Throttled to ~once every 2 s so we stay well under the Live Activity update budget.
     func update(bpm: Int?, recovery: Int?, connected: Bool, effort: Int? = nil) {
-        guard authInfo.areActivitiesEnabled else { return }
+        guard authInfo.areActivitiesEnabled else {
+            if activity != nil { Task { await end() } }
+            return
+        }
 
         // Re-adopt an activity that outlived a previous app session. ActivityKit keeps Live Activities
         // alive across launches/relaunches, but a fresh controller starts with `activity == nil`, so

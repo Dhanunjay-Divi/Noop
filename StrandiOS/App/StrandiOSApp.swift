@@ -31,9 +31,16 @@ struct StrandiOSApp: App {
     /// Chart data-colour style (Titanium / Classic throwback). Re-colours gauges + charts.
     @AppStorage(ChartStyle.storageKey) private var chartStyleRaw = ChartStyle.titanium.rawValue
     @AppStorage("noop.acceptedTermsVersion") private var acceptedTermsVersion = ""
+    /// ActivityKit owns Lock Screen + Dynamic Island as one Live Activity surface. Observe both privacy
+    /// choices at the root so disabling it ends the pill immediately and daily scores are included only
+    /// after a separate explicit opt-in.
+    @AppStorage(UnitPrefs.liveActivityKey) private var liveActivityEnabled = true
+    @AppStorage(UnitPrefs.liveActivityChargeKey) private var liveActivityShowsCharge = true
+    @AppStorage(UnitPrefs.liveActivityEffortKey) private var liveActivityShowsEffort = true
 
     init() {
         PuffinExperiment.migrateContinuousHrvOvernightDefault()
+        HydrationReminders.migrateIndependentChannelsIfNeeded()
         #if DEBUG
         // DEBUG-only promo-screenshot harness: when launched with `--demo-hour <Int>`, pin Today to that
         // hour's day-cycle scene + a per-hour stat frame. No-op (active stays nil) when the arg is absent.
@@ -167,9 +174,11 @@ struct StrandiOSApp: App {
                     let day = Repository.widgetAnchor(days: model.repo.days)
                     liveActivity.update(
                         bpm: model.live.connected ? (model.bpm ?? model.live.heartRate) : nil,
-                        recovery: day?.recovery.map { Int($0.rounded()) },
+                        recovery: liveActivityShowsCharge
+                            ? day?.recovery.map { Int($0.rounded()) } : nil,
                         connected: model.live.connected,
-                        effort: day?.strain.map { Int($0.rounded()) }
+                        effort: liveActivityShowsEffort
+                            ? day?.strain.map { Int($0.rounded()) } : nil
                     )
                 }
                 // End the Live Activity the moment the link drops, even if no further HR tick arrives.
@@ -179,9 +188,37 @@ struct StrandiOSApp: App {
                     let day = Repository.widgetAnchor(days: model.repo.days)
                     liveActivity.update(
                         bpm: isConnected ? (model.bpm ?? model.live.heartRate) : nil,
-                        recovery: day?.recovery.map { Int($0.rounded()) },
+                        recovery: liveActivityShowsCharge
+                            ? day?.recovery.map { Int($0.rounded()) } : nil,
                         connected: isConnected,
-                        effort: day?.strain.map { Int($0.rounded()) }
+                        effort: liveActivityShowsEffort
+                            ? day?.strain.map { Int($0.rounded()) } : nil
+                    )
+                }
+                .onChange(of: liveActivityEnabled, initial: true) { _, enabled in
+                    guard !enabled else { return }
+                    Task { await liveActivity.end() }
+                }
+                .onChange(of: liveActivityShowsCharge) { _, showCharge in
+                    guard liveActivityEnabled else { return }
+                    let day = Repository.widgetAnchor(days: model.repo.days)
+                    liveActivity.update(
+                        bpm: model.live.connected ? (model.bpm ?? model.live.heartRate) : nil,
+                        recovery: showCharge ? day?.recovery.map { Int($0.rounded()) } : nil,
+                        connected: model.live.connected,
+                        effort: liveActivityShowsEffort
+                            ? day?.strain.map { Int($0.rounded()) } : nil
+                    )
+                }
+                .onChange(of: liveActivityShowsEffort) { _, showEffort in
+                    guard liveActivityEnabled else { return }
+                    let day = Repository.widgetAnchor(days: model.repo.days)
+                    liveActivity.update(
+                        bpm: model.live.connected ? (model.bpm ?? model.live.heartRate) : nil,
+                        recovery: liveActivityShowsCharge
+                            ? day?.recovery.map { Int($0.rounded()) } : nil,
+                        connected: model.live.connected,
+                        effort: showEffort ? day?.strain.map { Int($0.rounded()) } : nil
                     )
                 }
                 // #911/#759: republish the Home/Lock-Screen widget whenever the dashboard caches actually
@@ -336,9 +373,10 @@ private struct iOSRootView: View {
     @AppStorage("noop.lastSeenChangelogVersion") private var lastSeenChangelog = ""
     @AppStorage("noop.acceptedTermsVersion") private var acceptedTerms = ""
     @AppStorage("noop.acceptedTermsAt") private var acceptedTermsAt = ""
-    /// Intentionally process-scoped: the trial disclosure appears on every cold launch,
-    /// without creating an account or persisting another consent identifier.
-    @State private var trialNoticeAcknowledgedThisLaunch = false
+    /// Local-only build marker. It contains no account or health data and makes the preview disclosure
+    /// appear once per genuinely newer app build instead of once per cold process launch.
+    @AppStorage(TrialNoticePolicy.acknowledgedBuildStorageKey)
+    private var acknowledgedTrialBuild = ""
     @State private var showWhatsNew = false
 
     var body: some View {
@@ -390,14 +428,15 @@ private struct iOSRootView: View {
                     .transition(.opacity)
                     .zIndex(2)
             }
-            // Trial disclosure sits above Terms/onboarding so it is the first thing a tester sees
-            // on every cold launch. The DEBUG demo harness bypasses it for deterministic captures.
+            // Trial disclosure sits above Terms/onboarding so it is the first thing a tester sees on a
+            // fresh install or newer build. The DEBUG demo harness bypasses it for deterministic captures.
             if TrialNoticePolicy.shouldPresent(
-                acknowledgedThisLaunch: trialNoticeAcknowledgedThisLaunch,
+                acknowledgedBuildIdentifier: acknowledgedTrialBuild,
+                currentBuildIdentifier: TrialNoticePolicy.currentBuildIdentifier(),
                 demoBypass: demoBypass
             ) {
                 TrialNoticeView(onContinue: {
-                    trialNoticeAcknowledgedThisLaunch = true
+                    acknowledgedTrialBuild = TrialNoticePolicy.currentBuildIdentifier()
                 })
                 .transition(.opacity)
                 .zIndex(3)
@@ -405,7 +444,7 @@ private struct iOSRootView: View {
         }
         .animation(.easeInOut(duration: 0.35), value: onboarded)
         .animation(.easeInOut(duration: 0.35), value: acceptedTerms)
-        .animation(.easeInOut(duration: 0.35), value: trialNoticeAcknowledgedThisLaunch)
+        .animation(.easeInOut(duration: 0.35), value: acknowledgedTrialBuild)
         .sheet(isPresented: $showWhatsNew) {
             WhatsNewView(onClose: {
                 lastSeenChangelog = AppChangelog.currentVersion
@@ -422,7 +461,7 @@ private struct iOSRootView: View {
             UpdateStore.shared.seedWhatsNewIfNeeded()
         }
         .onChange(of: acceptedTerms) { _, _ in showWhatsNewIfDue() }
-        .onChange(of: trialNoticeAcknowledgedThisLaunch) { _, _ in showWhatsNewIfDue() }
+        .onChange(of: acknowledgedTrialBuild) { _, _ in showWhatsNewIfDue() }
     }
 
     /// DEBUG: launched with --demo-seed, skip the first-run gates (onboarding / terms / What's New) so the
@@ -437,12 +476,21 @@ private struct iOSRootView: View {
 
     private func showWhatsNewIfDue() {
         if demoBypass { return }
-        // Existing users who updated: their last-seen version is behind the current one.
-        if trialNoticeAcknowledgedThisLaunch
-            && onboarded && acceptedTerms == Terms.currentVersion
-            && lastSeenChangelog != AppChangelog.currentVersion {
-            showWhatsNew = true
-        }
+        // Existing users who updated: their last-seen release is genuinely behind the current one.
+        // Persist before presentation so an interactive swipe-dismiss or process termination cannot make
+        // the same release notes replay on the next launch. They remain manually available in Settings.
+        guard !TrialNoticePolicy.shouldPresent(
+            acknowledgedBuildIdentifier: acknowledgedTrialBuild,
+            currentBuildIdentifier: TrialNoticePolicy.currentBuildIdentifier(),
+            demoBypass: demoBypass
+        ), onboarded,
+           acceptedTerms == Terms.currentVersion,
+           TrialNoticePolicy.isNewerMarketingVersion(
+               AppChangelog.currentVersion,
+               than: lastSeenChangelog
+           ) else { return }
+        lastSeenChangelog = AppChangelog.currentVersion
+        showWhatsNew = true
     }
 }
 

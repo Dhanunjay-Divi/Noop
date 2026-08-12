@@ -109,7 +109,7 @@ private struct HealthFirstRunContent: View {
     private var hasLiveHR: Bool { displayHR != nil }
 
     var body: some View {
-        if !hasLiveHR {
+        if !hasLiveHR && !live.connected {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 // Even with no history yet, a freshly-connected strap can be told to sync now (#364) —
                 // so the control is reachable before the screen has any data to show.
@@ -117,6 +117,8 @@ private struct HealthFirstRunContent: View {
                 ComingSoon(what: "No biometrics yet. Import your WHOOP export (and Apple Health if you have it) in Data Sources to fill this in.")
             }
         } else {
+            // A connected first-time user must be able to reach the explicit Start Live HR control even
+            // before the first packet/history row exists. The control itself remains default-off.
             HealthSectionsStack()
         }
     }
@@ -227,6 +229,16 @@ private struct HeartRateSection: View {
     /// resets when the view is recreated, which is fine for a live trace.
     @State private var hrHistory: [LiveHRSample] = []
 
+    /// This card owns one foreground realtime lease only after the person explicitly starts it. The
+    /// choice is session-scoped: leaving Health releases the lease, and reopening never starts a
+    /// battery-heavier stream by surprise. Other owners (a workout, HRV reading, Live Session) keep
+    /// their own leases; this view never releases work it did not start.
+    @State private var liveTrackingOptedIn = false
+    /// Packet identity captured at Start. Cached BPM/R-R from before the tap never qualifies as Live;
+    /// the hero opens only after the transport accepts a newer sensor notification.
+    @State private var liveTrackingStartSequence: UInt64?
+    @State private var liveTrackingLatestSample: LiveState.HeartRateSample?
+
     /// The 1 Hz sampling clock for the hero trace (#941, reimplemented from ryanbr's PR). The buffer
     /// used to append only when `displayHR` CHANGED, but AppModel deliberately republishes `bpm` only
     /// when the smoothed median actually moves, so a steady heart rate banked ZERO points and the
@@ -293,22 +305,28 @@ private struct HeartRateSection: View {
     var body: some View {
         // Compute the derived live values ONCE per body pass and thread them into the
         // subviews, instead of re-evaluating heavy computed properties multiple times.
-        let displayHR = self.displayHR
+        let hasFreshPacket = liveTrackingOptedIn
+            && (liveTrackingLatestSample?.sequence ?? 0) > (liveTrackingStartSequence ?? UInt64.max)
+        let displayHR = hasFreshPacket ? self.displayHR : nil
         let hasLiveHR = displayHR != nil
         let fraction = hrFraction(displayHR)
         let zone = hrZone(fraction)
         let series = hrSeries(displayHR)
 
         return VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Heart Rate", overline: "Live",
-                          trailing: hrIsDerived ? String(localized: "from R-R") : nil)
+            SectionHeader("Heart Rate", overline: liveTrackingOptedIn ? "Live" : "Paused",
+                          trailing: liveTrackingOptedIn && hrIsDerived ? String(localized: "from R-R") : nil)
+
+            liveTrackingControl
 
             // The live HR hero is a flat WHOOP card tinted rose — heart-rate's metric accent.
             // No scenic starfield / bloom: fill contrast carries the edge (Apple-flat).
             ChartCard(
                 title: "Heart Rate",
-                subtitle: hrIsDerived ? String(localized: "Estimated from R-R interval")
-                    : (hasLiveHR ? String(localized: "Streaming live") : String(localized: "Awaiting strap")),
+                subtitle: liveTrackingOptedIn && hrIsDerived ? String(localized: "Estimated from R-R interval")
+                    : (hasLiveHR ? String(localized: "Streaming live")
+                       : (liveTrackingOptedIn ? String(localized: "Awaiting wearable")
+                          : String(localized: "Live display paused"))),
                 trailing: hasLiveHR ? "\(displayHR!) bpm" : "—",
                 tint: StrandPalette.metricRose
             ) {
@@ -319,9 +337,24 @@ private struct HeartRateSection: View {
                     ("Zone", hasLiveHR ? "Z\(zone)" : "—"),
                     ("% Max", hasLiveHR ? "\(Int((fraction * 100).rounded()))%" : "—"),
                     ("Max HR", "\(profile.hrMax)"),
-                    ("State", hasLiveHR ? String(localized: "STREAMING") : String(localized: "IDLE")),
+                    ("State", hasLiveHR ? String(localized: "STREAMING")
+                     : (liveTrackingOptedIn ? String(localized: "WAITING") : String(localized: "PAUSED"))),
                 ])
             }
+        }
+        .onDisappear { stopLiveTracking() }
+        .onChangeCompat(of: live.connected) { connected in
+            guard liveTrackingOptedIn else { return }
+            // A gap invalidates the last packet immediately. A reconnect re-arms this existing lease,
+            // never takes a second one, and waits for a genuinely newer packet before showing Live.
+            liveTrackingLatestSample = nil
+            liveTrackingStartSequence = live.heartRateSampleSequence
+            if connected { model.rearmRealtimeIfWanted() }
+        }
+        .onReceive(live.heartRateSamplePublisher) { sample in
+            guard liveTrackingOptedIn,
+                  sample.sequence > (liveTrackingStartSequence ?? UInt64.max) else { return }
+            liveTrackingLatestSample = sample
         }
         .onReceive(sampleTimer) { now in
             // Bank the CURRENT spike-filtered HR once a second, stamped with the tick's real wall-clock
@@ -329,10 +362,82 @@ private struct HeartRateSection: View {
             // on-change sampling drew through steady stretches (#941). The 30...220 physiological guard
             // mirrors the Android chart's existing range check; nil banks nothing (disconnect clears the
             // median on both platforms), so a stale value never flat-lines a dead trace.
-            guard let v = displayHR, (30...220).contains(v) else { return }
+            guard hasFreshPacket,
+                  let v = displayHR, (30...220).contains(v) else { return }
             hrHistory.append(LiveHRSample(date: now, bpm: Double(v)))
             if hrHistory.count > 180 { hrHistory.removeFirst(hrHistory.count - 180) }
         }
+    }
+
+    /// User-facing Start/Stop control for this Heart Rate card. Stopping pauses this live display and
+    /// releases only its own high-rate lease; connection, history sync, stored data, workouts, and the
+    /// independently opted-in Continuous HRV preference are deliberately untouched.
+    private var liveTrackingControl: some View {
+        NoopCard(tint: StrandPalette.metricRose) {
+            VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                HStack(alignment: .top, spacing: NoopMetrics.space3) {
+                    Image(systemName: liveTrackingOptedIn ? "waveform.path.ecg.rectangle.fill"
+                                                          : "waveform.path.ecg.rectangle")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(liveTrackingOptedIn
+                                         ? StrandPalette.metricRose : StrandPalette.textSecondary)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: NoopMetrics.space1) {
+                        Text(liveTrackingOptedIn ? "Live heart rate is on" : "Live heart rate is off")
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text(liveTrackingOptedIn
+                             ? "Showing the high-rate foreground stream on this screen."
+                             : "Your wearable stays connected and stored history continues to sync.")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Live tracking uses more wearable and phone battery. It stops when you leave this screen; workouts and other sessions manage their own streams.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                NoopButton(liveTrackingOptedIn ? "Stop Live HR" : "Start Live HR",
+                           systemImage: liveTrackingOptedIn ? "stop.fill" : "play.fill",
+                           kind: liveTrackingOptedIn ? .secondary : .primary,
+                           fullWidth: true) {
+                    liveTrackingOptedIn ? stopLiveTracking() : startLiveTracking()
+                }
+                // Stop always remains available. Start needs a live transport and should not compete
+                // with an active history offload.
+                .disabled(!liveTrackingOptedIn && (!live.connected || live.backfilling))
+                .accessibilityHint(liveTrackingOptedIn
+                    ? "Pauses this live display without disconnecting your wearable or deleting data."
+                    : (live.backfilling ? "Wait for history sync to finish."
+                       : "Starts high-rate heart rate while this screen is open."))
+
+                #if os(iOS)
+                Divider().overlay(StrandPalette.hairline)
+                LiveActivityPreferenceRow(compact: true)
+                #endif
+            }
+        }
+    }
+
+    private func startLiveTracking() {
+        guard live.connected, !live.backfilling, !liveTrackingOptedIn else { return }
+        liveTrackingStartSequence = live.heartRateSampleSequence
+        liveTrackingLatestSample = nil
+        liveTrackingOptedIn = true
+        hrHistory.removeAll(keepingCapacity: true)
+        model.startRealtimeHR()
+    }
+
+    private func stopLiveTracking() {
+        guard liveTrackingOptedIn else { return }
+        liveTrackingOptedIn = false
+        liveTrackingStartSequence = nil
+        liveTrackingLatestSample = nil
+        hrHistory.removeAll(keepingCapacity: true)
+        model.stopRealtimeHR()
     }
 
     /// The hero chart body: a tall, time-aware HR line tinted to the current zone, with a
@@ -379,6 +484,7 @@ private struct HeartRateSection: View {
     }
 
     private func zoneLabel(hasLiveHR: Bool, zone: Int, fraction: Double) -> String {
+        guard liveTrackingOptedIn else { return String(localized: "Paused") }
         guard hasLiveHR else { return String(localized: "Idle") }
         return String(localized: "Zone \(zone) · \(Int((fraction * 100).rounded()))%")
     }

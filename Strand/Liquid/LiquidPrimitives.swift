@@ -9,6 +9,22 @@
 import SwiftUI
 import StrandDesign
 
+// MARK: - Interaction budget
+
+/// The iOS shell sets this only while a vertically dominant content drag is active. Decorative liquid
+/// clocks pose at their current value during the gesture so scrolling owns the frame budget; the semantic
+/// value, layout, and hit targets are unchanged, and animation resumes as soon as the finger lifts.
+private struct LiquidInteractionInProgressKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var liquidInteractionInProgress: Bool {
+        get { self[LiquidInteractionInProgressKey.self] }
+        set { self[LiquidInteractionInProgressKey.self] = newValue }
+    }
+}
+
 // MARK: - Renderers (pure GraphicsContext drawing)
 
 enum LiquidRender {
@@ -228,6 +244,7 @@ struct LiquidVessel: View {
     var animated: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.liquidInteractionInProgress) private var interactionInProgress
     @ObservedObject private var motion = NoopMotionState.shared
     @State private var sim: LiquidSim
     @State private var splashes = 0
@@ -240,7 +257,11 @@ struct LiquidVessel: View {
     }
 
     var body: some View {
-        if animated && !motion.poseStill(reduceMotion) { gauge } else { staticGauge }
+        if animated && !motion.poseStill(reduceMotion) && !interactionInProgress {
+            gauge
+        } else {
+            staticGauge
+        }
     }
 
     private var gauge: some View {
@@ -283,11 +304,16 @@ struct LiquidTube: View {
     var animated: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.liquidInteractionInProgress) private var interactionInProgress
     @ObservedObject private var motion = NoopMotionState.shared
     @State private var sim = LiquidSim(target: 0)
 
     var body: some View {
-        if animated && !motion.poseStill(reduceMotion) { liveTube } else { staticTube }
+        if animated && !motion.poseStill(reduceMotion) && !interactionInProgress {
+            liveTube
+        } else {
+            staticTube
+        }
     }
 
     private var liveTube: some View {
@@ -320,10 +346,15 @@ struct LiquidThread: View {
     var animated: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.liquidInteractionInProgress) private var interactionInProgress
     @ObservedObject private var motion = NoopMotionState.shared
 
     var body: some View {
-        if animated && !motion.poseStill(reduceMotion) { liveThread } else { staticThread }
+        if animated && !motion.poseStill(reduceMotion) && !interactionInProgress {
+            liveThread
+        } else {
+            staticThread
+        }
     }
 
     private var liveThread: some View {

@@ -89,16 +89,10 @@ struct LiquidTodayView: View {
     @AppStorage(TodayLayoutPrefs.orderKey) private var sectionOrderRaw = ""
     @State private var showArrangeSheet = false
     private var sectionOrder: [TodaySection] { TodayLayoutPrefs.decodeOrder(sectionOrderRaw) }
-    // #430 parity: the Key-Metrics grid honours the SAME editor selection/order + Detailed-tiles switch as
-    // Android (byte-identical @AppStorage keys). `kSparks` holds the trailing-14-day series the detailed
-    // tiles graph (keyed by metric-catalog key), filled by the loader alongside everything else.
+    // The Key-Metrics grid honours the shared editor's selection/order. Today is intentionally a daily
+    // snapshot; historical sparklines and their window controls live in Trends and metric detail.
     @AppStorage(KeyMetricPrefs.layoutKey) private var keyMetricsRaw = ""
-    @AppStorage("today.keyMetricsDetailed") private var keyMetricsDetailed = false
-    /// The detailed graphs' trailing window — 2 days / 1 week / 2 weeks (shared key with Android). The
-    /// loader banks a day-keyed 14-day superset; render filters down, so a window change applies instantly.
-    @AppStorage("today.keyMetricsWindowDays") private var keyMetricsWindowDays = 14
     @State private var showKeyMetricsEditor = false
-    @State private var kSparks: [String: [(String, Double)]] = [:]
     private var enabledKeyMetrics: [KeyMetric] { KeyMetricPrefs.decodeEnabled(keyMetricsRaw) }
 
     // day navigation (0 = today, 1 = yesterday, …)
@@ -266,7 +260,10 @@ struct LiquidTodayView: View {
 
                 liquidRefreshIndicator   // grows in the revealed space; a vessel filling with the pull
 
-                VStack(alignment: .leading, spacing: 12) {
+                // Keep the first screen immediate and defer expensive lower sections (notably the
+                // raw-sample auto-workout scan) until they approach the viewport. This also lets SwiftUI
+                // retire offscreen liquid canvases instead of animating the whole dashboard while scrolling.
+                LazyVStack(alignment: .leading, spacing: 12) {
                     scene
                     // A raised illness/strain warning must remain visible on the default Today surface.
                     // Keep it pinned outside the reorderable section list so it cannot be moved below the
@@ -433,13 +430,17 @@ struct LiquidTodayView: View {
     /// Arm the refresh once the pull passes the threshold; FIRE it when the finger releases (the pull
     /// springs back toward zero). Guarded so it can't double-fire or re-trigger mid-refresh.
     private func handlePull(_ y: CGFloat) {
-        pullY = max(0, y)
+        let nextPullY = max(0, y)
+        // During ordinary upward scrolling the preference is negative, so both values are zero. Avoid
+        // assigning the same @State value on every scroll sample; this view owns the whole dashboard and
+        // a redundant write needlessly invalidates all of its cards while the finger is moving.
+        if abs(nextPullY - pullY) > 0.5 { pullY = nextPullY }
         guard !refreshing else { return }
-        if pullY >= pullThreshold, !refreshArmed {
+        if nextPullY >= pullThreshold, !refreshArmed {
             refreshArmed = true
             pullHaptic &+= 1
         }
-        if refreshArmed, pullY < 6 {
+        if refreshArmed, nextPullY < 6 {
             refreshArmed = false
             refreshing = true
             Task {
@@ -448,8 +449,12 @@ struct LiquidTodayView: View {
                 // so a pull while disconnected or mid-offload safely no-ops. The sync status chip owns the
                 // ongoing offload progress; the pull spinner stays short (the reload below).
                 ble.syncNow()
+                let previousSeq = repo.refreshSeq
                 await repo.refresh()
-                await load()
+                // A changed refreshSeq re-runs the keyed task above. Only an unchanged refresh needs an
+                // explicit reload (for raw intraday samples that don't alter the daily cache), preventing
+                // two concurrent copies of the same expensive Today load.
+                if repo.refreshSeq == previousSeq { await load() }
                 try? await Task.sleep(nanoseconds: 350_000_000)   // let the fill read as "done"
                 withAnimation(.easeOut(duration: 0.25)) { refreshing = false }
             }
@@ -1087,31 +1092,6 @@ struct LiquidTodayView: View {
 
     // MARK: - Key metrics grid
 
-    /// The chosen detailed-graph window's oldest day key (2 days / 1 week / 2 weeks ending on the
-    /// selected day). The loader banks a 14-day superset; render filters down so a window change in the
-    /// editor applies instantly, no reload.
-    private var sparkWindowCutoffKey: String {
-        let days = (keyMetricsWindowDays == 2 || keyMetricsWindowDays == 7) ? keyMetricsWindowDays : 14
-        let cal = Calendar.current
-        let anchor = cal.startOfDay(for: selectedLogicalDay)
-        return Repository.localDayKey(cal.date(byAdding: .day, value: -(days - 1), to: anchor) ?? anchor)
-    }
-
-    /// A metric's spark values inside the chosen window, oldest → newest.
-    private func windowedSpark(_ key: String) -> [Double] {
-        let cutoff = sparkWindowCutoffKey
-        return (kSparks[key] ?? []).filter { $0.0 >= cutoff }.map { $0.1 }
-    }
-
-    /// The Key-Metrics header's trailing label for the chosen detailed-graph window (Android twin).
-    private var trendWindowLabel: String {
-        switch keyMetricsWindowDays {
-        case 2: return String(localized: "2-day trend")
-        case 7: return String(localized: "7-day trend")
-        default: return String(localized: "14-day trend")
-        }
-    }
-
     private var keyMetricsSection: some View {
         // HRV / Resting HR (+ Blood Oxygen / Respiratory) tiles share the recovery vitals' per-field
         // today-first carry so they don't blank at the rollover while Recovery/Strain/Rest stay strictly
@@ -1120,8 +1100,10 @@ struct LiquidTodayView: View {
         let rhr = (displayDay?.restingHr ?? vitalsDay?.restingHr).map(Double.init)
         return VStack(spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                sectionHead("KEY METRICS", trailing: trendWindowLabel)
-                // #430 parity: the SAME editor the classic grid uses — selection + order + Detailed tiles.
+                sectionHead("KEY METRICS", trailing: selectedDayOffset == 0
+                    ? String(localized: "Today's snapshot")
+                    : selectedLogicalDay.formatted(date: .abbreviated, time: .omitted))
+                // The editor chooses metrics and order; trend exploration stays in detail/Trends.
                 Button { showKeyMetricsEditor = true } label: {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 12, weight: .semibold))
@@ -1133,7 +1115,7 @@ struct LiquidTodayView: View {
             // #430 parity: the grid honours the Key-Metrics editor (selection + order, all ten metrics)
             // instead of a hard-coded six — the bespoke Sleep-hours ktile gives way to the shared REST
             // score tile, aligning the liquid grid with the classic macOS grid and Android.
-            // Two columns give values, units and trends enough room to breathe on a phone. Three columns
+            // Two columns give values and units enough room to breathe on a phone. Three columns
             // made long labels and five-digit values compete for the same narrow sliver, which looked
             // like a diagnostic table rather than a premium daily dashboard.
             LazyVGrid(
@@ -1154,7 +1136,7 @@ struct LiquidTodayView: View {
 
     /// One editor-selected Key-Metric tile: the metric's value/tint/fill exactly as the old hard-coded
     /// tiles read them (Android's descriptor map is the twin), plus the metric-catalog `key` that names
-    /// both its 14-day spark series and its tap-through detail. Weight has no liquid value source yet —
+    /// its tap-through detail. Weight has no liquid value source yet —
     /// its tile reads "—" but still taps through to the weight trend detail (which has its own series).
     @ViewBuilder
     private func ktileFor(_ metric: KeyMetric, hrv: Double?, rhr: Double?) -> some View {
@@ -1208,7 +1190,6 @@ struct LiquidTodayView: View {
     private func energyKTile(symbol: String) -> some View {
         let breakdown = energyBreakdown
         let metric = caloriesDetailMetric
-        let spark = metric.map { windowedSpark($0.key) } ?? []
         let tile = VStack(alignment: .leading, spacing: NoopMetrics.space2) {
             HStack(alignment: .center, spacing: NoopMetrics.space2) {
                 MetricGlyph(symbol, size: 28)
@@ -1240,16 +1221,6 @@ struct LiquidTodayView: View {
                 energyKpiMini(String(localized: "Resting"), breakdown.restingKcal)
             }
 
-            if keyMetricsDetailed {
-                if spark.count >= 2 {
-                    Sparkline(values: spark,
-                              gradient: Gradient(colors: [StrandPalette.metricAmber.opacity(0.5),
-                                                           StrandPalette.metricAmber]))
-                        .frame(height: 22).padding(.top, 2).accessibilityHidden(true)
-                } else {
-                    Color.clear.frame(height: 22).padding(.top, 2)
-                }
-            }
         }
         .padding(NoopMetrics.space3)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1311,22 +1282,6 @@ struct LiquidTodayView: View {
                 // Preserve the two-column baseline without drawing a fake zero/progress sliver.
                 Color.clear.frame(height: 7).accessibilityHidden(true)
             }
-            // #430 parity: DETAILED tiles grow the trend graph under the bar, tinted to the metric and
-            // windowed to the editor's 2-day / 1-week / 2-week choice (the Android twin). A metric with no
-            // windowed series keeps a clear placeholder of the same height so every tile in a detailed row
-            // stays equal-height with its bars aligned.
-            if keyMetricsDetailed {
-                let spark = key.map { windowedSpark($0) } ?? []
-                if spark.count >= 2 {
-                    Sparkline(values: spark,
-                              gradient: Gradient(colors: [tint.opacity(0.5), tint]))
-                        .frame(height: 22)
-                        .padding(.top, 6)
-                        .accessibilityHidden(true)
-                } else {
-                    Color.clear.frame(height: 22).padding(.top, 6)
-                }
-            }
         }
         .padding(NoopMetrics.space3)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1354,23 +1309,51 @@ struct LiquidTodayView: View {
         }
     }
 
-    // MARK: - Last workouts
+    // MARK: - Selected-day workouts
 
     private var lastWorkoutsSection: some View {
         VStack(spacing: 8) {
-            sectionHead("LAST WORKOUTS", trailing: "\(workouts.count) total")
-            if let w = workouts.first {
-                NavigationLink(value: TabRoute.workouts) { workoutCard(w) }
-                    .buttonStyle(LiquidPressStyle())
-            } else {
-                card {
-                    Text("No workouts yet")
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            sectionHead(selectedDayOffset == 0 ? "TODAY'S WORKOUTS" : "WORKOUTS",
+                        trailing: selectedDayOffset == 0
+                            ? sessionCountLabel(workouts.count)
+                            : selectedLogicalDay.formatted(date: .abbreviated, time: .omitted))
+            if !workouts.isEmpty {
+                ForEach(Array(workouts.enumerated()), id: \.offset) { _, workout in
+                    NavigationLink(value: TabRoute.workouts) { workoutCard(workout) }
+                        .buttonStyle(LiquidPressStyle())
                 }
+            } else {
+                NavigationLink(value: TabRoute.workouts) {
+                    card {
+                        HStack(spacing: NoopMetrics.space3) {
+                            MetricGlyph("figure.run", size: 36)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(selectedDayOffset == 0
+                                     ? String(localized: "No workout today")
+                                     : String(localized: "No workout logged that day"))
+                                    .font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                Text(selectedDayOffset == 0
+                                     ? String(localized: "A tracked or imported session will appear here automatically.")
+                                     : String(localized: "Choose another day or open Workouts to browse your log."))
+                                    .font(StrandFont.footnote)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                    }
+                }
+                .buttonStyle(LiquidPressStyle())
             }
         }
+    }
+
+    private func sessionCountLabel(_ count: Int) -> String {
+        count == 1 ? String(localized: "1 session") : String(localized: "\(count) sessions")
     }
 
     private func workoutCard(_ w: WorkoutRow) -> some View {
@@ -1489,12 +1472,13 @@ struct LiquidTodayView: View {
             todayKey: tkey)
 
         let cal = Calendar.current
-        let dayStart = cal.startOfDay(for: selectedLogicalDay)
-        let from = Int(dayStart.timeIntervalSince1970)
+        let selectedCalendarWindow = WorkoutDateWindow.localDay(dayKey: selectedDayKey, calendar: cal)
+            ?? WorkoutDateWindow.localDay(containing: selectedLogicalDay, calendar: cal)
+        let from = selectedCalendarWindow.lowerBound
         // today → midnight..now; a past day → its full 24h (a missing morning reads as empty space).
         let to: Int = selectedDayOffset == 0
             ? Int(Date().timeIntervalSince1970)
-            : Int((cal.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart).timeIntervalSince1970)
+            : selectedCalendarWindow.upperBound
 
         async let restA = repo.exploreSeries(key: "sleep_performance", source: "my-whoop")
         async let stressA = repo.series(key: "stress", source: "my-whoop")
@@ -1507,7 +1491,8 @@ struct LiquidTodayView: View {
         async let stepsA = repo.exploreSeries(key: "steps_est", source: "my-whoop")
         async let appleA = repo.appleDailyRows()
         async let hrA = repo.hrBuckets(from: from, to: to, bucketSeconds: 300)
-        async let wkA = repo.workoutRows()
+        async let wkA = repo.workoutRows(overlappingFrom: selectedCalendarWindow.lowerBound,
+                                         to: selectedCalendarWindow.upperBound)
         // Ask the same cross-source resolver the Classic Today view uses which source actually won each
         // displayed score. Limit the read to the selected-day window instead of scanning full history.
         let sourceDayKey = selectedDayKey
@@ -1536,52 +1521,9 @@ struct LiquidTodayView: View {
         let storedStress = await stressA
         let daysSnapshot = repo.days
 
-        // #430 parity: the day-keyed series the DETAILED Key-Metrics tiles graph — a trailing CALENDAR
-        // window ending on the selected day (not the last-N stored rows, which on an old import showed
-        // months-old data as a fresh trend, issue #23). The loader banks the 14-day SUPERSET; the chosen
-        // 2-day/1-week/2-week window filters at render (windowedSpark), so a picker change applies without
-        // a reload. Keys mirror the metric catalog so a tile's graph, its tap-through detail and Android's
-        // Window all read the same signal. Rest reuses the already-loaded sleep_performance series.
-        let sparkCutoff = Repository.localDayKey(cal.date(byAdding: .day, value: -13, to: dayStart) ?? dayStart)
-        let sparkRows = daysSnapshot.filter { $0.day >= sparkCutoff && $0.day <= selectedDayKey }
-        // #616: imported-first calorie spark (the day's imported Apple active energy ?: NOOP's on-device
-        // estimate) over the window, so a Health-Connect / Apple-only calorie user gets a trend too —
-        // matching the imported-first VALUE. Union of imported days + strap-row days. Mirrors Android's
-        // caloriesSpark (windowed caloriesByDay).
-        let appleRowsForSpark = await appleA
-        var winImportedKcal: [String: Double] = [:]
-        var winImportedRestingKcal: [String: Double] = [:]
-        for r in appleRowsForSpark where r.day >= sparkCutoff && r.day <= selectedDayKey {
-            if let k = r.activeKcal { winImportedKcal[r.day] = max(winImportedKcal[r.day] ?? 0, k) }
-            if let k = r.basalKcal { winImportedRestingKcal[r.day] = max(winImportedRestingKcal[r.day] ?? 0, k) }
-        }
-        var winOnDeviceKcal: [String: Double] = [:]
-        for r in sparkRows { if let k = r.activeKcalEst { winOnDeviceKcal[r.day] = k } }
-        let totalKcalSpark: [(String, Double)] = Set(winImportedKcal.keys)
-            .intersection(winImportedRestingKcal.keys).sorted().compactMap { day in
-                guard let active = winImportedKcal[day], let resting = winImportedRestingKcal[day] else { return nil }
-                return (day, active + resting)
-            }
-        kSparks = [
-            "recovery": sparkRows.compactMap { r in r.recovery.map { (r.day, $0) } },
-            "strain": sparkRows.compactMap { r in r.strain.map { (r.day, $0) } },
-            "hrv": sparkRows.compactMap { r in r.avgHrv.map { (r.day, $0) } },
-            "rhr": sparkRows.compactMap { r in r.restingHr.map { (r.day, Double($0)) } },
-            "spo2": sparkRows.compactMap { r in r.spo2Pct.map { (r.day, $0) } },
-            "resp_rate": sparkRows.compactMap { r in r.respRateBpm.map { (r.day, $0) } },
-            "steps": sparkRows.compactMap { r in r.steps.map { (r.day, Double($0)) } },
-            // Energy series stay source-isolated. Apple Total contains paired days only; a partial day
-            // retains its one component; the strap key is its indivisible combined estimate. Never merge
-            // any of these into a synthetic cross-source number.
-            "total_kcal": totalKcalSpark,
-            "active_kcal": winImportedKcal.sorted { $0.key < $1.key }.map { ($0.key, $0.value) },
-            "basal_kcal": winImportedRestingKcal.sorted { $0.key < $1.key }.map { ($0.key, $0.value) },
-            "energy_kcal": winOnDeviceKcal.sorted { $0.key < $1.key }.map { ($0.key, $0.value) },
-            "steps_est": stepsSeries.filter { $0.day >= sparkCutoff && $0.day <= selectedDayKey }
-                .map { ($0.day, $0.value) },
-            "sleep_performance": restSeries.filter { $0.day >= sparkCutoff && $0.day <= selectedDayKey }
-                .map { ($0.day, $0.value) },
-        ]
+        // Today consumes only the selected day's imported values. Historical series are intentionally
+        // left to Trends/detail, avoiding a full 14-day aggregation on every dashboard refresh.
+        let appleRows = await appleA
         stress = await Task.detached(priority: .utility) {
             StressModel(days: daysSnapshot, stored: storedStress)?.score
         }.value
@@ -1599,14 +1541,14 @@ struct LiquidTodayView: View {
         // Imported Apple Health steps for the SELECTED day (max across rows), the middle tier between the
         // measured strap count and the motion estimate. Health Connect is Android-only, so apple-health is
         // the sole import source on iOS. Mirrors Android `stepsForDay` (#377).
-        importedStepsDay = appleRowsForSpark.filter { $0.day == selectedDayKey }.compactMap { $0.steps }.max()
+        importedStepsDay = appleRows.filter { $0.day == selectedDayKey }.compactMap { $0.steps }.max()
         // Keep the Apple Health components together. The derived Total is resolved later only when both
         // exist; a partial row never borrows the strap's combined estimate to complete itself.
-        let selectedAppleEnergy = appleRowsForSpark.last(where: { $0.day == selectedDayKey })
+        let selectedAppleEnergy = appleRows.last(where: { $0.day == selectedDayKey })
         importedActiveKcalDay = selectedAppleEnergy?.activeKcal
         importedRestingKcalDay = selectedAppleEnergy?.basalKcal
         hrValues = (await hrA).map { $0.bpm }
-        workouts = await wkA
+        workouts = (await wkA).sorted { $0.startTs > $1.startTs }
 
         let (chargeSource, effortSource, restSource) = await (chargeSourceA, effortSourceA, restSourceA)
         let sourceResolutions = [

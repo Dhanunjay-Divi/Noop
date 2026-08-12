@@ -9,6 +9,7 @@ final class HydrationRemindersTests: XCTestCase {
         HydrationReminders.activeStartMinutesKey,
         HydrationReminders.activeEndMinutesKey,
         HydrationReminders.strapBuzzEnabledKey,
+        HydrationReminders.independentChannelsMigrationKey,
         "notif.masterEnabled",
         "notif.quietHoursEnabled",
         "notif.quietStartMinutes",
@@ -33,6 +34,33 @@ final class HydrationRemindersTests: XCTestCase {
         XCTAssertEqual(HydrationReminders.intervalMinutes, 120)
         XCTAssertEqual(HydrationReminders.activeStartMinutes, 8 * 60)
         XCTAssertEqual(HydrationReminders.activeEndMinutes, 21 * 60)
+    }
+
+    func testChannelMigrationClearsDormantLegacyWristFlagOnlyOnce() {
+        let defaults = UserDefaults.standard
+        defaults.set(false, forKey: HydrationReminders.enabledKey)
+        defaults.set(true, forKey: HydrationReminders.strapBuzzEnabledKey)
+
+        HydrationReminders.migrateIndependentChannelsIfNeeded(defaults: defaults)
+
+        XCTAssertFalse(HydrationReminders.strapBuzzEnabled)
+        XCTAssertTrue(defaults.bool(forKey: HydrationReminders.independentChannelsMigrationKey))
+
+        defaults.set(true, forKey: HydrationReminders.strapBuzzEnabledKey)
+        HydrationReminders.migrateIndependentChannelsIfNeeded(defaults: defaults)
+        XCTAssertTrue(HydrationReminders.strapBuzzEnabled,
+                      "The migration must not override a post-upgrade independent choice.")
+    }
+
+    func testChannelMigrationPreservesAnActiveLegacyPair() {
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: HydrationReminders.enabledKey)
+        defaults.set(true, forKey: HydrationReminders.strapBuzzEnabledKey)
+
+        HydrationReminders.migrateIndependentChannelsIfNeeded(defaults: defaults)
+
+        XCTAssertTrue(HydrationReminders.isEnabled)
+        XCTAssertTrue(HydrationReminders.strapBuzzEnabled)
     }
 
     func testIntervalIsClampedToNotificationBudget() {
@@ -100,9 +128,9 @@ final class HydrationRemindersTests: XCTestCase {
         XCTAssertEqual(slot, .init(minuteOfDay: 23 * 60 + 59, localDay: "2026-08-11"))
     }
 
-    func testStrapSlotRequiresEveryOptInAndClaimsOnlyOnce() throws {
+    func testStrapSlotIsIndependentFromPhoneNotificationsAndClaimsOnlyOnce() throws {
         let defaults = UserDefaults.standard
-        defaults.set(true, forKey: HydrationReminders.enabledKey)
+        defaults.set(false, forKey: HydrationReminders.enabledKey)
         defaults.set(true, forKey: HydrationReminders.strapBuzzEnabledKey)
         defaults.set(true, forKey: "notif.masterEnabled")
         defaults.set(10 * 60, forKey: HydrationReminders.activeStartMinutesKey)
@@ -119,6 +147,25 @@ final class HydrationRemindersTests: XCTestCase {
 
         defaults.set(false, forKey: "notif.masterEnabled")
         defaults.removeObject(forKey: "hydrationReminders.lastClaimedStrapSlot")
+        XCTAssertFalse(HydrationReminders.claimDueStrapBuzz(now: now, calendar: calendar))
+    }
+
+    func testPhoneOnlyAndNeitherDoNotClaimStrapBuzz() throws {
+        let defaults = UserDefaults.standard
+        defaults.set(true, forKey: HydrationReminders.enabledKey)
+        defaults.set(false, forKey: HydrationReminders.strapBuzzEnabledKey)
+        defaults.set(true, forKey: "notif.masterEnabled")
+        defaults.set(10 * 60, forKey: HydrationReminders.activeStartMinutesKey)
+        defaults.set(10 * 60, forKey: HydrationReminders.activeEndMinutesKey)
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 8, day: 11, hour: 10, minute: 3
+        )))
+
+        XCTAssertFalse(HydrationReminders.claimDueStrapBuzz(now: now, calendar: calendar))
+        defaults.set(false, forKey: HydrationReminders.enabledKey)
         XCTAssertFalse(HydrationReminders.claimDueStrapBuzz(now: now, calendar: calendar))
     }
 

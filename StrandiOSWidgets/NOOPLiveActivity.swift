@@ -15,9 +15,9 @@ struct NOOPLiveActivity: Widget {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(context.attributes.title)
                         .font(.caption).foregroundStyle(StrandPalette.textSecondary)
-                    Text("\(context.state.bpm.map(String.init) ?? "–") bpm")
+                    Text(context.isStale ? "Update paused" : "\(context.state.bpm.map(String.init) ?? "–") bpm")
                         .font(.system(size: 26, weight: .bold, design: .rounded))
-                        .foregroundStyle(StrandPalette.textPrimary)
+                        .foregroundStyle(context.isStale ? StrandPalette.textSecondary : StrandPalette.textPrimary)
                 }
                 Spacer()
                 // Charge + Effort (#446) on the banner, mirroring the Dynamic Island expanded stats.
@@ -34,11 +34,13 @@ struct NOOPLiveActivity: Widget {
             .noopAppearance(WidgetAppearancePreference.load())
             .activityBackgroundTint(StrandPalette.surfaceBase)
             .activitySystemActionForegroundColor(StrandPalette.textPrimary)
+            .opacity(context.isStale ? 0.72 : 1)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Label("\(context.state.bpm.map(String.init) ?? "–")", systemImage: "heart.fill")
-                        .foregroundStyle(StrandPalette.statusCritical)
+                    Label(context.isStale ? "Paused" : "\(context.state.bpm.map(String.init) ?? "–")",
+                          systemImage: context.isStale ? "pause.fill" : "heart.fill")
+                        .foregroundStyle(context.isStale ? .secondary : StrandPalette.statusCritical)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     // Charge + Effort (#446) — one more stat alongside the leading live HR.
@@ -55,11 +57,13 @@ struct NOOPLiveActivity: Widget {
                     Text(context.attributes.title).font(.caption).foregroundStyle(.secondary)
                 }
             } compactLeading: {
-                Image(systemName: "heart.fill").foregroundStyle(StrandPalette.statusCritical)
+                Image(systemName: context.isStale ? "pause.fill" : "heart.fill")
+                    .foregroundStyle(context.isStale ? .secondary : StrandPalette.statusCritical)
             } compactTrailing: {
-                Text("\(context.state.bpm.map(String.init) ?? "–")")
+                Text(context.isStale ? "—" : "\(context.state.bpm.map(String.init) ?? "–")")
             } minimal: {
-                Image(systemName: "heart.fill").foregroundStyle(StrandPalette.statusCritical)
+                Image(systemName: context.isStale ? "pause.fill" : "heart.fill")
+                    .foregroundStyle(context.isStale ? .secondary : StrandPalette.statusCritical)
             }
         }
     }

@@ -14,6 +14,9 @@ enum HydrationReminders {
     static let activeStartMinutesKey = "hydrationReminders.activeStartMinutes"
     static let activeEndMinutesKey = "hydrationReminders.activeEndMinutes"
     static let strapBuzzEnabledKey = "hydrationReminders.strapBuzzEnabled"
+    /// One-time boundary between the legacy combined reminder switch and the independent phone/wrist
+    /// channels. An old hidden wrist flag must never become active merely because the app was updated.
+    static let independentChannelsMigrationKey = "hydrationReminders.independentChannels.v1"
 
     private static let scheduledRequestIDsKey = "hydrationReminders.scheduledRequestIDs"
     private static let lastClaimedStrapSlotKey = "hydrationReminders.lastClaimedStrapSlot"
@@ -68,6 +71,17 @@ enum HydrationReminders {
 
     static var strapBuzzEnabled: Bool {
         UserDefaults.standard.bool(forKey: strapBuzzEnabledKey)
+    }
+
+    /// Preserve an explicitly active legacy pair, but clear a dormant hidden wrist flag when the old
+    /// master reminder was OFF. From this build onward each channel persists independently.
+    static func migrateIndependentChannelsIfNeeded(defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: independentChannelsMigrationKey) else { return }
+        if !defaults.bool(forKey: enabledKey) {
+            defaults.set(false, forKey: strapBuzzEnabledKey)
+            defaults.removeObject(forKey: lastClaimedStrapSlotKey)
+        }
+        defaults.set(true, forKey: independentChannelsMigrationKey)
     }
 
     static func setEnabled(
@@ -210,8 +224,7 @@ enum HydrationReminders {
     /// bonded + encrypted live state. This preference gate keeps the automation opt-in and de-duplicated.
     static func claimDueStrapBuzz(now: Date = Date(), calendar: Calendar = .current) -> Bool {
         let defaults = UserDefaults.standard
-        guard isEnabled,
-              strapBuzzEnabled,
+        guard strapBuzzEnabled,
               defaults.bool(forKey: masterWristAlertsKey)
         else { return false }
 
@@ -252,6 +265,7 @@ enum HydrationReminders {
         let center = UNUserNotificationCenter.current()
         let oldIDs = storedRequestIDs
         if !oldIDs.isEmpty { center.removePendingNotificationRequests(withIdentifiers: oldIDs) }
+        DailyReviewNotifications.registerPrivacyCategory(on: center)
 
         let specs = reminderSpecs(
             start: activeStartMinutes,
@@ -265,6 +279,8 @@ enum HydrationReminders {
             content.title = spec.title
             content.body = spec.body
             content.sound = .default
+            content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+            content.threadIdentifier = "noop.hydration"
             content.userInfo = [NotificationRouteBridge.userInfoKey: spec.route.rawValue]
 
             var components = DateComponents()

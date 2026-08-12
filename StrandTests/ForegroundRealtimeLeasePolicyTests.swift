@@ -63,4 +63,24 @@ final class ForegroundRealtimeLeasePolicyTests: XCTestCase {
         XCTAssertTrue(source.contains(".onAppear { refreshConnectionSnapshot(); consumeActiveWorkoutRequest() }"),
                       "Opening Live must refresh status only, never acquire the realtime lease.")
     }
+
+    func testHealthHeartRateRequiresExplicitBalancedLiveLease() throws {
+        let here = URL(fileURLWithPath: #filePath)
+        let root = here.deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent("Strand/Screens/HealthView.swift"),
+                                encoding: .utf8)
+        XCTAssertTrue(source.contains("@State private var liveTrackingOptedIn = false"))
+        XCTAssertTrue(source.contains("liveTrackingLatestSample?.sequence ?? 0"),
+                      "Start must wait for a newer sensor packet rather than displaying cached BPM.")
+        XCTAssertTrue(source.contains(".onReceive(live.heartRateSamplePublisher)"),
+                      "An unchanged BPM packet must still wake the local Live indicator.")
+        XCTAssertTrue(source.contains("Start Live HR"))
+        XCTAssertTrue(source.contains("Stop Live HR"))
+        XCTAssertTrue(source.contains("model.startRealtimeHR()"))
+        XCTAssertTrue(source.contains("model.stopRealtimeHR()"))
+        XCTAssertTrue(source.contains(".onDisappear { stopLiveTracking() }"))
+        XCTAssertTrue(source.contains("if !hasLiveHR && !live.connected"),
+                      "A connected first-time user must be able to reach Start Live HR before history exists.")
+        XCTAssertFalse(source.contains(".onAppear { startLiveTracking() }"))
+    }
 }

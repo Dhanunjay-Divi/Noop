@@ -4,6 +4,20 @@ import StrandDesign
 import Foundation
 import Combine
 
+/// Per-drag scratch space for the adaptive navigation bar. Reference semantics are intentional: updating
+/// this object does not publish SwiftUI changes on every touch sample, unlike three separate `@State`s.
+private final class TabBarDragTracker {
+    var started = false
+    var lastTranslation = CGSize.zero
+    var accumulator: CGFloat = 0
+
+    func reset() {
+        started = false
+        lastTranslation = .zero
+        accumulator = 0
+    }
+}
+
 /// iOS navigation shell. macOS uses a `NavigationSplitView` sidebar (`RootView`); on iPhone the
 /// natural analogue is a `TabView` with the most-used screens as tabs and everything else under a
 /// "More" list. Every screen is the same `StrandDesign`-built view the macOS app uses.
@@ -31,9 +45,13 @@ struct RootTabView: View {
     /// visual only — the shell keeps reserving the largest measured height so changing modes can never
     /// move the scroll endpoint or strand the final card behind the bar.
     @State private var tabBarCompact = Self.initialTabBarCompact
-    @State private var tabBarDragStarted = false
-    @State private var tabBarDragLastTranslation = CGSize.zero
-    @State private var tabBarDragAccumulator: CGFloat = 0
+    /// Mutable gesture bookkeeping deliberately lives in a non-observable reference. These values change
+    /// on every finger sample; keeping them in `@State` invalidated the entire five-tab shell every frame
+    /// and made otherwise-light ScrollViews hitch. Only the threshold result (`tabBarCompact`) is render
+    /// state. `contentGestureActive` changes once at gesture start/end and pauses decorative liquid clocks
+    /// while the user's finger needs the render budget.
+    @State private var tabBarDragTracker = TabBarDragTracker()
+    @GestureState private var contentGestureActive = false
     /// A safe-area inset follows the software keyboard and can leave a custom tab bar floating halfway
     /// up the display. Native tab bars disappear while typing, so mirror that behaviour here and let the
     /// tab content use the keyboard-adjusted safe area on its own.
@@ -193,6 +211,7 @@ struct RootTabView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(StrandPalette.surfaceBase.ignoresSafeArea())
+        .environment(\.liquidInteractionInProgress, contentGestureActive)
         // Observe the same finger gesture as the nested ScrollViews without taking ownership of it.
         // Horizontal charts/day swipes are ignored; a small directional accumulator provides a dead
         // zone so tiny reversals and scroll bounce do not make the bar flicker between sizes.
@@ -235,7 +254,15 @@ struct RootTabView: View {
             consumePendingNotificationRoute()
         }
         .task {
-            await repo.refresh()
+            // AppModel owns the one cold-launch repository refresh. Wait briefly for its published cache,
+            // but never start a second independent 4,000-day read from the tab shell: on larger histories
+            // that duplicate work was the main source of launch and first-scroll contention.
+            if !repo.loaded {
+                for _ in 0..<200 {
+                    if repo.loaded { break }
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                }
+            }
             // Backup & Sync: on-launch catch-up (see RootView). Detached + utility priority so a
             // 100MB+ whole-DB ZIP never blocks startup; gated on the auto toggle (default OFF). (Must-fix #4.)
             let backupRepo = repo
@@ -277,12 +304,17 @@ struct RootTabView: View {
     /// dominance protects Trends charts, the Today day-swipe, and the system Back gesture.
     private var adaptiveTabBarGesture: some Gesture {
         DragGesture(minimumDistance: 10, coordinateSpace: .global)
+            .updating($contentGestureActive) { value, active, _ in
+                let dx = value.translation.width
+                let dy = value.translation.height
+                if abs(dy) > abs(dx) * 1.15 { active = true }
+            }
             .onChanged { value in
-                let prior = tabBarDragStarted ? tabBarDragLastTranslation : .zero
+                let prior = tabBarDragTracker.started ? tabBarDragTracker.lastTranslation : .zero
                 let dx = value.translation.width - prior.width
                 let dy = value.translation.height - prior.height
-                tabBarDragStarted = true
-                tabBarDragLastTranslation = value.translation
+                tabBarDragTracker.started = true
+                tabBarDragTracker.lastTranslation = value.translation
 
                 guard !keyboardVisible,
                       abs(dy) > abs(dx) * 1.15,
@@ -290,24 +322,22 @@ struct RootTabView: View {
 
                 // A real reversal starts a fresh decision rather than making the user first cancel all
                 // travel accumulated in the previous direction.
-                if tabBarDragAccumulator * dy < 0 { tabBarDragAccumulator = 0 }
-                tabBarDragAccumulator += dy
+                if tabBarDragTracker.accumulator * dy < 0 { tabBarDragTracker.accumulator = 0 }
+                tabBarDragTracker.accumulator += dy
 
-                if tabBarDragAccumulator <= -14, !tabBarCompact {
+                if tabBarDragTracker.accumulator <= -14, !tabBarCompact {
                     tabBarCompact = true
-                    tabBarDragAccumulator = 0
-                } else if tabBarDragAccumulator >= 10, tabBarCompact {
+                    tabBarDragTracker.accumulator = 0
+                } else if tabBarDragTracker.accumulator >= 10, tabBarCompact {
                     tabBarCompact = false
-                    tabBarDragAccumulator = 0
+                    tabBarDragTracker.accumulator = 0
                 }
             }
             .onEnded { _ in resetTabBarDragTracking() }
     }
 
     private func resetTabBarDragTracking() {
-        tabBarDragStarted = false
-        tabBarDragLastTranslation = .zero
-        tabBarDragAccumulator = 0
+        tabBarDragTracker.reset()
     }
 
     /// Consume both live and cold-launch navigation requests. `onChange` handles taps while the shell is
@@ -925,14 +955,14 @@ private struct FloatingTabBar: View {
         if colorScheme == .dark {
             return .black.opacity(appearanceMode == .black ? 0.76 : 0.52)
         }
-        return Color(hex: "#D6DAE0").opacity(0.10)
+        return .white.opacity(0.08)
     }
     private var navigationScrim: Color {
         guard !reduceTransparency, colorSchemeContrast != .increased else { return .clear }
         if colorScheme == .dark {
             return .black.opacity(appearanceMode == .black ? 0.22 : 0.12)
         }
-        return .black.opacity(0.018)
+        return .black.opacity(0.035)
     }
     private var navigationGlassOpacity: Double {
         // Clear Glass still carries a strong milk-white optical body over a pearl canvas. Fade only

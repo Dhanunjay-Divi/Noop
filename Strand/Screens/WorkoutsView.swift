@@ -11,6 +11,69 @@ private struct WorkoutRecoveryTrendPoint: Identifiable, Equatable {
     var id: Int { startTs }
 }
 
+/// A half-open, calendar-aware workout window. Calendar arithmetic keeps a "day" honest across daylight
+/// saving transitions, and overlap semantics include sessions that begin before midnight and finish after
+/// it. This is shared by Today and the Workouts log so the two screens cannot disagree about day scope.
+struct WorkoutDateWindow: Equatable, Sendable {
+    let lowerBound: Int
+    let upperBound: Int
+
+    static func localDay(containing date: Date, calendar: Calendar = .current) -> Self {
+        let start = calendar.startOfDay(for: date)
+        let end = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
+        return Self(lowerBound: Int(start.timeIntervalSince1970),
+                    upperBound: Int(end.timeIntervalSince1970))
+    }
+
+    /// Resolve a persisted local `yyyy-MM-dd` key without passing through UTC. Today can deliberately
+    /// surface the new calendar-day row before the 04:00 logical rollover when a just-finished night is
+    /// banked there; deriving the workout window from this same key keeps every Today section on one day.
+    static func localDay(dayKey: String, calendar: Calendar = .current) -> Self? {
+        let parts = dayKey.split(separator: "-").compactMap { Int($0) }
+        // Stored day keys are Gregorian ISO dates regardless of the user's display calendar. Parse with
+        // Gregorian semantics in the user's current time zone, then let the supplied calendar establish
+        // the local midnight boundaries (which preserves DST behavior and alternate-calendar settings).
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
+        guard parts.count == 3,
+              let date = gregorian.date(from: DateComponents(
+                calendar: gregorian,
+                timeZone: gregorian.timeZone,
+                year: parts[0], month: parts[1], day: parts[2]
+              )) else { return nil }
+        return localDay(containing: date, calendar: calendar)
+    }
+
+    static func trailingCalendarDays(_ count: Int, endingOn date: Date = Date(),
+                                     calendar: Calendar = .current) -> Self {
+        let safeCount = max(1, count)
+        let finalDay = calendar.startOfDay(for: date)
+        let firstDay = calendar.date(byAdding: .day, value: -(safeCount - 1), to: finalDay) ?? finalDay
+        let end = calendar.date(byAdding: .day, value: 1, to: finalDay)
+            ?? finalDay.addingTimeInterval(86_400)
+        return Self(lowerBound: Int(firstDay.timeIntervalSince1970),
+                    upperBound: Int(end.timeIntervalSince1970))
+    }
+
+    /// User-picked dates are inclusive in the UI; the storage interval remains half-open internally.
+    static func custom(from first: Date, through second: Date,
+                       calendar: Calendar = .current) -> Self {
+        let firstDay = calendar.startOfDay(for: min(first, second))
+        let finalDay = calendar.startOfDay(for: max(first, second))
+        let end = calendar.date(byAdding: .day, value: 1, to: finalDay)
+            ?? finalDay.addingTimeInterval(86_400)
+        return Self(lowerBound: Int(firstDay.timeIntervalSince1970),
+                    upperBound: Int(end.timeIntervalSince1970))
+    }
+
+    func intersects(_ row: WorkoutRow) -> Bool {
+        let effectiveEnd = row.endTs > row.startTs ? row.endTs : row.startTs + 1
+        return row.startTs < upperBound && effectiveEnd > lowerBound
+    }
+
+    func filter(_ rows: [WorkoutRow]) -> [WorkoutRow] { rows.filter(intersects) }
+}
+
 // MARK: - Workouts
 //
 // The activity log, instrument-grade and uniform. Built ONLY from the locked Noop
@@ -51,6 +114,9 @@ struct WorkoutsView: View {
     @State private var loaded: Bool
     @State private var seededInitialRange = false
     @State private var range: Range = .all
+    @State private var customStartDate = Calendar.current.date(
+        byAdding: .day, value: -29, to: Calendar.current.startOfDay(for: Date())) ?? Date()
+    @State private var customEndDate = Calendar.current.startOfDay(for: Date())
     /// #797: how many trailing days of workouts are currently LOADED into `allRows`. First paint loads
     /// `Self.firstPaintWindowDays`; picking "All" (or a range wider than this) pages the full history in on
     /// demand. nil means the full history is loaded (the user expanded to "All"). Preview rows are treated
@@ -158,25 +224,28 @@ struct WorkoutsView: View {
                 // Compute the windowed rows and per-sport groups ONCE per body
                 // evaluation, then thread them into every section. SwiftUI re-runs
                 // `body` on hover/animation/1Hz HR ticks; the previous computed-
-                // property fan-out (rows → effectiveRange → sessions(_:), and
+                // property fan-out (rows → selected range → sessions(_:), and
                 // sportGroups → rows → …) rebuilt the same filters/aggregations
                 // several times per render. Same windowing, same results.
-                let resolved = effectiveRange
-                let windowRows = sessions(for: resolved)
+                let windowRows = sessions(for: range)
                 let groups = sportGroups(from: windowRows)
                 let zonesSummary = WorkoutZones.summary(from: windowRows)
 
                 HStack { startLiveWorkoutButton; Spacer() }
-                rangeBar(rows: windowRows, effectiveRange: resolved)
+                rangeBar(rows: windowRows)
                 if let postLogNote { postLogBanner(postLogNote) }
-                effortHero(rows: windowRows, effectiveRange: resolved, groups: groups)
-                summarySection(rows: windowRows, effectiveRange: resolved, groups: groups)
-                breakdownSection(groups: groups, rows: windowRows)
-                if let z = zonesSummary {
-                    zonesSection(z, totalSessions: windowRows.count)
+                if windowRows.isEmpty {
+                    emptySelectedRange
+                } else {
+                    effortHero(rows: windowRows, selectedRange: range, groups: groups)
+                    summarySection(rows: windowRows, selectedRange: range, groups: groups)
+                    breakdownSection(groups: groups, rows: windowRows)
+                    if let z = zonesSummary {
+                        zonesSection(z, totalSessions: windowRows.count)
+                    }
+                    recoveryTrendSection
+                    sessionsSection(rows: windowRows)
                 }
-                recoveryTrendSection
-                sessionsSection(rows: windowRows)
             }
         }
         .task(id: repo.refreshSeq) {
@@ -187,8 +256,14 @@ struct WorkoutsView: View {
             let wasLoaded = loaded
             loaded = true
             if !wasLoaded {
-                range = defaultRange(for: r)
+                let initialRange = defaultRange(for: r)
+                range = initialRange
                 seededInitialRange = true
+                // `.all` is wider than the bounded first-paint query. When the best initial range is
+                // already All, `onChange(range)` does not fire (`.all` -> `.all`), so explicitly expand
+                // here rather than labelling a 400-day subset as all time—or declaring an older history
+                // empty because the first bounded page happened to contain nothing.
+                if initialRange == .all { await expandWindowIfNeeded(for: .all) }
             }
         }
         .onAppear {
@@ -199,11 +274,10 @@ struct WorkoutsView: View {
             }
         }
         // #797: when the user picks a range wider than the bounded first-paint window (typically "All"),
-        // page the full history in. A pick that fits the loaded window is a no-op. Also covers the
-        // auto-widen: if the selected window is sparse and `effectiveRange` falls back to `.all`, the
-        // full read is needed to show the older sessions.
+        // page the full history in. A pick that fits the loaded window is a no-op. Empty selections stay
+        // empty: the screen never silently widens the user's requested dates.
         .onChangeCompat(of: range) { newRange in
-            Task { await expandWindowIfNeeded(for: newRange == .all ? .all : effectiveRange) }
+            Task { await expandWindowIfNeeded(for: newRange) }
         }
         .task(id: recoveryTrendInputKey) {
             await loadRecoveryTrend()
@@ -270,8 +344,8 @@ struct WorkoutsView: View {
     private func openDetail(_ row: WorkoutRow) { detail = WorkoutDetailTarget(row: row) }
 
     /// Re-read every source after a mutation so the screen reflects the new state immediately.
-    /// Keeps the user's current range — only the initial load picks a default — and the auto-widen
-    /// (`effectiveRange`) still covers a now-empty window.
+    /// Keeps the user's current range — only the initial load picks a default. A now-empty window remains
+    /// visibly empty rather than jumping to older workouts.
     private func reload() async {
         allRows = await repo.workoutRows(days: loadedWindowDays ?? 4000)
     }
@@ -280,10 +354,14 @@ struct WorkoutsView: View {
 
     /// Apply the screen's active filter + range, capped to the latest 90 days as promised by the feature.
     private var recoveryTrendRows: [WorkoutRow] {
-        let visible = sessions(for: effectiveRange)
-        guard let last = latestTs else { return [] }
-        let cutoff = last - 90 * 86_400
-        return visible.filter { $0.startTs >= cutoff }.sorted { $0.startTs < $1.startTs }
+        let visible = sessions(for: range)
+        // Anchor the cap to the newest workout INSIDE the selected range, not to today. Otherwise a
+        // historical custom range truthfully contains sessions but its promised "latest 90 days within
+        // this range" recovery chart is forced empty.
+        guard let newest = visible.max(by: { $0.startTs < $1.startTs }) else { return [] }
+        let latestNinety = WorkoutDateWindow.trailingCalendarDays(
+            90, endingOn: Date(timeIntervalSince1970: TimeInterval(newest.startTs)))
+        return latestNinety.filter(visible).sorted { $0.startTs < $1.startTs }
     }
 
     /// Stable task identity: changing the range/filter/rows or HRmax cancels and rebuilds the trend.
@@ -294,8 +372,16 @@ struct WorkoutsView: View {
     }
 
     private var recoveryTrendCaption: String {
-        if let days = effectiveRange.days, days <= 90 { return effectiveRange.caption }
-        return String(localized: "last 90 days")
+        if range == .all || range == .year {
+            return String(localized: "latest 90 days within \(rangeDisplayLabel(for: range))")
+        }
+        if range == .custom,
+           WorkoutDateWindow.custom(from: customStartDate, through: customEndDate).upperBound
+                - WorkoutDateWindow.custom(from: customStartDate, through: customEndDate).lowerBound
+                > 90 * 86_400 {
+            return String(localized: "latest 90 days within \(rangeDisplayLabel(for: range))")
+        }
+        return rangeDisplayLabel(for: range)
     }
 
     private func loadRecoveryTrend() async {
@@ -433,9 +519,8 @@ struct WorkoutsView: View {
 
     // MARK: - Range control
 
-    private func rangeBar(rows: [WorkoutRow], effectiveRange: Range) -> some View {
-        let fellBack = effectiveRange != range
-        let caption = rangeCaption(rows: rows, effectiveRange: effectiveRange, fellBack: fellBack)
+    private func rangeBar(rows: [WorkoutRow]) -> some View {
+        let caption = rangeCaption(rows: rows)
         #if os(iOS)
         let stacked = hSizeClass == .compact
         #else
@@ -445,22 +530,53 @@ struct WorkoutsView: View {
             if stacked {
                 // iPhone: button on its own row, the range pill full-width below — no crushed sliver.
                 addWorkoutButton
-                SegmentedPillControl(Range.allCases, selection: $range) { $0.label }
+                SegmentedPillControl(Range.allCases, selection: $range,
+                                     adaptsToAvailableWidth: true) { $0.label }
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 HStack(spacing: 12) {
                     addWorkoutButton
                     Spacer()
-                    SegmentedPillControl(Range.allCases, selection: $range) { $0.label }
+                    SegmentedPillControl(Range.allCases, selection: $range,
+                                         adaptsToAvailableWidth: true) { $0.label }
                 }
             }
+            if range == .custom { customRangePicker }
             filterBar
             Text(caption)
                 .font(StrandFont.footnote)
-                .foregroundStyle(fellBack ? StrandPalette.statusWarning : StrandPalette.textTertiary)
+                .foregroundStyle(StrandPalette.textTertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityLabel(caption)
         }
+    }
+
+    private var customRangePicker: some View {
+        NoopCard(padding: 12, tint: StrandPalette.effortColor) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("CUSTOM DATES")
+                    .font(StrandFont.overline).tracking(StrandFont.overlineTracking)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                HStack(spacing: 12) {
+                    DatePicker("From", selection: customStartBinding,
+                               in: ...customEndDate, displayedComponents: .date)
+                    DatePicker("To", selection: customEndBinding,
+                               in: customStartDate...Date(), displayedComponents: .date)
+                }
+                .datePickerStyle(.compact)
+                Text(rangeDisplayLabel(for: .custom))
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
+        }
+    }
+
+    private var customStartBinding: Binding<Date> {
+        Binding(get: { customStartDate }, set: { customStartDate = min($0, customEndDate) })
+    }
+
+    private var customEndBinding: Binding<Date> {
+        Binding(get: { customEndDate }, set: { customEndDate = min(Date(), max($0, customStartDate)) })
     }
 
     /// #64: filter controls beside the range pill — a Sport menu, a Source menu, and a search field, with
@@ -614,29 +730,28 @@ struct WorkoutsView: View {
         .accessibilityLabel(model.activeWorkout == nil ? "Start a workout" : "View the active workout")
     }
 
-    /// The latest session start (anchors every window — windows are relative to the
-    /// most recent session, not "now", so an old log still resolves).
-    private var latestTs: Int? { allRows.map(\.startTs).max() }
-
     /// The active filter (#64), composed once. Sport / source / search all apply AFTER the window cut,
     /// so the effort hero, tiles, breakdown, zones and list all read one filtered set.
     private var filter: WorkoutFilter {
         WorkoutFilter(sport: sportFilter, sourceClass: sourceFilter, search: searchText)
     }
 
-    /// Sessions inside a given range, RELATIVE TO THE LATEST session, then passed through the active
-    /// filter. `.all` = all. The window anchor (`latestTs`) is the newest of ALL loaded rows so the
-    /// window doesn't shift when a filter narrows the set.
+    /// Sessions inside the exact requested calendar range, then passed through the active filter.
+    /// Presets end today; custom dates are inclusive. No sparse-data fallback or implicit widening.
     private func sessions(for r: Range) -> [WorkoutRow] {
-        let windowed: [WorkoutRow]
-        if let days = r.days {
-            guard let last = latestTs else { return [] }
-            let cutoff = last - days * 86_400
-            windowed = allRows.filter { $0.startTs >= cutoff }
-        } else {
-            windowed = allRows
-        }
+        let windowed = dateWindow(for: r)?.filter(allRows) ?? allRows
         return filter.apply(windowed)
+    }
+
+    private func dateWindow(for r: Range, now: Date = Date()) -> WorkoutDateWindow? {
+        switch r {
+        case .week:    return .trailingCalendarDays(7, endingOn: now)
+        case .month:   return .trailingCalendarDays(30, endingOn: now)
+        case .quarter: return .trailingCalendarDays(90, endingOn: now)
+        case .year:    return .trailingCalendarDays(365, endingOn: now)
+        case .custom:  return .custom(from: customStartDate, through: customEndDate)
+        case .all:     return nil
+        }
     }
 
     /// The set of displayed-sport names present across ALL loaded rows, for the sport-filter menu.
@@ -647,40 +762,53 @@ struct WorkoutsView: View {
         return counts.sorted { ($0.value, $1.key) > ($1.value, $0.key) }.map(\.key)
     }
 
-    /// The range actually shown: the SELECTED range when it holds ≥1 session, else
-    /// the smallest LARGER range that does — so switching ranges stays visibly
-    /// distinct and only an empty window widens.
-    private var effectiveRange: Range {
-        guard !allRows.isEmpty else { return range }
-        for r in range.widening where !sessions(for: r).isEmpty { return r }
-        return .all
-    }
-
-    /// "N sessions · <range>" near the control, flagging an auto-widen. Appends "· filtered" (#64) when a
-    /// sport/source/search filter is narrowing the list. Takes the already-resolved range / windowed rows
-    /// so `body` computes them once.
-    private func rangeCaption(rows: [WorkoutRow], effectiveRange: Range, fellBack: Bool) -> String {
+    /// "N sessions · <exact range>" near the control. Appends "· filtered" (#64) when a filter narrows
+    /// the list; zero stays zero so the UI never presents old history as part of a sparse selection.
+    private func rangeCaption(rows: [WorkoutRow]) -> String {
         guard loaded, !allRows.isEmpty else { return "—" }
         let n = rows.count
         let suffix = filter.isActive ? String(localized: " · filtered") : ""
-        if fellBack {
-            return (n == 1
-                ? String(localized: "1 session · sparse, widened to \(effectiveRange.caption)")
-                : String(localized: "\(n) sessions · sparse, widened to \(effectiveRange.caption)")) + suffix
-        }
+        let dateLabel = rangeDisplayLabel(for: range)
         return (n == 1
-            ? String(localized: "1 session · \(effectiveRange.caption)")
-            : String(localized: "\(n) sessions · \(effectiveRange.caption)")) + suffix
+            ? String(localized: "1 session · \(dateLabel)")
+            : String(localized: "\(n) sessions · \(dateLabel)")) + suffix
     }
 
-    /// Pick the tightest range that still holds ≥2 sessions; otherwise show All.
+    /// Pick the tightest exact, today-anchored preset that holds ≥2 sessions; otherwise show All.
     private func defaultRange(for source: [WorkoutRow]) -> Range {
-        guard let last = source.map(\.startTs).max() else { return .all }
-        for r in Range.allCases where r.days != nil {
-            let cutoff = last - (r.days ?? 0) * 86_400
-            if source.filter({ $0.startTs >= cutoff }).count >= 2 { return r }
+        guard !source.isEmpty else { return .all }
+        for r in [Range.week, .month, .quarter, .year] {
+            if (dateWindow(for: r)?.filter(source).count ?? 0) >= 2 { return r }
         }
         return .all
+    }
+
+    private func rangeDisplayLabel(for r: Range) -> String {
+        guard r == .custom else { return r.caption }
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: min(customStartDate, customEndDate))
+        let end = calendar.startOfDay(for: max(customStartDate, customEndDate))
+        if calendar.isDate(start, inSameDayAs: end) {
+            return start.formatted(date: .abbreviated, time: .omitted)
+        }
+        return String(localized: "\(start.formatted(date: .abbreviated, time: .omitted)) – \(end.formatted(date: .abbreviated, time: .omitted))")
+    }
+
+    private var emptySelectedRange: some View {
+        NoopCard(tint: StrandPalette.effortColor) {
+            HStack(alignment: .top, spacing: NoopMetrics.space3) {
+                MetricGlyph("calendar.badge.minus", size: 38)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("No workouts in this range")
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text("Nothing was logged during \(rangeDisplayLabel(for: range)). Choose another range, start a session, or add one manually.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 
     // MARK: - Effort hero (typical effort on a flat Reset card)
@@ -690,7 +818,7 @@ struct WorkoutsView: View {
     /// count + total time alongside. The ring reads the AVERAGE per-session strain (the stored 0–100
     /// Effort axis, mirroring the Today effort ring); the headline number is shown on the user's scale.
     @ViewBuilder
-    private func effortHero(rows: [WorkoutRow], effectiveRange: Range, groups: [SportGroup]) -> some View {
+    private func effortHero(rows: [WorkoutRow], selectedRange: Range, groups: [SportGroup]) -> some View {
         let strains = rows.compactMap(\.strain)
         let avgStrain = strains.isEmpty ? 0 : strains.reduce(0, +) / Double(strains.count)
         let totalTimeH = rows.compactMap(\.durationS).reduce(0, +) / 3600.0
@@ -698,13 +826,13 @@ struct WorkoutsView: View {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .center, spacing: 24) {
                     effortHeroGauge(avgStrain: avgStrain, hasData: !strains.isEmpty)
-                    effortHeroStats(rows: rows, effectiveRange: effectiveRange,
+                    effortHeroStats(rows: rows, selectedRange: selectedRange,
                                     groups: groups, totalTimeH: totalTimeH)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 VStack(alignment: .center, spacing: 16) {
                     effortHeroGauge(avgStrain: avgStrain, hasData: !strains.isEmpty)
-                    effortHeroStats(rows: rows, effectiveRange: effectiveRange,
+                    effortHeroStats(rows: rows, selectedRange: selectedRange,
                                     groups: groups, totalTimeH: totalTimeH)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -772,11 +900,12 @@ struct WorkoutsView: View {
     }
 
     @ViewBuilder
-    private func effortHeroStats(rows: [WorkoutRow], effectiveRange: Range,
+    private func effortHeroStats(rows: [WorkoutRow], selectedRange: Range,
                                  groups: [SportGroup], totalTimeH: Double) -> some View {
         let modal = modalSport(from: groups)
+        let dateLabel = rangeDisplayLabel(for: selectedRange)
         VStack(alignment: .leading, spacing: 12) {
-            Text("Effort this \(effectiveRange.heroWord)")
+            Text("Effort · \(dateLabel)")
                 .font(StrandFont.headline)
                 .foregroundStyle(StrandPalette.textPrimary)
             HStack(spacing: NoopMetrics.gap) {
@@ -787,8 +916,8 @@ struct WorkoutsView: View {
                          tint: StrandPalette.effortBright)
             }
             Text(modal.count > 0
-                 ? "Mostly \(WorkoutSource.displaySport(modal.sport)) (\(effectiveRange.caption))."
-                 : "Logged sessions across \(effectiveRange.caption).")
+                 ? "Mostly \(WorkoutSource.displaySport(modal.sport)) (\(dateLabel))."
+                 : "Logged sessions across \(dateLabel).")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -822,7 +951,7 @@ struct WorkoutsView: View {
 
     // MARK: - Summary tiles (uniform 104pt StatTiles)
 
-    private func summarySection(rows: [WorkoutRow], effectiveRange: Range, groups: [SportGroup]) -> some View {
+    private func summarySection(rows: [WorkoutRow], selectedRange: Range, groups: [SportGroup]) -> some View {
         let totalCount = rows.count
         let totalTimeH = rows.compactMap(\.durationS).reduce(0, +) / 3600.0
         let totalKcal = rows.compactMap(\.energyKcal).reduce(0, +)
@@ -832,7 +961,7 @@ struct WorkoutsView: View {
         return LazyVGrid(columns: tileColumns, alignment: .leading, spacing: NoopMetrics.gap) {
             StatTile(label: "Total Workouts",
                      value: "\(totalCount)",
-                     caption: effectiveRange.caption,
+                     caption: rangeDisplayLabel(for: selectedRange),
                      accent: StrandPalette.effortColor)
             StatTile(label: "Total Time",
                      value: String(localized: "\(oneDecimal(totalTimeH))h"),
@@ -1024,9 +1153,11 @@ struct WorkoutsView: View {
     private func sessionsSection(rows: [WorkoutRow]) -> some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             HStack(alignment: .firstTextBaseline) {
-                SectionHeader("All Sessions",
-                              overline: "Log",
-                              trailing: String(localized: "\(rows.count) total"))
+                SectionHeader("Sessions",
+                              overline: "\(rangeDisplayLabel(for: range))",
+                              trailing: rows.count == 1
+                                ? String(localized: "1 session")
+                                : String(localized: "\(rows.count) sessions"))
                 selectPill(rows: rows)
             }
             if selectionMode { selectionToolbar(rows: rows) }
@@ -1547,7 +1678,7 @@ struct WorkoutsView: View {
     // MARK: - Range model
 
     private enum Range: CaseIterable, Hashable {
-        case week, month, quarter, year, all
+        case week, month, quarter, year, all, custom
         var label: String {
             switch self {
             case .week:    return String(localized: "7D")
@@ -1555,6 +1686,7 @@ struct WorkoutsView: View {
             case .quarter: return String(localized: "90D")
             case .year:    return String(localized: "1Y")
             case .all:     return String(localized: "All")
+            case .custom:  return String(localized: "Custom")
             }
         }
         var caption: String {
@@ -1564,16 +1696,7 @@ struct WorkoutsView: View {
             case .quarter: return String(localized: "last 90 days")
             case .year:    return String(localized: "last year")
             case .all:     return String(localized: "all time")
-            }
-        }
-        /// A short noun for the effort hero's "Effort this …" headline.
-        var heroWord: String {
-            switch self {
-            case .week:    return String(localized: "week")
-            case .month:   return String(localized: "month")
-            case .quarter: return String(localized: "quarter")
-            case .year:    return String(localized: "year")
-            case .all:     return String(localized: "log")
+            case .custom:  return String(localized: "custom dates")
             }
         }
         /// Trailing-window length in days, or nil for "all".
@@ -1583,15 +1706,8 @@ struct WorkoutsView: View {
             case .month:   return 30
             case .quarter: return 90
             case .year:    return 365
-            case .all:     return nil
+            case .all, .custom: return nil
             }
-        }
-        /// This range plus every LARGER range, ascending — the auto-expand search
-        /// order when the selected window holds zero sessions.
-        var widening: [Range] {
-            let order: [Range] = [.week, .month, .quarter, .year, .all]
-            guard let i = order.firstIndex(of: self) else { return [.all] }
-            return Array(order[i...])
         }
     }
 

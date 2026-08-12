@@ -144,8 +144,12 @@ final class MoreListParityTests: XCTestCase {
         XCTAssertTrue(shell.contains(".simultaneousGesture(adaptiveTabBarGesture)"))
         XCTAssertTrue(shell.contains("abs(dy) > abs(dx) * 1.15"),
                       "Horizontal charts and Back gestures must not collapse the bar.")
-        XCTAssertTrue(shell.contains("tabBarDragAccumulator <= -14"))
-        XCTAssertTrue(shell.contains("tabBarDragAccumulator >= 10"))
+        XCTAssertTrue(shell.contains("tabBarDragTracker.accumulator <= -14"))
+        XCTAssertTrue(shell.contains("tabBarDragTracker.accumulator >= 10"))
+        XCTAssertTrue(shell.contains("@GestureState private var contentGestureActive"),
+                      "Per-sample drag bookkeeping must not invalidate the whole tab shell.")
+        XCTAssertTrue(shell.contains(".environment(\\.liquidInteractionInProgress, contentGestureActive)"),
+                      "Decorative liquid clocks should yield the frame budget during vertical scrolling.")
         XCTAssertTrue(shell.contains("height > measuredTabBarHeight + 0.5"),
                       "The shell must retain its largest reservation while the bar compacts.")
         XCTAssertTrue(shell.contains("--demo-compact-tab-bar"),

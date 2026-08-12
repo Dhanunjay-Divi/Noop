@@ -2282,6 +2282,34 @@ final class Repository: ObservableObject {
         return await reconcileWorkoutHrWithTrace(visible, store: store)
     }
 
+    /// Workouts overlapping one exact half-open timestamp window, newest first.
+    ///
+    /// This is the daily-dashboard counterpart to `workoutRows(days:)`: it applies the same source union,
+    /// dismissal, cross-source de-duplication, and trace reconciliation, but lets SQLite select the tiny
+    /// requested window first. A Today swipe therefore cannot trigger a 4,000-day workout scan.
+    func workoutRows(overlappingFrom from: Int, to: Int, limit: Int = 250) async -> [WorkoutRow] {
+        guard to > from, let store = await ensureStore() else { return [] }
+        var rows: [WorkoutRow] = []
+        for id in importedReadIds {
+            rows += (try? await store.workoutsOverlapping(
+                deviceId: id, from: from, to: to, limit: limit)) ?? []
+        }
+        for id in computedReadIds {
+            rows += (try? await store.workoutsOverlapping(
+                deviceId: id, from: from, to: to, limit: limit)) ?? []
+        }
+        for id in [Self.appleHealthSource, "lifting", Self.activityFileSource] {
+            rows += (try? await store.workoutsOverlapping(
+                deviceId: id, from: from, to: to, limit: limit)) ?? []
+        }
+
+        rows = Self.dedupWorkoutsByNaturalKey(rows)
+        let dismissed = WorkoutSource.parseDismissedSpans(dismissedDetectedSpans)
+        let visible = rows.filter { !WorkoutSource.isDismissed($0, spans: dismissed) }
+        let deduped = WorkoutSource.dedupCrossSource(visible).sorted { $0.startTs > $1.startTs }
+        return await reconcileWorkoutHrWithTrace(deduped, store: store, cap: limit)
+    }
+
     /// DISPLAY-ONLY: reconcile each workout's shown Avg/Max HR with the strap trace that actually drives
     /// its graph / zones / effort (#77, #499). The detail screen always charts (`workoutHrBuckets`) and
     /// zone-bins (`workoutZoneMinutes`) the strap's own ~1 Hz samples over `[startTs, endTs]`; the

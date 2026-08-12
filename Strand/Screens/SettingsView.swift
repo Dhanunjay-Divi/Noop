@@ -91,8 +91,6 @@ struct SettingsView: View {
     @AppStorage(UnitPrefs.effortScaleKey) private var effortScaleRaw = EffortScale.hundred.rawValue
     @AppStorage(UnitPrefs.trendChartStyleKey) private var trendChartStyleRaw = TrendChartStyle.line.rawValue
     @AppStorage(UnitPrefs.hrvWindowKey) private var hrvWindowRaw = HrvWindow.whole.rawValue
-    // Live-HR Live Activity (Lock Screen + Dynamic Island), iOS only (#336). Default on.
-    @AppStorage(UnitPrefs.liveActivityKey) private var liveActivityEnabled = true
     // Alternate app icon (iOS only) — false = Titanium (primary AppIcon), true = Blue Titanium
     // ("AppIcon-Navy"). Display-only preference; the live switch goes through setAlternateIconName.
     @AppStorage("appIcon.alt") private var useNavyIcon = false
@@ -1038,18 +1036,7 @@ struct SettingsView: View {
 
                 #if os(iOS)
                 Divider().overlay(StrandPalette.hairline)
-                // MARK: Live Activity — show live HR on the Lock Screen + Dynamic Island (#336).
-                Toggle(isOn: $liveActivityEnabled) {
-                    Text("Live heart rate in Dynamic Island")
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
-                Text("Shows your live heart rate on the Lock Screen and in the Dynamic Island while the strap is connected. Turn it off to keep your live HR out of the Dynamic Island. (Any one already showing clears within a moment.)")
-                    .font(StrandFont.caption)
-                    .foregroundStyle(StrandPalette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
+                LiveActivityPreferenceRow()
                 #endif
             }
         }
@@ -2383,6 +2370,61 @@ struct SettingsView: View {
             .padding(.vertical, 4)
     }
 }
+
+#if os(iOS)
+/// ActivityKit presents one Live Activity across the Lock Screen and, on supported iPhones, the Dynamic
+/// Island. The system does not offer two independently addressable destinations, so this row exposes one
+/// honest surface switch plus a separate privacy choice for the extra daily scores.
+struct LiveActivityPreferenceRow: View {
+    var compact = false
+    @AppStorage(UnitPrefs.liveActivityKey) private var liveActivityEnabled = true
+    @AppStorage(UnitPrefs.liveActivityChargeKey) private var showCharge = true
+    @AppStorage(UnitPrefs.liveActivityEffortKey) private var showEffort = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: $liveActivityEnabled) {
+                Text("Live HR Live Activity")
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textPrimary)
+            }
+            .toggleStyle(.switch)
+            .tint(StrandPalette.accent)
+            .accessibilityHint("Shows live heart rate on the Lock Screen and, on supported iPhones, in the Dynamic Island.")
+
+            Text(compact
+                 ? "Shows this live reading on the Lock Screen and, on supported iPhones, in the Dynamic Island. Apple controls those two locations together."
+                 : "Apple shows the same Live Activity on the Lock Screen and, on supported iPhones, in the Dynamic Island; those locations cannot be selected separately. Turning this off ends NOOP’s current Live Activity immediately.")
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if liveActivityEnabled {
+                Toggle(isOn: $showCharge) {
+                    Label("Charge indicator", systemImage: "bolt.heart.fill")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                }
+                .toggleStyle(.switch)
+                .tint(StrandPalette.accent)
+
+                Toggle(isOn: $showEffort) {
+                    Label("Effort indicator", systemImage: "flame.fill")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                }
+                .toggleStyle(.switch)
+                .tint(StrandPalette.accent)
+
+                Text("Each score is independent. Turn either off to hide only that indicator; Live HR and the other indicator keep working.")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+#endif
 
 // MARK: - Advanced disclosure (S3)
 

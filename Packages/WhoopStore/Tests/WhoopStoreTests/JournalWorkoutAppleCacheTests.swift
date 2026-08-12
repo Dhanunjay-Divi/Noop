@@ -236,6 +236,41 @@ final class JournalWorkoutAppleCacheTests: XCTestCase {
         XCTAssertEqual(limited.map { $0.startTs }, [100], "limit honoured, oldest first")
     }
 
+    func testWorkoutOverlapReadIncludesMidnightSpanningSession() async throws {
+        let store = try await WhoopStore.inMemory()
+        let rows = [
+            WorkoutRow(startTs: 900, endTs: 1_100, sport: "crossing", source: "a",
+                       durationS: 200, energyKcal: nil, avgHr: nil, maxHr: nil, strain: nil,
+                       distanceM: nil, zonesJSON: nil, notes: nil),
+            WorkoutRow(startTs: 800, endTs: 1_000, sport: "ends-at-start", source: "a",
+                       durationS: 200, energyKcal: nil, avgHr: nil, maxHr: nil, strain: nil,
+                       distanceM: nil, zonesJSON: nil, notes: nil),
+            WorkoutRow(startTs: 1_999, endTs: 2_100, sport: "inside", source: "a",
+                       durationS: 101, energyKcal: nil, avgHr: nil, maxHr: nil, strain: nil,
+                       distanceM: nil, zonesJSON: nil, notes: nil),
+            WorkoutRow(startTs: 2_000, endTs: 2_100, sport: "starts-at-end", source: "a",
+                       durationS: 100, energyKcal: nil, avgHr: nil, maxHr: nil, strain: nil,
+                       distanceM: nil, zonesJSON: nil, notes: nil),
+        ]
+        try await store.upsertWorkouts(rows, deviceId: "devA")
+
+        let overlapping = try await store.workoutsOverlapping(
+            deviceId: "devA", from: 1_000, to: 2_000, limit: 100)
+        XCTAssertEqual(overlapping.map(\.sport), ["crossing", "inside"])
+    }
+
+    func testWorkoutOverlapReadTreatsZeroLengthRowAsOneSecond() async throws {
+        let store = try await WhoopStore.inMemory()
+        let marker = WorkoutRow(startTs: 1_500, endTs: 1_500, sport: "marker", source: "a",
+                                durationS: nil, energyKcal: nil, avgHr: nil, maxHr: nil,
+                                strain: nil, distanceM: nil, zonesJSON: nil, notes: nil)
+        try await store.upsertWorkouts([marker], deviceId: "devA")
+
+        let overlapping = try await store.workoutsOverlapping(
+            deviceId: "devA", from: 1_500, to: 1_501, limit: 100)
+        XCTAssertEqual(overlapping.map(\.sport), ["marker"])
+    }
+
     func testDeleteWorkoutsBySportAndRange() async throws {
         // Pins deleteWorkouts (detected-workout idempotency, port of WhoopDao.deleteWorkoutsBySport):
         // deletes only the matching (deviceId, sport, startTs-range) rows, leaving other sports,

@@ -125,6 +125,19 @@ enum UnitPrefs {
             ? true : UserDefaults.standard.bool(forKey: liveActivityKey)
     }
 
+    /// Independent indicators inside the live-HR Live Activity. Both default to ON to preserve the
+    /// pre-picker presentation; the user can now hide either one without losing Live HR or the other.
+    static let liveActivityChargeKey = "liveActivity.showCharge"
+    static let liveActivityEffortKey = "liveActivity.showEffort"
+    static func liveActivityShowsCharge() -> Bool {
+        UserDefaults.standard.object(forKey: liveActivityChargeKey) == nil
+            ? true : UserDefaults.standard.bool(forKey: liveActivityChargeKey)
+    }
+    static func liveActivityShowsEffort() -> Bool {
+        UserDefaults.standard.object(forKey: liveActivityEffortKey) == nil
+            ? true : UserDefaults.standard.bool(forKey: liveActivityEffortKey)
+    }
+
     /// Resolve the stored raw values into a concrete temperature unit, applying the
     /// "match the system" default when no explicit override is set.
     static func resolveTemperature(system: UnitSystem, override raw: String) -> TemperatureUnit {

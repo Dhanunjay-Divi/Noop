@@ -1,19 +1,105 @@
 import SwiftUI
 import StrandDesign
 
-/// Process-launch policy for the iPhone trial disclosure. This deliberately uses
-/// in-memory state rather than AppStorage: every cold launch shows the notice again,
-/// while the screenshot/demo harness can bypass it deterministically.
+/// Version/build policy for the iPhone trial disclosure. The acknowledged identity is persisted in
+/// `UserDefaults`, so a build is shown once rather than once per process launch. Comparing both bundle
+/// fields matters for TestFlight-style releases, where a replacement build can keep the same marketing
+/// version while advancing `CFBundleVersion`.
 enum TrialNoticePolicy {
+    static let acknowledgedBuildStorageKey = "noop.lastAcknowledgedTrialBuild"
+
+    /// Stable, schema-prefixed value stored by `iOSRootView`. Bundle version components are restricted by
+    /// Apple to version-like text; trimming here also prevents an accidentally blank build setting from
+    /// creating a marker that changes between launches.
+    static func buildIdentifier(
+        marketingVersion: String,
+        buildNumber: String
+    ) -> String {
+        let version = normalized(marketingVersion) ?? "0"
+        let build = normalized(buildNumber) ?? "0"
+        return "1|\(version)|\(build)"
+    }
+
+    static func currentBuildIdentifier(
+        infoDictionary: [String: Any] = Bundle.main.infoDictionary ?? [:]
+    ) -> String {
+        buildIdentifier(
+            marketingVersion: stringValue(infoDictionary["CFBundleShortVersionString"]) ?? "0",
+            buildNumber: stringValue(infoDictionary["CFBundleVersion"]) ?? "0"
+        )
+    }
+
     static func shouldPresent(
-        acknowledgedThisLaunch: Bool,
+        acknowledgedBuildIdentifier: String,
+        currentBuildIdentifier: String,
         demoBypass: Bool
     ) -> Bool {
-        !acknowledgedThisLaunch && !demoBypass
+        guard !demoBypass else { return false }
+        guard let current = BuildIdentity(currentBuildIdentifier) else {
+            // Fail safe for an invalid current bundle identity: show once for that exact value, but do not
+            // get stuck in an every-launch loop after it has been acknowledged.
+            return acknowledgedBuildIdentifier != currentBuildIdentifier
+        }
+        guard let acknowledged = BuildIdentity(acknowledgedBuildIdentifier) else { return true }
+        return current.isNewer(than: acknowledged)
+    }
+
+    /// The automatic What's New sheet is release-version gated rather than build gated: a TestFlight
+    /// rebuild with unchanged notes still gets the trial disclosure above, but does not replay identical
+    /// notes. Numeric comparison prevents a downgrade from being treated as a new release.
+    static func isNewerMarketingVersion(
+        _ currentVersion: String,
+        than acknowledgedVersion: String
+    ) -> Bool {
+        guard let current = normalized(currentVersion) else { return false }
+        guard let acknowledged = normalized(acknowledgedVersion) else { return true }
+        return current.compare(
+            acknowledged,
+            options: [.numeric, .caseInsensitive]
+        ) == .orderedDescending
+    }
+
+    private struct BuildIdentity {
+        let marketingVersion: String
+        let buildNumber: String
+
+        init?(_ persistedValue: String) {
+            let fields = persistedValue.split(separator: "|", omittingEmptySubsequences: false)
+            guard fields.count == 3,
+                  fields[0] == "1",
+                  let version = normalized(String(fields[1])),
+                  let build = normalized(String(fields[2])) else { return nil }
+            marketingVersion = version
+            buildNumber = build
+        }
+
+        func isNewer(than other: BuildIdentity) -> Bool {
+            let versionOrder = marketingVersion.compare(
+                other.marketingVersion,
+                options: [.numeric, .caseInsensitive]
+            )
+            if versionOrder != .orderedSame { return versionOrder == .orderedDescending }
+            return buildNumber.compare(
+                other.buildNumber,
+                options: [.numeric, .caseInsensitive]
+            ) == .orderedDescending
+        }
+    }
+
+    private static func normalized(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains("|") else { return nil }
+        return trimmed
+    }
+
+    private static func stringValue(_ value: Any?) -> String? {
+        if let value = value as? String { return normalized(value) }
+        if let value = value as? NSNumber { return normalized(value.stringValue) }
+        return nil
     }
 }
 
-/// Full-screen trial disclosure shown before Terms and onboarding on every iOS launch.
+/// Full-screen trial disclosure shown before Terms and onboarding once for each newer iOS app build.
 /// The wording distinguishes NOOP-operated cloud storage (none) from explicit optional
 /// destinations the user may choose, so the promise remains true if self-hosted sync is enabled.
 struct TrialNoticeView: View {
