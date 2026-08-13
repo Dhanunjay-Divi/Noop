@@ -32,12 +32,12 @@ enum AppleDemoSeeder {
     static var requested: Bool { CommandLine.arguments.contains("--demo-seed") }
 
     /// Seed only if requested AND the store is empty. Safe to call on every launch.
-    static func seedIfRequested(into store: WhoopStore) async {
+    static func seedIfRequested(into store: WhoopStore, vitalityProfileAge: Int) async {
         guard requested else { return }
         seedDemoDeviceIfNeeded(into: store)
         let existing = (try? await store.dailyMetrics(deviceId: whoop, from: "0000-00-00", to: "9999-99-99")) ?? []
         guard existing.isEmpty else { return }
-        do { try await seed(into: store) }
+        do { try await seed(into: store, vitalityProfileAge: vitalityProfileAge) }
         catch { NSLog("AppleDemoSeeder: seed failed — \(error)") }
     }
 
@@ -58,7 +58,7 @@ enum AppleDemoSeeder {
         try? registry.add(polar)
     }
 
-    private static func seed(into store: WhoopStore) async throws {
+    private static func seed(into store: WhoopStore, vitalityProfileAge: Int) async throws {
         var rng = SplitMix64(seed: 0xC0FFEE)
         let cal = Calendar.current
         let zone = TimeZone.current
@@ -216,6 +216,11 @@ enum AppleDemoSeeder {
                 value: round1((vitality + gauss(&rng, 0.0, 1.0)).clamped(40.0, 80.0))))
             series.append(MetricPoint(day: day, key: "body_age",
                 value: round1((bodyAgeDemo + gauss(&rng, 0.0, 0.3)).clamped(30.0, 45.0))))
+            // Demo Vitality is synthetic but uses the current provenance-safe model contract. Seed the
+            // same v2 marker the real engine writes so strict upgrade gating does not hide the fixture.
+            series.append(MetricPoint(
+                day: day, key: AgeMetricProfile.vitalityKey,
+                value: AgeMetricProfile.vitalityToken(age: vitalityProfileAge)))
             fitnessAge -= 0.75  // ~6 yr younger across the 8 seeded Saturdays
             vo2 += 0.75
             vitality += 2.0

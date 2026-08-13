@@ -349,7 +349,7 @@
     <string name="l10n_breathe_screen_the_strap_buzzes_a_gentle_rhythm_eb5c6a65">The strap buzzes a gentle rhythm just below your current heart rate, a felt metronome to relax toward. It trails your heart down rather than yanking it, and stops on its own.</string>
     <string name="l10n_breathe_screen_turn_off_8807c2b3">Turn off</string>
     <string name="l10n_breathe_screen_waiting_for_a_resting_heart_rate_980cedbf">Waiting for a resting heart rate. Start a live reading first, or come back when you\'re still.</string>
-    <string name="l10n_breathe_screen_your_hrv_dipped_while_you_were_231d3c7a">Your HRV dipped while you were still. Want a minute to breathe?</string>
+    <string name="l10n_breathe_screen_your_hrv_dipped_while_you_were_231d3c7a">Your short-window HRV moved below its recent baseline while low wrist motion was observed. Want a minute to breathe?</string>
     <string name="l10n_caffeine_log_after_your_clocklabel_cutoffminutes_cutoff_may_3c023900">After your %1$s cutoff - may still be active at bed.</string>
     <string name="l10n_caffeine_log_amount_in_mg_optional_f0749888">Amount in mg (optional)</string>
     <string name="l10n_caffeine_log_bedtime_e3cb8bd6">Bedtime</string>
@@ -1881,4 +1881,8 @@
     <string name="appearance_detail_black">True OLED black with pearl controls</string>
     <string name="appearance_settings_blurb">Choose the app finish. System follows your device; Dark uses dimensional graphite; Black uses a true OLED-black canvas.</string>
     <string name="appearance_onboarding_subtitle">NOOP follows your system by default. Choose Light, Dark, or true Black here, and change it any time in Settings → Appearance.</string>
+    <string name="settings_automatic_stress_check_ins">Automatic stress check-ins</string>
+    <string name="settings_manual_only">Manual only</string>
+    <string name="settings_automatic_stress_unavailable_reason">Unavailable for the current live source because NOOP does not receive fresh, timestamp-matched wrist motion. It will not infer wrist stillness from phone motion or buzz automatically.</string>
+    <string name="settings_manual_breathe_available">Manual Breathe remains available from Today’s + menu and More. It stays user-started and can use screen, audio, or supported strap haptics.</string>
 </resources>

@@ -322,7 +322,7 @@
     <string name="l10n_breathe_screen_the_strap_buzzes_a_gentle_rhythm_eb5c6a65">A bracelete vibra a um ritmo suave logo abaixo da tua frequência cardíaca atual, um metrónomo de feltro para relaxar. Arrasta o teu coração para baixo, em vez de o arrancar, e para por conta própria.</string>
     <string name="l10n_breathe_screen_turn_off_8807c2b3">Desligar</string>
     <string name="l10n_breathe_screen_waiting_for_a_resting_heart_rate_980cedbf">À espera de uma frequência cardíaca em repouso. Comece primeiro uma leitura em direto ou volte quando estiver quieto.</string>
-    <string name="l10n_breathe_screen_your_hrv_dipped_while_you_were_231d3c7a">O teu HRV caiu enquanto estavas parado. Queres um minuto para respirar?</string>
+    <string name="l10n_breathe_screen_your_hrv_dipped_while_you_were_231d3c7a">A tua VFC de curto prazo desceu abaixo do valor de referência recente enquanto se observava pouco movimento do pulso. Queres dedicar um minuto à respiração?</string>
     <string name="l10n_caffeine_log_after_your_clocklabel_cutoffminutes_cutoff_may_3c023900">Após o teu ponto de corte %1$s - pode ainda estar ativo na cama.</string>
     <string name="l10n_caffeine_log_amount_in_mg_optional_f0749888">Quantidade em mg (opcional)</string>
     <string name="l10n_caffeine_log_bedtime_e3cb8bd6">Hora de dormir</string>
@@ -1849,4 +1849,8 @@
     <string name="appearance_settings_blurb">Escolha o acabamento da app. Sistema segue o dispositivo; Escuro usa grafite dimensional; Preto usa um fundo OLED totalmente preto.</string>
     <string name="appearance_onboarding_subtitle">A NOOP segue o sistema por predefinição. Escolha Claro, Escuro ou Preto puro aqui e altere-o quando quiser em Definições → Aspeto.</string>
     <string name="l10n_app_changelog_today_first_insights_9_2_0">Informações centradas no dia de hoje, automação mais discreta e evidência que podes consultar</string>
+    <string name="settings_automatic_stress_check_ins">Check-ins automáticos de stress</string>
+    <string name="settings_manual_only">Apenas manual</string>
+    <string name="settings_automatic_stress_unavailable_reason">Indisponível para a fonte em direto atual porque o NOOP não recebe movimento recente do pulso com um carimbo de data/hora correspondente. O NOOP não deduz que o pulso está imóvel a partir do movimento do telefone nem vibra automaticamente.</string>
+    <string name="settings_manual_breathe_available">A respiração manual continua disponível no menu + de Hoje e em Mais. És tu que a inicias e pode usar o ecrã, o áudio ou a resposta háptica de pulseiras compatíveis.</string>
 </resources>

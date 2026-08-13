@@ -4,10 +4,10 @@ import WhoopProtocol
 @testable import Strand
 
 /// Pins the pure logic behind the #155 Shortcuts drop file (Documents/noop_sync.txt): the exact
-/// `HR,[reserved],Steps,yyyy-MM-dd HH:mm` line shape the reporter's pre-built Siri Shortcut parses
-/// (the old HRV field stays blank because RMSSD is not Apple SDNN; commas preserve compatibility),
-/// the LOCAL-zone timestamp, 15-minute windowing,
-/// cumulative-u16 step delta math, and the advance-only-on-nonempty-success watermark — a watermark
+/// `HR,[reserved],[reserved],yyyy-MM-dd HH:mm` line shape the reporter's pre-built Siri Shortcut parses
+/// (the old HRV and Steps fields stay blank because RMSSD is not Apple SDNN and @57 is not a validated
+/// step count; commas preserve compatibility), the LOCAL-zone timestamp, 15-minute windowing,
+/// legacy cumulative-u16 motion delta math, and the advance-only-on-nonempty-success watermark — a watermark
 /// that moved past a failed or empty-before-late-data write would silently drop that span forever.
 final class ShortcutHealthExportTests: XCTestCase {
 
@@ -52,7 +52,7 @@ final class ShortcutHealthExportTests: XCTestCase {
     }
 
     private actor RecordingReads: ShortcutExportReads {
-        private(set) var requestedStepFrom: Int?
+        private(set) var stepReadCount = 0
         let steps: [StepSample]
 
         init(steps: [StepSample]) { self.steps = steps }
@@ -63,7 +63,7 @@ final class ShortcutHealthExportTests: XCTestCase {
                          limit: Int) async throws -> [RRInterval] { [] }
         func stepSamples(deviceId: String, from: Int, to: Int,
                          limit: Int) async throws -> [StepSample] {
-            requestedStepFrom = from
+            stepReadCount += 1
             return steps
         }
     }
@@ -76,16 +76,16 @@ final class ShortcutHealthExportTests: XCTestCase {
 
     func testLineAllFields() {
         let w = Window(start: 0, hr: 62, hrvMs: 45.27, steps: 120)
-        XCTAssertEqual(ShortcutHealthExport.line(w, timeZone: utc), "62,,120,1970-01-01 00:00")
+        XCTAssertEqual(ShortcutHealthExport.line(w, timeZone: utc), "62,,,1970-01-01 00:00")
     }
 
     // Empty fields MUST keep their commas — the Shortcut splits by comma and relies on fixed
     // column positions.
     func testEmptyFieldsKeepCommas() {
         XCTAssertEqual(ShortcutHealthExport.line(Window(start: 0, hrvMs: 45.27, steps: 120), timeZone: utc),
-                       ",,120,1970-01-01 00:00")
+                       ",,,1970-01-01 00:00")
         XCTAssertEqual(ShortcutHealthExport.line(Window(start: 0, hr: 62, steps: 120), timeZone: utc),
-                       "62,,120,1970-01-01 00:00")
+                       "62,,,1970-01-01 00:00")
         XCTAssertEqual(ShortcutHealthExport.line(Window(start: 0, hr: 62, hrvMs: 45.27), timeZone: utc),
                        "62,,,1970-01-01 00:00")
         XCTAssertEqual(ShortcutHealthExport.line(Window(start: 0, hr: 62), timeZone: utc),
@@ -95,6 +95,14 @@ final class ShortcutHealthExportTests: XCTestCase {
     // RMSSD must never populate the reserved Apple-Health field: Apple's writable HRV type is SDNN.
     func testRMSSDColumnRemainsBlank() {
         XCTAssertEqual(ShortcutHealthExport.line(Window(start: 0, hrvMs: 33.0), timeZone: utc),
+                       ",,,1970-01-01 00:00")
+    }
+
+    // The third fixed-position field used to carry @57 counter deltas. Suppress it even if a legacy
+    // analyzer Window still contains a value: motion ticks scaled by a preference are not validated
+    // Apple Health steps.
+    func testMotionCounterColumnRemainsBlank() {
+        XCTAssertEqual(ShortcutHealthExport.line(Window(start: 0, steps: 12_345), timeZone: utc),
                        ",,,1970-01-01 00:00")
     }
 
@@ -206,17 +214,32 @@ final class ShortcutHealthExportTests: XCTestCase {
         XCTAssertEqual(windows, [Window(start: 9_900, steps: 40)])
     }
 
-    func testIncrementalExportQueriesOneStepWindowBeforeWatermark() async {
+    func testProductionExportNeverReadsMotionCounterSteps() async throws {
         defaults.set(9_900, forKey: ShortcutHealthExport.watermarkKey)
         let source = RecordingReads(steps: [
             StepSample(ts: 9_100, counter: 130),
             StepSample(ts: 9_950, counter: 170),
         ])
-        _ = await ShortcutHealthExport.export(
+        let outcome = await ShortcutHealthExport.export(
             source: source, deviceId: "dev", now: Date(timeIntervalSince1970: 20_000),
             defaults: defaults, directory: dir, timeZone: utc)
-        let requestedStepFrom = await source.requestedStepFrom
-        XCTAssertEqual(requestedStepFrom, 9_000)
+        let stepReadCount = await source.stepReadCount
+        XCTAssertEqual(outcome, .written(lines: 0))
+        XCTAssertEqual(stepReadCount, 0)
+        XCTAssertEqual(try fileText(), "")
+        XCTAssertEqual(defaults.integer(forKey: ShortcutHealthExport.watermarkKey), 9_900,
+                       "An HR-empty interval remains retryable; @57 must not make it look exported.")
+    }
+
+    func testProductionExportKeepsStepColumnBlankWhenHeartRateWritesTheRow() async throws {
+        let source = FakeReads(
+            hr: [HRBucket(ts: 0, bpm: 62)],
+            steps: [StepSample(ts: 100, counter: 100), StepSample(ts: 200, counter: 250)])
+        let outcome = await ShortcutHealthExport.export(
+            source: source, deviceId: "dev", now: Date(timeIntervalSince1970: 10_000),
+            defaults: defaults, directory: dir, timeZone: utc)
+        XCTAssertEqual(outcome, .written(lines: 1))
+        XCTAssertEqual(try fileText(), "62,,,1970-01-01 00:00")
     }
 
     // MARK: - Coverage span
@@ -336,5 +359,65 @@ final class ShortcutHealthExportTests: XCTestCase {
         defaults.set(12_345, forKey: ShortcutHealthExport.watermarkKey)
         ShortcutHealthExport.resetWatermark(defaults: defaults)
         XCTAssertEqual(defaults.integer(forKey: ShortcutHealthExport.watermarkKey), 0)
+    }
+
+    func testHROnlyMigrationClearsLegacyFileEvenWhenExportDisabled() throws {
+        defaults.set(false, forKey: ShortcutHealthExport.enabledKey)
+        defaults.set(12_345, forKey: ShortcutHealthExport.watermarkKey)
+        try Data("61,,1234,2026-08-12 10:00".utf8)
+            .write(to: dir.appendingPathComponent(ShortcutHealthExport.fileName), options: .atomic)
+
+        XCTAssertTrue(ShortcutHealthExport.migrateLegacyFileIfNeeded(
+            defaults: defaults, directory: dir))
+        XCTAssertEqual(try fileText(), "")
+        XCTAssertEqual(defaults.integer(forKey: ShortcutHealthExport.watermarkKey), 0,
+                       "Discarding the legacy file must make its safe HR coverage replayable.")
+        XCTAssertTrue(defaults.bool(forKey: ShortcutHealthExport.hrOnlyMigrationKey))
+    }
+
+    func testHROnlyMigrationLetsNextExportReplaySevenDaysOfSafeHR() async throws {
+        let nowTs = 1_000_000_800 // 15-minute aligned, so this is also the closed-coverage end.
+        let replayStart = nowTs - ShortcutHealthExport.lookbackSeconds
+        defaults.set(nowTs, forKey: ShortcutHealthExport.watermarkKey)
+        try Data("61,,1234,2026-08-12 10:00".utf8)
+            .write(to: dir.appendingPathComponent(ShortcutHealthExport.fileName), options: .atomic)
+
+        XCTAssertTrue(ShortcutHealthExport.migrateLegacyFileIfNeeded(
+            defaults: defaults, directory: dir))
+        let outcome = await ShortcutHealthExport.export(
+            source: FakeReads(hr: [HRBucket(ts: replayStart, bpm: 64)]),
+            deviceId: "dev", now: Date(timeIntervalSince1970: TimeInterval(nowTs)),
+            defaults: defaults, directory: dir, timeZone: utc)
+
+        XCTAssertEqual(outcome, .written(lines: 1))
+        XCTAssertEqual(try fileText(),
+                       "64,,,\(ShortcutHealthExport.timestamp(replayStart, timeZone: utc))")
+        XCTAssertEqual(defaults.integer(forKey: ShortcutHealthExport.watermarkKey), nowTs)
+    }
+
+    func testHROnlyMigrationWriteFailurePreservesWatermarkAndRetries() {
+        let oldWatermark = 12_345
+        defaults.set(oldWatermark, forKey: ShortcutHealthExport.watermarkKey)
+        let missingDirectory = dir.appendingPathComponent("missing")
+
+        XCTAssertFalse(ShortcutHealthExport.migrateLegacyFileIfNeeded(
+            defaults: defaults, directory: missingDirectory))
+        XCTAssertEqual(defaults.integer(forKey: ShortcutHealthExport.watermarkKey), oldWatermark,
+                       "A failed file replacement must not change the covered HR span.")
+        XCTAssertFalse(defaults.bool(forKey: ShortcutHealthExport.hrOnlyMigrationKey),
+                       "A failed migration must remain retryable.")
+    }
+
+    func testHROnlyMigrationRunsOnceAndDoesNotEraseNewHRFile() throws {
+        try Data("61,,1234,2026-08-12 10:00".utf8)
+            .write(to: dir.appendingPathComponent(ShortcutHealthExport.fileName), options: .atomic)
+        XCTAssertTrue(ShortcutHealthExport.migrateLegacyFileIfNeeded(
+            defaults: defaults, directory: dir))
+
+        try Data("72,,,2026-08-13 09:00".utf8)
+            .write(to: dir.appendingPathComponent(ShortcutHealthExport.fileName), options: .atomic)
+        XCTAssertFalse(ShortcutHealthExport.migrateLegacyFileIfNeeded(
+            defaults: defaults, directory: dir))
+        XCTAssertEqual(try fileText(), "72,,,2026-08-13 09:00")
     }
 }

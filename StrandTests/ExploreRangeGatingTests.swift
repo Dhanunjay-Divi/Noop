@@ -9,6 +9,15 @@ import XCTest
 final class ExploreRangeGatingTests: XCTestCase {
     func testMetricDetailsOpenWithCurrentReadingAndCompactHistory() {
         XCTAssertEqual(MetricDetailPresentation.defaultHistoryRange, .week)
+        XCTAssertEqual(
+            MetricDetailPresentation.contentOrder,
+            [.today, .compareHistory, .relationships, .education],
+            "Every shared metric detail must lead with Today and put comparisons/history after it"
+        )
+        XCTAssertEqual(MetricDetailPresentation.currentReadState(
+            latestDay: "2026-08-13",
+            currentDayKeys: ["2026-08-12", "2026-08-13"]
+        ), .today)
         XCTAssertTrue(MetricDetailPresentation.isCurrent(
             latestDay: "2026-08-13",
             currentDayKeys: ["2026-08-12", "2026-08-13"]
@@ -21,6 +30,14 @@ final class ExploreRangeGatingTests: XCTestCase {
             latestDay: nil,
             currentDayKeys: ["2026-08-13"]
         ))
+        XCTAssertEqual(MetricDetailPresentation.currentReadState(
+            latestDay: "2026-08-11",
+            currentDayKeys: ["2026-08-12", "2026-08-13"]
+        ), .latestAvailable)
+        XCTAssertEqual(MetricDetailPresentation.currentReadState(
+            latestDay: nil,
+            currentDayKeys: ["2026-08-13"]
+        ), .unavailable)
     }
 
 

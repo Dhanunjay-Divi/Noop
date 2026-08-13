@@ -72,6 +72,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.noop.analytics.Baselines
 import com.noop.analytics.AgeMetricProfile
 import com.noop.analytics.IllnessSignalEngine
+import com.noop.analytics.IntelligenceEngine
 import com.noop.analytics.V5HealthSignals
 import com.noop.analytics.FitnessAgeEngine
 import com.noop.analytics.VitalityEngine
@@ -776,28 +777,12 @@ private fun VitalitySection(vm: AppViewModel, days: List<DailyMetric>, profile: 
     }
     val contributions = remember(days, profile.age) {
         val last21 = days.takeLast(21)
-        val minCoverage = 14
-        val nights = last21.mapNotNull { it.totalSleepMin }.map { it / 60.0 }.filter { it > 0 }
-        val hrvs = last21.mapNotNull { it.avgHrv }
-        val rhrs = last21.mapNotNull { it.restingHr }.map { it.toDouble() }
-        val steps = last21.mapNotNull { it.steps }.map { it.toDouble() }
-        fun mean(a: List<Double>): Double? = if (a.isEmpty()) null else a.average()
         // Match the STORED headline's aggregation (IntelligenceEngine.medianOfDoubles): median resting HR +
-        // HRV (robust to one outlier night), mean sleep + steps — so this "what's driving it" breakdown
-        // reconciles with the stored Vitality / Wellness Age number rather than drifting on the mean.
-        fun median(a: List<Double>): Double? {
-            if (a.isEmpty()) return null
-            val s = a.sorted(); val n = s.size
-            return if (n % 2 == 1) s[n / 2] else (s[n / 2 - 1] + s[n / 2]) / 2.0
-        }
-        VitalityEngine.contributions(VitalityEngine.Inputs(
-            chronoAge = profile.age.toDouble(),
-            restingHR = if (rhrs.size >= minCoverage) median(rhrs) else null,
-            sleepHours = if (nights.size >= minCoverage) mean(nights) else null,
-            sleepConsistency = if (nights.size >= minCoverage) VitalityEngine.sleepConsistency(nights) else null,
-            rmssd = if (hrvs.size >= minCoverage) median(hrvs) else null,
-            rmssdNorm = VitalityEngine.rmssdNorm(profile.age.toDouble()),
-            steps = if (steps.size >= minCoverage) mean(steps) else null))
+        // HRV (robust to one outlier night) + mean sleep. The shared builder also enforces the provenance
+        // boundary: un-sourced DailyMetric.steps is omitted rather than shown as a measured contribution.
+        VitalityEngine.contributions(
+            IntelligenceEngine.vitalityInputs(last21, profile.age.toDouble()),
+        )
     }
     val v = vitality.takeIf { loadedProfileState == profileState }
     val ba = bodyAge.takeIf { loadedProfileState == profileState }
@@ -2177,34 +2162,42 @@ private suspend fun buildSeriesVitalDetail(vm: AppViewModel, key: String): Vital
         format = { it.roundToInt().toString() },
     )
     "steps_est" -> {
-        // #377: the Today Steps tile resolves a REAL step count FIRST — the WHOOP 5/MG on-device @57
-        // counter (DailyMetric.steps) ?: imported Health Connect / Apple Health ?: the motion-model
-        // estimate (TodayScreen: `day?.steps ?: importedStepsForDay ?: estimatedStepsForDay`). This
-        // detail read the estimate ALONE, so a WHOOP 5.0 with a real count saw the estimate history —
+        // #377: the Today Steps tile resolves an imported measured Health Connect / Apple Health count
+        // first, then WHOOP 5/MG's @57 motion estimate, then the calibrated motion-model fallback.
+        // detail read the calibrated estimate ALONE, so a WHOOP 5.0 with an @57 value saw that history —
         // clamped flat at StepsEstimateEngine.MAX_DAILY_STEPS = 60,000 when the motion fit over-shoots —
-        // instead of its real steps. Resolve per day with the SAME precedence so the graph + Readings
-        // match the card. iOS already routes this detail through the real "steps" metric (not the
-        // estimate); this brings Android to parity. Real strap steps live in DailyMetric.steps; imported
-        // steps in AppleDaily; the estimate in the "steps_est" series — three disjoint stores, so the
+        // instead of its direct motion estimate. Resolve per day with the SAME precedence so graph + Readings
+        // match the card. iOS routes the @57 path through its explicitly motion-estimate descriptor.
+        // Strap estimates live in DailyMetric.steps; imported measured steps in AppleDaily; the calibrated
+        // estimate in the "steps_est" series — three disjoint stores, so the
         // per-day `?:` chain never double-counts.
-        val real = vm.repo.resolvedSeries("steps", "my-whoop", "0000-00-00", "9999-99-99",
+        val motionDerived = vm.repo.resolvedSeries("steps", "my-whoop", "0000-00-00", "9999-99-99",
             strapDeviceId = vm.activeStrapId)
-            .points.associateBy({ it.day }, { VitalReading(it.day, it.value, it.source) })
+            .points.associateBy({ it.day }, {
+                VitalReading(it.day, it.value, MOTION_DERIVED_STEPS_SOURCE)
+            })
         val imported = LinkedHashMap<String, VitalReading>()
         for (r in vm.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31") +
             vm.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31")) {
             val s = r.steps
-            if (s != null && s > 0) imported.putIfAbsent(r.day, VitalReading(r.day, s.toDouble(), r.deviceId))
+            if (s != null && s > 0) {
+                val candidate = VitalReading(r.day, s.toDouble(), r.deviceId)
+                if (candidate.value > (imported[r.day]?.value ?: Double.NEGATIVE_INFINITY)) {
+                    imported[r.day] = candidate
+                }
+            }
         }
-        val est = vm.repo.resolvedSeries("steps_est", "my-whoop", "0000-00-00", "9999-99-99",
+        val calibratedEstimate = vm.repo.resolvedSeries("steps_est", "my-whoop", "0000-00-00", "9999-99-99",
             strapDeviceId = vm.activeStrapId)
-            .points.associateBy({ it.day }, { VitalReading(it.day, it.value, it.source) })
+            .points.associateBy({ it.day }, {
+                VitalReading(it.day, it.value, CALIBRATED_MOTION_STEPS_SOURCE)
+            })
         VitalDetailModel(
             key = key,
             title = uiString(R.string.l10n_health_screen_steps_cdde4f20),
             unit = "steps",
             color = Palette.metricCyan,
-            readings = mergeStepsReadings(real, imported, est),
+            readings = mergeStepsReadings(motionDerived, imported, calibratedEstimate),
             format = { it.roundToInt().toString() },
         )
     }

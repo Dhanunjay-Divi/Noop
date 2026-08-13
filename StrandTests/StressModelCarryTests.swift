@@ -149,3 +149,46 @@ final class StressModelCarryTests: XCTestCase {
         return f.string(from: date)
     }
 }
+
+/// Pins the fail-closed contract between the Automations UI and the automatic stress detector. A
+/// remembered opt-in is data, not evidence: it cannot enable automatic haptics until the live source
+/// supplies fresh, timestamp-matched wrist motion.
+final class BiofeedbackCapabilityTests: XCTestCase {
+
+    func testCurrentLiveSourceCannotEnableAutomaticStressNudges() {
+        XCTAssertFalse(BiofeedbackPrefs.automaticStressNudgesAvailable)
+
+        let config = BiofeedbackPrefs.stressConfig(
+            storedCheckInEnabled: true,
+            storedAutoNudge: true,
+            capability: BiofeedbackPrefs.automaticStressNudgeCapability)
+
+        XCTAssertFalse(config.enabled,
+                       "a stored master opt-in must not bypass missing wrist-motion evidence")
+        XCTAssertFalse(config.autoNudge,
+                       "a stored auto-nudge opt-in must remain ineffective on the current source")
+    }
+
+    func testFutureVerifiedSourceCanHonorPreservedChoices() {
+        let config = BiofeedbackPrefs.stressConfig(
+            storedCheckInEnabled: true,
+            storedAutoNudge: true,
+            capability: .availableWithTimestampMatchedWristMotion,
+            quietHoursEnabled: false)
+
+        XCTAssertTrue(config.enabled)
+        XCTAssertTrue(config.autoNudge)
+        XCTAssertFalse(config.quietHoursEnabled)
+    }
+
+    func testCapabilityDoesNotOverrideUserOptOut() {
+        let config = BiofeedbackPrefs.stressConfig(
+            storedCheckInEnabled: false,
+            storedAutoNudge: true,
+            capability: .availableWithTimestampMatchedWristMotion)
+
+        XCTAssertFalse(config.enabled)
+        XCTAssertFalse(config.autoNudge,
+                       "a stale child opt-in must not bypass the stored master opt-out")
+    }
+}

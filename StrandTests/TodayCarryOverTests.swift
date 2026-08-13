@@ -117,6 +117,32 @@ final class TodayCarryOverTests: XCTestCase {
         XCTAssertEqual(carried?.respRateBpm, 14.2)
     }
 
+    // MARK: respiratory dashboard source honesty
+
+    func testRespiratoryDashboardRoutesCarriedWhoopValueToWhoopDetail() {
+        let reading = TodayView.respiratoryDashboardReading(
+            todayWhoop: nil, priorWhoop: 14.2, apple: 16.8)
+
+        XCTAssertEqual(reading.value, 14.2)
+        XCTAssertEqual(reading.source, "my-whoop")
+    }
+
+    func testRespiratoryDashboardCurrentWhoopValueOutranksCarryAndApple() {
+        let reading = TodayView.respiratoryDashboardReading(
+            todayWhoop: 13.7, priorWhoop: 14.2, apple: 16.8)
+
+        XCTAssertEqual(reading.value, 13.7)
+        XCTAssertEqual(reading.source, "my-whoop")
+    }
+
+    func testRespiratoryDashboardUsesAppleOnlyWhenWhoopHasNoVisibleValue() {
+        let reading = TodayView.respiratoryDashboardReading(
+            todayWhoop: nil, priorWhoop: nil, apple: 16.8)
+
+        XCTAssertEqual(reading.value, 16.8)
+        XCTAssertEqual(reading.source, "apple-health")
+    }
+
     // MARK: recency cap + relabel (#779)
 
     func testCarryWithinTwoDays_readsLastNight() {

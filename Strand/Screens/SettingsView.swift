@@ -11,12 +11,28 @@ import StrandDesign
 import StrandAnalytics
 import WhoopStore
 
+/// A focused entry point into Settings. The iPhone shell uses `.profile` for the avatar and the
+/// dedicated More destination, while the ordinary Settings route keeps the complete screen. Both
+/// render the same controls backed by the same `ProfileStore`, so surfacing Profile separately never
+/// forks or migrates the user's persisted body data.
+enum SettingsFocus: Equatable {
+    case profile
+}
+
 /// Settings — profile (powers zones / calories / recovery), strap connection, and about.
 /// Grouped cards on surface.raised with a two-column form feel.
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var live: LiveState
     @EnvironmentObject var profile: ProfileStore
+
+    /// Nil presents the complete Settings index. `.profile` presents only the existing local profile,
+    /// photo and independent measurement-unit editors as a clearly named destination.
+    private let focus: SettingsFocus?
+
+    init(focus: SettingsFocus? = nil) {
+        self.focus = focus
+    }
 
     /// Profile-photo picker selection (PhotosUI). Cleared back to nil once the bytes are loaded.
     @State private var avatarPickerItem: PhotosPickerItem?
@@ -199,41 +215,15 @@ struct SettingsView: View {
     @AppStorage(SettingsDisclosureDefaults.advancedOpenKey) private var advancedOpen = SettingsDisclosureDefaults.advancedOpenDefault
 
     var body: some View {
-        ScreenScaffold(title: "Settings",
-                       subtitle: "Your numbers, your strap, and how NOOP works. All on \(Platform.deviceNounPhrase).",
+        ScreenScaffold(title: focus == .profile ? "Profile" : "Settings",
+                       subtitle: focus == .profile
+                       ? "These power your heart-rate zones, calorie estimates and recovery baselines. Keep them accurate."
+                       : "Your numbers, your strap, and how NOOP works. All on \(Platform.deviceNounPhrase).",
                        // The day-of-sky liquid backdrop, matching Today / Health / Sleep / Trends / Devices:
                        // a fixed, full-bleed time-of-day sky behind the scroll content (it does not scroll).
                        // Settings' own frosted cards sit on the dark canvas below the sky band, unchanged.
                        topBackground: liquidScaffoldSky()) {
-            VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
-                // Everyday sections stay expanded (S3): the ones a first-run user actually needs.
-                profilePhotoCard.staggeredAppear(index: 0)
-                profileCard.staggeredAppear(index: 1)
-                unitsCard.staggeredAppear(index: 2)
-                appearanceCard.staggeredAppear(index: 3)
-                strapCard.staggeredAppear(index: 4)
-                powerSavingCard.staggeredAppear(index: 5)
-                featuresCard.staggeredAppear(index: 6)
-
-                // Lower-frequency sections collapse behind a single default-closed disclosure so the
-                // screen opens at ~6 sections instead of 11. Nothing is removed; every section here
-                // (Recovery / advanced scoring, Test Centre, the experimental probes + raw-capture, and
-                // Backup & restore) stays one tap away. Modelled on the Test Centre "Advanced" group.
-                SettingsDisclosureGroup(
-                    title: "Advanced",
-                    subtitle: "Recovery, Test Centre, experimental probes, and backup. Tucked away to keep the everyday screen tidy.",
-                    isExpanded: $advancedOpen
-                ) {
-                    recoveryCard
-                    testCentreCard
-                    experimentalCard
-                    backupCard
-                }
-                .staggeredAppear(index: 6)
-
-                // About stays expanded at the foot (version, links and the help sheets people return to).
-                aboutCard.staggeredAppear(index: 7)
-            }
+            settingsContent
         }
         .alert(backupAlertTitle, isPresented: $showBackupAlert) {
             Button("OK", role: .cancel) { }
@@ -295,6 +285,45 @@ struct SettingsView: View {
             guard !didMigrateAutoWorkoutMode else { return }
             didMigrateAutoWorkoutMode = true
             PuffinExperiment.migrateAutoWorkoutMode()
+        }
+    }
+
+    /// The focused Profile destination is intentionally a projection of the complete Settings screen,
+    /// not a second profile implementation. Editing here updates the same on-device `ProfileStore` used
+    /// by onboarding, zones, calories, age estimates and the full Settings page.
+    @ViewBuilder
+    private var settingsContent: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
+            profilePhotoCard.staggeredAppear(index: 0)
+            profileCard.staggeredAppear(index: 1)
+            unitsCard.staggeredAppear(index: 2)
+
+            if focus == nil {
+                // Everyday sections stay expanded (S3): the ones a first-run user actually needs.
+                appearanceCard.staggeredAppear(index: 3)
+                strapCard.staggeredAppear(index: 4)
+                powerSavingCard.staggeredAppear(index: 5)
+                featuresCard.staggeredAppear(index: 6)
+
+                // Lower-frequency sections collapse behind a single default-closed disclosure so the
+                // screen opens at ~6 sections instead of 11. Nothing is removed; every section here
+                // (Recovery / advanced scoring, Test Centre, the experimental probes + raw-capture, and
+                // Backup & restore) stays one tap away. Modelled on the Test Centre "Advanced" group.
+                SettingsDisclosureGroup(
+                    title: "Advanced",
+                    subtitle: "Recovery, Test Centre, experimental probes, and backup. Tucked away to keep the everyday screen tidy.",
+                    isExpanded: $advancedOpen
+                ) {
+                    recoveryCard
+                    testCentreCard
+                    experimentalCard
+                    backupCard
+                }
+                .staggeredAppear(index: 6)
+
+                // About stays expanded at the foot (version, links and the help sheets people return to).
+                aboutCard.staggeredAppear(index: 7)
+            }
         }
     }
 

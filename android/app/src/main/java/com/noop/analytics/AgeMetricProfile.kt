@@ -9,7 +9,12 @@ import kotlin.math.roundToInt
 object AgeMetricProfile {
     const val FITNESS_AGE_KEY = "fitness_age_profile_v1"
     const val VO2MAX_ESTIMATE_KEY = "vo2max_est_profile_v1"
-    const val VITALITY_KEY = "vitality_profile_v1"
+    /**
+     * The v1 marker accompanied scores that could use provenance-free DailyMetric.steps. Keep its key
+     * only so the computed-series upgrade cleanup can remove it; readers must require the v2 marker.
+     */
+    const val LEGACY_VITALITY_KEY = "vitality_profile_v1"
+    const val VITALITY_KEY = "vitality_profile_v2"
 
     fun fitnessAgeToken(age: Double, sex: String): Double? {
         val wholeAge = age.roundToInt()
@@ -28,6 +33,10 @@ object AgeMetricProfile {
     }
 
     fun vitalityToken(age: Double): Double = age.roundToInt().toDouble()
+
+    /** Vitality v2 has no legacy-token grace period: a missing marker may describe a steps-era score. */
+    fun acceptsVitality(stored: Double?, current: Double?): Boolean =
+        current != null && stored == current
 
     /** Accept pre-provenance rows only until a relevant profile edit makes provenance mandatory. */
     fun accepts(stored: Double?, current: Double?, provenanceRequired: Boolean): Boolean {

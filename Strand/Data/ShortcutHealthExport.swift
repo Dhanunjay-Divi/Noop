@@ -7,10 +7,12 @@ import StrandAnalytics
 /// can't carry the HealthKit entitlement, so HealthKitBridge never runs for sideloaders. Instead,
 /// NOOP drops a plain-text file at Documents/noop_sync.txt (exposed to Files/Shortcuts via
 /// UIFileSharingEnabled) and the reporter's pre-built Siri Shortcut reads it and logs the rows into
-/// Apple Health. One line per 15-minute window — `HR,[reserved],Steps,yyyy-MM-dd HH:mm` —
+/// Apple Health. One line per 15-minute window — `HR,[reserved],[reserved],yyyy-MM-dd HH:mm` —
 /// en_US_POSIX, LOCAL time (the Shortcut parses dates in the device zone), empty fields keep their
 /// commas so column positions are fixed, NO header. The legacy HRV column is always blank: strap HRV
-/// here is RMSSD, while Apple's writable HealthKit type is SDNN, and relabelling one as the other is
+/// here is RMSSD, while Apple's writable HealthKit type is SDNN. The legacy Steps column is also always
+/// blank: WHOOP 5/MG `step_motion_counter@57` is a motion counter scaled by a user preference, not a
+/// validated pedometer step count. Relabelling either value as an Apple Health quantity would be
 /// semantic data corruption.
 ///
 /// Reads ONLY the strap source (`repo.deviceId`) — never `apple-health` (a Shortcut-logged value
@@ -27,16 +29,20 @@ enum ShortcutHealthExport {
     /// Exclusive end of the last successfully written coverage, unix seconds. Advances ONLY after
     /// a successful file write, so a failed export retries the same span next time.
     static let watermarkKey = "noop.shortcutSync.lastExportTs"
+    /// One-time migration marker for the 9.2 HR-only file contract. Older builds could leave a
+    /// `noop_sync.txt` row whose third column contained WHOOP @57 motion ticks presented as steps.
+    /// Clear that payload synchronously at launch before any Shortcut can consume it; subsequent
+    /// HR-only exports safely replace the file through the normal differential path.
+    static let hrOnlyMigrationKey = "noop.shortcutSync.hrOnlyFileMigratedV1"
     static let fileName = "noop_sync.txt"
     /// Aggregation window: 15 minutes, epoch-aligned — the same boundaries hrBuckets(900) groups by.
     static let windowSeconds = 900
     /// Catch-up bound: never reach further back than 7 days, even on a first run or after a long gap.
     static let lookbackSeconds = 7 * 86_400
-    /// Reboot/reset guard for the cumulative u16 step counter — same cap as AnalyticsEngine's
-    /// daily-steps math (a reset is byte-indistinguishable from a wrap; a huge corrected delta
-    /// is a reset, not steps).
+    /// Reboot/reset guard for the legacy cumulative-u16 analyzer below. Retained only for its pure
+    /// windowing contract; Shortcut export never reads or renders this stream as Apple Health Steps.
     static let maxStepDelta = 30_000
-    /// Row cap retained for bounded sensor reads (currently the cumulative step stream).
+    /// Row cap retained for the legacy analyzer's bounded test contract. Production export reads HR only.
     static let readLimit = 2_000_000
 
     enum Outcome: Equatable {
@@ -52,7 +58,9 @@ enum ShortcutHealthExport {
         // Legacy/internal RMSSD aggregate. The Apple-Health renderer always suppresses this field;
         // retained only so the analyzer/windowing contract remains testable during format migration.
         var hrvMs: Double? = nil
-        var steps: Int? = nil   // wrap-corrected positive-delta sum
+        // Legacy/internal motion-counter aggregate. The Apple-Health renderer always suppresses this
+        // field; retained only so the analyzer/windowing contract remains testable during format migration.
+        var steps: Int? = nil
     }
 
     // MARK: - Entry points
@@ -60,8 +68,34 @@ enum ShortcutHealthExport {
     /// Background-transition hook (StrandiOSApp scenePhase). No-op until the user opts in.
     @MainActor
     static func writeIfEnabled(repo: Repository) async {
+        // Also repair here in case launch-time Documents access was temporarily unavailable. This is
+        // synchronous and runs before the opt-in gate or any sensor/store await.
+        _ = migrateLegacyFileIfNeeded()
         guard UserDefaults.standard.bool(forKey: enabledKey) else { return }
         _ = await writeNow(repo: repo)
+    }
+
+    /// Atomically removes any pre-9.2 Shortcut payload exactly once. This deliberately runs even when
+    /// export is disabled: an installed Siri Shortcut can still read a file left by an older build.
+    /// The marker is written and the old export watermark is cleared only after the empty replacement
+    /// succeeds. That keeps a transient filesystem failure fully retryable and lets the next HR-only
+    /// export rebuild up to the normal seven-day catch-up bound instead of skipping safe HR rows whose
+    /// prior file was just discarded.
+    @discardableResult
+    static func migrateLegacyFileIfNeeded(
+        defaults: UserDefaults = .standard,
+        directory: URL? = FileManager.default.urls(for: .documentDirectory,
+                                                   in: .userDomainMask).first
+    ) -> Bool {
+        guard !defaults.bool(forKey: hrOnlyMigrationKey), let directory else { return false }
+        do {
+            try Data().write(to: directory.appendingPathComponent(fileName), options: .atomic)
+            resetWatermark(defaults: defaults)
+            defaults.set(true, forKey: hrOnlyMigrationKey)
+            return true
+        } catch {
+            return false
+        }
     }
 
     @MainActor
@@ -97,16 +131,10 @@ enum ShortcutHealthExport {
         do {
             let hr = try await source.hrBuckets(deviceId: deviceId, from: span.from,
                                                 to: span.end - 1, bucketSeconds: windowSeconds)
-            // Step samples are cumulative counters, so computing the first delta in this coverage
-            // needs one sample from before the watermark. Without this overlap, every incremental
-            // export silently drops the steps between the last prior sample and the first new one.
-            // One full aggregation window is bounded and covers the normal strap sampling cadence.
-            let stepReadFrom = max(0, span.from - windowSeconds)
-            let steps = try await source.stepSamples(deviceId: deviceId, from: stepReadFrom,
-                                                     to: span.end - 1, limit: readLimit)
-            // Do not read or export strap RMSSD for the Apple Health Shortcut. Keep the empty second
-            // column for compatibility with existing Shortcuts, which then skip that value.
-            let windows = aggregate(hr: hr, rr: [], steps: steps, end: span.end,
+            // Do not read or export strap RMSSD or @57 motion-counter values for the Apple Health
+            // Shortcut. Keep both legacy columns empty for compatibility with existing Shortcuts,
+            // which already skip blank values at those fixed positions.
+            let windows = aggregate(hr: hr, rr: [], steps: [], end: span.end,
                                     from: span.from)
             // Full-file replace even when 0 windows: the Shortcut has no dedup, so stale lines left
             // behind would be double-logged on its next run.
@@ -191,13 +219,13 @@ enum ShortcutHealthExport {
         return byStart.values.sorted { $0.start < $1.start }
     }
 
-    /// `HR,[reserved],Steps,yyyy-MM-dd HH:mm` — empty fields keep their commas. The second field was
-    /// historically RMSSD labelled generically as HRV; it remains blank so the companion Shortcut
-    /// cannot write RMSSD into Apple Health's SDNN type. Timestamp is the window START in local time.
+    /// `HR,[reserved],[reserved],yyyy-MM-dd HH:mm` — empty fields keep their commas. The second field was
+    /// historically RMSSD labelled generically as HRV; the third was fed from the @57 motion counter.
+    /// Both remain blank so the companion Shortcut cannot write them into semantically different Apple
+    /// Health quantities. Timestamp is the window START in local time.
     static func line(_ w: Window, timeZone: TimeZone) -> String {
         let hr = w.hr.map(String.init) ?? ""
-        let steps = w.steps.map(String.init) ?? ""
-        return "\(hr),,\(steps),\(timestamp(w.start, timeZone: timeZone))"
+        return "\(hr),,,\(timestamp(w.start, timeZone: timeZone))"
     }
 
     /// No header, no trailing newline — a trailing "\n" would give the Shortcut's split-by-newline

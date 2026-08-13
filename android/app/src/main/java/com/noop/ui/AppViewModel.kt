@@ -765,6 +765,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // merged daysMergedFlow above republishes the freshly computed scores to the UI.
         // Mirrors macOS AppModel's launch + 15-min analyze loop.
         viewModelScope.launch {
+            // Vitality v2 migration must not depend on the raw-HR watermark: an upgraded install can have
+            // unchanged raw data while a released v1 score still depended on provenance-free @57 steps.
+            // This lightweight persisted-days pass removes or refreshes only computed Vitality rows before
+            // the heavy scorer's normal offload grace/fingerprint gates.
+            // DemoSeeder already writes v2-tagged synthetic rows and can race ViewModel creation on its
+            // background seed coroutine; the released-data migration is intentionally production-only.
+            if (!com.noop.BuildConfig.ENABLE_DEMO) {
+                runCatching {
+                    IntelligenceEngine.recomputeVitalityOnly(
+                        repo = repository,
+                        profile = currentProfile(),
+                        importedDeviceId = deviceId,
+                    )
+                }.onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
+            }
             delay(FIRST_OFFLOAD_GRACE_MS) // give the first offload a moment
             // One-shot on-upgrade #547 timestamp heal: a bad strap clock/flash (pikapik) wrote raw +
             // computed rows with garbage timestamps (far-past / a 2027 spike / a future date) BEFORE the
@@ -1067,7 +1082,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         sex = profileStore.sex,
         stepTicksPerStep = profileStore.stepTicksPerStep,
         waistCm = profileStore.waistCm,
-        ageInputConfirmed = profileStore.ageInputConfirmed,
+        // The demo flavor's on-device history is synthetic and DemoSeeder stamps its actual profile-age
+        // v2 marker. Treat that seeded age as confirmed for analytics so the normal launch/backstop pass
+        // refreshes (rather than purges) demo Vitality. Production remains strictly user-confirmed.
+        ageInputConfirmed = profileStore.ageInputConfirmed || com.noop.BuildConfig.ENABLE_DEMO,
         sexInputConfirmed = profileStore.sexInputConfirmed,
         fitnessAgeProvenanceRequired = profileStore.fitnessAgeProvenanceRequired,
         vo2maxProvenanceRequired = profileStore.vo2maxProvenanceRequired,

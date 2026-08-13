@@ -303,7 +303,7 @@
     <string name="l10n_breathe_screen_the_strap_buzzes_a_gentle_rhythm_eb5c6a65">手环会以略低于您当前心率的轻柔节奏产生震动，就像一个能感知到的节拍器，引导您放松。它会慢慢向下牵引您的心率，而不是生硬地拽低它，并在完成后自动停止。</string>
     <string name="l10n_breathe_screen_turn_off_8807c2b3">关闭</string>
     <string name="l10n_breathe_screen_waiting_for_a_resting_heart_rate_980cedbf">正在等待静息心率数据。请先开启一次实时读取，或者等您完全静下来时再来。</string>
-    <string name="l10n_breathe_screen_your_hrv_dipped_while_you_were_231d3c7a">当您处于静止状态时，您的 HRV 出现了一次下探。需要花一分钟做个呼吸放松吗？</string>
+    <string name="l10n_breathe_screen_your_hrv_dipped_while_you_were_231d3c7a">在观察到腕部活动较少时，您的短时 HRV 低于近期基线。要花一分钟做呼吸练习吗？</string>
     <string name="l10n_caffeine_log_after_your_clocklabel_cutoffminutes_cutoff_may_3c023900">在您设定的 %1$s 截止时间之后摄入 - 睡觉时可能仍有兴奋作用残留。</string>
     <string name="l10n_caffeine_log_amount_in_mg_optional_f0749888">摄入量 (毫克，可选填)</string>
     <string name="l10n_caffeine_log_bedtime_e3cb8bd6">就寝时间</string>
@@ -1827,4 +1827,8 @@
     <string name="appearance_detail_black">OLED 纯黑底配浅色控件</string>
     <string name="appearance_settings_blurb">选择应用外观。跟随系统会采用设备设置；深色使用立体石墨色；纯黑使用真正的 OLED 黑色背景。</string>
     <string name="appearance_onboarding_subtitle">NOOP 默认跟随系统。你可以在此选择浅色、深色或纯黑，并随时在“设置 → 外观”中更改。</string>
+    <string name="settings_automatic_stress_check_ins">自动压力提醒</string>
+    <string name="settings_manual_only">仅限手动</string>
+    <string name="settings_automatic_stress_unavailable_reason">当前实时数据源无法使用此功能，因为 NOOP 未收到与时间戳匹配的最新腕部运动数据。NOOP 不会根据手机运动推断手腕静止，也不会自动振动提醒。</string>
+    <string name="settings_manual_breathe_available">你仍可从“今日”的 + 菜单和“更多”中手动打开“呼吸”。它始终由你主动开始，并可使用屏幕、音频或受支持的手环振动提示。</string>
 </resources>

@@ -125,6 +125,35 @@ class TodayMetricTilesTest {
         assertEquals(9500, stepsForDay(apple, hc, "2026-01-04"))
     }
 
+    @Test
+    fun strapStepValueIsExplicitlyMotionDerived() {
+        // A measured import wins when both are present.
+        assertEquals(
+            "Measured · Apple Health / Health Connect",
+            stepsSourceCaption(motionDerived = 9_000, imported = 8_000, calibratedEstimate = 7_000),
+        )
+        assertEquals("Steps", stepsTileLabel(9_000, 8_000, 7_000))
+        assertEquals(8_000, resolvedSteps(imported = 8_000, motionDerived = 9_000, calibratedEstimate = 7_000))
+    }
+
+    @Test
+    fun importedPhoneStepsRemainMeasured() {
+        assertEquals(
+            "Measured · Apple Health / Health Connect",
+            stepsSourceCaption(motionDerived = null, imported = 8_000, calibratedEstimate = 7_000),
+        )
+        assertEquals("Steps", stepsTileLabel(null, 8_000, 7_000))
+    }
+
+    @Test
+    fun calibratedFallbackIsAlsoExplicitlyMotionDerived() {
+        assertEquals(
+            "Motion-derived estimate · calibrated",
+            stepsSourceCaption(motionDerived = null, imported = null, calibratedEstimate = 7_000),
+        )
+        assertEquals("Motion-derived steps", stepsTileLabel(null, null, 7_000))
+    }
+
     // MARK: buildingHint — the unscored Effort/Rest "it's coming" caption, today-only (#527)
 
     @Test

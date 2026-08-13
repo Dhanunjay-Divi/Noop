@@ -24,15 +24,20 @@ final class BehaviorStore: ObservableObject {
 
     // MARK: Haptic biofeedback — Stress check-ins (L3)
     //
-    // The v5 "stress check-ins (haptic)" master toggle + sub-toggles. Default OFF (opt-in, manual-first).
-    // These MIRROR the keys `BiofeedbackPrefs` reads/writes (the controller + central L3 hook use that
-    // value type); exposing them here gives the Settings group an `@Published` binding without a second
-    // source of truth — the keys are identical, so a write through either path is seen by both. The
-    // central L3 hook (Wave 3) reads `BiofeedbackPrefs.stressConfig()`.
+    // Stored choices for a future live source that can provide timestamp-matched wrist motion. Defaults
+    // remain OFF (opt-in, manual-first). These MIRROR the keys `BiofeedbackPrefs` reads/writes. They are
+    // intentionally preserved across this fail-closed release, but are not exposed as working toggles:
+    // `BiofeedbackPrefs.stressConfig()` applies the single evidence-capability gate before the detector.
     @Published var stressCheckIn: Bool { didSet { d.set(stressCheckIn, forKey: K.stressCheckIn) } }
     @Published var stressAutoNudge: Bool { didSet { d.set(stressAutoNudge, forKey: K.stressAutoNudge) } }
     @Published var stressQuietHours: Bool { didSet { d.set(stressQuietHours, forKey: K.stressQuietHours) } }
     @Published var stressUseResonancePace: Bool { didSet { d.set(stressUseResonancePace, forKey: K.stressUseResonance) } }
+
+    /// Presentation helper only. The persisted preference never counts as active unless the live source
+    /// can provide the wrist-motion evidence required by `BiofeedbackPrefs`.
+    var automaticStressNudgeEffective: Bool {
+        BiofeedbackPrefs.automaticStressNudgesAvailable && stressCheckIn && stressAutoNudge
+    }
 
     // MARK: Smart alarm
     @Published var smartAlarmEnabled: Bool { didSet { d.set(smartAlarmEnabled, forKey: K.alarmOn) } }

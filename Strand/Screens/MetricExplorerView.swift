@@ -30,6 +30,30 @@ private let strandDayParser: DateFormatter = {
 
 private func parseDay(_ day: String) -> Date? { strandDayParser.date(from: day) }
 
+/// Empty dossier guidance is tied to the descriptor's actual source. A WHOOP export cannot populate
+/// Apple Health, nutrition, mood or Mi Fitness namespaces, so the old one-size-fits-all claim was both
+/// misleading and a dead end. Kept pure so routing/copy regressions are straightforward to test.
+enum MetricEmptyStateCopy {
+    static func message(for metric: MetricDescriptor) -> String {
+        switch metric.source {
+        case "apple-health":
+            return String(localized: "Connect Apple Health or import an Apple Health export to add this metric.")
+        case "nutrition-csv":
+            return String(localized: "Import a nutrition CSV in Data Sources to add this metric.")
+        case "xiaomi-band":
+            return String(localized: "Import Mi Fitness history in Data Sources to add this metric.")
+        case "noop-mood":
+            return String(localized: "Log this signal in NOOP to begin its private on-device history.")
+        case "whoop-official-reference":
+            return String(localized: "Import a WHOOP export in Data Sources to add this official reference metric.")
+        case "my-whoop":
+            return String(localized: "Wear and sync your connected band to begin this on-device metric history.")
+        default:
+            return String(localized: "Connect or import the matching data source to begin this metric history.")
+        }
+    }
+}
+
 /// "9 Jun 2026" — long, locale-stable date for the hero "as of" line.
 private func longDate(_ d: Date) -> String {
     let f = DateFormatter()
@@ -154,11 +178,32 @@ enum ExploreRangeGating {
 /// the latest daily reading; range selection belongs to the lower History section and starts compact.
 /// This prevents a current value from visually inheriting a month/all-time label.
 enum MetricDetailPresentation {
+    /// Every metric dossier uses this same reading order, regardless of which surface opened it.
+    /// Keeping the order here makes it difficult for a future one-off metric to put an aggregate
+    /// before the current daily reading again.
+    enum Section: String, CaseIterable, Equatable {
+        case today
+        case compareHistory
+        case relationships
+        case education
+    }
+
+    enum CurrentReadState: Equatable {
+        case today
+        case latestAvailable
+        case unavailable
+    }
+
+    static let contentOrder: [Section] = [.today, .compareHistory, .relationships, .education]
     static let defaultHistoryRange: ExploreRange = .week
 
+    static func currentReadState(latestDay: String?, currentDayKeys: Set<String>) -> CurrentReadState {
+        guard let latestDay else { return .unavailable }
+        return currentDayKeys.contains(latestDay) ? .today : .latestAvailable
+    }
+
     static func isCurrent(latestDay: String?, currentDayKeys: Set<String>) -> Bool {
-        guard let latestDay else { return false }
-        return currentDayKeys.contains(latestDay)
+        currentReadState(latestDay: latestDay, currentDayKeys: currentDayKeys) == .today
     }
 }
 
@@ -626,11 +671,23 @@ struct MetricDetailView: View {
     /// Daily records can use either the civil-day key or NOOP's sleep-aware logical-day key. Treat both
     /// as current so an overnight reading does not become "stale" merely because it landed before the
     /// rollover boundary; every other date is labelled Latest available rather than Today.
-    private var latestIsCurrentDay: Bool {
-        MetricDetailPresentation.isCurrent(
+    private var currentReadState: MetricDetailPresentation.CurrentReadState {
+        MetricDetailPresentation.currentReadState(
             latestDay: latest?.day,
             currentDayKeys: [Repository.localDayKey(Date()), Repository.logicalDayKey(Date())]
         )
+    }
+    private var latestIsCurrentDay: Bool { currentReadState == .today }
+
+    /// The top-level section remains "Today" even when today's packet is not available. The trailing
+    /// state prevents a stale source reading from being presented as current while still keeping the
+    /// latest honest value visible below it.
+    private var todaySectionStatus: String {
+        switch currentReadState {
+        case .today:           return String(localized: "Current")
+        case .latestAvailable: return String(localized: "No reading today")
+        case .unavailable:     return String(localized: "Waiting for data")
+        }
     }
     private var education: MetricEducation { MetricKnowledge.education(for: metric) }
     private var isEnergyMetric: Bool {
@@ -699,12 +756,9 @@ struct MetricDetailView: View {
             // therefore does not start its catalog scan) until the user approaches it.
             LazyVStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 if loaded && series.isEmpty {
-                    // No data in the entire history — keep the range bar for context, then the
-                    // honest empty state (no scenic hero floating over nothing). Deliberately
-                    // NOT gated by the #943 chip locking: with zero data there is no chart for
-                    // the ranges to misrepresent, and hiding the bar here would regress this
-                    // "for context" intent.
-                    rangeBar(effectiveRange: effRange, windowed: win, windowFellBack: fellBack)
+                    // Even an empty dossier starts with Today. The comparison controls remain below
+                    // the explanation/setup state, so an empty range cannot look like the headline.
+                    metricDetailSectionHeader(.today, trailing: todaySectionStatus)
                     metricMeaningCard
                     if metric.key == "fitness_age" {
                         // Fitness Age is COMPUTED on-device from resting HR + activity — not imported — so
@@ -741,36 +795,39 @@ struct MetricDetailView: View {
                             }
                         }
                     } else {
-                        ComingSoon(what: "Import your history first. A WHOOP export in Data Sources fills every metric you can explore here in about a minute.")
+                        ComingSoon(what: LocalizedStringKey(MetricEmptyStateCopy.message(for: metric)))
                     }
-                } else if !loaded {
+                    metricDetailSectionHeader(.compareHistory, trailing: nil)
                     rangeBar(effectiveRange: effRange, windowed: win, windowFellBack: fellBack)
+                } else if !loaded {
+                    metricDetailSectionHeader(.today, trailing: String(localized: "Loading"))
                     metricMeaningCard
                     ComingSoon(what: "Reading your \(metric.title.lowercased())…")
                 } else {
                     // Read in the order people make a decision: latest state first, personal context
                     // second, then selectable history and deeper education. The historical range never
                     // labels the current hero, so a monthly chart cannot look like a monthly headline.
+                    metricDetailSectionHeader(.today, trailing: todaySectionStatus)
                     heroHeader
                     if isEnergyMetric { energyBreakdownCard }
 
-                    SectionHeader(
-                        "Personal comparison",
-                        overline: latestIsCurrentDay ? "Today vs your baseline" : "Latest vs your baseline",
-                        trailing: baselineRead.position == .building ? "Calibrating" : nil
+                    metricDetailSectionHeader(.compareHistory, trailing: effRange.name)
+                    metricDetailSubsectionHeader(
+                        latestIsCurrentDay ? "Today vs your baseline" : "Latest vs your baseline",
+                        trailing: baselineRead.position == .building ? String(localized: "Calibrating") : nil
                     )
                     personalReadCard
 
-                    SectionHeader("History", overline: "Compare over time", trailing: effRange.name)
+                    metricDetailSubsectionHeader("History")
                     rangeBar(effectiveRange: effRange, windowed: win, windowFellBack: fellBack)
                     heroChart(effectiveRange: effRange, windowed: win, windowFellBack: fellBack)
                     statRow(effectiveRange: effRange, windowed: win)
                     readingsTable(windowed: win)
 
-                    SectionHeader("Relationships", overline: "Signals that move together")
+                    metricDetailSectionHeader(.relationships, trailing: nil)
                     correlationCard
 
-                    SectionHeader("Understand this metric", overline: "Method and next steps")
+                    metricDetailSectionHeader(.education, trailing: nil)
                     metricMeaningCard
                     guidanceCard
                 }
@@ -801,6 +858,46 @@ struct MetricDetailView: View {
         // Range changes the window, hence the correlation inputs — recompute the
         // cached scan rather than letting `correlationCard` run it inside body.
         .onChangeCompat(of: range) { _ in recomputeCorrelations() }
+    }
+
+    /// Shared high-level hierarchy for every metric detail. These labels intentionally describe the
+    /// user's task (read today, compare, understand) rather than the implementation/source partition.
+    @ViewBuilder
+    private func metricDetailSectionHeader(_ section: MetricDetailPresentation.Section,
+                                           trailing: String?) -> some View {
+        switch section {
+        case .today:
+            SectionHeader("Today", overline: "Your daily reading", trailing: trailing)
+                .accessibilityAddTraits(.isHeader)
+        case .compareHistory:
+            SectionHeader("Compare & history", overline: "Your baseline and change over time",
+                          trailing: trailing)
+                .accessibilityAddTraits(.isHeader)
+        case .relationships:
+            SectionHeader("Relationships", overline: "Signals that move together", trailing: trailing)
+                .accessibilityAddTraits(.isHeader)
+        case .education:
+            SectionHeader("Understand this metric", overline: "Method and next steps", trailing: trailing)
+                .accessibilityAddTraits(.isHeader)
+        }
+    }
+
+    private func metricDetailSubsectionHeader(_ title: LocalizedStringKey,
+                                              trailing: String? = nil) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(StrandFont.overline)
+                .tracking(StrandFont.overlineTracking)
+                .textCase(.uppercase)
+                .foregroundStyle(StrandPalette.textSecondary)
+            Spacer(minLength: NoopMetrics.space2)
+            if let trailing {
+                Text(trailing)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
+        }
+        .accessibilityAddTraits(.isHeader)
     }
 
     private func load() async {

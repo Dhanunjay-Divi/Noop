@@ -582,6 +582,9 @@ struct RootTabView: View {
                     MoreRow("Compare", "rectangle.split.2x1.fill", .compare)
                 }
                 moreSection("Body") {
+                    // Profile is a first-class body destination, not a form hidden near the top of the
+                    // much longer Settings page. It reuses SettingsView's exact ProfileStore-backed editor.
+                    MoreRow("Profile", "person.crop.circle.fill", .profile)
                     MoreRow("Devices", "applewatch.side.right", .devices)
                     MoreRow("Band", "waveform.path.ecg", .live)
                     MoreRow("Workouts", "figure.run", .workouts)
@@ -680,6 +683,7 @@ struct RootTabView: View {
 
     private func quickAccessRoute(for id: String) -> MoreDestination {
         switch id {
+        case "profile": return .profile
         case "devices": return .devices
         case "workouts": return .workouts
         case "widgets": return .widgets
@@ -786,7 +790,7 @@ struct RootTabView: View {
 /// registration in `moreTab`.
 private enum MoreDestination: Hashable {
     case insightsHub, intelligence, coach, insights, explore, compare
-    case devices, live, workouts, health, labBook, stress, breathe, intervals, rhythm
+    case profile, devices, live, workouts, health, labBook, stress, breathe, intervals, rhythm
     case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport
     case alarms, automations, widgets, testCentre, siriShortcuts, settings
 
@@ -798,6 +802,7 @@ private enum MoreDestination: Hashable {
         case .insights:        InsightsView()
         case .explore:         MetricExplorerView()
         case .compare:         CompareView()
+        case .profile:         SettingsView(focus: .profile)
         case .devices:         DevicesView()
         case .live:            LiveView()
         case .workouts:        WorkoutsView()
@@ -826,6 +831,7 @@ private enum MoreDestination: Hashable {
     /// Deterministic screenshot routing for the real More navigation stack.
     static func demo(named rawName: String) -> Self? {
         switch rawName.lowercased() {
+        case "profile": return .profile
         case "devices": return .devices
         case "live": return .live
         case "workouts": return .workouts

@@ -592,31 +592,43 @@ struct AutomationsView: View {
     private var coachingCard: some View {
         Section2(icon: "bolt.heart.fill", title: String(localized: "Haptic coaching"),
                  blurb: String(localized: "Train by feel. The strap buzzes so you don't have to watch a screen."),
-                 active: behavior.zoneCoaching || behavior.stressCheckIn) {
+                 active: behavior.zoneCoaching || behavior.automaticStressNudgeEffective) {
             VStack(spacing: 0) {
                 ToggleRow(label: String(localized: "HR-zone coaching"),
                           help: String(localized: "Buzz when you hit your top zone (ease off) and again when you recover. Uses your max HR from Settings."),
                           isOn: $behavior.zoneCoaching)
                 rowDivider
-                // v5 L3 closed-loop check-in (master + sub toggles). Default OFF, manual-first. The keys
-                // mirror BiofeedbackPrefs, which the central detector (AppModel.evaluateStress) reads.
-                ToggleRow(label: String(localized: "Stress check-ins (haptic)"),
-                          help: String(localized: "Experimental. NOOP can offer a one-minute guided breath only when a fresh HRV shift and trustworthy stillness evidence are both available. Missing motion evidence suppresses the buzz. Never an alarm or diagnosis."),
-                          isOn: $behavior.stressCheckIn)
-                if behavior.stressCheckIn {
-                    rowDivider
-                    ToggleRow(label: String(localized: "Auto-nudge when verified"),
-                              help: String(localized: "When supported by the connected source, allow a check-in only after NOOP verifies a fresh HRV shift, resting heart rate, and stillness. If verification is unavailable, Breathe remains manual."),
-                              isOn: $behavior.stressAutoNudge)
-                    rowDivider
-                    ToggleRow(label: String(localized: "Respect quiet hours"),
-                              help: String(localized: "Suppress auto-nudges overnight (10pm-7am)."),
-                              isOn: $behavior.stressQuietHours)
-                    rowDivider
-                    ToggleRow(label: String(localized: "Use my resonance pace"),
-                              help: String(localized: "Breathe at the pace your last \u{201C}find my pace\u{201D} sweep locked in, if you have one. Otherwise a calm 5.5 breaths/min."),
-                              isOn: $behavior.stressUseResonancePace)
+                // Do not expose an inert opt-in. The current live path has R-R intervals but no fresh,
+                // timestamp-matched WRIST motion, so it cannot establish stillness. Phone motion is not
+                // equivalent. BiofeedbackPrefs also applies this same capability as an engine-level gate.
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Automatic stress check-ins")
+                            .font(StrandFont.body)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text("Unavailable for the current live source because NOOP does not receive fresh, timestamp-matched wrist motion. It will not infer wrist stillness from phone motion or buzz automatically.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 12)
+                    StatePill("Manual only", tone: .neutral, showsDot: false)
                 }
+                .frame(minHeight: 42)
+                .padding(.vertical, 4)
+                rowDivider
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "wind")
+                        .foregroundStyle(StrandPalette.restBright)
+                        .accessibilityHidden(true)
+                    Text("Manual Breathe remains available from Today’s + menu and More. It stays user-started and can use screen, audio, or supported strap haptics.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
             }
         }
     }

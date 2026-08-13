@@ -29,6 +29,14 @@ struct LiquidTodayView: View {
 
     /// Shared with the real Today's card-customise editor so the two stay in sync.
     @AppStorage(DashboardCardPrefs.selectionKey) private var dashboardCardsRaw = ""
+    @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    @AppStorage(UnitPrefs.massKey) private var massUnitRaw = ""
+    @AppStorage(UnitPrefs.temperatureKey) private var temperatureUnitRaw = ""
+    private var unitSystem: UnitSystem { UnitSystem(rawValue: unitSystemRaw) ?? .metric }
+    private var massUnit: MassUnit { UnitPrefs.resolveMass(system: unitSystem, override: massUnitRaw) }
+    private var temperatureUnit: TemperatureUnit {
+        UnitPrefs.resolveTemperature(system: unitSystem, override: temperatureUnitRaw)
+    }
     /// Hydration is independently opt-in. A saved dashboard selection must not keep a dead hydration
     /// row visible after the feature is turned off.
     @AppStorage(HydrationStore.enabledKey) private var hydrationEnabled = false
@@ -67,6 +75,7 @@ struct LiquidTodayView: View {
     @State private var importedStepsDay: Int?      // Apple Health steps for the selected day (middle tier)
     @State private var importedActiveKcalDay: Double?  // Apple Health active component for the selected day
     @State private var importedRestingKcalDay: Double? // Apple Health basal/resting component for the selected day
+    @State private var importedWeightKg: Double?    // freshest measured weight at or before selected day
     @State private var hrValues: [Double] = []     // hrBuckets since midnight → 5-min means
     @State private var workouts: [WorkoutRow] = [] // newest-first
 
@@ -112,6 +121,10 @@ struct LiquidTodayView: View {
     /// today's row has no vitals yet, so these fall back to the last night that recorded them. Never
     /// resolved in body — body rescans repo.days ~23× per pass, and this cache keeps that read O(1).
     @State private var cachedVitalsDay: DailyMetric?
+    /// Per-field carries stay separate from the whole-row vitals carry because computed recovery rows can
+    /// legitimately omit SpO₂ or skin temperature. Cached once in load(), never rescanned from body.
+    @State private var cachedSpo2Day: DailyMetric?
+    @State private var cachedSkinTempDay: DailyMetric?
     /// The Charge hero's resolved state (#543 carry + the honest label), resolved ONCE in load() alongside
     /// the other caches. It composes `TodayView.lastScoredRecoveryDay`, which is O(days) — exactly the scan
     /// this cache exists to keep out of body. Never resolved in body.
@@ -162,6 +175,8 @@ struct LiquidTodayView: View {
     /// The prior-day vitals carry (see `cachedVitalsDay`), read O(1) from the cache. Non-nil only at
     /// offset 0 (today); a navigated past day carries nothing (its own row is the whole story).
     private var vitalsDay: DailyMetric? { cachedVitalsDay }
+    private var spo2Day: DailyMetric? { cachedSpo2Day }
+    private var skinTempDay: DailyMetric? { cachedSkinTempDay }
     /// The Charge hero's resolved state (see `cachedChargeDisplay`), read O(1) from the cache.
     private var chargeDisplay: ChargeDisplay { cachedChargeDisplay }
 
@@ -389,7 +404,7 @@ struct LiquidTodayView: View {
         }
         .sheet(isPresented: $showSettings) {
             NavigationStack {
-                SettingsView()
+                SettingsView(focus: .profile)
                     .background(StrandPalette.surfaceBase.ignoresSafeArea())
                     .liquidSheetDoneChrome { showSettings = false }
             }
@@ -496,7 +511,7 @@ struct LiquidTodayView: View {
                         }
                     }
                     .buttonStyle(LiquidPressStyle())
-                    .accessibilityLabel("Profile and settings")
+                    .accessibilityLabel("Profile")
                     LiquidAddButton()
                     LiquidBatteryButton()
                     // Keep page customisation in one conventional overflow instead of giving three
@@ -818,19 +833,24 @@ struct LiquidTodayView: View {
                      symbol: card.icon, tint: StrandPalette.accent,
                      frac: fracOver(displayDay?.respRateBpm, 24))
         case .steps:
-            // Route by the EXACT (key, source) the tile chose to display — measured my-whoop, imported
-            // apple-health, or the my-whoop estimate — NOT by bare key (bare "steps" resolves to
-            // apple-health and would mismatch a WHOOP-measured value). Order-independent.
-            cardLink(.metricSourced(key: stepsDetailKey, source: stepsDetailSource), title: card.title, sub: card.subtitle,
+            // Route by the EXACT (key, source) the tile chose to display — WHOOP 5/MG motion estimate,
+            // imported Apple Health count, or calibrated motion estimate — NOT by bare key (bare "steps"
+            // resolves to apple-health and would mismatch a strap-derived value). Order-independent.
+            cardLink(.metricSourced(key: stepsDetailKey, source: stepsDetailSource), title: card.title, sub: stepsSourceCaption,
                      value: stepsText, symbol: card.icon,
                      tint: StrandPalette.metricCyan, frac: fracOver(stepCount, 10000))
         case .bloodOxygen:
-            // Not wired to a real read yet — render EMPTY (not half-full) so it doesn't imply a reading.
-            cardLink(.metric("spo2"), title: card.title, sub: card.subtitle,
-                     value: "–", symbol: card.icon, tint: StrandPalette.metricCyan, frac: nil)
+            let value = liquidSpo2
+            cardLink(.metricSourced(key: "spo2", source: "my-whoop"), title: card.title,
+                     sub: value == nil ? card.subtitle : String(localized: "Latest available reading"),
+                     value: value.map { String(format: "%.0f%%", $0) } ?? "–", symbol: card.icon,
+                     tint: StrandPalette.metricCyan, frac: fracOver(value, 100))
         case .skinTemp:
-            cardLink(.metric("skin_temp"), title: card.title, sub: card.subtitle,
-                     value: "–", symbol: card.icon, tint: StrandPalette.metricAmber, frac: nil)
+            let value = liquidSkinTemperature
+            cardLink(.metricSourced(key: "skin_temp", source: "my-whoop"), title: card.title,
+                     sub: value == nil ? card.subtitle : String(localized: "Latest available reading"),
+                     value: value.map(skinTemperatureText) ?? "–", symbol: card.icon,
+                     tint: StrandPalette.metricAmber, frac: nil)
         case .calories:
             energyCardLink(card)
         case .sleep:
@@ -1186,7 +1206,7 @@ struct LiquidTodayView: View {
             ktile(String(localized: "Resting HR"), intText(rhr), "bpm", StrandPalette.metricRose, nil,
                   symbol: metric.icon, key: "rhr")
         case .bloodOxygen:
-            let spo2 = displayDay?.spo2Pct ?? vitalsDay?.spo2Pct
+            let spo2 = liquidSpo2
             ktile(String(localized: "Blood Oxygen"), intText(spo2), "%", StrandPalette.metricCyan, nil,
                   symbol: metric.icon, key: "spo2")
         case .respiratory:
@@ -1198,7 +1218,8 @@ struct LiquidTodayView: View {
                   nil, symbol: metric.icon, key: stepsDetailKey,
                   detailMetric: stepsDetailMetric)
         case .weight:
-            ktile(String(localized: "Weight"), "—", "", StrandPalette.metricAmber, nil,
+            ktile(String(localized: "Weight"), importedWeightKg.map(weightText) ?? "—", "",
+                  StrandPalette.metricAmber, nil,
                   symbol: metric.icon, key: "weight")
         case .calories:
             energyKTile(symbol: metric.icon)
@@ -1475,6 +1496,9 @@ struct LiquidTodayView: View {
         // echo today's still-forming row; only on today (a past day's own row is the whole story).
         let tkey = cachedDisplayDay?.day ?? selectedDayKey
         cachedVitalsDay = (selectedDayOffset == 0) ? Repository.lastVitalsDay(days: repo.days, todayKey: tkey) : nil
+        cachedSpo2Day = (selectedDayOffset == 0) ? Repository.lastSpo2Day(days: repo.days, todayKey: tkey) : nil
+        cachedSkinTempDay = (selectedDayOffset == 0)
+            ? Repository.lastSkinTempDay(days: repo.days, todayKey: tkey) : nil
         // Charge carry (#543) + the honest label, resolved here for the same reason as the two above: the
         // selector below scans repo.days. Calibration nights come from the SAME `RecoveryScorer` helper the
         // classic Today reads, so the two screens agree on when a wearer is genuinely mid-calibration
@@ -1557,7 +1581,7 @@ struct LiquidTodayView: View {
         vitality = profile.acceptsVitality(provenance: vitProfile) ? (await vitA).last?.value : nil
         ageMetricsLoadedProfileState = profile.ageMetricStateToken
         // Steps is a DAILY metric, so key it to the SELECTED day (like restScore above), not the history-wide
-        // latest. Without this, swiping to a past day with no strap step count showed today's estimate (the
+        // latest. Without this, swiping to a past day with no strap motion estimate showed today's estimate (the
         // `.last` value) instead of that day's. Mirrors the classic Today's stepsEstByDay[selectedDayKey].
         let stepsByDay = Dictionary(stepsSeries.map { ($0.day, $0.value) }, uniquingKeysWith: { _, last in last })
         // Never let the history tail pose as today's count. An exact-day row may be absent while an
@@ -1567,6 +1591,10 @@ struct LiquidTodayView: View {
         // measured strap count and the motion estimate. Health Connect is Android-only, so apple-health is
         // the sole import source on iOS. Mirrors Android `stepsForDay` (#377).
         importedStepsDay = appleRows.filter { $0.day == selectedDayKey }.compactMap { $0.steps }.max()
+        // Weight is not expected every day. Use the freshest measured Apple Health value no later than
+        // the day being viewed; never borrow from a future day when navigating backwards.
+        importedWeightKg = appleRows.filter { $0.day <= selectedDayKey && $0.weightKg != nil }
+            .max(by: { $0.day < $1.day })?.weightKg
         // Keep the Apple Health components together. The derived Total is resolved later only when both
         // exist; a partial row never borrows the strap's combined estimate to complete itself.
         let selectedAppleEnergy = appleRows.last(where: { $0.day == selectedDayKey })
@@ -1680,15 +1708,45 @@ struct LiquidTodayView: View {
             : String(localized: "Good evening")
     }
 
-    // Measured strap count ?: imported Apple Health count ?: motion estimate — the same precedence the
-    // detail routing follows below, so the tapped-through source always matches the number shown (#377).
+    // Measured Apple Health count first, then WHOOP 5/MG @57 motion estimate, then calibrated fallback.
+    // The route and source caption below share this precedence so detail always matches the number shown.
     private var stepCount: Double? {
-        displayDay?.steps.map(Double.init) ?? importedStepsDay.map(Double.init) ?? stepsEst
+        MetricCatalog.todayStepsValue(imported: importedStepsDay.map(Double.init),
+                                      motionDerived: displayDay?.steps.map(Double.init),
+                                      calibratedEstimate: stepsEst)
     }
 
     private var stepsDetailMetric: MetricDescriptor? {
-        MetricCatalog.todayStepsMetric(hasMeasuredSteps: displayDay?.steps != nil,
+        MetricCatalog.todayStepsMetric(hasMotionDerivedSteps: displayDay?.steps != nil,
                                        hasImportedSteps: importedStepsDay != nil)
+    }
+
+    /// Truthful source caption for the number on the Liquid Steps card. Apple Health remains an imported
+    /// pedometer count; both local strap paths are clearly labelled as motion-derived estimates.
+    private var stepsSourceCaption: String {
+        if importedStepsDay != nil { return String(localized: "Imported · Apple Health") }
+        if displayDay?.steps != nil { return String(localized: "Motion-derived estimate · WHOOP 5/MG") }
+        if stepsEst != nil { return String(localized: "Motion-derived estimate · calibrated") }
+        return String(localized: "No step source for this day")
+    }
+
+    private var liquidSpo2: Double? {
+        displayDay?.spo2Pct ?? vitalsDay?.spo2Pct ?? spo2Day?.spo2Pct
+    }
+
+    private var liquidSkinTemperature: Double? {
+        displayDay?.skinTempDevC ?? vitalsDay?.skinTempDevC ?? skinTempDay?.skinTempDevC
+    }
+
+    private func skinTemperatureText(_ celsius: Double) -> String {
+        if VitalBands.isAbsoluteSkinTemp(celsius) {
+            return UnitFormatter.temperatureFromCelsius(celsius, unit: temperatureUnit, decimals: 1)
+        }
+        return UnitFormatter.temperatureDeltaFromCelsius(celsius, unit: temperatureUnit, decimals: 1)
+    }
+
+    private func weightText(_ kilograms: Double) -> String {
+        UnitFormatter.massFromKilograms(kilograms, unit: massUnit)
     }
 
     private var stepsDetailKey: String { stepsDetailMetric?.key ?? "steps_est" }

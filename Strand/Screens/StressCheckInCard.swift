@@ -2,11 +2,11 @@ import SwiftUI
 import Combine
 import StrandDesign
 
-// StressCheckInCard.swift — the L3 closed-loop JITAI surface (the "passive" layer). When the shipped,
-// unit-tested `StressOnsetDetector` fires (short-window HRV below a warmed recent baseline, with observed
-// low motion), the
-// central hook (Wave 3, in BLEManager's existing offload/evaluateStress call-site) posts a pending nudge
-// on `StressNudgeCenter`; this dismissible card surfaces it. NEVER an alarm, NEVER a push (unless the
+// StressCheckInCard.swift — the L3 closed-loop JITAI surface (the "passive" layer), retained for a
+// future live source that supplies timestamp-matched wrist motion. The current source is capability-
+// gated to manual Breathe, so it cannot present this card. When that evidence is eventually wired and
+// the unit-tested `StressOnsetDetector` fires, the central hook posts a pending nudge on
+// `StressNudgeCenter`; this dismissible card surfaces it. NEVER an alarm, NEVER a push (unless the
 // user separately opted into notifications), NEVER a diagnosis — it describes only the measured
 // short-window/baseline relationship, with
 // Breathe now / Not now / Turn off, matching DaytimeStress's "passive suggestion" stance.

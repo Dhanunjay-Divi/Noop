@@ -71,6 +71,7 @@ class ReadinessEngineTest {
             "Your measured recovery trends are aligned with your recent baseline.",
             r.summary,
         )
+        assertEquals("Aligned", r.headline)
         assertFalse(r.summary.contains("load", ignoreCase = true))
         assertFalse(r.summary.contains("train", ignoreCase = true))
     }
@@ -80,6 +81,9 @@ class ReadinessEngineTest {
         // Today: HRV suppressed AND resting HR elevated -> two "bad" recovery signals.
         val r = ReadinessEngine.evaluate(baseline(todayHrv = 50.0, todayRhr = 60, todayStrain = 10.0))
         assertEquals(ReadinessEngine.Level.RUNDOWN, r.level)
+        assertEquals("Multiple shifts", r.headline)
+        assertFalse(r.summary.contains("rest today", ignoreCase = true))
+        assertFalse(r.summary.contains("train", ignoreCase = true))
     }
 
     @Test
@@ -121,12 +125,32 @@ class ReadinessEngineTest {
     }
 
     @Test
+    fun trainingMonotonyCannotDowngradeAlignedRecovery() {
+        val days = baseline(todayHrv = 72.0, todayRhr = 46, todayStrain = 10.0).toMutableList()
+        // Keep enough non-zero variation for the Foster ratio, but make the recent week deliberately
+        // uniform enough to produce the descriptive Training variety watch signal.
+        val recent = listOf(10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 11.0, 10.0)
+        recent.forEachIndexed { offset, strain ->
+            val index = 21 + offset
+            days[index] = days[index].copy(strain = strain)
+        }
+
+        val read = ReadinessEngine.evaluate(days)
+        assertNotNull(read.signals.firstOrNull { it.key == "monotony" })
+        assertEquals(ReadinessEngine.Level.PRIMED, read.level)
+        assertEquals("Aligned", read.headline)
+    }
+
+    @Test
     fun respRateRiseFlags() {
-        // Today resp rate well above baseline (~14) -> illness-ish watch/bad signal present.
+        // Today resp rate well above baseline (~14) -> a shifted signal is present.
         val r = ReadinessEngine.evaluate(
             baseline(todayHrv = 60.0, todayRhr = 52, todayStrain = 10.0, todayResp = 18.0)
         )
         assertTrue(r.signals.any { it.key == "respRate" })
+        assertFalse(
+            r.signals.first { it.key == "respRate" }.detail.contains("sick", ignoreCase = true)
+        )
     }
 
     @Test

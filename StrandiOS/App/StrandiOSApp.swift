@@ -39,6 +39,10 @@ struct StrandiOSApp: App {
     @AppStorage(UnitPrefs.liveActivityEffortKey) private var liveActivityShowsEffort = true
 
     init() {
+        // 9.2 data-truth migration: clear a legacy Shortcuts file that may contain WHOOP @57 motion
+        // ticks in the Apple Health Steps column. Do this synchronously before constructing stores,
+        // BLE sources, or any async reader; future writes use the HR-only fixed-column contract.
+        _ = ShortcutHealthExport.migrateLegacyFileIfNeeded()
         PuffinExperiment.migrateContinuousHrvOvernightDefault()
         HydrationReminders.migrateIndependentChannelsIfNeeded()
         #if DEBUG

@@ -17,17 +17,16 @@ import kotlin.math.sqrt
  * Same windows, same thresholds, same outputs.
  *
  * Signals and their references:
- * - **HRV readiness** — z-score of today's HRV against the personal trailing baseline. A drop of
- *   roughly half a standard deviation flags autonomic fatigue (Plews et al. 2013; Buchheit 2014).
- * - **Resting-HR drift** — elevated resting HR vs baseline is a classic overtraining / illness
- *   signal (Lamberts et al. 2004).
- * - **Respiratory-rate drift** — a rise in sleeping respiratory rate is an early illness signal.
+ * - **HRV readiness** — z-score of today's HRV against the personal trailing baseline. A lower
+ *   personal-baseline comparison is surfaced as a shift to recheck, not a clinical explanation.
+ * - **Resting-HR drift** — resting HR compared with the wearer's own recent baseline.
+ * - **Respiratory-rate drift** — sleeping respiratory rate compared with the wearer's own baseline.
  * - **Recent-load ratio (ACWR)** — a fixed-window 7-day/28-day ratio of recorded daily strain.
  *   It is retained as descriptive context and is not Training Stress Balance, an injury predictor,
  *   or a universal safe-load prescription. [TrainingLoadModel] separately implements ATL/CTL/TSB
  *   for additive load units.
- * - **Training monotony** — mean/SD of daily strain over a week; high monotony (low variety) is
- *   associated with higher strain and illness (Foster 1998).
+ * - **Training monotony** — mean/SD of recorded daily strain over a week. It is descriptive
+ *   context only; NOOP does not turn it into an injury or illness prediction.
  *
  * Not medical advice. These are approximations from a consumer strap; they describe trends in
  * *your own* data, nothing more.
@@ -202,10 +201,10 @@ object ReadinessEngine {
             key = "hrv", label = "HRV",
             unit = "ms", decimals = 0,
             higherIsBetter = true,
-            goodText = "above your baseline - well recovered",
+            goodText = "above your recent baseline",
             neutralText = "in your normal range",
             watchText = "a touch below baseline",
-            badText = "suppressed - a sign of autonomic fatigue",
+            badText = "below your recent baseline",
         )
         if (hrvSignal != null) signals.add(hrvSignal)
 
@@ -219,11 +218,11 @@ object ReadinessEngine {
             goodText = "at or below baseline",
             neutralText = "in your normal range",
             watchText = "running a little high",
-            badText = "elevated - overtraining or illness can do this",
+            badText = "elevated compared with your recent baseline",
         )
         if (rhrSignal != null) signals.add(rhrSignal)
 
-        // Respiratory-rate drift (illness early signal) ----------------------
+        // Respiratory-rate drift ---------------------------------------------
         // respRateBpm may be a clean cloud value OR a higher-variance on-device RSA estimate
         // (WHOOP5 BLE-only) and carries no source flag, so gate conservatively for BOTH: keep the
         // minBaseline + sd>0 guard, only act on physiologically plausible sleeping-RR (~8-25 bpm),
@@ -241,7 +240,7 @@ object ReadinessEngine {
                     signals.add(
                         Signal(
                             key = "respRate", label = "Respiratory rate",
-                            detail = "up vs baseline - sometimes an early sign of getting sick", flag = Flag.BAD,
+                            detail = "higher than your recent baseline; recheck across more nights", flag = Flag.BAD,
                             evidence = respEvidence,
                         )
                     )
@@ -287,7 +286,7 @@ object ReadinessEngine {
                     signals.add(
                         Signal(
                             key = "monotony", label = "Training variety",
-                            detail = "low - similar strain every day raises strain/illness risk", flag = Flag.WATCH,
+                            detail = "recorded daily strain has varied less than usual", flag = Flag.WATCH,
                             evidence = "monotony ${fmt(mono, 1)}",
                         )
                     )
@@ -386,9 +385,11 @@ object ReadinessEngine {
     // MARK: Synthesis
 
     private fun synthesize(signals: List<Signal>, hasHistory: Boolean): Triple<Level, String, String> {
-        // ACWR is display-only context. Exclude it even though its producer currently marks it neutral,
-        // so a future wording/band change cannot silently make the ratio a readiness verdict.
-        val evaluativeSignals = signals.filter { it.key != "acwr" }
+        // Training-load context (ratio and monotony) is descriptive only. Readiness is synthesized solely
+        // from the measured recovery physiology whose personal baselines are evaluated above. Keeping an
+        // allow-list prevents a future context signal from silently changing the wellness verdict.
+        val evaluativeKeys = setOf("hrv", "rhr", "respRate")
+        val evaluativeSignals = signals.filter { it.key in evaluativeKeys }
         if (!hasHistory || evaluativeSignals.isEmpty()) {
             return Triple(
                 Level.INSUFFICIENT, "Readiness",
@@ -404,25 +405,25 @@ object ReadinessEngine {
 
         if (bad.size >= 2) {
             return Triple(
-                Level.RUNDOWN, "Run down",
-                "Several signals are down at once. Treat today as recovery - easy movement, real sleep tonight.",
+                Level.RUNDOWN, "Multiple shifts",
+                "Several measured signals shifted from your recent range. Recheck the trend and use how you feel as context.",
             )
         }
         if (recoveryDown || bad.size >= 1) {
             return Triple(
-                Level.STRAINED, "Strained",
-                "One of your signals is flagging. You can train, but keep it controlled and bank the recovery.",
+                Level.STRAINED, "One shift",
+                "One measured signal shifted from your recent range. A single day is a cue to recheck, not a diagnosis or training instruction.",
             )
         }
         if (good.size >= 2 && watch.isEmpty()) {
             return Triple(
-                Level.PRIMED, "Primed",
+                Level.PRIMED, "Aligned",
                 "Your measured recovery trends are aligned with your recent baseline.",
             )
         }
         return Triple(
-            Level.BALANCED, "Balanced",
-            "Nothing's flagging. Train to feel - your body's holding steady.",
+            Level.BALANCED, "Within range",
+            "Available measured signals are close to your recent baseline.",
         )
     }
 

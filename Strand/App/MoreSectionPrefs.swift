@@ -35,9 +35,9 @@ enum MoreSectionPrefs {
     /// A deliberately small shortcut row. Health readings remain in the primary tabs; these are utilities
     /// users otherwise have to hunt for in four different groups.
     static let quickAccess: [MoreQuickAccessItem] = [
+        .init(id: "profile", title: "Profile", systemImage: "person.crop.circle.fill"),
         .init(id: "devices", title: "Devices", systemImage: "applewatch.side.right"),
         .init(id: "workouts", title: "Workouts", systemImage: "figure.run"),
-        .init(id: "widgets", title: "Widgets", systemImage: "rectangle.3.group.fill"),
         .init(id: "settings", title: "Settings", systemImage: "gearshape.fill")
     ]
 

@@ -189,10 +189,35 @@ final class IntelligenceEngine: ObservableObject {
     // active strap's live data at read time.
 
     /// Median of a list (0 when empty) , used to denoise the 7-day resting-HR for Fitness Age.
-    static func medianOf(_ xs: [Double]) -> Double {
+    nonisolated static func medianOf(_ xs: [Double]) -> Double {
         guard !xs.isEmpty else { return 0 }
         let s = xs.sorted(); let n = s.count
         return n % 2 == 1 ? s[n / 2] : (s[n / 2 - 1] + s[n / 2]) / 2
+    }
+
+    /// Build the shared Vitality / Wellness Age inputs from merged daily rows. `DailyMetric.steps`
+    /// intentionally does not enter this model: that legacy column has no source provenance, and on a
+    /// strap-computed row it is WHOOP 5/MG @57 motion ticks scaled by a preference rather than validated
+    /// pedometer steps. Imported Apple Health steps remain available in their sourced store; until a
+    /// provenance-aware join is added here, omission is safer than silently treating motion as measured.
+    nonisolated static func vitalityInputs(days: [DailyMetric], chronoAge: Double,
+                                           minimumCoverage: Int = 14) -> VitalityEngine.Inputs {
+        let nights = days.compactMap { $0.totalSleepMin }
+            .map { Double($0) / 60.0 }.filter { $0 > 0 }
+        let hrvs = days.compactMap { $0.avgHrv }
+        let rhrs = days.compactMap { $0.restingHr }.map(Double.init)
+        func mean(_ values: [Double]) -> Double? {
+            values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+        }
+        return VitalityEngine.Inputs(
+            chronoAge: chronoAge,
+            restingHR: rhrs.count >= minimumCoverage ? medianOf(rhrs) : nil,
+            sleepHours: nights.count >= minimumCoverage ? mean(nights) : nil,
+            sleepConsistency: nights.count >= minimumCoverage
+                ? VitalityEngine.sleepConsistency(nightlyHours: nights) : nil,
+            rmssd: hrvs.count >= minimumCoverage ? medianOf(hrvs) : nil,
+            rmssdNorm: VitalityEngine.rmssdNorm(forAge: chronoAge),
+            steps: nil)
     }
 
     /// The per-day RHR floor-vs-mean diagnostic line (#691). NOOP's `floor` is the WHOOP-style resting
@@ -358,6 +383,108 @@ final class IntelligenceEngine: ObservableObject {
         for id in ids {
             for key in keys { _ = try? await store.deleteMetricSeries(deviceId: id, key: key) }
         }
+    }
+
+    /// Reconcile the provenance-safe Vitality v2 rows at the model-version boundary. This helper owns
+    /// only computed sources supplied by the caller: imported/raw/vendor namespaces are never queried or
+    /// deleted. A legacy steps-influenced headline is removed before a valid v2 replacement is written;
+    /// when current inputs no longer span three physiological domains, no stale headline survives.
+    @discardableResult
+    nonisolated static func reconcileVitalityV2(
+        store: WhoopStore,
+        computedReadIds: [String],
+        writeId: String,
+        days: [DailyMetric],
+        age: Int,
+        inputsUsable: Bool,
+        saturdayKey: String
+    ) async -> Bool {
+        var computedIds = computedReadIds
+        if !computedIds.contains(writeId) { computedIds.append(writeId) }
+        var seenIds = Set<String>()
+        computedIds = computedIds.filter { seenIds.insert($0).inserted }
+
+        var newestToken: MetricPoint?
+        var hasLegacyToken = false
+        for id in computedIds {
+            let rows = (try? await store.metricSeries(
+                deviceId: id, key: AgeMetricProfile.vitalityKey,
+                from: "0000-01-01", to: "9999-12-31")) ?? []
+            if let row = rows.last,
+               newestToken == nil || row.day > newestToken!.day {
+                newestToken = row
+            }
+            if !hasLegacyToken {
+                hasLegacyToken = !((try? await store.metricSeries(
+                    deviceId: id, key: AgeMetricProfile.legacyVitalityKey,
+                    from: "0000-01-01", to: "9999-12-31")) ?? []).isEmpty
+            }
+        }
+
+        let currentToken = AgeMetricProfile.vitalityToken(age: age)
+        let result = inputsUsable
+            ? VitalityEngine.compute(vitalityInputs(days: days, chronoAge: Double(age)))
+            : nil
+        let acceptsCurrentModel = AgeMetricProfile.acceptsVitalityV2(
+            stored: newestToken?.value, current: currentToken)
+
+        if hasLegacyToken || !acceptsCurrentModel || result == nil {
+            let computedOnlyKeys = [
+                // Remove the acceptance marker first: if a later deletion fails, readers still fail
+                // closed instead of accepting a stale headline.
+                AgeMetricProfile.vitalityKey, AgeMetricProfile.legacyVitalityKey,
+                "vitality", "body_age",
+            ]
+            // Key-major ordering removes the v2 acceptance marker across the full computed union before
+            // any displayed value. A partial storage failure therefore still leaves every reader closed.
+            for key in computedOnlyKeys {
+                for id in computedIds {
+                    do {
+                        _ = try await store.deleteMetricSeries(deviceId: id, key: key)
+                    } catch {
+                        return false
+                    }
+                }
+            }
+        }
+
+        guard let result else { return false }
+        do {
+            _ = try await store.upsertMetricSeries([
+                MetricPoint(day: saturdayKey, key: "vitality", value: result.vitality),
+                MetricPoint(day: saturdayKey, key: "body_age", value: result.bodyAge),
+                MetricPoint(day: saturdayKey, key: AgeMetricProfile.vitalityKey, value: currentToken),
+            ], deviceId: writeId)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Lightweight launch reconciliation for the Vitality v2 model boundary. This deliberately runs
+    /// independently of the raw-HR analysis watermark: an otherwise unchanged upgrade still has to
+    /// remove a persisted v1 headline (or replace it from currently eligible, provenance-safe inputs).
+    /// Only the computed source union is passed to `reconcileVitalityV2`; imported/vendor rows remain
+    /// outside this migration.
+    @discardableResult
+    func recomputeVitalityOnly(maxDays: Int = 21) async -> Bool {
+        guard let store = await repo.storeHandle() else { return false }
+        let now = Int(Date().timeIntervalSince1970)
+        let offset = TimeZone.current.secondsFromGMT()
+        let midnight = Self.midnightLocal(now, offsetSec: offset)
+        let newestDay = AnalyticsEngine.dayString(midnight, offsetSec: offset)
+        let oldestDay = AnalyticsEngine.dayString(
+            midnight - (maxDays - 1) * 86_400, offsetSec: offset)
+        let days = Array((await repo.dailyMetrics(fromDay: oldestDay, toDay: newestDay))
+            .sorted { $0.day < $1.day }.suffix(maxDays))
+        return await Self.reconcileVitalityV2(
+            store: store,
+            computedReadIds: repo.computedReadIds,
+            writeId: deviceId + "-noop",
+            days: days,
+            age: profile.age,
+            inputsUsable: profile.ageInputConfirmed && (20...80).contains(profile.age),
+            saturdayKey: Self.saturdayKey(onOrBefore: newestDay))
     }
 
     /// Manual "refresh Fitness Age" (the button on the not-ready card): recompute the weekly Fitness Age NOW
@@ -1402,41 +1529,32 @@ final class IntelligenceEngine: ObservableObject {
         // Wellness Age does not use sex, but it still must never treat the seeded age-30 editor value
         // as user-provided. Its own experimental model is defined only over ages 20...80.
         let wellnessInputsUsable = profile.ageInputConfirmed && (20...80).contains(profile.age)
-        let storedVitalityToken = await latestComputedProfileToken(
-            store: store, key: AgeMetricProfile.vitalityKey)
-        if !wellnessInputsUsable || !profile.acceptsVitality(provenance: storedVitalityToken) {
-            await purgeComputedMetricKeys(
-                store: store, keys: ["vitality", "body_age", AgeMetricProfile.vitalityKey])
-        }
-
         // ── Vitality / Wellness Age (Phase 7) , weekly, trailing 21 days ───────────────────────────
         // This is an experimental lifestyle-risk composite, not WHOOP Age or biological age. Require
         // 14 observed days for each factor before letting that factor enter, and require three independent
         // domains inside VitalityEngine. Missing values remain unavailable rather than being imputed.
         let v21 = Array(faGateByDay.values.sorted { $0.day < $1.day }.suffix(21))
-        let vMinCoverage = 14
-        let vRHRs = v21.compactMap { $0.restingHr }.map(Double.init)
-        let vNights = v21.compactMap { $0.totalSleepMin }.map { Double($0) / 60.0 }.filter { $0 > 0 }
-        let vHRVs = v21.compactMap { $0.avgHrv }
-        let vSteps = v21.compactMap { $0.steps }.map(Double.init)
-        let vInputs = VitalityEngine.Inputs(
-            chronoAge: Double(profile.age),
-            restingHR: vRHRs.count >= vMinCoverage ? IntelligenceEngine.medianOf(vRHRs) : nil,
-            sleepHours: vNights.count >= vMinCoverage ? vNights.reduce(0, +) / Double(vNights.count) : nil,
-            sleepConsistency: vNights.count >= vMinCoverage
-                ? VitalityEngine.sleepConsistency(nightlyHours: vNights) : nil,
-            rmssd: vHRVs.count >= vMinCoverage ? IntelligenceEngine.medianOf(vHRVs) : nil,
-            rmssdNorm: VitalityEngine.rmssdNorm(forAge: Double(profile.age)),
-            steps: vSteps.count >= vMinCoverage ? vSteps.reduce(0, +) / Double(vSteps.count) : nil)
-        if wellnessInputsUsable, let vRes = VitalityEngine.compute(vInputs) {
-            let satKey = IntelligenceEngine.saturdayKey(onOrBefore: newestDay)
-            _ = try? await store.upsertMetricSeries([
-                MetricPoint(day: satKey, key: "vitality", value: vRes.vitality),
-                MetricPoint(day: satKey, key: "body_age", value: vRes.bodyAge),
-                MetricPoint(day: satKey, key: AgeMetricProfile.vitalityKey,
-                            value: profile.vitalityProfileToken),
-            ], deviceId: computedId)
+        #if DEBUG
+        if !AppleDemoSeeder.requested {
+            _ = await Self.reconcileVitalityV2(
+                store: store,
+                computedReadIds: repo.computedReadIds,
+                writeId: computedId,
+                days: v21,
+                age: profile.age,
+                inputsUsable: wellnessInputsUsable,
+                saturdayKey: IntelligenceEngine.saturdayKey(onOrBefore: newestDay))
         }
+        #else
+        _ = await Self.reconcileVitalityV2(
+            store: store,
+            computedReadIds: repo.computedReadIds,
+            writeId: computedId,
+            days: v21,
+            age: profile.age,
+            inputsUsable: wellnessInputsUsable,
+            saturdayKey: IntelligenceEngine.saturdayKey(onOrBefore: newestDay))
+        #endif
 
         // ── Steps ESTIMATE (WHOOP 4.0) , DAILY, keyed to each strap-only day ────────────────────────
         // A WHOOP 4.0 sends no step count over BLE, so for days the phone DIDN'T also count steps we

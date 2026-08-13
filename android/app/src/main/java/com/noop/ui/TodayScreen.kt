@@ -759,11 +759,12 @@ fun TodayScreen(
     }
 
     // Steps for the selected day from imported Apple Health / Health Connect data, the Today Steps
-    // tile's fallback when the strap itself didn't bank an on-device count. A WHOOP 4.0 DOES count
+    // tile's measured source. A WHOOP 4.0 DOES count
     // steps (in the official WHOOP app), but NOOP can't yet read them off the strap over Bluetooth, so
     // on a 4.0 the tile shows your imported steps instead of "No Data". Reloads as the day selector
-    // moves. On-device WHOOP 5/MG steps still take precedence. (#150)
+    // moves. This measured count outranks WHOOP 5/MG's @57 motion estimate. (#150)
     var importedStepsForDay by remember { mutableStateOf<Int?>(null) }
+    var importedStepsByDay by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     LaunchedEffect(days, selectedDayKey) {
         // Today's steps keep moving after the manual one-shot HC import, so the stored row goes
         // stale within minutes, top it up with ONE live StepsRecord read before the stored-row
@@ -773,26 +774,28 @@ fun TodayScreen(
                 HealthConnectImporter.refreshTodaySteps(context, viewModel.repo)
             } catch (_: Exception) { /* best-effort */ }
         }
-        importedStepsForDay = stepsForDay(
-            viewModel.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31"),
-            viewModel.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31"),
-            selectedDayKey,
-        )
+        val apple = viewModel.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31")
+        val healthConnect = viewModel.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31")
+        importedStepsByDay = (apple + healthConnect).filter { it.steps != null }
+            .groupBy { it.day }.mapValues { (_, rows) -> rows.mapNotNull { it.steps }.max() }
+        importedStepsForDay = importedStepsByDay[selectedDayKey]
     }
 
     // On-device steps ESTIMATE for the selected day (key "steps_est", computed "-noop" source). The
-    // Steps tile prefers a REAL step count (strap @57 counter / imported Health Connect); only when a
-    // day has NEITHER does it fall back to this estimate, shown with an "est." caption so it's never read
-    // as a measured count. resolvedSeries reads the computed source for the my-whoop key, exactly like
+    // Steps tile prefers a measured phone import, then the @57 motion-derived value; only when a day has
+    // neither does it fall back to this calibrated estimate. Every strap-derived path is labelled as an
+    // estimate. resolvedSeries reads the computed source for the my-whoop key, exactly like
     // the Explore "steps_est" metric. Null until loaded / no estimate for the day. (#150)
     var stepsEstForDay by remember { mutableStateOf<Int?>(null) }
+    var stepsEstByDay by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     LaunchedEffect(days, selectedDayKey) {
         val byDay = runCatching {
             viewModel.repo.resolvedSeries("steps_est", "my-whoop", "0000-00-00", "9999-99-99",
                 strapDeviceId = viewModel.activeStrapId)
                 .values.associate { it.first to it.second }
         }.getOrDefault(emptyMap())
-        stepsEstForDay = byDay[selectedDayKey]?.let { Math.round(it).toInt() }
+        stepsEstByDay = byDay.mapValues { Math.round(it.value).toInt() }
+        stepsEstForDay = stepsEstByDay[selectedDayKey]
     }
 
     // The selected day's representative activity class for the Steps tile icon (#316 / @63). Reads the day's
@@ -1040,7 +1043,9 @@ fun TodayScreen(
 
     // 14-day trailing calendar window ending on the phone's actual local day.
     // Old imports stay in history, but they do not fill the Today trend tiles.
-    val window = rememberTrendWindow(days, selectedDay, keyMetricsWindowDays)
+    val window = rememberTrendWindow(
+        days, selectedDay, keyMetricsWindowDays, importedStepsByDay, stepsEstByDay,
+    )
 
     LaunchedEffect(days) {
         // #849: this footer pass is the heavy one. It derives HR per imported workout from raw strap samples
@@ -2684,7 +2689,8 @@ private fun SynthesisHeroCard(
             )
             Spacer(Modifier.weight(1f))
             // S4 (#205): the one-word readiness read kept on the hero now the full Readiness card folded
-            // into the Charge-ring tap. Push / Maintain / Rest; hidden when there isn't enough history.
+            // into the Charge-ring tap. Aligned / Within range / Recheck / Multiple shifts; hidden when
+            // there isn't enough history.
             // Tapping it opens the Charge breakdown, where the full Readiness card now lives.
             val readinessLevel = remember(days) {
                 if (days.isEmpty()) ReadinessEngine.Level.INSUFFICIENT
@@ -3056,7 +3062,15 @@ private fun YourCardsSection(
                     // #110: label the sleep row with its source + night (this section renders at offset 0
                     // only, so it IS last night), so a WHOOP-imported figure is never silently shown as
                     // "last night" with no provenance. iOS TodayView.sleepSourceSubtitle twin.
-                    subtitleOverride = sleepSourceSubtitle(card, day),
+                    subtitleOverride = when (card) {
+                        DashboardCard.SLEEP -> sleepSourceSubtitle(card, day)
+                        DashboardCard.STEPS -> stepsSourceCaption(
+                            motionDerived = day?.steps,
+                            imported = importedStepsForDay,
+                            calibratedEstimate = estimatedStepsForDay,
+                        )
+                        else -> null
+                    },
                     // #706/#684: every card now opens its OWN detail, matching iOS. The Stress card -> Stress;
                     // the overnight vitals (HRV / Resting HR / Respiratory / SpO₂ / Skin Temp) + Fitness age /
                     // Vitality / Steps / Calories -> each metric's focused trend (vital_detail/<key>, the iOS
@@ -3189,7 +3203,7 @@ private fun dashboardCardFraction(
         DashboardCard.RESTING_HR -> over((day?.restingHr ?: vitalsDay?.restingHr)?.toDouble(), 100.0)
         DashboardCard.RESPIRATORY -> over(day?.respRateBpm ?: vitalsDay?.respRateBpm, 24.0)
         DashboardCard.STEPS -> {
-            val steps = (day?.steps ?: importedStepsForDay ?: estimatedStepsForDay)?.toDouble()
+            val steps = resolvedSteps(importedStepsForDay, day?.steps, estimatedStepsForDay)?.toDouble()
             over(steps, 10000.0)
         }
         DashboardCard.SLEEP -> over(vd?.totalSleepMin, 480.0)
@@ -3252,8 +3266,8 @@ private fun dashboardCardValue(
             (vd?.skinTempDevC ?: skinTempDay?.skinTempDevC)?.let { String.format(Locale.US, "%+.1f°", it) } ?: NO_DATA
         DashboardCard.SLEEP -> sleepValue(vd)
         DashboardCard.STEPS -> {
-            val real = day?.steps?.let { intStringGrouped(it.toDouble()) }
-                ?: importedStepsForDay?.let { intStringGrouped(it.toDouble()) }
+            val real = importedStepsForDay?.let { intStringGrouped(it.toDouble()) }
+                ?: day?.steps?.let { intStringGrouped(it.toDouble()) }
             val est = estimatedStepsForDay?.let { intStringGrouped(it.toDouble()) }
             real ?: est ?: NO_DATA
         }
@@ -4293,8 +4307,8 @@ private fun MetricGrid(
     // #616: the Calories tile's imported-first 14-day trend (see caloriesSpark above) — threaded like
     // restSpark because it isn't a plain DailyMetric column (it unions the imported + on-device series).
     caloriesSpark: List<Double> = emptyList(),
-    // #316 / @63, the selected day's representative activity class (0=still, 1=walk, 2=run), shown as a small
-    // still/walk/run glyph on a REAL (measured) Steps tile. null hides the icon (no classed sample for the day).
+    // #316 / @63, the selected day's representative activity class (0=still, 1=walk, 2=run), shown beside
+    // the WHOOP 5/MG motion estimate. null hides it when no classed sample exists for the day.
     stepActivityClassForDay: Int? = null,
     // #760/#792: the caption under an ESTIMATED Steps tile: the engine's STATUS line (manual k, or
     // k=… from N days + confidence tier) so a frozen-looking estimate self-explains. Built from the SAME
@@ -4411,11 +4425,10 @@ private fun MetricGrid(
             )
         },
         KeyMetric.STEPS to run {
-            // Steps precedence (unchanged): on-device count → imported → estimate. (#107/#150)
-            val realSteps = d?.steps ?: importedStepsForDay
-            val steps = realSteps ?: estimatedStepsForDay
+            // A measured phone count wins; @57 and calibration are explicitly motion-derived fallbacks.
+            val steps = resolvedSteps(importedStepsForDay, d?.steps, estimatedStepsForDay)
             KeyTileData(
-                label = uiString(R.string.l10n_today_screen_steps_cdde4f20),
+                label = stepsTileLabel(d?.steps, importedStepsForDay, estimatedStepsForDay),
                 value = steps?.let { intString(it.toDouble()) } ?: NO_DATA,
                 unit = "",
                 tint = Palette.metricCyan,
@@ -5634,7 +5647,7 @@ private fun ReadinessSection(days: List<DailyMetric>, carriedDay: DailyMetric? =
     val readiness = remember(days, anchorKey) { ReadinessEngine.evaluate(days, today = anchorKey) }
     if (readiness.level == ReadinessEngine.Level.INSUFFICIENT) return
 
-    val overline = carriedDay?.let { carriedCaption(it.day) } ?: "Should you push today?"
+    val overline = carriedDay?.let { carriedCaption(it.day) } ?: "How your signals compare"
     SectionHeader("Readiness", overline = overline)
     NoopCard {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -5886,7 +5899,7 @@ private data class Window(
     val spo2: List<Double>,
     val resp: List<Double>,
     // #616: the Steps tile carried no `spark` series, so it drew no trend line while every other tile did.
-    // On-device DailyMetric.steps (the strap @57 count) — the same signal the Steps tile VALUE reads
+    // On-device DailyMetric.steps (the strap @57 motion-derived estimate) — the same signal the Steps tile VALUE reads
     // (on-device-first), matching iOS kSparks "steps". (Calories is imported-first, so its spark is threaded
     // separately as caloriesSpark, not read off a DailyMetric column here.)
     val steps: List<Double>,
@@ -5902,14 +5915,19 @@ private fun rememberTrendWindow(
     days: List<com.noop.data.DailyMetric>,
     anchorDay: LocalDate,
     windowDays: Int,
+    importedStepsByDay: Map<String, Int> = emptyMap(),
+    calibratedStepsByDay: Map<String, Int> = emptyMap(),
 ): Window =
-    androidx.compose.runtime.remember(days, anchorDay, windowDays) {
+    androidx.compose.runtime.remember(days, anchorDay, windowDays, importedStepsByDay, calibratedStepsByDay) {
         // Trailing CALENDAR days ending today, NOT the last N stored rows, which on an old import
         // were months-old data shown as a fresh trend (issue #23). ISO yyyy-MM-dd sorts chronologically.
         val cutoff = anchorDay.minusDays((windowDays - 1).toLong()).toString()
         val end = anchorDay.toString()
         val recent = days.filter { it.day >= cutoff && it.day <= end }
         fun series(pick: (DailyMetric) -> Double?): List<Double> = recent.mapNotNull(pick)
+        val motionStepsByDay = recent.mapNotNull { row -> row.steps?.let { row.day to it } }.toMap()
+        val measuredWindow = importedStepsByDay.filterKeys { it >= cutoff && it <= end }
+        val calibratedWindow = calibratedStepsByDay.filterKeys { it >= cutoff && it <= end }
         Window(
             recovery = series { it.recovery },
             strain = series { it.strain },
@@ -5918,7 +5936,7 @@ private fun rememberTrendWindow(
             rhr = series { it.restingHr?.toDouble() },
             spo2 = series { it.spo2Pct },
             resp = series { it.respRateBpm },
-            steps = series { it.steps?.toDouble() },   // #616
+            steps = resolvedStepsSeries(measuredWindow, motionStepsByDay, calibratedWindow).map { it.second },
         )
     }
 

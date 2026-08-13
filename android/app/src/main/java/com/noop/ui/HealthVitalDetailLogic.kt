@@ -15,17 +15,20 @@ internal data class VitalReading(
     val source: String,
 )
 
+internal const val MOTION_DERIVED_STEPS_SOURCE = "noop-motion-derived-steps"
+internal const val CALIBRATED_MOTION_STEPS_SOURCE = "noop-calibrated-motion-steps"
+
 /** #377: merge the three step stores into one per-day series with the SAME precedence as the Today
- *  Steps tile — a REAL on-device count ([real], WHOOP 5/MG @57 → DailyMetric.steps) wins, else an
- *  [imported] Health Connect / Apple Health count, else the motion-model [est] (`steps_est`). The three
+ *  Steps tile — an imported measured Health Connect / Apple Health count wins, else WHOOP 5/MG's
+ *  @57 motion-derived estimate, else the calibrated motion-model estimate (`steps_est`). The three
  *  are disjoint stores so the `?:` chain never double-counts. Ascending by day. Pure for testability. */
 internal fun mergeStepsReadings(
-    real: Map<String, VitalReading>,
+    motionDerived: Map<String, VitalReading>,
     imported: Map<String, VitalReading>,
-    est: Map<String, VitalReading>,
+    calibratedEstimate: Map<String, VitalReading>,
 ): List<VitalReading> =
-    (real.keys + imported.keys + est.keys).toSortedSet()
-        .mapNotNull { d -> real[d] ?: imported[d] ?: est[d] }
+    (motionDerived.keys + imported.keys + calibratedEstimate.keys).toSortedSet()
+        .mapNotNull { d -> imported[d] ?: motionDerived[d] ?: calibratedEstimate[d] }
 
 /** #616: per-day precedence merge for a metric with disjoint stores (first non-null per day wins),
  *  ascending. The N-store generalisation of [mergeStepsReadings]; calories reuse it as the two-store

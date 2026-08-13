@@ -7,13 +7,14 @@ package com.noop.analytics
  * cue. PURE + DB-free, carrying its OWN de-dup state exactly like [SedentaryDetector.evaluate]: the caller
  * persists [Decision.nextState] and feeds it back, so a replayed window can't re-fire. No I/O / BLE here.
  *
- * Faithful Kotlin mirror of StrandAnalytics/StressOnsetDetector.swift — keep the EMA baseline, the drop
- * threshold, the edge trigger, the exercise gate, and the rate-limit/quiet-hours suppressors byte-identical
- * to Swift (cross-platform parity is the contract, pinned by matching golden-vector tests).
+ * Faithful Kotlin mirror of StrandAnalytics/StressOnsetDetector.swift — keep the warmed personal baseline,
+ * drop threshold, edge trigger, credibility gate, and rate-limit/quiet-hours suppressors byte-identical to
+ * Swift (cross-platform parity is the contract, pinned by matching golden-vector tests).
  * See docs/superpowers/specs/2026-06-19-v5-haptic-biofeedback-design.md (L3).
  *
  * WHAT IT GENERALISES (from AppModel.evaluateStress): a rolling clean-R-R buffer → a SLOW RMSSD baseline
- * (the shipped 0.98/0.02 EMA) + a resting-HR band gate (55–100 bpm) + a `rmssd < baseline × 0.6` drop +
+ * (an exact warm-up mean, then the shipped 0.98/0.02 EMA) + a resting-HR band gate (55–100 bpm) + a
+ * `rmssd < baseline × 0.6` drop +
  * a once-per-15-min limiter + a single confirming buzz. What this engine ADDS, per spec:
  *   1. A FAST short-window RMSSD (the latest beats) vs the slow baseline.
  *   2. EDGE trigger: fire ONCE on the fresh crossing (was-above → now-below), not every tick.
@@ -22,7 +23,8 @@ package com.noop.analytics
  *   4. Rate-limit + quiet hours + master toggle, and never while a manual Breathe/L1/L2 session runs.
  *
  * HONEST / NON-CLINICAL: "stress" is an autonomic PROXY (HRV-down vs the user's OWN baseline), never a
- * diagnosis. The card the caller shows says "HRV dipped while you were still" — never "you are stressed".
+ * diagnosis. The card says "short-window HRV moved below its recent baseline" and only mentions stillness
+ * after contemporaneous motion evidence was actually observed — never "you are stressed".
  * On fire: a single confirming buzz + a passive in-app card; NEVER a push notification unless the user
  * opted into notifications (matches DaytimeStress's "passive suggestion, never a notification" stance).
  *
@@ -54,6 +56,12 @@ object StressOnsetDetector {
      *  (reuses the [SedentaryDetector] move threshold so the two gates agree on what "moving" is). */
     val MOTION_GATE_G: Double = SedentaryDetector.DEFAULT_MOVE_THRESHOLD_G
 
+    /** A baseline needs this many DISTINCT, trusted short windows before a later window may fire. */
+    const val MINIMUM_TRUSTED_BASELINE_WINDOWS: Int = 4
+
+    /** Overlapping callbacks cannot counterfeit warm-up: admit at most one trusted window per minute. */
+    const val MINIMUM_TRUSTED_WINDOW_SPACING_SECONDS: Long = 60L
+
     // ── Config ────────────────────────────────────────────────────────────────
 
     /**
@@ -80,7 +88,7 @@ object StressOnsetDetector {
      * The persisted state the detector carries between evaluations (restart-safe). The caller stores this
      * verbatim and feeds the prior value back in, exactly like [SedentaryState]. A fresh user starts from
      * [INITIAL]. Carries the slow EMA baseline (so it survives relaunch), the edge state (was the fast
-     * RMSSD below the threshold on the previous tick?), and the rate-limit clock.
+     * RMSSD below the threshold on the previous tick?), the baseline warm-up, and the rate-limit clock.
      */
     data class State(
         /** Slow RMSSD baseline (EMA), ms. 0 = uninitialised (seeds from the first trusted fast RMSSD). */
@@ -90,6 +98,13 @@ object StressOnsetDetector {
         val wasBelow: Boolean = false,
         /** Unix-seconds of the last fire (0 = never) — the rate limiter. */
         val lastFireAt: Long = 0L,
+        /** Number of distinct trusted windows incorporated into the baseline, capped at the warm-up floor.
+         *  Zero is the compatible default for legacy state, forcing a safe re-warm after upgrade. */
+        val trustedWindowCount: Int = 0,
+        /** Stable identity of the last trusted clean R-R tail. Zero means no accepted window yet. */
+        val lastTrustedWindowFingerprint: Long = 0L,
+        /** Unix-seconds when the last distinct trusted window was admitted. */
+        val lastTrustedWindowAt: Long = 0L,
     ) {
         companion object {
             /** Cold-start state (no baseline, not below, never fired). */
@@ -110,11 +125,20 @@ object StressOnsetDetector {
         /** Too few clean beats to judge honestly. */
         INSUFFICIENT_DATA,
 
+        /** A valid window is still building the minimum distinct-window personal baseline. */
+        WARMING_UP,
+
+        /** The same or an overlapping trusted R-R tail cannot advance baseline or edge state. */
+        DUPLICATE_WINDOW,
+
         /** Fast RMSSD is at/above the threshold — no dip. */
         NO_DIP,
 
         /** The dip isn't a fresh edge (already below last tick). */
         NOT_AN_EDGE,
+
+        /** No contemporaneous motion observation exists, so stillness cannot be established. */
+        MOTION_UNAVAILABLE,
 
         /** Suppressed by the exercise gate (HR out of band and/or recent motion = metabolic, not stress). */
         EXERCISE_GATED,
@@ -152,15 +176,14 @@ object StressOnsetDetector {
      *   latest [FAST_WINDOW_BEATS] clean beats; the slow baseline EMA absorbs each trusted fast value.
      * - [currentHR]: latest smoothed live HR (bpm), or null if unknown (then the HR half of the gate can't
      *   pass and we treat HR as out-of-band — conservative).
-     * - [recentMotionG]: recent smoothed wrist-motion (g) from `collector.recentGravity`, or null if no
-     *   recent gravity (then the motion half of the gate is inconclusive — see below).
+     * - [recentMotionG]: timestamp-validated, recent smoothed wrist-motion (g) from banked gravity, or null
+     *   when motion is absent/stale. Missing motion cannot establish stillness, so it suppresses nudges.
      * - [sessionActive]: true if a manual Breathe/L1/L2 session is already running (never nudge over it).
      * - [state]: the prior persisted state; [nowSec] / [tzOffsetSec] passed IN (never read a clock).
      *
      * The EXERCISE GATE suppresses when EITHER signal says metabolic: HR outside [55,100], OR recent motion
-     * at/above [MOTION_GATE_G]. A missing HR is treated as out-of-band (can't confirm resting); missing
-     * motion alone does NOT gate (HR-band can carry it — gravity is offloaded and lags, spec Q3), so the
-     * resting-HR band is the real-time gate and motion is a secondary confirm when present.
+     * at/above [MOTION_GATE_G]. Missing HR is treated as out-of-band, and missing/stale motion also
+     * suppresses: an in-band HR cannot truthfully establish that the wearer is still.
      */
     fun evaluate(
         rrBuffer: List<Int>,
@@ -182,6 +205,16 @@ object StressOnsetDetector {
             )
         }
 
+        // A user-started workout/coaching/breathing session is not baseline-learning time either. Keep
+        // state untouched so session physiology cannot contaminate the resting comparison after it ends.
+        if (sessionActive) {
+            return Decision(
+                shouldNudge = false, reason = Reason.SUPPRESSED, buzzLoops = config.buzzLoops,
+                fastRMSSD = null, baselineRMSSD = state.baselineRMSSD.takeIf { it > 0.0 },
+                nextState = state,
+            )
+        }
+
         // 2) Fast RMSSD over the latest clean beats. Clean first (range + Malik), then take the tail.
         val cleanAll = HrvAnalyzer.cleanRR(rrBuffer.map { it.toDouble() })
         val fastWindow = if (cleanAll.size > FAST_WINDOW_BEATS) cleanAll.takeLast(FAST_WINDOW_BEATS) else cleanAll
@@ -195,16 +228,53 @@ object StressOnsetDetector {
             )
         }
 
-        // 3) Advance the slow baseline EMA (seed on first trusted value), exactly like evaluateStress.
-        val newBaseline = if (state.baselineRMSSD == 0.0) {
-            fast
+        // 3) Establish credibility BEFORE learning. Only a window whose HR and observed motion both support
+        // a resting context may train the personal baseline behind an interruptive suggestion.
+        val hrInBand = currentHR != null && currentHR >= RESTING_HR_LOW && currentHR <= RESTING_HR_HIGH
+        if (recentMotionG == null || !recentMotionG.isFinite()) {
+            return Decision(
+                shouldNudge = false, reason = Reason.MOTION_UNAVAILABLE, buzzLoops = config.buzzLoops,
+                fastRMSSD = fast, baselineRMSSD = state.baselineRMSSD.takeIf { it > 0.0 },
+                nextState = state,
+            )
+        }
+        if (!hrInBand || recentMotionG >= MOTION_GATE_G) {
+            return Decision(
+                shouldNudge = false, reason = Reason.EXERCISE_GATED, buzzLoops = config.buzzLoops,
+                fastRMSSD = fast, baselineRMSSD = state.baselineRMSSD.takeIf { it > 0.0 },
+                nextState = state,
+            )
+        }
+
+        // 4) Only a DISTINCT trusted R-R tail may advance the baseline. The same cached window may reach
+        // this engine more than once, and heavily-overlapping callbacks are not independent evidence.
+        val fingerprint = trustedWindowFingerprint(fastWindow)
+        val priorCount = state.trustedWindowCount.coerceIn(0, MINIMUM_TRUSTED_BASELINE_WINDOWS)
+        val overlapsPriorWindow = priorCount > 0 &&
+            (nowSec - state.lastTrustedWindowAt) < MINIMUM_TRUSTED_WINDOW_SPACING_SECONDS
+        if (fingerprint == state.lastTrustedWindowFingerprint || overlapsPriorWindow) {
+            return Decision(
+                shouldNudge = false, reason = Reason.DUPLICATE_WINDOW, buzzLoops = config.buzzLoops,
+                fastRMSSD = fast, baselineRMSSD = state.baselineRMSSD.takeIf { it > 0.0 },
+                nextState = state,
+            )
+        }
+
+        // 5) Use an exact running mean throughout the four-window warm-up, then the slow EMA. A legacy
+        // state has count==0, so its old ungated EMA is deliberately replaced by the first trusted window.
+        val baseline = if (priorCount < MINIMUM_TRUSTED_BASELINE_WINDOWS) {
+            (state.baselineRMSSD * priorCount.toDouble() + fast) / (priorCount + 1).toDouble()
         } else {
             state.baselineRMSSD * BASELINE_EMA_ALPHA + fast * (1.0 - BASELINE_EMA_ALPHA)
         }
-        var next = state.copy(baselineRMSSD = newBaseline)
-        val baseline = newBaseline
+        var next = state.copy(
+            baselineRMSSD = baseline,
+            trustedWindowCount = minOf(MINIMUM_TRUSTED_BASELINE_WINDOWS, priorCount + 1),
+            lastTrustedWindowFingerprint = fingerprint,
+            lastTrustedWindowAt = nowSec,
+        )
 
-        // 4) Is the fast RMSSD below the drop threshold? (the dip test)
+        // 6) Is the fast RMSSD below the drop threshold? (the dip test)
         val threshold = baseline * DROP_RATIO
         val isBelow = fast < threshold
         // The edge: a FRESH crossing (above on the previous tick → below now). Always record the new
@@ -217,17 +287,13 @@ object StressOnsetDetector {
             fastRMSSD = fast, baselineRMSSD = baseline, nextState = next,
         )
 
+        // The current window may complete warm-up, but cannot also be judged against a baseline that partly
+        // contains itself. Auto-fire begins only on a later distinct trusted window.
+        if (priorCount < MINIMUM_TRUSTED_BASELINE_WINDOWS) return decide(false, Reason.WARMING_UP)
         if (!isBelow) return decide(false, Reason.NO_DIP)
         if (!isEdge) return decide(false, Reason.NOT_AN_EDGE)
 
-        // 5) Exercise gate (the credibility line). HR out of the resting band (or unknown) → metabolic.
-        //    Recent motion at/above the gate → metabolic. Either suppresses.
-        val hrInBand = currentHR != null && currentHR >= RESTING_HR_LOW && currentHR <= RESTING_HR_HIGH
-        val moving = recentMotionG != null && recentMotionG >= MOTION_GATE_G
-        if (!hrInBand || moving) return decide(false, Reason.EXERCISE_GATED)
-
-        // 6) Suppressors: a manual session is running, the rate limit, or quiet hours.
-        if (sessionActive) return decide(false, Reason.SUPPRESSED)
+        // 7) Remaining suppressors: rate limit or quiet hours. Sessions were rejected before learning.
         if (state.lastFireAt != 0L && (nowSec - state.lastFireAt) < MIN_SECONDS_BETWEEN_FIRES) {
             return decide(false, Reason.SUPPRESSED)
         }
@@ -238,8 +304,19 @@ object StressOnsetDetector {
             }
         }
 
-        // 7) Fire — a fresh, non-metabolic HRV dip while still. Stamp the rate-limit clock.
+        // 8) Fire — a fresh short-window HRV dip with observed low motion. Stamp the rate-limit clock.
         next = next.copy(lastFireAt = nowSec)
         return decide(true, Reason.ONSET)
+    }
+
+    /** Stable across launches (unlike `hashCode`) so persisted state rejects a replay after relaunch. */
+    private fun trustedWindowFingerprint(window: List<Double>): Long {
+        // FNV-1a offset basis represented as the same signed 64-bit pattern as Swift's UInt64 value.
+        var hash = -3_750_763_034_362_895_579L
+        for (value in window) {
+            hash = (hash xor java.lang.Double.doubleToRawLongBits(value)) * 1_099_511_628_211L
+        }
+        hash = hash xor window.size.toLong()
+        return if (hash == 0L) 1L else hash
     }
 }

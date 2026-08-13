@@ -2,15 +2,17 @@ import XCTest
 @testable import Strand
 
 final class MetricCatalogStepsTests: XCTestCase {
-    func testTodayStepsUsesMeasuredWhoopSeriesWhenAvailable() {
-        let metric = MetricCatalog.todayStepsMetric(hasMeasuredSteps: true)
+    func testTodayStepsUsesMotionDerivedWhoopSeriesWhenAvailable() {
+        let metric = MetricCatalog.todayStepsMetric(hasMotionDerivedSteps: true)
 
         XCTAssertEqual(metric?.key, "steps")
         XCTAssertEqual(metric?.source, "my-whoop")
+        XCTAssertEqual(metric?.title, "Steps (motion estimate)")
+        XCTAssertTrue(metric?.description?.contains("Not a validated pedometer count") == true)
     }
 
-    func testTodayStepsUsesWhoopFourEstimateWhenMeasuredSeriesIsUnavailable() {
-        let metric = MetricCatalog.todayStepsMetric(hasMeasuredSteps: false)
+    func testTodayStepsUsesWhoopFourEstimateWhenMotionSeriesIsUnavailable() {
+        let metric = MetricCatalog.todayStepsMetric(hasMotionDerivedSteps: false)
 
         XCTAssertEqual(metric?.key, "steps_est")
         XCTAssertEqual(metric?.source, "my-whoop")
@@ -19,18 +21,30 @@ final class MetricCatalogStepsTests: XCTestCase {
     /// #377 parity: with no measured strap count but an imported Apple Health count for the day, Today
     /// shows and taps through to the imported value — NOT the motion estimate.
     func testTodayStepsPrefersImportedAppleHealthOverEstimate() {
-        let metric = MetricCatalog.todayStepsMetric(hasMeasuredSteps: false, hasImportedSteps: true)
+        let metric = MetricCatalog.todayStepsMetric(hasMotionDerivedSteps: false, hasImportedSteps: true)
 
         XCTAssertEqual(metric?.key, "steps")
         XCTAssertEqual(metric?.source, "apple-health")
     }
 
-    /// A measured strap count always wins, even when an import also exists (real ?: imported ?: estimate).
-    func testMeasuredStepsWinOverImported() {
-        let metric = MetricCatalog.todayStepsMetric(hasMeasuredSteps: true, hasImportedSteps: true)
+    func testMeasuredImportedStepsWinOverMotionDerivedEstimate() {
+        let metric = MetricCatalog.todayStepsMetric(hasMotionDerivedSteps: true, hasImportedSteps: true)
 
         XCTAssertEqual(metric?.key, "steps")
-        XCTAssertEqual(metric?.source, "my-whoop")
+        XCTAssertEqual(metric?.source, "apple-health")
+        XCTAssertEqual(metric?.title, "Steps")
+    }
+
+    func testTodayStepsValueAndSeriesUseMeasuredFirstPerDay() {
+        XCTAssertEqual(MetricCatalog.todayStepsValue(imported: 8_000, motionDerived: 9_000,
+                                                     calibratedEstimate: 7_000), 8_000)
+        let merged = MetricCatalog.todayStepsSeries(
+            imported: [("2026-08-12", 8_000)],
+            motionDerived: [("2026-08-11", 6_000), ("2026-08-12", 9_000)],
+            calibratedEstimate: [("2026-08-10", 5_000), ("2026-08-12", 7_000)]
+        )
+        XCTAssertEqual(merged.map(\.day), ["2026-08-10", "2026-08-11", "2026-08-12"])
+        XCTAssertEqual(merged.map(\.value), [5_000, 6_000, 8_000])
     }
 
     func testAppleHealthStepsRemainsAnIndependentCatalogMetric() {
@@ -39,7 +53,7 @@ final class MetricCatalogStepsTests: XCTestCase {
         XCTAssertEqual(metric?.id, "apple-health:steps")
     }
 
-    /// Both measured WHOOP steps and the WHOOP 4.0 estimate must be resolvable by EXACT source, so the
+    /// Both WHOOP motion estimates must be resolvable by EXACT source, so the
     /// Today card/tile can route to them (via `.metricSourced` / `todayStepsMetric`) without depending on
     /// catalog declaration order.
     func testWhoopStepsAreResolvableBySource() {
@@ -77,5 +91,14 @@ final class MetricCatalogStepsTests: XCTestCase {
             higherIsBetter: true
         )
         XCTAssertEqual(official.sourceLabel, "WHOOP import")
+    }
+
+    func testMetricEmptyStateCopyNamesTheDescriptorSource() {
+        let apple = MetricCatalog.metric(key: "weight", source: "apple-health")!
+        XCTAssertTrue(MetricEmptyStateCopy.message(for: apple).contains("Apple Health"))
+        XCTAssertFalse(MetricEmptyStateCopy.message(for: apple).contains("WHOOP export"))
+
+        let strap = MetricCatalog.metric(key: "hrv", source: "my-whoop")!
+        XCTAssertTrue(MetricEmptyStateCopy.message(for: strap).contains("connected band"))
     }
 }

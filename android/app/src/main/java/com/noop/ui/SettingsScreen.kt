@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BatteryStd
 import androidx.compose.material.icons.filled.BugReport
@@ -235,9 +236,8 @@ class ProfileStore(private val prefs: SharedPreferences) {
         provenance, vo2maxProfileToken, vo2maxProvenanceRequired,
     )
 
-    fun acceptsVitality(provenance: Double?): Boolean = AgeMetricProfile.accepts(
-        provenance, vitalityProfileToken, vitalityProvenanceRequired,
-    )
+    fun acceptsVitality(provenance: Double?): Boolean =
+        AgeMetricProfile.acceptsVitality(provenance, vitalityProfileToken)
 
     fun confirmAgeInput() {
         prefs.edit()
@@ -622,8 +622,6 @@ fun SettingsScreen(
     var illnessWatch by remember { mutableStateOf(NoopPrefs.illnessWatch(context)) }
     var cycleTracking by remember { mutableStateOf(NoopPrefs.cycleTracking(context)) }
     var hydrationTracking by remember { mutableStateOf(NoopPrefs.hydrationTracking(context)) }
-    var stressCheckIn by remember { mutableStateOf(BiofeedbackPrefs.checkInEnabled(context)) }
-    var stressAutoNudge by remember { mutableStateOf(BiofeedbackPrefs.autoNudge(context)) }
     var rhythmEnabled by remember { mutableStateOf(RhythmConsent.isEnabled(context)) }
     var coachSignals by remember { mutableStateOf(NoopPrefs.coachSignals(context)) }
     var autoWorkoutMode by remember { mutableStateOf(NoopPrefs.autoWorkoutMode(context)) }
@@ -2501,26 +2499,48 @@ fun SettingsScreen(
                     },
                 )
                 RowDivider()
-                ToggleRow(
-                    title = uiString(R.string.l10n_settings_screen_stress_check_ins_haptic_bf2746ba),
-                    detail = "Lets NOOP notice a fresh HRV dip while you're still and offer a minute to breathe. \"Stress\" here is an autonomic proxy from your own baseline, never a diagnosis. The strap gives one light confirming buzz; no push notification.",
-                    checked = stressCheckIn,
-                    onCheckedChange = {
-                        stressCheckIn = it
-                        BiofeedbackPrefs.setCheckInEnabled(context, it)
-                        // Turning the master off also disarms the auto-nudge sub-toggle so it can't fire.
-                        if (!it) { stressAutoNudge = false; BiofeedbackPrefs.setAutoNudge(context, false) }
-                    },
-                )
-                if (stressCheckIn) {
-                    ToggleRow(
-                        title = uiString(R.string.l10n_settings_screen_offer_a_breath_automatically_6c709dee),
-                        detail = "When a dip is detected, surface the check-in card on its own (rate-limited, quiet-hours aware). Off keeps it manual.",
-                        checked = stressAutoNudge,
-                        onCheckedChange = {
-                            stressAutoNudge = it
-                            BiofeedbackPrefs.setAutoNudge(context, it)
-                        },
+                // The live source has R-R intervals but no fresh, timestamp-matched wrist-motion
+                // contract. Present the capability truth instead of an inert or misleading opt-in.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            uiString(R.string.settings_automatic_stress_check_ins),
+                            style = NoopType.subhead,
+                            color = Palette.textPrimary,
+                        )
+                        Text(
+                            uiString(R.string.settings_automatic_stress_unavailable_reason),
+                            style = NoopType.footnote,
+                            color = Palette.textTertiary,
+                        )
+                    }
+                    StatePill(
+                        title = uiString(R.string.settings_manual_only),
+                        tone = StrandTone.Neutral,
+                        showsDot = false,
+                    )
+                }
+                RowDivider()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Icon(
+                        Icons.Filled.Air,
+                        contentDescription = null,
+                        tint = Palette.restBright,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text(
+                        uiString(R.string.settings_manual_breathe_available),
+                        style = NoopType.footnote,
+                        color = Palette.textSecondary,
+                        modifier = Modifier.weight(1f),
                     )
                 }
                 RowDivider()
@@ -3073,19 +3093,6 @@ fun SettingsScreen(
 
                 RowDivider()
 
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Overline("Built on")
-                    AttributionRow(repo = "my-whoop", note = "WHOOP 4.0 protocol")
-                    AttributionRow(repo = "goose", note = "WHOOP 5.0 protocol")
-                }
-                Text(
-                    uiString(R.string.l10n_settings_screen_open_source_ble_reverse_engineering_work_40062271),
-                    style = NoopType.footnote,
-                    color = Palette.textTertiary,
-                )
-
-                RowDivider()
-
                 // Support link — the project issue tracker keeps reports and follow-up attached to
                 // the canonical repository instead of routing users to an upstream maintainer.
                 val supportInteraction = remember { MutableInteractionSource() }
@@ -3500,18 +3507,5 @@ private fun NoteRow(icon: ImageVector, iconTint: Color, text: String) {
     ) {
         Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(16.dp))
         Text(text, style = NoopType.footnote, color = Palette.textSecondary)
-    }
-}
-
-@Composable
-private fun AttributionRow(repo: String, note: String) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.semantics { contentDescription = uiString(R.string.l10n_settings_screen_repo_note_0a694b50, repo, note) },
-    ) {
-        Text("›", style = NoopType.headline, color = Palette.accent)
-        Text(repo, style = NoopType.mono(12f), color = Palette.textPrimary)
-        Text(uiString(R.string.l10n_settings_screen_note_a2481d6c, note), style = NoopType.footnote, color = Palette.textTertiary)
     }
 }

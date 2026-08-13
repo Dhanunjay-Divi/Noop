@@ -14,6 +14,7 @@ import com.noop.data.DeviceRegistry
 import com.noop.data.WhoopDatabase
 import com.noop.data.WhoopRepository
 import com.noop.sync.RemoteSyncService
+import com.noop.ui.BiofeedbackPrefs
 import com.noop.ui.NoopPrefs
 import com.noop.ui.AppearanceMode
 import com.noop.ui.AppearancePrefs
@@ -50,6 +51,9 @@ class NoopApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // The current live path has no timestamp-matched wrist-motion + R-R evidence contract. Disarm
+        // any pre-upgrade automatic stress opt-in before BLE/background readers can observe it.
+        BiofeedbackPrefs.migrateAutomaticStressNudgePreferences(this)
         lastWidgetNightMode = resources.configuration.isNightMode()
         // Restore any process-killed, actively-recording GPS workout before the foreground service or
         // ViewModel reads GpsSession. The checkpoint is local-only and expires after 24 hours.

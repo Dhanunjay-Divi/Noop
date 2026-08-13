@@ -138,6 +138,15 @@ private enum class BreatheMode(val label: String) {
     Calm("Calm me"),
 }
 
+/** Hold one balanced process-wide suppression lease for the exact lifetime of a running biofeedback flow. */
+@Composable
+private fun StressNudgeSuppressionLease(active: Boolean) {
+    DisposableEffect(active) {
+        val lease = if (active) StressNudgeSessionRegistry.acquire() else null
+        onDispose { lease?.release() }
+    }
+}
+
 /**
  * Breathe — HRV haptic breathing biofeedback. The strap both measures HRV (R-R
  * intervals) and buzzes (haptic motor), so we pace the breath with a felt cue and
@@ -156,6 +165,7 @@ fun BreatheScreen(viewModel: AppViewModel) {
 
     var pace by remember { mutableStateOf(Pace.Coherence) }
     var running by remember { mutableStateOf(false) }
+    StressNudgeSuppressionLease(active = running)
 
     // Opt-in audio pacer — a soft tone at each phase change (a brighter note on the inhale, a lower one
     // on the exhale). Default OFF (manual-first). The tone player honours the ringer mode, so a phone on
@@ -748,9 +758,9 @@ private fun timeString(total: Int): String =
 /**
  * The L3 closed-loop JITAI surface — Kotlin twin of StressCheckInCard.swift. Observes
  * [StressNudgeCenter.pending]; when the shipped [com.noop.analytics.StressOnsetDetector] fires (a fresh,
- * non-metabolic HRV dip while still), the central hook (Wave 3) calls [StressNudgeCenter.present] and this
- * dismissible card appears. NEVER an alarm, NEVER a push, NEVER a diagnosis — "HRV dipped while you were
- * still", with Breathe now / Not now / Turn off.
+ * short-window HRV shift with observed low motion), the central hook calls [StressNudgeCenter.present] and
+ * this dismissible card appears. NEVER an alarm, NEVER a push, NEVER a diagnosis — with Breathe now /
+ * Not now / Turn off.
  */
 @Composable
 private fun StressCheckInCard(onBreatheNow: () -> Unit) {
@@ -826,6 +836,7 @@ private fun ResonanceMode(
 ) {
     val context = LocalContext.current
     var sweeping by remember { mutableStateOf(false) }
+    StressNudgeSuppressionLease(active = sweeping)
     var quick by remember { mutableStateOf(false) }
     var sweepLabel by remember { mutableStateOf<String?>(null) }
     var sweepProgress by remember { mutableDoubleStateOf(0.0) }
@@ -1058,6 +1069,7 @@ private fun RsaCurve(scores: List<ResonanceEngine.PaceScore>) {
 @Composable
 private fun CalmMode(viewModel: AppViewModel, live: com.noop.ble.LiveState, bpm: Int?) {
     var running by remember { mutableStateOf(false) }
+    StressNudgeSuppressionLease(active = running)
     var startHr by remember { mutableStateOf<Int?>(null) }
     var targetBpm by remember { mutableStateOf<Double?>(null) }
     var elapsed by remember { mutableIntStateOf(0) }

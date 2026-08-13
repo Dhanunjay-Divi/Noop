@@ -1205,26 +1205,12 @@ private struct VitalitySection: View {
 
     private var contributions: [VitalityEngine.Contribution] {
         let last21 = repo.days.suffix(21)
-        let minCoverage = 14
-        let nights = last21.compactMap { $0.totalSleepMin }.map { Double($0) / 60.0 }.filter { $0 > 0 }
-        let hrvs = last21.compactMap { $0.avgHrv }
-        let rhrs = last21.compactMap { $0.restingHr }.map(Double.init)
-        let steps = last21.compactMap { $0.steps }.map(Double.init)
-        func mean(_ a: [Double]) -> Double? { a.isEmpty ? nil : a.reduce(0, +) / Double(a.count) }
         // Aggregate EXACTLY as the stored headline does (IntelligenceEngine), so this "what's driving it"
         // breakdown reconciles with the stored Vitality / Wellness Age number it explains.
-        // on different statistics: resting HR + HRV are MEDIANED (robust to one outlier night), sleep +
-        // steps are MEANED. Using the mean for all four let a single bad RHR/HRV reading drift the breakdown
-        // out of step with the median-based headline (code review).
-        return VitalityEngine.contributions(.init(
-            chronoAge: Double(profile.age),
-            restingHR: rhrs.count >= minCoverage ? IntelligenceEngine.medianOf(rhrs) : nil,
-            sleepHours: nights.count >= minCoverage ? mean(nights) : nil,
-            sleepConsistency: nights.count >= minCoverage
-                ? VitalityEngine.sleepConsistency(nightlyHours: nights) : nil,
-            rmssd: hrvs.count >= minCoverage ? IntelligenceEngine.medianOf(hrvs) : nil,
-            rmssdNorm: VitalityEngine.rmssdNorm(forAge: Double(profile.age)),
-            steps: steps.count >= minCoverage ? mean(steps) : nil))
+        // The shared builder also enforces the provenance boundary: un-sourced DailyMetric.steps is
+        // omitted rather than presented as a measured activity contribution.
+        return VitalityEngine.contributions(IntelligenceEngine.vitalityInputs(
+            days: Array(last21), chronoAge: Double(profile.age)))
     }
 
     var body: some View {

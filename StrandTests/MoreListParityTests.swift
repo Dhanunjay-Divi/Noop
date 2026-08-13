@@ -189,6 +189,10 @@ final class MoreListParityTests: XCTestCase {
                       "The rendered shortcuts must use the tested shared four-item contract.")
         XCTAssertTrue(shell.contains("MoreQuickAccessLabel(item: item)"),
                       "Keep the tile view split out so RootTabView remains cheap to type-check.")
+        XCTAssertTrue(shell.contains("MoreRow(\"Profile\", \"person.crop.circle.fill\", .profile)"),
+                      "Profile must stay visible in the Body index instead of being buried in Settings.")
+        XCTAssertTrue(shell.contains("case .profile:         SettingsView(focus: .profile)"),
+                      "The visible Profile row must open the focused editor backed by ProfileStore.")
     }
 
     /// ObsidianFlow is intentionally adaptive: dark hardware in Dark mode, pearl relief in Light mode.

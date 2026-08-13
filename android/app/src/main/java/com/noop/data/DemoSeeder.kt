@@ -1,5 +1,6 @@
 package com.noop.data
 
+import com.noop.analytics.AgeMetricProfile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
@@ -46,9 +47,9 @@ object DemoSeeder {
     )
 
     /** Seed only if the demo (and the user) has no daily history yet. Safe to call on every launch. */
-    suspend fun seedIfEmpty(repo: WhoopRepository) {
+    suspend fun seedIfEmpty(repo: WhoopRepository, vitalityAge: Double) {
         if (repo.days(WHOOP).isNotEmpty()) return
-        seed(repo)
+        seed(repo, vitalityAge)
     }
 
     /**
@@ -85,7 +86,7 @@ object DemoSeeder {
     private fun SourceCoordinatorIsWhoop(d: PairedDeviceRow): Boolean =
         d.id == "my-whoop" || d.brand.equals("WHOOP", ignoreCase = true)
 
-    private suspend fun seed(repo: WhoopRepository) {
+    private suspend fun seed(repo: WhoopRepository, vitalityAge: Double) {
         val rng = Random(0xC0FFEE)
         val zone = ZoneId.systemDefault()
         val startDay = LocalDate.now().minusDays((DAYS - 1).toLong())
@@ -266,6 +267,15 @@ object DemoSeeder {
                 round1((vitality + gauss(rng, 0.0, 1.0)).coerceIn(40.0, 80.0))))
             series.add(MetricSeriesRow(WHOOP_NOOP, day, "body_age",
                 round1((bodyAgeDemo + gauss(rng, 0.0, 0.3)).coerceIn(30.0, 45.0))))
+            // Vitality readers require the provenance-safe v2 marker. Stamp the actual demo profile age,
+            // mirroring IntelligenceEngine's weekly write, so synthetic rows are visible only for the
+            // profile they describe and never inherit the released steps-era v1 grace period.
+            series.add(MetricSeriesRow(
+                WHOOP_NOOP,
+                day,
+                AgeMetricProfile.VITALITY_KEY,
+                AgeMetricProfile.vitalityToken(vitalityAge),
+            ))
             fitnessAge -= 0.75 // ~6 yr younger across the 8 seeded Saturdays
             vo2 += 0.75
             vitality += 2.0

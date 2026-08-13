@@ -50,6 +50,8 @@ internal fun provenanceDisplayLabel(
     rawSource: String,
     deviceId: String = WhoopRepository.WHOOP_SOURCE,
 ): String {
+    if (rawSource == MOTION_DERIVED_STEPS_SOURCE) return "Motion-derived estimate"
+    if (rawSource == CALIBRATED_MOTION_STEPS_SOURCE) return "Calibrated motion estimate"
     if (rawSource.endsWith("-noop")) return "On-device"
     if (rawSource == deviceId || rawSource == WhoopRepository.WHOOP_SOURCE) return "Whoop"
     if (rawSource == WhoopRepository.APPLE_HEALTH_SOURCE) return "Apple Health"
@@ -127,16 +129,16 @@ internal fun provenanceLabelTint(label: String): Color = when (label) {
 }
 
 /**
- * S4 (#205): the one-word readiness read kept on the hero (Push / Maintain / Rest) now the full Readiness
+ * S4 (#205): the descriptive readiness read kept on the hero now the full Readiness
  * card folded into the Charge-ring tap. PURE mapping of the existing [ReadinessEngine.Level]; INSUFFICIENT
  * returns null (the hero then shows no word, matching the old card hiding itself). Byte-identical twin of
  * the Swift TodayView.readinessWord.
  */
 internal fun readinessWord(level: ReadinessEngine.Level): String? = when (level) {
-    ReadinessEngine.Level.PRIMED -> "Push"
-    ReadinessEngine.Level.BALANCED -> "Maintain"
-    ReadinessEngine.Level.STRAINED -> "Rest"
-    ReadinessEngine.Level.RUNDOWN -> "Rest"
+    ReadinessEngine.Level.PRIMED -> "Aligned"
+    ReadinessEngine.Level.BALANCED -> "Within range"
+    ReadinessEngine.Level.STRAINED -> "Recheck"
+    ReadinessEngine.Level.RUNDOWN -> "Multiple shifts"
     ReadinessEngine.Level.INSUFFICIENT -> null
 }
 

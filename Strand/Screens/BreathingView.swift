@@ -9,9 +9,10 @@ import StrandAnalytics
 ///
 /// The strap both *measures* HRV (via R-R intervals) and *buzzes* (haptic strap motor), so we can pace
 /// the user's breath with a felt cue and watch their HRV respond in real time — and now also *find* the
-/// user's personal resonance pace (L1) and offer a below-HR "Calm me" metronome (L2). A passive stress
-/// check-in card (L3) surfaces when the shipped StressOnsetDetector fires. All layers are opt-in,
-/// user-stoppable, and quiet-hours-aware.
+/// user's personal resonance pace (L1) and offer a below-HR "Calm me" metronome (L2). The passive
+/// stress-check-in card (L3) is retained for a future live source that supplies fresh, timestamp-matched
+/// wrist motion; the current source is capability-gated to manual Breathe. All active layers are opt-in
+/// and user-stoppable.
 ///
 /// Mode switch:
 ///  • **Breathe** — the shipped fixed-pace trainer (presets + the locked resonance pill), unchanged.
@@ -40,8 +41,8 @@ private struct BreathingContent: View {
     /// environment at init, so we build it in `.onAppear`). Self-contained — the spec's view-specific
     /// controller; it never edits the shared AppModel.
     @StateObject private var controllerBox = ControllerBox()
-    /// The L3 passive-nudge surface — Wave 3 injects a shared instance; this local fallback keeps the
-    /// card surface present whether or not central wiring has landed.
+    /// The future L3 passive-nudge surface — Wave 3 injects a shared instance. The current effective
+    /// config is disabled until the live source can verify stillness with matched wrist motion.
     @StateObject private var fallbackNudge = StressNudgeCenter()
     @Environment(\.stressNudgeCenter) private var injectedNudge
 

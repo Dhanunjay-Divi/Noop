@@ -31,4 +31,14 @@ class AgeMetricProfileTest {
         assertNull(AgeMetricProfile.vo2maxEstimateToken(40.0, "female", 0.0))
         assertNotNull(AgeMetricProfile.fitnessAgeToken(40.0, "female"))
     }
+
+    @Test
+    fun vitalityV2NeverAcceptsAMissingOrLegacyMarker() {
+        val current = AgeMetricProfile.vitalityToken(40.0)
+
+        assertFalse(AgeMetricProfile.acceptsVitality(null, current))
+        assertFalse(AgeMetricProfile.acceptsVitality(39.0, current))
+        assertTrue(AgeMetricProfile.acceptsVitality(current, current))
+        assertNotEquals(AgeMetricProfile.LEGACY_VITALITY_KEY, AgeMetricProfile.VITALITY_KEY)
+    }
 }

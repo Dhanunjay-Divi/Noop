@@ -340,7 +340,7 @@
     <string name="l10n_breathe_screen_the_strap_buzzes_a_gentle_rhythm_eb5c6a65">Der Strap vibriert einen sanften Rhythmus knapp unter deiner aktuellen Herzfrequenz, ein spürbares Metronom zum Entspannen. Er führt dein Herz nach unten, statt es zu zerren, und stoppt von selbst.</string>
     <string name="l10n_breathe_screen_turn_off_8807c2b3">Ausschalten</string>
     <string name="l10n_breathe_screen_waiting_for_a_resting_heart_rate_980cedbf">Warte auf eine Ruheherzfrequenz. Starte zuerst eine Live-Messung oder komm zurück, wenn du still bist.</string>
-    <string name="l10n_breathe_screen_your_hrv_dipped_while_you_were_231d3c7a">Deine HRV ist gesunken, während du still warst. Eine Minute zum Atmen?</string>
+    <string name="l10n_breathe_screen_your_hrv_dipped_while_you_were_231d3c7a">Deine Kurzzeit-HRV ist unter deinen jüngsten Basiswert gefallen, während nur geringe Bewegung am Handgelenk gemessen wurde. Möchtest du eine Minute zum Atmen nutzen?</string>
     <string name="l10n_caffeine_log_after_your_clocklabel_cutoffminutes_cutoff_may_3c023900">Nach Ihrem %1$s Cutoff - kann noch im Bett aktiv sein.</string>
     <string name="l10n_caffeine_log_amount_in_mg_optional_f0749888">Menge in mg (optional)</string>
     <string name="l10n_caffeine_log_bedtime_e3cb8bd6">Schlafenszeit</string>
@@ -1871,4 +1871,8 @@
     <string name="appearance_settings_blurb">Wähle das Erscheinungsbild der App. System folgt deinem Gerät, Dunkel verwendet räumliches Graphit und Schwarz eine echte OLED-Schwarzfläche.</string>
     <string name="appearance_onboarding_subtitle">NOOP folgt standardmäßig deinem System. Wähle hier Hell, Dunkel oder echtes Schwarz und ändere es jederzeit unter Einstellungen → Erscheinungsbild.</string>
     <string name="l10n_app_changelog_today_first_insights_9_2_0">Einblicke mit Fokus auf heute, ruhigere Automatisierung und nachvollziehbare Nachweise</string>
+    <string name="settings_automatic_stress_check_ins">Automatische Stress-Check-ins</string>
+    <string name="settings_manual_only">Nur manuell</string>
+    <string name="settings_automatic_stress_unavailable_reason">Für die aktuelle Live-Quelle nicht verfügbar, da NOOP keine frische, zeitlich zugeordnete Bewegung des Handgelenks empfängt. NOOP leitet Handgelenkruhe nicht aus der Bewegung des Telefons ab und löst keinen automatischen Vibrationshinweis aus.</string>
+    <string name="settings_manual_breathe_available">Manuelles Atmen bleibt über das +-Menü in „Heute“ und unter „Mehr“ verfügbar. Es wird von dir gestartet und kann den Bildschirm, Audio oder unterstützte Armband-Haptik verwenden.</string>
 </resources>

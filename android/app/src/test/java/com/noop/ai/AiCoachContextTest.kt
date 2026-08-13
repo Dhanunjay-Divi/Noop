@@ -101,6 +101,19 @@ class AiCoachContextTest {
     }
 
     @Test
+    fun unprovenancedDailyStepsAreNotSentAsFactualCoachContext() {
+        val days = (1..14).map {
+            computedRow(june(it)).copy(steps = 54_321, activeKcalEst = 500.0)
+        }
+
+        val ctx = coach().buildContext(days)
+
+        assertFalse("step label leaked", ctx.contains("steps ", ignoreCase = true))
+        assertFalse("step value leaked", ctx.contains("54321"))
+        assertTrue("unrelated vitals must remain", ctx.contains("active energy 500kcal/day"))
+    }
+
+    @Test
     fun defaultPromptUsesCurrentScoreNames() {
         val prompt = AiCoach.DEFAULT_SYSTEM_PROMPT
         assertTrue(prompt.contains("Recovery"))

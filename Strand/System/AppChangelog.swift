@@ -958,7 +958,7 @@ enum AppChangelog {
             date: "June 2026",
             items: [
                 "**Fitness Age - a weekly number for how fit your heart is.** NOOP now estimates your **Fitness Age** from your resting heart rate and recent activity, and shows it against your real age - “35, four years younger than your calendar age.” Built on the published Nes/HUNT VO₂max model. Tap **“How accurate is this?”** to see exactly which of your inputs went in, grouped by what each one unlocks - we’re honest that it’s a fitness comparison, not a biological age.",
-                "**Vitality + Wellness Age - an experimental lifestyle view.** A weekly **0-100 Vitality** score and age-shaped comparison from coverage-gated resting HR, sleep-duration consistency, HRV, and activity. It shows what is helping and what may be holding you back. This is **not WHOOP Age, biological age, a diagnosis, or a lifespan estimate**.",
+                "**Vitality + Wellness Age - an experimental lifestyle view.** A weekly **0-100 Vitality** score and age-shaped comparison from coverage-gated resting HR, sleep duration and consistency, HRV, and profile age. It shows what is helping and what may be holding you back. This is **not WHOOP Age, biological age, a diagnosis, or a lifespan estimate**.",
                 "**Optional: see your estimated VO₂max.** Add your waist measurement in Settings and NOOP will also show an estimated VO₂max alongside your Fitness Age. (Your Fitness Age itself never needs it.)",
                 "**Honest by design.** Fitness Age shows the source model's broad error translation; Wellness Age explicitly has no validated personal confidence interval. Both remain non-clinical.",
             ]),

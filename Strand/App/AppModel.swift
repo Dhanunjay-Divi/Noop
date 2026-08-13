@@ -468,7 +468,8 @@ final class AppModel: ObservableObject {
             // dataset so an empty simulator/dev build can walk every screen (verification + marketing
             // screenshots). No-op in Release (whole seeder is #if DEBUG) and once data already exists.
             if AppleDemoSeeder.requested, let store = await self.repo.storeHandle() {
-                await AppleDemoSeeder.seedIfRequested(into: store)
+                await AppleDemoSeeder.seedIfRequested(
+                    into: store, vitalityProfileAge: self.profile.age)
                 // Give the demo a plausible strap battery so the Today header badge renders (the live
                 // battery is runtime-only and nil without a connected strap).
                 self.live.batteryPct = 68
@@ -480,6 +481,18 @@ final class AppModel: ObservableObject {
             }
             #endif
             await self.repo.refresh()                          // surface any imported data at once
+            // Vitality v2 is a provenance/model boundary, so reconcile it once per launch even when the
+            // raw-HR fingerprint is unchanged and the normal analysis backstop will short-circuit. This
+            // removes only legacy computed vitality/body-age rows; imported/vendor metrics are untouched.
+            #if DEBUG
+            // The screenshot fixture has no confirmed onboarding profile; its synthetic scores carry an
+            // explicit v2 marker from the seeder and must not be mistaken for released v1 user data.
+            if !AppleDemoSeeder.requested {
+                _ = await self.intelligence.recomputeVitalityOnly()
+            }
+            #else
+            _ = await self.intelligence.recomputeVitalityOnly()
+            #endif
             await self.wireSourceCoordinator()                 // dormant unless a generic strap is active
             try? await Task.sleep(nanoseconds: 6_000_000_000)  // give the first offload a moment
             // FIX 2(a): DEFER the heavy one-shot 4000-day heal/rescore while an import is in flight. A

@@ -35,7 +35,42 @@ final class MetricEducationTests: XCTestCase {
             let copy = (education.commonInfluences + education.actions).joined(separator: " ")
             XCTAssertFalse(copy.localizedCaseInsensitiveContains("body composition"))
             XCTAssertFalse(copy.localizedCaseInsensitiveContains("body-composition"))
+            XCTAssertFalse(copy.localizedCaseInsensitiveContains("steps"))
+            XCTAssertFalse(copy.localizedCaseInsensitiveContains("activity"))
         }
+    }
+
+    func testVitalityChangelogNamesOnlyCurrentV2Inputs() throws {
+        let release = try XCTUnwrap(AppChangelog.releases.first { $0.version == "4.0.0" })
+        let claim = try XCTUnwrap(release.items.first {
+            $0.localizedCaseInsensitiveContains("Vitality + Wellness Age")
+        })
+        XCTAssertFalse(claim.localizedCaseInsensitiveContains("steps"))
+        XCTAssertFalse(claim.localizedCaseInsensitiveContains("activity"))
+        XCTAssertTrue(claim.localizedCaseInsensitiveContains("profile age"))
+    }
+
+    func testWhoopStepCounterEducationCallsItMotionDerivedNotMeasured() throws {
+        let metric = try XCTUnwrap(MetricCatalog.metric(key: "steps", source: "my-whoop"))
+        let education = MetricKnowledge.education(for: metric)
+        let copy = [metric.title, metric.description ?? "", education.whatItIs,
+                    education.method, education.limitations].joined(separator: " ")
+
+        XCTAssertTrue(copy.localizedCaseInsensitiveContains("motion"))
+        XCTAssertTrue(copy.localizedCaseInsensitiveContains("estimate"))
+        XCTAssertTrue(copy.localizedCaseInsensitiveContains("not a validated pedometer count"))
+        XCTAssertFalse(copy.localizedCaseInsensitiveContains("measured step counter"))
+        XCTAssertEqual(MetricKnowledge.dataKind(for: metric), "Derived on device")
+    }
+
+    func testAppleHealthStepsRemainImportedPedometerSteps() throws {
+        let metric = try XCTUnwrap(MetricCatalog.metric(key: "steps", source: "apple-health"))
+        let education = MetricKnowledge.education(for: metric)
+
+        XCTAssertEqual(metric.title, "Steps")
+        XCTAssertTrue(education.whatItIs.localizedCaseInsensitiveContains("imported"))
+        XCTAssertFalse(education.method.localizedCaseInsensitiveContains("motion-counter"))
+        XCTAssertEqual(MetricKnowledge.dataKind(for: metric), "Imported")
     }
 
     func testAgeMetricProfileProvenanceRejectsCorrectionsAndWaistRemoval() {

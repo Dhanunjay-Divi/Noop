@@ -2,14 +2,38 @@ import Foundation
 import StrandAnalytics
 
 // BiofeedbackPrefs.swift — the small, on-device pref surface for the haptic-biofeedback pillar:
-// the locked resonance pace + its date (L1), and the "stress check-ins (haptic)" master/sub toggles
-// + the replay-safe StressOnsetDetector state (L3). UserDefaults-backed, single-user, no store table —
+// the locked resonance pace + its date (L1), the stored preference for automatic stress check-ins,
+// and the replay-safe StressOnsetDetector state (L3). UserDefaults-backed, single-user, no store table —
 // the same lightweight pattern Breathe's `@AppStorage("breathe.lastOutcome")` and `InactivityPrefs` use.
 //
 // Nothing here leaves the device (the spec's "resonance pace + outcomes are local prefs"). The toggles
 // default OFF / safe (manual-first ethos). A Settings toggle group (Wave 3) writes the same keys; this
 // type is the single reader/writer so the engine config stays consistent.
 enum BiofeedbackPrefs {
+
+    /// Evidence capability for automatic stress haptic nudges.
+    ///
+    /// The present live path supplies clean R-R intervals but does not supply a fresh, timestamp-matched
+    /// wrist-motion observation to `StressOnsetDetector`. Phone motion is intentionally not substituted:
+    /// it says where the phone moved, not whether the wearer's wrist was still. Keep this one gate as the
+    /// source of truth until the live wearable pipeline wires that evidence into `AppModel`.
+    enum AutomaticStressNudgeCapability: Equatable, Sendable {
+        case unavailableNeedsTimestampMatchedWristMotion
+        case availableWithTimestampMatchedWristMotion
+
+        var isAvailable: Bool {
+            self == .availableWithTimestampMatchedWristMotion
+        }
+    }
+
+    /// Compile-time truth for the currently-wired live source. Changing this to `.available…` is only
+    /// valid in the same change that passes fresh, timestamp-matched wrist motion to the detector.
+    static let automaticStressNudgeCapability: AutomaticStressNudgeCapability =
+        .unavailableNeedsTimestampMatchedWristMotion
+
+    static var automaticStressNudgesAvailable: Bool {
+        automaticStressNudgeCapability.isAvailable
+    }
 
     private static var d: UserDefaults { .standard }
 
@@ -84,12 +108,33 @@ enum BiofeedbackPrefs {
         set { d.set(newValue, forKey: K.quietEnd) }
     }
 
-    /// Build the engine config from the persisted toggles, so the central L3 hook (Wave 3, in BLEManager's
-    /// existing evaluateStress call-site) reads one consistent config.
+    /// Build the engine config from the persisted choices and the independently-verified evidence
+    /// capability. Stored choices are deliberately preserved so a future supported wearable path can
+    /// honor them, but unsupported builds always return an effectively disabled detector config.
     static func stressConfig() -> StressOnsetDetector.Config {
-        StressOnsetDetector.Config(
-            enabled: checkInEnabled,
-            autoNudge: autoNudge,
+        stressConfig(
+            storedCheckInEnabled: checkInEnabled,
+            storedAutoNudge: autoNudge,
+            capability: automaticStressNudgeCapability,
+            quietHoursEnabled: quietHoursEnabled,
+            quietStartMinutes: quietStartMinutes,
+            quietEndMinutes: quietEndMinutes)
+    }
+
+    /// Pure overload used by tests and future source negotiation. It prevents UI state, a stale stored
+    /// `true`, or phone motion from bypassing the timestamp-matched wrist-motion requirement.
+    static func stressConfig(
+        storedCheckInEnabled: Bool,
+        storedAutoNudge: Bool,
+        capability: AutomaticStressNudgeCapability,
+        quietHoursEnabled: Bool = true,
+        quietStartMinutes: Int = 22 * 60,
+        quietEndMinutes: Int = 7 * 60
+    ) -> StressOnsetDetector.Config {
+        let sourceCanVerifyStillness = capability.isAvailable
+        return StressOnsetDetector.Config(
+            enabled: sourceCanVerifyStillness && storedCheckInEnabled,
+            autoNudge: sourceCanVerifyStillness && storedCheckInEnabled && storedAutoNudge,
             quietHoursEnabled: quietHoursEnabled,
             quietStartMinutes: quietStartMinutes,
             quietEndMinutes: quietEndMinutes,

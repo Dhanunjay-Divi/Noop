@@ -34,7 +34,19 @@ struct ShortcutExportSettingsView: View {
                 }
                 .toggleStyle(.switch)
                 .tint(StrandPalette.accent)
-                Text("When this is on, NOOP rewrites a plain-text file (On My iPhone › NOOP › noop_sync.txt) each time you leave the app: one line per 15 minutes of heart rate and steps, read straight from your strap. The legacy HRV field stays blank because strap RMSSD is not Apple Health's SDNN metric. Pair it with the Siri Shortcut that reads the file and logs the compatible values into Apple Health (no HealthKit entitlement needed), so it works on sideloaded installs. The setup guide and the pre-built Shortcut live in the project wiki on GitHub.")
+                // The file keeps its historical four-column shape, but only heart-rate samples are
+                // populated. The two reserved metric columns stay blank so old Shortcuts keep parsing.
+                Label("Heart rate", systemImage: "checkmark.circle.fill")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                HStack {
+                    Label("Steps (estimated)", systemImage: "xmark.circle")
+                    Spacer(minLength: 12)
+                    Text("Unavailable")
+                }
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                Text("Estimated from your WHOOP's motion, calibrated to your phone. Not a measured step count.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -160,7 +160,7 @@ enum MetricKnowledge {
                 why: "It combines several slow-moving inputs so improving one area does not hide weakening signals elsewhere.",
                 method: "Computed on device from a trailing 21-day window. Each included factor needs at least 14 observed days, and the score needs at least three physiological domains.",
                 limits: "This experimental combination has not been clinically validated and cannot measure overall health or longevity.",
-                influences: ["Resting heart rate", "Sleep duration and consistency", "Activity and steps", "HRV", "Profile age"],
+                influences: ["Resting heart rate", "Sleep duration and consistency", "HRV", "Profile age"],
                 actions: ["Open the contribution view before acting on the total.", "Choose one sustainable input to improve for several weeks.", "Treat short-term movement as noise unless the contributors moved too."],
                 related: ["body_age", "fitness_age", "rhr", "hrv", "sleep_consistency", "body_fat"],
                 cadence: "Long-term estimate")
@@ -171,7 +171,7 @@ enum MetricKnowledge {
                 why: "It offers one slow-moving comparison between supported lifestyle signals and your profile age.",
                 method: "Derived on device from at least 14 observed days per included factor and at least three physiological domains. It is not read directly from any sensor.",
                 limits: "The literature-inspired factors were not validated together as a clinical model, and NOOP has no validated personal confidence interval. Do not use it to estimate ageing, disease risk, or lifespan.",
-                influences: ["Vitality inputs", "Profile age", "Sleep duration and consistency", "Activity and steps", "Resting heart rate", "HRV"],
+                influences: ["Vitality inputs", "Profile age", "Sleep duration and consistency", "Resting heart rate", "HRV"],
                 actions: ["Inspect the contributing factors rather than chasing the age number.", "Look for sustained movement across several weeks.", "Keep your profile age current."],
                 related: ["vitality", "fitness_age", "rhr", "hrv", "body_fat"],
                 cadence: "Long-term estimate")
@@ -289,14 +289,21 @@ enum MetricKnowledge {
                 cadence: "Changes through the day")
 
         case "steps", "steps_est":
-            let estimated = metric.key == "steps_est"
+            let imported = metric.source == "apple-health" || metric.source == "xiaomi-band"
+            let motionDerived = metric.source == "my-whoop"
             return item(
-                what: estimated ? "Estimated steps converts strap movement into a calibrated daily approximation." : "Steps count detected walking-like movement during the day.",
+                what: imported
+                    ? "Steps are a count imported from the named pedometer source."
+                    : "This is an on-device estimate that maps strap motion to a step-like daily total.",
                 why: "Daily movement complements workout load and is an easy long-term activity habit to follow.",
-                method: estimated
-                    ? "Estimated on device from strap motion and personal calibration; it is not a measured step counter."
-                    : "Measured or imported from the source named on the reading.",
-                limits: "Devices differ, and cycling, pushing a stroller or arm movement can under- or over-count.",
+                method: imported
+                    ? "Imported from the source named on the reading; NOOP preserves it separately from strap estimates."
+                    : (metric.key == "steps"
+                        ? "Estimated on device from WHOOP 5/MG @57 motion-counter deltas divided by your step-scale setting. It is not a validated pedometer count."
+                        : "Estimated on device from strap motion and personal calibration. It is not a validated pedometer count."),
+                limits: motionDerived
+                    ? "Strap motion can differ from footfalls, and the scale is a user preference rather than a validated step calibration. Treat the number as an estimate."
+                    : "Devices differ, and cycling, pushing a stroller or arm movement can under- or over-count.",
                 influences: ["Walking", "Daily routine", "Device placement", "Activity type", "Source algorithm"],
                 actions: ["Compare against the same source over time.", "Build movement gradually around your current routine.", "Use minutes or distance when the activity type is not step-like."],
                 related: ["strain", "active_kcal", "vitality", "fitness_age"],
@@ -386,7 +393,11 @@ enum MetricKnowledge {
             "recovery", "strain", "sleep_performance", "fitness_age", "vo2max_est",
             "vitality", "body_age", "stress", "steps_est",
         ]
-        if derived.contains(metric.key) { return String(localized: "Derived on device") }
+        // WHOOP 5/MG `steps` under `my-whoop` is the @57 motion-counter estimate. It deliberately keeps
+        // the legacy series key for compatibility, so source + key—not key alone—must classify it.
+        if derived.contains(metric.key) || (metric.key == "steps" && metric.source == "my-whoop") {
+            return String(localized: "Derived on device")
+        }
         if metric.source == "apple-health" || metric.source == "xiaomi-band"
             || metric.source == "nutrition-csv" {
             return String(localized: "Imported")

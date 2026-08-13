@@ -8,7 +8,11 @@ import SwiftUI
 enum AgeMetricProfile {
     static let fitnessAgeKey = "fitness_age_profile_v1"
     static let vo2maxEstimateKey = "vo2max_est_profile_v1"
-    static let vitalityKey = "vitality_profile_v1"
+    /// The v2 marker identifies the provenance-safe Vitality model, which no longer treats the legacy
+    /// `DailyMetric.steps` column as measured activity. Keep the old key only so the computed-row cleanup
+    /// can remove it during upgrade; raw/imported/vendor namespaces are never part of that cleanup.
+    static let legacyVitalityKey = "vitality_profile_v1"
+    static let vitalityKey = "vitality_profile_v2"
 
     static func fitnessAgeToken(age: Int, sex: String) -> Double? {
         guard let sexCode = sexCode(sex) else { return nil }
@@ -27,6 +31,13 @@ enum AgeMetricProfile {
         guard let current else { return false }
         if let stored { return stored == current }
         return !provenanceRequired
+    }
+
+    /// Vitality v2 is a model-version boundary, not only a profile-edit boundary. A missing v2 marker
+    /// therefore cannot accept an older steps-influenced headline, even for users whose profile has never
+    /// been edited and whose general provenance-required preference is still false.
+    static func acceptsVitalityV2(stored: Double?, current: Double) -> Bool {
+        stored == current
     }
 
     private static func sexCode(_ sex: String) -> Int? {
@@ -410,8 +421,7 @@ final class ProfileStore: ObservableObject {
     }
 
     func acceptsVitality(provenance: Double?) -> Bool {
-        AgeMetricProfile.accepts(stored: provenance, current: vitalityProfileToken,
-                                 provenanceRequired: vitalityProvenanceRequired)
+        AgeMetricProfile.acceptsVitalityV2(stored: provenance, current: vitalityProfileToken)
     }
 
     private func requireAgeMetricProvenance(age: Bool, sex: Bool, waist: Bool) {

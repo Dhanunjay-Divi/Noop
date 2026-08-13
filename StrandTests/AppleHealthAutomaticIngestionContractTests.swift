@@ -167,8 +167,10 @@ final class AppleHealthAutomaticIngestionContractTests: XCTestCase {
         XCTAssertTrue(view.contains("strap RMSSD as Apple Health SDNN"))
 
         let shortcut = try text("Strand/Data/ShortcutHealthExport.swift")
-        XCTAssertTrue(shortcut.contains("return \"\\(hr),,\\(steps),"),
-                      "The HealthKit-free Shortcut path must leave its legacy HRV field empty too.")
+        XCTAssertTrue(shortcut.contains("return \"\\(hr),,,\\(timestamp"),
+                      "The HealthKit-free Shortcut path must leave its legacy HRV and Steps fields empty.")
+        XCTAssertFalse(shortcut.contains("let steps = try await source.stepSamples"),
+                       "Unvalidated @57 motion-counter values must never be read for Apple Health export.")
     }
 
     func testWritebackDoesNotHideLocalStoreReadFailuresOrOverclaimCloudIsolation() throws {

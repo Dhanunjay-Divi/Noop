@@ -57,6 +57,7 @@ import com.noop.analytics.NapPrefs
 import com.noop.analytics.NapVerdict
 import com.noop.analytics.RestScorer
 import com.noop.analytics.SedentaryDetector
+import com.noop.analytics.StressMotionEvidence
 import com.noop.analytics.StressOnsetDetector
 import com.noop.analytics.UserProfile
 import com.noop.analytics.WorkoutDetector
@@ -67,12 +68,15 @@ import com.noop.notif.InactivityNotifier
 import com.noop.notif.ScheduledReportNotifier
 import com.noop.notif.scorePctOrNull
 import com.noop.ui.BiofeedbackPrefs
+import com.noop.ui.ActiveWorkoutStore
 import com.noop.ui.HrvWindow
 import com.noop.ui.InactivityPrefs
+import com.noop.ui.LiveSessionRunner
 import com.noop.ui.NoopPrefs
 import com.noop.ui.NotifPrefs
 import com.noop.ui.ProfileStore
 import com.noop.ui.StressNudgeCenter
+import com.noop.ui.StressNudgeSessionRegistry
 import com.noop.ui.UnitPrefs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -2271,6 +2275,9 @@ class WhoopBleClient(
      *  two IO coroutines could both read a stale 4.0 label and a late service write could erase an exact
      *  MG label written milliseconds earlier. */
     private val identityReconcileLock = Mutex()
+    /** Serialize stress detector state from preference load through persistence/action scheduling. Two
+     * overlapping offload completions must never evaluate the same pre-fire state and queue two buzzes. */
+    private val stressNudgeLock = Mutex()
 
     /** #364 auto-continue: consecutive immediate re-kicks after a 60s idle-cap OR HISTORY_COMPLETE exit on
      *  THIS connection. Bounded by [MAX_AUTO_CONTINUES] so a pathological strap can't pin the radio. Reset
@@ -3075,7 +3082,7 @@ class WhoopBleClient(
     /**
      * L3 closed-loop stress check-in (v5 haptic-biofeedback). On the same natural offload completion that
      * drives [maybeBuzzInactivity], run the shipped, unit-tested [StressOnsetDetector] over the live R-R
-     * buffer: a FRESH, non-metabolic HRV dip while still fires a single confirming buzz + a passive in-app
+     * buffer: a fresh short-window HRV shift with observed low motion may fire one buzz + a passive in-app
      * card via [StressNudgeCenter.present]. NEVER a push, NEVER a diagnosis — "stress" is an autonomic
      * proxy vs the user's OWN baseline. All gating + de-dup is in the engine; we only supply honest inputs
      * (the rolling R-R, the live HR, recent motion, the worn flag) and persist the engine's [nextState] so
@@ -3089,42 +3096,80 @@ class WhoopBleClient(
         if (!config.enabled || !config.autoNudge) return
         ioScope.launch {
             try {
-                val nowSec = System.currentTimeMillis() / 1000L
-                // Recent wrist-motion (g): the smoothed activity intensity over the freshly-arrived
-                // gravity window, the same primitive SedentaryDetector reuses. Null when there's no
-                // recent gravity — the engine then leans on the resting-HR band gate (spec Q3).
-                val from = nowSec - INACTIVITY_LOOKBACK_S
-                val grav = runCatching { repository.gravitySamples(deviceId, from, nowSec) }.getOrDefault(emptyList())
-                val recentMotionG = WorkoutDetector.activitySeries(grav).lastOrNull()?.intensity
+                stressNudgeLock.withLock {
+                    val nowSec = System.currentTimeMillis() / 1000L
+                    val live = _state.value
+                    // Haptic-first and worn-only. A live-HR shortcut without an encrypted bond cannot deliver
+                    // the promised confirming buzz, and off-wrist physiology cannot train a resting baseline.
+                    if (!live.bonded || !live.encryptedBond || !live.worn) return@withLock
 
-                val live = _state.value
-                val decision = StressOnsetDetector.evaluate(
-                    rrBuffer = live.rrRecent,
-                    currentHR = live.heartRate?.toDouble(),
-                    recentMotionG = recentMotionG,
-                    // We never offer the cue over a manual Breathe/L1/L2 session; the BLE layer doesn't
-                    // track that, so leave it false — the in-app card is also suppressed by its own UI.
-                    sessionActive = false,
-                    state = BiofeedbackPrefs.loadStressState(context),
-                    config = config,
-                    nowSec = nowSec,
-                    tzOffsetSec = InactivityPrefs.tzOffsetSec(nowSec),
-                )
-                // Persist the advanced de-dup/EMA state every run so a replayed window can't re-fire.
-                BiofeedbackPrefs.saveStressState(context, decision.nextState)
+                    // Read every real session source before touching detector state. A SharedPreferences read
+                    // failure means the manual-workout state is unknown, so fail closed rather than claiming
+                    // `sessionActive=false`. The process registry covers Breathe/Resonance/Calm; Live Session
+                    // and pending-card state are process-wide; manual workouts have a durable snapshot.
+                    val sessionActive = stressNudgeSessionActiveOrNull() ?: run {
+                        log("Stress check-in: suppressed because active-session state was unavailable.")
+                        return@withLock
+                    }
 
-                if (decision.shouldNudge) {
-                    handler.post { buzz(decision.buzzLoops) }
-                    StressNudgeCenter.present(
-                        fastRMSSD = decision.fastRMSSD,
-                        baselineRMSSD = decision.baselineRMSSD,
+                    // Recent wrist-motion (g): accept only a dense ten-second gravity window whose newest row
+                    // is no more than two minutes old. A four-hour query is needed to find data after an offload,
+                    // but old/sparse rows are NOT evidence of current stillness and become null here.
+                    val from = nowSec - INACTIVITY_LOOKBACK_S
+                    val grav = runCatching { repository.gravitySamples(deviceId, from, nowSec) }
+                        .getOrDefault(emptyList())
+                    val recentMotionG = StressMotionEvidence.recentIntensityG(grav, nowSec)
+
+                    val decision = StressOnsetDetector.evaluate(
+                        rrBuffer = live.rrRecent,
+                        currentHR = live.heartRate?.toDouble(),
+                        recentMotionG = recentMotionG,
+                        sessionActive = sessionActive,
+                        state = BiofeedbackPrefs.loadStressState(context),
+                        config = config,
+                        nowSec = nowSec,
+                        tzOffsetSec = InactivityPrefs.tzOffsetSec(nowSec),
                     )
-                    log("Stress check-in: nudged on a fresh non-metabolic HRV dip.")
+                    // Persist before scheduling so every later invocation observes the fire/replay state.
+                    BiofeedbackPrefs.saveStressState(context, decision.nextState)
+
+                    if (decision.shouldNudge) {
+                        // Re-check on the action queue so a session started while DB/evaluation work was in
+                        // flight wins the race. Unknown state suppresses. The detector's saved fire clock may
+                        // conservatively rate-limit a raced-away cue, but no session can receive an interrupt.
+                        handler.post {
+                            val currentConfig = BiofeedbackPrefs.stressConfig(context)
+                            if (!currentConfig.enabled || !currentConfig.autoNudge) return@post
+                            if (stressNudgeSessionActiveOrNull() != false) return@post
+                            buzz(decision.buzzLoops)
+                            StressNudgeCenter.present(
+                                fastRMSSD = decision.fastRMSSD,
+                                baselineRMSSD = decision.baselineRMSSD,
+                            )
+                            log("Stress check-in: nudged on a fresh HRV shift with observed low motion.")
+                        }
+                    }
                 }
             } catch (t: Throwable) {
                 log("Stress check-in: check failed (${t.message})")
             }
         }
+    }
+
+    /**
+     * Observe every Android-owned session that must suppress an automatic stress cue. null means the
+     * durable manual-workout source could not be read; callers must fail closed in that case.
+     */
+    private fun stressNudgeSessionActiveOrNull(): Boolean? {
+        val workout = try {
+            ActiveWorkoutStore.from(context).load()
+        } catch (_: Throwable) {
+            return null
+        }
+        val workoutRecording = workout != null && workout.endMs == null
+        val liveSessionRunning = LiveSessionRunner.active.value?.snapshot?.value?.ended == false
+        return workoutRecording || liveSessionRunning || StressNudgeSessionRegistry.active ||
+            StressNudgeCenter.pending.value != null
     }
 
     /**

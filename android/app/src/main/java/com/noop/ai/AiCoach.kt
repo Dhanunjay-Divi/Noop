@@ -251,10 +251,11 @@ class AiCoach(private val repo: WhoopRepository) {
         sb.append("HRV ${avgInt(last30) { it.avgHrv }}ms, ")
         sb.append("RHR ${avgInt(last30) { d -> d.restingHr?.toDouble() }}bpm\n")
         // Additional vitals when present (#124, the coach used to see only recovery/strain/sleep/HRV/RHR).
+        // DailyMetric.steps is deliberately omitted: that merged legacy field carries no provenance and
+        // can be an @57 motion-derived estimate. The coach must not present it as a factual step count.
         sb.append("  SpO₂ ${avgInt(last30) { it.spo2Pct }}%, ")
         sb.append("respiration ${avg1(last30) { it.respRateBpm }}/min, ")
         sb.append("skin-temp deviation ${avg1(last30) { it.skinTempDevC }}°C, ")
-        sb.append("steps ${avgInt(last30) { d -> d.steps?.toDouble() }}/day, ")
         sb.append("active energy ${avgInt(last30) { it.activeKcalEst }}kcal/day\n")
 
         // --- Recent workouts (derived from logged exercise counts + day strain) ---

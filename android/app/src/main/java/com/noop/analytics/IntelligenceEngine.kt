@@ -93,6 +93,128 @@ object IntelligenceEngine {
 
     private const val SECONDS_PER_DAY: Long = 86_400L
 
+    /**
+     * Build the shared Vitality / Wellness Age inputs from merged daily rows. [DailyMetric.steps]
+     * intentionally does not enter this model: that legacy column has no source provenance, and on a
+     * strap-computed row it is WHOOP 5/MG @57 motion ticks scaled by a preference rather than validated
+     * pedometer steps. Imported Health Connect / Apple Health steps remain in their sourced store; until
+     * a provenance-aware join is added here, omission is safer than silently treating motion as measured.
+     */
+    internal fun vitalityInputs(
+        days: List<DailyMetric>,
+        chronoAge: Double,
+        minimumCoverage: Int = 14,
+    ): VitalityEngine.Inputs {
+        val nights = days.mapNotNull { it.totalSleepMin }.map { it / 60.0 }.filter { it > 0 }
+        val hrvs = days.mapNotNull { it.avgHrv }
+        val rhrs = days.mapNotNull { it.restingHr }.map { it.toDouble() }
+        return VitalityEngine.Inputs(
+            chronoAge = chronoAge,
+            restingHR = if (rhrs.size >= minimumCoverage) medianOfDoubles(rhrs) else null,
+            sleepHours = if (nights.size >= minimumCoverage) nights.average() else null,
+            sleepConsistency = if (nights.size >= minimumCoverage) {
+                VitalityEngine.sleepConsistency(nights)
+            } else null,
+            rmssd = if (hrvs.size >= minimumCoverage) medianOfDoubles(hrvs) else null,
+            rmssdNorm = VitalityEngine.rmssdNorm(chronoAge),
+            steps = null,
+        )
+    }
+
+    /**
+     * Persist a provenance-safe Vitality / Wellness Age result, or invalidate only its computed series.
+     *
+     * The v1 marker identified scores that could depend on un-sourced @57 motion-derived steps. A missing
+     * or mismatched v2 marker therefore cannot receive the generic legacy grace period used by the older
+     * profile metrics. Likewise, an omitted result is not an upsert deletion: when the remaining safe
+     * inputs no longer span three domains, the previous steps-era headline must be removed explicitly.
+     * Imported/raw/vendor rows are outside [purgeComputedMetricKeys]' computed-source allow-list.
+     */
+    internal suspend fun persistVitalityOrInvalidate(
+        repo: WhoopRepository,
+        profile: UserProfile,
+        days: List<DailyMetric>,
+        importedDeviceId: String,
+        computedId: String,
+        newestDay: String,
+    ): Boolean {
+        // Delete the accepted v2 marker FIRST. If storage fails part-way through cleanup, strict readers
+        // fail closed instead of continuing to accept a surviving stale headline.
+        val computedKeys = listOf(
+            AgeMetricProfile.VITALITY_KEY,
+            AgeMetricProfile.LEGACY_VITALITY_KEY,
+            "vitality",
+            "body_age",
+        )
+        val inputsUsable = profile.ageInputConfirmed && profile.age in 20.0..80.0
+        val storedToken = repo.latestMetricComputedUnion(
+            importedDeviceId, AgeMetricProfile.VITALITY_KEY,
+        )?.value
+        val legacyToken = repo.latestMetricComputedUnion(
+            importedDeviceId, AgeMetricProfile.LEGACY_VITALITY_KEY,
+        )?.value
+        val result = if (inputsUsable) {
+            VitalityEngine.compute(vitalityInputs(days, profile.age))
+        } else null
+
+        if (legacyToken != null || !inputsUsable ||
+            !AgeMetricProfile.acceptsVitality(storedToken, AgeMetricProfile.vitalityToken(profile.age)) ||
+            result == null
+        ) {
+            purgeComputedMetricKeys(repo, importedDeviceId, computedId, computedKeys)
+        }
+        result ?: return false
+
+        val satKey = saturdayKeyOnOrBefore(newestDay)
+        repo.upsertMetricSeries(listOf(
+            MetricSeriesRow(deviceId = computedId, day = satKey, key = "vitality", value = result.vitality),
+            MetricSeriesRow(deviceId = computedId, day = satKey, key = "body_age", value = result.bodyAge),
+            MetricSeriesRow(
+                deviceId = computedId,
+                day = satKey,
+                key = AgeMetricProfile.VITALITY_KEY,
+                value = AgeMetricProfile.vitalityToken(profile.age),
+            ),
+        ))
+        return true
+    }
+
+    /**
+     * Cheap launch/update reconciliation for the weekly Vitality projection. Unlike [analyzeRecent], this
+     * reads only persisted merged daily rows, so it can invalidate or refresh a steps-era score even when
+     * the raw-HR fingerprint is unchanged and the heavy scoring pass correctly skips. Idempotent and
+     * computed-source-only; no imported/raw/vendor row is rewritten.
+     */
+    suspend fun recomputeVitalityOnly(
+        repo: WhoopRepository,
+        profile: UserProfile,
+        importedDeviceId: String = "my-whoop",
+        maxDays: Int = 21,
+        nowSeconds: Long = System.currentTimeMillis() / 1_000L,
+    ): Boolean = analyzeGate.withLock {
+        val computedId = "$importedDeviceId-noop"
+        val boundedDays = maxDays.coerceAtLeast(1)
+        val tzOffsetSeconds = java.util.TimeZone.getDefault().getOffset(nowSeconds * 1_000L) / 1_000L
+        val nowLocalMidnight = midnightLocal(nowSeconds, tzOffsetSeconds)
+        val newestDay = AnalyticsEngine.dayString(nowLocalMidnight, tzOffsetSeconds)
+        val oldestDay = AnalyticsEngine.dayString(
+            nowLocalMidnight - (boundedDays - 1) * SECONDS_PER_DAY,
+            tzOffsetSeconds,
+        )
+        val days = repo.daysMerged(importedDeviceId)
+            .filter { it.day in oldestDay..newestDay }
+            .sortedBy { it.day }
+            .takeLast(boundedDays)
+        persistVitalityOrInvalidate(
+            repo = repo,
+            profile = profile,
+            days = days,
+            importedDeviceId = importedDeviceId,
+            computedId = computedId,
+            newestDay = newestDay,
+        )
+    }
+
     /** Imported wearable-export source ids whose DAILY aggregates can be scored for a NOOP Charge/Rest on
      *  an import-only day (#823). Matches WearableExportImporter.Brand.deviceId. Mirrors the Swift
      *  Repository.wearableImportSources. */
@@ -1059,47 +1181,18 @@ object IntelligenceEngine {
             ))
         }
 
-        // Vitality/Wellness Age uses chronological age but no sex coefficient. Keep non-binary users
-        // eligible while refusing the untouched age-30 seed and the model's unsupported age range.
-        val wellnessInputsUsable = profile.ageInputConfirmed && profile.age in 20.0..80.0
-        val storedVitalityToken = repo.latestMetricComputedUnion(
-            importedDeviceId, AgeMetricProfile.VITALITY_KEY,
-        )?.value
-        if (!wellnessInputsUsable || !AgeMetricProfile.accepts(
-                storedVitalityToken, AgeMetricProfile.vitalityToken(profile.age),
-                profile.vitalityProvenanceRequired,
-            )
-        ) purgeComputedMetricKeys(
-            repo, importedDeviceId, computedId,
-            listOf("vitality", "body_age", AgeMetricProfile.VITALITY_KEY),
-        )
-
         // ── Vitality / Wellness Age (Phase 7), weekly from trailing 21 days ──
         // Experimental lifestyle-risk composite, not WHOOP Age/biological age. Each factor needs 14
         // observed days; missing data remains unavailable. VitalityEngine also requires three domains.
         val v21 = faGateByDay.values.sortedBy { it.day }.takeLast(21)
-        val vMinCoverage = 14
-        val vRhrs = v21.mapNotNull { it.restingHr }.map { it.toDouble() }
-        val vNights = v21.mapNotNull { it.totalSleepMin }.map { it / 60.0 }.filter { it > 0 }
-        val vHRVs = v21.mapNotNull { it.avgHrv }
-        val vSteps = v21.mapNotNull { it.steps }.map { it.toDouble() }
-        val vInputs = VitalityEngine.Inputs(
-            chronoAge = profile.age,
-            restingHR = if (vRhrs.size >= vMinCoverage) medianOfDoubles(vRhrs) else null,
-            sleepHours = if (vNights.size >= vMinCoverage) vNights.average() else null,
-            sleepConsistency = if (vNights.size >= vMinCoverage) VitalityEngine.sleepConsistency(vNights) else null,
-            rmssd = if (vHRVs.size >= vMinCoverage) medianOfDoubles(vHRVs) else null,
-            rmssdNorm = VitalityEngine.rmssdNorm(profile.age),
-            steps = if (vSteps.size >= vMinCoverage) vSteps.average() else null)
-        if (wellnessInputsUsable) VitalityEngine.compute(vInputs)?.let { vRes ->
-            val satKey = saturdayKeyOnOrBefore(newestDay)
-            repo.upsertMetricSeries(listOf(
-                MetricSeriesRow(deviceId = computedId, day = satKey, key = "vitality", value = vRes.vitality),
-                MetricSeriesRow(deviceId = computedId, day = satKey, key = "body_age", value = vRes.bodyAge),
-                MetricSeriesRow(deviceId = computedId, day = satKey,
-                    key = AgeMetricProfile.VITALITY_KEY,
-                    value = AgeMetricProfile.vitalityToken(profile.age))))
-        }
+        persistVitalityOrInvalidate(
+            repo = repo,
+            profile = profile,
+            days = v21,
+            importedDeviceId = importedDeviceId,
+            computedId = computedId,
+            newestDay = newestDay,
+        )
 
         // ── Steps ESTIMATE (WHOOP 4.0) , DAILY, keyed to each strap-only day ──
         // A WHOOP 4.0 sends no step count over BLE, so for days the phone DIDN'T also count steps we
@@ -1623,7 +1716,10 @@ object IntelligenceEngine {
         repo: WhoopRepository, activeDeviceId: String, computedId: String, keys: List<String>,
     ) {
         val ids = (repo.computedSourceIds(activeDeviceId) + computedId).distinct()
-        for (id in ids) for (key in keys) repo.deleteMetricSeries(id, key)
+        // Key-major ordering lets callers put an acceptance/provenance marker first and remove it across
+        // the whole active∪canonical union before touching any displayed value. A partial storage failure
+        // then fails closed instead of leaving another computed sibling's marker able to bless stale data.
+        for (key in keys) for (id in ids) repo.deleteMetricSeries(id, key)
     }
 
     /** Manual "refresh Fitness Age" (the button on the not-ready card): recompute the weekly Fitness Age

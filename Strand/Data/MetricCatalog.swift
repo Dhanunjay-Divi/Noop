@@ -269,16 +269,17 @@ enum MetricCatalog {
         d("strain", String(localized: "Effort"), "Effort", "/100", "my-whoop", "flame", 1, nil,
           String(localized: "Cardiovascular load for the day, on a 0-100 scale (was 0-21).")),
         d("steps", String(localized: "Steps"), "Effort", "", "apple-health", "figure.walk", 0, true),
-        // WHOOP 5.0 / MG exposes a measured daily step count. Declared AFTER apple-health on purpose:
+        // WHOOP 5.0 / MG exposes a motion-derived daily estimate from @57. Declared AFTER apple-health:
         // the bare-key `first { key == "steps" }` resolvers (LabBookView, CompareView, the TabRoute
         // `.metric` fallback) keep their prior apple-health default, so this entry's position never
         // changes where any of them tap through. The Today card/tile route to it EXPLICITLY by source
         // (`.metricSourced` / `todayStepsMetric`), which is what actually needs it.
-        d("steps", String(localized: "Steps"), "Effort", "steps", "my-whoop", "figure.walk", 0, true),
-        // On-device steps ESTIMATE for a WHOOP 4.0 (no real step count over BLE): the strap's daily
+        d("steps", String(localized: "Steps (motion estimate)"), "Effort", "steps", "my-whoop", "figure.walk.motion", 0, true,
+          String(localized: "Estimated on device from WHOOP 5/MG motion-counter ticks and your step-scale setting. Not a validated pedometer count.")),
+        // On-device calibrated steps ESTIMATE for a WHOOP 4.0 (no readable step count over BLE): the strap's daily
         // motion volume scaled by a personal calibration. Stored under the computed "-noop" source, so
         // it reads through the same exploreSeries fallback fitness_age/vitality use. Distinct from the
-        // real "steps" above — labelled "(estimated)" so it's never mistaken for a measured count.
+        // @57 motion estimate above — both are labelled so neither is mistaken for a measured count.
         d("steps_est", String(localized: "Steps (estimated)"), "Effort", "steps", "my-whoop", "figure.walk.motion", 0, true,
           String(localized: "Estimated from your WHOOP's motion, calibrated to your phone. Not a measured step count.")),
         d("hr_zones13_min", String(localized: "HR Zones 1-3"), "Effort", "min", "my-whoop", "heart", 0, nil),
@@ -335,14 +336,41 @@ enum MetricCatalog {
         all.first { $0.key == key && $0.source == source }
     }
 
-    /// The source the Today steps tile taps through to, matching the value it displays. Precedence
-    /// mirrors Android's `TodayScreen` (#377): the measured WHOOP 5.0 / MG count, else the imported
-    /// Apple Health count, else the WHOOP 4.0 motion estimate. `hasImportedSteps` defaults false so
-    /// existing callers keep the measured-or-estimate behaviour unchanged.
-    static func todayStepsMetric(hasMeasuredSteps: Bool, hasImportedSteps: Bool = false) -> MetricDescriptor? {
-        if hasMeasuredSteps { return metric(key: "steps", source: "my-whoop") }
+    /// The source the Today steps tile taps through to, matching the value it displays. A measured
+    /// pedometer count imported from Apple Health always outranks WHOOP 5/MG's @57 motion-derived
+    /// estimate; the calibrated WHOOP 4 fallback is last. This ordering is shared with Android.
+    static func todayStepsMetric(hasMotionDerivedSteps: Bool, hasImportedSteps: Bool = false) -> MetricDescriptor? {
         if hasImportedSteps { return metric(key: "steps", source: "apple-health") }
+        if hasMotionDerivedSteps { return metric(key: "steps", source: "my-whoop") }
         return metric(key: "steps_est", source: "my-whoop")
+    }
+
+    /// One-value form of the measured-first steps contract. Keeping the arbitration here prevents a
+    /// card, dashboard row and route from independently drifting back to motion-first precedence.
+    static func todayStepsValue<T>(imported: T?, motionDerived: T?, calibratedEstimate: T?) -> T? {
+        imported ?? motionDerived ?? calibratedEstimate
+    }
+
+    /// Per-day form used by Today sparklines. Sources are merged by day rather than choosing one whole
+    /// series, so a measured import wins every overlapping day while motion estimates still fill gaps.
+    static func todayStepsSeries(
+        imported: [(day: String, value: Double)],
+        motionDerived: [(day: String, value: Double)],
+        calibratedEstimate: [(day: String, value: Double)]
+    ) -> [(day: String, value: Double)] {
+        func byDay(_ points: [(day: String, value: Double)]) -> [String: Double] {
+            Dictionary(points.filter { $0.value.isFinite && $0.value >= 0 }
+                .map { ($0.day, $0.value) }, uniquingKeysWith: { _, newer in newer })
+        }
+        let importedByDay = byDay(imported)
+        let motionByDay = byDay(motionDerived)
+        let estimateByDay = byDay(calibratedEstimate)
+        return Set(importedByDay.keys).union(motionByDay.keys).union(estimateByDay.keys)
+            .sorted()
+            .compactMap { day in
+                todayStepsValue(imported: importedByDay[day], motionDerived: motionByDay[day],
+                                calibratedEstimate: estimateByDay[day]).map { (day, $0) }
+            }
     }
 
     /// #616: the calorie twin of `todayStepsMetric` — route the tapped detail to the source that MATCHES
