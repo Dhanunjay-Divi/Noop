@@ -1854,4 +1854,5 @@
     <string name="appearance_detail_black">Negro OLED puro con controles claros</string>
     <string name="appearance_settings_blurb">Elige el acabado de la app. Sistema sigue tu dispositivo; Oscuro usa grafito dimensional; Negro usa un lienzo OLED totalmente negro.</string>
     <string name="appearance_onboarding_subtitle">NOOP sigue el sistema de forma predeterminada. Elige Claro, Oscuro o Negro puro aquí y cámbialo cuando quieras en Ajustes → Apariencia.</string>
+    <string name="l10n_app_changelog_today_first_insights_9_2_0">Información centrada en hoy, automatización más discreta y evidencia que puedes revisar</string>
 </resources>

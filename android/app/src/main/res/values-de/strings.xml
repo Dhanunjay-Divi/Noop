@@ -1870,4 +1870,5 @@
     <string name="appearance_detail_black">Echtes OLED-Schwarz mit hellen Bedienelementen</string>
     <string name="appearance_settings_blurb">Wähle das Erscheinungsbild der App. System folgt deinem Gerät, Dunkel verwendet räumliches Graphit und Schwarz eine echte OLED-Schwarzfläche.</string>
     <string name="appearance_onboarding_subtitle">NOOP folgt standardmäßig deinem System. Wähle hier Hell, Dunkel oder echtes Schwarz und ändere es jederzeit unter Einstellungen → Erscheinungsbild.</string>
+    <string name="l10n_app_changelog_today_first_insights_9_2_0">Einblicke mit Fokus auf heute, ruhigere Automatisierung und nachvollziehbare Nachweise</string>
 </resources>

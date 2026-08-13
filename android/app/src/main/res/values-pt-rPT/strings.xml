@@ -1848,4 +1848,5 @@
     <string name="appearance_detail_black">Preto OLED puro com controlos claros</string>
     <string name="appearance_settings_blurb">Escolha o acabamento da app. Sistema segue o dispositivo; Escuro usa grafite dimensional; Preto usa um fundo OLED totalmente preto.</string>
     <string name="appearance_onboarding_subtitle">A NOOP segue o sistema por predefinição. Escolha Claro, Escuro ou Preto puro aqui e altere-o quando quiser em Definições → Aspeto.</string>
+    <string name="l10n_app_changelog_today_first_insights_9_2_0">Informações centradas no dia de hoje, automação mais discreta e evidência que podes consultar</string>
 </resources>

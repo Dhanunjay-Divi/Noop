@@ -1854,4 +1854,5 @@
     <string name="appearance_detail_black">Noir OLED absolu avec commandes claires</string>
     <string name="appearance_settings_blurb">Choisissez la finition de l’app. Système suit votre appareil ; Sombre utilise un graphite profond ; Noir utilise un fond OLED totalement noir.</string>
     <string name="appearance_onboarding_subtitle">NOOP suit le système par défaut. Choisissez Clair, Sombre ou Noir absolu ici, puis modifiez ce choix à tout moment dans Réglages → Apparence.</string>
+    <string name="l10n_app_changelog_today_first_insights_9_2_0">Des informations centrées sur aujourd’hui, une automatisation plus discrète et des preuves consultables</string>
 </resources>

@@ -2256,35 +2256,8 @@ struct SettingsView: View {
                         .stroke(StrandPalette.statusWarning.opacity(0.25), lineWidth: 1)
                 )
 
-                rowDivider
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Protocol research & lineage").strandOverline()
-                    attribution(repo: "johnmiddleton12/wearable", note: String(localized: "WHOOP 4.0 reference"))
-                    attribution(repo: "b-nnett/goose", note: String(localized: "WHOOP 5.0 reference"))
-                }
-
-                Text("See Legal & acknowledgements for exact provenance, notices and license scope.")
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.textTertiary)
             }
         }
-    }
-
-    private func attribution(repo: String, note: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(StrandPalette.accent)
-                .accessibilityHidden(true)
-            Text(repo)
-                .font(StrandFont.mono(12))
-                .foregroundStyle(StrandPalette.textPrimary)
-            Text("· \(note)")
-                .font(StrandFont.footnote)
-                .foregroundStyle(StrandPalette.textTertiary)
-        }
-        .accessibilityElement(children: .combine)
     }
 
     // MARK: - iOS reality & diagnostics (iOS-only)
