@@ -7,6 +7,22 @@ import XCTest
 /// kept verbatim. The rule is non-destructive - it never mutates the stored @State - so this is the
 /// whole contract. Byte-identical rule to Android's coercedVitalRange.
 final class ExploreRangeGatingTests: XCTestCase {
+    func testMetricDetailsOpenWithCurrentReadingAndCompactHistory() {
+        XCTAssertEqual(MetricDetailPresentation.defaultHistoryRange, .week)
+        XCTAssertTrue(MetricDetailPresentation.isCurrent(
+            latestDay: "2026-08-13",
+            currentDayKeys: ["2026-08-12", "2026-08-13"]
+        ))
+        XCTAssertFalse(MetricDetailPresentation.isCurrent(
+            latestDay: "2026-08-11",
+            currentDayKeys: ["2026-08-12", "2026-08-13"]
+        ))
+        XCTAssertFalse(MetricDetailPresentation.isCurrent(
+            latestDay: nil,
+            currentDayKeys: ["2026-08-13"]
+        ))
+    }
+
 
     /// Only WEEK + ALL unlocked (the first-week / calibrating state).
     private func wk1(_ r: ExploreRange) -> Bool { r == .week || r == .all }

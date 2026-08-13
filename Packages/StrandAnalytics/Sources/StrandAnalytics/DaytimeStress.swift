@@ -20,8 +20,9 @@ import WhoopProtocol
 // needed beyond the day itself.
 //
 // "Sustained high stress" is an honest, conservative flag: the most recent
-// `sustainedHours` covered hours must ALL sit in the HIGH band (≥ highBandFloor). It
-// drives a passive in-app suggestion to run a Breathe session — never a notification.
+// `sustainedHours` wall-clock-adjacent hours must ALL sit in the HIGH band
+// (≥ highBandFloor) AND carry usable R-R-derived RMSSD. HR-only hours can still be
+// displayed, but cannot trigger the sustained Breathe suggestion.
 //
 // APPROXIMATE and non-clinical: an hour with too little data (few HR samples / too few
 // clean beats) is reported as `.noData` and never invented.
@@ -47,6 +48,15 @@ public enum DaytimeStress {
     /// One hour of the daytime timeline. `level` is the shared 0–3 stress proxy, or nil
     /// when the hour had too little signal to score honestly.
     public struct HourPoint: Equatable, Sendable {
+        /// Which signals actually support this hour. Kept separate from `level` because
+        /// an HR-only hour remains useful on the timeline but is not strong enough to
+        /// drive a sustained-stress intervention.
+        public enum Evidence: String, Equatable, Sendable {
+            case none
+            case heartRateOnly
+            case heartRateAndHRV
+        }
+
         /// Hour-of-day on the LOCAL clock (0–23), the bucket this point covers.
         public let hour: Int
         /// Unix seconds at the start of the bucket (wall-clock).
@@ -57,16 +67,36 @@ public enum DaytimeStress {
         public let meanHR: Double?
         /// RMSSD over the hour's clean R-R (ms), or nil (too few clean beats).
         public let rmssd: Double?
+        /// Raw HR samples assigned to this hour before the minimum-count gate.
+        public let hrSampleCount: Int
+        /// Raw R-R intervals assigned to this hour before cleaning.
+        public let rrInputCount: Int
+        /// R-R intervals that survived the shared range + ectopic cleaner.
+        public let rrCleanCount: Int
 
         /// True when the hour was scored (had enough HR to place on the curve).
         public var hasData: Bool { level != nil }
+        /// True only when this hour has a usable RMSSD backed by the cleaner's minimum
+        /// beat count. This is the evidence gate for the sustained-high suggestion.
+        public var hasHRVEvidence: Bool {
+            rmssd != nil && rrCleanCount >= HRVAnalyzer.minBeats
+        }
+        /// Compact provenance for presentation/debugging without re-running HRV cleaning.
+        public var evidence: Evidence {
+            guard meanHR != nil else { return .none }
+            return hasHRVEvidence ? .heartRateAndHRV : .heartRateOnly
+        }
 
-        public init(hour: Int, startTs: Int, level: Double?, meanHR: Double?, rmssd: Double?) {
+        public init(hour: Int, startTs: Int, level: Double?, meanHR: Double?, rmssd: Double?,
+                    hrSampleCount: Int = 0, rrInputCount: Int = 0, rrCleanCount: Int = 0) {
             self.hour = hour
             self.startTs = startTs
             self.level = level
             self.meanHR = meanHR
             self.rmssd = rmssd
+            self.hrSampleCount = hrSampleCount
+            self.rrInputCount = rrInputCount
+            self.rrCleanCount = rrCleanCount
         }
     }
 
@@ -74,9 +104,10 @@ public enum DaytimeStress {
     public struct Result: Equatable, Sendable {
         /// Waking-hour timeline, earliest → latest. Hours with no signal carry `level == nil`.
         public let hours: [HourPoint]
-        /// True when the most recent `sustainedHours` SCORED hours all sit in the HIGH band.
+        /// True when the most recent `sustainedHours` scored hours are wall-clock adjacent,
+        /// all sit in the HIGH band, and every hour carries usable R-R-derived RMSSD.
         public let sustainedHigh: Bool
-        /// Count of trailing high hours backing `sustainedHigh` (0 when not sustained).
+        /// Count of trailing, adjacent, HRV-backed high hours backing `sustainedHigh`.
         public let sustainedRun: Int
         /// Mean stress across the SCORED hours, or nil when none were scorable.
         public let dayMean: Double?
@@ -94,6 +125,8 @@ public enum DaytimeStress {
 
         /// The scored hours only (level non-nil), in time order.
         public var scored: [HourPoint] { hours.filter { $0.level != nil } }
+        /// Number of displayed/scored hours with usable R-R-derived RMSSD evidence.
+        public var hrvBackedHourCount: Int { scored.filter(\.hasHRVEvidence).count }
 
         /// Empty read — used when the day had no usable intraday HR at all.
         public static let empty = Result(hours: [], sustainedHigh: false, sustainedRun: 0,
@@ -183,7 +216,14 @@ public enum DaytimeStress {
         // 2) Per-hour mean HR + RMSSD (RMSSD via the shared HRV cleaner, so ectopic
         //    beats can't fabricate variability). An hour with < minHourHRSamples HR is
         //    left unscored (noData) — never invented.
-        struct HourAgg { let bucket: Int; let meanHR: Double?; let rmssd: Double?; let nHR: Int }
+        struct HourAgg {
+            let bucket: Int
+            let meanHR: Double?
+            let rmssd: Double?
+            let nHR: Int
+            let nRRInput: Int
+            let nRRClean: Int
+        }
         let orderedBuckets = hrByBucket.keys.sorted()
         var aggs: [HourAgg] = []
         aggs.reserveCapacity(orderedBuckets.count)
@@ -191,7 +231,8 @@ public enum DaytimeStress {
             let hrs = hrByBucket[b] ?? []
             let mHR = hrs.count >= minHourHRSamples ? mean(hrs) : nil
             let rrRes = HRVAnalyzer.analyze(rawRR: rrByBucket[b] ?? [])
-            aggs.append(HourAgg(bucket: b, meanHR: mHR, rmssd: rrRes.rmssd, nHR: hrs.count))
+            aggs.append(HourAgg(bucket: b, meanHR: mHR, rmssd: rrRes.rmssd,
+                                nHR: hrs.count, nRRInput: rrRes.nInput, nRRClean: rrRes.nClean))
         }
 
         // 3) The day's OWN quiet reference: centre on the CALM end (the lower quartile of
@@ -229,7 +270,9 @@ public enum DaytimeStress {
                                   rmssd: a.rmssd, meanRMSSD: refRMSSD, sdRMSSD: sdRMSSD))
                 : nil
             points.append(HourPoint(hour: hourOfDay, startTs: wallStart,
-                                    level: level, meanHR: a.meanHR, rmssd: a.rmssd))
+                                    level: level, meanHR: a.meanHR, rmssd: a.rmssd,
+                                    hrSampleCount: a.nHR, rrInputCount: a.nRRInput,
+                                    rrCleanCount: a.nRRClean))
         }
 
         let scored = points.compactMap { p -> (HourPoint, Double)? in p.level.map { (p, $0) } }
@@ -241,10 +284,20 @@ public enum DaytimeStress {
                          dayMean: nil, peak: nil)
         }
 
-        // 5) Sustained-high flag: walk back from the latest SCORED hour while each is HIGH.
+        // 5) Sustained-high flag: walk back from the latest SCORED hour while each is HIGH,
+        //    has usable R-R-derived RMSSD, and starts exactly one wall-clock bucket before
+        //    the following point. A missing/under-covered hour therefore breaks the run,
+        //    and HR-only activation remains visible without driving an intervention.
         var run = 0
-        for (_, lvl) in scored.reversed() {
-            if lvl >= highBandFloor { run += 1 } else { break }
+        var laterStartTs: Int?
+        for (point, level) in scored.reversed() {
+            guard level >= highBandFloor, point.hasHRVEvidence else { break }
+            if let laterStartTs,
+               laterStartTs - point.startTs != bucketSeconds {
+                break
+            }
+            run += 1
+            laterStartTs = point.startTs
         }
         let sustained = run >= sustainedHours
 

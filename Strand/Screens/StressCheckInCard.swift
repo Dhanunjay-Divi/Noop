@@ -3,10 +3,12 @@ import Combine
 import StrandDesign
 
 // StressCheckInCard.swift — the L3 closed-loop JITAI surface (the "passive" layer). When the shipped,
-// unit-tested `StressOnsetDetector` fires (a fresh, non-metabolic HRV dip while the user is still), the
+// unit-tested `StressOnsetDetector` fires (short-window HRV below a warmed recent baseline, with observed
+// low motion), the
 // central hook (Wave 3, in BLEManager's existing offload/evaluateStress call-site) posts a pending nudge
 // on `StressNudgeCenter`; this dismissible card surfaces it. NEVER an alarm, NEVER a push (unless the
-// user separately opted into notifications), NEVER a diagnosis — "HRV dipped while you were still", with
+// user separately opted into notifications), NEVER a diagnosis — it describes only the measured
+// short-window/baseline relationship, with
 // Breathe now / Not now / Turn off, matching DaytimeStress's "passive suggestion" stance.
 //
 // See docs/superpowers/specs/2026-06-19-v5-haptic-biofeedback-design.md (L3 / UX → "Auto-nudge (passive)").
@@ -60,7 +62,7 @@ struct StressCheckInCard: View {
                         StatePill("Passive", tone: .neutral, showsDot: true)
                     }
 
-                    Text("Your HRV dipped while you were still. Want a minute to breathe?")
+                    Text("Your short-window HRV moved below its recent baseline. Want a minute to breathe?")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -99,7 +101,7 @@ struct StressCheckInCard: View {
     /// An honest one-liner with the two estimates the engine surfaced, framed as "your own number".
     private func honestLine(_ nudge: StressNudgeCenter.Nudge) -> String? {
         guard let fast = nudge.fastRMSSD, let base = nudge.baselineRMSSD, base > 0 else { return nil }
-        return String(format: String(localized: "RMSSD %.0f ms now vs your ~%.0f ms baseline (estimate from PPG-derived R-R)."),
+        return String(format: String(localized: "RMSSD %.0f ms now vs your recent ~%.0f ms baseline (estimate)."),
                       fast, base)
     }
 }

@@ -23,6 +23,28 @@ public enum ScoreConfidence: String, Equatable, Sendable, Codable {
     case building
     case solid
 
+    /// Why a Rest read did not earn the highest input-confidence tier. These are evidence limits,
+    /// not diagnoses, and never alter the Rest score itself.
+    public enum RestLimitation: String, Equatable, Sendable, Codable {
+        case noSession
+        case noStagedSleep
+        case motionUnavailable
+        case sparseMotion
+        case implausibleStageMix
+    }
+
+    /// Rest certainty plus the concrete evidence limits behind it. `confidence` is byte-identical
+    /// to `rest(...)`; the richer shape only lets presentation explain an existing downgrade.
+    public struct RestAssessment: Equatable, Sendable {
+        public let confidence: ScoreConfidence
+        public let limitations: [RestLimitation]
+
+        public init(confidence: ScoreConfidence, limitations: [RestLimitation]) {
+            self.confidence = confidence
+            self.limitations = limitations
+        }
+    }
+
     // MARK: - Derivations (one per score; mirror the Android helpers exactly)
 
     /// Charge (recovery) confidence.
@@ -94,5 +116,36 @@ public enum ScoreConfidence: String, Equatable, Sendable, Codable {
             return .building   // high-efficiency night with near-zero deep+REM → low-confidence staging (#H9)
         }
         return base
+    }
+
+    /// Explainable companion to `rest(...)`. It delegates tier calculation to the canonical helper,
+    /// then reports only the gates that actually constrained this night's evidence. Score inputs and
+    /// weights remain untouched.
+    public static func restAssessment(hasSession: Bool, hasStagedSleep: Bool,
+                                      asleepSeconds: Double, restorativeSeconds: Double,
+                                      efficiency: Double, gravitySparse: Bool = false,
+                                      motionUnavailable: Bool = false) -> RestAssessment {
+        let confidence = rest(hasSession: hasSession, hasStagedSleep: hasStagedSleep,
+                              asleepSeconds: asleepSeconds,
+                              restorativeSeconds: restorativeSeconds,
+                              efficiency: efficiency,
+                              gravitySparse: gravitySparse || motionUnavailable)
+        var limitations: [RestLimitation] = []
+        if !hasSession {
+            limitations.append(.noSession)
+        } else if !hasStagedSleep {
+            limitations.append(.noStagedSleep)
+        }
+        if motionUnavailable {
+            limitations.append(.motionUnavailable)
+        } else if gravitySparse {
+            limitations.append(.sparseMotion)
+        }
+        if hasSession, hasStagedSleep, asleepSeconds > 0,
+           efficiency >= highEfficiencyThreshold,
+           restorativeSeconds / asleepSeconds < restorativeLowConfidenceShare {
+            limitations.append(.implausibleStageMix)
+        }
+        return RestAssessment(confidence: confidence, limitations: limitations)
     }
 }

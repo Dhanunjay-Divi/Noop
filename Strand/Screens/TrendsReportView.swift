@@ -67,9 +67,9 @@ enum TrendsReportData {
 
     /// The nine day→value maps the engine consumes, keyed by ReportMetric.
     ///
-    /// `stressByDay` is the persisted daily stress series ("yyyy-MM-dd" → 0–3), the same
-    /// stored series the Stress screen prioritises (#457). It isn't carried on `DailyMetric`,
-    /// so the caller loads it and passes it in; absent days simply stay out of the report.
+    /// `stressByDay` is a source-isolated causal NOOP autonomic-load series ("yyyy-MM-dd" → 0–3).
+    /// It is derived by the caller from strictly-prior personal days; opaque legacy stored stress rows
+    /// are never accepted because their source/model version cannot be proven.
     static func metricMaps(from days: [DailyMetric],
                            stressByDay: [String: Double] = [:]) -> [ReportMetric: [String: Double]] {
         var workouts: [String: Double] = [:]
@@ -95,9 +95,7 @@ enum TrendsReportData {
             if let v = d.respRateBpm { respRate[d.day] = v }
             if let v = d.skinTempDevC { skinTempDev[d.day] = v }
         }
-        // Daily stress score (#457), clamped to its 0–3 scale. Stored-only — the report never
-        // re-derives a stress value (unlike the live Stress screen), so a day with no banked
-        // stress simply has no Stress row contribution.
+        // Experimental daily autonomic-load estimate, clamped to its declared 0–3 scale.
         let stress = stressByDay.mapValues { Swift.min(Swift.max($0, 0), 3) }
         return [
             .workouts: workouts, .stress: stress,
@@ -421,8 +419,7 @@ struct TrendsReportSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var range: ReportRange = .days90
     @State private var exporting = false
-    /// Stored daily stress series ("yyyy-MM-dd" → 0–3), for the Stress row (#457). Loaded
-    /// once from the same "my-whoop" series the Stress screen reads; empty until it arrives.
+    /// Causal, source-isolated NOOP autonomic-load series ("yyyy-MM-dd" → 0–3).
     @State private var stressByDay: [String: Double] = [:]
 
     private var today: String { Repository.localDayKey(Date()) }
@@ -511,11 +508,18 @@ struct TrendsReportSheet: View {
         #if os(iOS)
         .noopSheetPresentation(largeFirst: true)
         #endif
-        // Load the stored daily stress series for the Stress row (#457). The same
-        // "my-whoop" series the Stress screen prioritises; the report never re-derives it.
+        // Build the same source-isolated causal series used by Stress detail. Each historical point uses
+        // only its own strictly-prior days, so future data cannot rewrite the report's earlier values.
+        // Legacy persisted `stress` rows are intentionally ignored.
         .task {
-            let pts = await repo.series(key: "stress", source: "my-whoop")
-            stressByDay = Dictionary(pts.map { ($0.day, $0.value) }, uniquingKeysWith: { _, b in b })
+            let assessment = StressModel.preferredAssessment(sourceRows: repo.vitalMetricRows)
+            let reads = DailyAutonomicLoad.causalTrend(days: StressModel.engineDays(assessment.days))
+            stressByDay = Dictionary(
+                reads.compactMap { read in
+                    guard let day = read.asOf, let value = read.value else { return nil }
+                    return (day, value)
+                },
+                uniquingKeysWith: { _, latest in latest })
         }
     }
 

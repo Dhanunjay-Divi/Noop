@@ -683,6 +683,14 @@ extension WhoopStore {
                 t.column("lastFullReconcileAt", .integer)
             }
         }
+        // v38: persist the analytics engine's canonical gravity-density verdict beside each sleep
+        // session. Nullable is intentional: existing/imported/manual rows have unknown coverage and
+        // must not be promoted merely because two raw samples expanded into a full motion epoch grid.
+        migrator.registerMigration("v38-sleep-gravity-sparse") { db in
+            try db.alter(table: "sleepSession") { t in
+                t.add(column: "gravitySparse", .boolean)
+            }
+        }
         return migrator
     }
 }

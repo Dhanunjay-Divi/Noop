@@ -26,7 +26,7 @@ object AppChangelog {
      * Bump this when you add a release below. The "What's New" sheet shows automatically when the
      * stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
      */
-    const val CURRENT_VERSION = "9.1.2"
+    const val CURRENT_VERSION = "9.2.0"
 
     data class Release(
         val version: String,
@@ -37,6 +37,18 @@ object AppChangelog {
 
     /** Newest first. */
     val releases: List<Release> = listOf(
+        Release(
+            version = "9.2.0",
+            title = uiString(R.string.l10n_app_changelog_today_first_insights_9_2_0),
+            date = "August 2026",
+            items = listOf(
+                "**Every metric starts with today.** Open a tile to see the latest reading first, how it compares with your own usual range, selectable history, related signals, and a plain-language explanation.",
+                "**Wellness estimates show their evidence.** Autonomic load, readiness, and sleep expose source, as-of date, confidence, calibration, and limitations. Sources are never blended to manufacture a baseline, and old imported stress rows no longer masquerade as NOOP results.",
+                "**Interruptions are conservative.** Activity-suggestion alerts require a separate opt-in, stale candidates are reconciled, and stress nudges fail closed without verified motion and enough clean R-R windows.",
+                "**Live means genuinely live.** Widgets and Live Activities use the actual heart-rate packet time, end stale or duplicate surfaces, and keep connection state separate from sample freshness.",
+                "**Smoother, clearer iPhone experience.** Scroll-aware glass navigation, lighter liquid rendering while moving, focused device cards, Quick Access, and a compact-safe onboarding flow make the app faster and easier to scan without losing technical detail.",
+            ),
+        ),
         Release(
             version = "9.1.2",
             title = uiString(R.string.l10n_app_changelog_safer_upgrades_trustworthy_signals_9c1f2a7b),

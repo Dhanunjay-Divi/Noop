@@ -9,6 +9,11 @@ final class DailyReviewNotificationsTests: XCTestCase {
         DailyReviewNotifications.morningMinutesKey,
         DailyReviewNotifications.eveningMinutesKey,
         NotificationRouteBridge.pendingRouteKey,
+        AutoWorkoutNotifications.enabledKey,
+        PuffinExperiment.autoWorkoutModeKey,
+        PuffinExperiment.autoDetectWorkoutsKey,
+        "autoWorkout.lastNotifiedToken",
+        "autoWorkout.notifiedTokenHistory",
     ]
 
     override func setUp() {
@@ -74,6 +79,205 @@ final class DailyReviewNotificationsTests: XCTestCase {
                 from: [NotificationRouteBridge.userInfoKey: "untrusted-destination"]
             )
         )
+    }
+
+    func testActivitySuggestionInterruptionsRequestPermissionOnlyOnExplicitEnable() async {
+        let notifications = AutoWorkoutNotificationClientSpy(status: .notDetermined)
+        notifications.authorizationResult = true
+
+        XCTAssertFalse(AutoWorkoutNotifications.isEnabled)
+        let enabled = await withCheckedContinuation {
+            (continuation: CheckedContinuation<AutoWorkoutNotifications.EnableOutcome, Never>) in
+            AutoWorkoutNotifications.setEnabled(true, client: notifications.client) {
+                continuation.resume(returning: $0)
+            }
+        }
+
+        XCTAssertEqual(enabled, .enabled)
+        XCTAssertEqual(notifications.authorizationRequestCount, 1)
+        XCTAssertTrue(AutoWorkoutNotifications.isEnabled)
+
+        let off = await withCheckedContinuation {
+            (continuation: CheckedContinuation<AutoWorkoutNotifications.EnableOutcome, Never>) in
+            AutoWorkoutNotifications.setEnabled(false, client: notifications.client) {
+                continuation.resume(returning: $0)
+            }
+        }
+        XCTAssertEqual(off, .off)
+        XCTAssertEqual(notifications.authorizationRequestCount, 1,
+                       "Turning interruptions off must not request notification permission.")
+        XCTAssertFalse(AutoWorkoutNotifications.isEnabled)
+    }
+
+    func testDeniedActivitySuggestionPermissionLeavesPreferenceOff() async {
+        let notifications = AutoWorkoutNotificationClientSpy(status: .notDetermined)
+        notifications.authorizationResult = false
+
+        let outcome = await withCheckedContinuation {
+            (continuation: CheckedContinuation<AutoWorkoutNotifications.EnableOutcome, Never>) in
+            AutoWorkoutNotifications.setEnabled(true, client: notifications.client) {
+                continuation.resume(returning: $0)
+            }
+        }
+
+        XCTAssertEqual(outcome, .denied)
+        XCTAssertEqual(notifications.authorizationRequestCount, 1)
+        XCTAssertFalse(AutoWorkoutNotifications.isEnabled,
+                       "A denied OS permission must never leave a misleading enabled switch.")
+    }
+
+    func testClearWhileAddIsSuspendedRemovesStaleNotificationAndDoesNotDeduplicateRetry() async {
+        let notifications = AutoWorkoutNotificationClientSpy(status: .authorized)
+        notifications.suspendAdds = true
+        PuffinExperiment.setAutoWorkoutMode(.ask)
+        UserDefaults.standard.set(true, forKey: AutoWorkoutNotifications.enabledKey)
+        let start = 1_700_000_000
+        let end = start + 1_200
+
+        let posting = Task {
+            await AutoWorkoutNotifications.postIfAuthorized(
+                startSec: start,
+                endSec: end,
+                client: notifications.client
+            )
+        }
+        await notifications.waitUntilAddStarts()
+
+        AutoWorkoutNotifications.clear(client: notifications.client)
+        notifications.resumeAdd()
+        await posting.value
+
+        XCTAssertTrue(notifications.requests.isEmpty,
+                      "A clear that wins during add must remove the daemon-side stale request.")
+        XCTAssertGreaterThanOrEqual(notifications.removalCount, 2,
+                                    "Cleanup must run once immediately and again after stale add returns.")
+        XCTAssertNil(UserDefaults.standard.string(forKey: "autoWorkout.lastNotifiedToken"),
+                     "A delivery invalidated by clear must remain retryable.")
+        XCTAssertNil(UserDefaults.standard.stringArray(forKey: "autoWorkout.notifiedTokenHistory"))
+    }
+
+    func testSameCandidateCanRepostAfterClearBeforeStaleAddCompletes() async {
+        let notifications = AutoWorkoutNotificationClientSpy(status: .authorized)
+        notifications.suspendAdds = true
+        PuffinExperiment.setAutoWorkoutMode(.ask)
+        UserDefaults.standard.set(true, forKey: AutoWorkoutNotifications.enabledKey)
+        let start = 1_700_100_000
+        let end = start + 1_200
+        let expectedToken = "candidate:" + AutoWorkoutNotifications.token(startSec: start, endSec: end)
+
+        let stalePosting = Task {
+            await AutoWorkoutNotifications.postIfAuthorized(
+                startSec: start,
+                endSec: end,
+                client: notifications.client
+            )
+        }
+        await notifications.waitUntilAddStarts()
+
+        AutoWorkoutNotifications.clear(client: notifications.client)
+        // This is deliberately the same candidate. The retired active generation must not suppress it.
+        await AutoWorkoutNotifications.postIfAuthorized(
+            startSec: start,
+            endSec: end,
+            client: notifications.client
+        )
+        notifications.resumeAdd()
+        await stalePosting.value
+
+        XCTAssertEqual(notifications.addCount, 2,
+                       "The current generation must retry after the stale generation is cleared.")
+        XCTAssertEqual(notifications.requests.count, 1,
+                       "Stale cleanup must run before, not after, the newer stable-id delivery.")
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "autoWorkout.lastNotifiedToken"),
+                       expectedToken)
+    }
+
+    func testActivitySuggestionDedupHonorsBoundedHistoryAndLegacyToken() {
+        let suite = "DailyReviewNotificationsTests.autoWorkout.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let start = 1_700_000_000
+        let delivery = "candidate:" + AutoWorkoutNotifications.token(startSec: start, endSec: start + 1_200)
+
+        XCTAssertTrue(AutoWorkoutNotifications.shouldDeliver(
+            deliveryToken: delivery, kind: .candidate, startSec: start, defaults: defaults
+        ))
+        defaults.set([delivery], forKey: "autoWorkout.notifiedTokenHistory")
+        XCTAssertFalse(AutoWorkoutNotifications.shouldDeliver(
+            deliveryToken: delivery, kind: .candidate, startSec: start, defaults: defaults
+        ))
+
+        defaults.removeObject(forKey: "autoWorkout.notifiedTokenHistory")
+        defaults.set("start:\(start)", forKey: "autoWorkout.lastNotifiedToken")
+        XCTAssertFalse(AutoWorkoutNotifications.shouldDeliver(
+            deliveryToken: delivery, kind: .candidate, startSec: start, defaults: defaults
+        ))
+    }
+}
+
+/// Deterministic, in-memory stand-in for Notification Center. `suspendAdds` models the real daemon
+/// boundary: removal can finish locally before an already-started add reports completion.
+@MainActor
+private final class AutoWorkoutNotificationClientSpy {
+    var status: UNAuthorizationStatus
+    var authorizationResult = false
+    var authorizationRequestCount = 0
+    var suspendAdds = false
+    private(set) var requests: [String: UNNotificationRequest] = [:]
+    private(set) var removalCount = 0
+    private(set) var addCount = 0
+
+    private var addStarted = false
+    private var addStartedContinuation: CheckedContinuation<Void, Never>?
+    private var addResumeContinuation: CheckedContinuation<Void, Never>?
+
+    init(status: UNAuthorizationStatus) {
+        self.status = status
+    }
+
+    var client: AutoWorkoutNotifications.NotificationClient {
+        AutoWorkoutNotifications.NotificationClient(
+            authorizationStatus: { [weak self] in self?.status ?? .denied },
+            requestAuthorization: { [weak self] in
+                guard let self else { return false }
+                self.authorizationRequestCount += 1
+                return self.authorizationResult
+            },
+            add: { [weak self] request in
+                guard let self else { return }
+                await self.add(request)
+            },
+            remove: { [weak self] identifiers in
+                self?.remove(identifiers)
+            }
+        )
+    }
+
+    private func add(_ request: UNNotificationRequest) async {
+        addCount += 1
+        if suspendAdds {
+            addStarted = true
+            addStartedContinuation?.resume()
+            addStartedContinuation = nil
+            await withCheckedContinuation { addResumeContinuation = $0 }
+        }
+        requests[request.identifier] = request
+    }
+
+    func waitUntilAddStarts() async {
+        if addStarted { return }
+        await withCheckedContinuation { addStartedContinuation = $0 }
+    }
+
+    func resumeAdd() {
+        suspendAdds = false
+        addResumeContinuation?.resume()
+        addResumeContinuation = nil
+    }
+
+    private func remove(_ identifiers: [String]) {
+        removalCount += 1
+        identifiers.forEach { requests.removeValue(forKey: $0) }
     }
 }
 

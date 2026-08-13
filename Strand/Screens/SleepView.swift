@@ -377,6 +377,8 @@ struct SleepView: View {
     private func restHero(_ model: SleepModel) -> some View {
         let night = heroNight(model)
         let score = performanceScore(for: night)
+        let assessment = restAssessment(for: night)
+        let isProviderScore = isImportedPerformance(for: night)
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("Sleep performance", overline: nightRelativeLabel,
                           trailing: String(localized: "Sleep Score"))
@@ -431,7 +433,31 @@ struct SleepView: View {
                     .padding(.vertical, NoopMetrics.space5)
                     .accessibilityElement(children: .combine)
                 }
-                SourceBadge(score != nil ? heroSource(for: night) : "On-device", tint: StrandPalette.restColor)
+                HStack(spacing: NoopMetrics.space2) {
+                    SourceBadge(score != nil ? heroSource(for: night) : "On-device", tint: StrandPalette.restColor)
+                    SourceBadge(isProviderScore ? "Provider score" : restConfidenceLabel(assessment.confidence),
+                                tint: !isProviderScore && assessment.confidence == .solid
+                                    ? StrandPalette.statusPositive
+                                    : StrandPalette.statusWarning)
+                }
+                Text("As of \(night.spanLabel)")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.onDarkTertiary)
+                if let limitation = isProviderScore
+                    ? String(localized: "The imported score did not include provider confidence metadata.")
+                    : restLimitationText(assessment.limitations.first) {
+                    HStack(alignment: .top, spacing: NoopMetrics.space2) {
+                        Image(systemName: "info.circle")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.statusWarning)
+                            .accessibilityHidden(true)
+                        Text(limitation)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.onDarkSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .padding(NoopMetrics.cardInnerPadding + NoopMetrics.space1)
             .frame(maxWidth: .infinity)
@@ -451,6 +477,78 @@ struct SleepView: View {
         case ..<70:  return String(localized: "Fair")
         case ..<85:  return String(localized: "Good")
         default:     return String(localized: "Optimal")
+        }
+    }
+
+    /// Explain the evidence quality for the exact night shown by the hero. Imported WHOOP scores keep
+    /// their provider provenance and are not re-labelled from NOOP's local motion availability; the
+    /// local assessment applies only when NOOP produced the score/stages. Coverage comes from the
+    /// analytics engine's canonical verdict, never from the length of its expanded epoch grid.
+    private func restAssessment(for night: Night) -> ScoreConfidence.RestAssessment {
+        if isImportedPerformance(for: night) {
+            return .init(confidence: .solid, limitations: [])
+        }
+        let staged = night.realSegments?.isEmpty == false || night.stages.deep + night.stages.rem > 0
+        let efficiency = efficiencyPct(night).map { $0 / 100.0 } ?? 0
+        return Self.localRestAssessment(
+            hasSession: !night.sourceBlocks.isEmpty,
+            hasStagedSleep: staged,
+            asleepSeconds: night.stages.asleep * 60,
+            restorativeSeconds: (night.stages.deep + night.stages.rem) * 60,
+            efficiency: efficiency,
+            motionEpochCount: night.motionEpochs.count,
+            gravitySparse: night.gravitySparse)
+    }
+
+    /// Pure presentation seam for the on-device Rest read. A populated motion array proves only that a
+    /// trace could be gridded; it does not prove dense source coverage (two raw gravity samples can expand
+    /// across hundreds of epochs). Only the engine's non-nil `gravitySparse` verdict establishes known
+    /// coverage. Legacy rows with no verdict remain limited instead of being silently upgraded.
+    static func localRestAssessment(hasSession: Bool, hasStagedSleep: Bool,
+                                    asleepSeconds: Double, restorativeSeconds: Double,
+                                    efficiency: Double, motionEpochCount: Int,
+                                    gravitySparse: Bool?) -> ScoreConfidence.RestAssessment {
+        ScoreConfidence.restAssessment(
+            hasSession: hasSession,
+            hasStagedSleep: hasStagedSleep,
+            asleepSeconds: asleepSeconds,
+            restorativeSeconds: restorativeSeconds,
+            efficiency: efficiency,
+            gravitySparse: gravitySparse == true,
+            motionUnavailable: motionEpochCount == 0 || gravitySparse == nil)
+    }
+
+    /// Combine the engine verdicts for every fragment that contributes to a merged main night. Any known
+    /// sparse fragment limits the whole read; dense is returned only when every fragment is explicitly
+    /// known dense. A missing legacy/imported verdict therefore stays unknown (`nil`).
+    static func mergedGravitySparse(_ sessions: [CachedSleepSession]) -> Bool? {
+        guard !sessions.isEmpty else { return nil }
+        if sessions.contains(where: { $0.gravitySparse == true }) { return true }
+        guard sessions.allSatisfy({ $0.gravitySparse == false }) else { return nil }
+        return false
+    }
+
+    private func isImportedPerformance(for night: Night) -> Bool {
+        let wakeDay = Repository.localDayKey(Date(timeIntervalSince1970: TimeInterval(night.session.endTs)))
+        return repo.importedSleep[wakeDay]?.performancePct != nil
+    }
+
+    private func restConfidenceLabel(_ confidence: ScoreConfidence) -> LocalizedStringKey {
+        switch confidence {
+        case .calibrating: return "Calibrating"
+        case .building: return "Limited evidence"
+        case .solid: return "Higher confidence"
+        }
+    }
+
+    private func restLimitationText(_ limitation: ScoreConfidence.RestLimitation?) -> String? {
+        switch limitation {
+        case .noSession: return String(localized: "No complete sleep session supports this read yet.")
+        case .noStagedSleep: return String(localized: "Stage detail is unavailable, so read the score as an estimate.")
+        case .motionUnavailable: return String(localized: "Movement detail is unavailable for this night, limiting confidence in on-device stages and Rest.")
+        case .sparseMotion: return String(localized: "Motion coverage was sparse, limiting confidence in on-device stages and Rest.")
+        case .implausibleStageMix: return String(localized: "The stage mix may be an estimation miss; interpret deep and REM with care.")
+        case nil: return nil
         }
     }
 
@@ -758,11 +856,11 @@ struct SleepView: View {
                 MotionTrace(epochs: night.motionEpochs, height: 40, tint: StrandPalette.restColor)
                     .padding(.horizontal, 10)
             } else {
-                Text("No movement detail for this night")
+                Text("Movement detail is unavailable for this night. On-device stages and Rest have limited confidence.")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
-                    .accessibilityLabel(Text("No movement detail recorded for this night"))
+                    .accessibilityLabel(Text("Movement detail is unavailable for this night. On-device stages and Rest have limited confidence."))
             }
         }
         .accessibilityElement(children: .contain)
@@ -2150,7 +2248,8 @@ struct SleepView: View {
                                        restingHr: nil, avgHrv: nil, stagesJSON: nil)
         let realSegs = segs.count >= 2 ? segs.sorted { $0.start < $1.start } : nil
         return Night(session: synth, stages: stages, realSegments: realSegs, sourceBlocks: sessions,
-                     motionEpochs: motion, habitualMidsleepSec: habitualMidsleepSec)
+                     motionEpochs: motion, gravitySparse: Self.mergedGravitySparse(Array(group)),
+                     habitualMidsleepSec: habitualMidsleepSec)
     }
 
     /// The real stored blocks composing the day at `offset` (for the stage-less stub Night, so its edit
@@ -2829,6 +2928,10 @@ private struct Night {
     /// (older rows) — the Sleep tab then shows an honest empty state instead of a fabricated zero trace.
     /// This is read off the already-resolved group, NOT a re-resolution of the night.
     var motionEpochs: [Double] = []
+
+    /// Canonical motion-density verdict persisted by AnalyticsEngine for the fragments composing this
+    /// main night. `nil` means coverage provenance is unknown (legacy/imported/manual row), not dense.
+    var gravitySparse: Bool? = nil
 
     /// The LEARNED habitual midsleep (local time-of-day seconds) the owning view loaded for the user — the
     /// SAME value the engine threaded into the daily total — so `editTarget` resolves the SAME main block

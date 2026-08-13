@@ -102,6 +102,8 @@ final class BiofeedbackController: ObservableObject {
     private var secondTimer: AnyCancellable?
     /// A repeating driver for L2 (it recomputes the interval each pulse rather than a fixed cue list).
     private var calmTick: DispatchWorkItem?
+    /// Balanced AppModel suppression lease while this controller owns a running biofeedback session.
+    private var suppressesStressNudges = false
     /// The sweep's live R-R subscription (L1) — held so stop() tears it down cleanly.
     private var sweepRRSub: AnyCancellable?
 
@@ -153,6 +155,10 @@ final class BiofeedbackController: ObservableObject {
         clearSchedule()
         model.stopHaptics()
         ScreenIdle.keepAwake(false)
+        if suppressesStressNudges {
+            model.setStressNudgeSessionActive(false)
+            suppressesStressNudges = false
+        }
         running = false
         session = .none
         sweepLabel = nil
@@ -169,6 +175,8 @@ final class BiofeedbackController: ObservableObject {
         stop()
         session = .resonanceSession(bpm: bpm)
         running = true
+        model.setStressNudgeSessionActive(true)
+        suppressesStressNudges = true
         ScreenIdle.keepAwake(true)
         startSecondTimer()
         walkCues(BreathPacer.schedule(bpm: bpm, cycles: cycles)) { [weak self] in
@@ -210,6 +218,8 @@ final class BiofeedbackController: ObservableObject {
         stop()
         let paces = quick ? ResonanceEngine.quickSweepPaces : ResonanceEngine.fullSweepPaces
         running = true
+        model.setStressNudgeSessionActive(true)
+        suppressesStressNudges = true
         ScreenIdle.keepAwake(true)
         startSecondTimer()
         sweepProgress = 0
@@ -282,6 +292,8 @@ final class BiofeedbackController: ObservableObject {
         }
         session = .calmMe
         running = true
+        model.setStressNudgeSessionActive(true)
+        suppressesStressNudges = true
         calmStartHR = h0
         calmOutcome = nil
         calmDidNotFall = false

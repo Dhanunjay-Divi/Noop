@@ -66,8 +66,9 @@ public struct OnboardingWizard: View {
             VStack(spacing: 0) {
                 // Top chrome: a small back affordance + a step counter.
                 topBar
-                    .padding(.horizontal, 36)
-                    .padding(.top, 42)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 10)
+                    .padding(.bottom, 6)
 
                 // The paged content.
                 ZStack {
@@ -89,18 +90,30 @@ public struct OnboardingWizard: View {
                 .frame(maxWidth: 620, maxHeight: .infinity)
                 .transition(stepTransition)
                 .id(step)                       // re-runs the transition per step
-                .padding(.horizontal, 40)
-
-                // Bottom: the thread (progress) + the forward CTA.
-                bottomBar
-                    .padding(.horizontal, 40)
-                    .padding(.top, 24)
-                    .padding(.bottom, 36)
+                .padding(.horizontal, 20)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(StrandPalette.surfaceBase.ignoresSafeArea())
+        // Keep the progress + primary action in the safe area instead of hard-padding it inside the
+        // screen. SwiftUI raises this inset above the keyboard, while the active StepShell remains
+        // scrollable behind it — no clipped fields or unreachable CTA on compact phones.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            bottomBar
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+                .background(
+                    LinearGradient(
+                        colors: [StrandPalette.surfaceBase.opacity(0),
+                                 StrandPalette.surfaceBase.opacity(0.96)],
+                        startPoint: .top,
+                        endPoint: .center
+                    )
+                    .ignoresSafeArea()
+                )
+        }
         // Reduce Motion: leave the ambient bloom at its resting frame (no breathing).
         .onAppear { if !reduceMotion { glow = true } }
         // Isolated live observation — a hidden watcher slides Scan → celebration on bond
@@ -171,7 +184,7 @@ public struct OnboardingWizard: View {
 
     @ViewBuilder
     private var bottomBar: some View {
-        VStack(spacing: 28) {
+        VStack(spacing: 16) {
             ThreadProgress(progress: progress)
                 .frame(height: 3)
                 .frame(maxWidth: 620)
@@ -1387,8 +1400,12 @@ private struct StepShell<Content: View>: View {
                 content()
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 24)
+            .padding(.top, 14)
+            .padding(.bottom, 24)
         }
+        #if os(iOS)
+        .scrollDismissesKeyboard(.interactively)
+        #endif
     }
 }
 

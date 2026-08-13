@@ -141,15 +141,25 @@ final class MoreListParityTests: XCTestCase {
     func testiPhoneTabBarIsAdaptiveGlass() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
 
-        XCTAssertTrue(shell.contains(".simultaneousGesture(adaptiveTabBarGesture)"))
+        XCTAssertTrue(shell.contains(".simultaneousGesture(scrollInteractionGesture)"))
         XCTAssertTrue(shell.contains("abs(dy) > abs(dx) * 1.15"),
-                      "Horizontal charts and Back gestures must not collapse the bar.")
-        XCTAssertTrue(shell.contains("tabBarDragTracker.accumulator <= -14"))
-        XCTAssertTrue(shell.contains("tabBarDragTracker.accumulator >= 10"))
+                      "Horizontal charts and Back gestures must not consume the scroll interaction budget.")
+        XCTAssertTrue(shell.contains("reportScrollPosition(offset, for: tag)"),
+                      "Primary tabs must drive chrome from the real ScrollView top marker.")
+        XCTAssertTrue(shell.contains("offset <= -36, tracker.directionalTravel <= -18"),
+                      "Compaction needs both page progress and directional hysteresis.")
+        XCTAssertTrue(shell.contains("tracker.directionalTravel >= 26"),
+                      "Expansion needs a deliberate return, not a one-frame bounce.")
+        XCTAssertTrue(shell.contains("offset >= -10"),
+                      "Returning to the page's top band must always restore labels.")
         XCTAssertTrue(shell.contains("@GestureState private var contentGestureActive"),
                       "Per-sample drag bookkeeping must not invalidate the whole tab shell.")
-        XCTAssertTrue(shell.contains(".environment(\\.liquidInteractionInProgress, contentGestureActive)"),
-                      "Decorative liquid clocks should yield the frame budget during vertical scrolling.")
+        XCTAssertTrue(shell.contains("contentGestureActive || scrollMotionActive"),
+                      "Decorative liquid clocks should yield through both interaction and deceleration.")
+        XCTAssertTrue(shell.contains("180_000_000"),
+                      "Scroll motion needs a short idle debounce so liquid clocks do not resume mid-deceleration.")
+        XCTAssertTrue(shell.contains("FloatingTabBar.expandedReservedHeight"),
+                      "The first frame must reserve the expanded bar before its geometry preference arrives.")
         XCTAssertTrue(shell.contains("height > measuredTabBarHeight + 0.5"),
                       "The shell must retain its largest reservation while the bar compacts.")
         XCTAssertTrue(shell.contains("--demo-compact-tab-bar"),
@@ -169,6 +179,16 @@ final class MoreListParityTests: XCTestCase {
                       "Accessibility Dynamic Type must retain visible labels.")
         XCTAssertTrue(shell.contains(".frame(minHeight: 44)"))
         XCTAssertTrue(shell.contains(".accessibilityLabel(item.title)"))
+    }
+
+    func testiPhoneMoreHasBoundedQuickAccess() throws {
+        let shell = try sourceText("StrandiOS/App/RootTabView.swift")
+        XCTAssertTrue(shell.contains("moreQuickAccess\n                moreSection(\"Insights\")"),
+                      "Quick Access should lead the More index before the complete grouped catalogue.")
+        XCTAssertTrue(shell.contains("ForEach(MoreSectionPrefs.quickAccess"),
+                      "The rendered shortcuts must use the tested shared four-item contract.")
+        XCTAssertTrue(shell.contains("MoreQuickAccessLabel(item: item)"),
+                      "Keep the tile view split out so RootTabView remains cheap to type-check.")
     }
 
     /// ObsidianFlow is intentionally adaptive: dark hardware in Dark mode, pearl relief in Light mode.

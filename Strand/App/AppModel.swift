@@ -183,6 +183,10 @@ final class AppModel: ObservableObject {
     // via BiofeedbackPrefs so a relaunch can't re-fire), carried verbatim between evaluations.
     private var rrBuf: [Int] = []
     private var stressState = BiofeedbackPrefs.loadStressState()
+    /// Cross-surface truth gate for automatic stress nudges. View-owned workout/session/breathe flows
+    /// increment/decrement this around their real running lifetime; a pending card remains a separate gate.
+    /// Ref-counting is intentional because multiple explicit sessions must not clear each other's block.
+    private var stressNudgeSessionCount = 0
 
     /// Import source currently writing to the local store, if any.
     @Published private var activeImportSource: DataSourceImportKind?
@@ -315,9 +319,15 @@ final class AppModel: ObservableObject {
                 Task { [weak self] in await self?.ingestWeightScaleCapture(capture) }
             }
             .store(in: &hrCancellables)
-        // Smooth HR centrally so it's solid everywhere it's shown.
-        live.$heartRate.sink { [weak self] _ in self?.ingestHR() }.store(in: &hrCancellables)
-        live.$rr.sink { [weak self] _ in self?.ingestHR() }.store(in: &hrCancellables)
+        // Smooth HR centrally so it's solid everywhere it's shown. Only an R-R publication may advance
+        // the stress detector: an HR-only callback can otherwise append the same cached R-R packet again
+        // and counterfeit the detector's distinct-window warm-up.
+        live.$heartRate.sink { [weak self] _ in
+            self?.ingestHR(shouldEvaluateStress: false)
+        }.store(in: &hrCancellables)
+        live.$rr.sink { [weak self] _ in
+            self?.ingestHR(shouldEvaluateStress: true)
+        }.store(in: &hrCancellables)
         // Capture a workout point only for a genuine accepted HR packet. The LiveState event carries a
         // monotonic identity + receipt timestamp, unlike @Published display state, so an R-R republish,
         // timer tick, or cached BPM after disconnect cannot add duplicate/synthetic strain samples.
@@ -637,12 +647,20 @@ final class AppModel: ObservableObject {
 
     private func processAutomaticWorkoutAfterSync() async {
         let mode = PuffinExperiment.autoWorkoutMode
-        guard mode != .off, let candidate = await repo.autoDetectCandidate() else { return }
+        guard mode != .off else {
+            AutoWorkoutNotifications.clear()
+            return
+        }
+        guard let candidate = await repo.autoDetectCandidate() else {
+            AutoWorkoutNotifications.clear()
+            return
+        }
         guard AutoWorkoutBackgroundPolicy.shouldProcess(
             candidate,
             nowSec: Int(Date().timeIntervalSince1970)
         ) else {
             // Borderline and older candidates remain visible on Today without interrupting the user.
+            AutoWorkoutNotifications.clear()
             return
         }
         if mode == .autoSave, AutoWorkoutAutomationPolicy.shouldAutoSave(candidate) {
@@ -657,6 +675,13 @@ final class AppModel: ObservableObject {
         }
         await AutoWorkoutNotifications.postIfAuthorized(
             startSec: candidate.startSec, endSec: candidate.endSec)
+    }
+
+    /// Repairs notification state at launch/foreground as well as after a backfill. Detection remains
+    /// quiet inside Today when alerts are off; an older build's delivered suggestion is removed rather
+    /// than lingering after its candidate, mode, or explicit notification opt-in is no longer current.
+    func reconcileAutomaticWorkoutSurfaces() async {
+        await processAutomaticWorkoutAfterSync()
     }
 
     /// Canonical ingest for one Bluetooth SIG Weight Measurement. This is deliberately separate from
@@ -714,7 +739,7 @@ final class AppModel: ObservableObject {
     /// Fold a fresh reading into the smoothing window and republish a stable bpm.
     /// Prefers the strap's reported HR; falls back to 60000/R-R. Clamps to a plausible
     /// 30–220 range (rejects 0 / garbage spikes) and publishes the window MEDIAN.
-    private func ingestHR() {
+    private func ingestHR(shouldEvaluateStress: Bool) {
         var inst: Double?
         if let hr = live.heartRate, hr >= 30, hr <= 220 {
             inst = Double(hr)
@@ -740,7 +765,7 @@ final class AppModel: ObservableObject {
         // unconditional assign re-renders every bpm observer (Live, menu bar, widgets) for nothing.
         let smoothed = vals.isEmpty ? nil : Int(vals[vals.count / 2].rounded())
         if bpm != smoothed { bpm = smoothed }
-        evaluateStress()
+        if shouldEvaluateStress { evaluateStress() }
         // Hydration's durable lane is the scheduled OS notification. The optional strap lane is
         // deliberately evaluated only while fresh HR packets are flowing, then additionally gated by
         // connected + worn + bonded + encrypted state. This makes the one-buzz behavior useful without
@@ -1056,7 +1081,8 @@ final class AppModel: ObservableObject {
     }
 
     /// The unit-tested `StressOnsetDetector` decides whether to offer a 60-s guided breath. On a fresh,
-    /// non-metabolic HRV dip while the user is still, it fires a single confirming buzz and posts a
+    /// short-window HRV dip below a warmed personal baseline, with observed low motion, it fires a single
+    /// confirming buzz and posts a
     /// passive nudge to `stressNudgeCenter`. The detector carries replay-safe state (de-dup + slow
     /// baseline + rate limit), persisted via `BiofeedbackPrefs` so a relaunch can't re-fire. Honest /
     /// non-clinical: "stress" is an autonomic proxy vs the user's own baseline, never a diagnosis.
@@ -1067,14 +1093,19 @@ final class AppModel: ObservableObject {
         if rrBuf.count > 120 { rrBuf.removeFirst(rrBuf.count - 120) }
 
         // Inert unless the master toggle is on; the engine owns every gate (auto-nudge, exercise gate,
-        // quiet hours, rate limit, edge).
+        // motion evidence, baseline warm-up, quiet hours, rate limit, edge).
         let cfg = BiofeedbackPrefs.stressConfig()
         guard cfg.enabled, live.bonded, live.worn else { return }
+        // The current live transport does not provide a trustworthy contemporaneous motion sample here.
+        // Pass nil explicitly; the detector fails closed rather than claiming the wearer was still.
+        // A future source may wire a real, timestamp-validated activity value into this seam.
+        let recentMotionG: Double? = nil
         let decision = StressOnsetDetector.evaluate(
             rrBuffer: rrBuf,
             currentHR: bpm.map(Double.init),
-            recentMotionG: nil,   // wrist gravity is offloaded + lags live; the resting-HR band is the gate
-            sessionActive: stressNudgeCenter.pending != nil,   // never stack a fresh nudge over a live one
+            recentMotionG: recentMotionG,
+            sessionActive: activeWorkout != nil || stressNudgeSessionCount > 0
+                || stressNudgeCenter.pending != nil,
             state: stressState,
             config: cfg,
             nowSec: Int(Date().timeIntervalSince1970),
@@ -1084,7 +1115,17 @@ final class AppModel: ObservableObject {
         guard decision.shouldNudge else { return }
         if canBuzz { buzz(loops: UInt8(clamping: decision.buzzLoops)) }
         stressNudgeCenter.present(fastRMSSD: decision.fastRMSSD, baselineRMSSD: decision.baselineRMSSD)
-        live.append(log: "Stress check-in , HRV dipped while still")
+        live.append(log: "Stress check-in · short-window HRV moved below recent baseline")
+    }
+
+    /// Register/unregister a user-started coaching or breathing session as an automatic stress-nudge
+    /// suppressor. Calls are balanced by each session owner; clamping makes a duplicate teardown harmless.
+    func setStressNudgeSessionActive(_ active: Bool) {
+        if active {
+            stressNudgeSessionCount += 1
+        } else {
+            stressNudgeSessionCount = max(0, stressNudgeSessionCount - 1)
+        }
     }
 
     /// Whether the encrypted channel is up so a confirming buzz can actually fire (the command

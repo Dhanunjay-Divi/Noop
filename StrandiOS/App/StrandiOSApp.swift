@@ -166,19 +166,20 @@ struct StrandiOSApp: App {
                 // fixed-geometry tiles/gauges stay legible at the largest accessibility sizes rather than
                 // clipping; the common Larger-Text range still scales fully.
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-                .onReceive(model.live.$heartRate) { _ in
+                .onReceive(model.live.heartRateSamplePublisher) { sample in
                     // #911: anchor the Live Activity on the SAME shared `Repository.widgetAnchor` the
                     // Home/Lock widget and the watch snapshot use, so this fourth surface can't drift to a
                     // different day at the rollover (it previously read `days.last(where: recovery != nil)`,
                     // which kept pointing at yesterday's scored row after Today had moved on).
                     let day = Repository.widgetAnchor(days: model.repo.days)
                     liveActivity.update(
-                        bpm: model.live.connected ? (model.bpm ?? model.live.heartRate) : nil,
+                        bpm: model.live.connected ? sample.bpm : nil,
                         recovery: liveActivityShowsCharge
                             ? day?.recovery.map { Int($0.rounded()) } : nil,
                         connected: model.live.connected,
                         effort: liveActivityShowsEffort
-                            ? day?.strain.map { Int($0.rounded()) } : nil
+                            ? day?.strain.map { Int($0.rounded()) } : nil,
+                        observedAt: sample.receivedAt
                     )
                 }
                 // End the Live Activity the moment the link drops, even if no further HR tick arrives.
@@ -192,7 +193,8 @@ struct StrandiOSApp: App {
                             ? day?.recovery.map { Int($0.rounded()) } : nil,
                         connected: isConnected,
                         effort: liveActivityShowsEffort
-                            ? day?.strain.map { Int($0.rounded()) } : nil
+                            ? day?.strain.map { Int($0.rounded()) } : nil,
+                        observedAt: model.live.heartRateSample?.receivedAt
                     )
                 }
                 .onChange(of: liveActivityEnabled, initial: true) { _, enabled in
@@ -207,7 +209,8 @@ struct StrandiOSApp: App {
                         recovery: showCharge ? day?.recovery.map { Int($0.rounded()) } : nil,
                         connected: model.live.connected,
                         effort: liveActivityShowsEffort
-                            ? day?.strain.map { Int($0.rounded()) } : nil
+                            ? day?.strain.map { Int($0.rounded()) } : nil,
+                        observedAt: model.live.heartRateSample?.receivedAt
                     )
                 }
                 .onChange(of: liveActivityShowsEffort) { _, showEffort in
@@ -218,7 +221,8 @@ struct StrandiOSApp: App {
                         recovery: liveActivityShowsCharge
                             ? day?.recovery.map { Int($0.rounded()) } : nil,
                         connected: model.live.connected,
-                        effort: showEffort ? day?.strain.map { Int($0.rounded()) } : nil
+                        effort: showEffort ? day?.strain.map { Int($0.rounded()) } : nil,
+                        observedAt: model.live.heartRateSample?.receivedAt
                     )
                 }
                 // #911/#759: republish the Home/Lock-Screen widget whenever the dashboard caches actually
@@ -304,6 +308,16 @@ struct StrandiOSApp: App {
                 // supported, so this is safe on every device/simulator combination.
                 .task {
                     watch.activate()
+                    liveActivity.reconcile(
+                        bpm: model.bpm ?? model.live.heartRate,
+                        recovery: liveActivityShowsCharge
+                            ? Repository.widgetAnchor(days: model.repo.days)?.recovery.map { Int($0.rounded()) } : nil,
+                        connected: model.live.connected,
+                        effort: liveActivityShowsEffort
+                            ? Repository.widgetAnchor(days: model.repo.days)?.strain.map { Int($0.rounded()) } : nil,
+                        observedAt: model.live.heartRateSample?.receivedAt
+                    )
+                    await model.reconcileAutomaticWorkoutSurfaces()
                     await watch.pushLatest(from: model)
                 }
         }
@@ -335,6 +349,16 @@ struct StrandiOSApp: App {
                 // (BackfillPolicy.shouldRun's .foreground case), so this is a safe no-op on rapid re-opens.
                 model.ble.requestSync(.foreground)
                 Task {
+                    liveActivity.reconcile(
+                        bpm: model.bpm ?? model.live.heartRate,
+                        recovery: liveActivityShowsCharge
+                            ? Repository.widgetAnchor(days: model.repo.days)?.recovery.map { Int($0.rounded()) } : nil,
+                        connected: model.live.connected,
+                        effort: liveActivityShowsEffort
+                            ? Repository.widgetAnchor(days: model.repo.days)?.strain.map { Int($0.rounded()) } : nil,
+                        observedAt: model.live.heartRateSample?.receivedAt
+                    )
+                    await model.reconcileAutomaticWorkoutSurfaces()
                     health.refreshAuthIfPreviouslyGranted()
                     await health.foregroundCatchUp()
                     await WidgetSnapshot.publish(from: model)

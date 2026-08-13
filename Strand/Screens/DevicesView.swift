@@ -98,11 +98,15 @@ private struct DevicesContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
-            // UPPERCASE overline section header, matching the liquid Today. Counts the paired bands so the
-            // multi-WHOOP reality reads at a glance.
-            sectionHead("YOUR BANDS", trailing: activeDevices.count == 1
-                        ? String(localized: "1 paired")
-                        : String(localized: "\(activeDevices.count) paired"))
+            if activeDevices.isEmpty {
+                emptyDevicesHero
+            } else {
+                // UPPERCASE overline section header, matching the liquid Today. Counts the paired bands so
+                // the multi-device reality reads at a glance without pretending an import is a live band.
+                sectionHead("YOUR DEVICES", trailing: activeDevices.count == 1
+                            ? String(localized: "1 paired")
+                            : String(localized: "\(activeDevices.count) paired"))
+            }
             ForEach(Array(activeDevices.enumerated()), id: \.element.id) { idx, device in
                 // Shared read-only probe gate (Test Centre → Connection + a live WHOOP), hoisted so the two
                 // probe closures below don't each re-inline a 4-term && chain — which tips the iOS Swift
@@ -164,8 +168,10 @@ private struct DevicesContent: View {
                     .staggeredAppear(index: idx)
             }
 
-            addButton
-                .staggeredAppear(index: activeDevices.count)
+            if !activeDevices.isEmpty {
+                addButton
+                    .staggeredAppear(index: activeDevices.count)
+            }
 
             if !removedDevices.isEmpty { removedSection }
 
@@ -306,6 +312,44 @@ private struct DevicesContent: View {
             showAddWizard = true
         }
         .accessibilityLabel("Add a device")
+    }
+
+    /// A real zero-device state. A blank section plus a detached Add button looked like the registry had
+    /// failed to load; this card states the state, the benefit, and the next action in one accessible hero.
+    private var emptyDevicesHero: some View {
+        StrandCard(padding: 22, tint: StrandPalette.accent) {
+            VStack(spacing: 18) {
+                ZStack {
+                    Circle()
+                        .fill(StrandPalette.accent.opacity(0.13))
+                        .frame(width: 78, height: 78)
+                    Image(systemName: "wave.3.right.circle.fill")
+                        .font(.system(size: 36, weight: .regular))
+                        .foregroundStyle(StrandPalette.accent)
+                        .accessibilityHidden(true)
+                }
+
+                VStack(spacing: 6) {
+                    Text("Add your first device")
+                        .font(StrandFont.title2)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .multilineTextAlignment(.center)
+                    Text("Connect a WHOOP, Apple Watch, heart-rate strap, ring, or supported gym machine. NOOP will show only the signals that device actually provides.")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 430)
+                }
+
+                NoopButton("Add a device", systemImage: "plus", kind: .primary, fullWidth: true) {
+                    showAddWizard = true
+                }
+                .accessibilityHint("Opens the guided device setup")
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .staggeredAppear(index: 0)
     }
 
     private var removedSection: some View {
@@ -457,6 +501,7 @@ private struct DeviceCard: View {
     /// Removed-section affordances (re-add as active / delete its data).
     var onReAdd: (() -> Void)? = nil
     var onDeleteData: (() -> Void)? = nil
+    @State private var showTechnicalDetails = false
 
     /// The card's visible content. The required `body` wraps this in the whole-card liquid press button +
     /// the ⋮ menu overlay.
@@ -486,14 +531,6 @@ private struct DeviceCard: View {
                     statePill
                 }
 
-                // Honest local-takeover state row for an adopted Oura ring that is paired but not the
-                // active+connected source right now. States the single-owner reality plainly (if the ring
-                // was reset again or re-claimed in the Oura app, NOOP no longer owns it) without faking a
-                // live reading. Suppressed for the active+connected ring and for removed rings.
-                if device.sourceKind == .oura && !isLiveConnected && device.status == .paired {
-                    ouraLocalStateNote
-                }
-
                 // What this device CAPTURES — honest, per-model (not the generic stored set, which would
                 // mislabel e.g. a "Blood oxygen" chip when no SpO₂ % ever comes off the strap).
                 capabilityRow(symbol: "waveform.path.ecg", text: profile.captures,
@@ -501,14 +538,6 @@ private struct DeviceCard: View {
                 // What NOOP USES it for — the scores/screens this device drives.
                 capabilityRow(symbol: "bolt.fill", text: profile.powers,
                               tint: StrandPalette.textSecondary)
-                // Honest footnote: the "*" estimates + the SpO₂/steps caveats.
-                if !profile.footnote.isEmpty {
-                    Text(profile.footnote)
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
                 // #221: the full #78 pairing-refusal guidance, self-service right on the card instead of
                 // buried in the strap log — only when the bond was genuinely refused.
                 if bondRefused, let hint = pairingHint {
@@ -525,63 +554,30 @@ private struct DeviceCard: View {
                     batteryTube(pct)
                 }
 
-                // #987: strap clock state for the active+connected strap - "clock latched" + frame
-                // freshness, with the plain amber 1970/71 warning when the RTC was never set (the strap
-                // banks no history in that state, which otherwise looks like a NOOP sync bug).
-                if let clockLine = liveClockLine {
-                    Text(clockLine)
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                        .accessibilityLabel(clockLine)
-                }
-                if let warning = liveClockWarning {
-                    Text(warning)
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.statusWarning)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityLabel(warning)
-                }
-
                 HStack(spacing: 6) {
                     Text(lastSeenLine)
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
-                    // Firmware version for the active+connected strap, read on connect.
-                    if let fw = liveFirmware {
-                        Text("·").font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
-                        Text("FW \(fw)")
-                            .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.textSecondary)
-                            .accessibilityLabel("Firmware version \(fw)")
-                    }
-                    // #592: strap pack voltage beside the percent, when the battery event has reported it.
-                    if let mv = liveBatteryMv {
-                        Text("·").font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
-                        Text("\(Double(mv) / 1000.0, specifier: "%.2f") V")
-                            .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.textSecondary)
-                            .accessibilityLabel("Battery voltage \(Double(mv) / 1000.0, specifier: "%.2f") volts")
-                    }
-                    if let layout = liveHistoryLayout {
-                        Text("·").font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
-                        Text("v\(layout) history")
-                            .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.textSecondary)
-                            .accessibilityLabel("Historical record layout v\(layout)")
-                    }
-                    // The whole-card tap hint sits on the left; the ⋮ menu is a bottom-trailing overlay above
-                    // the press button (so its own taps win). No hint on the active card (no make-active),
-                    // nor on a removed card whose re-add is menu-only.
-                    if let hint = primaryActionHint {
-                        Text("·").font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
-                        Text(hint)
-                            .font(StrandFont.overlineScaled(10)).tracking(1.0)
-                            .foregroundStyle(StrandPalette.accent)
-                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(StrandPalette.accent)
-                            .accessibilityHidden(true)
-                    }
                     Spacer(minLength: 44)   // leave room for the ⋮ menu overlay at the bottom-trailing
+                }
+
+                technicalDisclosure
+
+                if let action = primaryAction, let hint = primaryActionHint {
+                    Button(action: action) {
+                        HStack(spacing: 7) {
+                            Text(hint)
+                                .font(StrandFont.subhead)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .accessibilityHidden(true)
+                        }
+                        .foregroundStyle(StrandPalette.accent)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -589,19 +585,67 @@ private struct DeviceCard: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// The whole-card liquid press wrapper: tapping the card performs its PRIMARY action (make active for a
-    /// paired band, re-add for a removed one), with the settle-in `LiquidPressStyle`. The ⋮ menu is layered
-    /// on top as an overlay so it captures its own taps; cards with no primary action (the active one, or a
-    /// removed one whose re-add is menu-only) fall back to a plain container so nothing taps by accident.
-    var body: some View {
-        Group {
-            if let action = primaryAction {
-                Button(action: action) { cardContent }
-                    .buttonStyle(LiquidPressStyle())
-            } else {
-                cardContent
+    /// Firmware, voltage, clock correlation, record layout and model caveats are valuable when debugging,
+    /// but they should not compete with connection state on every visit. Keep them one explicit tap away.
+    private var technicalDisclosure: some View {
+        DisclosureGroup(isExpanded: $showTechnicalDetails) {
+            VStack(alignment: .leading, spacing: 9) {
+                if device.sourceKind == .oura && !isLiveConnected && device.status == .paired {
+                    ouraLocalStateNote
+                }
+                if !profile.footnote.isEmpty {
+                    technicalLine(symbol: "info.circle", text: profile.footnote)
+                }
+                if let fw = liveFirmware {
+                    technicalLine(symbol: "cpu", text: String(localized: "Firmware \(fw)"))
+                }
+                if let mv = liveBatteryMv {
+                    technicalLine(symbol: "bolt", text: String(localized: "Battery voltage \(Double(mv) / 1000.0, specifier: "%.2f") V"))
+                }
+                if let layout = liveHistoryLayout {
+                    technicalLine(symbol: "externaldrive", text: String(localized: "History record layout v\(layout)"))
+                }
+                if let clockLine = liveClockLine {
+                    technicalLine(symbol: "clock.arrow.2.circlepath", text: clockLine)
+                }
+                if let warning = liveClockWarning {
+                    technicalLine(symbol: "exclamationmark.triangle", text: warning,
+                                  tint: StrandPalette.statusWarning)
+                }
             }
+            .padding(.top, 10)
+        } label: {
+            Text("Technical details")
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textSecondary)
         }
+        .tint(StrandPalette.textSecondary)
+        .accessibilityHint(showTechnicalDetails
+                           ? "Hides firmware, protocol and sensor caveats"
+                           : "Shows firmware, protocol and sensor caveats")
+    }
+
+    private func technicalLine(symbol: String, text: String,
+                               tint: Color = StrandPalette.textTertiary) -> some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: symbol)
+                .font(StrandFont.caption)
+                .foregroundStyle(tint)
+                .frame(width: 15)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(StrandFont.footnote)
+                .foregroundStyle(tint)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Actions stay as peer controls inside/on top of the card. Wrapping the entire card in a Button would
+    /// nest the Technical details disclosure inside that Button, causing disclosure taps to activate the
+    /// device instead of opening diagnostics.
+    var body: some View {
+        cardContent
         .overlay(alignment: .bottomTrailing) {
             actionsMenu
                 .padding(18)
@@ -620,8 +664,7 @@ private struct DeviceCard: View {
         return nil
     }
 
-    /// Short accent hint mirroring the primary tap, shown in the footer row. nil when the card has no
-    /// whole-card action (active band / menu-only removed band / I-1 import source).
+    /// Short accent label for the explicit primary action. nil when the card has no primary action.
     private var primaryActionHint: String? {
         if device.isImportSource { return nil }
         if device.status == .archived { return onReAdd == nil ? nil : String(localized: "Make active") }
@@ -899,10 +942,10 @@ struct DeviceCapabilityProfile {
         }
         // Legacy / unknown WHOOP (the seeded device, model just "WHOOP") — show only the common-to-all set.
         return DeviceCapabilityProfile(
-            displayModel: "WHOOP",
+            displayModel: String(localized: "WHOOP · model pending"),
             captures: String(localized: "Heart rate · HRV · Skin temp* · Resp rate* · Sleep · Strain · Battery"),
             powers: whoopPowers,
-            footnote: String(localized: "Exact model unknown. Shows what every WHOOP can do. * on-device estimate · no SpO₂ % off the strap (import a WHOOP CSV for that)."))
+            footnote: String(localized: "NOOP has not identified the exact WHOOP model yet, so this lists only signals common to supported WHOOP bands. * on-device estimate · no SpO₂ % off the strap (import a WHOOP CSV for that)."))
     }
 }
 

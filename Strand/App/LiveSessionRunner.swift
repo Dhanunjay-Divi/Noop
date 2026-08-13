@@ -78,6 +78,8 @@ final class LiveSessionRunner: ObservableObject {
 
     private var engine: LiveSessionEngine?
     private var timer: Timer?
+    /// Balanced AppModel suppression lease while this coaching session is running.
+    private var suppressesStressNudges = false
     /// Sample-arrival tick (background survival) — see the comment where it's armed in `start`.
     private var hrSink: AnyCancellable?
     private var model: AppModel?
@@ -111,6 +113,8 @@ final class LiveSessionRunner: ObservableObject {
         self.model = model
         self.repo = repo
         self.ble = ble
+        model.setStressNudgeSessionActive(true)
+        suppressesStressNudges = true
 
         // Resting HR: today's own, else the most recent banked night's. The engine needs *a* baseline
         // to place the band, so a never-slept-yet install gets a deliberately ordinary 60 — the band it
@@ -166,6 +170,10 @@ final class LiveSessionRunner: ObservableObject {
         timer = nil
         hrSink?.cancel()
         hrSink = nil
+        if suppressesStressNudges {
+            model?.setStressNudgeSessionActive(false)
+            suppressesStressNudges = false
+        }
         model?.stopRealtimeHR()
 
         // Prefer the engine's live band (it may have drifted its ceiling on a strong day) over the base.

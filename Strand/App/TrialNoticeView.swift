@@ -8,6 +8,24 @@ import StrandDesign
 enum TrialNoticePolicy {
     static let acknowledgedBuildStorageKey = "noop.lastAcknowledgedTrialBuild"
 
+    enum DistributionChannel: Equatable {
+        case testFlight
+        case privatePreview
+    }
+
+    /// TestFlight receipts live in `sandboxReceipt`; an Xcode/AltStore/SideStore developer install
+    /// does not. Do not label a Personal Team build as TestFlight when the user never received one.
+    static func distributionChannel(receiptURL: URL? = Bundle.main.appStoreReceiptURL) -> DistributionChannel {
+        receiptURL?.lastPathComponent == "sandboxReceipt" ? .testFlight : .privatePreview
+    }
+
+    static func channelLabel(_ channel: DistributionChannel) -> String {
+        switch channel {
+        case .testFlight: return String(localized: "TESTFLIGHT TRIAL")
+        case .privatePreview: return String(localized: "PRIVATE PREVIEW")
+        }
+    }
+
     /// Stable, schema-prefixed value stored by `iOSRootView`. Bundle version components are restricted by
     /// Apple to version-like text; trimming here also prevents an accidentally blank build setting from
     /// creating a marker that changes between launches.
@@ -115,7 +133,9 @@ struct TrialNoticeView: View {
 
                     BrandMark(size: 88)
 
-                    Text("TESTFLIGHT TRIAL")
+                    Text(TrialNoticePolicy.channelLabel(
+                        TrialNoticePolicy.distributionChannel()
+                    ))
                         .font(StrandFont.overline)
                         .tracking(StrandFont.overlineTracking)
                         .foregroundStyle(StrandPalette.textSecondary)

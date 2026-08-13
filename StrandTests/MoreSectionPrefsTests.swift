@@ -8,6 +8,16 @@ import XCTest
 /// `MoreSectionPrefs` twin (same key suffix, same CSV encoding, same Insights+Body default).
 final class MoreSectionPrefsTests: XCTestCase {
 
+    func testQuickAccessStaysSmallUsefulAndUnique() {
+        XCTAssertEqual(MoreSectionPrefs.quickAccess.map(\.id),
+                       ["devices", "workouts", "widgets", "settings"])
+        XCTAssertEqual(Set(MoreSectionPrefs.quickAccess.map(\.id)).count,
+                       MoreSectionPrefs.quickAccess.count)
+        XCTAssertLessThanOrEqual(MoreSectionPrefs.quickAccess.count, 4,
+                                 "Quick Access must remain a shortcut row, not become another full index.")
+        XCTAssertTrue(MoreSectionPrefs.quickAccess.allSatisfy { !$0.title.isEmpty && !$0.systemImage.isEmpty })
+    }
+
     func testFreshInstallDefaultsToInsightsAndBody() {
         // The seed: Insights + Body open at rest, Data + App collapsed.
         XCTAssertEqual(MoreSectionPrefs.defaultExpanded, ["Insights", "Body"])

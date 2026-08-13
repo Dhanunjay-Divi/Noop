@@ -735,7 +735,8 @@ public enum AnalyticsEngine {
                 efficiency: s.efficiency,
                 restingHr: s.restingHR,
                 avgHrv: s.avgHRV,
-                stagesJSON: encodeStages(s.stages))
+                stagesJSON: encodeStages(s.stages),
+                gravitySparse: gravitySparse)
         }
 
         // ── Per-session per-epoch motion (H8) ─────────────────────────────────

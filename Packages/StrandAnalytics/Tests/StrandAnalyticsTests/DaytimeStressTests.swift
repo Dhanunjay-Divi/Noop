@@ -51,15 +51,60 @@ final class DaytimeStressTests: XCTestCase {
     }
 
     func testSustainedHighFlagsAfterThreeConsecutiveHighHours() {
-        // A calm morning, then three increasingly tense afternoon hours that finish HIGH.
+        // A calm morning, then three adjacent tense afternoon hours with HRV evidence.
         var hr: [HRSample] = []
+        var rr: [RRInterval] = []
         for h in [8, 9, 10] { hr += hourHR(h, bpm: 58) }   // calm baseline hours
+        for h in [8, 9, 10] { rr += hourRRVariable(h, rrMs: 900, jitter: 40) }
         hr += hourHR(13, bpm: 120)
         hr += hourHR(14, bpm: 125)
         hr += hourHR(15, bpm: 130)
-        let r = DaytimeStress.analyze(hr: hr, rr: [])
+        for h in [13, 14, 15] { rr += hourRRVariable(h, rrMs: 900, jitter: 2) }
+        let r = DaytimeStress.analyze(hr: hr, rr: rr)
         XCTAssertTrue(r.sustainedHigh, "three trailing HIGH hours should flag sustained stress")
         XCTAssertGreaterThanOrEqual(r.sustainedRun, DaytimeStress.sustainedHours)
+        XCTAssertEqual(r.hrvBackedHourCount, 6)
+        XCTAssertTrue(r.scored.suffix(3).allSatisfy { $0.evidence == .heartRateAndHRV })
+    }
+
+    func testGappedHighHoursDoNotCountAsSustained() {
+        // Three individually HIGH, HRV-backed hours separated by gaps are not a three-hour run.
+        var hr: [HRSample] = []
+        var rr: [RRInterval] = []
+        for h in [8, 9, 10] {
+            hr += hourHR(h, bpm: 58)
+            rr += hourRRVariable(h, rrMs: 900, jitter: 40)
+        }
+        for h in [13, 15, 17] {
+            hr += hourHR(h, bpm: 125)
+            rr += hourRRVariable(h, rrMs: 900, jitter: 2)
+        }
+
+        let r = DaytimeStress.analyze(hr: hr, rr: rr)
+        let trailingElevated = r.scored.filter { [13, 15, 17].contains($0.hour) }
+        XCTAssertEqual(trailingElevated.count, 3)
+        XCTAssertTrue(trailingElevated.allSatisfy {
+            ($0.level ?? 0) >= DaytimeStress.highBandFloor && $0.hasHRVEvidence
+        })
+        XCTAssertFalse(r.sustainedHigh,
+                       "missing wall-clock hours must break an otherwise high, HRV-backed run")
+        XCTAssertEqual(r.sustainedRun, 1, "only the latest isolated high hour belongs to the run")
+    }
+
+    func testHROnlyHighHoursRemainVisibleButCannotTriggerSustained() {
+        // HR alone may draw the timeline, but it cannot justify an autonomic-stress nudge.
+        var hr: [HRSample] = []
+        for h in [8, 9, 10] { hr += hourHR(h, bpm: 58) }
+        for h in [13, 14, 15] { hr += hourHR(h, bpm: 125) }
+
+        let r = DaytimeStress.analyze(hr: hr, rr: [])
+        let trailing = Array(r.scored.suffix(3))
+        XCTAssertEqual(trailing.count, 3)
+        XCTAssertTrue(trailing.allSatisfy { ($0.level ?? 0) >= DaytimeStress.highBandFloor },
+                      "HR-only activation should remain visible on the timeline")
+        XCTAssertTrue(trailing.allSatisfy { $0.evidence == .heartRateOnly })
+        XCTAssertFalse(r.sustainedHigh, "HR-only hours must never trigger the sustained suggestion")
+        XCTAssertEqual(r.sustainedRun, 0)
     }
 
     func testFlatDayDoesNotFlagSustained() {

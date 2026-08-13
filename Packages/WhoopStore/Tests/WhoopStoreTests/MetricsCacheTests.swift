@@ -16,7 +16,7 @@ final class MetricsCacheTests: XCTestCase {
     }
 
     func testSchemaVersionBumped() {
-        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 37)
+        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 38)
     }
 
     // MARK: - sleep sessions
@@ -41,6 +41,29 @@ final class MetricsCacheTests: XCTestCase {
         XCTAssertEqual(rows[0].endTs, 6000)
         XCTAssertEqual(rows[0].efficiency, 0.95)
         XCTAssertNil(rows[0].stagesJSON)
+    }
+
+    func testSleepSessionGravitySparseProvenanceRoundTripsAndUpdates() async throws {
+        let store = try await WhoopStore.inMemory()
+        let sparse = CachedSleepSession(startTs: 1_000, endTs: 5_000, efficiency: 0.9,
+                                        restingHr: 52, avgHrv: 65, stagesJSON: nil,
+                                        gravitySparse: true)
+        try await store.upsertSleepSessions([sparse], deviceId: "devA")
+        var rows = try await store.sleepSessions(deviceId: "devA", from: 0, to: 100_000, limit: 1)
+        var row = try XCTUnwrap(rows.first)
+        XCTAssertEqual(row.gravitySparse, true)
+
+        let dense = CachedSleepSession(startTs: 1_000, endTs: 5_000, efficiency: 0.9,
+                                       restingHr: 52, avgHrv: 65, stagesJSON: nil,
+                                       gravitySparse: false)
+        try await store.upsertSleepSessions([dense], deviceId: "devA")
+        rows = try await store.sleepSessions(deviceId: "devA", from: 0, to: 100_000, limit: 1)
+        row = try XCTUnwrap(rows.first)
+        XCTAssertEqual(row.gravitySparse, false)
+
+        XCTAssertNil(CachedSleepSession(startTs: 2_000, endTs: 6_000, efficiency: nil,
+                                        restingHr: nil, avgHrv: nil, stagesJSON: nil).gravitySparse,
+                     "legacy/imported callers default to unknown coverage, never dense")
     }
 
     func testSleepSessionRangeFilter() async throws {

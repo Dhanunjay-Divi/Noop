@@ -19,13 +19,19 @@ public struct WidgetSnapshot: Codable, Equatable {
     /// `connected` is deliberately separate from `bonded`: a paired band is not necessarily live.
     /// Optional keeps snapshots written by an older app build decodable without inventing a state.
     public var connected: Bool?
+    /// Wall-clock instant when NOOP accepted the heart-rate packet represented by `bpm`.
+    /// This is deliberately distinct from `updated`: republishing an unchanged widget snapshot must not
+    /// make a held BPM look live. Optional keeps snapshots written by older app builds decodable without
+    /// inventing sample freshness.
+    public var heartRateObservedAt: Date?
     /// Logical day represented by the daily scores (`yyyy-MM-dd`). This prevents a carried prior-day
     /// score from being labelled as today's measurement around the overnight rollover.
     public var scoreDay: String?
 
     public init(recovery: Int?, bpm: Int?, batteryPct: Int?, bonded: Bool, updated: Date,
                 effort: Int? = nil, rest: Int? = nil, hrv: Int? = nil, restingHr: Int? = nil,
-                sleepMinutes: Int? = nil, connected: Bool? = nil, scoreDay: String? = nil) {
+                sleepMinutes: Int? = nil, connected: Bool? = nil,
+                heartRateObservedAt: Date? = nil, scoreDay: String? = nil) {
         self.recovery = recovery
         self.bpm = bpm
         self.batteryPct = batteryPct
@@ -37,6 +43,7 @@ public struct WidgetSnapshot: Codable, Equatable {
         self.restingHr = restingHr
         self.sleepMinutes = sleepMinutes
         self.connected = connected
+        self.heartRateObservedAt = heartRateObservedAt
         self.scoreDay = scoreDay
     }
 
@@ -83,7 +90,7 @@ public struct WidgetSnapshot: Codable, Equatable {
     public static var placeholder: WidgetSnapshot {
         WidgetSnapshot(recovery: 72, bpm: 58, batteryPct: 84, bonded: true, updated: Date(),
                        effort: 42, rest: 81, hrv: 64, restingHr: 52,
-                       sleepMinutes: 462, connected: true,
+                       sleepMinutes: 462, connected: true, heartRateObservedAt: Date(),
                        scoreDay: Self.dayFormatter.string(from: Date()))
     }
 
@@ -119,6 +126,38 @@ public struct WidgetSnapshot: Codable, Equatable {
         if age <= 20 * 60 { return .current }
         if age <= 2 * 60 * 60 { return .recent }
         return .stale
+    }
+
+    /// A heart-rate value is live only for this long after its real transport event. This intentionally
+    /// stays far shorter than the 20-minute publication bucket: WidgetKit may hold a snapshot, but that
+    /// cannot extend the life of a physiological sample.
+    public static let liveHeartRateMaxAge: TimeInterval = 2 * 60
+
+    /// Freshness of the actual HR packet, not of the widget publication. An older snapshot has no
+    /// `heartRateObservedAt`, so it resolves to `.unavailable` rather than being upgraded to live.
+    public func heartRateFreshness(at now: Date = Date()) -> Freshness {
+        guard bpm != nil, let observed = heartRateObservedAt else { return .unavailable }
+        let age = max(0, now.timeIntervalSince(observed))
+        if age <= Self.liveHeartRateMaxAge { return .current }
+        if age <= 2 * 60 * 60 { return .recent }
+        return .stale
+    }
+
+    /// Whether the saved connection observation is still current enough to call the wearable connected.
+    /// This retains the existing 20-minute expiry without conflating it with live HR.
+    public func hasCurrentConnection(at now: Date = Date()) -> Bool {
+        connected == true && freshness(at: now) == .current
+    }
+
+    /// True only when both the connection observation and a real, recent HR packet agree.
+    public func hasLiveHeartRate(at now: Date = Date()) -> Bool {
+        hasCurrentConnection(at: now) && heartRateFreshness(at: now) == .current
+    }
+
+    /// First instant at which a currently-live HR packet must be rendered as historical.
+    public var liveHeartRateExpiresAt: Date? {
+        guard connected == true, bpm != nil, let observed = heartRateObservedAt else { return nil }
+        return observed.addingTimeInterval(Self.liveHeartRateMaxAge)
     }
 
     public var hasDailySignal: Bool {

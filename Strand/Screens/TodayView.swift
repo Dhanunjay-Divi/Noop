@@ -708,16 +708,17 @@ struct TodayView: View {
         RecoveryScorer.skinTempRelative(deviationC: chargeBreakdownRow?.skinTempDevC)
     }
 
-    /// #205 (one-word readiness read kept on the hero: Push / Maintain / Rest). PURE mapping of the
-    /// existing `ReadinessEngine.Level` so the hero keeps a glanceable verdict even though the full
+    /// #205 one-line readiness context kept on the hero (Aligned / Within range / Recheck /
+    /// Multiple shifts). PURE mapping of the existing `ReadinessEngine.Level` so the hero keeps a
+    /// glanceable description even though the full
     /// Readiness card folds into the Charge breakdown sheet (S4). `insufficient` returns nil (the hero then
     /// shows no readiness word, matching the old card hiding itself). Mirror EXACTLY in Kotlin.
     static func readinessWord(_ level: ReadinessEngine.Level) -> String? {
         switch level {
-        case .primed:       return String(localized: "Push")
-        case .balanced:     return String(localized: "Maintain")
-        case .strained:     return String(localized: "Rest")
-        case .rundown:      return String(localized: "Rest")
+        case .primed:       return String(localized: "Aligned")
+        case .balanced:     return String(localized: "Within range")
+        case .strained:     return String(localized: "Recheck")
+        case .rundown:      return String(localized: "Multiple shifts")
         case .insufficient: return nil
         }
     }
@@ -888,7 +889,7 @@ struct TodayView: View {
         return f.string(from: date)
     }
 
-    /// On-device training-readiness synthesis (HRV / resting-HR / load). Read through the
+    /// On-device wellness-signal synthesis (HRV / resting-HR / load). Read through the
     /// memoized cache so the full-history sort inside `evaluate` runs once per data change,
     /// not once per ~1 Hz `body` pass while HR streams.
     private var readiness: ReadinessEngine.Readiness {
@@ -1340,9 +1341,10 @@ struct TodayView: View {
                 #endif
                 synthesisSection.staggeredAppear(index: 1)
                 // S4: the SEPARATE Readiness block is no longer a home-screen card, it folded into the
-                // Charge-ring tap (chargeBreakdownSheet). A one-word readiness read (Push / Maintain / Rest,
-                // #205) stays on the hero via the Synthesis section's pill row, so the home screen keeps a
-                // glanceable verdict without the full card. Readiness is NOT deleted, only moved behind a tap.
+                // Charge-ring tap (chargeBreakdownSheet). Descriptive readiness context (Aligned / Within
+                // range / Recheck / Multiple shifts, #205) stays on the hero via the Synthesis section's pill
+                // row, so the home screen keeps a glanceable summary without the full card. Readiness is NOT
+                // deleted, only moved behind a tap.
                 metricsSection.staggeredAppear(index: 2)
                 workoutsSection.staggeredAppear(index: 3)
                 heartRateTrendSection.staggeredAppear(index: 4)
@@ -1558,19 +1560,20 @@ struct TodayView: View {
         .strandPressable()
     }
 
-    // MARK: Readiness, on-device training-readiness synthesis (HRV / resting-HR / load).
+    // MARK: Readiness, on-device wellness-signal synthesis (HRV / resting-HR / load).
 
     /// S4: Readiness now lives behind the Charge-ring tap (in `chargeBreakdownSheet`), not as a standalone
     /// home-screen card. This wrapper is retained for the sheet's use: a titled header + the card body. A
-    /// one-word readiness read (Push / Maintain / Rest, #205) stays on the hero so the home screen keeps a
-    /// glanceable verdict. Hidden when there isn't enough history (the `.insufficient` level).
+    /// descriptive readiness read (Aligned / Within range / Recheck / Multiple shifts, #205) stays on the
+    /// hero so the home screen keeps glanceable wellness context. Hidden when there isn't enough history
+    /// (the `.insufficient` level).
     @ViewBuilder
     private func readinessCard(_ r: ReadinessEngine.Readiness) -> some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             // When Readiness is anchored on the carried last-scored day (#543), the overline stamps its
             // date so the prior read isn't passed off as today's; otherwise the usual prompt.
             SectionHeader("Readiness",
-                          overline: lastScoredRecoveryDay.map { "\(carriedCaption($0))" } ?? "Should you push today?")
+                          overline: lastScoredRecoveryDay.map { "\(carriedCaption($0))" } ?? "How your signals compare")
             NoopCard {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(spacing: 10) {
@@ -1632,10 +1635,10 @@ struct TodayView: View {
     // alone, read by VoiceOver and visible to colour-blind users.
     private func levelWord(_ l: ReadinessEngine.Level) -> String {
         switch l {
-        case .primed:       return String(localized: "Primed")
-        case .balanced:     return String(localized: "Balanced")
-        case .strained:     return String(localized: "Strained")
-        case .rundown:      return String(localized: "Run down")
+        case .primed:       return String(localized: "Aligned")
+        case .balanced:     return String(localized: "Within range")
+        case .strained:     return String(localized: "Recheck")
+        case .rundown:      return String(localized: "Multiple shifts")
         case .insufficient: return String(localized: "Not enough data")
         }
     }
@@ -1936,9 +1939,10 @@ struct TodayView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                 Spacer(minLength: 8)
-                // S4 (#205): the one-word readiness read kept on the hero now the full Readiness card folded
-                // into the Charge-ring tap. Push / Maintain / Rest, derived from the existing Readiness
-                // level; hidden when there isn't enough history (nil word). Sits beside the confidence pill.
+                // S4 (#205): descriptive readiness context kept on the hero now the full Readiness card folded
+                // into the Charge-ring tap. Aligned / Within range / Recheck / Multiple shifts, derived from
+                // the existing Readiness level; hidden when there isn't enough history (nil word). Sits beside
+                // the confidence pill.
                 if let word = Self.readinessWord(readiness.level) {
                     readinessHeroPill(word)
                 }
@@ -2043,7 +2047,8 @@ struct TodayView: View {
         }
     }
 
-    /// S4 (#205): the one-word readiness pill on the hero (Push / Maintain / Rest). A small tinted capsule
+    /// S4 (#205): the descriptive readiness pill on the hero (Aligned / Within range / Recheck /
+    /// Multiple shifts). A small tinted capsule
     /// matching the score-pill chrome, coloured by the readiness level. Tapping it opens the Charge
     /// breakdown sheet, where the FULL Readiness card now lives, so the glanceable word still leads to the
     /// detail it summarises.
@@ -2063,7 +2068,7 @@ struct TodayView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Readiness: \(word)")
-        .accessibilityHint("See your full readiness")
+        .accessibilityHint("See the supporting signal context")
     }
 
     // MARK: - Your cards (#582 / Design Reset)
@@ -3883,17 +3888,6 @@ struct TodayView: View {
         async let appleDaysA         = repo.appleDailyRows()
         async let xStepsA            = repo.series(key: "steps", source: "xiaomi-band")
         async let xSleepA            = repo.series(key: "sleep_total_min", source: "xiaomi-band")
-        // #753: the pinned Stress card must read its number the SAME way StressView (the detail page) does,
-        // not off the merged stress series' last row. StressView builds `StressModel(days: repo.days,
-        // stored:)` and shows `model.score`, which PREFERS today's stored stress row but otherwise DERIVES
-        // today's score from the live `repo.days` RHR/HRV baseline. The old pinned read
-        // (`exploreSeries("stress").last`) returned the latest *banked* day instead, so when today had no
-        // stored stress row yet the pinned card sat on yesterday's number (e.g. "2") while the detail page
-        // moved to today's freshly-derived value. They diverged because they computed from different sources
-        // AND the pinned card never re-derived. Reading the SAME `repo.series` the detail uses, and building
-        // the SAME StressModel below, ties the pinned card to today's score; both then refresh on the shared
-        // `repo.refreshSeq` task key (loadAll's TodayLoadKey) and stay in sync.
-        async let stressStoredA      = repo.series(key: "stress", source: "my-whoop")
         async let fitnessAgeSeriesA  = repo.exploreSeries(key: "fitness_age", source: "my-whoop")
         async let vitalitySeriesA    = repo.exploreSeries(key: "vitality", source: "my-whoop")
         async let fitnessAgeProfileA = repo.exploreSeries(
@@ -3916,11 +3910,11 @@ struct TodayView: View {
         let xSleep = await xSleepA
         xiaomiDays = Set(xSteps.map(\.day) + xSleep.map(\.day)).count
         // Your cards (#582 / Design Reset): Stress / Fitness age / Vitality for the pinned home cards.
-        // #753: Stress mirrors StressView. `StressModel(days:stored:).score` is TODAY's score (stored row
-        // preferred, else derived off the live RHR/HRV baseline), so the pinned card never lags the detail
-        // page on a day with no banked stress row. nil (no usable signal) keeps the honest "Calibrating"
-        // placeholder, matching StressView's empty state. Fitness age / Vitality keep their merged reads.
-        stressToday = StressModel(days: repo.days, stored: await stressStoredA)?.score
+        // Stress mirrors the detail screen's source-isolated causal model. Never merge WHOOP, NOOP and
+        // Apple Health into one synthetic baseline, and never carry an older score into the selected day.
+        // A stale model remains available (and honestly dated) in Stress detail, while Today stays blank.
+        let stressModel = StressModel(sourceRows: repo.vitalMetricRows)
+        stressToday = stressModel?.asOfDay == selectedDayKey ? stressModel?.score : nil
         let fitnessProfileToken = (await fitnessAgeProfileA).last?.value
         let vitalityProfileToken = (await vitalityProfileA).last?.value
         fitnessAgeToday = profile.acceptsFitnessAge(provenance: fitnessProfileToken)

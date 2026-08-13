@@ -60,6 +60,9 @@ extension WidgetSnapshot {
             restingHr: day?.restingHr,
             sleepMinutes: day?.totalSleepMin.map { Int($0.rounded()) },
             connected: model.live.connected,
+            // Use the transport event's real receipt time. Scene/battery/background republishes can happen
+            // much later and must never renew a held BPM's "Live" lifetime.
+            heartRateObservedAt: model.live.heartRateSample?.receivedAt,
             scoreDay: day?.day
         )
         snap.save()

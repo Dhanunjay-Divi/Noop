@@ -39,6 +39,10 @@ final class ReadinessEngineTests: XCTestCase {
         XCTAssertEqual(r.signals.first { $0.key == "acwr" }?.evidence, "7d 10.0 / 28d 10.0")
         XCTAssertEqual(r.summary,
                        "Your measured recovery trends are aligned with your recent baseline.")
+        XCTAssertEqual(r.headline, "Aligned")
+        XCTAssertEqual(r.asOfDay, "2024-03-29")
+        XCTAssertEqual(r.confidence, .solid)
+        XCTAssertEqual(r.baselineDays, 28)
         XCTAssertFalse(r.summary.localizedCaseInsensitiveContains("load"))
         XCTAssertFalse(r.summary.localizedCaseInsensitiveContains("train"))
     }
@@ -47,6 +51,10 @@ final class ReadinessEngineTests: XCTestCase {
         // Today: HRV suppressed AND resting HR elevated → two "bad" recovery signals.
         let r = ReadinessEngine.evaluate(days: baseline(todayHrv: 50, todayRhr: 60, todayStrain: 10))
         XCTAssertEqual(r.level, .rundown)
+        XCTAssertEqual(r.headline, "Multiple shifts")
+        XCTAssertFalse(r.summary.localizedCaseInsensitiveContains("rest today"))
+        XCTAssertFalse(r.summary.localizedCaseInsensitiveContains("train"))
+        XCTAssertFalse(r.summary.localizedCaseInsensitiveContains("diagnosis"))
     }
 
     func testRecentLoadSpikeIsDescriptiveOnly() {
@@ -93,11 +101,33 @@ final class ReadinessEngineTests: XCTestCase {
         XCTAssertGreaterThan(spikeReadiness.acwr ?? 0, steadyReadiness.acwr ?? 0)
     }
 
+    func testTrainingMonotonyCannotDowngradeAlignedRecovery() {
+        var days = baseline(todayHrv: 72, todayRhr: 46, todayStrain: 10)
+        // Keep enough non-zero variation for the Foster ratio, but make the recent week deliberately
+        // uniform enough to produce the descriptive Training variety watch signal.
+        let recent = [10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 11.0, 10.0]
+        for (offset, strain) in recent.enumerated() {
+            let index = 21 + offset
+            let row = days[index]
+            days[index] = DailyMetric(
+                day: row.day, totalSleepMin: row.totalSleepMin, efficiency: row.efficiency,
+                deepMin: row.deepMin, remMin: row.remMin, lightMin: row.lightMin,
+                disturbances: row.disturbances, restingHr: row.restingHr, avgHrv: row.avgHrv,
+                recovery: row.recovery, strain: strain, exerciseCount: row.exerciseCount,
+                spo2Pct: row.spo2Pct, skinTempDevC: row.skinTempDevC, respRateBpm: row.respRateBpm)
+        }
+        let read = ReadinessEngine.evaluate(days: days)
+        XCTAssertNotNil(read.signals.first { $0.key == "monotony" })
+        XCTAssertEqual(read.level, .primed)
+        XCTAssertEqual(read.headline, "Aligned")
+    }
+
     func testRespRateRiseFlags() {
-        // Today resp rate well above baseline (~14) → illness-ish watch/bad signal present.
+        // Today's respiratory rate is well above the personal baseline (~14), so a shifted signal is present.
         let r = ReadinessEngine.evaluate(days: baseline(todayHrv: 60, todayRhr: 52, todayStrain: 10, todayResp: 18))
         XCTAssertTrue(r.signals.contains { $0.key == "respRate" })
         XCTAssertEqual(r.signals.first { $0.key == "respRate" }?.evidence, "18.0 vs 14.0 rpm")
+        XCTAssertFalse(r.signals.first { $0.key == "respRate" }?.detail.localizedCaseInsensitiveContains("sick") == true)
     }
 
     func testExplicitTodayWithoutMatchingRowIsInsufficient() {
@@ -106,6 +136,11 @@ final class ReadinessEngineTests: XCTestCase {
         // stored (stale) row (issue #23/#24).
         let days = baseline(todayHrv: 72, todayRhr: 46, todayStrain: 10)
         XCTAssertEqual(ReadinessEngine.evaluate(days: days, today: "2026-06-08").level, .insufficient)
+        let missing = ReadinessEngine.evaluate(days: days, today: "2026-06-08")
+        XCTAssertEqual(missing.asOfDay, "2026-06-08")
+        XCTAssertEqual(missing.confidence, .calibrating)
+        XCTAssertEqual(missing.baselineDays, 0)
+        XCTAssertFalse(missing.limitations.isEmpty)
         // The day that IS present still computes (no regression for current data).
         XCTAssertNotEqual(ReadinessEngine.evaluate(days: days, today: "2024-03-29").level, .insufficient)
         // The legacy no-`today` path is unchanged — still falls back to the most recent row.
@@ -163,6 +198,19 @@ final class ReadinessEngineTests: XCTestCase {
         XCTAssertEqual(withAdditiveLoad.trainingLoad?.atl, 50)
         XCTAssertEqual(withAdditiveLoad.trainingLoad?.ctl, 50)
         XCTAssertEqual(withAdditiveLoad.trainingLoad?.tsb, 0)
+    }
+
+    func testSingleRecoverySignalIsExplicitlyBuildingConfidence() {
+        var days: [DailyMetric] = []
+        for i in 1...15 {
+            days.append(d(i, hrv: i.isMultiple(of: 2) ? 62 : 58,
+                          rhr: nil, strain: nil, resp: nil))
+        }
+        days.append(d(16, hrv: 70, rhr: nil, strain: nil, resp: nil))
+        let read = ReadinessEngine.evaluate(days: days, today: "2024-03-16")
+        XCTAssertEqual(read.confidence, .building)
+        XCTAssertEqual(read.baselineDays, 15)
+        XCTAssertTrue(read.limitations.contains { $0.contains("one current recovery signal") })
     }
 
     func testStatsHelpers() {

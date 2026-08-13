@@ -60,4 +60,18 @@ final class OnboardingUnitsPickerTests: XCTestCase {
         XCTAssertTrue(source.contains("foregroundStyle(StrandPalette.accentInk)"),
                       "The dark-mode near-white CTA must use dark contrast ink, not hard-coded white.")
     }
+
+    func testOnboardingKeepsContentScrollableAndCTAKeyboardSafe() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let source = try String(contentsOf: root.appendingPathComponent("Strand/Onboarding/OnboardingWizard.swift"))
+        XCTAssertTrue(source.contains(".safeAreaInset(edge: .bottom"),
+                      "The primary action must sit above the home indicator and keyboard.")
+        XCTAssertTrue(source.contains("ScrollView(.vertical, showsIndicators: false)"),
+                      "Every onboarding page must remain vertically reachable on compact phones.")
+        XCTAssertTrue(source.contains(".scrollDismissesKeyboard(.interactively)"),
+                      "Measurement entry should allow an interactive keyboard dismissal.")
+        XCTAssertTrue(source.contains("@AppStorage(UnitPrefs.massKey)"))
+        XCTAssertTrue(source.contains("@AppStorage(UnitPrefs.heightKey)"),
+                      "Keyboard/layout work must not fold weight and height back into one unit choice.")
+    }
 }

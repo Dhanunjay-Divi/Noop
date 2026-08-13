@@ -24,6 +24,23 @@ final class WhoopProvenanceImportTests: XCTestCase {
         let store = try await WhoopStore.inMemory()
         let deviceId = "test-whoop-\(UUID().uuidString)"
         defer { WhoopReferenceImportManifest().remove(deviceId: deviceId) }
+
+        // Seed rows produced by the pre-v3 importer plus unrelated data. Re-import may remove only the
+        // exact classified cycle days in their matching namespace.
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-01-02", key: "stress", value: 1.8),
+            MetricPoint(day: "2026-01-02", key: "note", value: 7),
+            MetricPoint(day: "2026-01-03", key: "stress", value: 2.2), // quarantined source day
+            MetricPoint(day: "2025-12-31", key: "stress", value: 0.4),
+        ], deviceId: deviceId)
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-01-01", key: "stress", value: 1.2),
+            MetricPoint(day: "2025-12-31", key: "stress", value: 0.6),
+        ], deviceId: deviceId + "-noop")
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-01-02", key: "stress", value: 2.8),
+        ], deviceId: "unrelated-device")
+
         _ = try await WhoopImporter.importExport(
             url: directory, into: store, deviceId: deviceId)
 
@@ -42,8 +59,28 @@ final class WhoopProvenanceImportTests: XCTestCase {
         let localSeries = try await store.metricSeries(
             deviceId: deviceId + "-noop", key: "recovery",
             from: "2026-01-01", to: "2026-01-03")
+        let officialStress = try await store.metricSeries(
+            deviceId: deviceId, key: "stress", from: "2026-01-02", to: "2026-01-02")
+        let localStress = try await store.metricSeries(
+            deviceId: deviceId + "-noop", key: "stress", from: "2026-01-01", to: "2026-01-01")
         XCTAssertEqual(officialSeries.map(\.day), ["2026-01-02"])
         XCTAssertEqual(localSeries.map(\.day), ["2026-01-01"])
+        XCTAssertTrue(officialStress.isEmpty,
+                      "WHOOP CSV does not provide Stress Monitor values; NOOP must not invent one in the official namespace")
+        XCTAssertTrue(localStress.isEmpty,
+                      "causal NOOP autonomic load is derived at read time, not persisted from a full-history export")
+        let preservedOfficialStress = try await store.metricSeries(
+            deviceId: deviceId, key: "stress", from: "2025-12-31", to: "2026-01-03")
+        let preservedLocalStress = try await store.metricSeries(
+            deviceId: deviceId + "-noop", key: "stress", from: "2025-12-31", to: "2026-01-03")
+        let preservedNote = try await store.metricSeries(
+            deviceId: deviceId, key: "note", from: "2026-01-02", to: "2026-01-02")
+        let unrelatedStress = try await store.metricSeries(
+            deviceId: "unrelated-device", key: "stress", from: "2026-01-02", to: "2026-01-02")
+        XCTAssertEqual(preservedOfficialStress.map(\.day), ["2025-12-31", "2026-01-03"])
+        XCTAssertEqual(preservedLocalStress.map(\.day), ["2025-12-31"])
+        XCTAssertEqual(preservedNote.count, 1)
+        XCTAssertEqual(unrelatedStress.count, 1)
         XCTAssertFalse((official + local).contains { $0.day == "2026-01-03" })
         XCTAssertEqual(
             WhoopReferenceImportManifest().verifiedDays(

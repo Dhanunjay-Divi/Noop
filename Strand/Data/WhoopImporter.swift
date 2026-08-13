@@ -8,7 +8,7 @@ enum WhoopImporter {
 
     /// The WHOOP CSV mapping revision, stamped into the Import test-mode parser line. Bump when this
     /// importer's column->store mapping changes so a shared report's parser version is unambiguous.
-    static let importerVersion = 2
+    static let importerVersion = 3
     /// Shared provenance stamp for comparison/calibration. Keep this derived from `importerVersion`
     /// so UI call sites cannot drift from the importer that actually wrote the reference rows.
     static var schemaRevision: String { "whoop-csv-import-v\(importerVersion)" }
@@ -156,26 +156,10 @@ enum WhoopImporter {
         }
         appendCyclePoints(officialCycles, approximate: false)
         appendCyclePoints(approximateCycles, approximate: true)
-        // Derived: a daily stress proxy from RHR (up) + HRV (down) vs the personal baseline.
-        func meanStd(_ a: [Double]) -> (Double, Double) {
-            guard !a.isEmpty else { return (0, 1) }
-            let m = a.reduce(0, +) / Double(a.count)
-            let v = a.map { ($0 - m) * ($0 - m) }.reduce(0, +) / Double(a.count)
-            return (m, max(v.squareRoot(), 0.0001))
-        }
-        func appendStress(_ cycles: [WhoopCycleRow], approximate: Bool) {
-            let (rm, rs) = meanStd(cycles.compactMap(\.restingHeartRate))
-            let (hm, hs) = meanStd(cycles.compactMap(\.hrvMs))
-            for c in cycles {
-                guard let rhr = c.restingHeartRate, let hrv = c.hrvMs,
-                      let day = cycleDay(wake: c.wakeOnset, end: c.cycleEnd, start: c.cycleStart,
-                                         tzOffsetMin: c.tzOffsetMin) else { continue }
-                let z = 0.6 * ((rhr - rm) / rs) - 0.6 * ((hrv - hm) / hs)
-                add(day, "stress", max(0, min(3, 1.5 + z)), approximate: approximate)
-            }
-        }
-        appendStress(officialCycles, approximate: false)
-        appendStress(approximateCycles, approximate: true)
+        // WHOOP's export does not include its proprietary Stress Monitor series here. Do not derive a
+        // NOOP proxy from the full export and write it back into WHOOP's official namespace: that both
+        // misstates provenance and lets future days influence older scores. The causal NOOP estimate is
+        // derived at read time from strictly prior days by DailyAutonomicLoad instead.
         // Derived: daily HR-zone minutes + strength-activity time from workouts.
         func appendWorkoutPoints(_ sourceRows: [WhoopWorkoutRow], approximate: Bool) {
             var zoneByDay: [String: [Double]] = [:]
@@ -208,6 +192,26 @@ enum WhoopImporter {
         }
         appendWorkoutPoints(officialWorkouts, approximate: false)
         appendWorkoutPoints(approximateWorkouts, approximate: true)
+
+        // Importer v2 incorrectly persisted a full-history-derived `stress` proxy into these source
+        // namespaces. A successful re-import is the only place where we can prove which exact rows came
+        // from this export, so migrate only those cycle days. Unknown-source/quarantined days, unrelated
+        // dates, other keys, and other devices remain untouched. Current stress is derived causally at
+        // read time and therefore is intentionally not written back below.
+        func cycleDays(_ cycles: [WhoopCycleRow]) -> Set<String> {
+            Set(cycles.compactMap {
+                cycleDay(wake: $0.wakeOnset, end: $0.cycleEnd, start: $0.cycleStart,
+                         tzOffsetMin: $0.tzOffsetMin)
+            })
+        }
+        for day in cycleDays(officialCycles) {
+            _ = try await store.deleteMetricSeriesPoint(
+                deviceId: deviceId, day: day, key: "stress")
+        }
+        for day in cycleDays(approximateCycles) {
+            _ = try await store.deleteMetricSeriesPoint(
+                deviceId: computedDeviceId, day: day, key: "stress")
+        }
         try await store.upsertMetricSeries(points, deviceId: deviceId)
         try await store.upsertMetricSeries(approximatePoints, deviceId: computedDeviceId)
 

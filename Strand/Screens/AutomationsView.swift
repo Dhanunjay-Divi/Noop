@@ -601,12 +601,12 @@ struct AutomationsView: View {
                 // v5 L3 closed-loop check-in (master + sub toggles). Default OFF, manual-first. The keys
                 // mirror BiofeedbackPrefs, which the central detector (AppModel.evaluateStress) reads.
                 ToggleRow(label: String(localized: "Stress check-ins (haptic)"),
-                          help: String(localized: "When a fresh, non-exercise HRV dip is detected while you're still, NOOP offers a one-minute guided breath: a single confirming buzz and a dismissible card. Never an alarm, never a diagnosis."),
+                          help: String(localized: "Experimental. NOOP can offer a one-minute guided breath only when a fresh HRV shift and trustworthy stillness evidence are both available. Missing motion evidence suppresses the buzz. Never an alarm or diagnosis."),
                           isOn: $behavior.stressCheckIn)
                 if behavior.stressCheckIn {
                     rowDivider
-                    ToggleRow(label: String(localized: "Auto-nudge"),
-                              help: String(localized: "Let the check-in fire on its own. Off keeps it manual: you start a breath from Breathe yourself."),
+                    ToggleRow(label: String(localized: "Auto-nudge when verified"),
+                              help: String(localized: "When supported by the connected source, allow a check-in only after NOOP verifies a fresh HRV shift, resting heart rate, and stillness. If verification is unavailable, Breathe remains manual."),
                               isOn: $behavior.stressAutoNudge)
                     rowDivider
                     ToggleRow(label: String(localized: "Respect quiet hours"),

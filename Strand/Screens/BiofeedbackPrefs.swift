@@ -27,6 +27,9 @@ enum BiofeedbackPrefs {
         static let stBaseline   = "biofeedback.stOnsetBaseline"
         static let stWasBelow   = "biofeedback.stOnsetWasBelow"
         static let stLastFire   = "biofeedback.stOnsetLastFire"
+        static let stWindowCount = "biofeedback.stOnsetTrustedWindowCount"
+        static let stWindowFingerprint = "biofeedback.stOnsetLastWindowFingerprint"
+        static let stWindowAt = "biofeedback.stOnsetLastWindowAt"
     }
 
     // MARK: - L1 locked resonance pace
@@ -99,12 +102,20 @@ enum BiofeedbackPrefs {
         StressOnsetDetector.State(
             baselineRMSSD: d.double(forKey: K.stBaseline),
             wasBelow: d.bool(forKey: K.stWasBelow),
-            lastFireAt: d.integer(forKey: K.stLastFire))
+            lastFireAt: d.integer(forKey: K.stLastFire),
+            // Missing keys from an older build read as zero, which deliberately requires a fresh warm-up
+            // instead of treating one legacy EMA value as a fully-established personal baseline.
+            trustedWindowCount: d.integer(forKey: K.stWindowCount),
+            lastTrustedWindowFingerprint: d.string(forKey: K.stWindowFingerprint).flatMap(UInt64.init) ?? 0,
+            lastTrustedWindowAt: d.integer(forKey: K.stWindowAt))
     }
 
     static func saveStressState(_ s: StressOnsetDetector.State) {
         d.set(s.baselineRMSSD, forKey: K.stBaseline)
         d.set(s.wasBelow, forKey: K.stWasBelow)
         d.set(s.lastFireAt, forKey: K.stLastFire)
+        d.set(s.trustedWindowCount, forKey: K.stWindowCount)
+        d.set(String(s.lastTrustedWindowFingerprint), forKey: K.stWindowFingerprint)
+        d.set(s.lastTrustedWindowAt, forKey: K.stWindowAt)
     }
 }

@@ -150,6 +150,18 @@ enum ExploreRangeGating {
     }
 }
 
+/// Keeps the metric dossier's information hierarchy explicit and testable. A detail always opens on
+/// the latest daily reading; range selection belongs to the lower History section and starts compact.
+/// This prevents a current value from visually inheriting a month/all-time label.
+enum MetricDetailPresentation {
+    static let defaultHistoryRange: ExploreRange = .week
+
+    static func isCurrent(latestDay: String?, currentDayKeys: Set<String>) -> Bool {
+        guard let latestDay else { return false }
+        return currentDayKeys.contains(latestDay)
+    }
+}
+
 // MARK: - Readings table projection (task #8)
 
 /// One windowed reading behind a vital's detail chart: its day ("YYYY-MM-DD"), the value, and the RAW
@@ -472,7 +484,7 @@ struct MetricDetailView: View {
                       effortScale: effortScale, mass: massUnit)
     }
 
-    @State private var range: ExploreRange = .month
+    @State private var range: ExploreRange = MetricDetailPresentation.defaultHistoryRange
     /// Draw-in fraction for the hero ring gauge (0–100 scores). Set to the real fraction
     /// in `.onAppear` with a soft ease, exactly as TodayView animates its rings.
     @State private var heroAnimatedFraction: Double = 0
@@ -611,6 +623,15 @@ struct MetricDetailView: View {
     }
 
     private var latest: (day: String, value: Double)? { series.last }
+    /// Daily records can use either the civil-day key or NOOP's sleep-aware logical-day key. Treat both
+    /// as current so an overnight reading does not become "stale" merely because it landed before the
+    /// rollover boundary; every other date is labelled Latest available rather than Today.
+    private var latestIsCurrentDay: Bool {
+        MetricDetailPresentation.isCurrent(
+            latestDay: latest?.day,
+            currentDayKeys: [Repository.localDayKey(Date()), Repository.logicalDayKey(Date())]
+        )
+    }
     private var education: MetricEducation { MetricKnowledge.education(for: metric) }
     private var isEnergyMetric: Bool {
         ["energy_kcal", "active_kcal", "basal_kcal", "total_kcal"].contains(metric.key)
@@ -727,18 +748,31 @@ struct MetricDetailView: View {
                     metricMeaningCard
                     ComingSoon(what: "Reading your \(metric.title.lowercased())…")
                 } else {
-                    // Scenic hero: the metric's current value as a layered ring gauge (0–100
-                    // scores) or a big SF-Rounded headline, floated over the domain's starfield,
-                    // with the range pill. Then the frosted chart / stat tiles / correlations.
-                    heroHeader(effectiveRange: effRange, windowed: win, windowFellBack: fellBack)
+                    // Read in the order people make a decision: latest state first, personal context
+                    // second, then selectable history and deeper education. The historical range never
+                    // labels the current hero, so a monthly chart cannot look like a monthly headline.
+                    heroHeader
                     if isEnergyMetric { energyBreakdownCard }
+
+                    SectionHeader(
+                        "Personal comparison",
+                        overline: latestIsCurrentDay ? "Today vs your baseline" : "Latest vs your baseline",
+                        trailing: baselineRead.position == .building ? "Calibrating" : nil
+                    )
                     personalReadCard
-                    metricMeaningCard
-                    guidanceCard
+
+                    SectionHeader("History", overline: "Compare over time", trailing: effRange.name)
+                    rangeBar(effectiveRange: effRange, windowed: win, windowFellBack: fellBack)
                     heroChart(effectiveRange: effRange, windowed: win, windowFellBack: fellBack)
                     statRow(effectiveRange: effRange, windowed: win)
                     readingsTable(windowed: win)
+
+                    SectionHeader("Relationships", overline: "Signals that move together")
                     correlationCard
+
+                    SectionHeader("Understand this metric", overline: "Method and next steps")
+                    metricMeaningCard
+                    guidanceCard
                 }
             }
             .padding(NoopMetrics.screenPadding)
@@ -910,12 +944,9 @@ struct MetricDetailView: View {
     /// The detail's opening hero: the metric's latest value as either the signature liquid
     /// LiquidVessel gauge (for 0–100 scores, filled to the score with the number counting up over
     /// it) or a big count-up headline number, floated over a domain-tinted ScenicHeroBackground,
-    /// with the category overline, the "as of" line, and the range pill. Mirrors TodayView's
-    /// liquid score-hero idiom (and Health's Fitness-Age / Vitality vessels).
-    @ViewBuilder
-    private func heroHeader(effectiveRange: ExploreRange,
-                            windowed: [(day: String, value: Double)],
-                            windowFellBack: Bool) -> some View {
+    /// with an explicit Today/latest label, source, and "as of" line. Historical controls deliberately
+    /// live below Personal comparison, so this value can never be mistaken for a range aggregate.
+    private var heroHeader: some View {
         let domain = metricDomain(metric)
         let value = latest?.value
         let heroValue = latest.map { fmt($0.value) } ?? "—"
@@ -929,20 +960,22 @@ struct MetricDetailView: View {
         // stretching ZStack sibling — an unconstrained ScenicHeroBackground inside a ScrollView filled
         // the whole viewport and left a huge blank band above the chart. As a .background it sizes to
         // the hero content, so the number/ring sits directly under the range pill.
-        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+        return VStack(alignment: .leading, spacing: NoopMetrics.gap) {
                 // Category + title on their OWN full-width row so a long title ("Heart Rate Variability")
                 // is never crushed into a letter-per-line column by the range pill (2026-07-02).
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(MetricCatalog.categoryDisplayName(metric.category).uppercased()).strandOverline()
-                    Text(metric.title)
-                        .font(StrandFont.title2)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .top, spacing: NoopMetrics.space3) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(latestIsCurrentDay ? String(localized: "TODAY") : String(localized: "LATEST AVAILABLE"))
+                            .strandOverline()
+                        Text(metric.title)
+                            .font(StrandFont.title2)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: NoopMetrics.space2)
+                    SourceBadge("\(metric.sourceLabel)", tint: domain.bright)
+                        .fixedSize()
                 }
-                // Range control on its own row beneath the title.
-                SegmentedPillControl(ExploreRange.allCases, selection: selectionBinding,
-                                     adaptsToAvailableWidth: true,
-                                     isEnabled: isUnlocked) { $0.label }
 
                 // The headline read-out in the liquid language: for a 0–100 score, the signature
                 // LiquidVessel gauge filled to the score (the same hero idiom as Today's rings / Health's
@@ -1007,22 +1040,6 @@ struct MetricDetailView: View {
                     Spacer(minLength: 0)
                 }
 
-                // The "N readings · range" caption (auto-widen flagged when it happens).
-                Text(rangeCaption(effectiveRange: effectiveRange,
-                                  windowed: windowed,
-                                  windowFellBack: windowFellBack))
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(windowFellBack ? StrandPalette.statusWarning : StrandPalette.textTertiary)
-                    .accessibilityLabel(rangeCaption(effectiveRange: effectiveRange,
-                                                     windowed: windowed,
-                                                     windowFellBack: windowFellBack))
-                // The subtle reason the dimmed chips exist (#943); shown only while some are locked.
-                // Byte-identical wording to the Android HealthScreen's unlock hint.
-                if hasLockedRanges {
-                    Text("Longer ranges unlock as more history builds.")
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                }
             }
         .padding(NoopMetrics.cardPadding)
         .background(ScenicHeroBackground(domain: domain))
@@ -1169,7 +1186,10 @@ struct MetricDetailView: View {
                         .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("YOUR READ TODAY").strandOverline()
+                        Text(latestIsCurrentDay
+                             ? String(localized: "YOUR READ TODAY")
+                             : String(localized: "LATEST VS YOUR BASELINE"))
+                            .strandOverline()
                         Text(MetricKnowledge.dataKind(for: metric))
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
@@ -1434,12 +1454,6 @@ struct MetricDetailView: View {
                                    windowed: windowed,
                                    windowFellBack: windowFellBack)
         return VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(MetricCatalog.categoryDisplayName(metric.category).uppercased()).strandOverline()
-                Text(metric.title)
-                    .font(StrandFont.title2)
-                    .foregroundStyle(StrandPalette.textPrimary)
-            }
             SegmentedPillControl(ExploreRange.allCases, selection: selectionBinding,
                                  adaptsToAvailableWidth: true,
                                  isEnabled: isUnlocked) { $0.label }
@@ -1448,6 +1462,11 @@ struct MetricDetailView: View {
                 .font(StrandFont.footnote)
                 .foregroundStyle(windowFellBack ? StrandPalette.statusWarning : StrandPalette.textTertiary)
                 .accessibilityLabel(caption)
+            if hasLockedRanges {
+                Text("Longer ranges unlock as more history builds.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
         }
     }
 

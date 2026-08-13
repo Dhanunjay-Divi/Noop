@@ -116,6 +116,7 @@ struct SettingsView: View {
     /// Observes the persisted value so Settings refreshes after the legacy-safe migration
     /// (old true/Auto-save → Ask, old false → Off, fresh install → Ask).
     @AppStorage(PuffinExperiment.autoWorkoutModeKey) private var autoWorkoutModeRaw = ""
+    @AppStorage(AutoWorkoutNotifications.enabledKey) private var autoWorkoutSuggestionNotifications = false
     @State private var didMigrateAutoWorkoutMode = false
 
     /// "Journal reminder" (#627, default ON). When ON, Today shows the persistent journal widget
@@ -1274,6 +1275,7 @@ struct SettingsView: View {
                         },
                         set: { mode in
                             PuffinExperiment.setAutoWorkoutMode(mode)
+                            if mode == .off { AutoWorkoutNotifications.clear() }
                         }
                     )) {
                         ForEach(PuffinExperiment.selectableAutoWorkoutModes) { mode in
@@ -1285,6 +1287,40 @@ struct SettingsView: View {
                 }
 
                 Text("After a sync, NOOP looks for a finalized, sustained rise in heart rate with sufficient signal coverage and motion confirmation when available. Ask always waits for your approval before saving. Automatic saving stays unavailable until the detector has held-out field validation and calibrated confidence. This is a conservative on-device heuristic, not WHOOP's proprietary detector, so it can miss or misread activities. On \(Platform.deviceNounPhrase) only.")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Toggle(isOn: Binding(
+                    get: {
+                        _ = autoWorkoutSuggestionNotifications
+                        return AutoWorkoutNotifications.isEnabled
+                    },
+                    set: { enabled in
+                        AutoWorkoutNotifications.setEnabled(enabled) { outcome in
+                            guard outcome == .enabled else { return }
+                            // Permission may be granted after the latest sync has already found a
+                            // candidate. Reconcile once so the explicit opt-in takes effect now rather
+                            // than waiting for a future foreground or backfill.
+                            Task { await model.reconcileAutomaticWorkoutSurfaces() }
+                        }
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Activity suggestion notifications")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text("Off by default")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                }
+                .toggleStyle(.switch)
+                .tint(StrandPalette.accent)
+                .disabled(PuffinExperiment.resolvedAutoWorkoutMode() == .off)
+                .accessibilityHint("Allow only strongly corroborated recent activity suggestions on the Lock Screen")
+
+                Text("With notifications off, detected bouts appear quietly in Today for review. Turn this on only if you want a Lock Screen suggestion after a recent, motion-corroborated bout. NOOP never saves a suggested workout without your approval.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

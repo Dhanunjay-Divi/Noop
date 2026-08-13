@@ -18,6 +18,12 @@ public struct CachedSleepSession: Equatable, Codable, Sendable {
     public let restingHr: Int?
     public let avgHrv: Double?
     public let stagesJSON: String?
+    /// The analytics engine's canonical motion-coverage verdict for this session. `true` means the
+    /// gravity stream was too sparse to support higher-confidence staging; `false` means the engine
+    /// observed adequate coverage. `nil` is deliberate provenance for legacy/imported/manual rows
+    /// whose coverage was never evaluated — presentation must not infer density from an expanded
+    /// `motionJSON` epoch count.
+    public let gravitySparse: Bool?
     /// True once the user has hand-corrected this session's wake/sleep bounds. The recompute/import
     /// upsert preserves an edited session's `endTs`/`stagesJSON` instead of overwriting them with the
     /// strap-detected values (see `upsertSleepSessions`). Defaults false so every cache/recompute path
@@ -30,12 +36,13 @@ public struct CachedSleepSession: Equatable, Codable, Sendable {
     public var effectiveStartTs: Int { startTsAdjusted ?? startTs }
     public init(startTs: Int, endTs: Int, efficiency: Double?, restingHr: Int?,
                 avgHrv: Double?, stagesJSON: String?, userEdited: Bool = false,
-                startTsAdjusted: Int? = nil) {
+                startTsAdjusted: Int? = nil, gravitySparse: Bool? = nil) {
         self.startTs = startTs; self.endTs = endTs
         self.efficiency = efficiency; self.restingHr = restingHr
         self.avgHrv = avgHrv; self.stagesJSON = stagesJSON
         self.userEdited = userEdited
         self.startTsAdjusted = startTsAdjusted
+        self.gravitySparse = gravitySparse
     }
 }
 
@@ -128,8 +135,8 @@ extension WhoopStore {
                 try db.execute(sql: """
                     INSERT INTO sleepSession
                         (deviceId, startTs, endTs, efficiency, restingHr, avgHrv, stagesJSON,
-                         userEdited, startTsAdjusted)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         userEdited, startTsAdjusted, gravitySparse)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(deviceId, startTs) DO UPDATE SET
                         -- A user-corrected night keeps its hand-set bed/wake times and stage breakdown;
                         -- a recompute/import refresh (this path) updates only the derived vitals. The
@@ -141,9 +148,11 @@ extension WhoopStore {
                         avgHrv = excluded.avgHrv,
                         stagesJSON = CASE WHEN sleepSession.userEdited THEN sleepSession.stagesJSON ELSE excluded.stagesJSON END,
                         startTsAdjusted = CASE WHEN sleepSession.userEdited THEN sleepSession.startTsAdjusted ELSE excluded.startTsAdjusted END,
+                        gravitySparse = excluded.gravitySparse,
                         userEdited = sleepSession.userEdited
                     """, arguments: [deviceId, s.startTs, s.endTs, s.efficiency,
-                                     s.restingHr, s.avgHrv, s.stagesJSON, s.userEdited, s.startTsAdjusted])
+                                     s.restingHr, s.avgHrv, s.stagesJSON, s.userEdited,
+                                     s.startTsAdjusted, s.gravitySparse])
                 n += db.changesCount
             }
             return n
@@ -438,7 +447,7 @@ extension WhoopStore {
         try syncRead { db in
             try Row.fetchAll(db, sql: """
                 SELECT startTs, endTs, efficiency, restingHr, avgHrv, stagesJSON, userEdited,
-                       startTsAdjusted FROM sleepSession
+                       startTsAdjusted, gravitySparse FROM sleepSession
                 WHERE deviceId = ? AND startTs >= ? AND startTs <= ?
                 ORDER BY startTs ASC LIMIT ?
                 """, arguments: [deviceId, from, to, limit])
@@ -446,7 +455,8 @@ extension WhoopStore {
                     CachedSleepSession(startTs: $0["startTs"], endTs: $0["endTs"],
                                        efficiency: $0["efficiency"], restingHr: $0["restingHr"],
                                        avgHrv: $0["avgHrv"], stagesJSON: $0["stagesJSON"],
-                                       userEdited: $0["userEdited"], startTsAdjusted: $0["startTsAdjusted"])
+                                       userEdited: $0["userEdited"], startTsAdjusted: $0["startTsAdjusted"],
+                                       gravitySparse: $0["gravitySparse"])
                 }
         }
     }

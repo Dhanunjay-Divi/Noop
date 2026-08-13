@@ -122,6 +122,9 @@ private struct BreathingContent: View {
 
     @State private var pace: Pace = .coherence
     @State private var running = false
+    /// Balanced AppModel suppression lease for the fixed-pace Breathe mode. Resonance/Calm sessions own
+    /// their separate lease inside `BiofeedbackController`.
+    @State private var suppressesStressNudges = false
 
     /// 0 = fully contracted, 1 = fully expanded. Drives the orb scale.
     @State private var orbProgress: CGFloat = 0
@@ -576,6 +579,10 @@ private struct BreathingContent: View {
     // MARK: - Session control (fixed-pace Breathe — unchanged)
 
     private func start() {
+        if !suppressesStressNudges {
+            model.setStressNudgeSessionActive(true)
+            suppressesStressNudges = true
+        }
         running = true
         ScreenIdle.keepAwake(true)
         sessionSeconds = 0
@@ -591,6 +598,10 @@ private struct BreathingContent: View {
     private func stop() {
         let wasRunning = running
         running = false
+        if suppressesStressNudges {
+            model.setStressNudgeSessionActive(false)
+            suppressesStressNudges = false
+        }
         ScreenIdle.keepAwake(false)
         phaseDeadline = .distantFuture
         // #769: this trainer fires per-phase buzzes (armPhase -> model.buzz). Stopping halts NEW pulses but

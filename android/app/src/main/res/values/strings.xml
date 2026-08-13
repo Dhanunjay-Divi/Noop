@@ -1835,6 +1835,7 @@
     <string name="workout_saving">Saving…</string>
     <string name="workout_retry_save">Retry save</string>
     <string name="workout_discard">Discard workout</string>
+    <string name="l10n_app_changelog_today_first_insights_9_2_0">Today-first insights, quieter automation, and evidence you can inspect</string>
     <string name="l10n_app_changelog_safer_upgrades_trustworthy_signals_9c1f2a7b">Safer upgrades, trustworthy signals, and production hardening</string>
     <string name="noop_backup_encryption_title">Backup encryption</string>
     <string name="noop_backup_encryption_configured_help">A recovery passphrase is stored in Android Keystore for unattended backups. It is never displayed or uploaded. Enter it again when restoring. Replacing it does not change older backups.</string>

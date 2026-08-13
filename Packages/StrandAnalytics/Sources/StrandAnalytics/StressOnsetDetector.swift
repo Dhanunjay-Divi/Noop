@@ -10,7 +10,8 @@ import Foundation
 // See docs/superpowers/specs/2026-06-19-v5-haptic-biofeedback-design.md (L3).
 //
 // WHAT IT GENERALISES (from AppModel.evaluateStress): a rolling clean-R-R buffer → a SLOW RMSSD baseline
-// (the shipped 0.98/0.02 EMA) + a resting-HR band gate (55–100 bpm) + a `rmssd < baseline × 0.6` drop +
+// (an exact warm-up mean, then the shipped 0.98/0.02 EMA) + a resting-HR band gate (55–100 bpm) + a
+// `rmssd < baseline × 0.6` drop +
 // a once-per-15-min limiter + a single confirming buzz. What this engine ADDS, per spec:
 //   1. A FAST short-window RMSSD (the latest beats) vs the slow baseline — "fast dropped below baseline".
 //   2. EDGE trigger: fire ONCE on the fresh crossing (was-above → now-below), not every tick.
@@ -20,7 +21,8 @@ import Foundation
 //   4. Rate-limit + quiet hours + master toggle, and never while a manual Breathe/L1/L2 session runs.
 //
 // HONEST / NON-CLINICAL: "stress" is an autonomic PROXY (HRV-down vs the user's OWN baseline), never a
-// diagnosis. The card the caller shows says "HRV dipped while you were still" — never "you are stressed".
+// diagnosis. The card the caller shows says "short-window HRV moved below its recent baseline" — never
+// "you are stressed", and never claims stillness unless motion was actually observed.
 // On fire: a single confirming buzz + a passive in-app card; NEVER a push notification unless the user
 // opted into notifications (matches DaytimeStress's "passive suggestion, never a notification" stance).
 //
@@ -47,6 +49,12 @@ public enum StressOnsetDetector {
     /// Recent smoothed wrist-motion (g) at/above this means "moving" → exercise gate suppresses the fire
     /// (reuses the `SedentaryDetector` move threshold so the two gates agree on what "moving" is).
     public static let motionGateG: Double = SedentaryDetector.defaultMoveThresholdG
+    /// A baseline must contain this many DISTINCT trusted short windows before a later window may fire.
+    /// Four is deliberately conservative: one clean R-R window seeds a number, not a personal baseline.
+    public static let minimumTrustedBaselineWindows: Int = 4
+    /// Sliding R-R callbacks overlap heavily. Count baseline observations at most once per minute so four
+    /// windows represent separate evidence rather than four adjacent packets from the same brief moment.
+    public static let minimumTrustedWindowSpacingSeconds: Int = 60
 
     // MARK: - Config
 
@@ -85,20 +93,34 @@ public enum StressOnsetDetector {
     /// The persisted state the detector carries between evaluations (restart-safe). The caller stores this
     /// verbatim and feeds the prior value back in, exactly like `SedentaryState`. A fresh user starts from
     /// `.initial`. Carries the slow EMA baseline (so it survives relaunch), the edge state (was the fast
-    /// RMSSD below the threshold on the previous tick?), and the rate-limit clock.
+    /// RMSSD below the threshold on the previous tick?), the baseline warm-up, and the rate-limit clock.
     public struct State: Equatable, Sendable {
-        /// Slow RMSSD baseline (EMA), ms. 0 = uninitialised (seeds from the first trusted fast RMSSD).
+        /// Slow RMSSD baseline, ms: exact mean during warm-up, then EMA. 0 = uninitialised.
         public var baselineRMSSD: Double
         /// Whether the fast RMSSD was BELOW the drop threshold on the previous evaluation — drives the
         /// EDGE (we fire only on a fresh above→below crossing, not every tick it stays below).
         public var wasBelow: Bool
         /// Unix-seconds of the last fire (0 = never) — the rate limiter.
         public var lastFireAt: Int
+        /// Number of distinct, trusted fast windows incorporated into the baseline, capped at the warm-up
+        /// requirement. Defaults to zero so a state saved by an older build warms up safely after upgrade.
+        public var trustedWindowCount: Int
+        /// Deterministic identity of the last trusted fast window. Replaying the same R-R tail must not
+        /// advance either the EMA or the warm-up count. Zero means no window has been accepted yet.
+        public var lastTrustedWindowFingerprint: UInt64
+        /// Unix-seconds of the last window admitted to the baseline. Zero is safe for old persisted state;
+        /// `trustedWindowCount` distinguishes an actual epoch-zero test fixture from an uninitialised state.
+        public var lastTrustedWindowAt: Int
 
-        public init(baselineRMSSD: Double = 0, wasBelow: Bool = false, lastFireAt: Int = 0) {
+        public init(baselineRMSSD: Double = 0, wasBelow: Bool = false, lastFireAt: Int = 0,
+                    trustedWindowCount: Int = 0, lastTrustedWindowFingerprint: UInt64 = 0,
+                    lastTrustedWindowAt: Int = 0) {
             self.baselineRMSSD = baselineRMSSD
             self.wasBelow = wasBelow
             self.lastFireAt = lastFireAt
+            self.trustedWindowCount = max(0, min(trustedWindowCount, minimumTrustedBaselineWindows))
+            self.lastTrustedWindowFingerprint = lastTrustedWindowFingerprint
+            self.lastTrustedWindowAt = lastTrustedWindowAt
         }
 
         /// Cold-start state (no baseline, not below, never fired).
@@ -115,10 +137,16 @@ public enum StressOnsetDetector {
         case disabled
         /// Too few clean beats to judge honestly.
         case insufficientData
+        /// A valid window is still building the minimum distinct-window personal baseline.
+        case warmingUp
+        /// The same trusted R-R tail was evaluated again; it cannot advance baseline or edge state.
+        case duplicateWindow
         /// Fast RMSSD is at/above the threshold — no dip.
         case noDip
         /// The dip isn't a fresh edge (already below last tick).
         case notAnEdge
+        /// No contemporaneous motion observation exists, so stillness cannot be established.
+        case motionUnavailable
         /// Suppressed by the exercise gate (HR out of band and/or recent motion = metabolic, not stress).
         case exerciseGated
         /// Inside the rate-limit window or quiet hours, or a manual session is running.
@@ -158,14 +186,13 @@ public enum StressOnsetDetector {
     /// - `currentHR`: latest smoothed live HR (bpm), or nil if unknown (then the HR half of the gate can't
     ///   pass and we treat HR as out-of-band — conservative).
     /// - `recentMotionG`: recent smoothed wrist-motion (g) from `collector.recentGravity`, or nil if no
-    ///   recent gravity (then the motion half of the gate is inconclusive — see below).
+    ///   recent gravity. Missing motion cannot establish stillness, so it suppresses auto-nudges.
     /// - `sessionActive`: true if a manual Breathe/L1/L2 session is already running (never nudge over it).
     /// - `state`: the prior persisted state; `nowSec` / `tzOffsetSec` passed IN (never read a clock).
     ///
     /// The EXERCISE GATE suppresses when EITHER signal says metabolic: HR outside [55,100], OR recent
-    /// motion at/above `motionGateG`. A missing HR is treated as out-of-band (can't confirm resting);
-    /// missing motion alone does NOT gate (HR-band can carry it — gravity is offloaded and lags, spec Q3),
-    /// so the resting-HR band is the real-time gate and motion is a secondary confirm when present.
+    /// motion at/above `motionGateG`. Missing HR is treated as out-of-band (can't confirm resting), and
+    /// missing motion also suppresses: an in-band HR cannot truthfully establish that the wearer is still.
     public static func evaluate(rrBuffer: [Int],
                                 currentHR: Double?,
                                 recentMotionG: Double?,
@@ -178,6 +205,13 @@ public enum StressOnsetDetector {
         // 1) Master gates: off / auto-nudge off → never nudge, state untouched.
         if !config.enabled || !config.autoNudge {
             return Decision(shouldNudge: false, reason: .disabled, buzzLoops: config.buzzLoops,
+                            fastRMSSD: nil, baselineRMSSD: state.baselineRMSSD > 0 ? state.baselineRMSSD : nil,
+                            nextState: state)
+        }
+        // A user-started workout/coaching/breathing session is not baseline-learning time either. Keep the
+        // state untouched so session physiology cannot contaminate the resting comparison after it ends.
+        if sessionActive {
+            return Decision(shouldNudge: false, reason: .suppressed, buzzLoops: config.buzzLoops,
                             fastRMSSD: nil, baselineRMSSD: state.baselineRMSSD > 0 ? state.baselineRMSSD : nil,
                             nextState: state)
         }
@@ -194,14 +228,57 @@ public enum StressOnsetDetector {
                             nextState: state)
         }
 
-        // 3) Advance the slow baseline EMA (seed on first trusted value), exactly like evaluateStress.
+        // 3) Establish the credibility gate BEFORE learning the personal baseline. A window can only
+        // become a trusted resting reference when both HR and motion positively support that context.
+        // Missing motion is not evidence of stillness, and exercise/ordinary movement must not train
+        // the baseline that later powers an interruptive stress suggestion.
+        let hrInBand: Bool = {
+            guard let hr = currentHR else { return false }
+            return hr >= restingHRLow && hr <= restingHRHigh
+        }()
+        guard let recentMotionG else {
+            return Decision(shouldNudge: false, reason: .motionUnavailable,
+                            buzzLoops: config.buzzLoops, fastRMSSD: fast,
+                            baselineRMSSD: state.baselineRMSSD > 0 ? state.baselineRMSSD : nil,
+                            nextState: state)
+        }
+        guard hrInBand, recentMotionG < motionGateG else {
+            return Decision(shouldNudge: false, reason: .exerciseGated,
+                            buzzLoops: config.buzzLoops, fastRMSSD: fast,
+                            baselineRMSSD: state.baselineRMSSD > 0 ? state.baselineRMSSD : nil,
+                            nextState: state)
+        }
+
+        // 4) Only a DISTINCT trusted R-R tail may advance the baseline. `evaluate` can be reached from
+        // both HR and R-R publishers, so the exact same cached window may otherwise be counted repeatedly.
+        let fingerprint = trustedWindowFingerprint(fastWindow)
+        let overlapsPriorWindow = state.trustedWindowCount > 0
+            && (nowSec - state.lastTrustedWindowAt) < minimumTrustedWindowSpacingSeconds
+        if fingerprint == state.lastTrustedWindowFingerprint || overlapsPriorWindow {
+            return Decision(shouldNudge: false, reason: .duplicateWindow, buzzLoops: config.buzzLoops,
+                            fastRMSSD: fast,
+                            baselineRMSSD: state.baselineRMSSD > 0 ? state.baselineRMSSD : nil,
+                            nextState: state)
+        }
+
+        // 5) Build the minimum personal baseline with an exact running mean, then advance it with the slow
+        // EMA. Applying alpha=0.98 during a four-window warm-up would leave ~94% of an outlier first window
+        // in the baseline, so ordinary later windows could be misclassified as a fresh dip. Older builds
+        // persisted an EMA without the evidence count; count==0 deliberately replaces that legacy value.
         var next = state
-        next.baselineRMSSD = state.baselineRMSSD == 0
-            ? fast
-            : state.baselineRMSSD * baselineEmaAlpha + fast * (1.0 - baselineEmaAlpha)
+        next.lastTrustedWindowFingerprint = fingerprint
+        next.lastTrustedWindowAt = nowSec
+        next.trustedWindowCount = min(minimumTrustedBaselineWindows, state.trustedWindowCount + 1)
+        if state.trustedWindowCount < minimumTrustedBaselineWindows {
+            let priorCount = Double(state.trustedWindowCount)
+            next.baselineRMSSD = (state.baselineRMSSD * priorCount + fast) / (priorCount + 1)
+        } else {
+            next.baselineRMSSD = state.baselineRMSSD * baselineEmaAlpha
+                + fast * (1.0 - baselineEmaAlpha)
+        }
         let baseline = next.baselineRMSSD
 
-        // 4) Is the fast RMSSD below the drop threshold? (the dip test)
+        // 6) Is the fast RMSSD below the drop threshold? (the dip test)
         let threshold = baseline * dropRatio
         let isBelow = fast < threshold
         // The edge: a FRESH crossing (above on the previous tick → below now). Always record the new
@@ -214,23 +291,16 @@ public enum StressOnsetDetector {
                      fastRMSSD: fast, baselineRMSSD: baseline, nextState: next)
         }
 
+        // The current window may complete warm-up, but it cannot also be judged against a baseline that
+        // partly contains itself. Auto-fire begins only on a later distinct trusted window.
+        if state.trustedWindowCount < minimumTrustedBaselineWindows {
+            return decide(false, .warmingUp)
+        }
         if !isBelow { return decide(false, .noDip) }
         if !isEdge { return decide(false, .notAnEdge) }
 
-        // 5) Exercise gate (the credibility line). HR out of the resting band (or unknown) → metabolic.
-        //    Recent motion at/above the gate → metabolic. Either suppresses.
-        let hrInBand: Bool = {
-            guard let hr = currentHR else { return false }   // unknown HR can't confirm resting → gate
-            return hr >= restingHRLow && hr <= restingHRHigh
-        }()
-        let moving: Bool = {
-            guard let m = recentMotionG else { return false } // no recent gravity → motion inconclusive
-            return m >= motionGateG
-        }()
-        if !hrInBand || moving { return decide(false, .exerciseGated) }
-
-        // 6) Suppressors: a manual session is running, the rate limit, or quiet hours.
-        if sessionActive { return decide(false, .suppressed) }
+        // 7) Remaining suppressors: the rate limit or quiet hours. Session activity was rejected before
+        // signal processing so it could not train the resting baseline.
         if state.lastFireAt != 0 && (nowSec - state.lastFireAt) < minSecondsBetweenFires {
             return decide(false, .suppressed)
         }
@@ -242,8 +312,21 @@ public enum StressOnsetDetector {
             }
         }
 
-        // 7) Fire — a fresh, non-metabolic HRV dip while still. Stamp the rate-limit clock.
+        // 8) Fire — a fresh short-window HRV dip with observed low motion. Stamp the rate-limit clock.
         next.lastFireAt = nowSec
         return decide(true, .onset)
+    }
+
+    /// Stable across launches (unlike `Hasher`) so the persisted state can reject a replay after relaunch.
+    /// The clean window contains finite millisecond values; hashing each exact Double bit pattern preserves
+    /// even a one-millisecond tail change without retaining any biometric samples in preferences.
+    private static func trustedWindowFingerprint(_ window: [Double]) -> UInt64 {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for value in window {
+            hash ^= value.bitPattern
+            hash &*= 1_099_511_628_211
+        }
+        hash ^= UInt64(window.count)
+        return hash == 0 ? 1 : hash
     }
 }

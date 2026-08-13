@@ -110,6 +110,24 @@ final class AnalyticsEngineTests: XCTestCase {
         XCTAssertEqual(result.cachedSleep.count, 1)
         XCTAssertNotNil(result.cachedSleep[0].stagesJSON)
         XCTAssertEqual(result.cachedSleep[0].restingHr, 50)
+        XCTAssertEqual(result.cachedSleep[0].gravitySparse, false)
+    }
+
+    func testAnalyzeDayPersistsSparseVerdictWhenTwoSamplesExpandToFullTrace() throws {
+        let day = "2021-06-15"
+        let n = night(endDay: day, hours: 7)
+        let endpointGravity = [try XCTUnwrap(n.gravity.first), try XCTUnwrap(n.gravity.last)]
+        let result = AnalyticsEngine.analyzeDay(
+            day: day, hr: n.hr, rr: n.rr, gravity: endpointGravity,
+            profile: UserProfile(weightKg: 75, heightCm: 178, age: 30, sex: "male"))
+
+        let session = try XCTUnwrap(result.cachedSleep.first)
+        XCTAssertEqual(result.cachedSleep.count, 1)
+        XCTAssertEqual(session.gravitySparse, true,
+                       "the engine verdict, not a gridded array count, is canonical coverage provenance")
+        XCTAssertGreaterThan(try XCTUnwrap(result.sessionMotionByStart[session.startTs]).count, 2,
+                             "two raw points expand across the session and therefore cannot prove coverage")
+        XCTAssertEqual(result.restConfidence, .building)
     }
 
     func testAnalyzeDayColdStartRecoveryNil() {
@@ -525,6 +543,44 @@ final class AnalyticsEngineTests: XCTestCase {
                                  asleepSeconds: asleep, restorativeSeconds: asleep * 0.45,
                                  efficiency: 0.95),
             .solid)
+    }
+
+    func testRestAssessmentSurfacesSparseMotionWithoutChangingTheTier() {
+        let asleep = 8.0 * 3600.0
+        let assessment = ScoreConfidence.restAssessment(
+            hasSession: true, hasStagedSleep: true,
+            asleepSeconds: asleep, restorativeSeconds: asleep * 0.45,
+            efficiency: 0.95, gravitySparse: true)
+        XCTAssertEqual(assessment.confidence,
+                       ScoreConfidence.rest(hasSession: true, hasStagedSleep: true,
+                                            asleepSeconds: asleep,
+                                            restorativeSeconds: asleep * 0.45,
+                                            efficiency: 0.95, gravitySparse: true))
+        XCTAssertEqual(assessment.limitations, [.sparseMotion])
+    }
+
+    func testRestAssessmentNamesMissingStagesAndSuspiciousMixSeparately() {
+        let unstaged = ScoreConfidence.restAssessment(
+            hasSession: true, hasStagedSleep: false,
+            asleepSeconds: 7 * 3600, restorativeSeconds: 0, efficiency: 0.9)
+        XCTAssertEqual(unstaged.confidence, .building)
+        XCTAssertEqual(unstaged.limitations, [.noStagedSleep])
+
+        let suspicious = ScoreConfidence.restAssessment(
+            hasSession: true, hasStagedSleep: true,
+            asleepSeconds: 7 * 3600, restorativeSeconds: 5 * 60, efficiency: 0.92)
+        XCTAssertEqual(suspicious.confidence, .building)
+        XCTAssertEqual(suspicious.limitations, [.implausibleStageMix])
+    }
+
+    func testRestAssessmentTreatsUnavailableMotionAsLimitedEvidence() {
+        let asleep = 7.0 * 3600.0
+        let assessment = ScoreConfidence.restAssessment(
+            hasSession: true, hasStagedSleep: true,
+            asleepSeconds: asleep, restorativeSeconds: asleep * 0.4,
+            efficiency: 0.9, motionUnavailable: true)
+        XCTAssertEqual(assessment.confidence, .building)
+        XCTAssertEqual(assessment.limitations, [.motionUnavailable])
     }
 
     // MARK: - #525 day with an overnight + a nap reports CONSISTENT totals

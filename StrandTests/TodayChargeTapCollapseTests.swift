@@ -3,18 +3,18 @@ import StrandAnalytics
 @testable import Strand
 
 /// A1/S4/S5 - the pure pieces behind the Today hero Charge-ring tap and the home-screen collapses:
-/// the one-word readiness read kept on the hero (#205), the collapsed "Synced from: ..." footer summary
+/// the descriptive readiness read kept on the hero (#205), the collapsed "Synced from: ..." footer summary
 /// (S5), and the metrics-grid overflow cap (S5). Each is a view-free static so it pins without a live view,
 /// the same way `heroRingDiameter` / `clampedDayOffset` are tested. The Kotlin twins mirror these exactly.
 final class TodayChargeTapCollapseTests: XCTestCase {
 
-    // MARK: #205 one-word readiness read (kept on the hero after Readiness folded into the Charge tap)
+    // MARK: #205 descriptive readiness read (kept on the hero after Readiness folded into the Charge tap)
 
     func testReadinessWord_mapsEveryLevel() {
-        XCTAssertEqual(TodayView.readinessWord(.primed), "Push")
-        XCTAssertEqual(TodayView.readinessWord(.balanced), "Maintain")
-        XCTAssertEqual(TodayView.readinessWord(.strained), "Rest")
-        XCTAssertEqual(TodayView.readinessWord(.rundown), "Rest")
+        XCTAssertEqual(TodayView.readinessWord(.primed), "Aligned")
+        XCTAssertEqual(TodayView.readinessWord(.balanced), "Within range")
+        XCTAssertEqual(TodayView.readinessWord(.strained), "Recheck")
+        XCTAssertEqual(TodayView.readinessWord(.rundown), "Multiple shifts")
     }
 
     func testReadinessWord_insufficientHasNoWord() {

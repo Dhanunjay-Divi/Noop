@@ -104,6 +104,9 @@ struct LiquidTodayView: View {
     // Resolve both ONCE per data/day change in load() and read the cache in body (O(1)).
     @State private var cachedDisplayDay: DailyMetric?
     @State private var cachedReadiness: ReadinessEngine.Readiness?
+    /// The exact day currently supporting the readiness read. Kept beside the cached result so Today can
+    /// stamp freshness/confidence without recomputing or implying a carried night belongs to today.
+    @State private var readinessAsOfDay: String?
     /// The recovery-INDEPENDENT prior-day vitals carry (HRV / RHR / respiratory), resolved ONCE in load()
     /// alongside cachedDisplayDay. Fixes the v8 rollover blank: after 04:00, before tonight's sleep scores,
     /// today's row has no vitals yet, so these fall back to the last night that recorded them. Never
@@ -240,6 +243,7 @@ struct LiquidTodayView: View {
 
     /// Scroll-to-top on an at-root Today re-tap (#198 follow-up); default 0 so macOS/other contexts stay inert.
     @Environment(\.scrollToTopSignal) private var scrollToTopSignal
+    @Environment(\.scrollPositionReporter) private var reportScrollPosition
     private static let topAnchorID = "liquidToday.top"
     private static let bottomAnchorID = "liquidToday.bottom"
     private static let patternsAnchorID = "liquidToday.patterns"
@@ -265,7 +269,7 @@ struct LiquidTodayView: View {
                 // retire offscreen liquid canvases instead of animating the whole dashboard while scrolling.
                 LazyVStack(alignment: .leading, spacing: 12) {
                     scene
-                    // A raised illness/strain warning must remain visible on the default Today surface.
+                    // A raised multi-signal warning must remain visible on the default Today surface.
                     // Keep it pinned outside the reorderable section list so it cannot be moved below the
                     // fold; the leaf renders nothing while AppModel has no active warning.
                     HealthAlertBanner()
@@ -320,7 +324,10 @@ struct LiquidTodayView: View {
             #endif
         }
         .coordinateSpace(name: Self.pullSpace)
-        .onPreferenceChange(PullOffsetKey.self) { handlePull($0) }
+        .onPreferenceChange(PullOffsetKey.self) { offset in
+            handlePull(offset)
+            reportScrollPosition(offset)
+        }
         // The original satin-obsidian field is a FIXED full-bleed backdrop behind the scroll content,
         // edge-to-edge under the status bar. It does not scroll, so the UI reads as glass moving over
         // physical hardware rather than wallpaper moving with the cards.
@@ -1037,6 +1044,20 @@ struct LiquidTodayView: View {
                             .font(StrandFont.caption)
                             .foregroundStyle(StrandPalette.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: NoopMetrics.space2) {
+                            Text(readinessConfidenceLabel.uppercased())
+                                .font(StrandFont.overlineScaled(8)).tracking(0.8)
+                            Text(readinessAsOfLabel)
+                                .font(StrandFont.caption)
+                        }
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        if let limitation = readiness.limitations.first,
+                           chargeDisplay.calibrationDetail == nil {
+                            Text(limitation)
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     }
                 }
@@ -1045,8 +1066,8 @@ struct LiquidTodayView: View {
             .accessibilityHint(synthesisExpanded ? "Collapse daily brief" : "Expand daily brief")
 
             // Current-state inference only. Historical browsing intentionally omits this card: the
-            // illness snapshot is live/latest and must never be projected backward onto a past day.
-            if selectedDayOffset == 0 {
+            // This current signal snapshot is live/latest and must never be projected onto a past day.
+            if selectedDayOffset == 0, chargeDisplay.calibrationDetail == nil {
                 TodaySignalPatternsCard(readiness: readiness, restScore: restScore)
                     .id(Self.patternsAnchorID)
             }
@@ -1449,6 +1470,7 @@ struct LiquidTodayView: View {
         // stale import could masquerade as today's pattern. An explicit absent key correctly yields
         // `.insufficient`.
         cachedReadiness = ReadinessEngine.evaluate(days: repo.days, today: selectedDayKey)
+        readinessAsOfDay = cachedReadiness?.asOfDay
         // Prior-day vitals carry, resolved ONCE here (never in body). Bound to today's own key so it can't
         // echo today's still-forming row; only on today (a past day's own row is the whole story).
         let tkey = cachedDisplayDay?.day ?? selectedDayKey
@@ -1481,7 +1503,6 @@ struct LiquidTodayView: View {
             : selectedCalendarWindow.upperBound
 
         async let restA = repo.exploreSeries(key: "sleep_performance", source: "my-whoop")
-        async let stressA = repo.series(key: "stress", source: "my-whoop")
         async let fitA = repo.exploreSeries(key: "fitness_age", source: "my-whoop")
         async let vitA = repo.exploreSeries(key: "vitality", source: "my-whoop")
         async let fitProfileA = repo.exploreSeries(
@@ -1516,17 +1537,19 @@ struct LiquidTodayView: View {
             todayValue: restByDay[selectedDayKey], lastDay: restSeries.last?.day,
             lastValue: restSeries.last?.value, isTodaySelected: selectedDayOffset == 0,
             todayKey: selectedDayKey)
-        // StressModel loops the full history to build its baseline — run it OFF the main actor so a big
-        // history doesn't stutter the UI. Snapshot the inputs (value types) into the detached task.
-        let storedStress = await stressA
-        let daysSnapshot = repo.days
+        // Mirror StressView's source-isolated read: select one complete source before building a personal
+        // baseline. Never blend strap, WHOOP export, and Apple rows into a synthetic physiology history.
+        // The Today card is stricter than the detail screen's honest historical carry: if the selected day
+        // is not the read's real as-of day, keep Today empty instead of relabelling an older score as current.
+        // `StressModel` is a linear, in-memory pass over already-loaded value rows; keeping it on the main
+        // actor also respects SourcedDailyMetric's app isolation without crossing it through an unsafe task.
+        let stressRows = repo.vitalMetricRows
 
         // Today consumes only the selected day's imported values. Historical series are intentionally
         // left to Trends/detail, avoiding a full 14-day aggregation on every dashboard refresh.
         let appleRows = await appleA
-        stress = await Task.detached(priority: .utility) {
-            StressModel(days: daysSnapshot, stored: storedStress)?.score
-        }.value
+        let stressModel = StressModel(sourceRows: stressRows)
+        stress = stressModel?.asOfDay == selectedDayKey ? stressModel?.score : nil
         let fitProfile = (await fitProfileA).last?.value
         let vitProfile = (await vitProfileA).last?.value
         fitnessAge = profile.acceptsFitnessAge(provenance: fitProfile)
@@ -1537,7 +1560,9 @@ struct LiquidTodayView: View {
         // latest. Without this, swiping to a past day with no strap step count showed today's estimate (the
         // `.last` value) instead of that day's. Mirrors the classic Today's stepsEstByDay[selectedDayKey].
         let stepsByDay = Dictionary(stepsSeries.map { ($0.day, $0.value) }, uniquingKeysWith: { _, last in last })
-        stepsEst = stepsByDay[selectedDayKey] ?? (selectedDayOffset == 0 ? stepsSeries.last?.value : nil)
+        // Never let the history tail pose as today's count. An exact-day row may be absent while an
+        // older estimate exists; Today must stay empty until this selected day actually has a point.
+        stepsEst = stepsByDay[selectedDayKey]
         // Imported Apple Health steps for the SELECTED day (max across rows), the middle tier between the
         // measured strap count and the motion estimate. Health Connect is Android-only, so apple-health is
         // the sole import source on iOS. Mirrors Android `stepsForDay` (#377).
@@ -1548,6 +1573,9 @@ struct LiquidTodayView: View {
         importedActiveKcalDay = selectedAppleEnergy?.activeKcal
         importedRestingKcalDay = selectedAppleEnergy?.basalKcal
         hrValues = (await hrA).map { $0.bpm }
+        // A row that only OVERLAPS the selected day (for example a workout begun before midnight) must
+        // be visibly attributed, not look like it started today. Keep the useful overlap but stamp its
+        // start day in the row; the empty state remains strictly selected-day scoped.
         workouts = (await wkA).sorted { $0.startTs > $1.startTs }
 
         let (chargeSource, effortSource, restSource) = await (chargeSourceA, effortSourceA, restSourceA)
@@ -1601,9 +1629,10 @@ struct LiquidTodayView: View {
 
     private var readinessWord: String? {
         switch readiness.level {
-        case .primed: return String(localized: "Push")
-        case .balanced: return String(localized: "Maintain")
-        case .strained, .rundown: return String(localized: "Rest")
+        case .primed: return String(localized: "Aligned")
+        case .balanced: return String(localized: "Within range")
+        case .strained: return String(localized: "Recheck")
+        case .rundown: return String(localized: "Multiple shifts")
         case .insufficient: return nil
         }
     }
@@ -1620,12 +1649,28 @@ struct LiquidTodayView: View {
             return String(localized: "No new nights from your strap for \(stale) days. Check it's connected and saving data.")
         }
         switch readiness.level {
-        case .primed: return String(localized: "You're primed. A hard session should land well today.")
-        case .balanced: return String(localized: "You're in a good spot for training.")
-        case .strained: return String(localized: "Signals are down a touch. Keep it easy today.")
-        case .rundown: return String(localized: "Several recovery signals are down. Prioritise rest today.")
+        case .primed: return String(localized: "Available recovery signals are aligned with your recent baseline.")
+        case .balanced: return String(localized: "Available signals are close to your recent baseline.")
+        case .strained: return String(localized: "One signal shifted. Recheck the trend and use how you feel as context.")
+        case .rundown: return String(localized: "Several signals shifted together. This is a prompt to review, not a diagnosis.")
         case .insufficient: return String(localized: "Still learning your baseline. A few more nights and this fills in.")
         }
+    }
+
+    private var readinessConfidenceLabel: String {
+        switch readiness.confidence {
+        case .calibrating: return String(localized: "Calibrating")
+        case .building: return String(localized: "Building confidence")
+        case .solid: return String(localized: "Higher confidence")
+        }
+    }
+
+    private var readinessAsOfLabel: String {
+        guard let day = readinessAsOfDay ?? readiness.asOfDay else {
+            return String(localized: "No current daily read")
+        }
+        if day == selectedDayKey { return String(localized: "As of this day") }
+        return String(localized: "As of \(day)")
     }
 
     private var greeting: String {
@@ -1735,6 +1780,14 @@ struct LiquidTodayView: View {
 
     private func workoutSub(_ w: WorkoutRow) -> String {
         var parts: [String] = []
+        let startDay = Repository.localDayKey(Date(timeIntervalSince1970: TimeInterval(w.startTs)))
+        if startDay != selectedDayKey {
+            parts.append(Date(timeIntervalSince1970: TimeInterval(w.startTs))
+                .formatted(date: .abbreviated, time: .shortened))
+        } else {
+            parts.append(Date(timeIntervalSince1970: TimeInterval(w.startTs))
+                .formatted(date: .omitted, time: .shortened))
+        }
         let secs = w.durationS ?? Double(max(w.endTs - w.startTs, 0))
         parts.append("\(Int(secs / 60)) min")
         if let dm = w.distanceM, dm > 0 { parts.append(String(format: "%.1f km", dm / 1000)) }
@@ -1785,7 +1838,7 @@ private struct TodaySignalPatternsCard: View {
         if CommandLine.arguments.contains("--demo-patterns") {
             let demoReadiness = ReadinessEngine.Readiness(
                 level: .rundown,
-                headline: "Run down",
+                headline: "Multiple shifts",
                 summary: "Several signals shifted.",
                 signals: [
                     .init(key: "hrv", label: "HRV", evidence: "52 vs 68 ms",

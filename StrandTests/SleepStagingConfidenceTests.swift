@@ -1,6 +1,7 @@
 import XCTest
 @testable import Strand
 import StrandAnalytics
+import WhoopStore
 
 /// #H9 — the Sleep stage-breakdown LOW-CONFIDENCE badge gate (`SleepView.isStagingLowConfidence`).
 ///
@@ -61,5 +62,55 @@ final class SleepStagingConfidenceTests: XCTestCase {
                                         efficiency: eff)
         XCTAssertTrue(uiFlag)
         XCTAssertEqual(tier, .building)
+    }
+
+    // MARK: Canonical motion-coverage provenance
+
+    func testTwoMotionEpochsDoNotOverrideCanonicalSparseLimitation() {
+        let asleep = 8.0 * 3_600.0
+        let assessment = SleepView.localRestAssessment(
+            hasSession: true, hasStagedSleep: true,
+            asleepSeconds: asleep, restorativeSeconds: asleep * 0.45,
+            efficiency: 0.95, motionEpochCount: 2, gravitySparse: true)
+
+        XCTAssertEqual(assessment.confidence, .building)
+        XCTAssertEqual(assessment.limitations, [.sparseMotion])
+    }
+
+    func testExpandedMotionTraceWithoutCoverageProvenanceRemainsLimited() {
+        let asleep = 8.0 * 3_600.0
+        let assessment = SleepView.localRestAssessment(
+            hasSession: true, hasStagedSleep: true,
+            asleepSeconds: asleep, restorativeSeconds: asleep * 0.45,
+            efficiency: 0.95, motionEpochCount: 960, gravitySparse: nil)
+
+        XCTAssertEqual(assessment.confidence, .building)
+        XCTAssertEqual(assessment.limitations, [.motionUnavailable])
+    }
+
+    func testExplicitDenseCoverageCanRetainHigherConfidence() {
+        let asleep = 8.0 * 3_600.0
+        let assessment = SleepView.localRestAssessment(
+            hasSession: true, hasStagedSleep: true,
+            asleepSeconds: asleep, restorativeSeconds: asleep * 0.45,
+            efficiency: 0.95, motionEpochCount: 960, gravitySparse: false)
+
+        XCTAssertEqual(assessment.confidence, .solid)
+        XCTAssertTrue(assessment.limitations.isEmpty)
+    }
+
+    func testMergedNightKeepsSparseAndUnknownFragmentProvenance() {
+        func session(_ start: Int, sparse: Bool?) -> CachedSleepSession {
+            CachedSleepSession(startTs: start, endTs: start + 3_600, efficiency: 0.9,
+                               restingHr: nil, avgHrv: nil, stagesJSON: nil,
+                               gravitySparse: sparse)
+        }
+
+        XCTAssertEqual(SleepView.mergedGravitySparse([session(0, sparse: false),
+                                                      session(4_000, sparse: true)]), true)
+        XCTAssertEqual(SleepView.mergedGravitySparse([session(0, sparse: false),
+                                                      session(4_000, sparse: false)]), false)
+        XCTAssertNil(SleepView.mergedGravitySparse([session(0, sparse: false),
+                                                    session(4_000, sparse: nil)]))
     }
 }

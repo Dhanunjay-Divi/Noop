@@ -4,18 +4,25 @@ import StrandDesign
 import Foundation
 import Combine
 
-/// Per-drag scratch space for the adaptive navigation bar. Reference semantics are intentional: updating
-/// this object does not publish SwiftUI changes on every touch sample, unlike three separate `@State`s.
-private final class TabBarDragTracker {
-    var started = false
-    var lastTranslation = CGSize.zero
-    var accumulator: CGFloat = 0
+/// Scroll-position scratch space for the adaptive navigation bar. Reference semantics are intentional:
+/// offsets arrive for every display-linked ScrollView update, but only a real phase/state transition
+/// should invalidate the five-tab shell. The screen itself reports its top marker in scroll coordinates;
+/// this tracker turns that stream into direction travel with separate compact/expand thresholds.
+private final class TabBarScrollTracker {
+    var lastOffset: CGFloat?
+    var directionalTravel: CGFloat = 0
+    var lastMovementUptime: TimeInterval = 0
+    var idleTask: Task<Void, Never>?
 
     func reset() {
-        started = false
-        lastTranslation = .zero
-        accumulator = 0
+        lastOffset = nil
+        directionalTravel = 0
+        lastMovementUptime = 0
+        idleTask?.cancel()
+        idleTask = nil
     }
+
+    deinit { idleTask?.cancel() }
 }
 
 /// iOS navigation shell. macOS uses a `NavigationSplitView` sidebar (`RootView`); on iPhone the
@@ -39,19 +46,19 @@ struct RootTabView: View {
     /// Actual rendered height of the custom bar (including its own bottom breathing room). Measuring
     /// it keeps Dynamic Type and future visual changes in lockstep with the space reserved below every
     /// tab; a duplicated magic spacer inevitably drifts and hides the last card again.
-    @State private var measuredTabBarHeight: CGFloat = 0
+    @State private var measuredTabBarHeight: CGFloat = FloatingTabBar.expandedReservedHeight
     /// The navigation chrome follows the user's vertical gesture: an upward swipe (reading farther down
     /// the page) compacts it to an icon rail; a downward swipe expands the labels again. The state is
     /// visual only — the shell keeps reserving the largest measured height so changing modes can never
     /// move the scroll endpoint or strand the final card behind the bar.
     @State private var tabBarCompact = Self.initialTabBarCompact
-    /// Mutable gesture bookkeeping deliberately lives in a non-observable reference. These values change
-    /// on every finger sample; keeping them in `@State` invalidated the entire five-tab shell every frame
-    /// and made otherwise-light ScrollViews hitch. Only the threshold result (`tabBarCompact`) is render
-    /// state. `contentGestureActive` changes once at gesture start/end and pauses decorative liquid clocks
-    /// while the user's finger needs the render budget.
-    @State private var tabBarDragTracker = TabBarDragTracker()
+    /// Mutable scroll bookkeeping deliberately lives in a non-observable reference. Actual offsets change
+    /// on every drag/deceleration frame; keeping them in `@State` invalidates the whole shell and hitches the
+    /// scroll. `scrollMotionActive` changes only when movement begins/settles. Together with the gesture
+    /// phase it pauses decorative liquid clocks for both the finger interaction AND inertial deceleration.
+    @State private var tabBarScrollTracker = TabBarScrollTracker()
     @GestureState private var contentGestureActive = false
+    @State private var scrollMotionActive = false
     /// A safe-area inset follows the software keyboard and can leave a custom tab bar floating halfway
     /// up the display. Native tab bars disappear while typing, so mirror that behaviour here and let the
     /// tab content use the keyboard-adjusted safe area on its own.
@@ -152,19 +159,19 @@ struct RootTabView: View {
         // LiquidToday / some pushed pages unable to expose their final card above the overlay.
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
-                tab(todayTabRoot, "Today", "square.grid.2x2",
+                tab(todayTabRoot, "Today", "square.grid.2x2", tag: IPhonePrimaryTab.today.rawValue,
                     path: $tabPaths[IPhonePrimaryTab.today.rawValue],
                     scrollSignal: scrollTop[IPhonePrimaryTab.today.rawValue])
                     .tag(IPhonePrimaryTab.today.rawValue)
-                tab(TrendsView(), "Trends", "chart.line.uptrend.xyaxis",
+                tab(TrendsView(), "Trends", "chart.line.uptrend.xyaxis", tag: IPhonePrimaryTab.trends.rawValue,
                     path: $tabPaths[IPhonePrimaryTab.trends.rawValue],
                     scrollSignal: scrollTop[IPhonePrimaryTab.trends.rawValue])
                     .tag(IPhonePrimaryTab.trends.rawValue)
-                tab(FriendsView(), "Friends", "person.2.fill",
+                tab(FriendsView(), "Friends", "person.2.fill", tag: IPhonePrimaryTab.friends.rawValue,
                     path: $tabPaths[IPhonePrimaryTab.friends.rawValue],
                     scrollSignal: scrollTop[IPhonePrimaryTab.friends.rawValue])
                     .tag(IPhonePrimaryTab.friends.rawValue)
-                tab(SleepView(), "Sleep", "bed.double",
+                tab(SleepView(), "Sleep", "bed.double", tag: IPhonePrimaryTab.sleep.rawValue,
                     path: $tabPaths[IPhonePrimaryTab.sleep.rawValue],
                     scrollSignal: scrollTop[IPhonePrimaryTab.sleep.rawValue])
                     .tag(IPhonePrimaryTab.sleep.rawValue)
@@ -211,11 +218,11 @@ struct RootTabView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(StrandPalette.surfaceBase.ignoresSafeArea())
-        .environment(\.liquidInteractionInProgress, contentGestureActive)
-        // Observe the same finger gesture as the nested ScrollViews without taking ownership of it.
-        // Horizontal charts/day swipes are ignored; a small directional accumulator provides a dead
-        // zone so tiny reversals and scroll bounce do not make the bar flicker between sizes.
-        .simultaneousGesture(adaptiveTabBarGesture)
+        .environment(\.liquidInteractionInProgress, contentGestureActive || scrollMotionActive)
+        // This observer only marks the immediate touch phase; actual bar state comes from each screen's
+        // top-marker position below. Keeping the gesture simultaneous preserves charts, day swipes and
+        // interactive Back, while the offset stream continues through inertial deceleration.
+        .simultaneousGesture(scrollInteractionGesture)
         .onPreferenceChange(FloatingTabBarHeightPreferenceKey.self) { height in
             // Preserve the LARGEST real measurement. Compacting the visual bar must not reduce the
             // content reservation (which would shift scroll position and could hide the final card).
@@ -236,7 +243,7 @@ struct RootTabView: View {
             // A new destination starts with the fully labelled wayfinding state. It may compact again
             // as soon as the user resumes scrolling down that page.
             tabBarCompact = false
-            resetTabBarDragTracking()
+            resetTabBarScrollTracking()
         }
         .onAppear {
             DailyReviewNotifications.restoreScheduleIfAuthorized()
@@ -299,45 +306,79 @@ struct RootTabView: View {
         keyboardVisible ? 0 : measuredTabBarHeight
     }
 
-    /// Finger-direction policy for the adaptive bar. Negative Y means the finger moved upward and the
-    /// page is advancing; positive Y means the user is returning toward the top. Requiring vertical
-    /// dominance protects Trends charts, the Today day-swipe, and the system Back gesture.
-    private var adaptiveTabBarGesture: some Gesture {
-        DragGesture(minimumDistance: 10, coordinateSpace: .global)
+    /// A lightweight interaction-phase observer. It does not decide compact/expanded state and never
+    /// writes per-sample `@State`; its sole job is to yield the liquid animation budget immediately,
+    /// before the first scroll-offset preference arrives.
+    private var scrollInteractionGesture: some Gesture {
+        DragGesture(minimumDistance: 4, coordinateSpace: .global)
             .updating($contentGestureActive) { value, active, _ in
                 let dx = value.translation.width
                 let dy = value.translation.height
                 if abs(dy) > abs(dx) * 1.15 { active = true }
             }
-            .onChanged { value in
-                let prior = tabBarDragTracker.started ? tabBarDragTracker.lastTranslation : .zero
-                let dx = value.translation.width - prior.width
-                let dy = value.translation.height - prior.height
-                tabBarDragTracker.started = true
-                tabBarDragTracker.lastTranslation = value.translation
-
-                guard !keyboardVisible,
-                      abs(dy) > abs(dx) * 1.15,
-                      abs(dy) > 0.5 else { return }
-
-                // A real reversal starts a fresh decision rather than making the user first cancel all
-                // travel accumulated in the previous direction.
-                if tabBarDragTracker.accumulator * dy < 0 { tabBarDragTracker.accumulator = 0 }
-                tabBarDragTracker.accumulator += dy
-
-                if tabBarDragTracker.accumulator <= -14, !tabBarCompact {
-                    tabBarCompact = true
-                    tabBarDragTracker.accumulator = 0
-                } else if tabBarDragTracker.accumulator >= 10, tabBarCompact {
-                    tabBarCompact = false
-                    tabBarDragTracker.accumulator = 0
-                }
-            }
-            .onEnded { _ in resetTabBarDragTracking() }
     }
 
-    private func resetTabBarDragTracking() {
-        tabBarDragTracker.reset()
+    /// Receives the real ScrollView top-marker position (0 at rest; negative after advancing). Unlike
+    /// finger translation this continues during deceleration and ignores non-scrolling vertical drags.
+    /// Hysteresis is intentionally asymmetric: compact only after meaningful down-page progress, expand
+    /// after a deliberate return gesture or whenever the page reaches its top band.
+    private func reportScrollPosition(_ offset: CGFloat, for tab: Int) {
+        guard tab == selectedTab, offset.isFinite else { return }
+        let tracker = tabBarScrollTracker
+
+        guard let previous = tracker.lastOffset else {
+            tracker.lastOffset = offset
+            if offset >= -10 { tabBarCompact = false }
+            return
+        }
+
+        let delta = offset - previous
+        tracker.lastOffset = offset
+        guard abs(delta) >= 0.5 else { return }
+
+        markScrollMotionActive()
+
+        if tracker.directionalTravel * delta < 0 { tracker.directionalTravel = 0 }
+        tracker.directionalTravel += delta
+
+        if offset >= -10 {
+            if tabBarCompact { tabBarCompact = false }
+            tracker.directionalTravel = 0
+        } else if !tabBarCompact, offset <= -36, tracker.directionalTravel <= -18 {
+            tabBarCompact = true
+            tracker.directionalTravel = 0
+        } else if tabBarCompact, tracker.directionalTravel >= 26 {
+            tabBarCompact = false
+            tracker.directionalTravel = 0
+        }
+    }
+
+    /// Treat the offset stream as a scroll phase: every movement postpones the idle edge. One lightweight
+    /// task watches a monotonic timestamp instead of being cancelled/recreated on every deceleration frame;
+    /// that keeps the animation pause cheap precisely while the user is asking the ScrollView to do work.
+    private func markScrollMotionActive() {
+        let tracker = tabBarScrollTracker
+        tracker.lastMovementUptime = ProcessInfo.processInfo.systemUptime
+        if !scrollMotionActive { scrollMotionActive = true }
+        guard tracker.idleTask == nil else { return }
+
+        tracker.idleTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 180_000_000)
+                guard !Task.isCancelled else { return }
+                guard ProcessInfo.processInfo.systemUptime - tracker.lastMovementUptime >= 0.18 else {
+                    continue
+                }
+                scrollMotionActive = false
+                tracker.idleTask = nil
+                return
+            }
+        }
+    }
+
+    private func resetTabBarScrollTracking() {
+        tabBarScrollTracker.reset()
+        scrollMotionActive = false
     }
 
     /// Consume both live and cold-launch navigation requests. `onChange` handles taps while the shell is
@@ -494,7 +535,7 @@ struct RootTabView: View {
         }
     }
 
-    private func tab<V: View>(_ view: V, _ title: LocalizedStringKey, _ icon: String,
+    private func tab<V: View>(_ view: V, _ title: LocalizedStringKey, _ icon: String, tag: Int,
                               path: Binding<NavigationPath>, scrollSignal: Int) -> some View {
         // Each primary tab gets its OWN NavigationStack so the in-content NavigationLinks (e.g. the Today
         // dashboard card rows) both navigate AND render opaque. An ORPHANED NavigationLink (no
@@ -513,6 +554,9 @@ struct RootTabView: View {
         // Drive this tab's root scroll-to-top on an at-root re-tap (#198 follow-up); read by ScreenScaffold
         // / LiquidTodayView inside. Only THIS tab's token changes on its reselect, so the others don't scroll.
         .environment(\.scrollToTopSignal, scrollSignal)
+        .environment(\.scrollPositionReporter, { offset in
+            reportScrollPosition(offset, for: tag)
+        })
         .toolbar(.hidden, for: .tabBar)   // we draw our own FloatingTabBar
         .tabItem { Label(title, systemImage: icon) }
     }
@@ -528,6 +572,7 @@ struct RootTabView: View {
                            onRefresh: { await repo.refresh() },
                            topBackground: liquidScaffoldSky(),
                            trailing: { appearanceQuickMenu }) {
+                moreQuickAccess
                 moreSection("Insights") {
                     MoreRow("What Moves You", "wand.and.sparkles", .insightsHub)
                     MoreRow("Intelligence", "brain.head.profile", .intelligence)
@@ -596,7 +641,50 @@ struct RootTabView: View {
         }
         // Scroll the More index to the top on an at-root re-tap (#198 follow-up); read by its ScreenScaffold.
         .environment(\.scrollToTopSignal, scrollSignal)
+        .environment(\.scrollPositionReporter, { offset in
+            reportScrollPosition(offset, for: IPhonePrimaryTab.more.rawValue)
+        })
         .tabItem { Label("More", systemImage: "ellipsis.circle.fill") }
+    }
+
+    /// The everyday utility doors, kept separate from the complete catalogue below. Four is intentional:
+    /// this is a shortcut grid, not another navigation hierarchy. The pure titles/icons/order live in
+    /// `MoreSectionPrefs.quickAccess`, while this shell owns only the typed navigation destinations.
+    private var moreQuickAccess: some View {
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Quick Access")
+                    .font(StrandFont.overline)
+                    .tracking(StrandFont.overlineTracking)
+                    .textCase(.uppercase)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                Spacer()
+                Text("Everyday tools")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
+                                GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                ForEach(MoreSectionPrefs.quickAccess, id: \.id) { item in
+                    NavigationLink(value: quickAccessRoute(for: item.id)) {
+                        MoreQuickAccessLabel(item: item)
+                    }
+                    .buttonStyle(LiquidPressStyle())
+                    .accessibilityLabel(Text(LocalizedStringKey(item.title)))
+                    .accessibilityHint("Opens from Quick Access")
+                }
+            }
+        }
+    }
+
+    private func quickAccessRoute(for id: String) -> MoreDestination {
+        switch id {
+        case "devices": return .devices
+        case "workouts": return .workouts
+        case "widgets": return .widgets
+        default: return .settings
+        }
     }
 
     /// Quick access belongs in More's header: it is always reachable, but it does not compete with
@@ -751,6 +839,40 @@ private enum MoreDestination: Hashable {
         }
     }
     #endif
+}
+
+/// The visual half of one Quick Access tile, split from the shell to keep SwiftUI's type checker out of
+/// the already-large RootTabView body. Navigation and scroll state remain owned by the parent stack.
+private struct MoreQuickAccessLabel: View {
+    let item: MoreQuickAccessItem
+
+    var body: some View {
+        HStack(spacing: 11) {
+            Image(systemName: item.systemImage)
+                .symbolRenderingMode(.monochrome)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(StrandPalette.textPrimary)
+                .frame(width: 34, height: 34)
+                .background(StrandPalette.surfaceInset.opacity(0.86),
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(StrandPalette.hairline, lineWidth: 0.8))
+                .accessibilityHidden(true)
+            Text(LocalizedStringKey(item.title))
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.86)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 13)
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+        .background(StrandPalette.surfaceRaised.opacity(0.92),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .strokeBorder(StrandPalette.hairlineStrong.opacity(0.8), lineWidth: 0.8))
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
 }
 
 /// One tappable destination row in the More index. A `NavigationLink` whose label is the standard app row:
@@ -921,6 +1043,11 @@ private struct FloatingTabBarHeightPreferenceKey: PreferenceKey {
 /// action button nested cleanly in the gap between them — no overlap, no glow. Real iOS 26 Liquid
 /// Glass where available, a `.ultraThinMaterial` fallback below. Replaces the hidden native tab bar.
 private struct FloatingTabBar: View {
+    /// Reserve the expanded bar from the very first layout pass. The rendered bar is 62pt high plus its
+    /// 4pt bottom breathing room; seeding this value prevents the TabView content from jumping upward
+    /// after the geometry preference arrives on a cold launch.
+    static let expandedReservedHeight: CGFloat = 66
+
     @Binding var selection: Int
     /// Scroll-reactive presentation supplied by the shell. Accessibility Dynamic Type deliberately
     /// keeps labels expanded even when this is true; compact mode remains an icon-only visual choice,

@@ -37,11 +37,20 @@ struct NOOPProvider: TimelineProvider {
         let now = Date()
         let metrics = WidgetMetricPreference.load()
         var entries = [NOOPEntry(date: now, snapshot: snapshot, supportingMetrics: metrics)]
-        // Even if WidgetKit defers the requested 15-minute reload, publish an explicit expiry entry so
-        // a cached `connected=true` bit stops saying Live once the snapshot leaves the current bucket.
-        let liveExpiry = snapshot.updated.addingTimeInterval(20 * 60 + 1)
-        if snapshot.connected == true, liveExpiry > now {
-            entries.append(NOOPEntry(date: liveExpiry, snapshot: snapshot,
+        // WidgetKit can defer the requested reload, so schedule semantic state transitions into this
+        // timeline. Live HR expires from the REAL packet receipt (two minutes), while connection remains
+        // a distinct, coarser observation that retains the existing 20-minute expiry.
+        var expiries: [Date] = []
+        if snapshot.hasLiveHeartRate(at: now), let liveUntil = snapshot.liveHeartRateExpiresAt {
+            expiries.append(liveUntil.addingTimeInterval(1))
+        }
+        let connectionExpiry = snapshot.updated.addingTimeInterval(20 * 60 + 1)
+        if snapshot.hasCurrentConnection(at: now), connectionExpiry > now {
+            expiries.append(connectionExpiry)
+        }
+        for expiry in expiries.filter({ $0 > now }).sorted() {
+            guard entries.last?.date != expiry else { continue }
+            entries.append(NOOPEntry(date: expiry, snapshot: snapshot,
                                      supportingMetrics: metrics))
         }
         completion(Timeline(entries: entries,
@@ -212,7 +221,8 @@ struct NOOPVitalsWidgetView: View {
                 CompactMetric(label: "HRV", value: unitValue(snapshot.hrv, "ms"))
                 CompactMetric(label: "RHR", value: unitValue(snapshot.restingHr, "bpm"))
             }
-            SnapshotFreshnessLabel(snapshot: snapshot, now: entry.date, compact: true)
+            SnapshotFreshnessLabel(snapshot: snapshot, now: entry.date, compact: true,
+                                   tracksHeartRate: true)
         }
         .padding(10)
     }
@@ -249,7 +259,8 @@ struct NOOPVitalsWidgetView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             Spacer(minLength: 0)
-            SnapshotFreshnessLabel(snapshot: snapshot, now: entry.date, compact: false)
+            SnapshotFreshnessLabel(snapshot: snapshot, now: entry.date, compact: false,
+                                   tracksHeartRate: true)
         }
         .padding(13)
     }
@@ -396,6 +407,7 @@ private struct WidgetHeader: View {
 
     private var connectionText: LocalizedStringKey {
         if isLive(snapshot, at: now) { return "Live" }
+        if snapshot.hasCurrentConnection(at: now) { return "Connected" }
         if snapshot.bonded { return "Paired" }
         if snapshot.hasDailySignal || snapshot.hasVitals { return "Local data" }
         return "No device"
@@ -403,6 +415,7 @@ private struct WidgetHeader: View {
 
     private var connectionTint: Color {
         if isLive(snapshot, at: now) { return StrandPalette.statusPositive }
+        if snapshot.hasCurrentConnection(at: now) { return StrandPalette.statusPositive }
         if snapshot.bonded { return StrandPalette.statusWarning }
         return StrandPalette.textTertiary
     }
@@ -620,17 +633,27 @@ private struct SnapshotFreshnessLabel: View {
     let snapshot: WidgetSnapshot
     let now: Date
     let compact: Bool
+    var tracksHeartRate = false
+
+    private var displayedFreshness: WidgetSnapshot.Freshness {
+        tracksHeartRate ? snapshot.heartRateFreshness(at: now) : snapshot.freshness(at: now)
+    }
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: freshnessSymbol)
-            switch snapshot.freshness(at: now) {
+            switch displayedFreshness {
             case .unavailable:
-                Text("Open NOOP")
+                Text(tracksHeartRate ? "No HR sample" : "Open NOOP")
             case .current:
-                Text("Updated now")
+                Text(tracksHeartRate ? "HR now" : "Refreshed now")
             case .recent, .stale:
-                Text(snapshot.updated, style: .relative)
+                if tracksHeartRate, let observed = snapshot.heartRateObservedAt {
+                    Text("HR")
+                    Text(observed, style: .relative)
+                } else {
+                    Text(snapshot.updated, style: .relative)
+                }
             }
         }
         .font(.system(size: compact ? 8 : 10, weight: .medium, design: .rounded))
@@ -639,7 +662,7 @@ private struct SnapshotFreshnessLabel: View {
     }
 
     private var freshnessSymbol: String {
-        switch snapshot.freshness(at: now) {
+        switch displayedFreshness {
         case .current: return "checkmark.circle.fill"
         case .recent: return "clock.fill"
         case .stale: return "exclamationmark.circle.fill"
@@ -648,7 +671,7 @@ private struct SnapshotFreshnessLabel: View {
     }
 
     private var freshnessTint: Color {
-        switch snapshot.freshness(at: now) {
+        switch displayedFreshness {
         case .current: return StrandPalette.statusPositive
         case .recent: return StrandPalette.textTertiary
         case .stale: return StrandPalette.statusWarning
@@ -865,18 +888,19 @@ private func supportingMetricTint(_ metric: WidgetMetric) -> Color {
 
 private func connectionSymbol(_ snapshot: WidgetSnapshot, at now: Date) -> String {
     if isLive(snapshot, at: now) { return "dot.radiowaves.left.and.right" }
+    if snapshot.hasCurrentConnection(at: now) { return "dot.radiowaves.left.and.right" }
     if snapshot.bonded { return "link" }
     return "link.slash"
 }
 
 private func connectionLabel(_ snapshot: WidgetSnapshot, at now: Date) -> String {
-    if isLive(snapshot, at: now) { return String(localized: "Connected") }
+    if snapshot.hasCurrentConnection(at: now) { return String(localized: "Connected") }
     if snapshot.bonded { return String(localized: "Paired") }
     return String(localized: "Not paired")
 }
 
 private func connectionColor(_ snapshot: WidgetSnapshot, at now: Date) -> Color {
-    if isLive(snapshot, at: now) { return StrandPalette.statusPositive }
+    if snapshot.hasCurrentConnection(at: now) { return StrandPalette.statusPositive }
     if snapshot.bonded { return StrandPalette.statusWarning }
     return StrandPalette.textTertiary
 }
@@ -887,7 +911,7 @@ private func scoreTint(_ score: Int?, fallback: Color) -> Color {
 }
 
 private func isLive(_ snapshot: WidgetSnapshot, at now: Date) -> Bool {
-    snapshot.connected == true && snapshot.freshness(at: now) == .current
+    snapshot.hasLiveHeartRate(at: now)
 }
 
 private func batterySymbol(_ percent: Int?) -> String {

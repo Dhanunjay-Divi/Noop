@@ -58,6 +58,7 @@ final class WidgetSnapshotTests: XCTestCase {
         XCTAssertNil(WidgetSnapshot.unavailable.bpm)
         XCTAssertFalse(WidgetSnapshot.unavailable.bonded)
         XCTAssertNil(WidgetSnapshot.unavailable.connected)
+        XCTAssertNil(WidgetSnapshot.unavailable.heartRateObservedAt)
         XCTAssertNil(WidgetSnapshot.unavailable.scoreDay)
     }
 
@@ -68,6 +69,8 @@ final class WidgetSnapshotTests: XCTestCase {
         XCTAssertEqual(snapshot.recovery, 72)
         XCTAssertTrue(snapshot.bonded)
         XCTAssertNil(snapshot.connected, "Pairing must never be upgraded to a live connection")
+        XCTAssertNil(snapshot.heartRateObservedAt,
+                     "An older snapshot must never invent a heart-rate observation time")
         XCTAssertNil(snapshot.sleepMinutes)
         XCTAssertNil(snapshot.scoreDay)
     }
@@ -84,6 +87,58 @@ final class WidgetSnapshotTests: XCTestCase {
         snapshot.updated = now.addingTimeInterval(-3 * 60 * 60)
         XCTAssertEqual(snapshot.freshness(at: now), .stale)
         XCTAssertTrue(snapshot.hasDailySignal, "A stale live snapshot can still carry valid day scores")
+    }
+
+    func testLiveHeartRateUsesActualSampleTimeNotPublicationTime() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        var snapshot = WidgetSnapshot.placeholder
+        snapshot.updated = now
+        snapshot.heartRateObservedAt = now.addingTimeInterval(-30)
+
+        XCTAssertTrue(snapshot.hasCurrentConnection(at: now))
+        XCTAssertTrue(snapshot.hasLiveHeartRate(at: now))
+        XCTAssertEqual(snapshot.heartRateFreshness(at: now), .current)
+
+        snapshot.heartRateObservedAt = now.addingTimeInterval(
+            -(WidgetSnapshot.liveHeartRateMaxAge + 1))
+        XCTAssertTrue(snapshot.hasCurrentConnection(at: now),
+                      "The connection observation remains distinct from HR freshness")
+        XCTAssertFalse(snapshot.hasLiveHeartRate(at: now),
+                       "Republishing now must not renew an old physiological sample")
+        XCTAssertEqual(snapshot.heartRateFreshness(at: now), .recent)
+    }
+
+    func testLiveHeartRateRequiresTimestampValueAndCurrentConnection() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        var snapshot = WidgetSnapshot.placeholder
+        snapshot.updated = now
+        snapshot.heartRateObservedAt = nil
+        XCTAssertFalse(snapshot.hasLiveHeartRate(at: now))
+        XCTAssertEqual(snapshot.heartRateFreshness(at: now), .unavailable)
+
+        snapshot.heartRateObservedAt = now
+        snapshot.bpm = nil
+        XCTAssertFalse(snapshot.hasLiveHeartRate(at: now))
+        XCTAssertEqual(snapshot.heartRateFreshness(at: now), .unavailable)
+
+        snapshot.bpm = 60
+        snapshot.connected = false
+        XCTAssertFalse(snapshot.hasLiveHeartRate(at: now))
+
+        snapshot.connected = true
+        snapshot.updated = now.addingTimeInterval(-21 * 60)
+        XCTAssertFalse(snapshot.hasLiveHeartRate(at: now),
+                       "A stale saved connection bit must not imply a live wearable")
+    }
+
+    func testLiveHeartRateExpiryIsAnchoredToSampleObservation() {
+        let observed = Date(timeIntervalSince1970: 10_000)
+        var snapshot = WidgetSnapshot.placeholder
+        snapshot.updated = observed.addingTimeInterval(60)
+        snapshot.heartRateObservedAt = observed
+
+        XCTAssertEqual(snapshot.liveHeartRateExpiresAt,
+                       observed.addingTimeInterval(WidgetSnapshot.liveHeartRateMaxAge))
     }
 
     func testWidgetDestinationURLsRoundTrip() {

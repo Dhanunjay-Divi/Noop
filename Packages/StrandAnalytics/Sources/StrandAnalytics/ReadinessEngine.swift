@@ -8,17 +8,16 @@ import WhoopStore
 /// deterministic function of the rows you pass in — no networking, no strap commands, no state.
 ///
 /// Signals and their references:
-/// - **HRV readiness** — z-score of today's HRV against the personal trailing baseline. A drop of
-///   roughly half a standard deviation flags autonomic fatigue (Plews et al. 2013; Buchheit 2014).
-/// - **Resting-HR drift** — elevated resting HR vs baseline is a classic overtraining / illness
-///   signal (Lamberts et al. 2004).
-/// - **Respiratory-rate drift** — a rise in sleeping respiratory rate is an early illness signal.
+/// - **HRV readiness** — z-score of today's HRV against the personal trailing baseline. A lower
+///   personal-baseline comparison is surfaced as a shift to recheck, not a clinical explanation.
+/// - **Resting-HR drift** — resting HR compared with the wearer's own recent baseline.
+/// - **Respiratory-rate drift** — sleeping respiratory rate compared with the wearer's own baseline.
 /// - **Recent-load ratio (ACWR)** — a fixed-window 7-day/28-day ratio of recorded daily strain.
 ///   It is retained as descriptive context and is not Training Stress Balance, an injury predictor,
 ///   or a universal safe-load prescription. `TrainingLoadModel` separately implements ATL/CTL/TSB
 ///   for additive load units.
-/// - **Training monotony** — mean/SD of daily strain over a week; high monotony (low variety) is
-///   associated with higher strain and illness (Foster 1998).
+/// - **Training monotony** — mean/SD of recorded daily strain over a week. It is descriptive
+///   context only; NOOP does not turn it into an injury or illness prediction.
 ///
 /// Not medical advice. These are approximations from a consumer strap; they describe trends in
 /// *your own* data, nothing more.
@@ -59,10 +58,25 @@ public enum ReadinessEngine {
         public let acwr: Double?
         /// Foster training monotony over the last week (nil if not enough strain history).
         public let monotony: Double?
+        /// Calendar day this read describes. nil only for legacy callers that did not select a day.
+        public let asOfDay: String?
+        /// Certainty of the read, derived from signal count and baseline coverage. It never changes
+        /// the readiness level or any underlying score.
+        public let confidence: ScoreConfidence
+        /// Valid strictly-prior baseline days supporting the thinnest evaluated recovery signal.
+        public let baselineDays: Int
+        /// Plain-language constraints the UI can disclose beside the read.
+        public let limitations: [String]
         public init(level: Level, headline: String, summary: String,
-                    signals: [Signal], acwr: Double?, monotony: Double?) {
+                    signals: [Signal], acwr: Double?, monotony: Double?,
+                    asOfDay: String? = nil,
+                    confidence: ScoreConfidence = .calibrating,
+                    baselineDays: Int = 0,
+                    limitations: [String] = []) {
             self.level = level; self.headline = headline; self.summary = summary
             self.signals = signals; self.acwr = acwr; self.monotony = monotony
+            self.asOfDay = asOfDay; self.confidence = confidence
+            self.baselineDays = baselineDays; self.limitations = limitations
         }
     }
 
@@ -160,10 +174,21 @@ public enum ReadinessEngine {
         guard let latest = latestRow else {
             return Readiness(level: .insufficient,
                              headline: "Readiness",
-                             summary: "Wear the strap for a few nights and your readiness read will appear here.",
-                             signals: [], acwr: nil, monotony: nil)
+                             summary: "A current daily row and enough prior nights are needed for this read.",
+                             signals: [], acwr: nil, monotony: nil,
+                             asOfDay: today, confidence: .calibrating, baselineDays: 0,
+                             limitations: ["No daily recovery row is available for this date."])
         }
         let history = sorted.filter { $0.day < latest.day }   // everything before today
+
+        // Metadata only: these counts explain the evidence supporting the read but never change score
+        // weights or thresholds. Use the SAME trailing columns each signal builder reads.
+        let trailing = history.suffix(baselineWindow)
+        let baselineCountByKey: [String: Int] = [
+            "hrv": trailing.compactMap(\.avgHrv).count,
+            "rhr": trailing.compactMap(\.restingHr).count,
+            "respRate": trailing.compactMap(\.respRateBpm).count,
+        ]
 
         var signals: [Signal] = []
 
@@ -175,10 +200,10 @@ public enum ReadinessEngine {
             unit: "ms",
             decimals: 0,
             higherIsBetter: true,
-            goodText: "above your baseline - well recovered",
+            goodText: "above your recent baseline",
             neutralText: "in your normal range",
             watchText: "a touch below baseline",
-            badText: "suppressed - a sign of autonomic fatigue")
+            badText: "below your recent baseline")
         if let s = hrvSignal { signals.append(s) }
 
         // Resting-HR drift ---------------------------------------------------
@@ -192,10 +217,10 @@ public enum ReadinessEngine {
             goodText: "at or below baseline",
             neutralText: "in your normal range",
             watchText: "running a little high",
-            badText: "elevated - overtraining or illness can do this")
+            badText: "elevated compared with your recent baseline")
         if let s = rhrSignal { signals.append(s) }
 
-        // Respiratory-rate drift (illness early signal) ----------------------
+        // Respiratory-rate drift ---------------------------------------------
         // respRateBpm may be a clean cloud value OR a higher-variance on-device RSA estimate, so gate
         // BOTH the latest value and the baseline mean to the plausible sleeping-RR band (8–25 bpm) and
         // use wider resp-only z thresholds (WATCH 1.5 / BAD 2.0) than HRV/RHR so a single noisy night
@@ -208,7 +233,7 @@ public enum ReadinessEngine {
                 if z >= 2.0 {
                     signals.append(Signal(key: "respRate", label: "Respiratory rate",
                         evidence: evidence(value: rr, baseline: m, unit: "rpm", decimals: 1),
-                        detail: "up vs baseline - sometimes an early sign of getting sick", flag: .bad))
+                        detail: "higher than your recent baseline; recheck across more nights", flag: .bad))
                 } else if z >= 1.5 {
                     signals.append(Signal(key: "respRate", label: "Respiratory rate",
                         evidence: evidence(value: rr, baseline: m, unit: "rpm", decimals: 1),
@@ -243,15 +268,41 @@ public enum ReadinessEngine {
                 if mono >= 2.0 {
                     signals.append(Signal(key: "monotony", label: "Training variety",
                         evidence: "monotony \(String(format: "%.1f", mono))",
-                        detail: "low - similar strain every day raises strain/illness risk", flag: .watch))
+                        detail: "recorded daily strain has varied less than usual", flag: .watch))
                 }
             }
         }
 
         let (level, headline, summary) = synthesize(signals: signals,
                                                     hasHistory: !history.isEmpty || acwr != nil)
+        let recoveryKeys = Set(["hrv", "rhr", "respRate"])
+        let recoverySignals = signals.filter { recoveryKeys.contains($0.key) }
+        let supportingCounts = recoverySignals.compactMap { baselineCountByKey[$0.key] }
+        let baselineDays = supportingCounts.min() ?? baselineCountByKey.values.max() ?? 0
+        let confidence: ScoreConfidence
+        if recoverySignals.isEmpty {
+            confidence = .calibrating
+        } else if recoverySignals.count >= 2 && baselineDays >= Baselines.minNightsTrust {
+            confidence = .solid
+        } else {
+            confidence = .building
+        }
+        var limitations: [String] = []
+        if recoverySignals.isEmpty {
+            limitations.append("No current recovery signal has enough prior variation for comparison.")
+        } else if recoverySignals.count == 1 {
+            limitations.append("This read is based on one current recovery signal.")
+        }
+        if !recoverySignals.isEmpty && baselineDays < Baselines.minNightsTrust {
+            limitations.append("The personal baseline has \(baselineDays) supporting prior days and is still building.")
+        }
+        if acwr != nil {
+            limitations.append("The recent-load ratio is descriptive and does not affect readiness.")
+        }
         return Readiness(level: level, headline: headline, summary: summary,
-                         signals: signals, acwr: acwr, monotony: monotony)
+                         signals: signals, acwr: acwr, monotony: monotony,
+                         asOfDay: latest.day, confidence: confidence,
+                         baselineDays: baselineDays, limitations: limitations)
     }
 
     // MARK: Signal builders
@@ -325,10 +376,11 @@ public enum ReadinessEngine {
     // MARK: Synthesis
 
     private static func synthesize(signals: [Signal], hasHistory: Bool) -> (Level, String, String) {
-        // The recent-load ratio is display-only context. Excluding it here is intentional even though
-        // the producer currently gives it a neutral flag: future wording/band changes must not silently
-        // turn a descriptive statistic into a readiness verdict or training prescription.
-        let evaluativeSignals = signals.filter { $0.key != "acwr" }
+        // Training-load context (ratio and monotony) is descriptive only. Readiness is synthesized solely
+        // from the measured recovery physiology whose personal baselines are evaluated above. Keeping an
+        // allow-list prevents a future context signal from silently changing the wellness verdict.
+        let evaluativeKeys = Set(["hrv", "rhr", "respRate"])
+        let evaluativeSignals = signals.filter { evaluativeKeys.contains($0.key) }
         guard hasHistory, !evaluativeSignals.isEmpty else {
             return (.insufficient, "Readiness",
                     "A few more nights of data and your readiness read will sharpen.")
@@ -341,19 +393,19 @@ public enum ReadinessEngine {
         }
 
         if bad.count >= 2 {
-            return (.rundown, "Run down",
-                    "Several signals are down at once. Treat today as recovery - easy movement, real sleep tonight.")
+            return (.rundown, "Multiple shifts",
+                    "Several measured signals shifted from your recent range. Recheck the trend and use how you feel as context.")
         }
         if recoveryDown || bad.count >= 1 {
-            return (.strained, "Strained",
-                    "One of your signals is flagging. You can train, but keep it controlled and bank the recovery.")
+            return (.strained, "One shift",
+                    "One measured signal shifted from your recent range. A single day is a cue to recheck, not a diagnosis or training instruction.")
         }
         if good.count >= 2 && watch.isEmpty {
-            return (.primed, "Primed",
+            return (.primed, "Aligned",
                     "Your measured recovery trends are aligned with your recent baseline.")
         }
-        return (.balanced, "Balanced",
-                "Nothing's flagging. Train to feel - your body's holding steady.")
+        return (.balanced, "Within range",
+                "Available measured signals are close to your recent baseline.")
     }
 
     // MARK: Stats helpers

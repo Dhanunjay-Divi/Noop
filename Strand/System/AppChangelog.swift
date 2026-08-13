@@ -7,7 +7,7 @@ enum AppChangelog {
 
     /// Bump this when you add a release below. The "What's New" sheet shows automatically when the
     /// stored last-seen version is behind this. (Decoupled from the bundle version on purpose.)
-    static let currentVersion = "9.1.2"
+    static let currentVersion = "9.2.0"
 
     struct Release: Identifiable {
         let version: String
@@ -19,6 +19,18 @@ enum AppChangelog {
 
     /// Newest first.
     static let releases: [Release] = [
+        Release(
+            version: "9.2.0",
+            title: "Today-first insights, quieter automation, and evidence you can inspect",
+            date: "August 2026",
+            items: [
+                "**Every metric starts with today.** Open a tile to see the latest reading first, how it compares with your own usual range, selectable history, related signals, and a plain-language explanation.",
+                "**Wellness estimates show their evidence.** Autonomic load, readiness, and sleep expose source, as-of date, confidence, calibration, and limitations. Sources are never blended to manufacture a baseline, and old imported stress rows no longer masquerade as NOOP results.",
+                "**Interruptions are conservative.** Activity-suggestion alerts require a separate opt-in, stale candidates are reconciled, and stress nudges fail closed without verified motion and enough clean R-R windows.",
+                "**Live means genuinely live.** Widgets and Live Activities use the actual heart-rate packet time, end stale or duplicate surfaces, and keep connection state separate from sample freshness.",
+                "**Smoother, clearer iPhone experience.** Scroll-aware glass navigation, lighter liquid rendering while moving, focused device cards, Quick Access, and a compact-safe onboarding flow make the app faster and easier to scan without losing technical detail.",
+            ]
+        ),
         Release(
             version: "9.1.2",
             title: "Safer upgrades, trustworthy signals, and production hardening",

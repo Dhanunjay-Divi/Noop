@@ -41,6 +41,10 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
     /// at-root re-tap of the active tab (#198 follow-up). Default 0 never changes, so macOS and every
     /// non-tab screen keep their exact prior scroll behaviour.
     @Environment(\.scrollToTopSignal) private var scrollToTopSignal
+    /// The iPhone shell supplies this at each tab root. It receives the real top-marker position from
+    /// this ScrollView (including inertial deceleration); the default no-op keeps macOS, sheets and
+    /// stand-alone previews behaviorally identical.
+    @Environment(\.scrollPositionReporter) private var reportScrollPosition
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -48,6 +52,15 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
             // Scroll-to-top anchor (#198 follow-up): a zero-height marker pinned above the content so an
             // at-root tab re-tap can bring the screen back to the very top. Layout-neutral.
             Color.clear.frame(height: 0).id(screenScaffoldTopAnchorID)
+            #if os(iOS)
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: ScreenScrollOffsetPreferenceKey.self,
+                    value: geometry.frame(in: .named(screenScaffoldScrollSpace)).minY
+                )
+            }
+            .frame(height: 0)
+            #endif
             column
             #if os(iOS)
             // Unified side margins matching the liquid home (16pt) so every page's cards + header line up
@@ -75,6 +88,8 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
             Color.clear.frame(height: 0).id(screenScaffoldBottomAnchorID)
         }
         #if os(iOS)
+        .coordinateSpace(name: screenScaffoldScrollSpace)
+        .onPreferenceChange(ScreenScrollOffsetPreferenceKey.self) { reportScrollPosition($0) }
         // #697: stop a vertical scroll from drifting/bouncing the screen left-right. `.basedOnSize` only
         // permits horizontal bounce when content genuinely overflows the width (it does not here, the column
         // is width-capped), so the spurious horizontal rubber-band that caused the sideways drift is gone.
@@ -288,6 +303,14 @@ struct DataPendingNote: View {
 /// generic (`<Content, Trailing>`) and Swift forbids stored static properties on generic types.
 private let screenScaffoldTopAnchorID = "screenScaffold.top"
 private let screenScaffoldBottomAnchorID = "screenScaffold.bottom"
+#if os(iOS)
+private let screenScaffoldScrollSpace = "screenScaffold.scroll"
+
+private struct ScreenScrollOffsetPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+#endif
 
 private struct ScrollToTopSignalKey: EnvironmentKey {
     static let defaultValue: Int = 0
@@ -298,4 +321,13 @@ extension EnvironmentValues {
         get { self[ScrollToTopSignalKey.self] }
         set { self[ScrollToTopSignalKey.self] = newValue }
     }
+
+    var scrollPositionReporter: (CGFloat) -> Void {
+        get { self[ScrollPositionReporterKey.self] }
+        set { self[ScrollPositionReporterKey.self] = newValue }
+    }
+}
+
+private struct ScrollPositionReporterKey: EnvironmentKey {
+    static let defaultValue: (CGFloat) -> Void = { _ in }
 }

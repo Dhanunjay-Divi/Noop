@@ -19,6 +19,50 @@ approximate; downloads for this fork are on the
 
 ---
 
+## 9.2.0: today-first insights, quieter automation, and inspectable evidence
+
+Released **2026-08-13**.
+
+**Insights and design**
+
+- Metric detail now begins with the current/latest value, then shows the user's own comparison,
+  selectable history, related signals, and education. The iPhone shell uses real scroll position to
+  compact its glass navigation and pauses liquid animation during scrolling for smoother movement.
+- Devices has a purposeful empty state and concise default cards, with firmware, voltage, clock, and
+  protocol diagnostics moved into Technical details. More gains Quick Access, and onboarding now
+  fits compact phones, larger text, mixed unit choices, keyboards, and the home indicator.
+
+**Evidence and data integrity**
+
+- NOOP's experimental autonomic-load estimate requires seven strictly prior valid days, computes each
+  historical point causally, keeps WHOOP/NOOP/Apple sources separate, and exposes its source, as-of
+  date, confidence, inputs, and limitations. It is not WHOOP Stress Monitor and is not a diagnosis of
+  emotional stress.
+- Re-importing an older WHOOP export removes only the exact legacy derived-stress rows that NOOP had
+  written into that export namespace. Unrelated metrics, sources, dates, and the user's live database
+  remain untouched. Trends reports now derive the same source-isolated series instead of exporting
+  the retired proxy.
+- Sleep confidence persists whether motion coverage was actually sparse; a synthetic full-looking
+  timeline cannot turn two motion samples into high confidence. Readiness treats training load as
+  context rather than silently downgrading physiology and uses observational, non-prescriptive copy.
+
+**Automation and live surfaces**
+
+- Lock-screen activity suggestions are a separate opt-in. Candidate notifications reconcile on
+  launch and foreground, deduplicate durably, clear immediately when disabled, and remain in-app when
+  evidence is too weak. They are suggestions, never proof that a workout happened.
+- Stress nudges require verified stillness, clean R-R evidence, four independent warm-up windows, and
+  no active workout or breathing session. Missing motion fails closed instead of claiming the user was
+  still.
+- Widgets and Live Activities use the timestamp of the actual HR packet. Stale and duplicate surfaces
+  end deterministically, while Bluetooth connection and heart-rate freshness are shown separately.
+
+**Upgrade note**
+
+- The database migrates in place and preserves existing history. This private preview still uses
+  Personal Team signing, so the app must be rebuilt and installed over the same bundle before its
+  seven-day development profile expires.
+
 ## 9.1.2: safer upgrades, trustworthy signals, private Friends, and Obsidian
 
 Released **2026-08-11**.

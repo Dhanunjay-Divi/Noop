@@ -208,8 +208,8 @@ struct CoupledView: View {
     }
 
     /// The centre stack over the vessel: the recovery % counting up in white over the fluid, a RECOVERY
-    /// overline in the SAMPLED recovery colour, and the one-word readiness pill (Push / Maintain / Rest,
-    /// #205 read).
+    /// overline in the SAMPLED recovery colour, and the descriptive readiness pill (Aligned / Within range /
+    /// Recheck / Multiple shifts, #205 read).
     @ViewBuilder
     private var heroCentre: some View {
         let sampled = recovery.map { StrandPalette.recoveryColor($0) } ?? StrandPalette.textTertiary
@@ -264,8 +264,9 @@ struct CoupledView: View {
         return String(localized: "Recovery, no data yet")
     }
 
-    /// The one-word readiness pill (Push / Maintain / Rest), tinted by the readiness level, matching the
-    /// Today hero pill chrome. Reuses TodayView's word + level colour so the read stays consistent.
+    /// The descriptive readiness pill (Aligned / Within range / Recheck / Multiple shifts), tinted by the
+    /// readiness level, matching the Today hero pill chrome. Reuses TodayView's word + level colour so the
+    /// read stays consistent.
     private func readinessPill(_ word: String) -> some View {
         let tint = readinessTint(readinessLevel)
         return Text(word.uppercased())

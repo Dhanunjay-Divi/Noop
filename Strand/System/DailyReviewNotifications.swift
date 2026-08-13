@@ -386,27 +386,156 @@ enum BluetoothAvailabilityNotifications {
 
 /// Privacy-safe alerts for a candidate that needs approval or a future validated policy just saved.
 /// Both open Today: Ask offers Save/dismiss, while the dormant review path offers Keep/Not a workout.
-/// This helper never asks for permission and never embeds a health value in notification copy.
+/// Permission is requested only from the explicit Settings opt-in; notification copy never embeds a
+/// health value.
 @MainActor
 enum AutoWorkoutNotifications {
+    /// Lock-screen interruptions are deliberately separate from quiet, in-app detection. A fresh
+    /// install may offer an activity for review on Today, but it must never interrupt the user until
+    /// they explicitly opt in here.
+    static let enabledKey = "autoWorkout.suggestionNotificationsEnabled"
     private static let requestID = "auto-workout-candidate"
     private static let lastTokenKey = "autoWorkout.lastNotifiedToken"
+    private static let tokenHistoryKey = "autoWorkout.notifiedTokenHistory"
+    private static let tokenUserInfoKey = "noop.autoWorkout.deliveryToken"
+    private static let maxRememberedTokens = 32
+    /// Permission is requested only from the explicit Settings switch. Keeping that async transition
+    /// separate from posting also lets an off-tap win if the system prompt is still in flight.
+    enum EnableOutcome: Equatable, Sendable {
+        case enabled
+        case denied
+        case off
+    }
+
+    /// Small injected boundary around `UNUserNotificationCenter`. Production uses `.system`; focused
+    /// tests can suspend `add` to prove that an opt-out/clear wins the exact in-flight race that used to
+    /// resurrect a stale notification after `removeDeliveredNotifications` had already returned.
+    struct NotificationClient {
+        let authorizationStatus: () async -> UNAuthorizationStatus
+        let requestAuthorization: () async -> Bool
+        let add: (UNNotificationRequest) async throws -> Void
+        let remove: ([String]) -> Void
+
+        static var system: NotificationClient {
+            NotificationClient(
+                authorizationStatus: {
+                    await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+                },
+                requestAuthorization: {
+                    (try? await UNUserNotificationCenter.current()
+                        .requestAuthorization(options: [.alert, .sound])) ?? false
+                },
+                add: { request in
+                    try await UNUserNotificationCenter.current().add(request)
+                },
+                remove: { identifiers in
+                    let center = UNUserNotificationCenter.current()
+                    center.removePendingNotificationRequests(withIdentifiers: identifiers)
+                    center.removeDeliveredNotifications(withIdentifiers: identifiers)
+                }
+            )
+        }
+    }
+
+    private struct QueuedDelivery {
+        let generation: UInt64
+        let deliveryToken: String
+        let kind: Kind
+        let startSec: Int
+        let content: UNMutableNotificationContent
+        let client: NotificationClient
+    }
+
+    /// Posting is serialized because every delivery intentionally replaces the same request identifier.
+    /// A generation invalidates the active await; queued work is discarded synchronously by `clear`.
+    private static var deliveryGeneration: UInt64 = 0
+    private static var preferenceGeneration: UInt64 = 0
+    private static var deliveryQueue: [QueuedDelivery] = []
+    private static var activeDeliveryToken: String?
+    private static var isDrainingDeliveries = false
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.bool(forKey: enabledKey)
+    }
+
+    static func setEnabled(
+        _ enabled: Bool,
+        completion: (@MainActor @Sendable (EnableOutcome) -> Void)? = nil
+    ) {
+        setEnabled(enabled, client: .system, completion: completion)
+    }
+
+    /// Enabling is a real authorization transaction, not just a preference write. The stored switch stays
+    /// false until iOS/macOS confirms that notifications are permitted, so Settings never promises an alert
+    /// the OS will silently discard. This is invoked only from the explicit user action in Settings.
+    static func setEnabled(
+        _ enabled: Bool,
+        client: NotificationClient,
+        completion: (@MainActor @Sendable (EnableOutcome) -> Void)? = nil
+    ) {
+        preferenceGeneration &+= 1
+        let attempt = preferenceGeneration
+
+        guard enabled else {
+            UserDefaults.standard.set(false, forKey: enabledKey)
+            clear(client: client)
+            completion?(.off)
+            return
+        }
+
+        // Fail closed while the OS decision is pending, and retire any notification left by an older build.
+        UserDefaults.standard.set(false, forKey: enabledKey)
+        clear(client: client)
+        Task { @MainActor in
+            let status = await client.authorizationStatus()
+            guard attempt == preferenceGeneration else { return }
+
+            let allowed: Bool
+            switch status {
+            case .authorized, .provisional:
+                allowed = true
+#if os(iOS)
+            case .ephemeral:
+                allowed = true
+#endif
+            case .notDetermined:
+                allowed = await client.requestAuthorization()
+            default:
+                allowed = false
+            }
+
+            guard attempt == preferenceGeneration else { return }
+            UserDefaults.standard.set(allowed, forKey: enabledKey)
+            completion?(allowed ? .enabled : .denied)
+        }
+    }
 
     static func token(startSec: Int, endSec: Int) -> String {
         AutoWorkoutSuggestionIdentity.token(startSec: startSec, endSec: endSec)
     }
 
     static func postIfAuthorized(startSec: Int, endSec: Int) async {
-        guard PuffinExperiment.autoDetectWorkoutsEnabled else { return }
-        await post(kind: .candidate, startSec: startSec, endSec: endSec)
+        await postIfAuthorized(startSec: startSec, endSec: endSec, client: .system)
+    }
+
+    static func postIfAuthorized(
+        startSec: Int,
+        endSec: Int,
+        client: NotificationClient
+    ) async {
+        guard PuffinExperiment.autoDetectWorkoutsEnabled, isEnabled else {
+            clear(client: client)
+            return
+        }
+        await post(kind: .candidate, startSec: startSec, endSec: endSec, client: client)
     }
 
     static func postAutoSavedIfAuthorized(startSec: Int, endSec: Int) async {
         guard PuffinExperiment.autoWorkoutMode == .autoSave else { return }
-        await post(kind: .autoSaved, startSec: startSec, endSec: endSec)
+        await post(kind: .autoSaved, startSec: startSec, endSec: endSec, client: .system)
     }
 
-    private enum Kind: String {
+    enum Kind: String {
         case candidate
         case autoSaved
 
@@ -427,39 +556,131 @@ enum AutoWorkoutNotifications {
         }
     }
 
-    private static func post(kind: Kind, startSec: Int, endSec: Int) async {
+    private static func post(
+        kind: Kind,
+        startSec: Int,
+        endSec: Int,
+        client: NotificationClient
+    ) async {
         let candidateToken = token(startSec: startSec, endSec: endSec)
         let deliveryToken = kind.rawValue + ":" + candidateToken
-        if let previous = UserDefaults.standard.string(forKey: lastTokenKey) {
-            if previous == deliveryToken { return }
-            // Pre-mode builds stored only `start:<ts>` for candidate prompts. Honor that identity so an
-            // upgrade never re-alerts an already reviewed suggestion.
-            if kind == .candidate,
-               AutoWorkoutSuggestionIdentity.matches(previous, startSec: startSec) { return }
-        }
+        guard shouldDeliver(deliveryToken: deliveryToken, kind: kind,
+                            startSec: startSec, defaults: .standard),
+              activeDeliveryToken != deliveryToken,
+              !deliveryQueue.contains(where: { $0.deliveryToken == deliveryToken }) else { return }
 
-        let center = UNUserNotificationCenter.current()
-        let settings = await center.notificationSettings()
-        guard canPost(using: settings.authorizationStatus) else { return }
         let content = UNMutableNotificationContent()
         content.title = kind.title
         content.body = kind.body
         content.sound = .default
-        content.userInfo = [NotificationRouteBridge.userInfoKey: NoopNotificationRoute.today.rawValue]
+        content.userInfo = [
+            NotificationRouteBridge.userInfoKey: NoopNotificationRoute.today.rawValue,
+            tokenUserInfoKey: deliveryToken,
+        ]
+
+        deliveryQueue.append(QueuedDelivery(
+            generation: deliveryGeneration,
+            deliveryToken: deliveryToken,
+            kind: kind,
+            startSec: startSec,
+            content: content,
+            client: client
+        ))
+        guard !isDrainingDeliveries else { return }
+        isDrainingDeliveries = true
+
+        while !deliveryQueue.isEmpty {
+            let delivery = deliveryQueue.removeFirst()
+            activeDeliveryToken = delivery.deliveryToken
+            await deliver(delivery)
+            activeDeliveryToken = nil
+        }
+        isDrainingDeliveries = false
+    }
+
+    private static func deliver(_ delivery: QueuedDelivery) async {
+        guard delivery.generation == deliveryGeneration,
+              shouldDeliver(deliveryToken: delivery.deliveryToken, kind: delivery.kind,
+                            startSec: delivery.startSec, defaults: .standard) else { return }
+
+        let status = await delivery.client.authorizationStatus()
+        guard delivery.generation == deliveryGeneration else { return }
+        guard canPost(using: status), delivery.kind == .autoSaved || isEnabled else {
+            delivery.client.remove([requestID])
+            return
+        }
+
         do {
-            try await center.add(UNNotificationRequest(identifier: requestID, content: content, trigger: nil))
-            UserDefaults.standard.set(deliveryToken, forKey: lastTokenKey)
+            try await delivery.client.add(UNNotificationRequest(
+                identifier: requestID,
+                content: delivery.content,
+                trigger: nil
+            ))
+            guard delivery.generation == deliveryGeneration,
+                  delivery.kind == .autoSaved || isEnabled else {
+                // `clear` may have run while `add` was suspended. Because this drain is serialized, no
+                // newer delivery can be installed until this stale completion has been removed.
+                delivery.client.remove([requestID])
+                return
+            }
+            remember(deliveryToken: delivery.deliveryToken, defaults: .standard)
         } catch {
             // Keep the token unset so a later completed sync can retry delivery.
+            // The daemon can still have accepted a request before reporting a cancellation/error. The
+            // serialized drain guarantees this cleanup cannot erase a newer queued delivery.
+            if delivery.generation != deliveryGeneration
+                || (delivery.kind != .autoSaved && !isEnabled) {
+                delivery.client.remove([requestID])
+            }
         }
+    }
+
+    /// Pure deduplication seam. Remembering a bounded history avoids A→B→A notification loops after
+    /// repeated backfills, while the legacy single-token check preserves upgrade behavior.
+    static func shouldDeliver(deliveryToken: String, kind: Kind,
+                              startSec: Int, defaults: UserDefaults) -> Bool {
+        if defaults.stringArray(forKey: tokenHistoryKey)?.contains(deliveryToken) == true { return false }
+        if let previous = defaults.string(forKey: lastTokenKey) {
+            if previous == deliveryToken { return false }
+            // Pre-mode builds stored only `start:<ts>` for candidate prompts. Honor that identity so an
+            // upgrade never re-alerts an already reviewed suggestion.
+            if kind == .candidate,
+               AutoWorkoutSuggestionIdentity.matches(previous, startSec: startSec) { return false }
+        }
+        return true
+    }
+
+    private static func remember(deliveryToken: String, defaults: UserDefaults) {
+        var history = defaults.stringArray(forKey: tokenHistoryKey) ?? []
+        history.removeAll { $0 == deliveryToken }
+        history.append(deliveryToken)
+        if history.count > maxRememberedTokens {
+            history.removeFirst(history.count - maxRememberedTokens)
+        }
+        defaults.set(history, forKey: tokenHistoryKey)
+        defaults.set(deliveryToken, forKey: lastTokenKey)
     }
 
     /// Remove a handled suggestion from Notification Center. The stable last-token stays persisted so a
     /// later scan of the same bout cannot post it again.
     static func removeHandled() {
-        let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: [requestID])
-        center.removeDeliveredNotifications(withIdentifiers: [requestID])
+        clear()
+    }
+
+    /// Clears both pending and already-delivered copies. Used when detection/interruptions are off,
+    /// when a completed sync no longer has an eligible current candidate, and during launch repair of
+    /// surfaces left behind by an older build.
+    static func clear() {
+        clear(client: .system)
+    }
+
+    static func clear(client: NotificationClient) {
+        deliveryGeneration &+= 1
+        deliveryQueue.removeAll()
+        // The suspended delivery still owns the drain, but it belongs to the retired generation. Do
+        // not let its token suppress a same-candidate retry that arrives after this clear.
+        activeDeliveryToken = nil
+        client.remove([requestID])
     }
 
     /// `ephemeral` is an iOS-only authorization state. Keep the shared macOS target compiling while

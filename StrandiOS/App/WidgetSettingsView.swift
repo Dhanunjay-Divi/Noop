@@ -55,7 +55,9 @@ struct WidgetSettingsView: View {
                         Spacer()
                         TimelineView(.periodic(from: .now, by: 60)) { context in
                             let live = snapshot.isLive(at: context.date)
-                            Label(live ? "Live" : "Local", systemImage: "circle.fill")
+                            let connected = snapshot.hasCurrentConnection(at: context.date)
+                            Label(live ? "Live" : connected ? "Connected" : "Local",
+                                  systemImage: "circle.fill")
                                 .labelStyle(.titleAndIcon)
                                 .font(StrandFont.caption)
                                 .foregroundStyle(live
@@ -298,6 +300,6 @@ private extension WidgetMetric {
 private extension WidgetSnapshot {
     /// A saved connection bit is only a point-in-time observation. Once the snapshot ages out, the
     /// preview must fall back to Local instead of implying that a killed/disconnected app is still live.
-    func isLive(at date: Date) -> Bool { connected == true && freshness(at: date) == .current }
+    func isLive(at date: Date) -> Bool { hasLiveHeartRate(at: date) }
 }
 #endif

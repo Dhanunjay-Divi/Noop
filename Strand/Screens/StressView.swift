@@ -4,36 +4,19 @@ import StrandDesign
 import StrandAnalytics
 import WhoopStore
 
-// MARK: - Stress Monitor
+// MARK: - Daily autonomic load
 //
-// A clear, Whoop-style "Stress Monitor": one 0–3 number, a band (LOW/MEDIUM/HIGH),
-// and a single plain-English line on *why*. The score is a transparent proxy for
-// autonomic load.
-//
-// Source of the daily 0–3 value, in priority order:
-//   1. The persisted `stress` metric series ("my-whoop") via `repo.series` — if a
-//      day has a stored stress value we trust it.
-//   2. Otherwise we DERIVE it from how today's resting HR / HRV sit against a
-//      personal 30-day baseline. Stress shows up as HIGHER resting HR and LOWER
-//      HRV, so we sum two z-scores and squash onto 0–3 with a logistic curve:
-//
-//        zRHR = (todayRHR − meanRHR) / sdRHR        // positive when RHR is UP
-//        zHRV = (meanHRV − todayHRV) / sdHRV        // positive when HRV is DOWN
-//        raw  = zRHR + zHRV                          // combined autonomic load
-//        stress = 3 / (1 + e^(−raw))                // 0 calm · 1.5 baseline · 3 high
-//
-// Bands:  0–1 LOW · 1–2 MEDIUM · 2–3 HIGH.
-//
-// Everything is computed live from `repo.days` (+ the stored series), so the math
-// is fully inspectable — see the "How this is computed" card at the bottom.
+// This screen presents NOOP's experimental, non-clinical 0–3 autonomic-load
+// estimate. It is derived locally from resting HR and HRV against strictly prior
+// personal days through `DailyAutonomicLoad`; it is not an emotional-stress
+// measurement, a diagnosis, or an attempt to reproduce WHOOP's proprietary score.
+// Every historical point has its own causal baseline, so later data cannot rewrite it.
 
 struct StressView: View {
     @EnvironmentObject var repo: Repository
     @AppStorage(SceneBackgroundPrefs.enabledKey) private var showDayCycleBackground = true
     @AppStorage(SkyBehindCardsPrefs.enabledKey) private var skyBehindCards = SkyBehindCardsPrefs.defaultEnabled
 
-    /// The stored 0–3 stress series ("my-whoop"), oldest→newest. Empty → derive.
-    @State private var storedSeries: [(day: String, value: Double)] = []
     @State private var loaded = false
     /// Trend window for the chart (W/M/3M/6M/1Y/ALL).
     @State private var range: ExploreRange = .month
@@ -62,7 +45,7 @@ struct StressView: View {
     @State private var modelSignature: StressInputs?
 
     var body: some View {
-        ScreenScaffold(title: "Stress", subtitle: "Autonomic load from HRV and resting heart rate",
+        ScreenScaffold(title: "Autonomic Load", subtitle: "Your physiology relative to your own recent baseline",
                        // PERF (scroll): lazy column — byte-identical layout (LazyVStack == eager VStack
                        // alignment/spacing/header). The content is one inner eager VStack, so the staggered
                        // section reveal is unchanged; this only defers building that stack until it scrolls in.
@@ -76,7 +59,7 @@ struct StressView: View {
             } else if !loaded {
                 ComingSoon(what: "Reading your heart-rate variability and resting heart rate…")
             } else {
-                emptyState
+                calibrationState(StressModel.preferredAssessment(sourceRows: repo.vitalMetricRows))
             }
         }
         .onAppear { rebuildModelIfNeeded() }
@@ -85,7 +68,6 @@ struct StressView: View {
     }
 
     private func load() async {
-        storedSeries = await repo.series(key: "stress", source: "my-whoop")
         loaded = true
         rebuildModelIfNeeded()
         await loadDaytime()
@@ -124,14 +106,14 @@ struct StressView: View {
         freqHRV = HRVFreqDomain.freqDomain(rr: rr)
     }
 
-    /// Recompute the cached `StressModel` only when (repo.days, storedSeries)
+    /// Recompute the cached `StressModel` only when daily inputs
     /// actually changed since the last build. Equality is an O(n) value compare,
     /// far cheaper than the model rebuild it guards.
     private func rebuildModelIfNeeded() {
-        let signature = StressInputs(days: repo.days, stored: storedSeries)
+        let signature = StressInputs(rows: repo.vitalMetricRows)
         guard signature != modelSignature else { return }
         modelSignature = signature
-        model = StressModel(days: repo.days, stored: storedSeries)
+        model = StressModel(sourceRows: repo.vitalMetricRows)
     }
 
     // MARK: Loaded content
@@ -154,8 +136,8 @@ struct StressView: View {
 
             // 2. Today's numbers — uniform tiles in one grid.
             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-                SectionHeader("Today", overline: "Markers",
-                              trailing: String(localized: "vs 30-day baseline"))
+                SectionHeader("Latest Read", overline: "Markers",
+                              trailing: String(localized: "vs prior baseline"))
                 tileGrid(model)
             }
             .staggeredAppear(index: 1)
@@ -203,7 +185,7 @@ struct StressView: View {
             NoopCard(tint: StressRamp.calm) {
                 VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
                     HStack {
-                        Text("Autonomic load through the day").strandOverline()
+                    Text("Intraday autonomic load").strandOverline()
                         Spacer()
                         if let peak = day.peak, let lvl = peak.level {
                             Text("peak \(String(format: "%.1f", lvl)) · \(hourLabel(peak.hour))")
@@ -236,7 +218,7 @@ struct StressView: View {
                     // bar split by how many waking hours sat in each band, with durations.
                     StressTotalsBar(totals: StressTotals(hours: day.hours))
 
-                    Text("The line is each waking hour's 0-3 proxy, scored against your own calm hours today. The bar below splits your day into calm, moderate and high stress time.")
+                    Text("This separate intraday proxy uses available waking-hour signals from today. It is experimental, may have gaps, and does not measure emotional stress.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -263,11 +245,11 @@ struct StressView: View {
                 HStack(spacing: NoopMetrics.rowSpacing) {
                     Image(systemName: "lungs.fill")
                         .foregroundStyle(StressRamp.calm)
-                    Text("Sustained high stress").strandOverline()
+                    Text("Sustained elevated load").strandOverline()
                     Spacer()
                     StatePill("\(day.sustainedRun)h elevated", tone: .warning, showsDot: true)
                 }
-                Text("Your last \(day.sustainedRun) hours have stayed in the high band. A few minutes of paced breathing can help downshift your nervous system.")
+                Text("Several adjacent, R-R-supported windows are elevated relative to today's calmer hours. If it feels useful, try a short paced-breathing session and reassess how you feel.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -290,7 +272,7 @@ struct StressView: View {
 
     // MARK: 1 · Hero — the liquid stress-level vessel.
     //
-    // The 0–3 stress score reads as the signature liquid gauge: a LiquidVessel that fills to score/3
+    // The 0–3 load estimate reads as the signature liquid gauge: a LiquidVessel that fills to score/3
     // and is tinted by the live band (calm blue → steady green → tense amber), with the count-up value +
     // "of 3" over it (the Today HeroScoreCell / Live BPM-gauge idiom). The band pill sits top-trailing and
     // one plain-English line explains the number below. Frosted card, liquid finish.
@@ -299,7 +281,7 @@ struct StressView: View {
         NoopCard(tint: StressRamp.calm) {
             VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
                 HStack {
-                    Text("Stress monitor").strandOverline()
+                    Text("NOOP autonomic load").strandOverline()
                     Spacer()
                     StatePill("\(model.band.title)", tone: model.band.tone, showsDot: true)
                 }
@@ -322,6 +304,17 @@ struct StressView: View {
                     }
                     Spacer(minLength: 0)
                 }
+
+                Divider().overlay(StrandPalette.hairline)
+                HStack(spacing: NoopMetrics.space2) {
+                    Label(model.confidenceTitle, systemImage: model.confidenceSystemImage)
+                        .foregroundStyle(model.confidenceColor)
+                    Spacer(minLength: NoopMetrics.space2)
+                    Text(model.provenanceSummary)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+                .font(StrandFont.footnote)
+                .lineLimit(2)
             }
         }
     }
@@ -361,10 +354,10 @@ struct StressView: View {
                     // Baevsky Stress Index, a whole number; higher means a more rigid, stressed rhythm.
                     if let si = stressIndex {
                         StatTile(
-                            label: "Baevsky Stress Index",
+                            label: "Baevsky rhythm index",
                             value: "\(Int(si.si.rounded()))",
                             systemImage: "gauge.with.dots.needle.67percent",
-                            caption: String(localized: "Autonomic rigidity from your heart-rate rhythm. Higher means a more rigid, stressed rhythm."),
+                            caption: String(localized: "A rhythm-derived research index affected by posture, breathing and signal quality; it is not diagnostic."),
                             accent: StressRamp.tense
                         )
                     }
@@ -374,10 +367,10 @@ struct StressView: View {
                     if let f = freqHRV {
                         if let ratio = f.lfhf {
                             StatTile(
-                                label: "Autonomic balance (LF/HF)",
+                                label: "LF/HF ratio",
                                 value: String(format: "%.1f", ratio),
                                 systemImage: "waveform.path.ecg",
-                                caption: String(localized: "Sympathetic vs parasympathetic tone from frequency-domain HRV. Higher leans sympathetic (stress-ward)."),
+                                caption: String(localized: "A frequency-domain ratio affected by breathing, posture and recording conditions. It does not cleanly separate sympathetic and parasympathetic activity."),
                                 accent: StressRamp.steady
                             )
                         } else if f.hf > 0 {
@@ -385,14 +378,14 @@ struct StressView: View {
                                 label: "HF power",
                                 value: "\(Int(f.hf.rounded()))",
                                 systemImage: "heart.text.square.fill",
-                                caption: String(localized: "Parasympathetic (rest) band of your HRV."),
+                                caption: String(localized: "High-frequency variability power, influenced by breathing and recording conditions."),
                                 accent: StressRamp.steady
                             )
                         }
                     }
                 }
 
-                Text("These are extra, on-demand HRV lenses computed from today's R-R intervals. They are informational and do not change the stress score above.")
+                Text("These exploratory R-R readouts do not change NOOP's daily estimate. They are non-clinical and do not measure emotional stress.")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -408,9 +401,9 @@ struct StressView: View {
             alignment: .leading,
             spacing: NoopMetrics.gap
         ) {
-            // Today's stress value, with its band as the caption.
+            // Latest experimental daily autonomic-load value, with its band as the caption.
             StatTile(
-                label: "Stress",
+                label: "Autonomic load",
                 value: String(format: "%.1f", model.score),
                 systemImage: "gauge.with.dots.needle.50percent",
                 caption: String(localized: "of 3 · \(model.band.title)"),
@@ -436,9 +429,9 @@ struct StressView: View {
                 accent: StrandPalette.metricPurple,
                 higherIsStress: false
             )
-            // Estimated calm time — share of recent days spent in the LOW band.
+            // Estimated low-load share among recent scorable days.
             StatTile(
-                label: "Calm time",
+                label: "Low-load days",
                 value: model.calmTimeValue,
                 systemImage: "wind",
                 caption: model.calmTimeCaption,
@@ -485,7 +478,7 @@ struct StressView: View {
     private func trendSection(_ model: StressModel) -> some View {
         let points = windowedTrend(model)
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Stress Trend", overline: "History", trailing: range.name)
+            SectionHeader("Autonomic Load Trend", overline: "History", trailing: range.name)
             if points.count >= 2 {
                 let avg = points.map(\.value).reduce(0, +) / Double(points.count)
                 // Axis top = highest reading rounded up, plus a little headroom, so a peak curve and
@@ -495,8 +488,8 @@ struct StressView: View {
                 let peak = (points.map(\.value).max() ?? 3).rounded(.up)
                 let yTop = max(1, peak + 0.3)
                 ChartCard(
-                    title: "Stress · \(range.label)",
-                    subtitle: String(localized: "Daily 0-3 proxy"),
+                    title: "NOOP Load · \(range.label)",
+                    subtitle: String(localized: "Causal daily 0-3 estimate"),
                     trailing: String(localized: "avg \(String(format: "%.1f", avg))"),
                     tint: StressRamp.calm
                 ) {
@@ -507,7 +500,7 @@ struct StressView: View {
                         showsArea: true,
                         height: NoopMetrics.chartHeight,
                         valueFormat: { String(format: "%.1f", $0) },
-                        accessibilityLabel: String(localized: "Stress trend"),
+                        accessibilityLabel: String(localized: "NOOP autonomic load trend"),
                         yDomain: 0...yTop
                     )
                 } footer: {
@@ -524,7 +517,7 @@ struct StressView: View {
                     .frame(maxWidth: .infinity, alignment: .trailing)
             } else {
                 NoopCard(tint: StressRamp.calm) {
-                    Text("Not enough recent days to chart a trend yet. Import a history or keep wearing your strap.")
+                    Text("A trend appears after multiple days pass the baseline and signal-quality gates.")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
@@ -550,15 +543,28 @@ struct StressView: View {
         NoopCard(tint: StressRamp.calm) {
             VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
                 Text("How this is computed").strandOverline()
-                Text(model.usingStored
-                     ? "Today's value is your recorded daily stress score (0-3)."
-                     : "Stress is derived from two autonomic signals.")
+                Text("NOOP experimental autonomic-load estimate")
                     .font(StrandFont.body)
                     .foregroundStyle(StrandPalette.textPrimary)
-                Text("We compare today's resting heart rate and HRV to your own 30-day baseline. A higher-than-usual resting HR and a lower-than-usual HRV both push the score up, classic signs the body is activated. The combined shift is mapped onto a 0-3 scale: 0 is calm, 1.5 sits at your baseline, 3 is highly activated.")
+                Text("For each day, NOOP compares resting heart rate and HRV with up to 30 strictly earlier personal days. A signal contributes only after at least 7 valid prior days and measurable baseline variation. Later data never rewrites an older point, and NOOP never fills missing evidence with a neutral 1.5.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    methodologyFact("As of", model.asOfDisplay)
+                    methodologyFact("Confidence", model.confidenceTitle)
+                    methodologyFact("Baseline", "\(model.baselineDays)d")
+                }
+                Text("Inputs used: \(model.observedInputsTitle). This is a wellness estimate, not emotional stress, a diagnosis, or WHOOP score parity. Illness, alcohol, training, sleep, breathing, posture, medication and sensor quality can all affect these signals.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !model.limitationSummary.isEmpty {
+                    Text(model.limitationSummary)
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.statusWarning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Divider().overlay(StrandPalette.hairline)
                 HStack(spacing: 0) {
                     bandLegend("0-1", String(localized: "LOW"), StressRamp.calm)
@@ -580,10 +586,85 @@ struct StressView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func methodologyFact(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label.uppercased())
+                .font(StrandFont.overline)
+                .foregroundStyle(StrandPalette.textTertiary)
+            Text(value)
+                .font(StrandFont.captionNumber)
+                .foregroundStyle(StrandPalette.textPrimary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     // MARK: Empty state
 
-    private var emptyState: some View {
-        ComingSoon(what: "No stress history yet. Import your WHOOP export in Data Sources to see it.")
+    private func calibrationState(_ assessment: StressModel.SourceAssessment) -> some View {
+        let readout = assessment.readout
+        let count = readout.baselineDays
+        let progress = min(Double(count) / Double(DailyAutonomicLoad.minimumBaselineDays), 1)
+        return VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
+            NoopCard(tint: StressRamp.calm) {
+                VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
+                    HStack {
+                        Text("CALIBRATING").strandOverline()
+                        Spacer()
+                        StatePill("\(count)/\(DailyAutonomicLoad.minimumBaselineDays)", tone: .warning, showsDot: true)
+                    }
+                    Text(calibrationTitle(readout))
+                        .font(StrandFont.title2)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text(calibrationMessage(readout))
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ProgressView(value: progress)
+                        .tint(StressRamp.calm)
+                    Text("\(count) valid prior day\(count == 1 ? "" : "s") available · minimum \(DailyAutonomicLoad.minimumBaselineDays)")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                    Text(assessment.title)
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.accent)
+                    if let note = assessment.note {
+                        Text(note)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            NoopCard(tint: StressRamp.calm) {
+                Text("NOOP waits for enough personal history and real baseline variation rather than inventing a score. The estimate is experimental, non-clinical, and is not emotional stress or WHOOP score parity.")
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func calibrationTitle(_ readout: DailyAutonomicLoad.Readout) -> String {
+        if readout.limitations.contains(.targetSignalsMissing) {
+            return String(localized: "Waiting for a daily signal")
+        }
+        if readout.limitations.contains(.restingHeartRateBaselineHasNoSpread)
+            || readout.limitations.contains(.heartRateVariabilityBaselineHasNoSpread) {
+            return String(localized: "More natural variation needed")
+        }
+        return String(localized: "Building your personal baseline")
+    }
+
+    private func calibrationMessage(_ readout: DailyAutonomicLoad.Readout) -> String {
+        if readout.limitations.contains(.targetSignalsMissing) {
+            return String(localized: "Wear a supported device through sleep so NOOP can observe resting heart rate or HRV.")
+        }
+        if readout.limitations.contains(.restingHeartRateBaselineHasNoSpread)
+            || readout.limitations.contains(.heartRateVariabilityBaselineHasNoSpread) {
+            return String(localized: "There is enough history, but the available baseline is too flat for a meaningful standardized comparison. NOOP will keep collecting rather than showing a made-up neutral value.")
+        }
+        let remaining = max(0, DailyAutonomicLoad.minimumBaselineDays - readout.baselineDays)
+        return String(localized: "Collect \(remaining) more valid prior day\(remaining == 1 ? "" : "s") for the first evidence-backed estimate.")
     }
 }
 
@@ -654,10 +735,9 @@ enum StressBand {
     }
 }
 
-// MARK: - Stress ramp (the WHOOP Stress sweep: blue → green → amber)
+// MARK: - Autonomic-load ramp (blue → green → amber)
 //
-// The Stress screen's one ramp. WHOOP has NO gold: calm reads as the link blue, a
-// balanced day as positive green, and a high-stress day as warning amber. The
+// The screen's one ramp: lower load reads blue, mid-range green, and higher load amber. The
 // semicircle gauge fill, the day autonomic-load line, the Calm/Moderate/High totals bar
 // and the trend all sample this SAME ramp, so the colour language is identical across
 // the screen. Never the gold or red→green recovery ramp.
@@ -666,9 +746,9 @@ enum StressRamp {
     /// Band anchors, lifted from the shared palette (no hard-coded hex). These are the
     /// blue / green / amber the totals legend and band dots use, kept in lock-step with
     /// the gauge gradient below.
-    static let calm    = StrandPalette.accent         // #60A0E0 — calm WHOOP blue
-    static let steady  = StrandPalette.statusPositive // #03E095 — balanced WHOOP green
-    static let tense   = StrandPalette.statusWarning  // #F0A020 — high WHOOP amber
+    static let calm    = StrandPalette.accent
+    static let steady  = StrandPalette.statusPositive
+    static let tense   = StrandPalette.statusWarning
 
     /// The 3-stop gauge ramp, evenly spaced (blue → green → amber).
     static let stops: [Gradient.Stop] = [
@@ -693,21 +773,14 @@ enum StressRamp {
 /// the stored series is a tuple array (not `Equatable`), so we mirror it into an
 /// `Equatable` shape. Comparison is O(n) — cheap versus rebuilding the model.
 private struct StressInputs: Equatable {
-    let days: [DailyMetric]
-    let stored: [StoredPoint]
+    let rows: [SourcedDailyMetric]
 
-    struct StoredPoint: Equatable {
-        let day: String
-        let value: Double
-    }
-
-    init(days: [DailyMetric], stored: [(day: String, value: Double)]) {
-        self.days = days
-        self.stored = stored.map { StoredPoint(day: $0.day, value: $0.value) }
+    init(rows: [SourcedDailyMetric]) {
+        self.rows = rows
     }
 }
 
-// MARK: - Stress model (transparent: stored value OR z-score derivation)
+// MARK: - Stress model (causal, source-isolated experimental estimate)
 
 struct StressModel {
     let score: Double            // 0–3 (today)
@@ -720,7 +793,16 @@ struct StressModel {
     let fullTrend: [TrendPoint]  // entire daily proxy history, oldest→newest
     let calmTimeValue: String    // e.g. "58%"
     let calmTimeCaption: String  // e.g. "of last 30 days"
-    let usingStored: Bool        // true when today's value came from the stored series
+    /// Kept for source compatibility with older call sites. NOOP no longer trusts an opaque
+    /// persisted `stress` series as interchangeable with this experimental estimate.
+    let usingStored: Bool
+    let asOfDay: String
+    let baselineDays: Int
+    let confidence: DailyAutonomicLoad.Confidence
+    let observedSignals: [DailyAutonomicLoad.Signal]
+    let limitations: [DailyAutonomicLoad.Limitation]
+    let sourceTitle: String
+    let sourceNote: String?
 
     /// Last up-to-14 trend values, for the hero tile sparkline.
     var sparkValues: [Double] { Array(fullTrend.suffix(14)).map(\.value) }
@@ -733,90 +815,83 @@ struct StressModel {
         return f
     }()
 
-    /// Build from oldest→newest daily metrics plus any stored "stress" series.
-    /// Returns nil only when there is no usable signal at all.
-    init?(days: [DailyMetric], stored: [(day: String, value: Double)]) {
-        // Stored values keyed by day, clamped to 0–3.
-        let storedByDay: [String: Double] = Dictionary(
-            stored.map { ($0.day, min(max($0.value, 0), 3)) },
-            uniquingKeysWith: { _, b in b }
-        )
+    struct SourceAssessment {
+        let source: DailyMetricSource
+        let title: String
+        let note: String?
+        let days: [DailyMetric]
+        let readout: DailyAutonomicLoad.Readout
 
-        // Carry (#543): today's own row is often vitals-less until the overnight is analyzed —
-        // especially right after an app update relaunches and re-runs the pass — so score the NEWEST
-        // day that actually carries usable signal (RHR/HRV, or a stored/imported stress value) instead of
-        // calibrating, the same last-night carry every other Today vital uses. The predicate mirrors the
-        // storedToday||derived gate below, so an imported stress-only latest day is still honored (not
-        // skipped). Falls back to the last row when no day has any signal (cold start).
-        guard let idx = days.lastIndex(where: {
-            $0.restingHr != nil || $0.avgHrv != nil || storedByDay[$0.day] != nil
-        }) ?? days.indices.last
-        else { return nil }   // no days at all
-        let today = days[idx]
+        var isScorable: Bool {
+            readout.value != nil
+                && readout.baselineDays >= DailyAutonomicLoad.minimumBaselineDays
+        }
+    }
 
-        // Baseline window: up to 30 days ending the day BEFORE the scored day, so it's measured
-        // against its own recent past rather than itself.
-        let baseline = idx > 0 ? Array(days[0..<idx].suffix(30)) : []
+    /// Legacy API retained for Today/LiquidToday compatibility. Opaque stored stress points are
+    /// intentionally ignored: their algorithm/provenance cannot be assumed equivalent to NOOP's.
+    init?(days: [DailyMetric], stored _: [(day: String, value: Double)]) {
+        self.init(assessment: Self.assessment(
+            source: .localCache,
+            days: days
+        ))
+    }
 
-        let rhrBase = baseline.compactMap { $0.restingHr }.map(Double.init)
-        let hrvBase = baseline.compactMap { $0.avgHrv }
+    /// Source-aware UI path. A full series is selected first, then evaluated; values from WHOOP,
+    /// NOOP and Apple Health are never blended into a synthetic baseline.
+    init?(sourceRows: [SourcedDailyMetric]) {
+        self.init(assessment: Self.preferredAssessment(sourceRows: sourceRows))
+    }
 
+    private init?(assessment: SourceAssessment) {
+        guard let s = assessment.readout.value,
+              let asOf = assessment.readout.asOf,
+              let today = assessment.days.last(where: { $0.day == asOf })
+        else { return nil }
+
+        let engineDays = Self.engineDays(assessment.days)
+        let trendReadouts = DailyAutonomicLoad.causalTrend(days: engineDays)
+        let pts = trendReadouts.compactMap { readout -> TrendPoint? in
+            guard let value = readout.value,
+                  let day = readout.asOf,
+                  let date = Self.dayParser.date(from: day)
+            else { return nil }
+            return TrendPoint(date: date, value: value)
+        }
+
+        let prior = assessment.days
+            .filter { $0.day < asOf }
+            .suffix(DailyAutonomicLoad.baselineWindowDays)
+        let rhrBase = prior.compactMap { $0.restingHr }.map(Double.init)
+        let hrvBase = prior.compactMap(\.avgHrv)
         let meanRHR = StressMath.mean(rhrBase)
-        let sdRHR   = StressMath.std(rhrBase, mean: meanRHR)
         let meanHRV = StressMath.mean(hrvBase)
-        let sdHRV   = StressMath.std(hrvBase, mean: meanHRV)
+        let usesRHR = assessment.readout.observedSignals.contains(.restingHeartRate)
+        let usesHRV = assessment.readout.observedSignals.contains(.heartRateVariability)
 
-        let rhrT = today.restingHr.map(Double.init)
-        let hrvT = today.avgHrv
-
-        // Resolve today's score: prefer a stored value, else derive.
-        let derivedAvailable = (rhrT != nil && meanRHR != nil) || (hrvT != nil && meanHRV != nil)
-        let storedToday = storedByDay[today.day]
-        guard storedToday != nil || derivedAvailable else { return nil }
-
-        let derivedToday: Double? = derivedAvailable
-            ? StressMath.squash(StressMath.rawScore(
-                rhrToday: rhrT, meanRHR: meanRHR, sdRHR: sdRHR,
-                hrvToday: hrvT, meanHRV: meanHRV, sdHRV: sdHRV))
-            : nil
-
-        let s = storedToday ?? derivedToday ?? 1.5
-        self.usingStored = storedToday != nil
+        self.usingStored = false
         self.score = s
         self.band = StressBand(score: s)
-        self.rhrToday = today.restingHr
-        self.hrvToday = hrvT
-        self.rhrDelta = (rhrT != nil && meanRHR != nil) ? (rhrT! - meanRHR!) : nil
-        self.hrvDelta = (hrvT != nil && meanHRV != nil) ? (hrvT! - meanHRV!) : nil
-
+        self.rhrToday = usesRHR ? today.restingHr : nil
+        self.hrvToday = usesHRV ? today.avgHrv : nil
+        self.rhrDelta = usesRHR ? Self.delta(today.restingHr.map(Double.init), meanRHR) : nil
+        self.hrvDelta = usesHRV ? Self.delta(today.avgHrv, meanHRV) : nil
+        self.fullTrend = pts
+        self.asOfDay = asOf
+        self.baselineDays = assessment.readout.baselineDays
+        self.confidence = assessment.readout.confidence
+        self.observedSignals = assessment.readout.observedSignals
+        self.limitations = assessment.readout.limitations
+        self.sourceTitle = assessment.title
+        self.sourceNote = assessment.note
         self.explanation = StressMath.explanation(
             band: self.band,
             rhrDelta: self.rhrDelta,
             hrvDelta: self.hrvDelta,
-            usingStored: self.usingStored
+            usingStored: false
         )
 
-        // Full daily proxy history: stored value if present for the day, else the
-        // z-score derivation against the SAME baseline so the line is comparable.
-        var pts: [TrendPoint] = []
-        for d in days {
-            guard let date = Self.dayParser.date(from: d.day) else { continue }
-            if let v = storedByDay[d.day] {
-                pts.append(TrendPoint(date: date, value: v))
-                continue
-            }
-            let dRHR = d.restingHr.map(Double.init)
-            let dHRV = d.avgHrv
-            guard (dRHR != nil && meanRHR != nil) || (dHRV != nil && meanHRV != nil) else { continue }
-            let r = StressMath.rawScore(
-                rhrToday: dRHR, meanRHR: meanRHR, sdRHR: sdRHR,
-                hrvToday: dHRV, meanHRV: meanHRV, sdHRV: sdHRV
-            )
-            pts.append(TrendPoint(date: date, value: StressMath.squash(r)))
-        }
-        self.fullTrend = pts
-
-        // "Calm time": share of the last 30 charted days that sat in the LOW band.
+        // Share of the last 30 independently scorable causal points in the LOW band.
         let recent = Array(pts.suffix(30))
         if recent.isEmpty {
             self.calmTimeValue = "—"
@@ -825,8 +900,139 @@ struct StressModel {
             let calm = recent.filter { $0.value < 1.0 }.count
             let pct = Int((Double(calm) / Double(recent.count) * 100).rounded())
             self.calmTimeValue = "\(pct)%"
-            self.calmTimeCaption = String(localized: "low-stress days · \(recent.count)d")
+            self.calmTimeCaption = String(localized: "low-load days · \(recent.count)d")
         }
+    }
+
+    static func engineDays(_ days: [DailyMetric]) -> [DailyAutonomicLoad.Day] {
+        days.map {
+            DailyAutonomicLoad.Day(day: $0.day,
+                                   restingHeartRate: $0.restingHr.map(Double.init),
+                                   hrv: $0.avgHrv)
+        }
+    }
+
+    /// The assessment used for either the loaded model or the calibration card. Direct NOOP strap
+    /// data wins only once it is actually scorable; until then a complete Apple Health reference
+    /// can be used without blending its values with the strap. When nothing is scorable, show the
+    /// candidate with the most real prior support instead of implying all history is absent.
+    static func preferredAssessment(sourceRows: [SourcedDailyMetric]) -> SourceAssessment {
+        let candidates: [SourceAssessment] = [
+            assessment(source: .noopComputed, sourceRows: sourceRows),
+            assessment(source: .whoopImport, sourceRows: sourceRows),
+            assessment(source: .appleHealth, sourceRows: sourceRows),
+            assessment(source: .localCache, sourceRows: sourceRows),
+        ].filter { !$0.days.isEmpty }
+
+        if let direct = candidates.first(where: { $0.source == .noopComputed && $0.isScorable }) {
+            return direct
+        }
+        if let apple = candidates.first(where: { $0.source == .appleHealth && $0.isScorable }) {
+            return apple
+        }
+        if let exported = candidates.first(where: { $0.source == .whoopImport && $0.isScorable }) {
+            return exported
+        }
+        if let local = candidates.first(where: { $0.source == .localCache && $0.isScorable }) {
+            return local
+        }
+        return candidates.max {
+            if $0.readout.baselineDays == $1.readout.baselineDays {
+                return sourceRank($0.source) > sourceRank($1.source)
+            }
+            return $0.readout.baselineDays < $1.readout.baselineDays
+        } ?? assessment(source: .localCache, days: [])
+    }
+
+    private static func assessment(source: DailyMetricSource,
+                                   sourceRows: [SourcedDailyMetric]) -> SourceAssessment {
+        assessment(source: source,
+                   days: sourceRows.filter { $0.source == source }.map(\.metric))
+    }
+
+    private static func assessment(source: DailyMetricSource,
+                                   days: [DailyMetric]) -> SourceAssessment {
+        let sorted = days.sorted { $0.day < $1.day }
+        let metadata = sourceMetadata(source)
+        return SourceAssessment(source: source, title: metadata.title, note: metadata.note,
+                                days: sorted,
+                                readout: DailyAutonomicLoad.readout(days: engineDays(sorted)))
+    }
+
+    private static func sourceRank(_ source: DailyMetricSource) -> Int {
+        switch source {
+        case .noopComputed: return 0
+        case .whoopImport: return 1
+        case .appleHealth: return 2
+        case .localCache: return 3
+        }
+    }
+
+    private static func sourceMetadata(_ source: DailyMetricSource) -> (title: String, note: String?) {
+        switch source {
+        case .noopComputed:
+            return (String(localized: "NOOP strap"), nil)
+        case .whoopImport:
+            return (String(localized: "WHOOP export reference"),
+                    String(localized: "Derived by NOOP from a single WHOOP export series; not WHOOP score parity."))
+        case .appleHealth:
+            return (String(localized: "Apple Health reference"),
+                    String(localized: "Apple Health HRV sampling and method may differ from strap RMSSD, so compare trends within this source only."))
+        case .localCache:
+            return (String(localized: "Local daily reference"), nil)
+        }
+    }
+
+    private static func delta(_ value: Double?, _ mean: Double?) -> Double? {
+        guard let value, let mean else { return nil }
+        return value - mean
+    }
+
+    var confidenceTitle: String {
+        switch confidence {
+        case .reliable: return String(localized: "2-signal support")
+        case .limited: return String(localized: "1-signal support")
+        case .unavailable: return String(localized: "Unavailable")
+        }
+    }
+
+    var confidenceSystemImage: String {
+        confidence == .reliable ? "checkmark.shield.fill" : "exclamationmark.triangle.fill"
+    }
+
+    var confidenceColor: Color {
+        confidence == .reliable ? StrandPalette.statusPositive : StrandPalette.statusWarning
+    }
+
+    var asOfDisplay: String {
+        guard let date = Self.dayParser.date(from: asOfDay) else { return asOfDay }
+        return date.formatted(.dateTime.month(.abbreviated).day())
+    }
+
+    var provenanceSummary: String {
+        String(localized: "\(sourceTitle) · \(asOfDisplay) · \(baselineDays)d base")
+    }
+
+    var observedInputsTitle: String {
+        let labels = observedSignals.map {
+            switch $0 {
+            case .restingHeartRate: return String(localized: "resting HR")
+            case .heartRateVariability: return String(localized: "HRV")
+            }
+        }
+        return labels.isEmpty ? String(localized: "none") : labels.joined(separator: " + ")
+    }
+
+    var limitationSummary: String {
+        var notes: [String] = []
+        if limitations.contains(.singleSignalEstimate) {
+            notes.append(String(localized: "Limited support: only one signal passed every gate."))
+        }
+        if limitations.contains(.staleSourceDay) {
+            notes.append(String(localized: "The latest day lacked usable inputs, so this carries the last observed day and labels its real date."))
+        }
+        if let sourceNote { notes.append(sourceNote) }
+        return notes.joined(separator: " ")
     }
 }
 
@@ -875,27 +1081,27 @@ enum StressMath {
         switch band {
         case .high:
             if rhrUp && hrvDn {
-                return String(localized: "Resting HR is elevated and HRV is below your baseline, both classic signs of high activation. Prioritise rest, hydration and an easy day.")
+                return String(localized: "Resting HR is above and HRV is below your prior baseline. That combination raises this experimental physiological-load estimate.")
             } else if hrvDn {
-                return String(localized: "HRV has dropped well below your baseline, pointing to elevated stress or fatigue. Ease off and give your body time to recover.")
+                return String(localized: "HRV is below your prior baseline, which raises this experimental estimate. Check the context and how you feel before acting on it.")
             } else if rhrUp {
-                return String(localized: "Resting heart rate is running high versus your norm. Your body is under load today. Keep effort light.")
+                return String(localized: "Resting heart rate is above your prior baseline, which raises this experimental estimate. One signal cannot identify the cause.")
             }
-            return String(localized: "Your autonomic markers are skewed toward stress today. Treat it as a recovery-focused day.")
+            return String(localized: "Available autonomic markers sit above their recent range. This is a physiological pattern, not a diagnosis or emotional-stress reading.")
         case .medium:
             if rhrUp || hrvDn {
                 return rhrUp
-                    ? String(localized: "Slightly off baseline (resting HR is a touch high), so you're moderately activated. Nothing alarming; just don't overreach.")
-                    : String(localized: "Slightly off baseline (HRV is a little low), so you're moderately activated. Nothing alarming; just don't overreach.")
+                    ? String(localized: "Resting HR is modestly above your prior baseline. Consider sleep, training, illness and measurement context.")
+                    : String(localized: "HRV is modestly below your prior baseline. Consider sleep, training, illness and measurement context.")
             }
-            return String(localized: "You're sitting around your typical autonomic baseline: moderate stress, a normal, balanced day.")
+            return String(localized: "The available signals sit near their recent personal range. That does not establish how stressed or recovered you feel.")
         case .low:
             if rhrDn && hrvUp {
-                return String(localized: "Resting heart rate is low and HRV is up. Your nervous system looks well-recovered and calm. A great day to push if you want to.")
+                return String(localized: "Resting HR is below and HRV is above your prior baseline, lowering this physiological-load estimate.")
             } else if hrvUp {
-                return String(localized: "HRV is above baseline, a sign of a relaxed, well-recovered nervous system. Stress is low.")
+                return String(localized: "HRV is above your prior baseline, lowering this estimate. It does not by itself establish recovery or emotional state.")
             }
-            return String(localized: "Resting heart rate and HRV are sitting at or below baseline: low physiological stress. You're in a calm, recovered state.")
+            return String(localized: "Available autonomic markers sit below their recent range. Interpret this experimental estimate alongside context and how you feel.")
         }
     }
 }
@@ -903,7 +1109,7 @@ enum StressMath {
 // MARK: - Daytime autonomic-load line (README screen-9)
 //
 // The day's intraday stress proxy drawn as a smooth LINE across the waking hours, filled
-// under the curve and stroked with the SAME 3-stop blue→green→amber WHOOP ramp as
+// under the curve and stroked with the SAME 3-stop blue→green→amber ramp as
 // the gauge. Only scored hours contribute points (no-data hours are skipped, never a
 // guessed value); the smooth line connects the ones we have. The y-axis is the 0–3 scale
 // and a faint dashed mid-line marks the 1.5 baseline.
@@ -937,7 +1143,7 @@ struct DaytimeLoadLine: View {
                 .stroke(StrandPalette.hairline, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
 
                 if pts.count >= 2 {
-                    // Soft area fill under the curve — a calm WHOOP-blue wash (no gold).
+                    // Soft area fill under the curve.
                     areaPath(pts, width: w, height: h)
                         .fill(
                             LinearGradient(
@@ -1054,7 +1260,7 @@ struct StressTotals {
 //
 // The Calm / Moderate / High split of the scored day, rendered as three labelled liquid tubes (the
 // signature LiquidTube, matching Health's recovery contributors and Today's Key-Metrics tubes). Each
-// tube fills to that band's SHARE of the scored day and is tinted to the band's WHOOP colour (calm blue /
+// tube fills to that band's SHARE of the scored day and is tinted to the band's colour (blue /
 // steady green / tense amber), with the band name + its duration above it. A day with no scored hours
 // leaves all three tubes empty (no fabricated fill).
 
@@ -1147,7 +1353,7 @@ private struct StressPreviewHarness: View {
                 NoopCard(tint: StressRamp.calm) {
                     VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
                         HStack {
-                            Text("Stress monitor").strandOverline()
+                            Text("NOOP autonomic load").strandOverline()
                             Spacer()
                             StatePill("\(band.title)", tone: band.tone)
                         }
@@ -1179,17 +1385,17 @@ private struct StressPreviewHarness: View {
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 168), spacing: NoopMetrics.gap)],
                           alignment: .leading, spacing: NoopMetrics.gap) {
-                    StatTile(label: "Stress", value: String(format: "%.1f", score),
+                    StatTile(label: "Autonomic load", value: String(format: "%.1f", score),
                              caption: "of 3 · \(band.title)", accent: StressRamp.color(score))
                     StatTile(label: "Resting HR", value: "54 bpm", accent: StrandPalette.metricRose,
                              delta: "+3 vs base", deltaColor: StrandPalette.statusWarning)
                     StatTile(label: "HRV", value: "48 ms", accent: StrandPalette.metricPurple,
                              delta: "−8 vs base", deltaColor: StrandPalette.statusWarning)
-                    StatTile(label: "Calm time", value: "58%", caption: "low-stress days · 30d",
+                    StatTile(label: "Low-load days", value: "58%", caption: "low-load days · 30d",
                              accent: StressRamp.calm)
                 }
 
-                ChartCard(title: "Stress · M", subtitle: "Daily 0-3 proxy", trailing: "avg 1.5") {
+                ChartCard(title: "NOOP Load · M", subtitle: "Causal daily 0-3 estimate", trailing: "avg 1.5") {
                     TrendChart(points: sampleStressTrend(30), gradient: StressRamp.gradient,
                                valueRange: 0...3, showsArea: true, height: NoopMetrics.chartHeight,
                                valueFormat: { String(format: "%.1f", $0) })
