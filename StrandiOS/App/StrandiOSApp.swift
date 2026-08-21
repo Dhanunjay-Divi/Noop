@@ -201,33 +201,17 @@ struct StrandiOSApp: App {
                         observedAt: model.live.heartRateSample?.receivedAt
                     )
                 }
-                .onChange(of: liveActivityEnabled, initial: true) { _, enabled in
-                    guard !enabled else { return }
-                    Task { await liveActivity.end() }
+                .onChange(of: liveActivityEnabled, initial: true) { _, _ in
+                    // Reconcile both edges: disabling removes every persisted surface immediately;
+                    // enabling may adopt/start from the still-fresh cached packet without waiting for
+                    // another BLE tick.
+                    reconcileLiveActivity()
                 }
-                .onChange(of: liveActivityShowsCharge) { _, showCharge in
-                    guard liveActivityEnabled else { return }
-                    let day = Repository.widgetAnchor(days: model.repo.days)
-                    liveActivity.update(
-                        bpm: model.live.connected ? (model.bpm ?? model.live.heartRate) : nil,
-                        recovery: showCharge ? day?.recovery.map { Int($0.rounded()) } : nil,
-                        connected: model.live.connected,
-                        effort: liveActivityShowsEffort
-                            ? day?.strain.map { Int($0.rounded()) } : nil,
-                        observedAt: model.live.heartRateSample?.receivedAt
-                    )
+                .onChange(of: liveActivityShowsCharge) { _, _ in
+                    reconcileLiveActivity()
                 }
-                .onChange(of: liveActivityShowsEffort) { _, showEffort in
-                    guard liveActivityEnabled else { return }
-                    let day = Repository.widgetAnchor(days: model.repo.days)
-                    liveActivity.update(
-                        bpm: model.live.connected ? (model.bpm ?? model.live.heartRate) : nil,
-                        recovery: liveActivityShowsCharge
-                            ? day?.recovery.map { Int($0.rounded()) } : nil,
-                        connected: model.live.connected,
-                        effort: showEffort ? day?.strain.map { Int($0.rounded()) } : nil,
-                        observedAt: model.live.heartRateSample?.receivedAt
-                    )
+                .onChange(of: liveActivityShowsEffort) { _, _ in
+                    reconcileLiveActivity()
                 }
                 // #911/#759: republish the Home/Lock-Screen widget whenever the dashboard caches actually
                 // change mid-session. The only other publish site is the scenePhase .active handler, so
@@ -311,16 +295,10 @@ struct StrandiOSApp: App {
                 // waiting for the next foreground. activate() is idempotent + a no-op where WC isn't
                 // supported, so this is safe on every device/simulator combination.
                 .task {
+                    // Cold-launch adoption/cleanup: packet publishers may stay quiet while an activity
+                    // from the prior process is still visible, so reconcile the cached sensor state too.
                     watch.activate()
-                    liveActivity.reconcile(
-                        bpm: model.bpm ?? model.live.heartRate,
-                        recovery: liveActivityShowsCharge
-                            ? Repository.widgetAnchor(days: model.repo.days)?.recovery.map { Int($0.rounded()) } : nil,
-                        connected: model.live.connected,
-                        effort: liveActivityShowsEffort
-                            ? Repository.widgetAnchor(days: model.repo.days)?.strain.map { Int($0.rounded()) } : nil,
-                        observedAt: model.live.heartRateSample?.receivedAt
-                    )
+                    reconcileLiveActivity(repairHydration: true)
                     await model.reconcileAutomaticWorkoutSurfaces()
                     await watch.pushLatest(from: model)
                 }
@@ -344,6 +322,9 @@ struct StrandiOSApp: App {
             }
             model.setRealtimeForeground(phase == .active)
             if phase == .active {
+                // Re-check packet age and ActivityKit's persisted list whenever NOOP returns. This ends a
+                // stale activity even when iOS suspended the in-process expiry task while in background.
+                reconcileLiveActivity(repairHydration: true)
                 model.drainPendingIntents()
                 // Re-arm the strap's smart alarm on foreground: the firmware alarm is a single instant
                 // and iOS can't re-arm it while suspended, so it would otherwise fire once and stop.
@@ -353,15 +334,6 @@ struct StrandiOSApp: App {
                 // (BackfillPolicy.shouldRun's .foreground case), so this is a safe no-op on rapid re-opens.
                 model.ble.requestSync(.foreground)
                 Task {
-                    liveActivity.reconcile(
-                        bpm: model.bpm ?? model.live.heartRate,
-                        recovery: liveActivityShowsCharge
-                            ? Repository.widgetAnchor(days: model.repo.days)?.recovery.map { Int($0.rounded()) } : nil,
-                        connected: model.live.connected,
-                        effort: liveActivityShowsEffort
-                            ? Repository.widgetAnchor(days: model.repo.days)?.strain.map { Int($0.rounded()) } : nil,
-                        observedAt: model.live.heartRateSample?.receivedAt
-                    )
                     await model.reconcileAutomaticWorkoutSurfaces()
                     health.refreshAuthIfPreviouslyGranted()
                     await health.foregroundCatchUp()
@@ -385,6 +357,27 @@ struct StrandiOSApp: App {
                 // no-op until the user turns on Shortcuts Export.
                 Task { await ShortcutHealthExport.writeIfEnabled(repo: model.repo) }
             }
+        }
+    }
+
+    private func reconcileLiveActivity(repairHydration: Bool = false) {
+        let day = Repository.widgetAnchor(days: model.repo.days)
+        let bpm = model.live.connected ? (model.bpm ?? model.live.heartRate) : nil
+        let recovery = liveActivityShowsCharge
+            ? day?.recovery.map { Int($0.rounded()) } : nil
+        let effort = liveActivityShowsEffort
+            ? day?.strain.map { Int($0.rounded()) } : nil
+        let observedAt = model.live.heartRateSample?.receivedAt
+        if repairHydration {
+            liveActivity.reconcile(
+                bpm: bpm, recovery: recovery, connected: model.live.connected,
+                effort: effort, observedAt: observedAt
+            )
+        } else {
+            liveActivity.update(
+                bpm: bpm, recovery: recovery, connected: model.live.connected,
+                effort: effort, observedAt: observedAt
+            )
         }
     }
 }

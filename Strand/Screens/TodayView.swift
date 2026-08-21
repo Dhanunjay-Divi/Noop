@@ -2257,10 +2257,11 @@ struct TodayView: View {
             // #843/#813, a same-day measured phone count outranks WHOOP 5/MG's @57 motion estimate;
             // never use a stale import or sparkline tail. The calibrated estimate is the final fallback.
             let appleStepsForDay = appleDays.last(where: { $0.day == selectedDayKey })?.steps
-            let primary = appleStepsForDay.map { intString(Double($0)) }
-                ?? d?.steps.map { intString(Double($0)) }
-            let est = stepsEstByDay[selectedDayKey].map { intString(Double($0)) }
-            return primary ?? est ?? "—"
+            return MetricCatalog.todayStepsValue(
+                imported: appleStepsForDay.map(Double.init),
+                motionDerived: d?.steps.map(Double.init),
+                calibratedEstimate: stepsEstByDay[selectedDayKey].map(Double.init)
+            ).map(intString) ?? "—"
         case .calories:
             return selectedEnergyBreakdown.headlineKcal.map { "\(intString($0)) kcal" } ?? "—"
         case .stress:
@@ -3329,11 +3330,42 @@ struct TodayView: View {
         return ("—", unit)
     }
 
-    /// One Key-Metric tile, keyed so the grid can be filtered + reordered per the saved layout (#251).
-    /// Each case is byte-for-byte the tile that used to be hard-coded in the grid, the refactor only
-    /// changes WHICH tiles render and in WHAT order, never how an individual tile looks.
+    /// Every classic tile opens the same source-pinned Metric Explorer dossier as its Liquid twin.
     @ViewBuilder
     private func keyMetricTile(_ metric: KeyMetric) -> some View {
+        if let descriptor = keyMetricDescriptor(metric) {
+            NavigationLink(value: TabRoute.metricSourced(key: descriptor.key, source: descriptor.source)) {
+                keyMetricTileContent(metric)
+            }
+            .buttonStyle(.plain)
+        } else {
+            keyMetricTileContent(metric)
+        }
+    }
+
+    private func keyMetricDescriptor(_ metric: KeyMetric) -> MetricDescriptor? {
+        switch metric {
+        case .charge:      return MetricCatalog.metric(key: "recovery", source: "my-whoop")
+        case .effort:      return MetricCatalog.metric(key: "strain", source: "my-whoop")
+        case .rest:        return MetricCatalog.metric(key: "sleep_performance", source: "my-whoop")
+        case .hrv:         return MetricCatalog.metric(key: "hrv", source: "my-whoop")
+        case .restingHr:   return MetricCatalog.metric(key: "rhr", source: "my-whoop")
+        case .bloodOxygen: return MetricCatalog.metric(key: "spo2", source: "my-whoop")
+        case .respiratory:
+            let reading = Self.respiratoryDashboardReading(
+                todayWhoop: displayDay?.respRateBpm,
+                priorWhoop: lastVitalsDay?.respRateBpm,
+                apple: sparks["resp_rate"]?.last)
+            return MetricCatalog.metric(key: "resp_rate", source: reading.source)
+        case .steps:       return selectedStepsMetric
+        case .weight:      return MetricCatalog.metric(key: "weight", source: "apple-health")
+        case .calories:    return selectedEnergyMetric
+        }
+    }
+
+    /// One Key-Metric tile, keyed so the grid can be filtered + reordered per the saved layout (#251).
+    @ViewBuilder
+    private func keyMetricTileContent(_ metric: KeyMetric) -> some View {
         let d = displayDay
         let aSelected = appleDays.last(where: { $0.day == selectedDayKey })
         let systemImage = metric.icon

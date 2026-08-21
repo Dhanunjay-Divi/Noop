@@ -63,4 +63,22 @@ final class ExploreRangeGatingTests: XCTestCase {
     func testNothingLockedKeepsSelection() {
         XCTAssertEqual(ExploreRangeGating.coerced(selection: .quarter, isUnlocked: { _ in true }), .quarter)
     }
+
+    func testEmptyStatePointsAppleMetricToAppleHealth() {
+        let metric = MetricCatalog.metric(key: "weight", source: "apple-health")!
+        let copy = MetricEmptyStateCopy.message(for: metric)
+
+        XCTAssertTrue(copy.contains("Apple Health"))
+        XCTAssertFalse(copy.contains("WHOOP export"))
+    }
+
+    func testEmptyStateDoesNotClaimWhoopExportContainsEveryMetric() {
+        let metric = MetricCatalog.metric(key: "hrv", source: "my-whoop")!
+        let copy = MetricEmptyStateCopy.message(for: metric)
+
+        XCTAssertTrue(copy.contains("connected band"))
+        XCTAssertTrue(copy.contains("on-device metric history"))
+        XCTAssertFalse(copy.contains("WHOOP export"))
+        XCTAssertFalse(copy.contains("every metric"))
+    }
 }

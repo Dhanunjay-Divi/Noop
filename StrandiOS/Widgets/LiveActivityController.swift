@@ -6,7 +6,9 @@ import ActivityKit
 /// in the Dynamic Island while the strap is bonded and streaming heart rate.
 @MainActor
 final class LiveActivityController {
-    private var activity: Activity<NOOPActivityAttributes>?
+    private typealias NOOPActivity = Activity<NOOPActivityAttributes>
+
+    private var activity: NOOPActivity?
     private var lastPush: Date = .distantPast
     /// Cached `ActivityAuthorizationInfo` — `update` runs at ~1 Hz off the live HR stream, and
     /// instantiating this system bridge per tick is needless allocation. ActivityKit's auth status
@@ -35,10 +37,7 @@ final class LiveActivityController {
     private var endWaiters: [CheckedContinuation<Void, Never>] = []
     private var expiryTask: Task<Void, Never>?
     private var hydrationTask: Task<Void, Never>?
-    /// How long after the last push iOS may keep showing the activity as fresh. The activity is
-    /// refreshed every ~2 s while streaming, so this never bites a live session; it auto-greys a
-    /// frozen activity if the app is suspended/killed without an explicit end (a missed-tick safety net
-    /// on top of the connected-driven end below).
+
     private struct DesiredState {
         let generation: UInt64
         let bpm: Int?
@@ -68,8 +67,7 @@ final class LiveActivityController {
         pendingState = desired
         // A fresh observation supersedes an older sample's timer immediately, before a queued
         // ActivityKit apply gets the main actor again.
-        expiryTask?.cancel()
-        expiryTask = nil
+        cancelExpiry()
         startDrainIfNeeded()
     }
 
@@ -106,13 +104,25 @@ final class LiveActivityController {
 
     private func apply(_ desired: DesiredState) async {
         guard isCurrent(desired) else { return }
-        let all = Activity<NOOPActivityAttributes>.activities
-        if activity == nil || !all.contains(where: { $0.id == activity?.id }) {
-            activity = all.max { lhs, rhs in
-                (lhs.content.staleDate ?? .distantPast) < (rhs.content.staleDate ?? .distantPast)
+
+        let all = allKnownActivities()
+        let usable = all.filter { candidate in
+            switch candidate.activityState {
+            case .ended, .dismissed: false
+            default: true
             }
         }
+        // ActivityKit does not promise an ordering for `activities`. Pick the newest stale-date and use
+        // a stable ID tie-break so relaunch adoption cannot oscillate between surviving activities.
+        let selection = LiveActivitySelection.select(usable.map {
+            .init(id: $0.id, freshnessDate: $0.content.staleDate)
+        })
+        let canonical = selection.canonicalID.flatMap { id in
+            usable.first { $0.id == id }
+        }
+        adopt(canonical)
 
+        guard isCurrent(desired) else { return }
         guard authInfo.areActivitiesEnabled,
               UnitPrefs.liveActivityEnabled(),
               desired.hasFreshHeartRate else {
@@ -123,25 +133,28 @@ final class LiveActivityController {
             return
         }
 
-        // A previous race/build may have left more than one NOOP activity. Keep the canonical newest
-        // activity and remove every duplicate before publishing the fresh state.
-        for duplicate in all where duplicate.id != activity?.id {
+        // A previous race/build may have left more than one NOOP activity. Keep the deterministic
+        // canonical activity and remove every duplicate before publishing the fresh state.
+        let duplicateIDs = Set(selection.duplicateIDs)
+        for duplicate in usable where duplicateIDs.contains(duplicate.id) {
             await duplicate.end(nil, dismissalPolicy: .immediate)
             guard isCurrent(desired) else { return }
         }
 
+        guard let bpm = desired.bpm, let observedAt = desired.observedAt else { return }
         let state = NOOPActivityAttributes.ContentState(
-            bpm: desired.bpm,
+            bpm: bpm,
             recovery: desired.recovery,
             bonded: desired.connected,
             effort: desired.effort
         )
-        let staleDate = desired.observedAt!
-            .addingTimeInterval(LiveHeartRateSurfacePolicy.maximumSampleAge)
+        let staleDate = observedAt.addingTimeInterval(
+            LiveHeartRateSurfacePolicy.maximumSampleAge
+        )
 
         if let activity {
             guard desired.now.timeIntervalSince(lastPush) > 2 else {
-                scheduleExpiry(observedAt: desired.observedAt!)
+                scheduleExpiry(observedAt: observedAt)
                 return
             }
             lastPush = desired.now
@@ -152,21 +165,35 @@ final class LiveActivityController {
             isStarting = true
             defer { isStarting = false }
             do {
-                activity = try Activity.request(
+                let started = try NOOPActivity.request(
                     attributes: NOOPActivityAttributes(title: String(localized: "Live HR")),
                     content: ActivityContent(state: state, staleDate: staleDate),
                     pushType: nil
                 )
+                adopt(started)
                 lastPush = desired.now
             } catch {
                 activity = nil
             }
         }
-        scheduleExpiry(observedAt: desired.observedAt!)
+        scheduleExpiry(observedAt: observedAt)
     }
 
     private func isCurrent(_ desired: DesiredState) -> Bool {
         desired.generation == stateGeneration && !isEnding
+    }
+
+    private func adopt(_ canonical: NOOPActivity?) {
+        if activity?.id != canonical?.id { lastPush = .distantPast }
+        activity = canonical
+    }
+
+    private func allKnownActivities() -> [NOOPActivity] {
+        var activities = NOOPActivity.activities
+        if let activity, !activities.contains(where: { $0.id == activity.id }) {
+            activities.append(activity)
+        }
+        return activities
     }
 
     private func scheduleExpiry(observedAt: Date) {
@@ -249,19 +276,14 @@ final class LiveActivityController {
 
     private func endActivities() async {
         // End every NOOP Live Activity, not just our cached handle — covers a straggler from a prior
-        // session we never re-adopted (#341) and any rare duplicate. Iterating the live list is the
-        // only way to reach activities this controller instance never started.
-        let hydrated = Activity<NOOPActivityAttributes>.activities
-        // Conversely, a just-requested handle can exist a beat before the process-wide list reflects
-        // it. Include that cached handle explicitly so an immediate opt-out cannot miss the new pill.
-        if let activity, !hydrated.contains(where: { $0.id == activity.id }) {
-            await activity.end(nil, dismissalPolicy: .immediate)
+        // session we never re-adopted and any rare duplicate. Include the cached handle because a newly
+        // requested activity can exist briefly before the process-wide list reflects it.
+        var ended = Set<String>()
+        for candidate in allKnownActivities() where ended.insert(candidate.id).inserted {
+            await candidate.end(nil, dismissalPolicy: .immediate)
         }
-        for act in hydrated {
-            await act.end(nil, dismissalPolicy: .immediate)
-        }
-        self.activity = nil
-        self.lastPush = .distantPast
+        activity = nil
+        lastPush = .distantPast
     }
 }
 #endif

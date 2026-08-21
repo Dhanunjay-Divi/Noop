@@ -35,16 +35,24 @@ final class MetricCatalogStepsTests: XCTestCase {
         XCTAssertEqual(metric?.title, "Steps")
     }
 
-    func testTodayStepsValueAndSeriesUseMeasuredFirstPerDay() {
-        XCTAssertEqual(MetricCatalog.todayStepsValue(imported: 8_000, motionDerived: 9_000,
-                                                     calibratedEstimate: 7_000), 8_000)
+    func testTodayStepsValueUsesMeasuredFirstThenBothFallbacks() {
+        XCTAssertEqual(MetricCatalog.todayStepsValue(imported: 8_400, motionDerived: 7_100,
+                                                     calibratedEstimate: 6_900), 8_400)
+        XCTAssertEqual(MetricCatalog.todayStepsValue(imported: nil, motionDerived: 7_100,
+                                                     calibratedEstimate: 6_900), 7_100)
+        XCTAssertEqual(MetricCatalog.todayStepsValue(imported: nil, motionDerived: nil,
+                                                     calibratedEstimate: 6_900), 6_900)
+    }
+
+    func testTodayStepsSeriesResolvesPrecedencePerDayWithoutDroppingFallbackDays() {
         let merged = MetricCatalog.todayStepsSeries(
-            imported: [("2026-08-12", 8_000)],
-            motionDerived: [("2026-08-11", 6_000), ("2026-08-12", 9_000)],
-            calibratedEstimate: [("2026-08-10", 5_000), ("2026-08-12", 7_000)]
+            imported: [("2026-08-10", 8_400)],
+            motionDerived: [("2026-08-10", 7_100), ("2026-08-11", 7_500)],
+            calibratedEstimate: [("2026-08-10", 6_900), ("2026-08-11", 7_000),
+                                 ("2026-08-12", 6_200)]
         )
         XCTAssertEqual(merged.map(\.day), ["2026-08-10", "2026-08-11", "2026-08-12"])
-        XCTAssertEqual(merged.map(\.value), [5_000, 6_000, 8_000])
+        XCTAssertEqual(merged.map(\.value), [8_400, 7_500, 6_200])
     }
 
     func testAppleHealthStepsRemainsAnIndependentCatalogMetric() {

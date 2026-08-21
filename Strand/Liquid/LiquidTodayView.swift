@@ -72,7 +72,7 @@ struct LiquidTodayView: View {
         ageMetricsLoadedProfileState == profile.ageMetricStateToken ? vitality : nil
     }
     @State private var stepsEst: Double?           // steps_est, day-keyed to the selected day (fallback)
-    @State private var importedStepsDay: Int?      // Apple Health steps for the selected day (middle tier)
+    @State private var importedStepsDay: Int?      // Apple Health measured steps for the selected day (preferred)
     @State private var importedActiveKcalDay: Double?  // Apple Health active component for the selected day
     @State private var importedRestingKcalDay: Double? // Apple Health basal/resting component for the selected day
     @State private var importedWeightKg: Double?    // freshest measured weight at or before selected day
@@ -1177,8 +1177,8 @@ struct LiquidTodayView: View {
 
     /// One editor-selected Key-Metric tile: the metric's value/tint/fill exactly as the old hard-coded
     /// tiles read them (Android's descriptor map is the twin), plus the metric-catalog `key` that names
-    /// its tap-through detail. Weight has no liquid value source yet —
-    /// its tile reads "—" but still taps through to the weight trend detail (which has its own series).
+    /// its tap-through detail. Sparse weight uses the freshest real Apple Health reading at or before
+    /// the selected day, while every daily signal remains selected-day scoped.
     @ViewBuilder
     private func ktileFor(_ metric: KeyMetric, hrv: Double?, rhr: Double?) -> some View {
         switch metric {
