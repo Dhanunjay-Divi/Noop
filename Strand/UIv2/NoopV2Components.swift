@@ -86,6 +86,12 @@ struct V2DeltaChip: View {
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
             .background(Capsule().fill(tone.opacity(0.14)))
+            // A11Y: speak a DIRECTION WORD and an interpretation — an arrow glyph alone is not accessible,
+            // and colour alone must never carry the good/bad meaning.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(
+                "\(d > 0 ? "up" : "down") \(abs(d).formatted(.number.precision(.fractionLength(abs(d) < 10 ? 1 : 0))))\(unit) versus baseline, \(good ? "improving" : "worth watching")"
+            ))
         }
     }
 }
@@ -113,12 +119,17 @@ struct V2HeroArc: View {
 
     var body: some View {
         ZStack {
-            // Arc group ONLY is rotated (135° puts the 270° sweep's gap centred at the bottom).
-            // The readout must NOT inherit this rotation, so it lives in a sibling layer.
+            // ⚠️ C1 LOAD-BEARING LAYOUT — DO NOT WRAP THESE TWO LAYERS IN A SHARED MODIFIER.
+            // The arc group ONLY is rotated (135° puts the 270° sweep's gap centred at the bottom). The
+            // readout is a SIBLING layer precisely so it does not inherit that rotation. An earlier build
+            // applied `.rotationEffect` to the whole ZStack and added a second un-rotated overlay, which
+            // rendered the number TWICE — once mirrored and garbled (see noop_WIP/screenshots/v2/
+            // todayv2_01.png for the evidence). Any refactor that re-nests these reintroduces that bug;
+            // `V2HeroArcSnapshotContract` below documents the invariant.
             ZStack {
                 Circle()
                     .trim(from: 0, to: 0.75)
-                    .stroke(Color.white.opacity(0.07),
+                    .stroke(NoopV2.decorationFaint.opacity(0.16),
                             style: StrokeStyle(lineWidth: 16, lineCap: .round))
                 Circle()
                     .trim(from: 0, to: 0.75 * fraction)
@@ -128,7 +139,7 @@ struct V2HeroArc: View {
             }
             .rotationEffect(.degrees(135))
 
-            // Upright readout
+            // Upright readout (sibling — see C1 note above)
             VStack(spacing: 2) {
                 if let v = value {
                     Text("\(Int(v.rounded()))")
@@ -158,7 +169,28 @@ struct V2HeroArc: View {
             }
         }
         .frame(width: size, height: size)
+        // A11Y: one element, spoken as data. Never expose an adjustable trait — this is a readout.
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityLabel(Text(label))
+        .accessibilityValue(Text(accessibilityReadout))
     }
+
+    /// Spoken value: "64 out of 100, moderate" / "not yet calculated, calibrating".
+    private var accessibilityReadout: String {
+        guard let v = value else {
+            return caption.map { "not yet calculated, \($0)" } ?? "not yet calculated"
+        }
+        let head = "\(Int(v.rounded())) out of \(Int(max))"
+        return caption.map { "\(head), \($0)" } ?? head
+    }
+}
+
+/// Documents the C1 invariant for the snapshot test that locks it (see ROUND-12).
+enum V2HeroArcSnapshotContract {
+    /// The hero must render EXACTLY ONE upright readout. If a future refactor nests the readout inside the
+    /// rotated arc group (or re-adds an overlay copy), the snapshot diff catches the double/rotated render.
+    static let expectedReadoutCount = 1
 }
 
 /// A compact satellite ring for the two non-headline scores.
@@ -179,7 +211,7 @@ struct V2SatelliteRing: View {
         VStack(spacing: 7) {
             ZStack {
                 Circle()
-                    .stroke(Color.white.opacity(0.07), style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                    .stroke(NoopV2.decorationFaint.opacity(0.16), style: StrokeStyle(lineWidth: 8, lineCap: .round))
                 Circle()
                     .trim(from: 0, to: fraction)
                     .stroke(NoopV2.ramp(base, tip), style: StrokeStyle(lineWidth: 8, lineCap: .round))
@@ -201,6 +233,9 @@ struct V2SatelliteRing: View {
                 .tracking(0.9)
                 .foregroundStyle(NoopV2.inkTertiary)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(label))
+        .accessibilityValue(Text(value.map { "\(Int($0.rounded())) out of \(Int(max))" } ?? "no data"))
     }
 }
 
@@ -255,35 +290,75 @@ struct V2RangeGauge: View {
                         .foregroundStyle(NoopV2.inkTertiary)
                 }
             }
+            // C3 FIX: this is a READOUT, not a control. The old thin-track + glowing round dot was visually
+            // identical to a `Slider` thumb, so users tried to drag it (affordance mismatch reads as broken).
+            // Now: the personal-range BAND is the hero (taller, clearly a zone), the track is a thin rule,
+            // and "you" is a CARET/tick that sits above the band rather than sitting in it like a thumb.
             GeometryReader { geo in
                 let w = geo.size.width
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.07)).frame(height: 7)
+                    // Thin full-scale rule
+                    Capsule()
+                        .fill(NoopV2.decorationFaint.opacity(0.14))
+                        .frame(height: 4)
+                        .offset(y: 5)
+                    // The personal range band — the hero of this component
                     if let lo = rangeLow, let hi = rangeHigh, scale != nil, hi > lo {
                         let x = pos(lo, in: w)
-                        Capsule()
-                            .fill(tint.opacity(0.28))
-                            .frame(width: Swift.max(3, pos(hi, in: w) - x), height: 7)
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(tint.opacity(0.30))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .stroke(tint.opacity(0.45), lineWidth: 1)
+                            )
+                            .frame(width: Swift.max(4, pos(hi, in: w) - x), height: 14)
                             .offset(x: x)
                     }
+                    // "You are here" caret — a downward triangle above the band. Deliberately NOT a circle.
                     if let v = value, scale != nil {
-                        Circle()
-                            .fill(tint)
-                            .frame(width: 13, height: 13)
-                            .overlay(Circle().stroke(Color.black.opacity(0.35), lineWidth: 2))
-                            .shadow(color: tint.opacity(0.7), radius: 6)
-                            .offset(x: Swift.max(0, Swift.min(w - 13, pos(v, in: w) - 6.5)))
+                        V2Caret()
+                            .fill(NoopV2.ink)
+                            .frame(width: 9, height: 6)
+                            .offset(x: Swift.max(0, Swift.min(w - 9, pos(v, in: w) - 4.5)), y: -8)
                     }
                 }
-                .frame(height: 14)
+                .frame(height: 22)
             }
-            .frame(height: 14)
-            if let statusText {
-                Text(statusText)
+            .frame(height: 22)
+            if let status = statusText {
+                Text(status)
                     .font(NoopV2.overline)
                     .foregroundStyle(NoopV2.inkTertiary)
             }
         }
+        // A11Y: read as data with an explicit range; no adjustable trait (reinforces C3).
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(title))
+        .accessibilityValue(Text(accessibilitySpoken))
+    }
+
+    private var accessibilitySpoken: String {
+        guard let v = value else { return "no data" }
+        let head = "\(v.formatted(.number.precision(.fractionLength(abs(v) < 10 ? 1 : 0)))) \(unit)"
+        guard let lo = rangeLow, let hi = rangeHigh else { return "\(head). Not enough baseline yet." }
+        let loS = lo.formatted(.number.precision(.fractionLength(0)))
+        let hiS = hi.formatted(.number.precision(.fractionLength(0)))
+        if v < lo { return "\(head). Below your usual range of \(loS) to \(hiS)." }
+        if v > hi { return "\(head). Above your usual range of \(loS) to \(hiS)." }
+        return "\(head). Inside your usual range of \(loS) to \(hiS)."
+    }
+}
+
+/// A small downward caret ("you are here"), used instead of a round thumb so the range gauge cannot be
+/// mistaken for an interactive slider (C3).
+struct V2Caret: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.midX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        p.closeSubpath()
+        return p
     }
 }
 
@@ -386,45 +461,42 @@ struct V2Heatmap: View {
     let level: (Int, Int) -> Double?   // (hour, dayIndex) -> level
     var caption: String? = nil
 
-    private func color(_ v: Double?) -> Color {
-        guard let v else { return Color.white.opacity(0.045) }
-        if v < 1 { return NoopV2.rest.opacity(0.75) }        // calm  → indigo
-        if v < 2 { return NoopV2.charge.opacity(0.80) }      // mid   → mint
-        return NoopV2.effort.opacity(0.92)                   // high  → amber
-    }
+    // C4 FIX: use the dedicated SEQUENTIAL load ramp, not the domain hues. Reusing mint (= recovery/good
+    // elsewhere) for "mid load" made a mid-stress week look calm. The ramp is ordered by lightness as well
+    // as hue, so it survives greyscale and colour-vision deficiency — colour is never the only channel, and
+    // the legend spells the buckets out in words.
+    private func color(_ v: Double?) -> Color { NoopV2.loadRampColor(v) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 5) {
+            HStack(spacing: 2) {
                 Text("").frame(width: 26)
                 ForEach(Array(dayLabels.enumerated()), id: \.offset) { _, d in
                     Text(d)
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(NoopV2.inkTertiary)
                         .frame(maxWidth: .infinity)
                 }
             }
+            // Tighter corners + smaller gaps so this reads as a GRID, not stacked pill bars (C4 note).
             ForEach(hours, id: \.self) { h in
-                HStack(spacing: 5) {
+                HStack(spacing: 2) {
                     Text(h % 3 == 0 ? String(format: "%02d", h) : "")
-                        .font(.system(size: 9, weight: .medium).monospacedDigit())
+                        .font(.system(size: 10, weight: .medium).monospacedDigit())
                         .foregroundStyle(NoopV2.inkTertiary)
                         .frame(width: 26, alignment: .trailing)
                     ForEach(0..<dayLabels.count, id: \.self) { d in
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
                             .fill(color(level(h, d)))
-                            .frame(height: 11)
+                            .frame(height: 17)
                             .frame(maxWidth: .infinity)
                     }
                 }
+                // A11Y: one element PER ROW (never 7×16 cells). "3 PM: mostly high, no data Sunday."
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(rowSpoken(h)))
             }
-            HStack(spacing: 10) {
-                legend("Calm", NoopV2.rest)
-                legend("Mid", NoopV2.charge)
-                legend("High", NoopV2.effort)
-                legend("No data", Color.white.opacity(0.10))
-            }
-            .padding(.top, 2)
+            legendRow
             if let caption {
                 Text(caption)
                     .font(NoopV2.caption)
@@ -432,22 +504,70 @@ struct V2Heatmap: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        // A11Y: a single summary element comes first so VoiceOver users get the insight immediately.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(summarySpoken))
+    }
+
+    private var legendRow: some View {
+        HStack(spacing: 10) {
+            legend("Lowest", NoopV2.loadRamp0)
+            legend("Low", NoopV2.loadRamp1)
+            legend("Mid", NoopV2.loadRamp2)
+            legend("High", NoopV2.loadRamp3)
+            legend("No data", NoopV2.loadRampEmpty)
+        }
+        .padding(.top, 2)
+        .accessibilityHidden(true)   // the words are already in the row/summary labels
+    }
+
+    /// "3 PM: mid Monday to Friday, no data Sunday" — bucket words, never colour names.
+    private func rowSpoken(_ h: Int) -> String {
+        var buckets: [String] = []
+        for d in 0..<dayLabels.count {
+            buckets.append(NoopV2.loadRampLabel(level(h, d)))
+        }
+        let hourText = h == 0 ? "12 AM" : (h < 12 ? "\(h) AM" : (h == 12 ? "12 PM" : "\(h - 12) PM"))
+        // Collapse to the dominant bucket + count of empty days, so it stays listenable.
+        let empties = buckets.filter { $0 == "no data" }.count
+        let scored = buckets.filter { $0 != "no data" }
+        let dominant = Dictionary(grouping: scored, by: { $0 })
+            .max(by: { $0.value.count < $1.value.count })?.key ?? "no data"
+        if scored.isEmpty { return "\(hourText): no data" }
+        return empties > 0
+            ? "\(hourText): mostly \(dominant), \(empties) day\(empties == 1 ? "" : "s") with no data"
+            : "\(hourText): mostly \(dominant)"
+    }
+
+    private var summarySpoken: String {
+        let base = "Load heatmap by hour and day."
+        var empties = 0
+        for h in hours { for d in 0..<dayLabels.count where level(h, d) == nil { empties += 1 } }
+        let gap = empties > 0 ? " \(empties) hour-slots had no data." : ""
+        return caption.map { "\(base) \($0)\(gap)" } ?? "\(base)\(gap)"
     }
 
     private func legend(_ t: String, _ c: Color) -> some View {
         HStack(spacing: 4) {
             RoundedRectangle(cornerRadius: 2).fill(c).frame(width: 9, height: 9)
-            Text(t).font(.system(size: 9)).foregroundStyle(NoopV2.inkTertiary)
+            Text(t).font(.system(size: 10)).foregroundStyle(NoopV2.inkTertiary)
         }
     }
 }
 
 // MARK: - Sparkline (static path, no animation)
 
+/// C7 FIX: the sparkline was decorative — no baseline, no "today", no scale, so it carried no information.
+/// It now draws the personal mean as a dashed rule and marks the latest point, which is what makes a
+/// 14-day trace readable at a glance ("am I above or below my own normal, and where am I now?").
 struct V2Sparkline: View {
     let points: [Double]
     var tint: Color = NoopV2.charge
     var height: CGFloat = 34
+    /// Show the dashed personal-mean baseline + terminal "today" dot.
+    var showContext: Bool = true
+    /// Optional label for VoiceOver ("14-day recovery trend").
+    var accessibilityTitle: String? = nil
 
     var body: some View {
         GeometryReader { geo in
@@ -455,19 +575,50 @@ struct V2Sparkline: View {
             if points.count > 1,
                let lo = points.min(), let hi = points.max(), hi > lo {
                 let step = w / CGFloat(points.count - 1)
-                Path { p in
-                    for (i, v) in points.enumerated() {
-                        let x = CGFloat(i) * step
-                        let y = h - CGFloat((v - lo) / (hi - lo)) * h
-                        i == 0 ? p.move(to: .init(x: x, y: y)) : p.addLine(to: .init(x: x, y: y))
+                let mean = points.reduce(0, +) / Double(points.count)
+                let meanY = h - CGFloat((mean - lo) / (hi - lo)) * h
+                ZStack(alignment: .topLeading) {
+                    if showContext {
+                        // Personal mean — the reference the trace is judged against.
+                        Path { p in
+                            p.move(to: .init(x: 0, y: meanY))
+                            p.addLine(to: .init(x: w, y: meanY))
+                        }
+                        .stroke(NoopV2.decorationFaint.opacity(0.55),
+                                style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    }
+                    Path { p in
+                        for (i, v) in points.enumerated() {
+                            let x = CGFloat(i) * step
+                            let y = h - CGFloat((v - lo) / (hi - lo)) * h
+                            i == 0 ? p.move(to: .init(x: x, y: y)) : p.addLine(to: .init(x: x, y: y))
+                        }
+                    }
+                    .stroke(NoopV2.ramp(tint, tint.opacity(0.6)),
+                            style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    if showContext, let last = points.last {
+                        let y = h - CGFloat((last - lo) / (hi - lo)) * h
+                        Circle()
+                            .fill(tint)
+                            .frame(width: 6, height: 6)
+                            .offset(x: w - 3, y: y - 3)
                     }
                 }
-                .stroke(NoopV2.ramp(tint, tint.opacity(0.6)),
-                        style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
             } else {
-                Capsule().fill(Color.white.opacity(0.07)).frame(height: 2).offset(y: h / 2)
+                Capsule().fill(NoopV2.decorationFaint.opacity(0.16)).frame(height: 2).offset(y: h / 2)
             }
         }
         .frame(height: height)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(accessibilityTitle ?? "Trend"))
+        .accessibilityValue(Text(trendSpoken))
+    }
+
+    private var trendSpoken: String {
+        guard points.count > 1, let first = points.first, let last = points.last else { return "no data" }
+        let mean = points.reduce(0, +) / Double(points.count)
+        let dir = last > first ? "rising" : (last < first ? "falling" : "flat")
+        let vsMean = last > mean ? "above" : (last < mean ? "below" : "at")
+        return "\(dir), latest \(Int(last.rounded())), \(vsMean) your \(points.count)-point average of \(Int(mean.rounded()))"
     }
 }

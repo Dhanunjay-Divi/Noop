@@ -96,6 +96,7 @@ struct TodayV2View: View {
                                           actionTitle: model.coachAction)
                         }
                         ranges.id("ranges")
+                        if !model.chargeTrend.isEmpty { trendCard.id("trend") }
                         if !model.heatmapDays.isEmpty { heatmap.id("heatmap") }
                         detail.id("detail")
                         footer
@@ -153,7 +154,10 @@ struct TodayV2View: View {
                       base: h.base, tip: h.tip, caption: h.caption)
                 .padding(.top, 4)
 
-            HStack(spacing: 14) {
+            // C8 FIX: TWO satellites only. The old row put Sleep + Effort rings AND a labelled sparkline
+            // side by side — three objects of different shapes at similar visual weight, which re-created
+            // v1's "nothing leads" problem in miniature. The trend moved to its own card below (C7).
+            HStack(spacing: 22) {
                 if h.label != "Sleep" {
                     V2SatelliteRing(label: "Sleep", value: model.rest,
                                     base: NoopV2.rest, tip: NoopV2.restTip)
@@ -164,20 +168,32 @@ struct TodayV2View: View {
                     V2SatelliteRing(label: "Recovery", value: model.charge,
                                     base: NoopV2.charge, tip: NoopV2.chargeTip)
                 }
-                if !model.chargeTrend.isEmpty {
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text("14-DAY")
-                            .font(NoopV2.overline)
-                            .tracking(0.9)
-                            .foregroundStyle(NoopV2.inkTertiary)
-                        V2Sparkline(points: model.chargeTrend, tint: heroTint, height: 44)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
             }
         }
         .frame(maxWidth: .infinity)
         .v2Card(padding: 20, raised: true)
+    }
+
+    /// C7/C8: the 14-day trace, now with a personal-mean baseline and a "today" marker, in its own card
+    /// where it has room to mean something.
+    private var trendCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("14-DAY \(model.headline.label.uppercased())")
+                    .font(NoopV2.overline)
+                    .tracking(1.0)
+                    .foregroundStyle(NoopV2.inkTertiary)
+                Spacer(minLength: 8)
+                Text("dashed = your average")
+                    .font(NoopV2.overline)
+                    .foregroundStyle(NoopV2.inkTertiary)
+            }
+            V2Sparkline(points: model.chargeTrend,
+                        tint: model.headline.base,
+                        height: 56,
+                        accessibilityTitle: "14-day \(model.headline.label) trend")
+        }
+        .v2Card()
     }
 
     // MARK: Your own range
@@ -205,12 +221,19 @@ struct TodayV2View: View {
         }
     }
 
-    /// Honest one-liner: inside / above / below YOUR range — never a population verdict.
+    /// Honest one-liner: where in YOUR range you sit — never a population verdict.
+    ///
+    /// The agent's review flagged that all three gauges read "Inside your usual range", which is
+    /// repetitive and low-information. Copy now varies by POSITION within the personal band, so three
+    /// gauges tell three different stories while still saying nothing clinical.
     private func rangeStatus(_ v: Double?, _ range: (Double, Double)?, higherIsBetter: Bool) -> String? {
-        guard let v, let r = range else { return "Not enough baseline yet" }
-        if v < r.0 { return higherIsBetter ? "Below your usual range" : "Below your usual range" }
+        guard let v, let r = range, r.1 > r.0 else { return "Not enough baseline yet" }
+        if v < r.0 { return "Below your usual range" }
         if v > r.1 { return "Above your usual range" }
-        return "Inside your usual range"
+        let f = (v - r.0) / (r.1 - r.0)          // 0 = bottom of your band, 1 = top
+        if f >= 0.75 { return higherIsBetter ? "Top of your range — strong" : "High side of your range" }
+        if f <= 0.25 { return higherIsBetter ? "Low side of your range" : "Bottom of your range — good" }
+        return "Mid-range for you"
     }
 
     // MARK: Pattern
@@ -290,9 +313,9 @@ extension TodayV2Model {
         m.coachOverline = "Today's focus"
         m.coachMessage = "Sleep was strong and your HRV is inside your usual range — a moderate-to-hard session is well supported today."
         m.coachAction = "See training target"
-        m.hrv = 84
+        m.hrv = 91          // near the top of the personal band -> "Top of your range"
         m.hrvRange = (62, 96)
-        m.restingHR = 53
+        m.restingHR = 49    // bottom of the band, and lower is better -> "Bottom of your range - good"
         m.restingHRRange = (48, 60)
         m.respiratory = 14.2
         m.respiratoryRange = (12.5, 16.0)

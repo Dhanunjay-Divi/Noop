@@ -38,7 +38,7 @@ struct V2MonthCalendar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            // Metric picker — horizontal chips, the active one filled.
+            // Metric picker — horizontal chips. C5: vertical padding raised so each pill clears ~44 pt.
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(metrics) { m in
@@ -47,21 +47,25 @@ struct V2MonthCalendar: View {
                             .font(NoopV2.overline)
                             .tracking(0.6)
                             .foregroundStyle(isOn ? .black.opacity(0.85) : NoopV2.inkSecondary)
-                            .padding(.horizontal, 11)
-                            .padding(.vertical, 6)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 44)                     // C5: HIG minimum
                             .background(
                                 Capsule().fill(isOn ? m.base.opacity(0.92) : Color.white.opacity(0.07))
                             )
+                            .contentShape(Capsule())
                             .onTapGesture { selected = m.id }
+                            .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+                            .accessibilityLabel(Text(m.title))
                     }
                 }
+                .padding(.vertical, 1)
             }
 
             // Weekday header
             HStack(spacing: 6) {
                 ForEach(Array(weekdayLabels.enumerated()), id: \.offset) { _, d in
                     Text(d)
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(NoopV2.inkTertiary)
                         .frame(maxWidth: .infinity)
                 }
@@ -71,7 +75,7 @@ struct V2MonthCalendar: View {
             let leading = Swift.max(0, Swift.min(6, firstWeekdayOffset))
             let cells = leading + dayCount
             let rows = Int(ceil(Double(cells) / Double(cols)))
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 ForEach(0..<rows, id: \.self) { r in
                     HStack(spacing: 6) {
                         ForEach(0..<cols, id: \.self) { c in
@@ -80,7 +84,7 @@ struct V2MonthCalendar: View {
                             if day >= 1 && day <= dayCount {
                                 dayCell(day)
                             } else {
-                                Color.clear.frame(maxWidth: .infinity).frame(height: 34)
+                                Color.clear.frame(maxWidth: .infinity).frame(height: 44)
                             }
                         }
                     }
@@ -89,31 +93,58 @@ struct V2MonthCalendar: View {
         }
     }
 
+    /// C6 FIX: at 26 pt with a 3 pt stroke a 40% day and a 70% day looked identical ("an almost-full green
+    /// ring"), which destroyed the whole point of a month view. Value is now encoded as a FILLED cell with
+    /// strong hue steps (red → amber → mint, the idea Bevel's own month view uses) plus opacity — far easier
+    /// to compare at this size than arc length. A no-data day stays an EMPTY outline, never a filled zero.
+    ///
+    /// C5 FIX: the visible cell is compact but the hit area is a full 44 pt square.
     private func dayCell(_ day: Int) -> some View {
         let frac = active?.values[day]
-        let base = active?.base ?? NoopV2.charge
-        let tip = active?.tip ?? NoopV2.chargeTip
+        let isToday = today == day
         return VStack(spacing: 3) {
             ZStack {
-                Circle()
-                    .stroke(Color.white.opacity(0.07), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(NoopV2.decorationFaint.opacity(0.28), lineWidth: 1)
+                    .frame(width: 30, height: 26)
                 if let f = frac {
-                    Circle()
-                        .trim(from: 0, to: Swift.min(1, Swift.max(0.02, f)))
-                        .stroke(NoopV2.ramp(base, tip), style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Self.stepColor(f))
+                        .frame(width: 30, height: 26)
                 }
-                if today == day {
-                    Circle().fill(Color.white.opacity(0.14)).padding(4)
+                if isToday {
+                    // "Today" must be unmistakable (the old white-0.14 disc was too subtle).
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(NoopV2.ink, lineWidth: 2)
+                        .frame(width: 30, height: 26)
                 }
             }
-            .frame(width: 26, height: 26)
             Text("\(day)")
-                .font(.system(size: 9, weight: today == day ? .bold : .regular).monospacedDigit())
-                .foregroundStyle(today == day ? NoopV2.ink : NoopV2.inkTertiary)
+                .font(.system(size: 10, weight: isToday ? .bold : .regular).monospacedDigit())
+                .foregroundStyle(isToday ? NoopV2.ink : NoopV2.inkTertiary)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 34)
+        .frame(height: 44)                       // C5: ≥44 pt target even though the swatch is 26 pt
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(Text(spoken(day: day, frac: frac, isToday: isToday)))
+    }
+
+    /// Strong hue steps so a bad day is RED, not "slightly less green" (C6). Ordered by lightness too, so
+    /// the month still reads in greyscale / with colour-vision deficiency.
+    static func stepColor(_ f: Double) -> Color {
+        let v = Swift.min(1, Swift.max(0, f))
+        if v < 0.34 { return Color(red: 0.85, green: 0.30, blue: 0.28).opacity(0.90) }   // low  — red
+        if v < 0.67 { return Color(red: 0.93, green: 0.72, blue: 0.28).opacity(0.90) }   // mid  — amber
+        return Color(red: 0.26, green: 0.82, blue: 0.58).opacity(0.92)                   // high — mint
+    }
+
+    private func spoken(day: Int, frac: Double?, isToday: Bool) -> String {
+        let prefix = isToday ? "Today, " : ""
+        let name = active?.title ?? "value"
+        guard let f = frac else { return "\(prefix)day \(day), no data" }
+        return "\(prefix)day \(day), \(name) \(Int((f * 100).rounded())) percent"
     }
 }
 
@@ -139,7 +170,7 @@ struct V2MonthCalendarDemo: View {
                                     dayCount: 31,
                                     today: 22)
                         .v2Card()
-                    Text("Each ring is one day. An empty ring means no data for that day — gaps stay gaps.")
+                    Text("Each square is one day: red is a low day, amber middling, mint strong. An empty outline means no data — gaps stay gaps.")
                         .font(NoopV2.caption)
                         .foregroundStyle(NoopV2.inkTertiary)
                 }
@@ -155,8 +186,9 @@ struct V2MonthCalendarDemo: View {
             var out: [Int: Double] = [:]
             for d in 1...22 {                                   // future days have no data yet
                 if gapDays.contains(d) { continue }             // honest wear gaps
-                let x = Double((d * seed) % 11) / 11.0
-                out[d] = 0.35 + x * 0.6
+                // Spread across the full 0-1 range so the red/amber/mint hue steps are all exercised.
+                let x = Double((d * seed) % 11) / 10.0
+                out[d] = 0.08 + x * 0.9
             }
             return out
         }

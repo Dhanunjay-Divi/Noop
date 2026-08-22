@@ -53,10 +53,24 @@ enum NoopV2 {
     static let hairlineStrong = Color.white.opacity(0.16)
 
     // MARK: - Ink
+    //
+    // Contrast measured on the L1 card surface (glassFill white 0.055 over canvasTop #0B0C10 ≈ #18191D):
+    //   ink            #F9F9F6      → ~16.6:1  (AAA)
+    //   inkSecondary   white 0.70   → ~9.1:1   (AAA)
+    //   inkTertiaryText white 0.55  → ~6.1:1   (AA  ✅)
+    //   decorationFaint white 0.45  → ~4.4:1   (FAILS AA for text — decoration only)
+    //
+    // C2 FIX (2026-08-22): the prototype used white 0.45 for the SMALLEST text in the app (11 pt overlines,
+    // 13 pt captions, 9 pt heatmap/calendar labels, gauge status lines) — below the 4.5:1 AA floor, and
+    // worse where a card overlaps the aurora bloom. Text tertiary is now 0.55; 0.45 survives only as
+    // `decorationFaint` for hairlines and empty tracks, which have no contrast requirement.
 
     static let ink = Color(red: 0.976, green: 0.976, blue: 0.965)          // primary text
     static let inkSecondary = Color.white.opacity(0.70)
-    static let inkTertiary = Color.white.opacity(0.45)
+    /// Smallest-text tertiary — AA-compliant. Use this for ALL text.
+    static let inkTertiary = Color.white.opacity(0.55)
+    /// Non-text decoration only (hairlines, empty tracks, disabled glyphs). NEVER for text.
+    static let decorationFaint = Color.white.opacity(0.45)
 
     // MARK: - Domain accents (semantic, consistent everywhere)
     //
@@ -71,6 +85,40 @@ enum NoopV2 {
     static let restTip = Color(red: 0.68, green: 0.80, blue: 1.00)
     static let load = Color(red: 0.78, green: 0.52, blue: 0.98)            // autonomic load — violet
     static let loadTip = Color(red: 0.90, green: 0.74, blue: 1.00)
+
+    // MARK: - Sequential LOAD ramp (heatmap / intensity only)
+    //
+    // C4 FIX: the heatmap previously reused the DOMAIN hues (mint = "mid" load, amber = "high"). But mint
+    // means *recovery/good* everywhere else, so a mint-heavy heatmap read as "a calm week" when it actually
+    // meant "mid stress all week". A heatmap must use a single ordered ramp whose low end is unambiguously
+    // the good end. This cool→warm ramp is reserved for INTENSITY surfaces and is never used for a domain
+    // score, so the two colour languages can't collide.
+    //
+    // Ordering is also encoded by LIGHTNESS (dark cool → bright warm), so the grid still reads correctly in
+    // greyscale / for colour-vision deficiency — colour is never the only channel.
+    static let loadRamp0 = Color(red: 0.16, green: 0.30, blue: 0.52)       // lowest  — deep blue
+    static let loadRamp1 = Color(red: 0.20, green: 0.55, blue: 0.62)       // low     — teal
+    static let loadRamp2 = Color(red: 0.85, green: 0.72, blue: 0.30)       // mid     — sand
+    static let loadRamp3 = Color(red: 0.93, green: 0.45, blue: 0.22)       // high    — orange
+    static let loadRampEmpty = Color.white.opacity(0.05)                   // no data — empty slot
+
+    /// Bucket a 0–3 load level onto the sequential ramp. `nil` ⇒ the empty slot (never a filled zero).
+    static func loadRampColor(_ level: Double?) -> Color {
+        guard let v = level else { return loadRampEmpty }
+        if v < 0.75 { return loadRamp0 }
+        if v < 1.50 { return loadRamp1 }
+        if v < 2.25 { return loadRamp2 }
+        return loadRamp3
+    }
+
+    /// Human label for a ramp bucket (used in legends and VoiceOver — never colour alone).
+    static func loadRampLabel(_ level: Double?) -> String {
+        guard let v = level else { return "no data" }
+        if v < 0.75 { return "lowest" }
+        if v < 1.50 { return "low" }
+        if v < 2.25 { return "mid" }
+        return "high"
+    }
 
     /// Status tones for chips/bands.
     static let positive = charge
@@ -96,16 +144,25 @@ enum NoopV2 {
     //
     // Rounded design for numbers (friendly, and reads as "instrument"), tight tracking on display text.
     // Every numeric style is monospaced-digit so values don't jitter as they update.
+    //
+    // DYNAMIC TYPE (a11y fix, 2026-08-22): the prose styles are built on SEMANTIC TEXT STYLES, so they
+    // scale with the user's Dynamic Type setting automatically. The prototype used fixed `.system(size:)`
+    // for everything, which silently ignored the accessibility setting — unacceptable in a health app.
+    //
+    // DOCUMENTED EXCEPTION: `number(_:_:)` stays FIXED-size. Those figures sit inside fixed-diameter arcs
+    // and rings (`V2HeroArc`, `V2SatelliteRing`), so scaling them would overflow the geometry rather than
+    // help. The surrounding labels/captions DO scale, and every such readout carries a VoiceOver value, so
+    // the information remains fully accessible at any type size.
 
     static func number(_ size: CGFloat, _ weight: Font.Weight = .semibold) -> Font {
         .system(size: size, weight: weight, design: .rounded).monospacedDigit()
     }
-    static let display = Font.system(size: 34, weight: .bold, design: .default)
-    static let title = Font.system(size: 21, weight: .semibold, design: .default)
-    static let headline = Font.system(size: 16, weight: .semibold, design: .default)
-    static let body = Font.system(size: 15, weight: .regular, design: .default)
-    static let caption = Font.system(size: 13, weight: .regular, design: .default)
-    static let overline = Font.system(size: 11, weight: .semibold, design: .default)
+    static let display = Font.system(.largeTitle, design: .default).weight(.bold)
+    static let title = Font.system(.title3, design: .default).weight(.semibold)
+    static let headline = Font.system(.callout, design: .default).weight(.semibold)
+    static let body = Font.system(.subheadline, design: .default)
+    static let caption = Font.system(.footnote, design: .default)
+    static let overline = Font.system(.caption2, design: .default).weight(.semibold)
 }
 
 // MARK: - Reusable surface modifiers
