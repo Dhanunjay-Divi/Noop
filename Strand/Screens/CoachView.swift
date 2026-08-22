@@ -95,7 +95,7 @@ struct CoachView: View {
                     Text("Let the coach use my data")
                         .font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
                     Text(coach.dataConsent
-                         ? "On: your charge, rest, HRV and workouts are shared with the provider for tailored coaching."
+                         ? "On: a summary of your recovery, effort, sleep, heart and available vital signals, plus workouts, is shared with the provider for tailored coaching."
                          : "Off: the coach answers generally and sends none of your metrics.")
                         .font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)

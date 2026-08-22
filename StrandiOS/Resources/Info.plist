@@ -6,7 +6,7 @@
 	<string>$(APP_GROUP_ID)</string>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>$(PRODUCT_BUNDLE_IDENTIFIER).debugexport</string>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER).diagnosticexport</string>
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER).refresh</string>
 	</array>
 	<key>CFBundleDevelopmentRegion</key>
@@ -53,6 +53,16 @@
 	<string>public.app-category.healthcare-fitness</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NOOPLaunchGateIterations</key>
+	<string>$(NOOP_LAUNCH_GATE_ITERATIONS)</string>
+	<key>NOOPLaunchGateRequired</key>
+	<string>$(NOOP_LAUNCH_GATE_REQUIRED)</string>
+	<key>NOOPLaunchGateSaltHex</key>
+	<string>$(NOOP_LAUNCH_GATE_SALT_HEX)</string>
+	<key>NOOPLaunchGateVerifierHex</key>
+	<string>$(NOOP_LAUNCH_GATE_VERIFIER_HEX)</string>
+	<key>NOOPLaunchGateVersion</key>
+	<string>$(NOOP_LAUNCH_GATE_VERSION)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
@@ -61,9 +71,9 @@
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>NOOP connects directly to your wearable and standards-compatible Bluetooth health devices, including an explicitly paired weight scale, to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>NOOP reads your Apple Health data to compute metrics locally. It uploads derived records only if you explicitly enable your own self-hosted server.</string>
+	<string>NOOP reads selected Apple Health data to compute wellness metrics locally. It shares summaries only when you explicitly enable self-hosted sync or send a request to your chosen AI provider.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>NOOP writes the metrics it computes from your strap back into Apple Health, on-device and only when you allow it.</string>
+	<string>NOOP writes selected wellness metrics, workouts, and sleep sessions to Apple Health only when you grant permission.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>NOOP connects to a self-hosted server on your local network only when you configure and enable that optional sync.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

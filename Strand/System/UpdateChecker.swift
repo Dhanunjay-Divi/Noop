@@ -1,10 +1,28 @@
 import Foundation
 import WhoopProtocol
 
-/// User-initiated "Check for updates": one call to the project's PUBLIC releases API (GitHub),
-/// made ONLY when the user taps the button. No background polling and no auto-update — it just reads the latest version
-/// number and compares it to the installed one; nothing about the user is sent. (Uses the
-/// network-client entitlement, which is otherwise only for the opt-in, off-by-default AI Coach.)
+/// Resolves the update lane before any network work starts. Apple-distributed builds must stay on
+/// Apple's update path; only a directly installed/private build may consult project releases.
+enum UpdateDeliveryPolicy {
+    enum Destination: Equatable {
+        case privateReleases
+        case appStore
+        case testFlight
+    }
+
+    static func destination(
+        for channel: TrialNoticePolicy.DistributionChannel
+    ) -> Destination {
+        switch channel {
+        case .privatePreview: return .privateReleases
+        case .appStore: return .appStore
+        case .testFlight: return .testFlight
+        }
+    }
+}
+
+/// User-initiated update check for directly installed/private builds. App Store and TestFlight
+/// builds short-circuit to an Apple-managed state before constructing a private-release request.
 @MainActor
 final class UpdateChecker: ObservableObject {
 
@@ -13,6 +31,7 @@ final class UpdateChecker: ObservableObject {
         case checking
         case upToDate(version: String)
         case available(version: String, url: URL, notes: String)
+        case managedByApple
         case failed
     }
 
@@ -22,8 +41,17 @@ final class UpdateChecker: ObservableObject {
         string: "https://api.github.com/repos/Dhanunjay-Divi/Noop/releases/latest"
     )!
 
-    func check(currentVersion: String) {
+    func check(
+        currentVersion: String,
+        channel: TrialNoticePolicy.DistributionChannel = TrialNoticePolicy.distributionChannel()
+    ) {
         guard state != .checking else { return }
+
+        guard UpdateDeliveryPolicy.destination(for: channel) == .privateReleases else {
+            state = .managedByApple
+            return
+        }
+
         state = .checking
         Task {
             do {

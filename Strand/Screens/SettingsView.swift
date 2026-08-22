@@ -203,7 +203,7 @@ struct SettingsView: View {
     /// low-power, sideload + cert expiry). iOS-only; the macOS strap log already carries OS + version.
     @State private var showDiagnostics = false
 
-    /// User-initiated GitHub release check behind the About "Check for updates" button.
+    /// User-initiated private-release check. Apple-distributed builds render their managed update lane instead.
     @StateObject private var updateChecker = UpdateChecker()
     @Environment(\.openURL) private var openURL
 
@@ -2156,6 +2156,20 @@ struct SettingsView: View {
                 .buttonStyle(LiquidPressStyle())
                 .accessibilityLabel("Legal and acknowledgements")
 
+                aboutExternalLink(
+                    title: String(localized: "Privacy Policy"),
+                    subtitle: String(localized: "How NOOP handles health data and optional sharing."),
+                    systemImage: "hand.raised.fill",
+                    destination: ProjectInfo.privacyPolicyURL
+                )
+
+                aboutExternalLink(
+                    title: String(localized: "Support"),
+                    subtitle: String(localized: "Help, troubleshooting and contact options."),
+                    systemImage: "questionmark.bubble.fill",
+                    destination: ProjectInfo.supportURL
+                )
+
                 #if os(iOS)
                 // iOS reality & diagnostics — honest expectations for a sideloaded iPhone build, plus a
                 // one-tap environment dump (device, iOS+build, Data Protection, background refresh,
@@ -2164,76 +2178,7 @@ struct SettingsView: View {
                 iphoneExpectations
                 #endif
 
-                // Check for updates — a single, user-initiated read of GitHub's public releases API.
-                // No background polling, no auto-update; sends nothing about you, just reads the version.
-                VStack(alignment: .leading, spacing: NoopMetrics.space2) {
-                    HStack(spacing: NoopMetrics.space2 + 2) {
-                        Button {
-                            // Compare the ACTUAL installed bundle version against GitHub's latest, not the
-                            // hand-maintained AppChangelog.currentVersion (which drifts stale and told v7
-                            // users they were behind, #697-adjacent). Mirrors Android's BuildConfig check.
-                            updateChecker.check(currentVersion: bundleVersionString)
-                        } label: {
-                            if updateChecker.state == .checking {
-                                HStack(spacing: NoopMetrics.space1 + 2) {
-                                    ProgressView().controlSize(.small)
-                                    Text("Checking…")
-                                }
-                            } else {
-                                Label("Check for updates", systemImage: "arrow.triangle.2.circlepath")
-                            }
-                        }
-                        .buttonStyle(NoopButtonStyle(.secondary))
-                        .disabled(updateChecker.state == .checking)
-
-                        if case .upToDate(let v) = updateChecker.state {
-                            Text("You're on the latest (\(v)).")
-                                .font(StrandFont.footnote)
-                                .foregroundStyle(StrandPalette.textSecondary)
-                        } else if case .failed = updateChecker.state {
-                            Text("Couldn't check. Try again.")
-                                .font(StrandFont.footnote)
-                                .foregroundStyle(StrandPalette.statusWarning)
-                        }
-                        Spacer()
-                    }
-
-                    // Update available: show what's new, with a download straight to the release.
-                    if case .available(let v, let url, let notes) = updateChecker.state {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Text("Version \(v) is available")
-                                    .font(StrandFont.subhead)
-                                    .foregroundStyle(StrandPalette.textPrimary)
-                                Spacer()
-                                NoopButton("Download", systemImage: "arrow.down.circle.fill", kind: .primary) {
-                                    openURL(url)
-                                }
-                            }
-                            if !notes.isEmpty {
-                                ScrollView {
-                                    Text(notes)
-                                        .font(StrandFont.footnote)
-                                        .foregroundStyle(StrandPalette.textSecondary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .frame(maxHeight: 150)
-                            }
-                        }
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(StrandPalette.surfaceInset,
-                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(StrandPalette.accent.opacity(0.3), lineWidth: 1)
-                        )
-                    }
-
-                    Text("Checks the project's home (GitHub) for the latest version when you tap. Nothing else is sent.")
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                }
+                updateDeliveryCard
 
                 // Project home — NOOP's code, releases, issues and wiki live on GitHub.
                 Link(destination: URL(string: "https://github.com/Dhanunjay-Divi/Noop")!) {
@@ -2286,6 +2231,153 @@ struct SettingsView: View {
                 )
 
             }
+        }
+    }
+
+    private func aboutExternalLink(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        destination: URL
+    ) -> some View {
+        Link(destination: destination) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(StrandPalette.accent)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text(subtitle)
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(LiquidPressStyle())
+        .accessibilityLabel(title)
+        .accessibilityHint(subtitle)
+    }
+
+    @ViewBuilder
+    private var updateDeliveryCard: some View {
+        switch UpdateDeliveryPolicy.destination(for: TrialNoticePolicy.distributionChannel()) {
+        case .appStore:
+            appleManagedUpdateCard(
+                title: String(localized: "Updates through the App Store"),
+                detail: String(localized: "NOOP updates through the App Store. Your local app data stays in the same iPhone app container when you update.")
+            )
+        case .testFlight:
+            appleManagedUpdateCard(
+                title: String(localized: "Updates through TestFlight"),
+                detail: String(localized: "This trial updates through TestFlight. Individual beta builds are available for up to 90 days, so install the latest version when TestFlight prompts you.")
+            )
+        case .privateReleases:
+            privateReleaseUpdateCard
+        }
+    }
+
+    private func appleManagedUpdateCard(title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "arrow.down.app.fill")
+                .foregroundStyle(StrandPalette.accent)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(StrandFont.body)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(detail)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            StrandPalette.surfaceInset,
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
+        .accessibilityElement(children: .combine)
+    }
+
+    private var privateReleaseUpdateCard: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+            HStack(spacing: NoopMetrics.space2 + 2) {
+                Button {
+                    // Direct/private builds retain their explicit project-release check. Apple-distributed
+                    // builds never render this control and UpdateChecker independently enforces that boundary.
+                    updateChecker.check(currentVersion: bundleVersionString)
+                } label: {
+                    if updateChecker.state == .checking {
+                        HStack(spacing: NoopMetrics.space1 + 2) {
+                            ProgressView().controlSize(.small)
+                            Text("Checking…")
+                        }
+                    } else {
+                        Label("Check for updates", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                }
+                .buttonStyle(NoopButtonStyle(.secondary))
+                .disabled(updateChecker.state == .checking)
+
+                if case .upToDate(let v) = updateChecker.state {
+                    Text("You're on the latest (\(v)).")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                } else if case .failed = updateChecker.state {
+                    Text("Couldn't check. Try again.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.statusWarning)
+                }
+                Spacer()
+            }
+
+            if case .available(let v, let url, let notes) = updateChecker.state {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Version \(v) is available")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Spacer()
+                        NoopButton("Download", systemImage: "arrow.down.circle.fill", kind: .primary) {
+                            openURL(url)
+                        }
+                    }
+                    if !notes.isEmpty {
+                        ScrollView {
+                            Text(notes)
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxHeight: 150)
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    StrandPalette.surfaceInset,
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(StrandPalette.accent.opacity(0.3), lineWidth: 1)
+                )
+            }
+
+            Text("Checks the project's home (GitHub) for the latest version when you tap. Nothing else is sent.")
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textTertiary)
         }
     }
 

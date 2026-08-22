@@ -27,8 +27,8 @@ This work builds on two community reverse-engineering efforts:
 
 - **`johnmiddleton12/my-whoop`** — WHOOP 4.0 protocol.
 - **`b-nnett/goose`** — observed WHOOP 5.0 fd4b ("puffin" packet framing)
-  protocol facts. Its repository has no explicit software license; this fork
-  copies none of its source or assets.
+  protocol facts. Its repository has no explicit software license; see the
+  [redistribution-rights remediation plan](PROTOCOL_RIGHTS_REMEDIATION.md).
 
 The canonical decode tables are bundled as a JSON resource:
 `Packages/WhoopProtocol/Sources/WhoopProtocol/Resources/whoop_protocol.json`, loaded by
@@ -628,5 +628,6 @@ inherit a base layout and override only what changed. The streamed decode that f
 ---
 
 *Reverse-engineering credit: `johnmiddleton12/my-whoop` (WHOOP 4.0) and `b-nnett/goose`
-(WHOOP 5.0). This is an independent interoperability project for the user's own device and data;
-it is not affiliated with WHOOP and is not a medical device.*
+(WHOOP 5.0). This is interoperability software for the user's own device and data; it is not
+affiliated with WHOOP, is not a medical device, and is not cleared for distribution while the
+repository's legal gate is blocked.*

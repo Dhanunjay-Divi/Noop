@@ -1,6 +1,34 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "APP STORE": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"APP STORE"}},"es":{"stringUnit":{"state":"translated","value":"APP STORE"}},"fr":{"stringUnit":{"state":"translated","value":"APP STORE"}},"pt-PT":{"stringUnit":{"state":"translated","value":"APP STORE"}}}},
+    "Access code": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Zugangscode"}},"es":{"stringUnit":{"state":"translated","value":"Código de acceso"}},"fr":{"stringUnit":{"state":"translated","value":"Code d’accès"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Código de acesso"}}}},
+    "Access is checked on this iPhone. NOOP does not send or store the code you enter.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Der Zugang wird auf diesem iPhone geprüft. NOOP sendet oder speichert den eingegebenen Code nicht."}},"es":{"stringUnit":{"state":"translated","value":"El acceso se comprueba en este iPhone. NOOP no envía ni guarda el código que introduces."}},"fr":{"stringUnit":{"state":"translated","value":"L’accès est vérifié sur cet iPhone. NOOP n’envoie ni ne conserve le code saisi."}},"pt-PT":{"stringUnit":{"state":"translated","value":"O acesso é verificado neste iPhone. A NOOP não envia nem guarda o código introduzido."}}}},
+    "Access is temporarily unavailable": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Der Zugang ist vorübergehend nicht verfügbar"}},"es":{"stringUnit":{"state":"translated","value":"El acceso no está disponible temporalmente"}},"fr":{"stringUnit":{"state":"translated","value":"L’accès est temporairement indisponible"}},"pt-PT":{"stringUnit":{"state":"translated","value":"O acesso está temporariamente indisponível"}}}},
+    "Checks this code on your iPhone and opens NOOP.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Prüft diesen Code auf deinem iPhone und öffnet NOOP."}},"es":{"stringUnit":{"state":"translated","value":"Comprueba este código en el iPhone y abre NOOP."}},"fr":{"stringUnit":{"state":"translated","value":"Vérifie ce code sur votre iPhone et ouvre NOOP."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Verifica este código no iPhone e abre a NOOP."}}}},
+    "Enter access code": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Zugangscode eingeben"}},"es":{"stringUnit":{"state":"translated","value":"Introduce el código de acceso"}},"fr":{"stringUnit":{"state":"translated","value":"Saisissez le code d’accès"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Introduz o código de acesso"}}}},
+    "Enter the code provided for NOOP access.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Gib den für den NOOP-Zugang bereitgestellten Code ein."}},"es":{"stringUnit":{"state":"translated","value":"Introduce el código proporcionado para acceder a NOOP."}},"fr":{"stringUnit":{"state":"translated","value":"Saisissez le code fourni pour accéder à NOOP."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Introduz o código fornecido para aceder à NOOP."}}}},
+    "Enter your access code to continue.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Gib deinen Zugangscode ein, um fortzufahren."}},"es":{"stringUnit":{"state":"translated","value":"Introduce tu código de acceso para continuar."}},"fr":{"stringUnit":{"state":"translated","value":"Saisissez votre code d’accès pour continuer."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Introduz o teu código de acesso para continuar."}}}},
+    "Help, troubleshooting and contact options.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Hilfe, Fehlerbehebung und Kontaktmöglichkeiten."}},"es":{"stringUnit":{"state":"translated","value":"Ayuda, resolución de problemas y opciones de contacto."}},"fr":{"stringUnit":{"state":"translated","value":"Aide, dépannage et options de contact."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Ajuda, resolução de problemas e opções de contacto."}}}},
+    "How NOOP handles health data and optional sharing.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Wie NOOP mit Gesundheitsdaten und optionalem Teilen umgeht."}},"es":{"stringUnit":{"state":"translated","value":"Cómo gestiona NOOP los datos de salud y el uso compartido opcional."}},"fr":{"stringUnit":{"state":"translated","value":"Comment NOOP traite les données de santé et le partage facultatif."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Como a NOOP trata dados de saúde e a partilha opcional."}}}},
+    "Install future NOOP updates from the same trusted source to keep the app current. Updating with the same app identity preserves its local container.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Installiere künftige NOOP-Updates aus derselben vertrauenswürdigen Quelle. Bei gleicher App-Identität bleibt der lokale Container erhalten."}},"es":{"stringUnit":{"state":"translated","value":"Instala futuras actualizaciones de NOOP desde la misma fuente de confianza. Si se mantiene la identidad de la app, se conserva su contenedor local."}},"fr":{"stringUnit":{"state":"translated","value":"Installez les prochaines mises à jour de NOOP depuis la même source fiable. La même identité d’app conserve son conteneur local."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Instala futuras atualizações da NOOP a partir da mesma fonte de confiança. A mesma identidade da app preserva o contentor local."}}}},
+    "Installed directly": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Direkt installiert"}},"es":{"stringUnit":{"state":"translated","value":"Instalada directamente"}},"fr":{"stringUnit":{"state":"translated","value":"Installée directement"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Instalada diretamente"}}}},
+    "Installed from the App Store": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Aus dem App Store installiert"}},"es":{"stringUnit":{"state":"translated","value":"Instalada desde el App Store"}},"fr":{"stringUnit":{"state":"translated","value":"Installée depuis l’App Store"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Instalada a partir da App Store"}}}},
+    "NOOP couldn’t save access securely. Unlock this iPhone and try again.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP konnte den Zugang nicht sicher speichern. Entsperre dieses iPhone und versuche es erneut."}},"es":{"stringUnit":{"state":"translated","value":"NOOP no pudo guardar el acceso de forma segura. Desbloquea este iPhone e inténtalo de nuevo."}},"fr":{"stringUnit":{"state":"translated","value":"NOOP n’a pas pu enregistrer l’accès de façon sécurisée. Déverrouillez cet iPhone et réessayez."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A NOOP não conseguiu guardar o acesso em segurança. Desbloqueia este iPhone e tenta novamente."}}}},
+    "NOOP has no account or NOOP-operated cloud. Metrics stay on this device by default.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP hat kein Konto und keine von NOOP betriebene Cloud. Messwerte bleiben standardmäßig auf diesem Gerät."}},"es":{"stringUnit":{"state":"translated","value":"NOOP no tiene cuenta ni nube operada por NOOP. Las métricas permanecen en este dispositivo de forma predeterminada."}},"fr":{"stringUnit":{"state":"translated","value":"NOOP n’utilise ni compte ni cloud exploité par NOOP. Les mesures restent par défaut sur cet appareil."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A NOOP não tem conta nem cloud operada pela NOOP. Por predefinição, as métricas ficam neste dispositivo."}}}},
+    "NOOP updates through the App Store. Your local app data stays in the same iPhone app container when you update.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"NOOP wird über den App Store aktualisiert. Deine lokalen App-Daten bleiben beim Update im selben iPhone-App-Container."}},"es":{"stringUnit":{"state":"translated","value":"NOOP se actualiza a través del App Store. Tus datos locales permanecen en el mismo contenedor de la app del iPhone."}},"fr":{"stringUnit":{"state":"translated","value":"NOOP se met à jour via l’App Store. Vos données locales restent dans le même conteneur d’app sur l’iPhone."}},"pt-PT":{"stringUnit":{"state":"translated","value":"A NOOP é atualizada através da App Store. Os dados locais permanecem no mesmo contentor da app no iPhone."}}}},
+    "Privacy Policy": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Datenschutzerklärung"}},"es":{"stringUnit":{"state":"translated","value":"Política de privacidad"}},"fr":{"stringUnit":{"state":"translated","value":"Politique de confidentialité"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Política de privacidade"}}}},
+    "Retry": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Erneut versuchen"}},"es":{"stringUnit":{"state":"translated","value":"Reintentar"}},"fr":{"stringUnit":{"state":"translated","value":"Réessayer"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Tentar novamente"}}}},
+    "TestFlight access to NOOP": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"TestFlight-Zugang zu NOOP"}},"es":{"stringUnit":{"state":"translated","value":"Acceso a NOOP mediante TestFlight"}},"fr":{"stringUnit":{"state":"translated","value":"Accès à NOOP via TestFlight"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Acesso à NOOP através do TestFlight"}}}},
+    "This trial updates through TestFlight. Individual beta builds are available for up to 90 days, so install the latest version when TestFlight prompts you.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Diese Testversion wird über TestFlight aktualisiert. Einzelne Beta-Builds sind bis zu 90 Tage verfügbar; installiere deshalb die neueste Version, wenn TestFlight dich dazu auffordert."}},"es":{"stringUnit":{"state":"translated","value":"Esta versión de prueba se actualiza mediante TestFlight. Cada compilación beta está disponible hasta 90 días, así que instala la versión más reciente cuando TestFlight te lo indique."}},"fr":{"stringUnit":{"state":"translated","value":"Cette version d’essai se met à jour via TestFlight. Chaque build bêta reste disponible jusqu’à 90 jours ; installez donc la dernière version lorsque TestFlight vous y invite."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Esta versão de teste é atualizada através do TestFlight. Cada build beta fica disponível até 90 dias; instala a versão mais recente quando o TestFlight solicitar."}}}},
+    "That access code didn’t match. Try again.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Dieser Zugangscode stimmt nicht. Versuche es erneut."}},"es":{"stringUnit":{"state":"translated","value":"El código de acceso no coincide. Inténtalo de nuevo."}},"fr":{"stringUnit":{"state":"translated","value":"Ce code d’accès ne correspond pas. Réessayez."}},"pt-PT":{"stringUnit":{"state":"translated","value":"O código de acesso não corresponde. Tenta novamente."}}}},
+    "Unlock this iPhone, then retry. If the problem continues, this build needs an updated access configuration.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Entsperre dieses iPhone und versuche es erneut. Bleibt das Problem bestehen, benötigt dieser Build eine aktualisierte Zugangskonfiguration."}},"es":{"stringUnit":{"state":"translated","value":"Desbloquea este iPhone y vuelve a intentarlo. Si el problema continúa, esta compilación necesita una configuración de acceso actualizada."}},"fr":{"stringUnit":{"state":"translated","value":"Déverrouillez cet iPhone, puis réessayez. Si le problème persiste, cette version nécessite une configuration d’accès mise à jour."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Desbloqueia este iPhone e tenta novamente. Se o problema continuar, esta versão precisa de uma configuração de acesso atualizada."}}}},
+    "Updates through TestFlight": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Updates über TestFlight"}},"es":{"stringUnit":{"state":"translated","value":"Actualizaciones mediante TestFlight"}},"fr":{"stringUnit":{"state":"translated","value":"Mises à jour via TestFlight"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Atualizações através do TestFlight"}}}},
+    "Updates through the App Store": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Updates über den App Store"}},"es":{"stringUnit":{"state":"translated","value":"Actualizaciones mediante el App Store"}},"fr":{"stringUnit":{"state":"translated","value":"Mises à jour via l’App Store"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Atualizações através da App Store"}}}},
+    "Use this TestFlight build to view and compare experimental wellness metrics from your wearable.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Nutze diesen TestFlight-Build, um experimentelle Wellness-Messwerte deines Wearables anzusehen und zu vergleichen."}},"es":{"stringUnit":{"state":"translated","value":"Usa esta versión de TestFlight para ver y comparar métricas experimentales de bienestar de tu wearable."}},"fr":{"stringUnit":{"state":"translated","value":"Utilisez cette version TestFlight pour consulter et comparer les mesures de bien-être expérimentales de votre appareil."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Usa esta versão do TestFlight para ver e comparar métricas experimentais de bem-estar do teu wearable."}}}},
+    "Use this preview to view and compare experimental wellness metrics from your wearable.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Nutze diese Vorschau, um experimentelle Wellness-Messwerte deines Wearables anzusehen und zu vergleichen."}},"es":{"stringUnit":{"state":"translated","value":"Usa esta vista previa para ver y comparar métricas experimentales de bienestar de tu wearable."}},"fr":{"stringUnit":{"state":"translated","value":"Utilisez cet aperçu pour consulter et comparer les mesures de bien-être expérimentales de votre appareil."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Usa esta pré-visualização para ver e comparar métricas experimentais de bem-estar do teu wearable."}}}},
+    "View and compare wellness metrics from your wearable, calculated locally on this device.": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Sieh dir Wellness-Messwerte deines Wearables an und vergleiche sie; sie werden lokal auf diesem Gerät berechnet."}},"es":{"stringUnit":{"state":"translated","value":"Consulta y compara métricas de bienestar de tu wearable, calculadas localmente en este dispositivo."}},"fr":{"stringUnit":{"state":"translated","value":"Consultez et comparez les mesures de bien-être de votre appareil, calculées localement sur cet appareil."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Vê e compara métricas de bem-estar do teu wearable, calculadas localmente neste dispositivo."}}}},
+    "Welcome to NOOP": {"localizations":{"de":{"stringUnit":{"state":"translated","value":"Willkommen bei NOOP"}},"es":{"stringUnit":{"state":"translated","value":"Te damos la bienvenida a NOOP"}},"fr":{"stringUnit":{"state":"translated","value":"Bienvenue dans NOOP"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Bem-vindo à NOOP"}}}},
     "%@ valid prior day%@ available · minimum %lld": {"shouldTranslate":false},
     "Apple shows the same Live Activity on the Lock Screen and, on supported iPhones, in the Dynamic Island; those locations cannot be selected separately. Turning this off ends NOOP’s current Live Activity immediately.": {"shouldTranslate":false},
     "Changes here refresh widgets you already placed. iOS controls the exact refresh time and may briefly show the previous choice.": {"shouldTranslate":false},
@@ -98221,54 +98249,54 @@
         }
       }
     },
-    "On: your charge, rest, HRV and workouts are shared with the provider for tailored coaching.": {
+    "On: a summary of your recovery, effort, sleep, heart and available vital signals, plus workouts, is shared with the provider for tailored coaching.": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "An: Deine Ladung, Ruhe, HRV und Workouts werden für maßgeschneidertes Coaching mit dem Anbieter geteilt."
+            "value": "An: Eine Zusammenfassung deiner Erholung, Belastung, deines Schlafs, deiner Herz- und verfügbaren Vitalwerte sowie deiner Workouts wird für individuelles Coaching mit dem Anbieter geteilt."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Activado: tu carga, descanso, VFC y entrenamientos se comparten con el proveedor para un coaching personalizado."
+            "value": "Activado: se comparte con el proveedor un resumen de tu recuperación, esfuerzo, sueño, señales cardíacas y vitales disponibles, además de tus entrenamientos, para ofrecerte un coaching personalizado."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Activé : votre charge, votre repos, votre VFC et vos entraînements sont partagés avec le fournisseur pour un coaching personnalisé."
+            "value": "Activé : un résumé de votre récupération, de votre effort, de votre sommeil, de vos signaux cardiaques et vitaux disponibles, ainsi que de vos entraînements, est partagé avec le fournisseur pour un coaching personnalisé."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "On, la tua carica, il riposo, l'HRV e gli Allenamenti vengono condivisi con il provider per un coaching su misura."
+            "value": "Attivo: un riepilogo di recupero, sforzo, sonno, segnali cardiaci e vitali disponibili, oltre agli allenamenti, viene condiviso con il provider per un coaching personalizzato."
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ligado: a tua carga, descanso, VFC e treinos são partilhados com o fornecedor para treino personalizado."
+            "value": "Ligado: um resumo da tua recuperação, esforço, sono, sinais cardíacos e vitais disponíveis, além dos treinos, é partilhado com o fornecedor para orientação personalizada."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Вкл.: ваш заряд, отдых, ВСР и тренировки передаются провайдеру для персонализированных тренерских рекомендаций."
+            "value": "Вкл.: сводка о восстановлении, нагрузке, сне, сердечных и доступных жизненных показателях, а также тренировках передаётся провайдеру для персональных рекомендаций."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "开启，你的能量、休息、HRV 和锻炼会分享给服务商，以获得量身定制的指导。"
+            "value": "开启后，你的恢复、负荷、睡眠、心脏和可用生命体征以及锻炼摘要会分享给服务商，以提供个性化指导。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "開啟，你的能量、休息、HRV 和鍛鍊會分享給服務供應商，以獲得量身定制的指導。"
+            "value": "開啟後，你的恢復、負荷、睡眠、心臟和可用生命徵象以及鍛鍊摘要會分享給服務供應商，以提供個人化指導。"
           }
         }
       }

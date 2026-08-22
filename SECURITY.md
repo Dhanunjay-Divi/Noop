@@ -43,9 +43,9 @@ the next release.
 
 ## Supported versions
 
-Until this fork publishes its first binary release, security fixes land on the
-latest source revision. After releases begin, only the latest release is
-supported. Rebuild/update from the canonical repository to pick up fixes.
+Before the first supported binary release, security fixes land on the latest
+source revision. After releases begin, only the latest release is supported.
+Rebuild or update from the canonical repository to pick up fixes.
 
 ## Out of scope
 

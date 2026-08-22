@@ -30,6 +30,7 @@ non-negotiable (especially on the Bluetooth path).
   - [Add a new BLE command](#add-a-new-ble-command)
   - [Add a database column or table](#add-a-database-column-or-table)
 - [Tests & fixtures](#tests--fixtures)
+- [Round records](#round-records)
 - [Commit & PR conventions](#commit--pr-conventions)
 - [Roadmap](#roadmap)
 
@@ -495,6 +496,29 @@ Schema lives in `Packages/WhoopStore/Sources/WhoopStore/Database.swift` as a **v
 - **`StrandTests`** is the macOS-app integration suite (run via `xcodebuild … test`).
 
 ---
+
+## Round records
+
+Every material engineering, research, physical-device, install, release, or
+repository round must create or update a record under
+[`ops/rounds/`](ops/rounds/) and add it to the newest-first index. Start from
+[`ops/ROUND_TEMPLATE.md`](ops/ROUND_TEMPLATE.md) and keep the active handoff
+current before stopping.
+
+A round record is engineering evidence, not marketing copy. It must distinguish
+simulator or unit-test evidence from a physical-device result, name work that is
+still incomplete, and state any database, migration, signing, or local-data
+impact. Never record credentials, email addresses, raw biometric exports,
+device identifiers, signing identities, or absolute personal file paths.
+
+Run the checked-in validator:
+
+```bash
+python3 Tools/validate-ops-rounds.py --all .
+```
+
+Pull requests are also gated on a changed round record. The checked-in record
+remains authoritative; the optional local skill is only a workflow aid.
 
 ## Commit & PR conventions
 

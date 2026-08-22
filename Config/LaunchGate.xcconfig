@@ -1,0 +1,13 @@
+// Temporary launch-access gate. The tracked wrapper contains no access code or verifier material.
+// Generate the ignored LaunchGateSecrets.xcconfig interactively with:
+//   python3 Tools/generate-launch-gate-verifier.py <new-version>
+//
+// An intentionally blank version disables the gate for ordinary source builds and makes its eventual
+// removal an in-place app update. The iOS Release target overrides REQUIRED to YES so an App Store
+// archive cannot silently omit the requested gate; set that target override to NO when retiring it.
+NOOP_LAUNCH_GATE_REQUIRED = NO
+NOOP_LAUNCH_GATE_VERSION =
+NOOP_LAUNCH_GATE_SALT_HEX =
+NOOP_LAUNCH_GATE_VERIFIER_HEX =
+NOOP_LAUNCH_GATE_ITERATIONS = 310000
+#include? "LaunchGateSecrets.xcconfig"

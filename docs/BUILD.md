@@ -19,9 +19,9 @@ user.
 
 The codebase is split into reusable, cross-platform Swift packages plus a thin platform-specific
 app layer. The **macOS app is the reference implementation**; **Android ships as a full app** under
-`android/`, and **iOS ships as a build-from-source target (`NOOPiOS`)** folded into main in v1.94 —
-built in Xcode, not distributed (no App Store / TestFlight, to stay anonymous). All reuse the same
-packages where they can.
+`android/`, and **iOS ships as the native `NOOPiOS` target** folded into main in v1.94. The same
+target supports signed source installs and, once every release gate is cleared, App Store Connect
+archives. All clients reuse the same packages where they can.
 
 ```
 Strand/
@@ -222,13 +222,14 @@ swift run backfill
 
 ---
 
-## iOS (source build or unsigned community IPA)
+## iOS (signed source, App Store candidate, or legacy development artifact)
 
-iOS has no App Store or TestFlight build. Build and sign it yourself in Xcode,
-or, if you are an authenticated collaborator on this private repository, download
-and re-sign an unsigned community IPA from this fork's Releases page with AltStore,
-SideStore, Sideloadly, or your own signing identity. Private GitHub raw/release URLs
-are not an anonymous AltStore source.
+Build and sign `NOOPiOS` in Xcode for development. The Release configuration is also the App Store
+candidate lane, but an archive must not be uploaded until the signing, metadata, privacy,
+physical-device, and distribution-legal checks in [`APP_STORE_RELEASE.md`](APP_STORE_RELEASE.md)
+pass. Authenticated repository collaborators can still download and re-sign an unsigned community
+IPA for authorized development testing; private GitHub raw/release URLs are not a public
+distribution channel.
 The iOS app is **newer and less battle-tested** than macOS and Android: live BLE on a real iPhone
 isn't yet fully validated. It shares the same analytics packages, so once data is in, results match
 macOS.
@@ -283,9 +284,7 @@ Android ships as a **full, native client**—a separate Kotlin/Gradle module rat
 than a port of the Swift app. It lives under **`android/`** with its own
 `README`. Build the full app (`./gradlew assembleFullDebug`) and sample-data
 demo (`./gradlew assembleDemoDebug`) from source, or use a clearly labeled
-staging artifact under this fork's Releases page. Older
-[`ryanbr/noop` releases](https://github.com/ryanbr/noop/releases) are upstream
-artifacts and do not contain this fork's self-hosted stack.
+staging artifact associated with a reviewed commit in the canonical repository.
 
 Toolchain:
 
@@ -330,8 +329,10 @@ NOOP builds on prior community reverse-engineering and interoperability work:
   packages are adapted from this work.
 - **`b-nnett/goose`** — observed WHOOP 5.0 / MG protocol facts (service family
   `fd4b0001-…`, CRC16-Modbus header). Its repository has no explicit software
-  license; this fork copies none of its source or assets.
+  license; its lineage remains part of the distribution-rights review.
 - **`groue/GRDB.swift`** — SQLite persistence.
 - **`weichsel/ZIPFoundation`** — zip handling for Apple Health exports.
 
-See [`ATTRIBUTION.md`](../ATTRIBUTION.md) for full detail.
+See [`ATTRIBUTION.md`](../ATTRIBUTION.md) for full detail and
+[`PROTOCOL_RIGHTS_REMEDIATION.md`](PROTOCOL_RIGHTS_REMEDIATION.md) for the open
+redistribution blocker and acceptance criteria.

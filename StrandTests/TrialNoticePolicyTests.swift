@@ -12,7 +12,8 @@ final class TrialNoticePolicyTests: XCTestCase {
             TrialNoticePolicy.shouldPresent(
                 acknowledgedBuildIdentifier: "",
                 currentBuildIdentifier: current,
-                demoBypass: false
+                demoBypass: false,
+                channel: .privatePreview
             )
         )
     }
@@ -22,7 +23,8 @@ final class TrialNoticePolicyTests: XCTestCase {
             TrialNoticePolicy.shouldPresent(
                 acknowledgedBuildIdentifier: current,
                 currentBuildIdentifier: current,
-                demoBypass: false
+                demoBypass: false,
+                channel: .privatePreview
             )
         )
     }
@@ -36,7 +38,8 @@ final class TrialNoticePolicyTests: XCTestCase {
             TrialNoticePolicy.shouldPresent(
                 acknowledgedBuildIdentifier: previous,
                 currentBuildIdentifier: current,
-                demoBypass: false
+                demoBypass: false,
+                channel: .privatePreview
             )
         )
     }
@@ -50,7 +53,8 @@ final class TrialNoticePolicyTests: XCTestCase {
             TrialNoticePolicy.shouldPresent(
                 acknowledgedBuildIdentifier: previous,
                 currentBuildIdentifier: current,
-                demoBypass: false
+                demoBypass: false,
+                channel: .privatePreview
             )
         )
     }
@@ -64,7 +68,8 @@ final class TrialNoticePolicyTests: XCTestCase {
             TrialNoticePolicy.shouldPresent(
                 acknowledgedBuildIdentifier: future,
                 currentBuildIdentifier: current,
-                demoBypass: false
+                demoBypass: false,
+                channel: .privatePreview
             )
         )
     }
@@ -78,7 +83,8 @@ final class TrialNoticePolicyTests: XCTestCase {
             TrialNoticePolicy.shouldPresent(
                 acknowledgedBuildIdentifier: laterBuild,
                 currentBuildIdentifier: current,
-                demoBypass: false
+                demoBypass: false,
+                channel: .privatePreview
             )
         )
     }
@@ -96,7 +102,8 @@ final class TrialNoticePolicyTests: XCTestCase {
             TrialNoticePolicy.shouldPresent(
                 acknowledgedBuildIdentifier: previous,
                 currentBuildIdentifier: newer,
-                demoBypass: false
+                demoBypass: false,
+                channel: .privatePreview
             )
         )
     }
@@ -128,7 +135,8 @@ final class TrialNoticePolicyTests: XCTestCase {
             TrialNoticePolicy.shouldPresent(
                 acknowledgedBuildIdentifier: "",
                 currentBuildIdentifier: current,
-                demoBypass: true
+                demoBypass: true,
+                channel: .privatePreview
             )
         )
     }

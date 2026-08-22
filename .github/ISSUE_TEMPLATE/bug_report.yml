@@ -14,9 +14,9 @@ body:
 
         ### ⛔ Next — is this already answered?
         Many "bugs" are expected behaviour or a known limit. **Please check these before filing — it's the fastest way to an answer:**
-        - **[FAQ](https://github.com/ryanbr/noop/wiki/FAQ)** — live HR, recovery/sleep, steps, importing, privacy, updates.
-        - **[WHOOP 5.0 / MG status](https://github.com/ryanbr/noop/wiki/WHOOP-5.0-and-MG-Status)** — SpO₂, steps, recovery/sleep on the newer straps (the most common topic).
-        - **[Troubleshooting](https://github.com/ryanbr/noop/wiki/Troubleshooting)** — pairing, "syncs but no data", generic HR straps.
+        - **[Project guide](https://github.com/Dhanunjay-Divi/Noop/blob/main/README.md)** — live HR, recovery/sleep, steps, importing, privacy, and updates.
+        - **[WHOOP 5.0 / MG status](https://github.com/Dhanunjay-Divi/Noop/blob/main/docs/WHOOP5_DEEP_DATA.md)** — current direct-from-strap limits and validation work for newer straps.
+        - **[Testing and troubleshooting](https://github.com/Dhanunjay-Divi/Noop/blob/main/docs/BETA_TESTING.md)** — pairing, sync evidence, privacy, and useful reports.
 
         ---
 
@@ -145,9 +145,9 @@ body:
           required: true
         - label: I attached or pasted a strap log above — **or** my bug is a clearly reproducible UI issue that doesn't need one (e.g. a typo, a button that does nothing) and I've described exactly how to see it.
           required: true
-        - label: I checked the [Troubleshooting guide](https://github.com/ryanbr/noop/wiki/Troubleshooting) — especially "history syncs but no data" (most often the strap isn't banking history to flash; charge it to 100% and reconnect).
+        - label: I checked the [testing and troubleshooting guide](https://github.com/Dhanunjay-Divi/Noop/blob/main/docs/BETA_TESTING.md) — especially the connection, sync, and evidence guidance.
           required: true
-        - label: I checked the [FAQ](https://github.com/ryanbr/noop/wiki/FAQ) and — if I'm on a WHOOP 5.0 / MG — the [5.0/MG status page](https://github.com/ryanbr/noop/wiki/WHOOP-5.0-and-MG-Status), and this isn't an already-known limit (e.g. SpO₂, or recovery/sleep on the 5/MG).
+        - label: I checked the [project guide](https://github.com/Dhanunjay-Divi/Noop/blob/main/README.md) and — if I'm on a WHOOP 5.0 / MG — the [5.0/MG status page](https://github.com/Dhanunjay-Divi/Noop/blob/main/docs/WHOOP5_DEEP_DATA.md), and this isn't an already-known limit.
           required: true
         - label: I've left out anything personal (strap serial, account email, raw export).
           required: true

@@ -432,19 +432,23 @@ private struct ExpectationsStep: View {
 
                 #if os(iOS)
                 Group {
-                    if IOSDiagnostics.capture().isSideloaded == true {
-                        // Free-development / AltStore builds still need periodic re-signing.
-                        expectationRow(
-                            icon: "iphone.gen3",
-                            title: String(localized: "Installed outside the App Store"),
-                            body: String(localized: "On iPhone this is a sideloaded build. Re-sign it about every 7 days on a free Apple ID (longer on a paid account). After your phone reboots, unlock it once so NOOP can read and sync its data.")
-                        )
-                    } else {
-                        // TestFlight/App Store receipts must not receive the old seven-day sideload warning.
+                    if TrialNoticePolicy.distributionChannel() == .testFlight {
                         expectationRow(
                             icon: "checkmark.seal",
                             title: String(localized: "Delivered through Apple"),
                             body: String(localized: "This trial updates through TestFlight. Individual beta builds are available for up to 90 days, so install the latest version when TestFlight prompts you.")
+                        )
+                    } else if TrialNoticePolicy.distributionChannel() == .appStore {
+                        expectationRow(
+                            icon: "checkmark.seal",
+                            title: String(localized: "Installed from the App Store"),
+                            body: String(localized: "NOOP updates through the App Store. Your local app data stays in the same iPhone app container when you update.")
+                        )
+                    } else {
+                        expectationRow(
+                            icon: "iphone.gen3",
+                            title: String(localized: "Installed directly"),
+                            body: String(localized: "Install future NOOP updates from the same trusted source to keep the app current. Updating with the same app identity preserves its local container.")
                         )
                     }
                 }
