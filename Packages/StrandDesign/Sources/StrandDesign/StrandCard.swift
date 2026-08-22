@@ -32,6 +32,8 @@ public struct FrostedCardSurface: View {
     @Environment(\.noopAppearanceMode) private var appearanceMode
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var accessibilityContrast
+    /// #2b: Smooth mode / Low Power also take the opaque (blur-free) surface path.
+    @ObservedObject private var motion = NoopMotionState.shared
     // "Card transparency" setting (reactive): fades the whole glass surface toward the background. 100 =
     // solid (default). Reading it here makes every card update live when the Settings slider moves.
     @AppStorage(CardAppearancePrefs.opacityKey) private var cardOpacityPercent = CardAppearancePrefs.defaultPercent
@@ -48,10 +50,17 @@ public struct FrostedCardSurface: View {
         // Reduced Transparency is an accessibility override, so it must win over the decorative
         // card-opacity preference. Otherwise a user could ask for opaque surfaces and still receive
         // a partially transparent card because the final modifier faded it again.
-        let effectiveOpacity = reduceTransparency ? 1.0 : op
+        //
+        // #2b (perf, 2026-08-22): Smooth mode / Low Power now take the SAME opaque path.
+        // `.ultraThinMaterial` forces a real backdrop blur per card, and Today renders many cards in a
+        // scroll view — on non-ProMotion hardware that blur is the second big per-frame cost after the
+        // liquid sims. Swapping to a solid `surfaceRaised` fill removes the blur passes entirely with no
+        // layout change. Accessibility Reduce Transparency keeps its original behaviour.
+        let opaqueSurface = reduceTransparency || motion.poseStillIgnoringReduceMotion
+        let effectiveOpacity = opaqueSurface ? 1.0 : op
         let increasedContrast = accessibilityContrast == .increased
         let oledBlack = appearanceMode == .black
-        let baseFill = reduceTransparency
+        let baseFill = opaqueSurface
             ? AnyShapeStyle(StrandPalette.surfaceRaised)
             : AnyShapeStyle(.ultraThinMaterial)
         shape
@@ -61,7 +70,7 @@ public struct FrostedCardSurface: View {
                 // health data readable. Reduced Transparency gets an opaque surface.
                 shape.fill(
                     StrandPalette.surfaceRaised.opacity(
-                        reduceTransparency ? 1 : (scheme == .dark ? (oledBlack ? 0.84 : 0.70) : 0.58)
+                        opaqueSurface ? 1 : (scheme == .dark ? (oledBlack ? 0.84 : 0.70) : 0.58)
                     )
                 )
             )

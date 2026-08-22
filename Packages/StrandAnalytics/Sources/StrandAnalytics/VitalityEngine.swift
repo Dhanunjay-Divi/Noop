@@ -19,12 +19,21 @@ import Foundation
 public enum VitalityEngine {
 
     // Gompertz: mortality-rate doubling time ≈ 8 years → ln(hazard) per year of age = ln(2)/8.
+    // SOURCE: the Gompertz–Makeham law of mortality; the ~8-year adult mortality-rate doubling time
+    // (MRDT) is a long-standing demographic regularity (Gompertz 1825; modern MRDT reviews).
     static let lnHazardPerYear = 0.6931471805599453 / 8.0   // ≈ 0.0866
     /// Correlated inputs (fitness, RHR, activity all move together) → shrink the naive log-hazard sum so
     /// we don't multiply the same underlying signal several times. 0.75 is a deliberately gentle shrink.
+    ///
+    /// PROVENANCE (2026-08-22): **internal, uncited.** There is no published shrink coefficient for this
+    /// particular basket of wearable inputs; 0.75 is a conservative engineering choice (it always REDUCES
+    /// the magnitude of the age offset, i.e. it errs toward "closer to your real age"). It is not a
+    /// population-derived constant and must not be presented as one.
     static let overlapShrink = 0.75
     /// Body Age is clamped to a sane band; Vitality maps Δage linearly around 50 (= "at your age").
     static let minBodyAge = 20.0, maxBodyAge = 90.0
+    /// PROVENANCE: **internal, uncited** presentation scaling (points of Vitality per year of Δage).
+    /// Chosen so a ±10-year offset spans most of the 0–100 axis; carries no epidemiological meaning.
     static let vitalityPerYear = 2.5   // each year younger than your age = +2.5 Vitality points
 
     /// The wearable inputs Vitality reads. All optional — the score uses whatever is present (≥ minFactors).
@@ -80,7 +89,32 @@ public enum VitalityEngine {
     /// duration-consistency are one sleep domain; they cannot manufacture readiness by themselves.
     public static let minFactors = 3
     public static let minDomains = 3
-    /// No validated individual confidence interval exists for this experimental composite.
+    /// The ± presentation band (years) for Wellness Age.
+    ///
+    /// HONESTY CORRECTION (2026-08-22, peer review): this was 0.0, which implied a point estimate and made
+    /// Wellness Age look MORE precise than Fitness Age — even though Fitness Age honestly publishes a
+    /// ~±19–21 y band from its model's SEE, and Wellness Age is the more speculative of the two (it chains
+    /// literature hazard ratios through a Gompertz conversion with an uncited overlap shrink).
+    ///
+    /// There is no published confidence interval for this composite, so the band is **explicitly a
+    /// model-level honesty floor, not a computed CI**: ±8 years at the minimum factor count, narrowing by
+    /// 1 year per extra independent factor, floored at ±5. Rationale for the scale: one Gompertz doubling
+    /// (~8 y of age-equivalent) is the natural unit of this model, so the band says "we cannot resolve
+    /// better than about one doubling." It NEVER claims statistical coverage; UI copy must read
+    /// "approximately ± N years", not "95% CI".
+    public static let bandYearsFloor: Double = 5.0
+    public static let bandYearsAtMinFactors: Double = 8.0
+
+    /// Band for a given number of contributing factors (more independent signals ⇒ a tighter, but never
+    /// tight, band).
+    public static func bandYears(factorsUsed: Int) -> Double {
+        let extra = Double(max(0, factorsUsed - minFactors))
+        return max(bandYearsFloor, bandYearsAtMinFactors - extra)
+    }
+
+    /// Legacy zero-band constant retained ONLY so any existing caller keeps compiling; do not use it for
+    /// presentation — call `bandYears(factorsUsed:)` instead.
+    @available(*, deprecated, message: "Use bandYears(factorsUsed:) — a 0 band over-states precision.")
     public static let bandYears = 0.0
 
     private static func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(hi, max(lo, v)) }
@@ -176,7 +210,7 @@ public enum VitalityEngine {
         let delta = inputs.chronoAge - bodyAge              // +ve = younger than your age
         let vitality = clamp(50 + delta * vitalityPerYear, 0, 100)
         return Result(vitality: vitality, bodyAge: bodyAge, chronoAge: inputs.chronoAge,
-                      deltaYears: delta, bandYears: bandYears, contributions: contribs,
-                      factorsUsed: contribs.count)
+                      deltaYears: delta, bandYears: bandYears(factorsUsed: contribs.count),
+                      contributions: contribs, factorsUsed: contribs.count)
     }
 }

@@ -31,6 +31,10 @@ struct StrandiOSApp: App {
     /// Chart data-colour style (Titanium / Classic throwback). Re-colours gauges + charts.
     @AppStorage(ChartStyle.storageKey) private var chartStyleRaw = ChartStyle.titanium.rawValue
     @AppStorage("noop.acceptedTermsVersion") private var acceptedTermsVersion = ""
+
+    /// #3 (perf): one-time, device-tier Smooth-mode default (constrained hardware starts posed).
+    /// Idempotent and never overrides a user choice — see QuietMotionPrefs.applyDeviceTierDefaultIfNeeded.
+    private static let _quietMotionTierDefault: Void = QuietMotionPrefs.applyDeviceTierDefaultIfNeeded()
     /// ActivityKit owns Lock Screen + Dynamic Island as one Live Activity surface. Observe both privacy
     /// choices at the root so disabling it ends the pill immediately and daily scores are included only
     /// after a separate explicit opt-in.
@@ -39,6 +43,7 @@ struct StrandiOSApp: App {
     @AppStorage(UnitPrefs.liveActivityEffortKey) private var liveActivityShowsEffort = true
 
     init() {
+        _ = Self._quietMotionTierDefault
         // 9.2 data-truth migration: clear a legacy Shortcuts file that may contain WHOOP @57 motion
         // ticks in the Apple Health Steps column. Do this synchronously before constructing stores,
         // BLE sources, or any async reader; future writes use the HR-only fixed-column contract.

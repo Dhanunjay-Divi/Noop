@@ -62,6 +62,37 @@ public enum NoopMotion {
 /// Low Power Mode and the system Reduce Motion setting always take precedence over this value.
 public enum QuietMotionPrefs {
     public static let enabledKey = "noop.quietMotion"
+
+    /// Set once the first-launch device-tier default has been applied, so a user who deliberately turns
+    /// Smooth mode OFF is never re-defaulted ON by a later launch.
+    public static let defaultAppliedKey = "noop.quietMotion.defaultApplied.v1"
+
+    /// #3 (perf, 2026-08-22): NOOP's audience is explicitly people on cheaper hardware, and the decorative
+    /// liquid/blur stack is what makes Today stutter there. So Smooth mode DEFAULTS ON for constrained
+    /// devices instead of waiting for the user to discover a Settings toggle.
+    ///
+    /// "Constrained" = a low physical-memory device (< 6 GB, i.e. roughly pre-A15 iPhones and base iPads).
+    /// RAM is used as the tier proxy because it is a cheap, public, monotonic signal — unlike display
+    /// refresh rate, which needs a live window, and unlike a device-model allow-list, which rots every
+    /// September. Users on capable hardware keep the full liquid experience by default.
+    ///
+    /// This is a DEFAULT, never a lock: the Settings toggle still wins in both directions, and the choice
+    /// is remembered via `defaultAppliedKey`.
+    public static var constrainedDeviceMemoryBytes: UInt64 { 6 * 1024 * 1024 * 1024 }
+
+    public static var isConstrainedDevice: Bool {
+        ProcessInfo.processInfo.physicalMemory < constrainedDeviceMemoryBytes
+    }
+
+    /// Apply the one-time, device-tier default. Call early in app start-up (idempotent).
+    public static func applyDeviceTierDefaultIfNeeded(_ defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: defaultAppliedKey) else { return }
+        defaults.set(true, forKey: defaultAppliedKey)
+        // Only ever turn it ON as a default; never force it off for someone who wanted it on.
+        if isConstrainedDevice, !defaults.bool(forKey: enabledKey) {
+            defaults.set(true, forKey: enabledKey)
+        }
+    }
 }
 
 /// One process-wide source of truth for non-essential animation policy.

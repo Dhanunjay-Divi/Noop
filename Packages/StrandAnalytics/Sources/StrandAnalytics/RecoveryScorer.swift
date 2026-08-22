@@ -23,9 +23,16 @@ import WhoopProtocol
 // ONLY when a skin-temp deviation is supplied; when nil the term drops and the
 // weights renormalize, leaving the no-skin-temp score IDENTICAL to before.
 //
-// Two more OPTIONAL, nil-default terms close the gap to Oura Readiness's 8 contributors (an
-// Oura-reference validation found Charge already tracks Oura's readiness at r≈0.71; these are
-// the two components Charge lacked):
+// Two more OPTIONAL, nil-default terms close the gap to Oura Readiness's 8 contributors.
+//
+// HONESTY NOTE (2026-08-22, peer review): an earlier version of this comment asserted "an
+// Oura-reference validation found Charge already tracks Oura's readiness at r≈0.71" as a plain
+// fact. That correlation came from an INTERNAL, single-participant Compare run whose n, date range
+// and device/firmware were never recorded here, so it must not be read as a validated agreement
+// statistic. It is retained only as an internal, UNPUBLISHED observation and must not be surfaced
+// in the UI, marketing, or docs until the validation notebook re-derives it with a stated n,
+// window, device and method (see noop_WIP/research/MASTER-ROADMAP.md items 17/19). The two terms
+// below are justified by their own construct validity, NOT by that number:
 //   overnight resting-HR DECLINE slope ("Recovery Index")      → W_RECOVERY_INDEX    = 0.05
 //   previous-day Effort vs personal baseline ("Activity Balance" /
 //   "Previous Day Activity", collapsed into one term)          → W_ACTIVITY_BALANCE  = 0.05
@@ -83,7 +90,13 @@ public enum RecoveryScorer {
     public static let logisticK: Double = 1.6
     /// Logistic offset so Z=0 → 58%.
     public static let logisticZ0: Double = -0.20
-    /// WHOOP-published population-average recovery (%). Cold-start fallback.
+    /// Cold-start fallback recovery (%) used ONLY before a personal baseline exists.
+    ///
+    /// HONESTY NOTE (2026-08-22): previously commented as "WHOOP-published population-average
+    /// recovery". No such WHOOP publication is cited anywhere in this repo, so that attribution is
+    /// withdrawn: treat 58 as an INTERNAL, UNCITED cold-start anchor (a plausible mid-band value on
+    /// the 0–100 axis), not a population norm. It affects only the pre-baseline fallback, never a
+    /// scored day, and must not be presented to the user as a population comparison.
     public static let populationMean: Double = 58.0
 
     /// Recovery band thresholds (WHOOP color scheme).

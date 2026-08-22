@@ -659,15 +659,22 @@ struct LiquidTodayView: View {
                               emptyText: chargeDisplay.calibrationCompactText ?? "–",
                               accessibilityValueOverride: chargeDisplay.calibrationDetail)
                 // #45: the hero Effort must honour the user's Effort scale like every other Effort read-out.
+                //
+                // #2 (perf, 2026-08-22): Effort and Sleep now render POSED (animated: false) while Recovery
+                // keeps the live fluid. Three concurrent 60 fps `Canvas` fluid simulations in one HStack was
+                // the single largest per-frame cost on Today and the prime suspect for the reported lag; one
+                // live hero preserves the signature motion at a third of the cost. The small gauges elsewhere
+                // were already static, so this is consistent with the existing design intent. Reduce Motion /
+                // Low Power / Smooth mode still pose ALL of them via `NoopMotionState.poseStill`.
                 HeroScoreCell(label: String(localized: "Effort"),
                               score: displayDay?.strain.map { UnitFormatter.effortValue($0, scale: effortScale) },
-                              tint: StrandPalette.effortColor, animated: dataLoaded,
+                              tint: StrandPalette.effortColor, animated: false,
                               onOpen: { openHeroMetric("strain") },
                               onExplain: { explainHeroMetric("strain") },
                               maxValue: effortScale == .whoop ? 21 : 100,
                               decimals: effortScale == .whoop ? 1 : 0)
                 HeroScoreCell(label: String(localized: "Sleep"), score: restScore, tint: StrandPalette.restColor,
-                              animated: dataLoaded,
+                              animated: false,
                               onOpen: { openHeroMetric("sleep_performance") },
                               onExplain: { explainHeroMetric("sleep_performance") })
             }
@@ -1360,7 +1367,12 @@ struct LiquidTodayView: View {
                             ? sessionCountLabel(workouts.count)
                             : selectedLogicalDay.formatted(date: .abbreviated, time: .omitted))
             if !workouts.isEmpty {
-                ForEach(Array(workouts.enumerated()), id: \.offset) { _, workout in
+                // #5 (perf): identify rows by a STABLE natural key, not the array index. With `id: \.offset`
+                // every refresh that re-orders or inserts a session re-identified every row below it, so
+                // SwiftUI tore down and rebuilt those cards (visible churn on pull-to-refresh). startTs +
+                // source + sport is unique per session in practice (one device cannot start two sessions of
+                // the same sport in the same second) and is stable across refetches.
+                ForEach(workouts, id: \.workoutRowIdentity) { workout in
                     NavigationLink(value: TabRoute.workouts) { workoutCard(workout) }
                         .buttonStyle(LiquidPressStyle())
                 }
@@ -2291,6 +2303,7 @@ private struct LiquidWordmark: View {
 /// double tap is an optional explanation shortcut. The separate 44pt information control keeps that
 /// explanation discoverable and accessible without relying on a hidden gesture.
 private struct HeroScoreCell: View {
+
     static let vesselDiameter: CGFloat = 84
 
     let label: String
@@ -2319,25 +2332,45 @@ private struct HeroScoreCell: View {
         return score.map { max(0, min(1, $0 / maxValue)) }
     }
 
+    /// Extracted so the compiler doesn't have to type-check the whole hero body as one expression
+    /// (it started timing out once this file grew — the compiler's own suggested remedy).
+    private var vesselLayer: some View {
+        ZStack {
+            LiquidVessel(value: frac, tint: tint, animated: animated)
+                .frame(width: Self.vesselDiameter, height: Self.vesselDiameter)
+            readout
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private var readout: some View {
+        if score != nil {
+            CountUpNumber(value: shown, font: StrandFont.rounded(26), decimals: decimals)
+        } else {
+            let size: CGFloat = emptyText == "–" ? 26 : 19
+            Text(emptyText).font(StrandFont.rounded(size))
+        }
+    }
+
+    /// The spoken value, extracted for the same type-check reason.
+    private var accessibilityValueText: String {
+        if let override = accessibilityValueOverride { return override }
+        guard let s = score else { return String(localized: "No data yet") }
+        if decimals > 0 {
+            return String(format: "%.\(decimals)f of %.0f", s, maxValue)
+        }
+        return String(localized: "\(Int(s.rounded())) of \(Int(maxValue.rounded()))")
+    }
+
     var body: some View {
         ZStack(alignment: .topTrailing) {
             VStack(spacing: 7) {
-                ZStack {
-                    LiquidVessel(value: frac, tint: tint, animated: animated)
-                        .frame(width: Self.vesselDiameter, height: Self.vesselDiameter)
-                    Group {
-                        if score != nil {
-                            CountUpNumber(value: shown, font: StrandFont.rounded(26), decimals: decimals)
-                        } else {
-                            Text(emptyText).font(StrandFont.rounded(emptyText == "–" ? 26 : 19))
-                        }
-                    }
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .allowsHitTesting(false)
-                }
+                vesselLayer
                 HStack(spacing: 3) {
                     // #74: one line, shrink-to-fit rather than wrap under large Dynamic Type (mirrors
                     // the score number above) so labels never grow the hero card to two lines.
@@ -2365,10 +2398,7 @@ private struct HeroScoreCell: View {
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(Text(label))
-            .accessibilityValue(Text(accessibilityValueOverride ?? score.map {
-                decimals > 0 ? String(format: "%.\(decimals)f of %.0f", $0, maxValue)
-                    : String(localized: "\(Int($0.rounded())) of \(Int(maxValue.rounded()))")
-            } ?? String(localized: "No data yet")))
+            .accessibilityValue(Text(accessibilityValueText))
             .accessibilityHint("Opens the detailed trend. An About button explains the metric.")
             .accessibilityAction { onOpen() }
             .accessibilityAction(named: Text("Explain \(label)")) { onExplain() }
@@ -3102,4 +3132,13 @@ private extension View {
         }
         #endif
     }
+}
+
+// MARK: - #5 (perf): stable row identity for workout lists
+//
+// `ForEach(_:id:)` needs an identity that survives a refetch. Using the array INDEX meant any re-order or
+// insert re-identified every row after it, forcing SwiftUI to rebuild those cards (churn on refresh).
+// startTs + source + sport is unique per session in practice and stable across refetches.
+extension WorkoutRow {
+    var workoutRowIdentity: String { "\(startTs)|\(source)|\(sport)" }
 }
