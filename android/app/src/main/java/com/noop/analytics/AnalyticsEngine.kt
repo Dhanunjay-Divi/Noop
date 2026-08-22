@@ -894,9 +894,12 @@ object RestScorer {
 
     /** Component weights (sum 1.0 when all present). Byte-identical to Swift. */
     const val wDuration: Double = 0.50
-    const val wEfficiency: Double = 0.20
+    // R1 (2026-08-21): efficiency 0.20→0.10, consistency 0.10→0.20. Mirrors Swift
+    // AnalyticsEngine.Rest — sleep-regularity is a stronger independent outcome predictor than
+    // in-bed efficiency. Weights still sum to 1.0. MUST stay byte-identical to Swift.
+    const val wEfficiency: Double = 0.10
     const val wRestorative: Double = 0.20
-    const val wConsistency: Double = 0.10
+    const val wConsistency: Double = 0.20
 
     /** Default personal sleep need (hours) before any recent-average refinement. */
     const val defaultSleepNeedHours: Double = 8.0

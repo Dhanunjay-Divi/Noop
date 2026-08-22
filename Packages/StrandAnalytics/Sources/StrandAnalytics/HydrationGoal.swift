@@ -92,4 +92,76 @@ public enum HydrationGoal {
         guard goalML > 0 else { return 0 }
         return min(1.0, max(0.0, totalML / Double(goalML)))
     }
+
+    // MARK: - R3: metric-aware inputs (weight + heat) — mirror EXACTLY in the Kotlin twin
+    //
+    // These EXTEND the goal without changing `dailyGoalML(sex:effort:)` (that overload still returns the
+    // sex-baseline result, so existing history/tests are unaffected). The metric-aware overload below uses
+    // body weight when known (more personal than a flat sex baseline) and adds a heat bump on hot days.
+    // Still a transparent wellness GUIDE — never medical advice, never a hard rule.
+    //
+    //   GOAL(ml) = roundToNearest( weightBaseline(sex,kg) + effortBump + heatBump, 50 )
+
+    /// ~35 ml per kg body mass per day — the standard adult maintenance estimate.
+    public static let mlPerKg = 35
+    /// The weight-derived baseline is clamped to a sane adult range (ml) so a bad weight can't produce an
+    /// absurd target.
+    public static let weightBaselineFloorML = 1500
+    public static let weightBaselineCeilML = 5000
+    /// Heat bump: extra ml per whole °C of skin-temperature elevation above the personal baseline, capped.
+    /// Only POSITIVE deviations add fluid; a cool day never reduces the guide below baseline.
+    public static let heatBumpPerDegML = 300
+    public static let maxHeatBumpML = 600
+
+    /// Baseline ml: weight-based (`round(35·kg)` clamped to the sane range) when `weightKg` is a finite
+    /// positive value, otherwise the sex baseline. `nil`/non-finite/≤0 weight ⇒ sex baseline (back-compat).
+    public static func weightBaselineML(sex: String, weightKg: Double?) -> Int {
+        guard let kg = weightKg, kg.isFinite, kg > 0 else { return baselineForSex(sex) }
+        let raw = Int((Double(mlPerKg) * kg).rounded())
+        return min(weightBaselineCeilML, max(weightBaselineFloorML, raw))
+    }
+
+    /// Heat bump (ml) from skin-temperature deviation in °C above baseline: `round(devC·300)` clamped to
+    /// 0…600. `nil`/non-finite or a non-positive deviation (at/below baseline) ⇒ 0.
+    public static func heatBumpML(skinTempDevC: Double?) -> Int {
+        guard let dev = skinTempDevC, dev.isFinite, dev > 0 else { return 0 }
+        let raw = Int((dev * Double(heatBumpPerDegML)).rounded())
+        return min(maxHeatBumpML, max(0, raw))
+    }
+
+    /// The metric-aware daily goal (ml): `roundToNearest(weightBaseline + effortBump + heatBump, 50)`.
+    /// Pure. With `weightKg == nil` and `skinTempDevC == nil` this equals `dailyGoalML(sex:effort:)`.
+    public static func dailyGoalML(sex: String, weightKg: Double?, effort: Double?,
+                                   skinTempDevC: Double?) -> Int {
+        let raw = weightBaselineML(sex: sex, weightKg: weightKg)
+            + effortBump(effort: effort)
+            + heatBumpML(skinTempDevC: skinTempDevC)
+        return roundToNearest(raw, step: roundToML)
+    }
+
+    // MARK: - R3: smart reminder schedule (pure; platform notification wiring consumes this)
+
+    /// Evenly spaced reminder minutes-of-day within waking hours, so intake is paced across the day rather
+    /// than crammed. Pure + deterministic so it is unit-testable and byte-identical to the Kotlin twin; the
+    /// platform layer (UNUserNotificationCenter / WorkManager) schedules a local notification at each.
+    ///
+    /// - `wakeHour`/`sleepHour`: 0…23 local hours; reminders only fire in `[wakeHour, sleepHour)` (quiet
+    ///   hours = sleep are never disturbed). `count` reminders are placed at the interior boundaries of
+    ///   `count` equal segments (so none lands exactly at wake or sleep). Returns [] for a non-positive
+    ///   count or a non-positive waking window.
+    public static func reminderMinutesOfDay(wakeHour: Int, sleepHour: Int, count: Int) -> [Int] {
+        guard count > 0 else { return [] }
+        let wake = max(0, min(23, wakeHour))
+        let sleep = max(0, min(24, sleepHour))
+        let startMin = wake * 60
+        let endMin = sleep * 60
+        guard endMin > startMin else { return [] }
+        let span = endMin - startMin
+        var out: [Int] = []
+        // Interior boundaries of `count` equal segments: start + span·i/(count+1), i = 1…count.
+        for i in 1...count {
+            out.append(startMin + (span * i) / (count + 1))
+        }
+        return out
+    }
 }

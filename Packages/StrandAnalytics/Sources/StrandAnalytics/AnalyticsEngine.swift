@@ -824,9 +824,13 @@ public enum AnalyticsEngine {
         public static let neutralConsistency: Double = 0.5
 
         public static let wDuration: Double = 0.50
-        public static let wEfficiency: Double = 0.20
+        // R1 (2026-08-21): efficiency 0.20→0.10, consistency 0.10→0.20. Sleep-regularity is a
+        // stronger independent predictor of health outcomes (Sleep Regularity Index literature)
+        // than in-bed efficiency, which partly duplicates the duration term. Weights still sum to
+        // 1.0. MUST stay byte-identical to Android AnalyticsEngine.kt. See noop_WIP/rounds/ROUND-01.
+        public static let wEfficiency: Double = 0.10
         public static let wRestorative: Double = 0.20
-        public static let wConsistency: Double = 0.10
+        public static let wConsistency: Double = 0.20
 
         /// Build the composite. `tstSeconds` = total sleep time, `restorativeSeconds` = deep+REM
         /// seconds, `deepSeconds` = deep-stage seconds (nil → no deep-adequacy adjustment, pooled

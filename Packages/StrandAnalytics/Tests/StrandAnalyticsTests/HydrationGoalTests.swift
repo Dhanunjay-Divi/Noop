@@ -104,4 +104,69 @@ final class HydrationGoalTests: XCTestCase {
         XCTAssertEqual(HydrationGoal.cupML, 237)
         XCTAssertEqual(HydrationGoal.bottleML, 500)
     }
+
+    // MARK: - R3: weight baseline
+
+    func testWeightBaselineUsesWeightWhenPresent() {
+        // 70 kg × 35 ml/kg = 2450 (in range).
+        XCTAssertEqual(HydrationGoal.weightBaselineML(sex: "male", weightKg: 70), 2450)
+        XCTAssertEqual(HydrationGoal.weightBaselineML(sex: "female", weightKg: 80), 2800)
+    }
+
+    func testWeightBaselineFallsBackToSexWhenAbsentOrInvalid() {
+        XCTAssertEqual(HydrationGoal.weightBaselineML(sex: "male", weightKg: nil), 3700)
+        XCTAssertEqual(HydrationGoal.weightBaselineML(sex: "female", weightKg: 0), 2700)
+        XCTAssertEqual(HydrationGoal.weightBaselineML(sex: "female", weightKg: -5), 2700)
+    }
+
+    func testWeightBaselineClampsToSaneRange() {
+        XCTAssertEqual(HydrationGoal.weightBaselineML(sex: "male", weightKg: 200), 5000)  // ceil
+        XCTAssertEqual(HydrationGoal.weightBaselineML(sex: "male", weightKg: 30), 1500)   // floor
+    }
+
+    // MARK: - R3: heat bump
+
+    func testHeatBumpNilOrNonPositiveIsZero() {
+        XCTAssertEqual(HydrationGoal.heatBumpML(skinTempDevC: nil), 0)
+        XCTAssertEqual(HydrationGoal.heatBumpML(skinTempDevC: 0), 0)
+        XCTAssertEqual(HydrationGoal.heatBumpML(skinTempDevC: -0.5), 0)
+    }
+
+    func testHeatBumpScalesAndCaps() {
+        XCTAssertEqual(HydrationGoal.heatBumpML(skinTempDevC: 0.5), 150)
+        XCTAssertEqual(HydrationGoal.heatBumpML(skinTempDevC: 1.0), 300)
+        XCTAssertEqual(HydrationGoal.heatBumpML(skinTempDevC: 3.0), 600)  // capped
+    }
+
+    // MARK: - R3: metric-aware goal + back-compat
+
+    func testMetricAwareGoalEqualsLegacyWhenNoWeightOrTemp() {
+        // With no weight and no temp, the metric-aware overload equals the legacy sex-baseline goal.
+        XCTAssertEqual(
+            HydrationGoal.dailyGoalML(sex: "male", weightKg: nil, effort: nil, skinTempDevC: nil),
+            HydrationGoal.dailyGoalML(sex: "male", effort: nil))
+        XCTAssertEqual(
+            HydrationGoal.dailyGoalML(sex: "female", weightKg: nil, effort: 50, skinTempDevC: nil),
+            HydrationGoal.dailyGoalML(sex: "female", effort: 50))
+    }
+
+    func testMetricAwareGoalCombinesWeightEffortHeat() {
+        // 70 kg (2450) + effort 50 (350) + 1.0 °C (300) = 3100 → round50 → 3100.
+        XCTAssertEqual(
+            HydrationGoal.dailyGoalML(sex: "male", weightKg: 70, effort: 50, skinTempDevC: 1.0), 3100)
+    }
+
+    // MARK: - R3: reminder schedule
+
+    func testReminderScheduleSpacesWithinWakingHours() {
+        XCTAssertEqual(
+            HydrationGoal.reminderMinutesOfDay(wakeHour: 7, sleepHour: 23, count: 6),
+            [557, 694, 831, 968, 1105, 1242])
+    }
+
+    func testReminderScheduleEdgeCases() {
+        XCTAssertEqual(HydrationGoal.reminderMinutesOfDay(wakeHour: 7, sleepHour: 23, count: 0), [])
+        // Inverted window (wake after sleep hour) → no reminders.
+        XCTAssertEqual(HydrationGoal.reminderMinutesOfDay(wakeHour: 23, sleepHour: 7, count: 6), [])
+    }
 }

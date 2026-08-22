@@ -112,7 +112,13 @@ fun HydrationScreen(viewModel: AppViewModel) {
     val strain = today?.strain
 
     val sex = remember { ProfileStore.from(context).sex }
-    val goalMl = remember(sex, strain) { HydrationGoal.dailyGoalMl(sex, strain) }
+    // R3: metric-aware goal — body weight personalises the baseline (~35 ml/kg) and an elevated skin
+    // temperature adds a modest heat bump, on top of the Effort bump. Nulls fall back to the previous
+    // sex-baseline behaviour, so a profile without a weight is unchanged. Mirrors the iOS wiring.
+    val skinTempDevC = today?.skinTempDevC
+    val goalMl = remember(sex, strain, skinTempDevC) {
+        HydrationGoal.dailyGoalMl(sex, null, strain, skinTempDevC)
+    }
 
     // The liquid sky backdrop honours the SAME opt-out pref as the liquid Today (a user who turned the
     // day-cycle sky off gets the flat canvas here too). Mirrors iOS `showDayCycleBackground ? ... : nil`.

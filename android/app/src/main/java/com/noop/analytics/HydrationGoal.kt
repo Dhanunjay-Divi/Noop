@@ -73,4 +73,58 @@ object HydrationGoal {
         if (step <= 0) return value
         return ((value + step / 2) / step) * step
     }
+
+    // R3: metric-aware inputs (weight + heat) — BYTE-IDENTICAL to the Swift twin. These EXTEND the goal
+    // without changing dailyGoalMl(sex, effort); that overload still returns the sex-baseline result so
+    // existing history/tests are unaffected. GOAL = round50(weightBaseline + effortBump + heatBump).
+
+    /** ~35 ml per kg body mass per day — the standard adult maintenance estimate. */
+    const val ML_PER_KG: Int = 35
+    /** The weight-derived baseline is clamped to a sane adult range (ml). */
+    const val WEIGHT_BASELINE_FLOOR: Int = 1500
+    const val WEIGHT_BASELINE_CEIL: Int = 5000
+    /** Heat bump: extra ml per whole °C of skin-temp elevation above baseline, and its cap. */
+    const val HEAT_BUMP_PER_DEG: Int = 300
+    const val MAX_HEAT_BUMP: Int = 600
+
+    /** Baseline ml: weight-based (round(35*kg) clamped) when [weightKg] is finite and > 0, else the sex
+     *  baseline. Null/non-finite/<=0 weight -> sex baseline (back-compat). */
+    fun weightBaselineMl(sex: String, weightKg: Double?): Int {
+        if (weightKg == null || !weightKg.isFinite() || weightKg <= 0.0) return baselineForSex(sex)
+        val raw = (ML_PER_KG * weightKg).roundToInt()
+        return raw.coerceIn(WEIGHT_BASELINE_FLOOR, WEIGHT_BASELINE_CEIL)
+    }
+
+    /** Heat bump (ml) from skin-temp deviation in °C above baseline: round(devC*300) clamped 0..600.
+     *  Null/non-finite or a non-positive deviation -> 0. */
+    fun heatBumpMl(skinTempDevC: Double?): Int {
+        if (skinTempDevC == null || !skinTempDevC.isFinite() || skinTempDevC <= 0.0) return 0
+        val raw = (skinTempDevC * HEAT_BUMP_PER_DEG).roundToInt()
+        return raw.coerceIn(0, MAX_HEAT_BUMP)
+    }
+
+    /** The metric-aware daily goal (ml): round50(weightBaseline + effortBump + heatBump). With
+     *  weightKg == null and skinTempDevC == null this equals dailyGoalMl(sex, effort). */
+    fun dailyGoalMl(sex: String, weightKg: Double?, effort: Double?, skinTempDevC: Double?): Int {
+        val raw = weightBaselineMl(sex, weightKg) + effortBump(effort) + heatBumpMl(skinTempDevC)
+        return roundToNearest(raw, ROUND_TO)
+    }
+
+    /** Evenly spaced reminder minutes-of-day within waking hours [wakeHour, sleepHour); quiet hours
+     *  (sleep) are never disturbed. [count] reminders at the interior boundaries of count equal segments.
+     *  [] for non-positive count or window. BYTE-IDENTICAL to the Swift twin. */
+    fun reminderMinutesOfDay(wakeHour: Int, sleepHour: Int, count: Int): List<Int> {
+        if (count <= 0) return emptyList()
+        val wake = wakeHour.coerceIn(0, 23)
+        val sleep = sleepHour.coerceIn(0, 24)
+        val startMin = wake * 60
+        val endMin = sleep * 60
+        if (endMin <= startMin) return emptyList()
+        val span = endMin - startMin
+        val out = ArrayList<Int>(count)
+        for (i in 1..count) {
+            out.add(startMin + (span * i) / (count + 1))
+        }
+        return out
+    }
 }

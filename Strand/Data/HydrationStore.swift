@@ -207,9 +207,15 @@ extension Repository {
         }
     }
 
-    /// Today's hydration goal (ml) from the profile sex + today's Effort score. Pure math in
-    /// `HydrationGoal`; this just feeds it the live inputs (today's `strain` is NOOP's 0–100 Effort).
-    func hydrationGoalML(profileSex: String) -> Int {
-        HydrationGoal.dailyGoalML(sex: profileSex, effort: today?.strain)
+    /// Today's hydration goal (ml). R3: metric-aware — body weight personalises the baseline (~35 ml/kg)
+    /// and an elevated skin temperature adds a modest heat bump, on top of the existing Effort bump. Pure
+    /// math in `HydrationGoal`; this just feeds it the live inputs (today's `strain` is NOOP's 0–100
+    /// Effort, `skinTempDevC` is today's skin-temp deviation from baseline). `weightKg == nil` falls back
+    /// to the sex baseline, so a profile without a weight behaves exactly as before.
+    func hydrationGoalML(profileSex: String, weightKg: Double? = nil) -> Int {
+        HydrationGoal.dailyGoalML(sex: profileSex,
+                                  weightKg: weightKg,
+                                  effort: today?.strain,
+                                  skinTempDevC: today?.skinTempDevC)
     }
 }

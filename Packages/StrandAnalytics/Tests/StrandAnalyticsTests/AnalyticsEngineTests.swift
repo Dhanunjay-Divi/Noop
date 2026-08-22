@@ -419,7 +419,9 @@ final class AnalyticsEngineTests: XCTestCase {
             tstSeconds: 4 * 3600, inBedSeconds: 5 * 3600, efficiency: 0.8,
             restorativeSeconds: 1 * 3600, needHours: 8.0, consistency: 0.5)
         XCTAssertEqual(withNil, withHalf, accuracy: 1e-9)
-        XCTAssertEqual(withNil, 56.0, accuracy: 1e-9)
+        // R1 (2026-08-21): weights are now dur .50 / eff .10 / restor .20 / consist .20.
+        // 0.50·0.5 + 0.10·0.8 + 0.20·0.5(restorative) + 0.20·0.5(neutral consist) = 0.53.
+        XCTAssertEqual(withNil, 53.0, accuracy: 1e-9)
     }
 
     func testAnalyzeDayPopulatesRestAndConfidence() {

@@ -151,3 +151,6 @@ Strand/Oura/OuraSecrets.xcconfig
 
 # Personal bundle id prefix (BYO; never committed)
 Config/BundleIdSecrets.xcconfig
+
+# kiro working area (sandbox analysis + screenshots)
+noop_WIP/
