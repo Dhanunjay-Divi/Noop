@@ -141,6 +141,50 @@ class FormatSpecExclusion(unittest.TestCase):
         self.assertTrue(ia.is_probably_ui_text("%.1f br/min"))
 
 
+class AppleFormatCoverage(unittest.TestCase):
+    @staticmethod
+    def catalog(key: str, english: str | None, translation: str) -> dict:
+        localizations = {
+            "de": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": translation,
+                }
+            }
+        }
+        if english is not None:
+            localizations["en"] = {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": english,
+                }
+            }
+        return {"strings": {key: {"localizations": localizations}}}
+
+    def test_named_key_uses_english_localization_as_format_source(self):
+        cat = self.catalog(
+            "safety.duration.hours",
+            "%1$lld hr",
+            "%1$lld Std.",
+        )
+        self.assertEqual(ia.apple_format_gaps(cat, "de"), [])
+
+    def test_named_key_still_rejects_a_dropped_placeholder(self):
+        cat = self.catalog(
+            "safety.location.accuracy_format",
+            "Captured at %1$@, about %2$lld m.",
+            "Erfasst um %1$@.",
+        )
+        self.assertEqual(
+            ia.apple_format_gaps(cat, "de"),
+            ["safety.location.accuracy_format"],
+        )
+
+    def test_literal_key_remains_the_source_without_english_override(self):
+        cat = self.catalog("%lld days", None, "%lld Tage")
+        self.assertEqual(ia.apple_format_gaps(cat, "de"), [])
+
+
 class ScanAndroidEndToEnd(unittest.TestCase):
     """Exercises scan_android() against real files on disk (its actual
     contract), not just the pure-function helpers above."""

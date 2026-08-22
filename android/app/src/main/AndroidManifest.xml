@@ -9,6 +9,10 @@
       Hence the single INTERNET permission below.
     -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
 
     <!-- Android 12+ (API 31+) Bluetooth runtime permissions.
          neverForLocation: we do not derive physical location from BLE scans, so we
@@ -309,14 +313,30 @@
             android:name="com.noop.alarm.SmartAlarmReceiver"
             android:exported="false" />
 
-        <!-- Re-arms the persisted hard-deadline alarm after a reboot so an overnight restart can't
-             silently drop the user's wake. -->
+        <!-- Re-arms local wall-clock alarms after reboot, DST, travel, or a manual time change. -->
         <receiver
             android:name="com.noop.alarm.SmartAlarmBootReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.DATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Recomputes the opt-in Coach reminder's next local wall-clock time after reboot or travel.
+             The receiver never invokes a model; it only re-enqueues a privacy-safe local notification. -->
+        <receiver
+            android:name="com.noop.notif.CoachCheckInTimeChangeReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.DATE_CHANGED" />
             </intent-filter>
         </receiver>
 

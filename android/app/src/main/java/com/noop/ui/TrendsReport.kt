@@ -240,7 +240,7 @@ object TrendsReportRenderer {
 
         val left = MARGIN + 16f
         var ty = cardTop + 26f
-        text(canvas, "NOOP", left, ty, 11f, sansBold, ACCENT, letterSpacing = 0.12f)
+        text(canvas, "NOOP", left, ty, 11f, sansBold, ACCENT, letterSpacing = 0f)
         textRight(canvas, range.longName.uppercase(), PAGE_W - MARGIN - 16f, ty, 10f, sansBold, TEXT_TERTIARY)
         ty += 30f
         text(canvas, "Trends report", left, ty, 26f, sansBold, TEXT_PRIMARY)
@@ -266,7 +266,7 @@ object TrendsReportRenderer {
 
         val left = MARGIN + 16f
         var ty = top + 22f
-        text(canvas, "SUMMARY", left, ty, 10f, sansBold, ACCENT, letterSpacing = 0.1f)
+        text(canvas, "SUMMARY", left, ty, 10f, sansBold, ACCENT, letterSpacing = 0f)
         ty += 8f
         text(canvas, "What changed", left, ty + 10f, 16f, sansBold, TEXT_PRIMARY)
         ty += 28f
@@ -286,7 +286,7 @@ object TrendsReportRenderer {
         top: Float,
     ): Float {
         var y = top
-        text(canvas, "BY THE NUMBERS", MARGIN, y + 4f, 10f, sansBold, TEXT_TERTIARY, letterSpacing = 0.1f)
+        text(canvas, "BY THE NUMBERS", MARGIN, y + 4f, 10f, sansBold, TEXT_TERTIARY, letterSpacing = 0f)
         y += 10f
         text(canvas, "Metrics", MARGIN, y + 14f, 16f, sansBold, TEXT_PRIMARY)
         y += 26f
@@ -308,7 +308,7 @@ object TrendsReportRenderer {
         var ty = top + 24f
 
         // Title + mean + trend chip.
-        text(canvas, stat.metric.label.uppercase(), left, ty, 11f, sansBold, accent, letterSpacing = 0.08f)
+        text(canvas, stat.metric.label.uppercase(), left, ty, 11f, sansBold, accent, letterSpacing = 0f)
         val meanStr = meanText(stat)
         textRight(canvas, meanStr, right, ty, 14f, sansMedium, TEXT_PRIMARY)
 
@@ -334,7 +334,7 @@ object TrendsReportRenderer {
         val colW = (right - left) / cols.size
         cols.forEachIndexed { i, (label, value) ->
             val cx = left + i * colW
-            text(canvas, label, cx, top + 80f, 9f, sansBold, TEXT_TERTIARY, letterSpacing = 0.06f)
+            text(canvas, label, cx, top + 80f, 9f, sansBold, TEXT_TERTIARY, letterSpacing = 0f)
             text(canvas, value, cx, top + 91f, 11f, sansMedium, TEXT_SECONDARY)
         }
 

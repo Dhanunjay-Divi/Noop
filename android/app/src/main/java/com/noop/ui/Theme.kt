@@ -389,20 +389,20 @@ object Metrics {
     val space18 = 18.dp
     val space24 = 24.dp
     val sourceBadgeHeight = 18.dp
-    val cardRadius = 18.dp   // Bevel continuous radius (18–22dp)
+    val cardRadius = 16.dp
     val cornerXs = 2.dp
     val cornerSm = 12.dp
     val cornerBadge = 6.dp
     val cornerPill = 50.dp
     val cardPadding = 16.dp
     val gap = 12.dp           // gap between cards
-    val sectionGap = 28.dp    // gap between sections
+    val sectionGap = 24.dp    // gap between sections
     // #765: the ONE inter-card vertical spacing for a screen's top-level scroll rows. Both ScreenScaffold
     // and LazyScreenScaffold use this for `spacedBy(...)`, so every Today/Explore card sits on the same
     // rhythm instead of a bare `20.dp` literal repeated per scaffold (and Today no longer injects ad-hoc
     // Spacer rows that broke that rhythm). One token = uniform, consistent gaps across the screens.
     val screenRowSpacing = 20.dp
-    val screenPadding = 24.dp
+    val screenPadding = 16.dp
     val tileHeight = 108.dp   // every metric tile is this tall
     val chartHeight = 220.dp
     val divider = 1.dp
@@ -437,29 +437,19 @@ object Metrics {
 
 // MARK: - Typography (ported from StrandDesign/Typography.swift §9.2)
 //
-// Helvetica Neue on Apple; on Android we use a Helvetica-Neue FontFamily where one
-// is bundled in res/font, else FontFamily.SansSerif as the documented substitute
-// (no Helvetica asset is bundled, so the platform grotesque stands in) with the same
-// sizes/weights. Numeric/live styles stay in the house sans and request TABULAR
+// Native platform sans-serif typography. Numeric/live styles request TABULAR
 // figures via fontFeatureSettings = "tnum" (mirroring iOS .monospacedDigit()) so live
 // values don't reflow; Monospace is reserved for the `mono` raw/log style only.
 
 object NoopType {
-    // Helvetica Neue family — falls back to the platform grotesque (SansSerif) when
-    // no res/font/helvetica_neue asset is bundled, per the v3 type spec.
     private val sans = FontFamily.SansSerif
     private val monoFamily = FontFamily.Monospace
 
-    /** Display 64–80 / Bold — the recovery ring number. Tight tracking (≈ -0.04em),
-     *  tabular figures so a changing value never reflows. Mirrors StrandFont.display. */
+    /** Display 64–80 / Bold — the recovery ring number. */
     fun display(size: Float = 72f) = TextStyle(
         fontFamily = sans, fontWeight = FontWeight.Bold, fontSize = size.sp,
-        letterSpacing = displayTracking(size).sp, fontFeatureSettings = "tnum",
+        letterSpacing = 0.sp, fontFeatureSettings = "tnum",
     )
-
-    /** The tight tracking for big display numbers (≈ -0.04em). Already applied inside
-     *  display(); exposed to mirror StrandFont.displayTracking. */
-    fun displayTracking(size: Float = 72f): Float = -size * 0.04f
 
     val title1 = TextStyle(fontFamily = sans, fontWeight = FontWeight.Bold, fontSize = 28.sp)
     val title2 = TextStyle(fontFamily = sans, fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
@@ -469,10 +459,10 @@ object NoopType {
     val caption = TextStyle(fontFamily = sans, fontWeight = FontWeight.Normal, fontSize = 12.sp)
     val footnote = TextStyle(fontFamily = sans, fontWeight = FontWeight.Normal, fontSize = 11.sp)
 
-    /** Overline 11 / Bold, +1.4 tracking, ALL-CAPS at use site. */
+    /** Overline 11 / Semibold, ALL-CAPS at use site. */
     val overline = TextStyle(
-        fontFamily = sans, fontWeight = FontWeight.Bold, fontSize = 11.sp,
-        letterSpacing = 1.4.sp,
+        fontFamily = sans, fontWeight = FontWeight.SemiBold, fontSize = 11.sp,
+        letterSpacing = 0.sp,
     )
 
     /** Mono 13 — raw / log views. */
@@ -496,7 +486,7 @@ object NoopType {
     val tileValue = number(24f)
     val tileValueLarge = number(26f)
 
-    const val overlineTracking = 1.4f
+    const val overlineTracking = 0f
 }
 
 // MARK: - Material3 bridge

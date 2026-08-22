@@ -23,11 +23,6 @@ struct LiveSessionView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var motion = NoopMotionState.shared
 
-    /// "Card transparency" (0–100, default 100): fades the live-session cards in lockstep with the frosted
-    /// cards; content stays readable. Mirrors Kotlin `NoopPrefs.cardOpacityPercent`.
-    @AppStorage(CardAppearancePrefs.opacityKey) private var cardOpacityPercent = CardAppearancePrefs.defaultPercent
-    private var cardOpacity: Double { max(0, min(1, Double(cardOpacityPercent) / 100)) }
-
     /// One runner per presentation — created here, started on appear, never restarted.
     @StateObject private var runner = LiveSessionRunner()
     let onClose: () -> Void
@@ -121,7 +116,7 @@ struct LiveSessionView: View {
 
     private var betaPill: some View {
         Text("BETA")
-            .font(StrandFont.overlineScaled(8.5)).tracking(1.2)
+            .font(StrandFont.overlineScaled(8.5)).tracking(0)
             .foregroundStyle(StrandPalette.textSecondary)
             .padding(.horizontal, 8).padding(.vertical, 2.5)
             .background(Capsule().fill(StrandPalette.surfaceInset)
@@ -295,8 +290,6 @@ struct LiveSessionSummarySheet: View {
     let row: LiveSessionRow
     let guardedCount: Int?
     let onDone: () -> Void
-    @AppStorage(CardAppearancePrefs.opacityKey) private var cardOpacityPercent = CardAppearancePrefs.defaultPercent
-    private var cardOpacity: Double { max(0, min(1, Double(cardOpacityPercent) / 100)) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
@@ -371,13 +364,7 @@ struct LiveSessionSummarySheet: View {
         VStack(alignment: .leading, spacing: NoopMetrics.rowSpacing) { content() }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(StrandPalette.surfaceRaised)
-                    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .strokeBorder(StrandPalette.hairline, lineWidth: 1))
-                    .opacity(cardOpacity)
-            )
+            .background(FrostedCardSurface(cornerRadius: NoopMetrics.cardRadius))
     }
 
     private var cueLine: String {

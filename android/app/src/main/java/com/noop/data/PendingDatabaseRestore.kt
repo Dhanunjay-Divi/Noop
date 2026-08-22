@@ -116,8 +116,14 @@ object PendingDatabaseRestore {
         val files = Fileset(context)
         val marker = readMarker(files.marker) ?: return
         if (marker.phase != Phase.APPLIED) return
-        if (marker.hasSettings && files.settings.exists()) {
-            runCatching { BackupSettingsBridge.apply(context.applicationContext, files.settings.readText()) }
+        val restoredSettings = marker.hasSettings && files.settings.exists() && runCatching {
+            BackupSettingsBridge.apply(context.applicationContext, files.settings.readText())
+            true
+        }.getOrDefault(false)
+        if (restoredSettings) {
+            // Preference mirrors and OS schedulers may already have been initialized earlier in this
+            // launch. Reconcile only after Room accepted the replacement and settings were committed.
+            BackupSettingsBridge.reconcileAfterRestore(context.applicationContext)
         }
         cleanupStaging(files, keepRollback = false)
         runCatching {

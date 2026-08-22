@@ -5,12 +5,14 @@ import android.content.Context
 import android.content.Intent
 
 /**
- * Re-arms the guaranteed wake alarm after a device reboot (#207).
+ * Re-arms local wall-clock alarms after reboot, manual clock changes, DST, or travel (#207).
  *
  * AlarmManager schedules are cleared by a restart, so without this a phone that reboots overnight
  * would silently drop the alarm — exactly the failure the safety guarantee exists to prevent. On
  * BOOT_COMPLETED (and the OEM "quick boot" variant) we re-schedule the SAME persisted hard deadline
  * via [SmartAlarmScheduler.rearmPersisted], which no-ops if the alarm is disabled or already past.
+ * For a timezone/date/clock change, the persisted epoch is no longer authoritative, so the wake
+ * alarm is recomputed from the user's local wall-clock target.
  */
 class SmartAlarmBootReceiver : BroadcastReceiver() {
 
@@ -22,15 +24,27 @@ class SmartAlarmBootReceiver : BroadcastReceiver() {
                 runCatching {
                     SmartAlarmScheduler.rearmPersisted(context, SmartAlarmStore.from(context))
                 }
-                // Re-schedule the (non-critical) wind-down nudge too — inexact repeating alarms are
-                // cleared by a reboot on many OEMs, so re-arm from the user's earliest wake time.
+                rearmWindDown(context)
+            }
+
+            Intent.ACTION_TIMEZONE_CHANGED,
+            Intent.ACTION_TIME_CHANGED,
+            Intent.ACTION_DATE_CHANGED -> {
                 runCatching {
-                    val wind = WindDownStore.from(context)
-                    if (wind.enabled) {
-                        val wake = SmartAlarmStore.from(context).targetMinutes
-                        WindDownScheduler.schedule(context, wind, wake)
-                    }
+                    val smart = SmartAlarmStore.from(context)
+                    if (smart.enabled) SmartAlarmScheduler.arm(context, smart)
                 }
+                rearmWindDown(context)
+            }
+        }
+    }
+
+    private fun rearmWindDown(context: Context) {
+        runCatching {
+            val wind = WindDownStore.from(context)
+            if (wind.enabled) {
+                val wake = SmartAlarmStore.from(context).targetMinutes
+                WindDownScheduler.schedule(context, wind, wake)
             }
         }
     }

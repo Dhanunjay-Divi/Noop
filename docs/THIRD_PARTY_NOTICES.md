@@ -5,7 +5,7 @@ Apple app, Android release runtime, and self-hosted server image. The current
 reviewed graph contains:
 
 - 5 SwiftPM components from the app workspace `Package.resolved`;
-- 125 Maven components selected by `fullReleaseRuntimeClasspath` in the Gradle
+- 127 Maven components selected by `fullReleaseRuntimeClasspath` in the Gradle
   lockfile;
 - 20 hash-locked Python runtime distributions; and
 - 3 digest-pinned OCI inputs (two build bases and the pulled TimescaleDB image).

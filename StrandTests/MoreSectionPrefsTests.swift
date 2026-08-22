@@ -10,7 +10,7 @@ final class MoreSectionPrefsTests: XCTestCase {
 
     func testQuickAccessStaysSmallUsefulAndUnique() {
         XCTAssertEqual(MoreSectionPrefs.quickAccess.map(\.id),
-                       ["profile", "devices", "workouts", "settings"])
+                       ["safety", "profile", "devices", "friends"])
         XCTAssertEqual(Set(MoreSectionPrefs.quickAccess.map(\.id)).count,
                        MoreSectionPrefs.quickAccess.count)
         XCTAssertLessThanOrEqual(MoreSectionPrefs.quickAccess.count, 4,

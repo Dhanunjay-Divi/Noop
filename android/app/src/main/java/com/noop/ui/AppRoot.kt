@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -24,10 +25,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CompareArrows
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bedtime
@@ -46,9 +50,12 @@ import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Timeline
@@ -58,10 +65,9 @@ import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.NavigationDrawerItem
-import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -84,12 +90,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -100,11 +109,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 
 // MARK: - Navigation model
 //
 // The macOS app's sidebar holds many sections; on Android (mirroring the iOS RootTabView) we surface
-// them through a unified floating "glass" bottom bar (Today · Trends · Sleep · More) for the everyday
+// them through a unified floating "glass" bottom bar (Today · Trends · Workouts · Sleep · More) for the everyday
 // screens, with a "More" sheet that lists the full grouped set — so every destination is one tap away
 // without a global hamburger/drawer. Destinations are grouped exactly as the sidebar groups them.
 // Routes whose screens belong to later waves point at a ComingSoon placeholder so the app compiles today.
@@ -133,6 +144,7 @@ private enum class Destination(
 
     // Group: Activity
     Workouts("workouts", R.string.nav_workouts, Icons.Filled.FitnessCenter),
+    Nutrition("nutrition", R.string.nav_nutrition, Icons.Filled.Restaurant),
     Trends("trends", R.string.nav_trends, Icons.AutoMirrored.Filled.TrendingUp),
 
     // Group: Insight
@@ -144,6 +156,7 @@ private enum class Destination(
 
     // Group: Health
     Health("health", R.string.nav_health, Icons.Filled.MonitorHeart),
+    Friends("friends", R.string.nav_friends, Icons.Filled.People),
     Hydration("hydration", R.string.nav_hydration, Icons.Filled.WaterDrop),
     VitalSigns("vital_signs", R.string.nav_vital_signs, Icons.Filled.HealthAndSafety),
     VitalSignsDetail("vital_detail/{key}", R.string.nav_vital_signs, Icons.Filled.HealthAndSafety),
@@ -153,11 +166,11 @@ private enum class Destination(
 
     // Group: System
     Automations("automations", R.string.nav_automations, Icons.Filled.Bolt),
-    // "Alarms" is the ONE alarm surface (#766): the phone-based Wake Window (light-sleep detection with a
-    // guaranteed OS backup), the strap's own firmware wake-alarm, and the wind-down reminder, all in one
-    // place. Previously "Wake Window" (#730), but the strap alarm moved in from Automations so the broader
-    // name fits. Route id stays "smart_alarm" (display string only).
+    // "Sleep Planner" is the ONE sleep-schedule surface (#766): tonight's plan, the phone Wake Window
+    // with guaranteed OS backup, the strap firmware alarm, and the wind-down reminder in one place.
+    // Route id stays "smart_alarm" (display string only).
     SmartAlarm("smart_alarm", R.string.nav_alarms, Icons.Filled.Alarm),
+    Safety("safety", R.string.nav_safety, Icons.Filled.Shield),
     Devices("devices", R.string.nav_devices, Icons.Filled.Sensors),
     DataSources("data_sources", R.string.nav_data_sources, Icons.Filled.Storage),
     BackupSync("backup_sync", R.string.nav_backup_sync, Icons.Filled.CloudSync),
@@ -194,8 +207,8 @@ private data class DrawerGroup(
     val defaultExpanded: Boolean,
 )
 
-// Mirrors the iOS RootTabView `moreTab` grouping + order one-for-one. Today / Trends / Sleep are NOT
-// listed (they're bottom-bar tabs, exactly as on iOS). Android-only screens (Vital Signs, Wake Window,
+// Mirrors the iOS RootTabView `moreTab` grouping + order. Today / Trends / Workouts / Sleep are NOT
+// listed (they're bottom-bar tabs). Android-only screens (Vital Signs, Wake Window,
 // Notifications, Devices) are slotted into the matching iOS group.
 private val drawerGroups: List<DrawerGroup> = listOf(
     DrawerGroup("Insights", R.string.more_group_insights, listOf(
@@ -203,7 +216,7 @@ private val drawerGroups: List<DrawerGroup> = listOf(
         Destination.Insights, Destination.Explore, Destination.Compare,
     ), defaultExpanded = true),
     DrawerGroup("Body", R.string.more_group_body, listOf(
-        Destination.Live, Destination.Workouts, Destination.Health, Destination.VitalSigns,
+        Destination.Live, Destination.Friends, Destination.Nutrition, Destination.Health, Destination.VitalSigns,
         Destination.LabBook, Destination.Stress, Destination.Breathe, Destination.Intervals,
         Destination.Rhythm,
     ), defaultExpanded = true),
@@ -252,7 +265,7 @@ internal object MoreSectionPrefs {
 }
 
 /**
- * App shell: a single [Scaffold] with a floating [GlassBottomBar] (Today · Trends · Sleep · More)
+ * App shell: a single [Scaffold] with a floating [GlassBottomBar] (Today · Trends · Workouts · Sleep · More)
  * driving one [NavHost], mirroring the iOS RootTabView. There is NO global toolbar and no nav drawer
  * — every screen self-titles via [ScreenScaffold], and the "More" sheet (opened from the bar) reaches
  * every destination in [drawerGroups], so nothing is lost. A single [AppViewModel] is created here and
@@ -267,6 +280,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
     val currentRoute = backStack?.destination?.route
     val current = Destination.forRoute(currentRoute)
     var showQuickActions by remember { mutableStateOf(false) }
+    var quickOverlay by remember { mutableStateOf<QuickActionKind?>(null) }
     // The Updates inbox sheet (opened by the Today header bell). The store is a process singleton so
     // the Today cards and the import path post to the same inbox this sheet renders.
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -288,16 +302,14 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
         Scaffold(
             containerColor = Palette.surfaceBase,
             bottomBar = {
-                // One unified "glass" bar: four evenly-spaced tabs — Today · Trends · Sleep · More
-                // (matches the iOS FloatingTabBar). The quick-action "+" lives in the Today header's
-                // top-right (balancing the avatar), so the bar is clean tabs only. "More" navigates to
-                // its own page (mirroring the iOS More tab) that reaches every grouped destination, so no
-                // destination is lost without the drawer.
+                // One translucent navigation island plus a separate persistent quick-add circle. The
+                // action stays reachable from every tab without crowding a page-specific header.
                 GlassBottomBar(
                     current = current,
                     onTabSelected = { dest ->
                         if (dest.route != currentRoute) nav.navigateTopLevel(dest.route)
                     },
+                    onQuickActions = { showQuickActions = true },
                 )
             },
         ) { inner ->
@@ -319,9 +331,6 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 composable(Destination.Today.route) {
                     TodayScreen(
                         viewModel = viewModel,
-                        // The quick-action "+" lives in the Today header's top-right now (off the
-                        // bottom bar) — it opens the same quick-action sheet the bar used to.
-                        onQuickActions = { showQuickActions = true },
                         // The Updates "ringer" — the bell sits before the +, and opens the inbox
                         // sheet AppRoot presents (it owns the nav for deep-links).
                         updateStore = updateStore,
@@ -381,7 +390,9 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 composable(Destination.Explore.route) { TrendsExploreScreen(viewModel) }
                 composable(Destination.Automations.route) { AutomationsScreen(viewModel) }
                 composable(Destination.SmartAlarm.route) { SmartAlarmScreen(viewModel) }
+                composable(Destination.Safety.route) { SafetyCenterScreen() }
                 composable(Destination.Workouts.route) { WorkoutsScreen(viewModel) }
+                composable(Destination.Nutrition.route) { NutritionLogScreen(viewModel) }
                 composable(Destination.Intelligence.route) { IntelligenceScreen(viewModel) }
 
                 // --- Placeholder routes (later waves fill these in) ---
@@ -400,6 +411,13 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         onVitalClick = { nav.navigate("vital_detail/$it") },
                         onOpenLabBook = { nav.navigateTopLevel(Destination.LabBook.route) },
                         onOpenFusedRecord = { nav.navigateTopLevel(Destination.FusedRecord.route) },
+                    )
+                }
+                composable(Destination.Friends.route) {
+                    FriendsScreen(
+                        onOpenBackupSync = {
+                            nav.navigateTopLevel(Destination.BackupSync.route)
+                        },
                     )
                 }
                 composable(Destination.Hydration.route) { HydrationScreen(viewModel) }
@@ -451,74 +469,59 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
             }
         }
 
-        // Quick-actions sheet, opened by the raised gold centre FAB. Each row routes to an
-        // existing destination — nothing new is built here, the FAB is just a faster door in.
+        // Compact 3x3 launcher opened by the persistent floating +. Long forms still live on their
+        // existing screens; this is a stable one-tap index, not a second implementation of each tool.
         if (showQuickActions) {
             ModalBottomSheet(
                 onDismissRequest = { showQuickActions = false },
-                containerColor = Palette.surfaceRaised,
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                containerColor = Palette.surfaceOverlay,
                 contentColor = Palette.textPrimary,
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp)
-                        .padding(bottom = 24.dp),
-                ) {
-                    Overline(
-                        "Quick actions",
-                        modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 6.dp),
-                        color = Palette.textTertiary,
-                    )
-                    // Updates inbox — relocated here off the Today header (the liquid Today header mirrors iOS,
-                    // which has no notifications bell). The feature is fully intact and one tap away: this row
-                    // opens the same inbox sheet, showing the unread count as a trailing badge.
-                    NavigationDrawerItem(
-                        selected = false,
-                        onClick = {
-                            showQuickActions = false
-                            showUpdatesInbox = true
-                        },
-                        icon = { Icon(Icons.Filled.Notifications, contentDescription = null) },
-                        label = { Text(uiString(R.string.l10n_app_root_updates_c76d1807), style = NoopType.body) },
-                        badge = {
-                            val unread = updateStore.unreadCount
-                            if (unread > 0) {
-                                Text(
-                                    if (unread > 99) "99+" else unread.toString(),
-                                    style = NoopType.captionNumber,
-                                    color = Palette.statusCritical,
-                                )
+                QuickActionLauncher(
+                    unreadUpdates = updateStore.unreadCount,
+                    onUpdates = {
+                        showQuickActions = false
+                        showUpdatesInbox = true
+                    },
+                    onPick = { action ->
+                        showQuickActions = false
+                        when (action.kind) {
+                            QuickActionKind.STRENGTH,
+                            QuickActionKind.HRV -> quickOverlay = action.kind
+                            else -> action.route?.let { route ->
+                                if (route != currentRoute) nav.navigateTopLevel(route)
                             }
-                        },
-                        colors = NavigationDrawerItemDefaults.colors(
-                            unselectedContainerColor = Palette.surfaceRaised,
-                            unselectedIconColor = Palette.accent,
-                            unselectedTextColor = Palette.textPrimary,
-                        ),
-                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
-                    )
-                    quickActions.forEach { action ->
-                        NavigationDrawerItem(
-                            selected = false,
-                            onClick = {
-                                showQuickActions = false
-                                if (action.route != currentRoute) {
-                                    nav.navigateTopLevel(action.route)
-                                }
-                            },
-                            icon = { Icon(action.icon, contentDescription = null) },
-                            label = { Text(stringResource(action.titleRes), style = NoopType.body) },
-                            colors = NavigationDrawerItemDefaults.colors(
-                                unselectedContainerColor = Palette.surfaceRaised,
-                                unselectedIconColor = Palette.accent,
-                                unselectedTextColor = Palette.textPrimary,
-                            ),
-                            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+                        }
+                    },
+                )
+            }
+        }
+
+        when (quickOverlay) {
+            QuickActionKind.STRENGTH -> {
+                StrengthTrainerSheet(
+                    vm = viewModel,
+                    onDismiss = { quickOverlay = null },
+                )
+            }
+            QuickActionKind.HRV -> {
+                Dialog(
+                    onDismissRequest = { quickOverlay = null },
+                    properties = DialogProperties(usePlatformDefaultWidth = false),
+                ) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = Palette.surfaceBase,
+                    ) {
+                        HrvSnapshotScreen(
+                            viewModel = viewModel,
+                            onClose = { quickOverlay = null },
                         )
                     }
                 }
             }
+            else -> Unit
         }
 
         // The Updates inbox (opened by the Today header bell). Presented here so it has the nav for
@@ -596,6 +599,44 @@ private fun MoreScreen(onNavigate: (String) -> Unit) {
         // Sky-behind-cards fills the viewport so the transparent cards reveal the sky the whole way down.
         fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
+        // Safety is an immediate launch card above every collapsible group. Keeping it outside the
+        // default-collapsed App group makes the manual help/check-in surface discoverable under stress.
+        NoopCard(
+            modifier = Modifier.clickable { onNavigate(Destination.Safety.route) },
+            tint = Palette.statusCritical,
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.Shield,
+                    contentDescription = null,
+                    tint = Palette.statusCritical,
+                    modifier = Modifier.size(22.dp),
+                )
+                Spacer(Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        stringResource(Destination.Safety.titleRes),
+                        style = NoopType.headline,
+                        color = Palette.textPrimary,
+                    )
+                    Text(
+                        stringResource(R.string.safety_more_subtitle),
+                        style = NoopType.footnote,
+                        color = Palette.textSecondary,
+                    )
+                }
+                Icon(
+                    Icons.Filled.ChevronRight,
+                    contentDescription = null,
+                    tint = Palette.textTertiary,
+                    modifier = Modifier.size(Metrics.iconSmall),
+                )
+            }
+        }
+
         // Mirror the iOS More page: each group is a tappable UPPERCASE overline header (with a disclosure
         // chevron) over a single grouped white NoopCard whose rows are tight (accent icon + title +
         // chevron) and separated by inset hairlines (NOT loose NavigationDrawerItems on the bare surface).
@@ -673,6 +714,7 @@ private fun MoreRow(dest: Destination, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .testTag("noop.more.${dest.route}")
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -691,23 +733,20 @@ private fun MoreRow(dest: Destination, onClick: () -> Unit) {
 
 // MARK: - Glass bottom bar
 //
-// The signature bar, ported from iOS's FloatingTabBar: ONE rounded "glass" island holding four
-// evenly-spaced inline slots — Today · Trends · Sleep · More. The quick-action "+" now lives in the
-// Today header's top-right (it left the bar to balance the avatar), so the bar is clean tabs only.
-// The "glass" feel is a translucent raised surface with a low elevation and a subtle hairline border
-// — frosted, not a hard opaque slab and not a glow. Each nav slot is an icon over a small label;
-// active = gold accent, inactive = textSecondary. All routing is unchanged: the four tabs switch the
-// same destinations.
+// The signature shell is one translucent five-tab island plus a separate circular quick-add control.
+// Both float over the page, preserving the user's requested glass treatment without turning the entire
+// navigation-safe area into an opaque slab.
 
 /** A single bottom-bar nav slot: the destination it switches to, plus the bar-specific icon/label. */
 private data class BarTab(val dest: Destination, val icon: ImageVector, @StringRes val labelRes: Int)
 
-/** The nav slots in iOS order: Today · Trends · Sleep · More.
- *  More is special-cased (it opens the sheet rather than a route), so it is appended at the call site. */
+/** The nav slots in iOS order. More is appended at the call site because its selected
+ * state also represents destinations reached through the complete index. */
 private val barLeadingTabs = listOf(
     BarTab(Destination.Today, Icons.Outlined.GridView, R.string.nav_today),
     // chart.line.uptrend.xyaxis on iOS — the rising-trend glyph, not a flat bar chart.
     BarTab(Destination.Trends, Icons.AutoMirrored.Filled.TrendingUp, R.string.nav_trends),
+    BarTab(Destination.Workouts, Icons.Filled.FitnessCenter, R.string.nav_workouts),
 )
 private val barTrailingTabs = listOf(
     BarTab(Destination.Sleep, Icons.Filled.Bedtime, R.string.nav_sleep),
@@ -717,71 +756,111 @@ private val barTrailingTabs = listOf(
 private fun GlassBottomBar(
     current: Destination,
     onTabSelected: (Destination) -> Unit,
+    onQuickActions: () -> Unit,
 ) {
     val barShape = RoundedCornerShape(50)
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            // Clear the gesture-nav bar (home indicator) first, then add breathing room so the capsule
-            // floats free of the bottom edge rather than jamming against it — iOS clears the home-indicator
-            // safe area + 4pt; here navigationBarsPadding + 12dp gives the same lift.
             .navigationBarsPadding()
-            .padding(horizontal = 22.dp)
+            .padding(horizontal = 6.dp)
             .padding(top = 4.dp, bottom = Metrics.space12),
         contentAlignment = Alignment.Center,
     ) {
-        Surface(
-            shape = barShape,
-            // "Glass": a translucent raised surface — a frosted island, not a hard slab. Compose has no
-            // cheap blur, so translucency (≈0.80) + a hairline rim is the Liquid-Glass stand-in. A soft,
-            // low drop shadow reads as floating without a glow.
-            color = Palette.surfaceRaised.copy(alpha = 0.80f),
-            tonalElevation = 2.dp,
-            shadowElevation = 4.dp,
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                // Cap the width so the pill stays a centred floating island on tablets, not a full-bleed bar.
-                .widthIn(max = 480.dp)
-                .border(0.5.dp, Palette.hairline.copy(alpha = 0.6f), barShape),
+                .widthIn(max = 548.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Row(
+            Surface(
+                shape = barShape,
+                color = Palette.surfaceRaised.copy(alpha = 0.64f),
+                tonalElevation = 1.dp,
+                shadowElevation = 4.dp,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    .weight(1f)
+                    .border(
+                        0.7.dp,
+                        Palette.hairlineStrong.copy(alpha = 0.58f),
+                        barShape,
+                    ),
             ) {
-                barLeadingTabs.forEach { tab ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 5.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(1.dp),
+                ) {
+                    barLeadingTabs.forEach { tab ->
+                        BarSlot(
+                            icon = tab.icon,
+                            label = stringResource(tab.labelRes),
+                            active = current == tab.dest,
+                            testTag = "noop.tab.${tab.dest.route}",
+                            modifier = Modifier.weight(1f),
+                            onClick = { onTabSelected(tab.dest) },
+                        )
+                    }
+                    barTrailingTabs.forEach { tab ->
+                        BarSlot(
+                            icon = tab.icon,
+                            label = stringResource(tab.labelRes),
+                            active = current == tab.dest,
+                            testTag = "noop.tab.${tab.dest.route}",
+                            modifier = Modifier.weight(1f),
+                            onClick = { onTabSelected(tab.dest) },
+                        )
+                    }
                     BarSlot(
-                        icon = tab.icon,
-                        label = stringResource(tab.labelRes),
-                        active = current == tab.dest,
+                        icon = Icons.Filled.MoreHoriz,
+                        label = stringResource(R.string.nav_more),
+                        active = current != Destination.Today && current != Destination.Trends &&
+                            current != Destination.Workouts && current != Destination.Sleep,
+                        testTag = "noop.tab.more",
                         modifier = Modifier.weight(1f),
-                        onClick = { onTabSelected(tab.dest) },
+                        onClick = { onTabSelected(Destination.More) },
                     )
                 }
-                barTrailingTabs.forEach { tab ->
-                    BarSlot(
-                        icon = tab.icon,
-                        label = stringResource(tab.labelRes),
-                        active = current == tab.dest,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onTabSelected(tab.dest) },
-                    )
-                }
-                BarSlot(
-                    icon = Icons.Filled.MoreHoriz,
-                    label = stringResource(R.string.nav_more),
-                    // Selected on the More page itself, and also kept lit whenever the current screen is
-                    // one reached THROUGH More (i.e. not one of the bar's own three tabs) — so drilling
-                    // into any grouped destination still reads as "you're in More", never "nowhere".
-                    active = current != Destination.Today && current != Destination.Trends &&
-                        current != Destination.Sleep,
-                    modifier = Modifier.weight(1f),
-                    onClick = { onTabSelected(Destination.More) },
-                )
             }
+            FloatingQuickAddButton(onClick = onQuickActions)
         }
+    }
+}
+
+@Composable
+private fun FloatingQuickAddButton(onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val quickActionsLabel = stringResource(
+        R.string.l10n_today_screen_quick_actions_e47e8042,
+    )
+    Box(
+        modifier = Modifier
+            .size(54.dp)
+            .testTag("noop.quick-actions")
+            .clip(CircleShape)
+            .background(Palette.surfaceRaised.copy(alpha = 0.66f))
+            .border(
+                0.7.dp,
+                Palette.hairlineStrong.copy(alpha = 0.62f),
+                CircleShape,
+            )
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            )
+            .semantics { contentDescription = quickActionsLabel },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Filled.Add,
+            contentDescription = null,
+            tint = Palette.textPrimary,
+            modifier = Modifier.size(22.dp),
+        )
     }
 }
 
@@ -792,12 +871,14 @@ private fun BarSlot(
     icon: ImageVector,
     label: String,
     active: Boolean,
+    testTag: String,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val tint = if (active) Palette.accent else Palette.textSecondary
     Column(
         modifier = modifier
+            .testTag(testTag)
             .clip(RoundedCornerShape(14.dp))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -805,7 +886,10 @@ private fun BarSlot(
                 onClick = onClick,
             )
             .padding(vertical = 3.dp)
-            .semantics { contentDescription = label },
+            .semantics {
+                contentDescription = label
+                selected = active
+            },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
@@ -817,21 +901,178 @@ private fun BarSlot(
                 fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
             ),
             color = tint,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
 
-/** A centre-FAB quick action: a display title, an icon and the destination route it opens. */
-private data class QuickAction(@StringRes val titleRes: Int, val icon: ImageVector, val route: String)
+private enum class QuickActionKind {
+    WORKOUT,
+    STRENGTH,
+    NUTRITION,
+    JOURNAL,
+    HYDRATION,
+    HRV,
+    BREATHE,
+    INTERVALS,
+    LIVE,
+}
 
-/** The quick actions on the gold centre FAB, each routing to an existing destination. Live HR leads
- *  — it moved off the bottom bar (so the FAB no longer overlaps a tab) but stays one tap away here. */
-private val quickActions: List<QuickAction> = listOf(
-    QuickAction(R.string.action_live_hr, Destination.Live.icon, Destination.Live.route),
-    QuickAction(R.string.action_start_workout, Icons.Filled.FitnessCenter, Destination.Workouts.route),
-    QuickAction(R.string.action_log_journal, Icons.Filled.Edit, Destination.Insights.route),
-    QuickAction(R.string.action_breathe, Icons.Filled.Air, Destination.Breathe.route),
+private data class QuickAction(
+    val title: String,
+    val icon: ImageVector,
+    val kind: QuickActionKind,
+    val route: String? = null,
 )
+
+private val quickActions: List<QuickAction> = listOf(
+    QuickAction("Workout", Icons.AutoMirrored.Filled.DirectionsRun, QuickActionKind.WORKOUT, Destination.Workouts.route),
+    QuickAction("Strength", Icons.Filled.FitnessCenter, QuickActionKind.STRENGTH),
+    QuickAction("Meal", Icons.Filled.Restaurant, QuickActionKind.NUTRITION, Destination.Nutrition.route),
+    QuickAction("Journal", Icons.Filled.Edit, QuickActionKind.JOURNAL, Destination.Insights.route),
+    QuickAction("Hydration", Icons.Filled.WaterDrop, QuickActionKind.HYDRATION, Destination.Hydration.route),
+    QuickAction("HRV", Icons.Filled.MonitorHeart, QuickActionKind.HRV),
+    QuickAction("Breathe", Icons.Filled.Air, QuickActionKind.BREATHE, Destination.Breathe.route),
+    QuickAction("Intervals", Icons.Filled.Timeline, QuickActionKind.INTERVALS, Destination.Intervals.route),
+    QuickAction("Live HR", Icons.Filled.FavoriteBorder, QuickActionKind.LIVE, Destination.Live.route),
+)
+
+@Composable
+private fun QuickActionLauncher(
+    unreadUpdates: Int,
+    onUpdates: () -> Unit,
+    onPick: (QuickAction) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Overline("Quick actions", color = Palette.textTertiary)
+            Spacer(Modifier.weight(1f))
+            UpdatesLauncherButton(unreadUpdates = unreadUpdates, onClick = onUpdates)
+        }
+        quickActions.chunked(3).forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                row.forEach { action ->
+                    QuickActionTile(
+                        action = action,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onPick(action) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickActionTile(
+    action: QuickAction,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val tint = when (action.kind) {
+        QuickActionKind.WORKOUT -> Palette.effortColor
+        QuickActionKind.STRENGTH -> Palette.metricPurple
+        QuickActionKind.NUTRITION -> Palette.statusPositive
+        QuickActionKind.JOURNAL -> Palette.accent
+        QuickActionKind.HYDRATION -> Palette.metricCyan
+        QuickActionKind.HRV, QuickActionKind.LIVE -> Palette.metricRose
+        QuickActionKind.BREATHE -> Palette.restColor
+        QuickActionKind.INTERVALS -> Palette.statusWarning
+    }
+    Column(
+        modifier = modifier
+            .height(88.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = action.title },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(46.dp)
+                .clip(CircleShape)
+                .background(Palette.surfaceInset)
+                .border(0.8.dp, Palette.hairline, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                action.icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Spacer(Modifier.height(7.dp))
+        Text(
+            action.title,
+            style = NoopType.footnote.copy(fontWeight = FontWeight.SemiBold),
+            color = Palette.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun UpdatesLauncherButton(unreadUpdates: Int, onClick: () -> Unit) {
+    val updatesLabel = stringResource(R.string.l10n_app_root_updates_c76d1807)
+    val unreadUpdatesLabel = stringResource(
+        R.string.appwide_shell_updates_unread_format,
+        unreadUpdates,
+    )
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .semantics {
+                contentDescription = if (unreadUpdates > 0) {
+                    unreadUpdatesLabel
+                } else {
+                    updatesLabel
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Filled.Notifications,
+            contentDescription = null,
+            tint = Palette.textSecondary,
+            modifier = Modifier.size(21.dp),
+        )
+        if (unreadUpdates > 0) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(18.dp)
+                    .clip(CircleShape)
+                    .background(Palette.statusCritical),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    if (unreadUpdates > 9) "9+" else unreadUpdates.toString(),
+                    style = NoopType.captionNumber.copy(fontSize = 9.sp),
+                    color = Color.White,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
 
 // MARK: - Navigation motion (README §Motion)
 //

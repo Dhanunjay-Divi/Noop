@@ -23,7 +23,7 @@ struct V2SectionHeader: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(overline.uppercased())
                     .font(NoopV2.overline)
-                    .tracking(1.1)
+                    .tracking(0)
                     .foregroundStyle(NoopV2.inkTertiary)
                 Text(title)
                     .font(NoopV2.title)
@@ -50,7 +50,7 @@ struct V2Chip: View {
     var body: some View {
         Text(text.uppercased())
             .font(NoopV2.overline)
-            .tracking(0.7)
+            .tracking(0)
             .foregroundStyle(filled ? Color.black.opacity(0.85) : tone)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
@@ -76,6 +76,15 @@ struct V2DeltaChip: View {
         if let d = delta, d.isFinite, abs(d) > 0.0001 {
             let good = higherIsBetter ? d > 0 : d < 0
             let tone = good ? NoopV2.positive : NoopV2.warning
+            let direction = d > 0
+                ? String(localized: "appwide.trend.direction.up")
+                : String(localized: "appwide.trend.direction.down")
+            let value = abs(d).formatted(
+                .number.precision(.fractionLength(abs(d) < 10 ? 1 : 0))
+            )
+            let interpretation = good
+                ? String(localized: "appwide.trend.interpretation.improving")
+                : String(localized: "appwide.trend.interpretation.watch")
             HStack(spacing: 3) {
                 Image(systemName: d > 0 ? "arrow.up.right" : "arrow.down.right")
                     .font(.system(size: 9, weight: .bold))
@@ -89,9 +98,17 @@ struct V2DeltaChip: View {
             // A11Y: speak a DIRECTION WORD and an interpretation — an arrow glyph alone is not accessible,
             // and colour alone must never carry the good/bad meaning.
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text(
-                "\(d > 0 ? "up" : "down") \(abs(d).formatted(.number.precision(.fractionLength(abs(d) < 10 ? 1 : 0))))\(unit) versus baseline, \(good ? "improving" : "worth watching")"
-            ))
+            .accessibilityLabel(
+                Text(
+                    String(
+                        format: String(localized: "appwide.trend.baseline_format"),
+                        direction,
+                        value,
+                        unit,
+                        interpretation
+                    )
+                )
+            )
         }
     }
 }
@@ -157,7 +174,7 @@ struct V2HeroArc: View {
                 }
                 Text(label.uppercased())
                     .font(NoopV2.overline)
-                    .tracking(1.4)
+                    .tracking(0)
                     .foregroundStyle(NoopV2.inkSecondary)
                     .padding(.top, 2)
                 if let caption {
@@ -230,7 +247,7 @@ struct V2SatelliteRing: View {
             .frame(width: size, height: size)
             Text(label.uppercased())
                 .font(NoopV2.overline)
-                .tracking(0.9)
+                .tracking(0)
                 .foregroundStyle(NoopV2.inkTertiary)
         }
         .accessibilityElement(children: .ignore)
@@ -383,7 +400,7 @@ struct V2StatTile: View {
                 }
                 Text(label.uppercased())
                     .font(NoopV2.overline)
-                    .tracking(0.8)
+                    .tracking(0)
                     .foregroundStyle(NoopV2.inkTertiary)
                 Spacer(minLength: 0)
             }
@@ -421,7 +438,7 @@ struct V2CoachBanner: View {
                     .font(.system(size: 11, weight: .bold))
                 Text(overline.uppercased())
                     .font(NoopV2.overline)
-                    .tracking(1.0)
+                    .tracking(0)
             }
             .foregroundStyle(tint)
             Text(message)

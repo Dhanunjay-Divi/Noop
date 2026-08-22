@@ -7,7 +7,7 @@ import StrandAnalytics
 // The read-only headline screen for the fusion pillar
 // (docs/superpowers/specs/2026-06-19-v5-local-multi-device-fusion-design.md §UX). For each core
 // metric it shows the BEST-sourced value, a provenance pill naming the source, the plain published
-// reason from MetricArbitrationPolicy ("counts directly" / "best stager"), and the inline agreement
+// reason from MetricArbitrationPolicy ("device step count" / "WHOOP staged-sleep import"), and the inline agreement
 // state from FusionResolver (agree / minor delta / conflict). When two sources disagree it offers a
 // conflict-compare sheet that lists EVERY source's value side by side and which one NOOP is using and
 // why — it NEVER silently merges or averages.
@@ -254,9 +254,8 @@ private struct FusedMetricRowView: View {
         .onTapGesture { if point.agreement == .conflict { onCompare() } }
     }
 
-    /// The winner's published reason — only worth showing when it adds justification ("counts
-    /// directly" / "best stager" / a tier word). A bare "direct sensor" on a lone vital is noise, so we
-    /// keep it but it reads quietly in tertiary text.
+    /// The winner's published evidence description. It reads quietly in tertiary text because it
+    /// explains provenance rather than making an accuracy claim.
     private var winnerReason: String? {
         point.contributors.first?.reason
     }

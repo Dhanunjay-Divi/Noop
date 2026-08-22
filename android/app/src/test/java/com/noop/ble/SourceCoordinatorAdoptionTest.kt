@@ -91,6 +91,7 @@ class SourceCoordinatorAdoptionTest {
         override suspend fun deleteMetricSeriesFor(deviceId: String) {}
         override suspend fun deleteSleepStatesFor(deviceId: String) {}
         override suspend fun deleteLabMarkersFor(deviceId: String) {}
+        override suspend fun deleteNutritionEntriesFor(deviceId: String) {}
         override suspend fun deleteLiveSessionsFor(deviceId: String) {}
         override suspend fun deleteDismissedWorkoutsFor(deviceId: String) {}
         override suspend fun deleteDismissedSleepsFor(deviceId: String) {}

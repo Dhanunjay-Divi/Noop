@@ -47,6 +47,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoGraph
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.SyncProblem
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -75,6 +78,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.role
@@ -95,20 +99,15 @@ import kotlin.math.sin
 // Every screen composes ONLY these. Fixed dimensions + one spacing scale guarantee
 // the uniform, instrument-grade look from the reference.
 
-// MARK: - Frosted card surface (Titanium & Gold) + NoopCard
+// MARK: - Quiet data surface + NoopCard
 //
-// The card surface: a deep-navy fill (cardFillTop → cardFillBottom), rounded corners, a
-// very faint DIAGONAL accent-gradient wash and a flat 1px hairline border — NO shadow
-// (Titanium & Gold cards sit flat on the navy field; depth comes from the hairline + fill,
-// not a drop shadow). `Modifier.frostedCardSurface(tint = …)` is the one place the look
-// lives so NoopCard / ad-hoc surfaces all share it. Pass a domain tint (or null for the
-// neutral gold wash).
+// Health data stays on a solid, high-contrast surface. Glass is reserved for
+// navigation and compact controls. `frostedCardSurface` remains the compatibility
+// entry point used by NoopCard and ad-hoc surfaces.
 
 /**
- * Paint the frosted-card surface (navy fill + faint diagonal accent wash + flat hairline
- * border, no shadow) behind the content. [tint] colours the wash + border bias; null uses a
- * near-neutral gold wash. Drawn with `drawBehind` so the animation/recomposition of the card's
- * content never reaches this surface subtree. Mirrors StrandDesign's FrostedCardSurface.
+ * Paint a solid card with an optional restrained domain wash and a hairline border.
+ * Drawn behind content so surface preference changes never animate charts or text.
  */
 /** App-wide card-surface opacity (0f = fully see-through, 1f = solid), driven by the "Card transparency"
  *  setting. Reactive (a mutableState) so the Settings slider live-previews; initialised from NoopPrefs at
@@ -131,11 +130,11 @@ fun Modifier.frostedCardSurface(
     // live-preview. Content drawn above the surface is unaffected, so numbers/labels stay readable.
     val op = CardAppearance.opacity
     this
-        // Elevation idiom: DARK is flat (the hairline + hue carry the edge). LIGHT raises the white card
-        // off the warm-paper canvas with a soft drop shadow — the hairline alone is too faint on paper.
+        // A low light-theme lift separates white cards from the neutral canvas without
+        // turning every data block into a floating panel.
         .then(
             if (Palette.isLight)
-                Modifier.shadow(elevation = (6f * op).dp, shape = RoundedCornerShape(cornerRadius), clip = false)
+                Modifier.shadow(elevation = (2f * op).dp, shape = RoundedCornerShape(cornerRadius), clip = false)
             else Modifier
         )
         .drawBehind {
@@ -145,22 +144,15 @@ fun Modifier.frostedCardSurface(
             val border = Palette.hairline.copy(alpha = Palette.hairline.alpha * op)
 
             if (tint == null) {
-                // NEUTRAL card (iOS FrostedCardSurface tint == nil): a FLAT raised surface — no vertical
-                // bevel gradient, no accent wash, and a PLAIN hairline border (no accent bias).
                 drawRoundRect(color = fill, cornerRadius = corner)
                 drawRoundRect(color = border, cornerRadius = corner, style = Stroke(width = 1.dp.toPx()))
             } else {
-                // TINTED card (iOS parity, 2026-06-23 "synthesis has the old blue style"): a FLAT raised
-                // surface — the SAME WHOOP grey as the neutral card, NO navy bevel gradient — carrying only
-                // a whisper of the domain tint as a diagonal hue wash so it stays in the grey family.
-                // 1) Flat raised fill — identical to the neutral card.
                 drawRoundRect(color = fill, cornerRadius = corner)
-                // 2) Faint diagonal accent hue wash over the flat fill (matches iOS FrostedCardSurface ~0.05).
                 drawRoundRect(
                     brush = Brush.linearGradient(
                         colorStops = arrayOf(
-                            0.0f to tint.copy(alpha = 0.05f * washStrength * op),
-                            0.5f to tint.copy(alpha = 0.015f * washStrength * op),
+                            0.0f to tint.copy(alpha = 0.024f * washStrength * op),
+                            0.5f to tint.copy(alpha = 0.008f * washStrength * op),
                             1.0f to Color.Transparent,
                         ),
                         start = Offset(0f, 0f),
@@ -168,13 +160,12 @@ fun Modifier.frostedCardSurface(
                     ),
                     cornerRadius = corner,
                 )
-                // 3) Plain 1px hairline (no accent bias) — matches the neutral card.
                 drawRoundRect(color = border, cornerRadius = corner, style = Stroke(width = 1.dp.toPx()))
             }
         }
 }
 
-// MARK: - NoopCard — the one card surface (Titanium & Gold frosted card, 16dp radius)
+// MARK: - NoopCard — the one shared card surface
 //
 // PUBLIC API is unchanged (modifier, padding, content); an optional [tint] was ADDED
 // (defaulted null) so callers can opt into a per-domain accent wash without breaking
@@ -199,31 +190,96 @@ fun NoopCard(
     }
 }
 
-// MARK: - DataPendingNote — the shared "what shows now vs what needs an import" banner
-//
-// A NoopCard with a leading AutoGraph glyph, a bold title and a body line. Every data
-// screen drops one of these in its empty/partial state so the user always knows what is
-// live now and what an import will backfill. Copy is passed verbatim by the call site.
+// MARK: - Screen states
 
+/** The production vocabulary for non-content states. Callers must distinguish an empty result from
+ * loading, partial, stale, and failed data instead of presenting every condition as one placeholder. */
+enum class ScreenStateKind {
+    Loading,
+    Empty,
+    Partial,
+    Stale,
+    Error,
+}
+
+/** One accessible, action-capable state card shared by every production screen.
+ *
+ * The title and body are exposed as one TalkBack announcement. A recovery action, when supplied,
+ * remains a separate button. Loading animation becomes a static glyph when system motion is reduced.
+ */
 @Composable
-fun DataPendingNote(title: String, body: String, modifier: Modifier = Modifier) {
-    NoopCard(modifier = modifier, padding = 18.dp) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            Icon(
-                Icons.Filled.AutoGraph,
-                contentDescription = null,
-                tint = Palette.accent,
-                modifier = Modifier.size(20.dp),
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(title, style = NoopType.headline, color = Palette.textPrimary)
-                Text(body, style = NoopType.subhead, color = Palette.textSecondary)
+fun ScreenStateCard(
+    kind: ScreenStateKind,
+    title: String,
+    body: String,
+    modifier: Modifier = Modifier,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
+    val tone = when (kind) {
+        ScreenStateKind.Loading -> StrandTone.Accent
+        ScreenStateKind.Empty -> StrandTone.Neutral
+        ScreenStateKind.Partial -> StrandTone.Warning
+        ScreenStateKind.Stale -> StrandTone.Warning
+        ScreenStateKind.Error -> StrandTone.Critical
+    }
+    val renderStill = rememberPoseStill()
+    val stateDescription = stringResource(
+        R.string.appwide_a11y_state_format,
+        title,
+        body,
+    )
+
+    NoopCard(modifier = modifier, padding = 18.dp, tint = tone.color) {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space16)) {
+            Row(
+                modifier = Modifier.clearAndSetSemantics {
+                    contentDescription = stateDescription
+                },
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                if (kind == ScreenStateKind.Loading && !renderStill) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = tone.color,
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Icon(
+                        when (kind) {
+                            ScreenStateKind.Loading -> Icons.Filled.AutoGraph
+                            ScreenStateKind.Empty -> Icons.Filled.AutoGraph
+                            ScreenStateKind.Partial -> Icons.Filled.Info
+                            ScreenStateKind.Stale -> Icons.Filled.SyncProblem
+                            ScreenStateKind.Error -> Icons.Filled.SyncProblem
+                        },
+                        contentDescription = null,
+                        tint = tone.color,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(title, style = NoopType.headline, color = Palette.textPrimary)
+                    Text(body, style = NoopType.subhead, color = Palette.textSecondary)
+                }
+            }
+
+            if (actionLabel != null && onAction != null) {
+                NoopButton(
+                    text = actionLabel,
+                    kind = NoopButtonKind.Secondary,
+                    onClick = onAction,
+                )
             }
         }
     }
+}
+
+// Compatibility wrapper for older call sites. New work should choose a precise ScreenStateKind.
+@Composable
+fun DataPendingNote(title: String, body: String, modifier: Modifier = Modifier) {
+    ScreenStateCard(kind = ScreenStateKind.Partial, title = title, body = body, modifier = modifier)
 }
 
 // MARK: - SyncingHistoryNote — pulsing "history sync in progress" line (#77)
@@ -396,7 +452,7 @@ fun StatePill(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (showsDot) ConnectionDot(tone = tone, pulsing = pulsing, size = 7.dp)
-        Text(title, style = NoopType.overline.copy(letterSpacing = 0.4.sp), color = tone.color)
+        Text(title, style = NoopType.overline.copy(letterSpacing = 0.sp), color = tone.color)
     }
 }
 
@@ -407,7 +463,7 @@ fun SourceBadge(text: String, tint: Color = Palette.accent, modifier: Modifier =
     val shape = RoundedCornerShape(50)
     Text(
         text = text.uppercase(),
-        style = NoopType.overline.copy(fontSize = 10.sp, letterSpacing = 0.5.sp),
+        style = NoopType.overline.copy(fontSize = 10.sp, letterSpacing = 0.sp),
         color = tint,
         maxLines = 1,                          // #74: e.g. "ON-DEVICE" stays on one line, never wraps the hero
         overflow = TextOverflow.Ellipsis,
@@ -587,6 +643,7 @@ fun <T> SegmentedPillControl(
     items: List<T>,
     selection: T,
     label: (T) -> String,
+    accessibilityLabel: (T) -> String = label,
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
     // Opt-in compact mode for long option sets. The track fills its parent and gives each segment an
@@ -656,6 +713,7 @@ fun <T> SegmentedPillControl(
                         }
                     }
                     .semantics {
+                        contentDescription = accessibilityLabel(item)
                         this.selected = selected
                         role = Role.RadioButton
                         if (!itemEnabled) disabled()
@@ -860,7 +918,7 @@ fun BevelGauge(
                         text = wordmark.uppercase(),
                         style = NoopType.overline.copy(
                             fontSize = (numberSp * 0.16f).sp,
-                            letterSpacing = (numberSp * 0.055f).sp,  // ≈ .34em wordmark tracking
+                            letterSpacing = 0.sp,
                             fontWeight = FontWeight.Bold,
                         ),
                         color = Palette.gold,
@@ -892,7 +950,7 @@ fun BevelGauge(
                         text = stateText,
                         style = NoopType.overline.copy(
                             fontSize = stateSize.sp,
-                            letterSpacing = (NoopType.overlineTracking * stateSize / 11f).sp,
+                            letterSpacing = 0.sp,
                         ),
                         color = tipColor,
                         modifier = Modifier.padding(top = 2.dp),
@@ -1178,18 +1236,18 @@ fun ScenicHeroBackground(
 // MARK: - ScreenScaffold (ported from Strand/Screens/ScreenScaffold.swift)
 //
 // Standard scrollable screen container: a title + optional subtitle header over the
-// dark surface, then a left-aligned content column with 28dp screen padding.
+// shared canvas, then a left-aligned content column on the compact page grid.
 
 @Composable
 fun ScreenScaffold(
     title: String?,
     subtitle: String? = null,
     modifier: Modifier = Modifier,
-    // Top inset above the content. Defaults to the standard 28dp screen padding; a screen that
+    // Top inset above the content. Defaults to the standard 24dp page rhythm; a screen that
     // supplies its own compact header (Today, title = null) can pass a smaller value to tighten the
     // gap above its first element — Compose forbids negative padding, so this is how iOS's
     // `.padding(top: -16)` tightening is expressed.
-    topPadding: Dp = 28.dp,
+    topPadding: Dp = Metrics.space24,
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
     // Optional full-bleed view drawn behind the scroll content at the TOP of the screen (e.g. Today's
@@ -1220,7 +1278,12 @@ fun ScreenScaffold(
         Column(
             modifier = columnModifier
                 .verticalScroll(rememberScrollState())
-                .padding(start = 28.dp, end = 28.dp, top = topPadding, bottom = 28.dp),
+                .padding(
+                    start = Metrics.screenPadding,
+                    end = Metrics.screenPadding,
+                    top = topPadding,
+                    bottom = Metrics.space24,
+                ),
             // #765: one shared inter-card spacing token (was a bare `20.dp`), so the eager + lazy scaffolds
             // and every screen through them keep the SAME uniform gap between top-level cards.
             verticalArrangement = Arrangement.spacedBy(Metrics.screenRowSpacing),
@@ -1306,7 +1369,7 @@ fun ScreenScaffold(
 //
 // The content slot is a [LazyListScope] (item { } / items(...)) rather than a ColumnScope,
 // so callers stay explicit about what is a one-off header vs the lazily-built list — and
-// every existing ScreenScaffold caller is untouched. The header, 28dp screen padding and
+// every existing ScreenScaffold caller is untouched. The header, compact page padding and
 // the shared Metrics.screenRowSpacing inter-item gap match ScreenScaffold so the two read identically.
 
 @Composable
@@ -1317,7 +1380,7 @@ fun LazyScreenScaffold(
     // Mirrors ScreenScaffold: a screen with a scene-backed header (Today-style) can tighten the gap
     // above its first row, and supply leading/trailing header actions + a screen-level scene backdrop.
     // All defaulted, so the existing flat callers (Intelligence) are byte-for-byte untouched.
-    topPadding: Dp = 28.dp,
+    topPadding: Dp = Metrics.space24,
     // The inter-row vertical spacing between top-level items. Defaults to the shared `screenRowSpacing`
     // (20dp) so every existing caller is byte-for-byte untouched; the liquid Today passes a tighter value
     // to match the iOS Today's compact `VStack(spacing: 12)` section rhythm (the maintainer's "iOS is
@@ -1369,7 +1432,7 @@ fun LazyScreenScaffold(
         }
 
     // The lazy list itself. Its background + the contentPadding differ by path so the scene-backed list
-    // is transparent (scene shows through) while keeping the SAME 28dp screen inset + shared row spacing as
+    // is transparent (scene shows through) while keeping the SAME page inset + shared row spacing as
     // the eager ScreenScaffold. The top inset honours [topPadding] (so a custom-header screen can tighten
     // the gap above the first row, exactly like ScreenScaffold's `padding(top = topPadding)`).
     val listModifier: Modifier =
@@ -1382,7 +1445,12 @@ fun LazyScreenScaffold(
         LazyColumn(
             modifier = listModifier,
             state = listState,
-            contentPadding = PaddingValues(start = 28.dp, top = topPadding, end = 28.dp, bottom = 28.dp),
+            contentPadding = PaddingValues(
+                start = Metrics.screenPadding,
+                top = topPadding,
+                end = Metrics.screenPadding,
+                bottom = Metrics.space24,
+            ),
             // #765: the shared inter-card spacing token by default (Today/Explore + the eager screens share
             // one uniform card rhythm); a caller may pass a tighter [rowSpacing] (the liquid Today does, for
             // the iOS-compact section rhythm).
@@ -1459,18 +1527,22 @@ fun StepperField(
 }
 
 @Composable
-fun StepperButton(symbol: String, onClick: () -> Unit, label: String) {
+fun StepperButton(symbol: String, onClick: () -> Unit, label: String, enabled: Boolean = true) {
     Box(
         modifier = Modifier
             .size(30.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(Palette.surfaceInset)
             .border(1.dp, Palette.hairline, RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
-        Text(symbol, style = NoopType.body.copy(fontWeight = FontWeight.SemiBold), color = Palette.textPrimary)
+        Text(
+            symbol,
+            style = NoopType.body.copy(fontWeight = FontWeight.SemiBold),
+            color = if (enabled) Palette.textPrimary else Palette.textTertiary,
+        )
     }
 }
 

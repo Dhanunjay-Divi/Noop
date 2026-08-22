@@ -9,12 +9,21 @@ import com.noop.ai.AiKeyStore
 import com.noop.ai.AiProvider
 import com.noop.ai.ChatMsg
 import com.noop.ai.CustomAiAuthHeader
+import com.noop.data.CoachMemoryRow
+import com.noop.data.CoachMessageRow
+import com.noop.data.JournalEntry
+import com.noop.data.StrengthRoutineExerciseRow
+import com.noop.data.StrengthRoutineRow
+import com.noop.data.StrengthTrainingContract
 import com.noop.data.WhoopDatabase
 import com.noop.data.WhoopRepository
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.util.UUID
 
 /**
  * View model for the AI Coach screen.
@@ -32,15 +41,19 @@ class CoachViewModel(app: Application) : AndroidViewModel(app) {
 
     // The networked coach, over the local store. No key is held here; the engine reads it from
     // the encrypted store at call time.
-    private val aiCoach = AiCoach(
-        WhoopRepository(WhoopDatabase.get(app.applicationContext).whoopDao())
-    )
+    private val repo = WhoopRepository(WhoopDatabase.get(app.applicationContext).whoopDao())
+    private val aiCoach = AiCoach(repo)
 
     // MARK: - Transcript
 
     private val _messages = MutableStateFlow<List<ChatMsg>>(emptyList())
     /** The conversation so far (user/assistant turns), oldest first. */
     val messages: StateFlow<List<ChatMsg>> = _messages.asStateFlow()
+
+    private val _memories = MutableStateFlow<List<CoachMemoryRow>>(emptyList())
+    val memories: StateFlow<List<CoachMemoryRow>> = _memories.asStateFlow()
+
+    private val persistentStateLoaded = CompletableDeferred<Unit>()
 
     private val _sending = MutableStateFlow(false)
     /** True while a request is in flight, the UI disables Send and shows a thinking state. */
@@ -49,6 +62,21 @@ class CoachViewModel(app: Application) : AndroidViewModel(app) {
     private val _error = MutableStateFlow<String?>(null)
     /** Non-null when the last send failed; the UI shows it in red. Cleared on the next send. */
     val error: StateFlow<String?> = _error.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            try {
+                _messages.value = repo.coachMessages(MAX_STORED_MESSAGES).map {
+                    ChatMsg(id = it.id, createdAt = it.createdAt, role = it.role, text = it.text)
+                }
+                _memories.value = repo.coachMemories()
+            } catch (e: Exception) {
+                _error.value = "Couldn't load the saved Coach conversation."
+            } finally {
+                persistentStateLoaded.complete(Unit)
+            }
+        }
+    }
 
     // MARK: - Provider / model selection (persisted via AiKeyStore)
 
@@ -246,10 +274,9 @@ class CoachViewModel(app: Application) : AndroidViewModel(app) {
         // action that is its own consent) or sends. Local Custom servers still refresh on Connect.
     }
 
-    /** Clear the stored key and reset the transcript back to the setup screen. */
+    /** Clear only the stored provider key. Conversation history is independent user data. */
     fun clearKey(ctx: Context) {
         AiKeyStore.clear(ctx)
-        _messages.value = emptyList()
         _error.value = null
         _keyVersion.value += 1
     }
@@ -262,7 +289,6 @@ class CoachViewModel(app: Application) : AndroidViewModel(app) {
         AiKeyStore.clear(ctx)
         _customConnected.value = false
         AiKeyStore.saveCustomConnected(ctx, false)
-        _messages.value = emptyList()
         _error.value = null
         _keyVersion.value += 1
     }
@@ -271,8 +297,12 @@ class CoachViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Append [msg] to the transcript, trimming to the newest [MAX_STORED_MESSAGES] so the in-memory list
      *  (and the Compose transcript) stays bounded over a long-lived session. (parity with Swift) */
-    private fun appendMessage(msg: ChatMsg) {
+    private suspend fun appendMessage(msg: ChatMsg) {
         _messages.value = (_messages.value + msg).takeLast(MAX_STORED_MESSAGES)
+        repo.appendCoachMessage(
+            CoachMessageRow(msg.id, msg.createdAt, msg.role, msg.text),
+            MAX_STORED_MESSAGES,
+        )
     }
 
     /**
@@ -285,11 +315,18 @@ class CoachViewModel(app: Application) : AndroidViewModel(app) {
 
         val appCtx = ctx.applicationContext
         _error.value = null
-        appendMessage(ChatMsg(role = "user", text = question))
         _sending.value = true
 
         viewModelScope.launch {
             try {
+                persistentStateLoaded.await()
+                appendMessage(
+                    ChatMsg(
+                        createdAt = nextMessageTimestamp(),
+                        role = "user",
+                        text = question,
+                    )
+                )
                 val reply = aiCoach.chat(
                     ctx = appCtx,
                     history = _messages.value,
@@ -301,8 +338,16 @@ class CoachViewModel(app: Application) : AndroidViewModel(app) {
                     // v5: only include the on-device-signals summary when BOTH the data consent is on AND
                     // the second opt-in is set (summary-only, no raw egress, see AiCoach.buildSignalsContext).
                     includeSignals = _consent.value && NoopPrefs.coachSignals(appCtx),
+                    // Enabled user-authored memory is injected only on this explicit Send path.
+                    coachMemory = _memories.value.filter { it.enabled }.map { it.text },
                 )
-                appendMessage(ChatMsg(role = "assistant", text = reply))
+                appendMessage(
+                    ChatMsg(
+                        createdAt = nextMessageTimestamp(),
+                        role = "assistant",
+                        text = reply,
+                    )
+                )
             } catch (e: Exception) {
                 _error.value = e.message ?: "Something went wrong. Please try again."
             } finally {
@@ -310,6 +355,157 @@ class CoachViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    fun clearConversation() {
+        viewModelScope.launch {
+            persistentStateLoaded.await()
+            try {
+                repo.clearCoachMessages()
+                _messages.value = emptyList()
+            } catch (_: Exception) {
+                _error.value = "Couldn't clear the saved conversation. Please try again."
+            }
+        }
+    }
+
+    fun saveMemory(id: String? = null, text: String, enabled: Boolean = true) {
+        viewModelScope.launch {
+            persistentStateLoaded.await()
+            val existing = id?.let { target -> _memories.value.firstOrNull { it.id == target } }
+            val now = System.currentTimeMillis()
+            val row = CoachMemoryRow(
+                id = existing?.id ?: java.util.UUID.randomUUID().toString(),
+                text = text,
+                enabled = enabled,
+                createdAt = existing?.createdAt ?: now,
+                updatedAt = maxOf(now, (existing?.updatedAt ?: 0) + 1),
+            )
+            try {
+                repo.upsertCoachMemory(row)
+                _memories.value = repo.coachMemories()
+            } catch (_: Exception) {
+                _error.value = "Couldn't save that memory. Keep it under 500 characters and try again."
+            }
+        }
+    }
+
+    fun setMemoryEnabled(id: String, enabled: Boolean) {
+        val memory = _memories.value.firstOrNull { it.id == id } ?: return
+        saveMemory(id, memory.text, enabled)
+    }
+
+    fun deleteMemory(id: String) {
+        viewModelScope.launch {
+            persistentStateLoaded.await()
+            try {
+                repo.deleteCoachMemory(id)
+                _memories.value = _memories.value.filterNot { it.id == id }
+            } catch (_: Exception) {
+                _error.value = "Couldn't delete that memory. Please try again."
+            }
+        }
+    }
+
+    // MARK: - Explicit, review-before-write actions
+
+    fun saveJournalDraft(
+        questions: Collection<String>,
+        note: String,
+        onComplete: (Boolean) -> Unit,
+    ) {
+        val allowed = CoachJournalDraftPolicy.questions.toSet()
+        val selected = questions.filter { it in allowed }.distinct().sorted()
+        if (selected.isEmpty()) {
+            _error.value = "Choose at least one journal item."
+            onComplete(false)
+            return
+        }
+        viewModelScope.launch {
+            val cleanNote = note.trim().take(500).ifBlank { null }
+            val rows = selected.map {
+                JournalEntry(
+                    deviceId = JOURNAL_DEVICE_ID,
+                    day = LocalDate.now().toString(),
+                    question = it,
+                    answeredYes = true,
+                    notes = cleanNote,
+                )
+            }
+            val saved = runCatching { repo.upsertJournal(rows) }.isSuccess
+            if (!saved) _error.value = "Couldn't save the journal check-in. Please try again."
+            onComplete(saved)
+        }
+    }
+
+    fun suggestedRoutineExerciseIds(): Set<String> {
+        val latest = _messages.value.lastOrNull { it.role == "assistant" }?.text.orEmpty()
+        val normalized = normalizeActionText(latest)
+        return StrengthTrainingContract.BUILT_IN_EXERCISES
+            .filter { normalized.contains(normalizeActionText(it.name)) }
+            .mapTo(linkedSetOf()) { it.id }
+    }
+
+    fun saveRoutineDraft(
+        name: String,
+        exerciseIds: Collection<String>,
+        onComplete: (Boolean) -> Unit,
+    ) {
+        val cleanName = name.trim()
+        val catalog = StrengthTrainingContract.BUILT_IN_EXERCISES.associateBy { it.id }
+        val selected = exerciseIds.distinct().mapNotNull(catalog::get)
+        if (cleanName.isEmpty() || selected.isEmpty()) {
+            _error.value = "Add a routine name and at least one exercise."
+            onComplete(false)
+            return
+        }
+        viewModelScope.launch {
+            val now = System.currentTimeMillis() / 1_000L
+            val routineId = UUID.randomUUID().toString().lowercase()
+            val routine = StrengthRoutineRow(
+                id = routineId,
+                name = cleanName,
+                note = "Created from a user-confirmed Coach draft.",
+                createdAt = now,
+                updatedAt = now,
+            )
+            val prescriptions = selected.mapIndexed { index, exercise ->
+                StrengthRoutineExerciseRow(
+                    id = UUID.randomUUID().toString().lowercase(),
+                    routineId = routineId,
+                    exerciseId = exercise.id,
+                    position = index,
+                    targetSets = 3,
+                    targetRepsMin = 8,
+                    targetRepsMax = 12,
+                    restSeconds = 90,
+                    createdAt = now,
+                    updatedAt = now,
+                )
+            }
+            val result = runCatching { repo.saveStrengthRoutine(routine, prescriptions) }
+            if (result.isFailure) {
+                _error.value = result.exceptionOrNull()?.message
+                    ?: "Couldn't create that routine. Please try again."
+            }
+            onComplete(result.isSuccess)
+        }
+    }
+
+    private fun normalizeActionText(value: String): String = buildString {
+        var previousSpace = true
+        value.lowercase().forEach { character ->
+            if (character.isLetterOrDigit()) {
+                append(character)
+                previousSpace = false
+            } else if (!previousSpace) {
+                append(' ')
+                previousSpace = true
+            }
+        }
+    }.trim()
+
+    private fun nextMessageTimestamp(): Long =
+        maxOf(System.currentTimeMillis(), (_messages.value.lastOrNull()?.createdAt ?: 0) + 1)
 
     /** Dismiss the current error (e.g. when the user edits the input again). */
     fun clearError() {

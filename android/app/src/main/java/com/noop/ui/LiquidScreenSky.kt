@@ -47,7 +47,7 @@ import androidx.compose.ui.unit.dp
  *  `topBackground` slot. [height] is the sky band; the sky fades into the theme canvas within it, so the
  *  cards below sit on the flat surface. Mirrors the iOS `liquidScaffoldSky`. */
 @Composable
-fun LiquidScreenSky(height: Dp = 340.dp, fillHeight: Boolean = false) {
+fun LiquidScreenSky(height: Dp = 240.dp, fillHeight: Boolean = false) {
     // "Sky behind cards" (opt-in): fill the whole viewport and hold the atmosphere with a softer settle so
     // the sky still reads UNDER the lower cards, instead of the default top-band that dissolves to canvas.
     val sizeMod = if (fillHeight) Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(height)

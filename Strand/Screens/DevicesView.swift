@@ -388,7 +388,7 @@ private struct DevicesContent: View {
                              onDark: Bool = false) -> some View {
         let color = onDark ? StrandPalette.onDarkSecondary : StrandPalette.textTertiary
         return HStack(alignment: .firstTextBaseline) {
-            Text(title).font(StrandFont.overline).tracking(1.6).foregroundStyle(color)
+            Text(title).font(StrandFont.overline).tracking(0).foregroundStyle(color)
             Spacer()
             Text(trailing).font(StrandFont.caption).foregroundStyle(color)
         }

@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.MonitorHeart
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -79,6 +80,7 @@ import com.noop.data.ImportSummary
 import com.noop.ingest.AppleHealthImporter
 import com.noop.ingest.HealthConnectImporter
 import com.noop.ingest.WhoopCsvImporter
+import com.noop.safety.SafetyPagingController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -199,6 +201,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                     OnboardingPage.Profile -> ProfileStep()
                     OnboardingPage.Import -> ImportStep(viewModel)
                     OnboardingPage.Notifications -> NotificationsStep()
+                    OnboardingPage.SafetyContacts -> SafetyContactsStep()
                     OnboardingPage.Appearance -> AppearanceStep()
                     OnboardingPage.Done -> DoneStep()
                 }
@@ -237,6 +240,7 @@ private enum class OnboardingPage(val cta: String) {
     Profile("Save & continue"),
     Import("Continue"),
     Notifications("Continue"),
+    SafetyContacts("Finish later"),
     Appearance("Continue"),
     Done("Enter NOOP");
 }
@@ -951,6 +955,34 @@ private fun NotificationsStep() {
             )
             Checkline("Wrist alerts (strain nudges and your smart alarm) arrive as notifications too.")
             Checkline("When Android asks, allow notifications so NOOP can keep you informed.")
+        }
+    }
+}
+
+@Composable
+private fun SafetyContactsStep() {
+    val context = LocalContext.current
+    val controller = remember(context) { SafetyPagingController(context) }
+
+    StepShell(
+        title = stringResource(R.string.safety_onboarding_title),
+        subtitle = stringResource(R.string.safety_onboarding_subtitle),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Metrics.space16),
+        ) {
+            IconBadge(icon = Icons.Filled.Shield, tint = Palette.statusPositive, size = 86)
+            NoopCard(padding = 18.dp) {
+                SafetyContactsSetup(controller = controller)
+            }
+            Text(
+                stringResource(R.string.safety_onboarding_pending_body),
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+                textAlign = TextAlign.Center,
+            )
         }
     }
 }

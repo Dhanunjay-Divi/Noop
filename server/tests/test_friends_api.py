@@ -158,12 +158,16 @@ def test_social_credentials_are_scoped_and_invites_are_one_time(
     request_id = redeemed.json()["request"]["request_id"]
     assert redeemed.json()["request"]["recipient"]["display_name"] == "Alice"
 
+    repository._friend_invites[invite["invite"]["invite_id"]]["expires_at"] = (
+        datetime.now(UTC) - timedelta(seconds=1)
+    )
     replay = client.post(
         "/v1/social/invites/redeem",
         headers=bob_headers,
         json={"code": code},
     )
-    assert replay.status_code == 404
+    assert replay.status_code == 201
+    assert replay.json()["request"]["request_id"] == request_id
 
     bob_cannot_accept = client.post(
         f"/v1/social/requests/{request_id}",
@@ -183,6 +187,19 @@ def test_social_credentials_are_scoped_and_invites_are_one_time(
         json={"decision": "accept"},
     )
     assert accepted.status_code == 200
+    accepted_replay = client.post(
+        f"/v1/social/requests/{request_id}",
+        headers=alice_headers,
+        json={"decision": "accept"},
+    )
+    assert accepted_replay.status_code == 200
+    assert accepted_replay.json()["request"]["status"] == "accepted"
+    opposite_replay = client.post(
+        f"/v1/social/requests/{request_id}",
+        headers=alice_headers,
+        json={"decision": "decline"},
+    )
+    assert opposite_replay.status_code == 409
 
     alice_friends = client.get("/v1/social/friends", headers=alice_headers).json()[
         "friends"
@@ -336,6 +353,79 @@ def test_invite_join_atomically_bootstraps_without_admin_credential(
         ]
         == "Alice"
     )
+
+
+def test_pending_enrollment_cleanup_is_authenticated_idempotent_and_handles_disabled(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    repository: MemoryRepository,
+) -> None:
+    _, alice_headers = _bootstrap(
+        client,
+        auth_headers,
+        display_name="Alice",
+        installation_id="45454545-4545-4545-8545-454545454545",
+    )
+    invite = client.post("/v1/social/invites", headers=alice_headers, json={}).json()
+    bob_install = "56565656-5656-4656-8656-565656565657"
+    bob_enrollment = str(uuid4())
+    bob_token = _member_token("P")
+    joined = client.post(
+        "/v1/social/invites/join",
+        json={
+            "code": invite["code"],
+            "display_name": "Pending Bob",
+            "installation_id": bob_install,
+            "daily_device_id": f"ios:{bob_install}:noop-friends",
+            "enrollment_id": bob_enrollment,
+            "member_token": bob_token,
+        },
+    )
+    assert joined.status_code == 201, joined.text
+    bob_id = joined.json()["profile"]["profile_id"]
+    cleanup_path = f"/v1/social/enrollments/{bob_enrollment}"
+    confirmation = {"X-Noop-Confirm": "DELETE PENDING SOCIAL ENROLLMENT"}
+
+    assert (
+        client.delete(
+            cleanup_path,
+            headers={"Authorization": f"Bearer {bob_token}"},
+        ).status_code
+        == 412
+    )
+    wrong = client.delete(
+        cleanup_path,
+        headers={
+            "Authorization": f"Bearer {_member_token('X')}",
+            **confirmation,
+        },
+    )
+    assert wrong.status_code == 403
+    assert bob_id in repository._friend_profiles
+
+    disabled = client.delete(
+        f"/v1/social/admin/profiles/{bob_id}",
+        headers={
+            **auth_headers,
+            "X-Noop-Confirm": f"DISABLE {bob_id}",
+        },
+    )
+    assert disabled.status_code == 204
+    assert (
+        client.get(
+            "/v1/social/me",
+            headers={"Authorization": f"Bearer {bob_token}"},
+        ).status_code
+        == 401
+    )
+
+    cleanup_headers = {
+        "Authorization": f"Bearer {bob_token}",
+        **confirmation,
+    }
+    assert client.delete(cleanup_path, headers=cleanup_headers).status_code == 204
+    assert bob_id not in repository._friend_profiles
+    assert client.delete(cleanup_path, headers=cleanup_headers).status_code == 204
 
 
 def test_member_sync_accepts_only_exact_computed_social_daily_envelope(
@@ -711,6 +801,12 @@ def test_feed_enforces_directional_daily_allowlist_and_computed_namespace(
         f"/v1/social/friends/{alice['profile_id']}", headers=bob_headers
     )
     assert removed.status_code == 204
+    assert (
+        client.delete(
+            f"/v1/social/friends/{alice['profile_id']}", headers=bob_headers
+        ).status_code
+        == 204
+    )
     assert (
         client.get(
             "/v1/social/feed",

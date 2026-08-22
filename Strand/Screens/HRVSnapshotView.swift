@@ -177,7 +177,7 @@ struct HRVSnapshotView: View {
                         .animation(.snappy, value: dialValue)
                     Text(dialUnit)
                         .font(StrandFont.footnote)
-                        .tracking(0.8)
+                        .tracking(0)
                         .foregroundStyle(StrandPalette.textTertiary)
                     if phase == .capturing {
                         Text("\(secondsRemaining)s left · \(captureBuffer.count) beats")

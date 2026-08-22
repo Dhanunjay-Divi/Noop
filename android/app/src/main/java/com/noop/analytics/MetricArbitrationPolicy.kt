@@ -9,9 +9,9 @@ package com.noop.analytics
  * reason string, plus the per-metric cross-validation tolerances. The single place a future
  * Polar/Garmin/Oura source is registered. Pure constants + two lookups.
  *
- * Trust tiers (lower = more trusted), grounded in what a device MEASURES vs ESTIMATES (spec §1):
- *   0 — Direct dedicated sensor for this metric (WHOOP R-R for HRV; a wrist band's pedometer for
- *       steps; chest/PPG strap for avg/max/resting HR; ring/strap temp for skin temp).
+ * Trust tiers (lower = preferred for this metric), grounded in source fit and derivation (spec §1):
+ *   0 — Preferred device/vendor output for this metric (for example imported WHOOP staging or a
+ *       phone/band step count). Tier is a selection rank, not an evidence-class claim.
  *   1 — Derived on-device from raw by NOOP (computed recovery/strain/sleep from strap streams).
  *   2 — Phone aggregate (Apple Health / Health Connect) of a declared-compatible quantity.
  *   3 — Estimate / proxy (a strap's STEP estimate; a calories estimate).
@@ -66,7 +66,7 @@ object MetricArbitrationPolicy {
      */
     fun tier(metric: MetricKind, source: FusionSource): Int = when (metric) {
         MetricKind.RESTING_HR, MetricKind.HEART_RATE, MetricKind.HRV, MetricKind.SPO2 ->
-            // Worn-sensor vitals: the strap measures them directly; the phone aggregates them.
+            // Worn-device vital output is preferred; phone health stores aggregate or bridge it.
             when (source) {
                 FusionSource.WHOOP_IMPORT -> 0   // direct dedicated sensor (R-R / PPG)
                 FusionSource.XIAOMI_BAND -> 0    // dedicated wrist PPG
@@ -155,35 +155,42 @@ object MetricArbitrationPolicy {
     }
 
     /**
-     * The published "best signal" reason a source wins (or appears) for a metric. Plain English,
-     * wellness-only — never asserts a value is true or medically valid. Drives the one-line caption on
-     * the fused row.
+     * Published source reason for a metric. This describes evidence class, not merely trust tier:
+     * an imported vendor summary must never be relabelled "direct sensor" because it won tier 0.
+     * Plain English, wellness-only, and never an accuracy or clinical claim.
      */
     fun reason(metric: MetricKind, source: FusionSource): String {
-        if (metric == MetricKind.STEPS &&
-            (source == FusionSource.XIAOMI_BAND || source == FusionSource.APPLE_HEALTH ||
-                source == FusionSource.HEALTH_CONNECT)
-        ) {
-            return "counts directly"
-        }
-        if (metric == MetricKind.STEPS &&
-            (source == FusionSource.WHOOP_IMPORT || source == FusionSource.NOOP_COMPUTED)
-        ) {
-            return "step estimate"
-        }
-        if (metric == MetricKind.SLEEP && source == FusionSource.WHOOP_IMPORT) return "best stager"
-        if (metric == MetricKind.SLEEP && source == FusionSource.NOOP_COMPUTED) return "computed stages"
-        if (metric == MetricKind.SLEEP &&
-            (source == FusionSource.APPLE_HEALTH || source == FusionSource.HEALTH_CONNECT)
-        ) {
-            return "phone sleep buckets"
-        }
-        if (metric == MetricKind.SKIN_TEMP) return "worn sensor"
-
-        return when (tier(metric, source)) {
-            0 -> "direct sensor"
-            1 -> "computed on device"
-            2 -> "phone aggregate"
+        return when {
+            metric == MetricKind.STEPS && source == FusionSource.XIAOMI_BAND ->
+                "device step count"
+            metric == MetricKind.STEPS &&
+                (source == FusionSource.APPLE_HEALTH || source == FusionSource.HEALTH_CONNECT) ->
+                "phone or watch step count"
+            metric == MetricKind.STEPS &&
+                (source == FusionSource.WHOOP_IMPORT || source == FusionSource.NOOP_COMPUTED) ->
+                "step estimate"
+            metric == MetricKind.SLEEP && source == FusionSource.WHOOP_IMPORT ->
+                "WHOOP staged-sleep import"
+            metric == MetricKind.SLEEP && source == FusionSource.NOOP_COMPUTED ->
+                "computed stages"
+            metric == MetricKind.SLEEP && source == FusionSource.XIAOMI_BAND ->
+                "device-staged sleep"
+            metric == MetricKind.SLEEP &&
+                (source == FusionSource.APPLE_HEALTH || source == FusionSource.HEALTH_CONNECT) ->
+                "health-data sleep import"
+            metric == MetricKind.SKIN_TEMP &&
+                (source == FusionSource.WHOOP_IMPORT || source == FusionSource.XIAOMI_BAND) ->
+                "wearable temperature"
+            metric == MetricKind.SKIN_TEMP &&
+                (source == FusionSource.APPLE_HEALTH || source == FusionSource.HEALTH_CONNECT) ->
+                "health-data import"
+            source == FusionSource.WHOOP_IMPORT -> "WHOOP import"
+            source == FusionSource.XIAOMI_BAND -> "device-derived"
+            source == FusionSource.NOOP_COMPUTED -> "computed on device"
+            source == FusionSource.APPLE_HEALTH || source == FusionSource.HEALTH_CONNECT ->
+                "health-data import"
+            source == FusionSource.NUTRITION_CSV -> "user import"
+            source == FusionSource.LOCAL_CACHE -> "cached value"
             else -> "estimate"
         }
     }

@@ -18,7 +18,7 @@ final class FusionResolverTests: XCTestCase {
         ])
         XCTAssertEqual(point?.winningSource, .xiaomiBand)
         XCTAssertEqual(point?.value, 8420)
-        XCTAssertEqual(point?.contributors.first?.reason, "counts directly")
+        XCTAssertEqual(point?.contributors.first?.reason, "device step count")
     }
 
     func testSleepWhoopBeatsPhoneBuckets() {
@@ -29,11 +29,11 @@ final class FusionResolverTests: XCTestCase {
         ])
         XCTAssertEqual(point?.winningSource, .whoopImport)
         XCTAssertEqual(point?.value, 432)
-        XCTAssertEqual(point?.contributors.first?.reason, "best stager")
+        XCTAssertEqual(point?.contributors.first?.reason, "WHOOP staged-sleep import")
     }
 
     func testRestingHRStrapBeatsPhone() {
-        // The strap measures HR directly (tier 0); the phone aggregates it (tier 2).
+        // Imported WHOOP HR is preferred here (tier 0); the phone health aggregate is tier 2.
         let point = FusionResolver.resolve(metricKey: "rhr", inputs: [
             FusionInput(source: .appleHealth, value: 55),
             FusionInput(source: .whoopImport, value: 52),
@@ -178,5 +178,16 @@ final class FusionResolverTests: XCTestCase {
         XCTAssertEqual(MetricArbitrationPolicy.kind(forKey: "sleep_deep_min"), .sleep)
         XCTAssertEqual(MetricArbitrationPolicy.kind(forKey: "steps"), .steps)
         XCTAssertEqual(MetricArbitrationPolicy.kind(forKey: "made_up_key"), .other)
+    }
+
+    func testEvidenceReasonsNeverRelabelImportsAsDirectSensors() {
+        XCTAssertEqual(MetricArbitrationPolicy.reason(metric: .hrv, source: .whoopImport),
+                       "WHOOP import")
+        XCTAssertEqual(MetricArbitrationPolicy.reason(metric: .skinTemp, source: .appleHealth),
+                       "health-data import")
+        XCTAssertEqual(MetricArbitrationPolicy.reason(metric: .heartRate, source: .xiaomiBand),
+                       "device-derived")
+        XCTAssertFalse(MetricArbitrationPolicy.reason(metric: .hrv, source: .whoopImport)
+            .contains("direct sensor"))
     }
 }

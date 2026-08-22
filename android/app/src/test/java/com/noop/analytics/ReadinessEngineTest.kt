@@ -72,6 +72,9 @@ class ReadinessEngineTest {
             r.summary,
         )
         assertEquals("Aligned", r.headline)
+        assertEquals("2024-03-29", r.asOfDay)
+        assertEquals(ScoreConfidence.SOLID, r.confidence)
+        assertEquals(28, r.baselineDays)
         assertFalse(r.summary.contains("load", ignoreCase = true))
         assertFalse(r.summary.contains("train", ignoreCase = true))
     }
@@ -171,7 +174,12 @@ class ReadinessEngineTest {
         // An explicit `today` with no matching row must read INSUFFICIENT — NOT synthesize off the newest
         // stored (stale) row (issue #23/#24).
         val days = baseline(todayHrv = 72.0, todayRhr = 46, todayStrain = 10.0)
-        assertEquals(ReadinessEngine.Level.INSUFFICIENT, ReadinessEngine.evaluate(days, today = "2026-06-08").level)
+        val missing = ReadinessEngine.evaluate(days, today = "2026-06-08")
+        assertEquals(ReadinessEngine.Level.INSUFFICIENT, missing.level)
+        assertEquals("2026-06-08", missing.asOfDay)
+        assertEquals(ScoreConfidence.CALIBRATING, missing.confidence)
+        assertEquals(0, missing.baselineDays)
+        assertTrue(missing.limitations.isNotEmpty())
         // The day that IS present still computes (no regression for current data).
         assertTrue(ReadinessEngine.evaluate(days, today = "2024-03-29").level != ReadinessEngine.Level.INSUFFICIENT)
         // The legacy no-`today` path is unchanged — still falls back to the most recent row.
@@ -240,6 +248,19 @@ class ReadinessEngineTest {
         assertEquals(50.0, withAdditiveLoad.trainingLoad?.atl!!, 0.0)
         assertEquals(50.0, withAdditiveLoad.trainingLoad?.ctl!!, 0.0)
         assertEquals(0.0, withAdditiveLoad.trainingLoad?.tsb!!, 0.0)
+    }
+
+    @Test
+    fun singleRecoverySignalIsExplicitlyBuildingConfidence() {
+        val days = mutableListOf<DailyMetric>()
+        for (i in 1..15) {
+            days.add(d(i, hrv = if (i % 2 == 0) 62.0 else 58.0, rhr = null, strain = null))
+        }
+        days.add(d(16, hrv = 70.0, rhr = null, strain = null))
+        val read = ReadinessEngine.evaluate(days, today = "2024-03-16")
+        assertEquals(ScoreConfidence.BUILDING, read.confidence)
+        assertEquals(15, read.baselineDays)
+        assertTrue(read.limitations.any { it.contains("one current recovery signal") })
     }
 
     @Test

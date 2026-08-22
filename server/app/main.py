@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import html as html_lib
 import json
 import logging
 import math
@@ -14,6 +15,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import parse_qs, quote
 from uuid import UUID, uuid4
 
 from fastapi import (
@@ -29,7 +31,7 @@ from fastapi import (
 )
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
@@ -45,10 +47,22 @@ from app.models import (
     FriendRequestDecision,
     FriendVisibilityPatch,
     IDENTIFIER_PATTERN,
+    SafetyContactCreate,
+    SafetyIncidentTransition,
+    SafetyPageCreate,
+    SafetyProfileBootstrap,
     STREAM_RANGES,
     StrictModel,
     SyncPayload,
     SyncResult,
+)
+from app.paging import (
+    PagingProvider,
+    PagingUnavailableError,
+    TwilioPagingProvider,
+    UnavailablePagingProvider,
+    normalise_provider_status,
+    validate_twilio_webhook,
 )
 from app.repository import (
     FriendConflictError,
@@ -60,6 +74,16 @@ from app.repository import (
     SyncConflictError,
     SyncRetiredError,
 )
+from app.safety_repository import (
+    MemorySafetyRepository,
+    PostgresSafetyRepository,
+    SafetyConflictError,
+    SafetyNotFoundError,
+    SafetyNotReadyError,
+    SafetyRepository,
+)
+from app.safety_capabilities import SafetyCapabilitySigner
+from app.safety_worker import SafetyDeliveryWorker
 
 RAW_NOTICE = (
     "Rows labelled raw_sensor or unclassified_sensor are uncalibrated sensor "
@@ -326,6 +350,224 @@ def _new_invite_code() -> tuple[str, str]:
     return display, compact
 
 
+def _new_safety_invitation_token() -> str:
+    # A browser-held one-time capability. Only its digest is stored.
+    return secrets.token_urlsafe(32)
+
+
+def _safe_provider_error(error: Exception) -> str:
+    text = str(error).strip() or "paging provider request failed"
+    return text[:240]
+
+
+def _safety_contact_response(
+    contact: dict[str, Any], *, now: datetime | None = None
+) -> dict[str, Any]:
+    response = dict(contact)
+    reference = now or datetime.now(UTC)
+    if (
+        response.get("status") == "pending"
+        and response.get("invite_expires_at") is not None
+        and response["invite_expires_at"] <= reference
+    ):
+        response["status"] = "expired"
+    return response
+
+
+def _safety_dispatch_response(dispatch: dict[str, Any]) -> dict[str, Any]:
+    response = dict(dispatch)
+    response["deliveries"] = [
+        {
+            key: value
+            for key, value in delivery.items()
+            if key not in {"phone_e164", "provider_reference"}
+        }
+        for delivery in dispatch.get("deliveries", [])
+    ]
+    summary: dict[str, int] = {}
+    for delivery in response["deliveries"]:
+        delivery_status = str(delivery["status"])
+        summary[delivery_status] = summary.get(delivery_status, 0) + 1
+    response["delivery_summary"] = summary
+    return response
+
+
+def _safety_acceptance_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": "no-store",
+        "Content-Security-Policy": (
+            "default-src 'none'; style-src 'unsafe-inline'; "
+            "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+        ),
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+    }
+
+
+def _safety_acceptance_page(
+    *,
+    invitation_token: str,
+    preview: dict[str, Any] | None,
+    outcome: str | None = None,
+) -> str:
+    if outcome is not None:
+        title = "Emergency contact response saved"
+        body = html_lib.escape(outcome)
+        actions = ""
+    elif preview is None:
+        title = "Invitation unavailable"
+        body = "This invitation is invalid, expired, or has already been used."
+        actions = ""
+    else:
+        contact = preview["contact"]
+        owner = html_lib.escape(str(preview["owner_display_name"]))
+        contact_name = html_lib.escape(str(contact["display_name"]))
+        status_value = str(contact["status"])
+        expires_at = contact["invite_expires_at"]
+        expired = status_value != "pending" or expires_at <= datetime.now(UTC)
+        title = f"{owner} invited you"
+        if expired:
+            body = (
+                "This invitation is no longer active. Ask the NOOP user to "
+                "send a new invitation."
+            )
+            actions = ""
+        else:
+            body = (
+                f"{contact_name}, accept only if you agree to receive SMS and "
+                f"automated voice safety pages for {owner}. NOOP does not "
+                "dispatch emergency services."
+            )
+            safe_token = quote(invitation_token, safe="")
+            actions = f"""
+              <form method="post" action="/safety/accept/{safe_token}">
+                <button class="accept" name="decision" value="accept">Accept invitation</button>
+                <button class="decline" name="decision" value="decline">Decline</button>
+              </form>
+            """
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{html_lib.escape(title)}</title>
+  <style>
+    :root {{ color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f4f5f6; color: #14171a; }}
+    main {{ width: min(520px, calc(100% - 32px)); box-sizing: border-box; padding: 32px; background: #fff;
+            border: 1px solid #dfe3e7; border-radius: 8px; box-shadow: 0 12px 36px rgba(0,0,0,.08); }}
+    .mark {{ color: #9a6d00; font-size: 13px; font-weight: 700; letter-spacing: .08em; }}
+    h1 {{ margin: 12px 0; font-size: 28px; line-height: 1.15; letter-spacing: 0; }}
+    p {{ color: #4f5962; line-height: 1.55; }}
+    form {{ display: grid; gap: 10px; margin-top: 24px; }}
+    button {{ min-height: 48px; border-radius: 7px; font: inherit; font-weight: 650; cursor: pointer; }}
+    .accept {{ border: 0; background: #14171a; color: #fff; }}
+    .decline {{ border: 1px solid #c8cdd2; background: transparent; color: inherit; }}
+    small {{ display: block; margin-top: 24px; color: #727b83; line-height: 1.45; }}
+    @media (prefers-color-scheme: dark) {{
+      body {{ background: #090a0b; color: #f4f5f6; }}
+      main {{ background: #151719; border-color: #303438; box-shadow: none; }}
+      p, small {{ color: #abb2b8; }}
+      .accept {{ background: #f4f5f6; color: #14171a; }}
+      .decline {{ border-color: #4b5157; }}
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark">NOOP SAFETY</div>
+    <h1>{html_lib.escape(title)}</h1>
+    <p>{body}</p>
+    {actions}
+    <small>Safety pages contain generic safety wording, not biometric readings. In an emergency, contact local emergency services directly.</small>
+  </main>
+</body>
+</html>"""
+
+
+def _safety_response_page(
+    *,
+    preview: dict[str, Any] | None,
+    action_url: str,
+    outcome: str | None = None,
+) -> str:
+    if outcome is not None:
+        title = "Safety response saved"
+        body = html_lib.escape(outcome)
+        actions = ""
+    elif preview is None:
+        title = "Safety page unavailable"
+        body = "This response link is invalid or has expired."
+        actions = ""
+    else:
+        owner = html_lib.escape(str(preview["owner_display_name"]))
+        status_value = str(preview["status"])
+        title = f"Respond to {owner}"
+        if status_value == "open":
+            body = (
+                f"{owner} sent an urgent Safety page. Call them now, then "
+                "tell the rest of their Safety Network whether you can respond."
+            )
+            safe_action = html_lib.escape(action_url, quote=True)
+            actions = f"""
+              <form method="post" action="{safe_action}">
+                <button class="accept" name="decision" value="responding">I’m responding</button>
+                <button class="decline" name="decision" value="cannot_respond">I cannot respond</button>
+              </form>
+            """
+        elif status_value == "acknowledged":
+            body = (
+                "A Safety Network contact has acknowledged this page. Call "
+                f"{owner} directly if you can still help."
+            )
+            actions = ""
+        else:
+            body = (
+                f"This Safety page is {html_lib.escape(status_value)} and is "
+                "no longer accepting responses."
+            )
+            actions = ""
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{html_lib.escape(title)}</title>
+  <style>
+    :root {{ color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f4f5f6; color: #14171a; }}
+    main {{ width: min(520px, calc(100% - 32px)); box-sizing: border-box; padding: 32px; background: #fff;
+            border: 1px solid #dfe3e7; border-radius: 8px; box-shadow: 0 12px 36px rgba(0,0,0,.08); }}
+    .mark {{ color: #9a6d00; font-size: 13px; font-weight: 700; letter-spacing: .08em; }}
+    h1 {{ margin: 12px 0; font-size: 28px; line-height: 1.15; letter-spacing: 0; }}
+    p {{ color: #4f5962; line-height: 1.55; }}
+    form {{ display: grid; gap: 10px; margin-top: 24px; }}
+    button {{ min-height: 48px; border-radius: 7px; font: inherit; font-weight: 650; cursor: pointer; }}
+    .accept {{ border: 0; background: #14171a; color: #fff; }}
+    .decline {{ border: 1px solid #c8cdd2; background: transparent; color: inherit; }}
+    small {{ display: block; margin-top: 24px; color: #727b83; line-height: 1.45; }}
+    @media (prefers-color-scheme: dark) {{
+      body {{ background: #090a0b; color: #f4f5f6; }}
+      main {{ background: #151719; border-color: #303438; box-shadow: none; }}
+      p, small {{ color: #abb2b8; }}
+      .accept {{ background: #f4f5f6; color: #14171a; }}
+      .decline {{ border-color: #4b5157; }}
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark">NOOP SAFETY NETWORK</div>
+    <h1>{html_lib.escape(title)}</h1>
+    <p>{body}</p>
+    {actions}
+    <small>NOOP has not contacted emergency services. In immediate danger, call local emergency services directly.</small>
+  </main>
+</body>
+</html>"""
+
+
 async def _run_retention_once(
     repository: Repository,
     settings: Settings,
@@ -389,6 +631,30 @@ async def require_friend_profile(
     return profile
 
 
+async def require_safety_profile(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+) -> dict[str, Any]:
+    supplied = (
+        credentials.credentials
+        if credentials is not None and credentials.scheme.casefold() == "bearer"
+        else ""
+    )
+    repository: SafetyRepository = request.app.state.safety_repository
+    profile = (
+        await repository.profile_for_token(_secret_hash(supplied))
+        if supplied.startswith("noop_safety_")
+        else None
+    )
+    if profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid or missing safety token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return profile
+
+
 def _json_download(value: Any, filename: str) -> Response:
     body = json.dumps(
         jsonable_encoder(value),
@@ -407,6 +673,8 @@ def create_app(
     *,
     settings: Settings | None = None,
     repository: Repository | None = None,
+    safety_repository: SafetyRepository | None = None,
+    paging_provider: PagingProvider | None = None,
 ) -> FastAPI:
     runtime_settings = settings or Settings.from_env()
     runtime_repository: Repository
@@ -423,6 +691,53 @@ def create_app(
         # lazy placeholder makes import-time tooling and OpenAPI generation safe.
         runtime_repository = MemoryRepository()
 
+    if safety_repository is not None:
+        runtime_safety_repository = safety_repository
+    elif isinstance(runtime_repository, PostgresRepository):
+        runtime_safety_repository = PostgresSafetyRepository(runtime_repository)
+    else:
+        runtime_safety_repository = MemorySafetyRepository()
+
+    runtime_twilio_callback_url: str | None = None
+    if paging_provider is not None:
+        runtime_paging_provider = paging_provider
+    elif runtime_settings.paging_configured:
+        callback_secret = quote(
+            runtime_settings.twilio_status_callback_secret or "", safe=""
+        )
+        runtime_twilio_callback_url = (
+            f"{(runtime_settings.public_base_url or '').rstrip('/')}"
+            "/v1/safety/provider/twilio/status"
+            f"?token={callback_secret}"
+        )
+        runtime_paging_provider = TwilioPagingProvider(
+            account_sid=runtime_settings.twilio_account_sid or "",
+            auth_token=runtime_settings.twilio_auth_token or "",
+            from_phone=runtime_settings.twilio_from_phone or "",
+            status_callback_url=runtime_twilio_callback_url,
+        )
+    else:
+        runtime_paging_provider = UnavailablePagingProvider()
+
+    capability_secret = (
+        runtime_settings.safety_capability_secret
+        or runtime_settings.api_token
+        or secrets.token_urlsafe(32)
+    )
+    runtime_safety_signer = SafetyCapabilitySigner(capability_secret)
+    runtime_safety_worker = SafetyDeliveryWorker(
+        repository=runtime_safety_repository,
+        provider=runtime_paging_provider,
+        public_base_url=runtime_settings.public_base_url or "http://localhost",
+        capability_signer=runtime_safety_signer,
+        poll_seconds=runtime_settings.safety_worker_poll_seconds,
+        lease_seconds=runtime_settings.safety_delivery_lease_seconds,
+        retry_base_seconds=runtime_settings.safety_retry_base_seconds,
+        provider_receipt_timeout_seconds=(
+            runtime_settings.safety_provider_receipt_timeout_seconds
+        ),
+    )
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         runtime_settings.validate_for_startup(
@@ -431,14 +746,24 @@ def create_app(
         )
         await runtime_repository.startup()
         retention_task: asyncio.Task[None] | None = None
+        safety_task: asyncio.Task[None] | None = None
         if runtime_settings.retention_days is not None:
             retention_task = asyncio.create_task(
                 _retention_worker(runtime_repository, runtime_settings),
                 name="noop-retention",
             )
+        if runtime_paging_provider.available:
+            safety_task = asyncio.create_task(
+                runtime_safety_worker.run(),
+                name="noop-safety-delivery",
+            )
         try:
             yield
         finally:
+            if safety_task is not None:
+                safety_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await safety_task
             if retention_task is not None:
                 retention_task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -453,6 +778,9 @@ def create_app(
     )
     app.state.settings = runtime_settings
     app.state.repository = runtime_repository
+    app.state.safety_repository = runtime_safety_repository
+    app.state.paging_provider = runtime_paging_provider
+    app.state.safety_worker = runtime_safety_worker
     app.add_middleware(
         RequestSizeLimitMiddleware,
         max_bytes=runtime_settings.max_request_bytes,
@@ -530,6 +858,15 @@ def create_app(
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         raise exc
 
+    def raise_safety_error(exc: Exception) -> None:
+        if isinstance(exc, SafetyNotFoundError):
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if isinstance(exc, SafetyConflictError):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if isinstance(exc, SafetyNotReadyError):
+            raise HTTPException(status_code=412, detail=str(exc)) from exc
+        raise exc
+
     @app.get("/healthz", tags=["operations"])
     async def health() -> dict[str, str]:
         # Public and intentionally contains no database/user information.
@@ -554,10 +891,384 @@ def create_app(
             headers={"Cache-Control": "no-store"},
         )
 
+    @app.get(
+        "/safety/accept/{invitation_token}",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def safety_invitation_page(invitation_token: str) -> HTMLResponse:
+        preview = None
+        if re.fullmatch(r"[A-Za-z0-9_-]{43,86}", invitation_token):
+            preview = await runtime_safety_repository.invitation_preview(
+                _secret_hash(invitation_token)
+            )
+        return HTMLResponse(
+            _safety_acceptance_page(
+                invitation_token=invitation_token,
+                preview=preview,
+            ),
+            status_code=200 if preview is not None else 404,
+            headers=_safety_acceptance_headers(),
+        )
+
+    @app.post(
+        "/safety/accept/{invitation_token}",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def decide_safety_invitation(
+        request: Request, invitation_token: str
+    ) -> HTMLResponse:
+        if re.fullmatch(r"[A-Za-z0-9_-]{43,86}", invitation_token) is None:
+            return HTMLResponse(
+                _safety_acceptance_page(
+                    invitation_token=invitation_token,
+                    preview=None,
+                ),
+                status_code=404,
+                headers=_safety_acceptance_headers(),
+            )
+        raw = await request.body()
+        if len(raw) > 2_048:
+            raise HTTPException(status_code=413, detail="form body is too large")
+        try:
+            values = parse_qs(
+                raw.decode("utf-8"),
+                keep_blank_values=False,
+                max_num_fields=4,
+            )
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="invalid form body") from exc
+        decision = values.get("decision", [""])[0]
+        if decision not in {"accept", "decline"}:
+            raise HTTPException(status_code=422, detail="choose accept or decline")
+        try:
+            contact = await runtime_safety_repository.decide_invitation(
+                invite_token_hash=_secret_hash(invitation_token),
+                decision=decision,
+                now=datetime.now(UTC),
+            )
+        except SafetyNotFoundError:
+            return HTMLResponse(
+                _safety_acceptance_page(
+                    invitation_token=invitation_token,
+                    preview=None,
+                ),
+                status_code=410,
+                headers=_safety_acceptance_headers(),
+            )
+        outcome = (
+            f"You are now an accepted emergency contact for "
+            f"{contact['display_name']}'s invitation. You may close this page."
+            if decision == "accept"
+            else "The invitation was declined. You may close this page."
+        )
+        return HTMLResponse(
+            _safety_acceptance_page(
+                invitation_token=invitation_token,
+                preview=None,
+                outcome=outcome,
+            ),
+            headers=_safety_acceptance_headers(),
+        )
+
+    async def safety_response_preview(
+        *,
+        dispatch_id: UUID,
+        contact_id: UUID,
+        expires: int,
+        signature: str,
+    ) -> dict[str, Any] | None:
+        now = datetime.now(UTC)
+        if not runtime_safety_signer.verify(
+            dispatch_id=str(dispatch_id),
+            contact_id=str(contact_id),
+            expires_at_unix=expires,
+            signature=signature,
+            now=now,
+        ):
+            return None
+        preview = await runtime_safety_repository.responder_preview(
+            dispatch_id=str(dispatch_id),
+            contact_id=str(contact_id),
+            now=now,
+        )
+        if preview is None or int(preview["expires_at"].timestamp()) != expires:
+            return None
+        return preview
+
+    def twilio_webhook_is_valid(
+        request: Request,
+        values: dict[str, list[str]],
+        *,
+        canonical_url: str | None = None,
+    ) -> bool:
+        public_url = canonical_url
+        if public_url is None:
+            public_url = (
+                f"{(runtime_settings.public_base_url or '').rstrip('/')}"
+                f"{request.url.path}"
+            )
+            if request.url.query:
+                public_url += f"?{request.url.query}"
+        return validate_twilio_webhook(
+            url=public_url,
+            parameters=values,
+            signature=request.headers.get("X-Twilio-Signature", ""),
+            auth_token=runtime_settings.twilio_auth_token or "",
+        )
+
+    @app.get(
+        "/safety/respond/{dispatch_id}/{contact_id}",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def safety_response_page(
+        request: Request,
+        dispatch_id: UUID,
+        contact_id: UUID,
+        expires: int = Query(..., gt=0),
+        signature: str = Query(..., min_length=43, max_length=43),
+    ) -> HTMLResponse:
+        preview = await safety_response_preview(
+            dispatch_id=dispatch_id,
+            contact_id=contact_id,
+            expires=expires,
+            signature=signature,
+        )
+        action_url = request.url.path
+        if request.url.query:
+            action_url += f"?{request.url.query}"
+        return HTMLResponse(
+            _safety_response_page(
+                preview=preview,
+                action_url=action_url,
+            ),
+            status_code=200 if preview is not None else 404,
+            headers=_safety_acceptance_headers(),
+        )
+
+    @app.post(
+        "/safety/respond/{dispatch_id}/{contact_id}",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+    )
+    async def decide_safety_response(
+        request: Request,
+        dispatch_id: UUID,
+        contact_id: UUID,
+        expires: int = Query(..., gt=0),
+        signature: str = Query(..., min_length=43, max_length=43),
+    ) -> HTMLResponse:
+        preview = await safety_response_preview(
+            dispatch_id=dispatch_id,
+            contact_id=contact_id,
+            expires=expires,
+            signature=signature,
+        )
+        if preview is None:
+            return HTMLResponse(
+                _safety_response_page(
+                    preview=None,
+                    action_url="",
+                ),
+                status_code=404,
+                headers=_safety_acceptance_headers(),
+            )
+        raw = await request.body()
+        if len(raw) > 2_048:
+            raise HTTPException(status_code=413, detail="form body is too large")
+        try:
+            values = parse_qs(
+                raw.decode("utf-8"),
+                keep_blank_values=False,
+                max_num_fields=4,
+            )
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="invalid form body") from exc
+        decision = values.get("decision", [""])[0]
+        if decision not in {"responding", "cannot_respond"}:
+            raise HTTPException(
+                status_code=422,
+                detail="choose whether you can respond",
+            )
+        try:
+            await runtime_safety_repository.record_responder_decision(
+                dispatch_id=str(dispatch_id),
+                contact_id=str(contact_id),
+                decision=decision,
+                source="sms_link",
+                now=datetime.now(UTC),
+            )
+        except SafetyConflictError as exc:
+            return HTMLResponse(
+                _safety_response_page(
+                    preview=preview,
+                    action_url="",
+                    outcome=str(exc),
+                ),
+                status_code=409,
+                headers=_safety_acceptance_headers(),
+            )
+        outcome = (
+            "Your response is saved. Call them now and coordinate with their "
+            "Safety Network."
+            if decision == "responding"
+            else "Your response is saved. Their other Safety Network contacts "
+            "can still respond."
+        )
+        return HTMLResponse(
+            _safety_response_page(
+                preview=preview,
+                action_url="",
+                outcome=outcome,
+            ),
+            headers=_safety_acceptance_headers(),
+        )
+
+    @app.post(
+        "/v1/safety/provider/twilio/respond/{dispatch_id}/{contact_id}",
+        include_in_schema=False,
+    )
+    async def twilio_safety_voice_response(
+        request: Request,
+        dispatch_id: UUID,
+        contact_id: UUID,
+        expires: int = Query(..., gt=0),
+        signature: str = Query(..., min_length=43, max_length=43),
+    ) -> Response:
+        preview = await safety_response_preview(
+            dispatch_id=dispatch_id,
+            contact_id=contact_id,
+            expires=expires,
+            signature=signature,
+        )
+        if preview is None:
+            return Response(
+                "<Response><Say>This Safety response link is no longer valid."
+                "</Say></Response>",
+                status_code=403,
+                media_type="application/xml",
+            )
+        raw = await request.body()
+        if len(raw) > 16_384:
+            raise HTTPException(status_code=413, detail="callback body is too large")
+        try:
+            values = parse_qs(
+                raw.decode("utf-8"),
+                keep_blank_values=False,
+                max_num_fields=32,
+            )
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400, detail="invalid callback body"
+            ) from exc
+        if runtime_settings.paging_configured and not twilio_webhook_is_valid(
+            request, values
+        ):
+            return Response(
+                "<Response><Say>This Safety response could not be verified."
+                "</Say></Response>",
+                status_code=403,
+                media_type="application/xml",
+            )
+        digit = values.get("Digits", [""])[0]
+        decision = {"1": "responding", "2": "cannot_respond"}.get(digit)
+        if decision is None:
+            return Response(
+                "<Response><Say>No valid response was recorded. Please call "
+                "the person directly.</Say></Response>",
+                media_type="application/xml",
+            )
+        try:
+            await runtime_safety_repository.record_responder_decision(
+                dispatch_id=str(dispatch_id),
+                contact_id=str(contact_id),
+                decision=decision,
+                source="voice_dtmf",
+                now=datetime.now(UTC),
+            )
+        except SafetyConflictError:
+            message = "This Safety page is already closed."
+        else:
+            message = (
+                "Your response is recorded. Please call them now."
+                if decision == "responding"
+                else "Your response is recorded. Thank you."
+            )
+        return Response(
+            f"<Response><Say>{html_lib.escape(message)}</Say></Response>",
+            media_type="application/xml",
+        )
+
+    @app.post(
+        "/v1/safety/provider/twilio/status",
+        status_code=status.HTTP_204_NO_CONTENT,
+        include_in_schema=False,
+    )
+    async def twilio_safety_delivery_receipt(
+        request: Request,
+        token: str = Query(default=""),
+    ) -> Response:
+        expected = runtime_settings.twilio_status_callback_secret or ""
+        if not expected or not hmac.compare_digest(
+            token.encode("utf-8"), expected.encode("utf-8")
+        ):
+            raise HTTPException(status_code=401, detail="invalid callback token")
+        raw = await request.body()
+        if len(raw) > 16_384:
+            raise HTTPException(status_code=413, detail="callback body is too large")
+        try:
+            values = parse_qs(
+                raw.decode("utf-8"),
+                keep_blank_values=False,
+                max_num_fields=32,
+            )
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400, detail="invalid callback body"
+            ) from exc
+        if not twilio_webhook_is_valid(
+            request,
+            values,
+            canonical_url=runtime_twilio_callback_url,
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="invalid callback signature",
+            )
+        provider_reference = (
+            values.get("MessageSid", [""])[0] or values.get("CallSid", [""])[0]
+        )
+        provider_status = (
+            values.get("MessageStatus", [""])[0] or values.get("CallStatus", [""])[0]
+        )
+        if provider_reference and provider_status:
+            now = datetime.now(UTC)
+            updated = await runtime_safety_repository.update_provider_receipt(
+                provider_reference=provider_reference,
+                status=normalise_provider_status(provider_status),
+                now=now,
+                retry_at=now
+                + timedelta(seconds=runtime_settings.safety_retry_base_seconds),
+            )
+            if updated:
+                runtime_safety_worker.wake()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     router = APIRouter(
         prefix="/v1",
         dependencies=[Depends(require_api_token)],
     )
+
+    @router.get("/safety/operations", tags=["operations"])
+    async def safety_operations() -> dict[str, Any]:
+        return {
+            "paging_configured": runtime_paging_provider.available,
+            **await runtime_safety_repository.monitoring_snapshot(
+                now=datetime.now(UTC)
+            ),
+        }
 
     @router.get("/status", tags=["operations"])
     async def service_status(request: Request) -> dict[str, Any]:
@@ -611,6 +1322,34 @@ def create_app(
             "token_notice": (
                 "Store this member token securely. It is returned only once and "
                 "can access computed daily sync and social summary routes only."
+            ),
+        }
+
+    @router.post(
+        "/safety/bootstrap",
+        status_code=status.HTTP_201_CREATED,
+        tags=["safety-admin"],
+    )
+    async def bootstrap_safety_profile(
+        body: SafetyProfileBootstrap,
+    ) -> dict[str, Any]:
+        try:
+            profile = await runtime_safety_repository.create_profile(
+                profile_id=str(uuid4()),
+                enrollment_id=str(body.enrollment_id),
+                display_name=body.display_name,
+                installation_id=body.installation_id,
+                token_hash=_secret_hash(body.safety_token.get_secret_value()),
+            )
+        except (SafetyNotFoundError, SafetyConflictError) as exc:
+            raise_safety_error(exc)
+            raise AssertionError("unreachable")
+        return {
+            "profile": profile,
+            "credential_notice": (
+                "The supplied safety token was stored only as a digest. It can "
+                "manage this installation's emergency contacts and manual "
+                "pages, but cannot read biometric data."
             ),
         }
 
@@ -675,6 +1414,44 @@ def create_app(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     social_router = APIRouter(prefix="/v1/social")
+
+    @social_router.delete(
+        "/enrollments/{enrollment_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        tags=["friends"],
+    )
+    async def delete_social_enrollment(
+        enrollment_id: UUID,
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None,
+            Depends(security),
+        ],
+        confirmation: Annotated[str | None, Header(alias="X-Noop-Confirm")] = None,
+    ) -> Response:
+        if confirmation != "DELETE PENDING SOCIAL ENROLLMENT":
+            raise HTTPException(
+                status_code=412,
+                detail=("set X-Noop-Confirm to 'DELETE PENDING SOCIAL ENROLLMENT'"),
+            )
+        supplied = (
+            credentials.credentials
+            if credentials is not None and credentials.scheme.casefold() == "bearer"
+            else ""
+        )
+        if not supplied.startswith("noop_member_"):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="invalid or missing member token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        try:
+            await runtime_repository.delete_friend_enrollment_data(
+                str(enrollment_id),
+                _secret_hash(supplied),
+            )
+        except FriendForbiddenError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @social_router.get("/me", tags=["friends"])
     async def social_profile(
@@ -964,6 +1741,331 @@ def create_app(
                 "never part of this endpoint."
             ),
         }
+
+    safety_router = APIRouter(prefix="/v1/safety")
+
+    def safety_contacts_payload(
+        contacts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        now = datetime.now(UTC)
+        public_contacts = [
+            _safety_contact_response(contact, now=now) for contact in contacts
+        ]
+        accepted_count = sum(
+            contact["status"] == "accepted" for contact in public_contacts
+        )
+        return {
+            "contacts": public_contacts,
+            "accepted_count": accepted_count,
+            "minimum_accepted": 2,
+            "maximum_contacts": 5,
+            "paging_configured": runtime_paging_provider.available,
+        }
+
+    async def send_contact_invitation(
+        *,
+        request: Request,
+        profile: dict[str, Any],
+        contact: dict[str, Any],
+        invitation_token: str,
+    ) -> dict[str, Any]:
+        base_url = (
+            runtime_settings.public_base_url.rstrip("/")
+            if runtime_settings.public_base_url
+            else str(request.base_url).rstrip("/")
+        )
+        acceptance_url = f"{base_url}/safety/accept/{quote(invitation_token, safe='')}"
+        try:
+            submission = await runtime_paging_provider.send_invitation(
+                to_phone=str(contact["phone_e164"]),
+                contact_name=str(contact["display_name"]),
+                owner_name=str(profile["display_name"]),
+                acceptance_url=acceptance_url,
+            )
+            return await runtime_safety_repository.update_invitation_delivery(
+                profile_id=str(profile["profile_id"]),
+                contact_id=str(contact["contact_id"]),
+                status=submission.status,
+                provider_reference=submission.provider_reference,
+                error=None,
+            )
+        except PagingUnavailableError as exc:
+            return await runtime_safety_repository.update_invitation_delivery(
+                profile_id=str(profile["profile_id"]),
+                contact_id=str(contact["contact_id"]),
+                status="failed",
+                provider_reference=None,
+                error=_safe_provider_error(exc),
+            )
+
+    @safety_router.get("/me", tags=["safety"])
+    async def safety_profile(
+        member: Annotated[dict[str, Any], Depends(require_safety_profile)],
+    ) -> dict[str, Any]:
+        contacts = await runtime_safety_repository.list_contacts(
+            str(member["profile_id"])
+        )
+        return {
+            "profile": member,
+            **safety_contacts_payload(contacts),
+            "automatic_escalation": {
+                "enabled": False,
+                "reason": (
+                    "No validated critical-event detector is configured. "
+                    "Wellness and anomaly estimates cannot trigger a page."
+                ),
+            },
+        }
+
+    @safety_router.get("/contacts", tags=["safety"])
+    async def safety_contacts(
+        member: Annotated[dict[str, Any], Depends(require_safety_profile)],
+    ) -> dict[str, Any]:
+        contacts = await runtime_safety_repository.list_contacts(
+            str(member["profile_id"])
+        )
+        return safety_contacts_payload(contacts)
+
+    @safety_router.post(
+        "/contacts",
+        status_code=status.HTTP_201_CREATED,
+        tags=["safety"],
+    )
+    async def add_safety_contact(
+        request: Request,
+        body: SafetyContactCreate,
+        member: Annotated[dict[str, Any], Depends(require_safety_profile)],
+    ) -> dict[str, Any]:
+        if not runtime_paging_provider.available:
+            raise HTTPException(
+                status_code=503,
+                detail=("SMS and voice paging are not configured on this server"),
+            )
+        invitation_token = _new_safety_invitation_token()
+        now = datetime.now(UTC)
+        try:
+            contact = await runtime_safety_repository.create_contact(
+                contact_id=str(uuid4()),
+                profile_id=str(member["profile_id"]),
+                display_name=body.display_name,
+                phone_e164=body.phone_e164,
+                invite_token_hash=_secret_hash(invitation_token),
+                invited_at=now,
+                invite_expires_at=now + timedelta(days=7),
+            )
+        except (SafetyNotFoundError, SafetyConflictError) as exc:
+            raise_safety_error(exc)
+            raise AssertionError("unreachable")
+        delivered = await send_contact_invitation(
+            request=request,
+            profile=member,
+            contact=contact,
+            invitation_token=invitation_token,
+        )
+        return {
+            "contact": _safety_contact_response(delivered),
+            "notice": (
+                "The recipient must explicitly accept before this contact can "
+                "receive a safety page."
+            ),
+        }
+
+    @safety_router.post(
+        "/contacts/{contact_id}/resend",
+        tags=["safety"],
+    )
+    async def resend_safety_contact_invitation(
+        request: Request,
+        contact_id: UUID,
+        member: Annotated[dict[str, Any], Depends(require_safety_profile)],
+    ) -> dict[str, Any]:
+        if not runtime_paging_provider.available:
+            raise HTTPException(
+                status_code=503,
+                detail=("SMS and voice paging are not configured on this server"),
+            )
+        invitation_token = _new_safety_invitation_token()
+        now = datetime.now(UTC)
+        try:
+            contact = await runtime_safety_repository.renew_invitation(
+                profile_id=str(member["profile_id"]),
+                contact_id=str(contact_id),
+                invite_token_hash=_secret_hash(invitation_token),
+                invited_at=now,
+                invite_expires_at=now + timedelta(days=7),
+            )
+        except (SafetyNotFoundError, SafetyConflictError) as exc:
+            raise_safety_error(exc)
+            raise AssertionError("unreachable")
+        delivered = await send_contact_invitation(
+            request=request,
+            profile=member,
+            contact=contact,
+            invitation_token=invitation_token,
+        )
+        return {"contact": _safety_contact_response(delivered)}
+
+    @safety_router.delete(
+        "/contacts/{contact_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        tags=["safety"],
+    )
+    async def remove_safety_contact(
+        contact_id: UUID,
+        member: Annotated[dict[str, Any], Depends(require_safety_profile)],
+    ) -> Response:
+        try:
+            await runtime_safety_repository.revoke_contact(
+                profile_id=str(member["profile_id"]),
+                contact_id=str(contact_id),
+                now=datetime.now(UTC),
+            )
+        except SafetyNotFoundError as exc:
+            raise_safety_error(exc)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @safety_router.post(
+        "/pages",
+        tags=["safety"],
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    @safety_router.post(
+        "/incidents",
+        tags=["safety"],
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    async def create_safety_page(
+        body: SafetyPageCreate,
+        member: Annotated[dict[str, Any], Depends(require_safety_profile)],
+        idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    ) -> Any:
+        if not runtime_paging_provider.available:
+            raise HTTPException(
+                status_code=503,
+                detail=("SMS and voice paging are not configured on this server"),
+            )
+        if idempotency_key is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Idempotency-Key is required for a safety page",
+            )
+        try:
+            idempotency_uuid = str(UUID(idempotency_key))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Idempotency-Key must be a UUID",
+            ) from exc
+        request_hash = hashlib.sha256(
+            json.dumps(
+                body.model_dump(mode="json"),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        now = datetime.now(UTC)
+        try:
+            dispatch = await runtime_safety_repository.create_dispatch(
+                dispatch_id=str(uuid4()),
+                profile_id=str(member["profile_id"]),
+                idempotency_key=idempotency_uuid,
+                request_hash=request_hash,
+                trigger=body.trigger,
+                now=now,
+                expires_at=now
+                + timedelta(seconds=runtime_settings.safety_incident_ttl_seconds),
+                voice_fallback_at=now
+                + timedelta(
+                    seconds=(runtime_settings.safety_acknowledgement_timeout_seconds)
+                ),
+            )
+        except (SafetyConflictError, SafetyNotReadyError) as exc:
+            raise_safety_error(exc)
+            raise AssertionError("unreachable")
+        if not dispatch["idempotent_replay"]:
+            runtime_safety_worker.wake()
+        return _safety_dispatch_response(dispatch)
+
+    @safety_router.get("/incidents", tags=["safety"])
+    async def safety_incidents(
+        member: Annotated[dict[str, Any], Depends(require_safety_profile)],
+        limit: int = Query(default=20, ge=1, le=100),
+    ) -> dict[str, Any]:
+        incidents = await runtime_safety_repository.list_dispatches(
+            profile_id=str(member["profile_id"]),
+            limit=limit,
+        )
+        return {
+            "incidents": [_safety_dispatch_response(incident) for incident in incidents]
+        }
+
+    @safety_router.get("/pages/{dispatch_id}", tags=["safety"])
+    @safety_router.get("/incidents/{dispatch_id}", tags=["safety"])
+    async def safety_page_status(
+        dispatch_id: UUID,
+        member: Annotated[dict[str, Any], Depends(require_safety_profile)],
+    ) -> dict[str, Any]:
+        try:
+            dispatch = await runtime_safety_repository.dispatch(
+                profile_id=str(member["profile_id"]),
+                dispatch_id=str(dispatch_id),
+            )
+        except SafetyNotFoundError as exc:
+            raise_safety_error(exc)
+            raise AssertionError("unreachable")
+        return _safety_dispatch_response(dispatch)
+
+    async def transition_safety_incident(
+        *,
+        action: str,
+        dispatch_id: UUID,
+        body: SafetyIncidentTransition,
+        member: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            incident = await runtime_safety_repository.transition_dispatch(
+                profile_id=str(member["profile_id"]),
+                dispatch_id=str(dispatch_id),
+                action=action,
+                note=body.note,
+                now=datetime.now(UTC),
+            )
+        except (SafetyNotFoundError, SafetyConflictError) as exc:
+            raise_safety_error(exc)
+            raise AssertionError("unreachable")
+        return _safety_dispatch_response(incident)
+
+    @safety_router.post(
+        "/incidents/{dispatch_id}/resolve",
+        tags=["safety"],
+    )
+    async def resolve_safety_incident(
+        dispatch_id: UUID,
+        body: SafetyIncidentTransition,
+        member: Annotated[dict[str, Any], Depends(require_safety_profile)],
+    ) -> dict[str, Any]:
+        return await transition_safety_incident(
+            action="resolve",
+            dispatch_id=dispatch_id,
+            body=body,
+            member=member,
+        )
+
+    @safety_router.post(
+        "/incidents/{dispatch_id}/cancel",
+        tags=["safety"],
+    )
+    async def cancel_safety_incident(
+        dispatch_id: UUID,
+        body: SafetyIncidentTransition,
+        member: Annotated[dict[str, Any], Depends(require_safety_profile)],
+    ) -> dict[str, Any]:
+        return await transition_safety_incident(
+            action="cancel",
+            dispatch_id=dispatch_id,
+            body=body,
+            member=member,
+        )
 
     @router.post(
         "/sync",
@@ -1301,6 +2403,7 @@ def create_app(
 
     app.include_router(router)
     app.include_router(social_router)
+    app.include_router(safety_router)
 
     static_root = Path(__file__).resolve().parent / "static"
     if runtime_settings.dashboard_enabled:

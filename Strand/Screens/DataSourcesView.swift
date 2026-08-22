@@ -415,6 +415,7 @@ struct DataSourcesView: View {
                 }
                 let points = result.metricPoints.map { MetricPoint(day: $0.day, key: $0.key, value: $0.value) }
                 try await store.upsertMetricSeries(points, deviceId: NutritionCsvImporter.sourceId)
+                try await store.upsertImportedNutritionDays(points)
                 await repo.refresh()
                 var msg = String(localized: "Imported \(result.importedDays) days (\(points.count) values)")
                 if let a = result.earliestDay, let b = result.latestDay, a != b { msg += " · \(a)-\(b)" }

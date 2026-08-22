@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nav_friends">Друзья</string>
+    <string name="friends_title">Друзья</string>
+    <string name="friends_subtitle">Личные показатели. Ваш сервер. Ваши правила.</string>
+    <string name="friends_refresh">Обновить друзей</string>
+    <string name="friends_you">Вы</string>
+    <string name="friends_overflow_count">+%1$d</string>
+    <string name="friends_working">Выполняется…</string>
+    <string name="friends_action_ok">ОК</string>
+    <string name="friends_action_cancel">Отмена</string>
+    <string name="friends_action_done">Готово</string>
+    <string name="friends_action_save">Сохранить настройки</string>
+    <string name="friends_action_remove">Удалить</string>
+    <string name="friends_action_decline">Отклонить</string>
+
+    <string name="friends_server_title">Создайте личный круг</string>
+    <string name="friends_server_body">Друзья работает на сервере Noop под вашим управлением. Учетная запись Noop и публичный профиль не создаются.</string>
+    <string name="friends_server_setup_action">Настроить сервер</string>
+    <string name="friends_join_details">Ввести данные приглашения</string>
+    <string name="friends_server_invite_note">Приглашение содержит адрес сервера и одноразовый код. Для вступления не нужен ключ администратора.</string>
+    <string name="friends_pending_title">Завершите принятие приглашения</string>
+    <string name="friends_pending_body">Noop сохранил эту попытку, поскольку ответ сервера был прерван. Повторите попытку с тем же одноразовым кодом или безопасно удалите созданный на сервере профиль.</string>
+    <string name="friends_pending_retry">Повторить приглашение</string>
+    <string name="friends_pending_discard">Отменить эту попытку</string>
+    <string name="friends_pending_discard_title">Отменить эту попытку вступления?</string>
+    <string name="friends_pending_discard_body">Noop попросит сервер удалить профиль и сводки Friends, связанные с этой незавершенной регистрацией, прежде чем удалить защищенные учетные данные с устройства.</string>
+    <string name="friends_pending_discard_action">Удалить попытку</string>
+    <string name="friends_profile_title">Создайте личный профиль</string>
+    <string name="friends_profile_body">Ваше имя видно только принятым друзьям на %1$s.</string>
+    <string name="friends_display_name">Отображаемое имя</string>
+    <string name="friends_create_profile">Создать личный профиль</string>
+    <string name="friends_profile_security_note">Ключ администратора используется один раз для выдачи отдельной учетной записи участника. В Друзья нет сквозного шифрования, поэтому доверяйте оператору сервера.</string>
+
+    <string name="friends_circle_overline">Ваш круг</string>
+    <plurals name="friends_people_count">
+        <item quantity="one">%1$d человек</item>
+        <item quantity="few">%1$d человека</item>
+        <item quantity="many">%1$d человек</item>
+        <item quantity="other">%1$d человека</item>
+    </plurals>
+    <string name="friends_invite_action">Пригласить друга</string>
+    <string name="friends_enter_invite_code">Ввести код приглашения</string>
+    <string name="friends_requests_title">Запросы</string>
+    <string name="friends_request_incoming">Хочет вступить в ваш круг</string>
+    <string name="friends_request_outgoing">Ожидает подтверждения</string>
+    <string name="friends_accept_named">Принять %1$s</string>
+    <string name="friends_today_title">Сегодня</string>
+    <string name="friends_private">Личное</string>
+    <plurals name="friends_friend_count">
+        <item quantity="one">%1$d друг</item>
+        <item quantity="few">%1$d друга</item>
+        <item quantity="many">%1$d друзей</item>
+        <item quantity="other">%1$d друга</item>
+    </plurals>
+    <string name="friends_empty_title">Ваш круг начинается здесь</string>
+    <string name="friends_empty_body">Пригласите человека, которому доверяете. Показатели появятся после его вступления и вашего подтверждения.</string>
+    <string name="friends_waiting_shared_day">Ожидание общего дня</string>
+    <string name="friends_scores_waiting">Показатели появятся после загрузки дневной сводки пользователем %1$s.</string>
+    <string name="friends_open_sharing_named">Открыть настройки доступа для %1$s</string>
+    <string name="friends_score_charge">Заряд</string>
+    <string name="friends_score_effort">Нагрузка</string>
+    <string name="friends_score_rest">Отдых</string>
+    <string name="friends_detail_sleep">Сон %1$s</string>
+    <string name="friends_detail_hrv">ВСР %1$s мс</string>
+    <string name="friends_detail_rhr">Пульс покоя %1$s уд/мин</string>
+    <string name="friends_duration_hours_minutes">%1$d ч %2$d мин</string>
+    <string name="friends_shared_today">Опубликовано сегодня</string>
+    <string name="friends_shared_yesterday">Опубликовано вчера</string>
+    <string name="friends_last_shared">Последняя публикация</string>
+    <string name="friends_last_shared_date">Последняя публикация: %1$s</string>
+
+    <string name="friends_privacy_title">Только сводки</string>
+    <string name="friends_privacy_body">Исходные данные пульса, интервалы R-R, стадии сна, дневники, тренировки, маршруты, экспортированные данные и идентификаторы устройств никогда не отображаются в Друзья.</string>
+    <string name="friends_leave_action">Покинуть круг и удалить копию с сервера</string>
+    <string name="friends_leave_title">Покинуть этот круг?</string>
+    <string name="friends_leave_body">Noop удалит связи с друзьями, учетную запись участника и отдельные сводки Друзья с этого сервера. Медицинские данные на устройстве и отдельная резервная копия сохранятся.</string>
+
+    <string name="friends_invite_title">Пригласить друга</string>
+    <string name="friends_invite_body">Одноразовый доступ к вашему личному кругу.</string>
+    <string name="friends_invite_expires">Действует до %1$s</string>
+    <string name="friends_invite_share">Поделиться приглашением</string>
+    <string name="friends_invite_subject">Вступите в мой личный круг Noop</string>
+    <string name="friends_invite_share_text">Вступите в мой личный круг Noop.\n\nСервер: %1$s\nОдноразовый код: %2$s\n\nВ Noop откройте Еще &gt; Друзья &gt; Ввести данные приглашения. Обмен начнется только после того, как я приму ваш запрос.</string>
+    <string name="friends_invite_disclosure">Код истекает в течение 72 часов и работает один раз. Вступление создает запрос, который вы по-прежнему решаете принять или отклонить.</string>
+    <string name="friends_join_title">Вступить в круг</string>
+    <string name="friends_join_body">Перед отправкой запроса проверьте адрес и условия.</string>
+    <string name="friends_server_address">Адрес сервера</string>
+    <string name="friends_invite_code">Код приглашения</string>
+    <string name="friends_join_default_title">Доступно по умолчанию</string>
+    <string name="friends_join_default_body">Заряд, Нагрузка и Отдых</string>
+    <string name="friends_join_never_title">Никогда не отправляется в Друзья</string>
+    <string name="friends_join_never_body">Исходные пульс и R-R, стадии сна, дневник, тренировки, маршруты, экспортированные данные и идентификаторы устройств</string>
+    <string name="friends_join_trust_title">Доверие оператору</string>
+    <string name="friends_join_trust_body">В Друзья нет сквозного шифрования. Оператор личного сервера может получить доступ к выбранным вами полям сводки.</string>
+    <string name="friends_join_send">Отправить запрос на вступление</string>
+
+    <string name="friends_sharing_directional">Доступ настраивается отдельно в каждом направлении и контролируется сервером.</string>
+    <string name="friends_daily_scores">Дневные показатели</string>
+    <string name="friends_additional_details">Дополнительные данные</string>
+    <string name="friends_sleep_duration">Продолжительность сна</string>
+    <string name="friends_hrv">ВСР</string>
+    <string name="friends_rhr">Пульс в покое</string>
+    <string name="friends_additional_default_note">Дополнительные данные отключены для каждой новой дружбы, пока вы их не включите.</string>
+    <string name="friends_they_share">Доступно вам</string>
+    <string name="friends_shared">Доступно</string>
+    <string name="friends_hidden">Скрыто</string>
+    <string name="friends_remove_named">Удалить %1$s</string>
+    <string name="friends_remove_title">Удалить %1$s?</string>
+    <string name="friends_remove_body">Вы больше не будете видеть показатели друг друга. Для повторного подключения потребуется новое приглашение.</string>
+
+    <string name="friends_upload_pending">Друзья загружены, но последнюю разрешенную сводку не удалось отправить. Noop повторит попытку.</string>
+    <string name="friends_notice_profile_ready">Личный профиль готов</string>
+    <string name="friends_notice_request_sent">Запрос отправлен. Обмен начнется после принятия.</string>
+    <string name="friends_notice_request_accepted">%1$s вступил в ваш круг</string>
+    <string name="friends_notice_request_declined">Запрос отклонен</string>
+    <string name="friends_notice_privacy_saved">Доступ для %1$s обновлен</string>
+    <string name="friends_notice_removed">%1$s удален. Обмен прекращен.</string>
+    <string name="friends_notice_profile_deleted">Профиль на сервере удален. Локальные данные о здоровье сохранены.</string>
+    <string name="friends_notice_pending_discarded">Ожидающее приглашение удалено</string>
+
+    <string name="friends_error_title">Друзья</string>
+    <string name="friends_error_input">Проверьте данные приглашения и повторите попытку.</string>
+    <string name="friends_error_network">Не удалось подключиться к личному серверу Друзья.</string>
+    <string name="friends_error_server">Сервер Друзья отклонил запрос (HTTP %1$d).</string>
+    <string name="friends_error_response">Сервер вернул нечитаемый ответ Друзья.</string>
+    <string name="friends_error_storage">Noop не удалось безопасно сохранить профиль Друзья на этом устройстве.</string>
+    <string name="friends_error_unknown">Не удалось выполнить запрос Друзья.</string>
+</resources>

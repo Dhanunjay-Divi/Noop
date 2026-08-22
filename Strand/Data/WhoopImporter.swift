@@ -8,7 +8,7 @@ enum WhoopImporter {
 
     /// The WHOOP CSV mapping revision, stamped into the Import test-mode parser line. Bump when this
     /// importer's column->store mapping changes so a shared report's parser version is unambiguous.
-    static let importerVersion = 3
+    static let importerVersion = 4
     /// Shared provenance stamp for comparison/calibration. Keep this derived from `importerVersion`
     /// so UI call sites cannot drift from the importer that actually wrote the reference rows.
     static var schemaRevision: String { "whoop-csv-import-v\(importerVersion)" }
@@ -278,6 +278,16 @@ enum WhoopImporter {
         let approximateWorkoutsWritten = try await store.upsertWorkouts(
             approximateMappedWorkouts, deviceId: computedDeviceId)
 
+        // `noop_user_data.json` was decoded and its complete relationship graph validated before this
+        // method began writing. Merge the accepted nutrition/strength rows atomically by stable ID;
+        // newer/equal local edits and built-in exercise definitions remain authoritative.
+        let portableSummary: PortableUserDataImportSummary?
+        if let portable = result.portableUserData {
+            portableSummary = try await store.importPortableUserData(portable)
+        } else {
+            portableSummary = nil
+        }
+
         // Stamp only rows that actually traversed the provenance-aware official path. Legacy rows already
         // in the namespace remain untouched but unverified, so Compare cannot silently relabel them.
         WhoopReferenceImportManifest().recordOfficialMetrics(
@@ -326,7 +336,26 @@ enum WhoopImporter {
             trace(lines)
         }
 
-        return result.summary
+        var summary = result.summary
+        if let portableSummary {
+            let portableCounts = [
+                "nutritionEntries": portableSummary.nutritionEntries,
+                "strengthExercises": portableSummary.strengthExercises,
+                "strengthRoutines": portableSummary.strengthRoutines,
+                "strengthRoutineExercises": portableSummary.strengthRoutineExercises,
+                "strengthSessions": portableSummary.strengthSessions,
+                "strengthSets": portableSummary.strengthSets,
+            ]
+            for (category, count) in portableCounts where count > 0 {
+                summary.countsByCategory[category] = count
+            }
+            summary.recordCount += portableSummary.total
+            if let portable = result.portableUserData {
+                summary.earliest = [summary.earliest, portable.earliestDate].compactMap { $0 }.min()
+                summary.latest = [summary.latest, portable.latestDate].compactMap { $0 }.max()
+            }
+        }
+        return summary
     }
 
     /// The NOOP day a WHOOP cycle belongs to: the local calendar day you WOKE. See

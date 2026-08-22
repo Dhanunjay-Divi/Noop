@@ -52,7 +52,7 @@ import kotlin.math.roundToInt
 // Value-for-value Compose twin of Strand/Screens/FusedRecordView.swift
 // (docs/superpowers/specs/2026-06-19-v5-local-multi-device-fusion-design.md §UX). For each core metric
 // it shows the BEST-sourced value, a provenance badge naming the source, the plain published reason
-// from MetricArbitrationPolicy ("counts directly" / "best stager"), and the inline agreement state
+// from MetricArbitrationPolicy ("device step count" / "WHOOP staged-sleep import"), and the inline agreement state
 // from FusionResolver (agree / minor delta / conflict). On a conflict it opens a compare detail
 // listing EVERY source side by side and which one NOOP is using and why — it NEVER silently merges.
 //

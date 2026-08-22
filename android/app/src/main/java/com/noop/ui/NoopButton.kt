@@ -197,7 +197,7 @@ fun NoopButton(
             text = text,
             style = NoopType.headline.copy(
                 fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.2.sp, // a hair of openness on the semibold face (iOS tracking 0.2)
+                letterSpacing = 0.sp,
             ),
             color = appearance.label,
             maxLines = 1,

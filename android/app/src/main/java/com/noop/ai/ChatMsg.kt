@@ -8,6 +8,8 @@ package com.noop.ai
  * @param text plain-text message body.
  */
 data class ChatMsg(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val createdAt: Long = System.currentTimeMillis(),
     val role: String, // "user" | "assistant"
     val text: String,
 )

@@ -1165,18 +1165,6 @@ struct TodayView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Updates")
-                // Quick-action + (the accented primary, gold, same 36 size as the rest).
-                Button { router.requestQuickActions() } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(StrandPalette.goldDeepText)
-                        .frame(width: 36, height: 36)
-                        .background(Circle().fill(StrandPalette.accent))
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Quick actions")
-                .accessibilityHint("Start a workout, log your journal, or breathe")
                 // Menu (Settings), the avatar, same 36 size.
                 Button { showSettings = true } label: {
                     ProfileAvatarView(imageData: profile.avatarImageData, size: 36)
@@ -2396,7 +2384,7 @@ struct TodayView: View {
             Text(value.map { intString($0) } ?? "—")
                 .font(StrandFont.captionNumber)
                 .foregroundStyle(value == nil ? StrandPalette.textTertiary : StrandPalette.textPrimary)
-            Text(label).font(StrandFont.overlineScaled(7.5)).tracking(0.7)
+            Text(label).font(StrandFont.overlineScaled(7.5)).tracking(0)
                 .foregroundStyle(StrandPalette.textTertiary)
         }
         .frame(minWidth: 48, alignment: .trailing)
@@ -2565,7 +2553,7 @@ struct TodayView: View {
             Text(label)
                 .font(StrandFont.footnote.weight(.semibold))
                 .textCase(.uppercase)
-                .tracking(0.6)
+                .tracking(0)
                 .foregroundStyle(StrandPalette.textSecondary)
             Spacer(minLength: 8)
             HStack(alignment: .firstTextBaseline, spacing: 3) {
@@ -3562,7 +3550,7 @@ struct TodayView: View {
                     Text("kcal").font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
                 }
                 Text(energyHeadlineLabel(breakdown).uppercased())
-                    .font(StrandFont.overlineScaled(7)).tracking(0.6)
+                    .font(StrandFont.overlineScaled(7)).tracking(0)
                     .foregroundStyle(StrandPalette.textTertiary)
                 HStack(spacing: 8) {
                     energyKeyMini(String(localized: "Active"), breakdown.activeKcal)
@@ -3581,7 +3569,7 @@ struct TodayView: View {
 
     private func energyKeyMini(_ label: String, _ value: Double?) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(label.uppercased()).font(StrandFont.overlineScaled(6.5)).tracking(0.5)
+            Text(label.uppercased()).font(StrandFont.overlineScaled(6.5)).tracking(0)
                 .foregroundStyle(StrandPalette.textTertiary)
             Text(value.map { intString($0) } ?? "—")
                 .font(StrandFont.captionNumber)

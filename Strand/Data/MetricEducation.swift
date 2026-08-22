@@ -355,9 +355,9 @@ enum MetricKnowledge {
 
         case "calories_in", "protein_g", "carbs_g", "fat_g":
             return item(
-                what: "This nutrition value comes from your imported food log.",
+                what: "This nutrition value comes from meals you logged in NOOP or imported from a food tracker.",
                 why: "Logged intake can be tested against sleep, training and recovery trends.",
-                method: "Imported as entered; NOOP does not invent missing meals or nutrients.",
+                method: "Manual meals and imported daily summaries are added as entered. A nutrient you did not provide stays missing; NOOP does not invent a zero or a meal.",
                 limits: "Portion estimates and incomplete logging can outweigh small day-to-day differences.",
                 influences: ["Portion accuracy", "Missing entries", "Food database", "Meal timing"],
                 actions: ["Aim for consistent logging before drawing conclusions.", "Use weekly patterns rather than one day.", "Consult a qualified professional for individualized nutrition care."],
@@ -397,6 +397,9 @@ enum MetricKnowledge {
         // the legacy series key for compatibility, so source + key—not key alone—must classify it.
         if derived.contains(metric.key) || (metric.key == "steps" && metric.source == "my-whoop") {
             return String(localized: "Derived on device")
+        }
+        if metric.source == "nutrition-log" {
+            return String(localized: "Logged / imported")
         }
         if metric.source == "apple-health" || metric.source == "xiaomi-band"
             || metric.source == "nutrition-csv" {

@@ -595,3 +595,28 @@ data class LiveSessionRow(
     val easeCount: Int,
     val hrSource: String,
 )
+
+/** One durable local Coach turn. Provider credentials are never stored in this table. */
+@Entity(
+    tableName = "coachMessage",
+    indices = [Index(name = "idx_coachMessage_createdAt", value = ["createdAt", "id"])],
+)
+data class CoachMessageRow(
+    @PrimaryKey val id: String,
+    val createdAt: Long,
+    val role: String,
+    val text: String,
+)
+
+/** One explicit, user-authored Coach memory. Disabled rows remain visible and editable locally. */
+@Entity(
+    tableName = "coachMemory",
+    indices = [Index(name = "idx_coachMemory_enabled_updatedAt", value = ["enabled", "updatedAt"])],
+)
+data class CoachMemoryRow(
+    @PrimaryKey val id: String,
+    val text: String,
+    val enabled: Boolean,
+    val createdAt: Long,
+    val updatedAt: Long,
+)

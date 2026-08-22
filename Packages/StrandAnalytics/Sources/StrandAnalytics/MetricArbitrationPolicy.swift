@@ -8,9 +8,9 @@ import Foundation
 // future Polar/Garmin/Oura source is registered. Pure constants + two lookups. Value-for-value Kotlin
 // twin in android/.../analytics/MetricArbitrationPolicy.kt.
 //
-// Trust tiers (lower = more trusted), grounded in what a device MEASURES vs ESTIMATES (spec §1):
-//   0 — Direct dedicated sensor for this metric (WHOOP R-R for HRV; a wrist band's pedometer for
-//       steps; chest/PPG strap for avg/max/resting HR; ring/strap temp for skin temp).
+// Trust tiers (lower = preferred for this metric), grounded in source fit and derivation (spec §1):
+//   0 — Preferred device/vendor output for this metric (for example imported WHOOP staging or a
+//       phone/band step count). Tier is a selection rank, not an evidence-class claim.
 //   1 — Derived on-device from raw by NOOP (computed recovery/strain/sleep from strap streams).
 //   2 — Phone aggregate (Apple Health / Health Connect) of a declared-compatible quantity.
 //   3 — Estimate / proxy (a strap's STEP estimate; a calories estimate).
@@ -70,7 +70,7 @@ public enum MetricArbitrationPolicy {
     public static func tier(metric: MetricKind, source: FusionSource) -> Int {
         switch metric {
         case .restingHR, .heartRate, .hrv, .spo2:
-            // Worn-sensor vitals: the strap measures them directly; the phone aggregates them.
+            // Worn-device vital output is preferred; phone health stores aggregate or bridge it.
             switch source {
             case .whoopImport:   return 0   // direct dedicated sensor (R-R / PPG)
             case .xiaomiBand:    return 0   // dedicated wrist PPG
@@ -159,31 +159,41 @@ public enum MetricArbitrationPolicy {
         }
     }
 
-    /// The published "best signal" reason a source wins (or appears) for a metric. Plain English,
-    /// wellness-only — never asserts a value is true or medically valid. Drives the one-line caption
-    /// on the fused row.
+    /// Published source reason for a metric. This describes evidence class, not merely trust tier:
+    /// an imported vendor summary must never be relabelled "direct sensor" because it won tier 0.
+    /// Plain English, wellness-only, and never an accuracy or clinical claim.
     public static func reason(metric: MetricKind, source: FusionSource) -> String {
-        let t = tier(metric: metric, source: source)
         switch (metric, source) {
-        case (.steps, .xiaomiBand), (.steps, .appleHealth), (.steps, .healthConnect):
-            return "counts directly"
+        case (.steps, .xiaomiBand):
+            return "device step count"
+        case (.steps, .appleHealth), (.steps, .healthConnect):
+            return "phone or watch step count"
         case (.steps, .whoopImport), (.steps, .noopComputed):
             return "step estimate"
         case (.sleep, .whoopImport):
-            return "best stager"
+            return "WHOOP staged-sleep import"
         case (.sleep, .noopComputed):
             return "computed stages"
+        case (.sleep, .xiaomiBand):
+            return "device-staged sleep"
         case (.sleep, .appleHealth), (.sleep, .healthConnect):
-            return "phone sleep buckets"
-        case (.skinTemp, _):
-            return "worn sensor"
-        default:
-            switch t {
-            case 0: return "direct sensor"
-            case 1: return "computed on device"
-            case 2: return "phone aggregate"
-            default: return "estimate"
-            }
+            return "health-data sleep import"
+        case (.skinTemp, .whoopImport), (.skinTemp, .xiaomiBand):
+            return "wearable temperature"
+        case (.skinTemp, .appleHealth), (.skinTemp, .healthConnect):
+            return "health-data import"
+        case (_, .whoopImport):
+            return "WHOOP import"
+        case (_, .xiaomiBand):
+            return "device-derived"
+        case (_, .noopComputed):
+            return "computed on device"
+        case (_, .appleHealth), (_, .healthConnect):
+            return "health-data import"
+        case (_, .nutritionCsv):
+            return "user import"
+        case (_, .localCache):
+            return "cached value"
         }
     }
 

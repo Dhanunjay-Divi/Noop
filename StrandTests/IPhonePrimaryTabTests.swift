@@ -2,12 +2,12 @@ import XCTest
 @testable import Strand
 
 final class IPhonePrimaryTabTests: XCTestCase {
-    func testPrimaryOrderKeepsFriendsVisibleAndMoreLast() {
+    func testPrimaryOrderKeepsWorkoutsVisibleAndMoreLast() {
         XCTAssertEqual(
             IPhonePrimaryTab.allCases,
-            [.today, .trends, .friends, .sleep, .more]
+            [.today, .trends, .activity, .sleep, .more]
         )
-        XCTAssertEqual(IPhonePrimaryTab.friends.rawValue, 2)
+        XCTAssertEqual(IPhonePrimaryTab.activity.rawValue, 2)
         XCTAssertEqual(IPhonePrimaryTab.sleep.rawValue, 3)
         XCTAssertEqual(IPhonePrimaryTab.more.rawValue, 4)
     }
@@ -21,9 +21,9 @@ final class IPhonePrimaryTabTests: XCTestCase {
         )
     }
 
-    func testInvitationNamesThePrimaryFriendsEntryPoint() {
-        XCTAssertTrue(FriendsNavigationCopy.invitationInstruction.contains("Friends tab"))
-        XCTAssertFalse(FriendsNavigationCopy.invitationInstruction.contains("More → Friends"))
+    func testInvitationNamesTheFriendsEntryPointInMore() {
+        XCTAssertTrue(FriendsNavigationCopy.invitationInstruction.contains("More → Friends"))
+        XCTAssertFalse(FriendsNavigationCopy.invitationInstruction.contains("Friends tab"))
     }
 
     @MainActor

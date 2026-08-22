@@ -13,12 +13,15 @@ import pytest
 from app.models import SyncPayload
 from app.repository import (
     FriendConflictError,
+    FriendForbiddenError,
     FriendNotFoundError,
     PostgresRepository,
     SyncRetiredError,
 )
+from app.safety_repository import PostgresSafetyRepository
 
 FIXTURES = Path(__file__).resolve().parent / "data"
+MIGRATIONS = Path(__file__).resolve().parents[1] / "migrations"
 DATABASE_URL = os.getenv("NOOP_TEST_DATABASE_URL")
 
 
@@ -37,6 +40,139 @@ def _payload_hash(payload: SyncPayload) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
+
+
+def test_safety_migration_removes_legacy_constraints_before_state_conversion() -> None:
+    sql = (MIGRATIONS / "006_safety_incidents.sql").read_text(encoding="utf-8")
+
+    dispatch_drop = sql.index("DROP CONSTRAINT IF EXISTS safety_dispatch_status")
+    dispatch_conversion = sql.index("UPDATE safety_dispatches\nSET status = 'expired'")
+    delivery_drop = sql.index("DROP CONSTRAINT IF EXISTS safety_delivery_status")
+    delivery_conversion = sql.index("UPDATE safety_deliveries\nSET status = CASE")
+
+    assert dispatch_drop < dispatch_conversion
+    assert delivery_drop < delivery_conversion
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for TimescaleDB integration tests",
+)
+@pytest.mark.asyncio
+async def test_postgres_safety_recovers_an_exhausted_final_lease() -> None:
+    repository = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=2,
+    )
+    safety = PostgresSafetyRepository(repository)
+    profile_id = str(uuid4())
+    dispatch_id = str(uuid4())
+    now = datetime.now(UTC)
+
+    await repository.startup()
+    try:
+        await safety.create_profile(
+            profile_id=profile_id,
+            enrollment_id=str(uuid4()),
+            display_name="Lease recovery test",
+            installation_id=str(uuid4()),
+            token_hash=hashlib.sha256(uuid4().bytes).hexdigest(),
+        )
+        for index in range(2):
+            invite_hash = hashlib.sha256(f"pg-invite-{uuid4()}".encode()).hexdigest()
+            await safety.create_contact(
+                contact_id=str(uuid4()),
+                profile_id=profile_id,
+                display_name=f"Contact {index}",
+                phone_e164=f"+1415555020{index}",
+                invite_token_hash=invite_hash,
+                invited_at=now,
+                invite_expires_at=now + timedelta(hours=1),
+            )
+            await safety.decide_invitation(
+                invite_token_hash=invite_hash,
+                decision="accept",
+                now=now,
+            )
+        await safety.create_dispatch(
+            dispatch_id=dispatch_id,
+            profile_id=profile_id,
+            idempotency_key=str(uuid4()),
+            request_hash=hashlib.sha256(b"manual_sos").hexdigest(),
+            trigger="manual_sos",
+            now=now,
+            expires_at=now + timedelta(minutes=30),
+            voice_fallback_at=now + timedelta(minutes=5),
+        )
+        jobs = await safety.claim_due_deliveries(
+            worker_id="worker-a",
+            now=now,
+            lease_until=now + timedelta(seconds=1),
+            limit=2,
+        )
+        target = jobs[0]
+        pool = repository._require_pool()
+        await pool.execute(
+            """
+            UPDATE safety_deliveries
+            SET max_attempts = 1
+            WHERE delivery_id = $1
+            """,
+            target["delivery_id"],
+        )
+
+        recovered_at = now + timedelta(seconds=2)
+        await safety.claim_due_deliveries(
+            worker_id="worker-b",
+            now=recovered_at,
+            lease_until=recovered_at + timedelta(seconds=1),
+            limit=10,
+        )
+
+        incident = await safety.dispatch(
+            profile_id=profile_id,
+            dispatch_id=dispatch_id,
+        )
+        delivery = next(
+            row
+            for row in incident["deliveries"]
+            if str(row["delivery_id"]) == str(target["delivery_id"])
+        )
+        assert delivery["status"] == "failed"
+        assert delivery["error"] == "delivery retry limit reached"
+        attempt_status = await pool.fetchval(
+            """
+            SELECT status
+            FROM safety_delivery_attempts
+            WHERE attempt_id = $1
+            """,
+            target["attempt_id"],
+        )
+        assert attempt_status == "unknown"
+        voice = next(
+            row
+            for row in incident["deliveries"]
+            if str(row["contact_id"]) == str(target["contact_id"])
+            and row["channel"] == "voice"
+        )
+        assert voice["available_at"] == recovered_at
+    finally:
+        if repository._pool is not None:
+            pool = repository._require_pool()
+            await pool.execute(
+                "DELETE FROM safety_dispatches WHERE profile_id = $1",
+                UUID(profile_id),
+            )
+            await pool.execute(
+                "DELETE FROM safety_contacts WHERE profile_id = $1",
+                UUID(profile_id),
+            )
+            await pool.execute(
+                "DELETE FROM safety_profiles WHERE profile_id = $1",
+                UUID(profile_id),
+            )
+        await repository.shutdown()
 
 
 @pytest.mark.skipif(
@@ -102,7 +238,7 @@ async def test_timescaledb_migrations_idempotency_rr_and_row_provenance() -> Non
             migration_count = await connection.fetchval(
                 "SELECT count(*) FROM noop_schema_migrations"
             )
-            assert migration_count == 4
+            assert migration_count == len(list(MIGRATIONS.glob("*.sql")))
             await repository._run_migrations(connection)
             assert (
                 await connection.fetchval("SELECT count(*) FROM noop_schema_migrations")
@@ -352,6 +488,25 @@ async def test_timescaledb_friend_join_and_directional_visibility() -> None:
             == []
         )
         assert await repository.list_friends(bob_id) == []
+
+        with pytest.raises(FriendForbiddenError):
+            await repository.delete_friend_enrollment_data(
+                bob_enrollment,
+                hashlib.sha256(b"wrong-member-token").hexdigest(),
+            )
+        await repository.disable_friend_profile(bob_id)
+        enrollment_deleted = await repository.delete_friend_enrollment_data(
+            bob_enrollment,
+            bob_token_hash,
+        )
+        assert enrollment_deleted["friend_profiles"] == 1
+        assert (
+            await repository.delete_friend_enrollment_data(
+                bob_enrollment,
+                bob_token_hash,
+            )
+            == {}
+        )
     finally:
         pool = repository._require_pool()
         await pool.execute(

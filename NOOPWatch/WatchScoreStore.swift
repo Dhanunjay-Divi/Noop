@@ -20,6 +20,8 @@ final class WatchScoreStore: NSObject, ObservableObject, WCSessionDelegate {
 
     /// The latest snapshot the watch knows about. nil = nothing has ever synced (fresh install).
     @Published private(set) var snapshot: WatchScoreSnapshot?
+    @Published private(set) var strengthPlan: WatchStrengthPlan?
+    @Published private(set) var strengthHandoffMessage: String?
 
     /// The shared App Group suite the watch app + its complication both read/write. `Bundle.main` is
     /// process-global, so this is exactly the lookup `WatchScoreSnapshot.appGroupId` itself performs —
@@ -31,11 +33,43 @@ final class WatchScoreStore: NSObject, ObservableObject, WCSessionDelegate {
     static let storageKey = WatchScoreSnapshot.storageKey
 
     override init() {
+        #if DEBUG
+        Self.seedDemoStrengthPlanIfNeeded()
+        #endif
         super.init()
         // Show the last-known snapshot straight away (honest about its age via the glance's "as of").
         snapshot = Self.loadPersisted()
+        strengthPlan = WatchStrengthPlan.load()
         activate()
     }
+
+    #if DEBUG
+    /// Screenshot-only routine data, activated solely by the existing explicit demo route.
+    private static func seedDemoStrengthPlanIfNeeded() {
+        guard ProcessInfo.processInfo.environment["NOOP_DEMO_SCREEN"] == "strength",
+              WatchStrengthPlan.load() == nil else { return }
+        WatchStrengthPlan(
+            routines: [
+                WatchStrengthRoutine(
+                    id: "demo-upper",
+                    name: "Upper strength",
+                    exerciseNames: ["Bench press", "Row", "Shoulder press"],
+                    targetSetCount: 12
+                ),
+                WatchStrengthRoutine(
+                    id: "demo-lower",
+                    name: "Lower strength",
+                    exerciseNames: ["Squat", "Romanian deadlift", "Calf raise"],
+                    targetSetCount: 11
+                ),
+            ],
+            activeSessionName: nil,
+            activeCompletedSets: 0,
+            activeTargetSets: 0,
+            updatedAt: Date()
+        ).save()
+    }
+    #endif
 
     /// Bring up the WCSession so the phone can reach us. Guarded because the simulator / an unpaired
     /// state can report the session unsupported, in which case we simply run on the last persisted snapshot.
@@ -74,11 +108,57 @@ final class WatchScoreStore: NSObject, ObservableObject, WCSessionDelegate {
         WidgetCenter.shared.reloadAllTimelines()
     }
 
+    private func apply(_ plan: WatchStrengthPlan) {
+        plan.save()
+        strengthPlan = plan
+    }
+
     /// Decode a WatchScoreSnapshot out of a WatchConnectivity payload. The phone encodes the Codable
     /// snapshot to Data under "snapshot"; we tolerate a missing/garbled payload by simply ignoring it.
     nonisolated private static func decode(from payload: [String: Any]) -> WatchScoreSnapshot? {
         guard let data = payload["snapshot"] as? Data else { return nil }
         return try? JSONDecoder().decode(WatchScoreSnapshot.self, from: data)
+    }
+
+    nonisolated private static func decodeStrength(
+        from payload: [String: Any]
+    ) -> WatchStrengthPlan? {
+        guard let data = payload[WatchStrengthPlan.contextKey] as? Data else { return nil }
+        return try? JSONDecoder().decode(WatchStrengthPlan.self, from: data)
+    }
+
+    /// Ask the paired phone to create or resume one routine-backed session. The phone is the source
+    /// of truth; an unreachable phone never produces a local phantom workout.
+    func startStrengthRoutine(id: String) {
+        guard WCSession.isSupported() else {
+            strengthHandoffMessage = "Open NOOP on your iPhone to start this routine."
+            return
+        }
+        let session = WCSession.default
+        guard session.activationState == .activated, session.isReachable else {
+            strengthHandoffMessage = "Open NOOP on your iPhone, then try again."
+            return
+        }
+        strengthHandoffMessage = "Starting on iPhone…"
+        session.sendMessage(
+            [WatchStrengthPlan.startRoutineMessageKey: id],
+            replyHandler: { [weak self] reply in
+                Task { @MainActor in
+                    self?.strengthHandoffMessage = (reply["accepted"] as? Bool) == true
+                        ? "Started on iPhone"
+                        : "The iPhone did not confirm the start."
+                }
+            },
+            errorHandler: { [weak self] _ in
+                Task { @MainActor in
+                    self?.strengthHandoffMessage = "Open NOOP on your iPhone, then try again."
+                }
+            }
+        )
+    }
+
+    func clearStrengthHandoffMessage() {
+        strengthHandoffMessage = nil
     }
 
     // MARK: WCSessionDelegate
@@ -91,6 +171,9 @@ final class WatchScoreStore: NSObject, ObservableObject, WCSessionDelegate {
         if let snap = Self.decode(from: session.receivedApplicationContext) {
             Task { @MainActor [weak self] in self?.apply(snap) }
         }
+        if let plan = Self.decodeStrength(from: session.receivedApplicationContext) {
+            Task { @MainActor [weak self] in self?.apply(plan) }
+        }
     }
 
     /// The phone calls `updateApplicationContext` whenever its dashboard refreshes. Latest-state only, so
@@ -99,6 +182,9 @@ final class WatchScoreStore: NSObject, ObservableObject, WCSessionDelegate {
                              didReceiveApplicationContext applicationContext: [String: Any]) {
         if let snap = Self.decode(from: applicationContext) {
             Task { @MainActor [weak self] in self?.apply(snap) }
+        }
+        if let plan = Self.decodeStrength(from: applicationContext) {
+            Task { @MainActor [weak self] in self?.apply(plan) }
         }
     }
 

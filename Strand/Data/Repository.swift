@@ -1954,7 +1954,8 @@ final class Repository: ObservableObject {
     ///    that have a declared 1:1 mapping);
     ///  • Apple-preferred → [Apple] (+ computed strap ONLY for steps/active_kcal, which the strap
     ///    estimates and Apple may not carry);
-    ///  • any other source → itself only (nutrition/mood are single-source by design).
+    ///  • nutrition-log → editable combined log, then legacy nutrition-csv as a migration fallback;
+    ///  • any other source → itself only.
     static func sourceCandidates(forKey key: String, preferredSource: String,
                                  actualWhoopSource: String) -> [MetricSourceCandidate] {
         let computedSource = actualWhoopSource + "-noop"
@@ -1997,6 +1998,12 @@ final class Repository: ObservableObject {
             }
             return uniqued(candidates)
         }
+        if preferredSource == NutritionLogContract.deviceId {
+            return [
+                MetricSourceCandidate(source: NutritionLogContract.deviceId, key: key),
+                MetricSourceCandidate(source: "nutrition-csv", key: key),
+            ]
+        }
         return [MetricSourceCandidate(source: preferredSource, key: key)]
     }
 
@@ -2034,7 +2041,8 @@ final class Repository: ObservableObject {
     ///  3. the merged daily metrics (`self.days`, imported ∪ computed) for keys with a DailyMetric
     ///     column , the same key→column map InsightsView.dailyOutcome / Android's dailyPick use,
     ///     extended to the full daily column set.
-    /// Any OTHER source (apple-health / nutrition-csv / noop-mood) reads only its own series, unchanged.
+    /// Any OTHER source delegates to the resolver. Nutrition uses `nutrition-log` first and the legacy
+    /// `nutrition-csv` partition only as a per-day fallback.
     /// #833/v7.7.2: `fullHistory` forces the full recordable epoch ("0000-01-01" ... "9999-12-31")
     /// regardless of `days`; false (the default) honours `days` exactly as before, so existing callers are
     /// byte-identical. The flag is forwarded to the non-strap `series(...)` delegation below so every source

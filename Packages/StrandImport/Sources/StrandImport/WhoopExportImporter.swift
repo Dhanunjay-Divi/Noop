@@ -1,4 +1,5 @@
 import Foundation
+import WhoopStore
 import ZIPFoundation
 
 /// Parses a Whoop data export (CSV bundle) into normalized Swift models.
@@ -125,6 +126,7 @@ public struct WhoopExportImporter {
     /// a summary.
     public func `import`(from url: URL) throws -> WhoopImportResult {
         let csvData = try loadCSVData(from: url)
+        let portable = try loadPortableUserData(from: url)
 
         var cycles: [WhoopCycleRow] = []
         var sleeps: [WhoopSleepRow] = []
@@ -146,7 +148,12 @@ public struct WhoopExportImporter {
 
         let summary = makeSummary(cycles: cycles, sleeps: sleeps, workouts: workouts, journal: journal)
         return WhoopImportResult(
-            cycles: cycles, sleeps: sleeps, workouts: workouts, journal: journal, summary: summary
+            cycles: cycles,
+            sleeps: sleeps,
+            workouts: workouts,
+            journal: journal,
+            portableUserData: portable,
+            summary: summary
         )
     }
 
@@ -247,6 +254,76 @@ public struct WhoopExportImporter {
             }
         }
         return result
+    }
+
+    // MARK: - Optional NOOP portable sidecar
+
+    /// Read only the exact versioned filename. Unlike unknown JSON files, a named but malformed
+    /// sidecar fails the import before any store writes so partial nutrition/strength restores cannot
+    /// masquerade as success.
+    private func loadPortableUserData(from url: URL) throws -> PortableUserData? {
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: url.path, isDirectory: &isDir) else {
+            throw ImportError.fileNotFound(url.path)
+        }
+        let data: Data?
+        if isDir.boolValue {
+            data = try portableDataFromFolder(url)
+        } else {
+            // `loadCSVData` already proved any supported file input is an archive, even when the
+            // provider omitted its .zip extension. Do not swallow a named sidecar's size/CRC error.
+            data = try portableDataFromZip(url)
+        }
+        return try data.map(PortableUserData.decode)
+    }
+
+    private func portableDataFromFolder(_ folder: URL) throws -> Data? {
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: folder,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else { throw ImportError.fileNotFound(folder.path) }
+        for case let fileURL as URL in enumerator
+        where fileURL.lastPathComponent.caseInsensitiveCompare(PortableUserData.fileName) == .orderedSame {
+            let size = try fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard size <= PortableUserData.maxFileBytes else {
+                throw PortableUserDataError.fileTooLarge(size)
+            }
+            return try Data(contentsOf: fileURL)
+        }
+        return nil
+    }
+
+    private func portableDataFromZip(_ zipURL: URL) throws -> Data? {
+        let archive: Archive
+        do {
+            archive = try Archive(url: zipURL, accessMode: .read)
+        } catch {
+            throw ImportError.notAZipOrFolder(zipURL.path)
+        }
+        for entry in archive where entry.type == .file {
+            let base = (entry.path as NSString).lastPathComponent
+            guard base.caseInsensitiveCompare(PortableUserData.fileName) == .orderedSame else {
+                continue
+            }
+            let declared = Int(exactly: entry.uncompressedSize) ?? Int.max
+            guard declared <= PortableUserData.maxFileBytes else {
+                throw PortableUserDataError.fileTooLarge(declared)
+            }
+            var data = Data()
+            var written = 0
+            _ = try archive.extract(entry) { chunk in
+                written += chunk.count
+                guard written <= PortableUserData.maxFileBytes else {
+                    throw PortableUserDataError.fileTooLarge(written)
+                }
+                data.append(chunk)
+            }
+            return data
+        }
+        return nil
     }
 
     // MARK: - physiological_cycles.csv

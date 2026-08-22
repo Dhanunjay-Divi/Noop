@@ -1,4 +1,5 @@
 import Foundation
+import WhoopStore
 
 // MARK: - Source provenance
 
@@ -728,6 +729,8 @@ public struct WhoopImportResult: Sendable, Equatable {
     public var sleeps: [WhoopSleepRow]
     public var workouts: [WhoopWorkoutRow]
     public var journal: [WhoopJournalRow]
+    /// NOOP's optional versioned sidecar for records that do not fit WHOOP's CSV schema.
+    public var portableUserData: PortableUserData?
     public var summary: ImportSummary
 
     public init(
@@ -735,12 +738,14 @@ public struct WhoopImportResult: Sendable, Equatable {
         sleeps: [WhoopSleepRow],
         workouts: [WhoopWorkoutRow],
         journal: [WhoopJournalRow],
+        portableUserData: PortableUserData? = nil,
         summary: ImportSummary
     ) {
         self.cycles = cycles
         self.sleeps = sleeps
         self.workouts = workouts
         self.journal = journal
+        self.portableUserData = portableUserData
         self.summary = summary
     }
 }

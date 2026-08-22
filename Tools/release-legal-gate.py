@@ -95,6 +95,10 @@ ANDROID_APACHE_PREFIXES = (
     "org.jetbrains.kotlin:",
     "org.jetbrains.kotlinx:",
 )
+ANDROID_APACHE_COORDINATES = {
+    "com.google.zxing:core",
+    "com.journeyapps:zxing-android-embedded",
+}
 
 
 class GateError(RuntimeError):
@@ -177,7 +181,10 @@ def android_components() -> list[dict[str, object]]:
         elif coordinate == "org.checkerframework:checker-qual":
             license_id = "MIT"
             files.append(license_file("android/checker-qual-3.12.0.txt"))
-        elif coordinate.startswith(ANDROID_APACHE_PREFIXES):
+        elif (
+            coordinate in ANDROID_APACHE_COORDINATES
+            or coordinate.startswith(ANDROID_APACHE_PREFIXES)
+        ):
             license_id = "Apache-2.0"
             files.append(license_file("android/Apache-2.0.txt"))
         else:

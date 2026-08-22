@@ -21,6 +21,13 @@ object RemoteSyncService {
         RemoteSyncPrefs.initialize(context)
     }
 
+    /** Dedicated installation-scoped producer for the privacy-minimized Friends projection. */
+    fun socialDailyDeviceId(activeDeviceId: String): String =
+        RemoteNamespaceCatalog.scopedRemoteId(
+            RemoteSyncPrefs.installationId(),
+            "$activeDeviceId-noop-friends-${RemoteNoopAlgorithmRevision.ID_SUFFIX}-friends-v1",
+        )
+
     fun saveConfiguration(
         context: Context,
         endpoint: String,

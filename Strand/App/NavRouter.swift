@@ -9,7 +9,7 @@ import Foundation
 enum IPhonePrimaryTab: Int, CaseIterable, Equatable {
     case today
     case trends
-    case friends
+    case activity
     case sleep
     case more
 
@@ -92,6 +92,8 @@ final class NavRouter: ObservableObject {
     /// Set when a screen's top-bar "+" asks the shell to open the quick-action sheet (the sheet lives
     /// in the iOS shell). The shell presents it, then resets this to false.
     @Published var quickActionsRequested = false
+    /// One-shot Watch/phone handoff request for the strength trainer sheet.
+    @Published var strengthRequested = false
 
     /// One-shot: `LiveView` reads this on appear to present the in-exercise screen for an already-running
     /// workout (routing alone only reaches the Live root), then clears it. A normal Live visit is
@@ -128,6 +130,7 @@ final class NavRouter: ObservableObject {
 
     /// Ask the shell to open the quick-action sheet (Live HR · workout · journal · breathe).
     func requestQuickActions() { quickActionsRequested = true }
+    func openStrength() { strengthRequested = true }
 
     /// Ask the shell to open the Devices manager (pair / switch bands). The shell decides how.
     func openDevices() { requestedDestination = .devices }

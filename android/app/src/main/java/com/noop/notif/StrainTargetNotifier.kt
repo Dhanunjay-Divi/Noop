@@ -14,17 +14,15 @@ import com.noop.ui.appLaunchIntent
 
 // MARK: - Target-strain notification (#593)
 //
-// A single opt-in, default-OFF celebratory nudge: once per day, when the day's Effort (strain) reaches the
-// LOW end of today's recovery-derived OPTIMAL strain band (the #43 coupled read), post a "reached your
-// optimal strain" notification.
+// A single opt-in, default-OFF informational nudge: once per day, when canonical 0-100 Effort reaches the
+// LOW end of DailyActionPlanner's evidence-gated personal range, post an informational
+// "Effort marker reached" notification.
 //
 // CLEAN-ROOM: this reimplements the BEHAVIOUR only. The copy is NOOP's own — NOT WHOOP's decompiled
-// strings — and the target is NOOP's own recovery→strain band (#43), not a value read off another app.
+// strings — and the target is NOOP's own personal-history planner output, not another app's value.
 //
-// The gate runs on the 0-21 coupled axis: the day's stored Effort (0-100) is converted with the shipped
-// UnitFormatter.effortValue(_, WHOOP) at the call site, and the target is the optimal band's `low` (already
-// 0-21). It is NOT "the instant" you cross the target — day strain is a per-analytics-pass rollup, so it
-// fires on the first pass at/after the crossing. Once-per-day dedupe via a persisted day flag, the same
+// It is NOT "the instant" you cross the target — daily Effort is a per-analytics-pass rollup, so it fires
+// on the first pass at/after the crossing. Once-per-day dedupe via a persisted day flag, the same
 // crossing-dedupe idiom as ScheduledReportPolicy / BatteryAlertPolicy. Default OFF like every automation.
 
 /** Pure, JVM-testable policy + copy for the target-strain notification — no Android types, so the decision
@@ -33,8 +31,8 @@ object StrainTargetPolicy {
 
     /** Fire at most once per day: only when enabled, BOTH the day strain and the target are known, the day
      *  strain has reached the target, and we haven't already posted for [today]. [dayStrain] and [target]
-     *  must be on the SAME axis (the 0-21 coupled axis, per the call site). A null [target] means recovery
-     *  is unknown (calibrating / unscored) ⇒ no target ⇒ never fires (never guess a target). */
+     *  must be on the SAME canonical 0-100 axis. A null target means the planner withheld the range
+     *  (unanswered check-in, stale/thin evidence, or recovery shift) ⇒ never fires. */
     fun shouldNotify(
         enabled: Boolean,
         dayStrain: Double?,
@@ -46,11 +44,12 @@ object StrainTargetPolicy {
         dayStrain >= target &&
         lastNotifiedDay != today
 
-    /** Title + body for the nudge. [target] is the optimal-band low on the 0-21 coupled axis. NOOP's OWN
-     *  wording — the feature is reimplemented behaviour, not copied copy. */
+    /** Title + body for the nudge. [target] is the marker on canonical 0-100 Effort. The wording
+     *  deliberately avoids "optimal", "earned", or permission-to-push claims. */
     fun copy(target: Int): Pair<String, String> {
-        val title = "Optimal strain reached"
-        val body = "You've hit today's optimal strain target of $target. Nice work — your recovery earned it."
+        val title = "Effort marker reached"
+        val body = "You've reached today's Effort marker of $target. It is a planning cue, not a limit—" +
+            "check how you feel before adding more."
         return title to body
     }
 }
@@ -62,23 +61,22 @@ object StrainTargetNotifier {
     private const val STRAIN_TARGET_NOTIF_ID = 4210
 
     /**
-     * Post the optimal-strain nudge if enabled and not already posted [day]. [dayStrain21]/[target21] are
-     * on the 0-21 coupled axis (the caller converts the stored 0-100 Effort via UnitFormatter and reads the
-     * target off the #43 optimal band). No-op on every path that fails the policy, so the caller can fire it
-     * freely each time the days collector republishes.
+     * Post the marker nudge if enabled and not already posted [day]. [dayEffort]/[targetEffort] are both
+     * canonical 0-100 Effort. No-op on every path that fails the policy, so the caller can invoke it on
+     * every days-collector publication.
      */
     @SuppressLint("MissingPermission") // guarded by areNotificationsEnabled() + runCatching
-    fun onStrainTarget(context: Context, day: String, dayStrain21: Double?, target21: Int?) {
+    fun onStrainTarget(context: Context, day: String, dayEffort: Double?, targetEffort: Int?) {
         if (!StrainTargetPolicy.shouldNotify(
                 enabled = NoopPrefs.strainTargetEnabled(context),
-                dayStrain = dayStrain21,
-                target = target21?.toDouble(),
+                dayStrain = dayEffort,
+                target = targetEffort?.toDouble(),
                 lastNotifiedDay = NoopPrefs.reportStrainTargetDay(context),
                 today = day,
             )
         ) return
         // Non-null: shouldNotify above required target != null before returning true.
-        val copy = StrainTargetPolicy.copy(target21!!)
+        val copy = StrainTargetPolicy.copy(targetEffort!!)
         runCatching {
             if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
             ensureChannel(context)

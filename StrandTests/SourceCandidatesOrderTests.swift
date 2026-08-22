@@ -1,5 +1,6 @@
 import XCTest
 @testable import Strand
+import WhoopStore
 
 /// Resolver precedence must match the documented order: imported WHOOP > NOOP-computed > Apple.
 /// Before the fix, the strap-preferred candidate list tried the ACTIVE strap's computed sibling
@@ -41,5 +42,12 @@ final class SourceCandidatesOrderTests: XCTestCase {
                                              actualWhoopSource: "whoop-4A0B")
         XCTAssertFalse(cs.contains { $0.source == "apple-health" },
                        "no declared Apple equivalent , no cross-source fallback")
+    }
+
+    func testNutritionLogFallsBackToLegacyCsvPerDay() {
+        let cs = Repository.sourceCandidates(forKey: "calories_in",
+                                             preferredSource: NutritionLogContract.deviceId,
+                                             actualWhoopSource: "whoop-4A0B")
+        XCTAssertEqual(cs.map(\.source), ["nutrition-log", "nutrition-csv"])
     }
 }

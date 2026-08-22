@@ -52,6 +52,15 @@ final class BackupSyncRoundTripTests: XCTestCase {
         let backup = tmp.appendingPathComponent(BackupSync.snapshotName(1_782_000_000_000))
         try DataBackup.writeBackupForTesting(databaseAt: sourceDB, to: backup)
         XCTAssertTrue(isZip(backup), "Backup should be a ZIP container (.noopbak)")
+        let archive = try XCTUnwrap(Archive(url: backup, accessMode: .read))
+        let manifestEntry = try XCTUnwrap(archive[BackupManifest.entryName])
+        var manifestData = Data()
+        _ = try archive.extract(manifestEntry) { manifestData.append($0) }
+        let manifest = try BackupManifest.decoded(from: manifestData)
+        XCTAssertEqual(manifest.sourcePlatform, .apple)
+        XCTAssertEqual(manifest.databaseEngine, .grdb)
+        XCTAssertEqual(manifest.databaseSchemaVersion, WhoopStoreInfo.schemaVersion)
+        XCTAssertEqual(manifest.payloads.database.path, "noop-backup.sqlite")
 
         // Restore into a DIFFERENT, throwaway live-DB path (so the user's real store is never touched).
         let liveDB = tmp.appendingPathComponent("live.sqlite")

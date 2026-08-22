@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 from collections import Counter
 from datetime import UTC, date, datetime
@@ -194,6 +195,10 @@ class Repository(Protocol):
 
     async def delete_friend_profile_data(
         self, profile_id: str, daily_device_id: str
+    ) -> dict[str, int]: ...
+
+    async def delete_friend_enrollment_data(
+        self, enrollment_id: str, token_hash: str
     ) -> dict[str, int]: ...
 
     async def create_friend_invite(
@@ -924,9 +929,6 @@ class MemoryRepository:
             now = datetime.now(UTC)
             profile["disabled_at"] = now
             profile["updated_at"] = now
-            for stored_hash, stored_profile in list(self._friend_tokens.items()):
-                if stored_profile == profile_id:
-                    del self._friend_tokens[stored_hash]
             for invite in self._friend_invites.values():
                 if invite["inviter_id"] == profile_id and invite["revoked_at"] is None:
                     invite["revoked_at"] = now
@@ -956,90 +958,121 @@ class MemoryRepository:
                 raise FriendForbiddenError(
                     "member profile is no longer active for this producer"
                 )
-
-            counts = Counter()
-            daily_keys = [key for key in self._daily if key[0] == daily_device_id]
-            counts["daily_metrics"] = len(daily_keys)
-            for key in daily_keys:
-                del self._daily[key]
-
-            batch_keys = [
-                batch_id
-                for batch_id, (_, device_id, _) in self._batch_hashes.items()
-                if device_id == daily_device_id
-            ]
-            counts["sync_batches"] = len(batch_keys)
-            for batch_id in batch_keys:
-                del self._batch_hashes[batch_id]
-
-            own_invites = {
-                invite_id
-                for invite_id, invite in self._friend_invites.items()
-                if invite["inviter_id"] == profile_id
-            }
-            request_keys = [
-                request_id
-                for request_id, request in self._friend_requests.items()
-                if profile_id in (request["inviter_id"], request["requester_id"])
-                or request["invite_id"] in own_invites
-            ]
-            counts["friend_requests"] = len(request_keys)
-            for request_id in request_keys:
-                del self._friend_requests[request_id]
-
-            counts["friend_invites"] = len(own_invites)
-            for invite_id in own_invites:
-                del self._friend_invites[invite_id]
-            for invite in self._friend_invites.values():
-                if invite["redeemed_by"] == profile_id:
-                    invite["redeemed_by"] = None
-
-            friendship_keys = [pair for pair in self._friendships if profile_id in pair]
-            counts["friendships"] = len(friendship_keys)
-            for pair in friendship_keys:
-                del self._friendships[pair]
-
-            visibility_keys = [
-                key for key in self._friend_visibility if profile_id in key
-            ]
-            counts["friend_visibility"] = len(visibility_keys)
-            for key in visibility_keys:
-                del self._friend_visibility[key]
-
-            block_keys = [key for key in self._friend_blocks if profile_id in key]
-            counts["friend_blocks"] = len(block_keys)
-            for key in block_keys:
-                self._friend_blocks.remove(key)
-
-            token_keys = [
-                token_hash
-                for token_hash, stored_profile_id in self._friend_tokens.items()
-                if stored_profile_id == profile_id
-            ]
-            counts["friend_tokens"] = len(token_keys)
-            for token_hash in token_keys:
-                del self._friend_tokens[token_hash]
-
-            del self._friend_profiles[profile_id]
-            counts["friend_profiles"] = 1
-
-            has_remaining_rows = any(
-                key[0] == daily_device_id
-                for store in (
-                    self._metrics,
-                    self._events,
-                    self._sleep,
-                    self._workouts,
-                    self._journal,
-                )
-                for key in store
+            return self._delete_friend_profile_data_locked(
+                profile_id,
+                daily_device_id,
             )
-            if (
-                not has_remaining_rows
-                and self._devices.pop(daily_device_id, None) is not None
-            ):
-                counts["devices"] = 1
-            return dict(counts)
+
+    async def delete_friend_enrollment_data(
+        self, enrollment_id: str, token_hash: str
+    ) -> dict[str, int]:
+        async with self._lock:
+            profile = next(
+                (
+                    row
+                    for row in self._friend_profiles.values()
+                    if row["enrollment_id"] == enrollment_id
+                ),
+                None,
+            )
+            if profile is None:
+                return {}
+            profile_id = profile["profile_id"]
+            if self._friend_tokens.get(token_hash) != profile_id:
+                raise FriendForbiddenError(
+                    "enrollment credential does not control this profile"
+                )
+            return self._delete_friend_profile_data_locked(
+                profile_id,
+                profile["daily_device_id"],
+            )
+
+    def _delete_friend_profile_data_locked(
+        self,
+        profile_id: str,
+        daily_device_id: str,
+    ) -> dict[str, int]:
+        counts = Counter()
+        daily_keys = [key for key in self._daily if key[0] == daily_device_id]
+        counts["daily_metrics"] = len(daily_keys)
+        for key in daily_keys:
+            del self._daily[key]
+
+        batch_keys = [
+            batch_id
+            for batch_id, (_, device_id, _) in self._batch_hashes.items()
+            if device_id == daily_device_id
+        ]
+        counts["sync_batches"] = len(batch_keys)
+        for batch_id in batch_keys:
+            del self._batch_hashes[batch_id]
+
+        own_invites = {
+            invite_id
+            for invite_id, invite in self._friend_invites.items()
+            if invite["inviter_id"] == profile_id
+        }
+        request_keys = [
+            request_id
+            for request_id, request in self._friend_requests.items()
+            if profile_id in (request["inviter_id"], request["requester_id"])
+            or request["invite_id"] in own_invites
+        ]
+        counts["friend_requests"] = len(request_keys)
+        for request_id in request_keys:
+            del self._friend_requests[request_id]
+
+        counts["friend_invites"] = len(own_invites)
+        for invite_id in own_invites:
+            del self._friend_invites[invite_id]
+        for invite in self._friend_invites.values():
+            if invite["redeemed_by"] == profile_id:
+                invite["redeemed_by"] = None
+
+        friendship_keys = [pair for pair in self._friendships if profile_id in pair]
+        counts["friendships"] = len(friendship_keys)
+        for pair in friendship_keys:
+            del self._friendships[pair]
+
+        visibility_keys = [key for key in self._friend_visibility if profile_id in key]
+        counts["friend_visibility"] = len(visibility_keys)
+        for key in visibility_keys:
+            del self._friend_visibility[key]
+
+        block_keys = [key for key in self._friend_blocks if profile_id in key]
+        counts["friend_blocks"] = len(block_keys)
+        for key in block_keys:
+            self._friend_blocks.remove(key)
+
+        token_keys = [
+            stored_hash
+            for stored_hash, stored_profile_id in self._friend_tokens.items()
+            if stored_profile_id == profile_id
+        ]
+        counts["friend_tokens"] = len(token_keys)
+        for stored_hash in token_keys:
+            del self._friend_tokens[stored_hash]
+
+        del self._friend_profiles[profile_id]
+        counts["friend_profiles"] = 1
+
+        has_remaining_rows = any(
+            key[0] == daily_device_id
+            for store in (
+                self._metrics,
+                self._events,
+                self._sleep,
+                self._workouts,
+                self._journal,
+            )
+            for key in store
+        )
+        if (
+            not has_remaining_rows
+            and self._devices.pop(daily_device_id, None) is not None
+        ):
+            counts["devices"] = 1
+        return dict(counts)
 
     async def create_friend_invite(
         self,
@@ -1095,12 +1128,35 @@ class MemoryRepository:
                 ),
                 None,
             )
-            if (
-                invite is None
-                or invite["revoked_at"] is not None
-                or invite["redeemed_at"] is not None
-                or invite["expires_at"] <= now
-            ):
+            if invite is None:
+                raise FriendNotFoundError("invite is invalid or expired")
+            if invite["redeemed_at"] is not None:
+                if invite["redeemed_by"] != requester_id:
+                    raise FriendNotFoundError("invite is invalid or expired")
+                request = next(
+                    (
+                        row
+                        for row in self._friend_requests.values()
+                        if row["invite_id"] == invite["invite_id"]
+                        and row["requester_id"] == requester_id
+                    ),
+                    None,
+                )
+                inviter = self._friend_profiles.get(invite["inviter_id"])
+                if (
+                    request is None
+                    or inviter is None
+                    or inviter["disabled_at"] is not None
+                ):
+                    raise FriendNotFoundError("invite is invalid or expired")
+                return {
+                    **request,
+                    "recipient": {
+                        "profile_id": inviter["profile_id"],
+                        "display_name": inviter["display_name"],
+                    },
+                }
+            if invite["revoked_at"] is not None or invite["expires_at"] <= now:
                 raise FriendNotFoundError("invite is invalid or expired")
             inviter_id = invite["inviter_id"]
             if inviter_id == requester_id:
@@ -1311,7 +1367,10 @@ class MemoryRepository:
             request = self._friend_requests.get(request_id)
             if request is None or request["inviter_id"] != profile_id:
                 raise FriendNotFoundError("incoming friend request was not found")
+            next_status = "accepted" if decision == "accept" else "declined"
             if request["status"] != "pending":
+                if request["status"] == next_status:
+                    return dict(request)
                 raise FriendConflictError("friend request is no longer pending")
             requester_id = request["requester_id"]
             if (profile_id, requester_id) in self._friend_blocks or (
@@ -1319,7 +1378,7 @@ class MemoryRepository:
                 profile_id,
             ) in self._friend_blocks:
                 raise FriendConflictError("friend request can no longer be accepted")
-            request["status"] = "accepted" if decision == "accept" else "declined"
+            request["status"] = next_status
             request["decided_at"] = now
             if decision == "accept":
                 pair = _friend_pair(profile_id, requester_id)
@@ -1377,9 +1436,7 @@ class MemoryRepository:
     async def remove_friend(self, profile_id: str, friend_id: str) -> None:
         async with self._lock:
             pair = _friend_pair(profile_id, friend_id)
-            if pair not in self._friendships:
-                raise FriendNotFoundError("friendship was not found")
-            del self._friendships[pair]
+            self._friendships.pop(pair, None)
             self._friend_visibility.pop((profile_id, friend_id), None)
             self._friend_visibility.pop((friend_id, profile_id), None)
 
@@ -2640,8 +2697,36 @@ class PostgresRepository:
                     profile_uuid,
                 )
 
+    async def delete_friend_enrollment_data(
+        self, enrollment_id: str, token_hash: str
+    ) -> dict[str, int]:
+        pool = self._require_pool()
+        row = await pool.fetchrow(
+            """
+            SELECT profile_id, daily_device_id, token_hash
+            FROM friend_profiles
+            WHERE enrollment_id = $1
+            """,
+            UUID(enrollment_id),
+        )
+        if row is None:
+            return {}
+        if not hmac.compare_digest(str(row["token_hash"]), token_hash):
+            raise FriendForbiddenError(
+                "enrollment credential does not control this profile"
+            )
+        return await self.delete_friend_profile_data(
+            str(row["profile_id"]),
+            row["daily_device_id"],
+            include_disabled=True,
+        )
+
     async def delete_friend_profile_data(
-        self, profile_id: str, daily_device_id: str
+        self,
+        profile_id: str,
+        daily_device_id: str,
+        *,
+        include_disabled: bool = False,
     ) -> dict[str, int]:
         pool = self._require_pool()
         profile_uuid = UUID(profile_id)
@@ -2651,9 +2736,11 @@ class PostgresRepository:
                     """
                     SELECT daily_device_id
                     FROM friend_profiles
-                    WHERE profile_id = $1 AND disabled_at IS NULL
+                    WHERE profile_id = $1
+                      AND (disabled_at IS NULL OR $2)
                     """,
                     profile_uuid,
+                    include_disabled,
                 )
                 if stored_device != daily_device_id:
                     raise FriendForbiddenError(
@@ -2669,11 +2756,12 @@ class PostgresRepository:
                     FROM friend_profiles
                     WHERE profile_id = $1
                       AND daily_device_id = $2
-                      AND disabled_at IS NULL
+                      AND (disabled_at IS NULL OR $3)
                     FOR UPDATE
                     """,
                     profile_uuid,
                     daily_device_id,
+                    include_disabled,
                 )
                 if profile is None:
                     raise FriendForbiddenError(
@@ -2791,18 +2879,44 @@ class PostgresRepository:
             async with connection.transaction():
                 invite = await connection.fetchrow(
                     """
-                    SELECT invite_id, inviter_id
+                    SELECT invite_id, inviter_id, expires_at, redeemed_at,
+                           redeemed_by, revoked_at
                     FROM friend_invites
                     WHERE code_hash = $1
-                      AND revoked_at IS NULL
-                      AND redeemed_at IS NULL
-                      AND expires_at > $2
                     FOR UPDATE
                     """,
                     code_hash,
-                    now,
                 )
                 if invite is None:
+                    raise FriendNotFoundError("invite is invalid or expired")
+                if invite["redeemed_at"] is not None:
+                    if invite["redeemed_by"] != requester_uuid:
+                        raise FriendNotFoundError("invite is invalid or expired")
+                    request = await connection.fetchrow(
+                        """
+                        SELECT request_id, invite_id, inviter_id, requester_id,
+                               status, created_at, decided_at
+                        FROM friend_requests
+                        WHERE invite_id = $1 AND requester_id = $2
+                        """,
+                        invite["invite_id"],
+                        requester_uuid,
+                    )
+                    recipient = await connection.fetchrow(
+                        """
+                        SELECT profile_id, display_name
+                        FROM friend_profiles
+                        WHERE profile_id = $1 AND disabled_at IS NULL
+                        """,
+                        invite["inviter_id"],
+                    )
+                    if request is None or recipient is None:
+                        raise FriendNotFoundError("invite is invalid or expired")
+                    return {
+                        **_decoded_row(request),
+                        "recipient": _decoded_row(recipient),
+                    }
+                if invite["revoked_at"] is not None or invite["expires_at"] <= now:
                     raise FriendNotFoundError("invite is invalid or expired")
                 inviter_uuid = invite["inviter_id"]
                 if inviter_uuid == requester_uuid:
@@ -3116,7 +3230,10 @@ class PostgresRepository:
                     UUID(request_id),
                     profile_uuid,
                 )
+                next_status = "accepted" if decision == "accept" else "declined"
                 if request["status"] != "pending":
+                    if request["status"] == next_status:
+                        return _decoded_row(request)
                     raise FriendConflictError("friend request is no longer pending")
                 requester_uuid = request["requester_id"]
                 blocked = await connection.fetchval(
@@ -3134,7 +3251,6 @@ class PostgresRepository:
                     raise FriendConflictError(
                         "friend request can no longer be accepted"
                     )
-                next_status = "accepted" if decision == "accept" else "declined"
                 updated = await connection.fetchrow(
                     """
                     UPDATE friend_requests
@@ -3286,7 +3402,7 @@ class PostgresRepository:
                     "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                     ":".join(pair),
                 )
-                status = await connection.execute(
+                await connection.execute(
                     """
                     DELETE FROM friendships
                     WHERE profile_a = $1 AND profile_b = $2
@@ -3294,8 +3410,6 @@ class PostgresRepository:
                     UUID(pair[0]),
                     UUID(pair[1]),
                 )
-                if _command_count(status) == 0:
-                    raise FriendNotFoundError("friendship was not found")
                 await connection.execute(
                     """
                     DELETE FROM friend_visibility

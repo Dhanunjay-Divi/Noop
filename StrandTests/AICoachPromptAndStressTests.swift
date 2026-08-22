@@ -96,4 +96,51 @@ final class AICoachPromptAndStressTests: XCTestCase {
         let expected = "Stress (SI): \(Int(si!.rounded())) "
         XCTAssertTrue(AICoachEngine.stressIndexSummary(si: si!).hasPrefix(expected))
     }
+
+    func testCoachMemoryContextIsExplicitAndBounded() {
+        XCTAssertEqual(AICoachEngine.memoryContext([]), "")
+        let context = AICoachEngine.memoryContext(
+            ["  Training for a 10K  "] + (0..<15).map { "memory-\($0)" }
+        )
+        XCTAssertTrue(context.contains("USER-MANAGED COACH MEMORY"))
+        XCTAssertTrue(context.contains("- Training for a 10K"))
+        XCTAssertFalse(context.contains("memory-14"), "only the first ten memories may be injected")
+
+        let long = AICoachEngine.memoryContext([String(repeating: "x", count: 4_000)])
+        XCTAssertLessThan(long.count, 2_300, "memory payload must remain bounded")
+        XCTAssertTrue(long.contains("not a medical record"))
+    }
+
+    func testVoiceJournalDraftOnlyMatchesKnownReviewRows() {
+        let matches = CoachJournalDraftPolicy.matches(
+            in: "I used the sauna, took magnesium, and had a glass of wine."
+        )
+        XCTAssertEqual(
+            Set(matches),
+            Set([
+                "Did you drink any alcohol?",
+                "Did you use a sauna?",
+                "Did you take magnesium?",
+            ])
+        )
+        XCTAssertTrue(CoachJournalDraftPolicy.matches(in: "ordinary day").isEmpty)
+        XCTAssertTrue(Set(matches).isSubset(of: Set(CoachJournalDraftPolicy.questions)))
+    }
+
+    func testRoutineDraftSeedsOnlyExactCatalogExerciseNames() {
+        let ids = AICoachEngine.suggestedExerciseIDs(
+            in: "Try Back Squat, Bench Press and Pull-up. Finish with an easy walk."
+        )
+        XCTAssertEqual(
+            Set(ids),
+            Set(["barbell_back_squat", "barbell_bench_press", "pull_up"])
+        )
+        XCTAssertTrue(AICoachEngine.suggestedExerciseIDs(in: "Do a balanced session.").isEmpty)
+    }
+
+    func testTodayBriefRemainsAnExplicitSendPrompt() {
+        XCTAssertTrue(AICoachEngine.todayBriefPrompt.contains("today"))
+        XCTAssertTrue(AICoachEngine.todayBriefPrompt.contains("Charge"))
+        XCTAssertFalse(AICoachEngine.todayBriefPrompt.contains("automatically"))
+    }
 }

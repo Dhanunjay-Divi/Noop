@@ -1,6 +1,15 @@
 package com.noop.ui
 
+import android.Manifest
+import android.app.Activity
+import android.app.TimePickerDialog
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.speech.RecognizerIntent
 import com.noop.R
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -10,6 +19,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,11 +28,24 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.AlertDialog
@@ -30,11 +53,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,17 +68,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.noop.ai.AiProvider
 import com.noop.ai.ChatMsg
 import com.noop.ai.CustomAiAuthHeader
+import com.noop.data.StrengthTrainingContract
+import com.noop.notif.CoachCheckInReminder
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 
 /**
  * AI Coach, the single opt-in, bring-your-own-key feature.
@@ -239,7 +272,153 @@ private fun CoachChat(vm: CoachViewModel) {
     val error by vm.error.collectAsStateWithLifecycle()
     val provider by vm.provider.collectAsStateWithLifecycle()
     val model by vm.model.collectAsStateWithLifecycle()
+    val memories by vm.memories.collectAsStateWithLifecycle()
+    val routineDefaultName = stringResource(R.string.coach_routine_default_name)
+    val checkInUnavailable = stringResource(R.string.coach_check_in_error)
+    val speechPrompt = stringResource(R.string.coach_dictation_prompt)
+    val speechUnavailable = stringResource(R.string.coach_dictation_unavailable)
     var input by remember { mutableStateOf("") }
+    var confirmClear by remember { mutableStateOf(false) }
+    var journalDraftVisible by remember { mutableStateOf(false) }
+    var journalDraft by remember { mutableStateOf("") }
+    var journalSelections by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var routineDraftVisible by remember { mutableStateOf(false) }
+    var routineName by remember(routineDefaultName) { mutableStateOf(routineDefaultName) }
+    var routineSelections by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var actionSaving by remember { mutableStateOf(false) }
+    var speechTarget by remember { mutableStateOf(CoachSpeechTarget.COMPOSER) }
+    var speechError by remember { mutableStateOf<String?>(null) }
+    var checkInEnabled by remember { mutableStateOf(CoachCheckInReminder.isEnabled(context)) }
+    var checkInMinutes by remember { mutableStateOf(CoachCheckInReminder.minutes(context)) }
+    var checkInError by remember { mutableStateOf<String?>(null) }
+
+    val speechLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spoken = result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+                ?.trim()
+                .orEmpty()
+            if (spoken.isNotEmpty()) {
+                when (speechTarget) {
+                    CoachSpeechTarget.COMPOSER -> input =
+                        listOf(input.trim(), spoken).filter { it.isNotEmpty() }.joinToString(" ")
+                    CoachSpeechTarget.JOURNAL -> {
+                        journalDraft = listOf(journalDraft.trim(), spoken)
+                            .filter { it.isNotEmpty() }
+                            .joinToString(" ")
+                        journalSelections = journalSelections +
+                            CoachJournalDraftPolicy.matches(journalDraft)
+                    }
+                }
+            }
+        }
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val scheduled = granted &&
+            CoachCheckInReminder.setEnabled(context, true, checkInMinutes)
+        checkInEnabled = scheduled
+        checkInError = if (scheduled) null else checkInUnavailable
+    }
+
+    fun launchSpeech(target: CoachSpeechTarget) {
+        speechTarget = target
+        speechError = null
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
+            )
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, speechPrompt)
+        runCatching { speechLauncher.launch(intent) }
+            .onFailure { speechError = speechUnavailable }
+    }
+
+    fun setCheckIn(enabled: Boolean) {
+        checkInError = null
+        if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        val applied = CoachCheckInReminder.setEnabled(context, enabled, checkInMinutes)
+        checkInEnabled = enabled && applied
+        if (enabled && !applied) {
+            checkInError = checkInUnavailable
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        CoachCheckInReminder.reconcile(context)
+    }
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text(stringResource(R.string.coach_clear_title)) },
+            text = { Text(stringResource(R.string.coach_clear_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClear = false
+                    vm.clearConversation()
+                }) {
+                    Text(stringResource(R.string.coach_clear_action), color = Palette.statusCritical)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) {
+                    Text(stringResource(R.string.coach_cancel))
+                }
+            },
+        )
+    }
+
+    if (journalDraftVisible) {
+        CoachJournalDraftDialog(
+            text = journalDraft,
+            selections = journalSelections,
+            saving = actionSaving,
+            onTextChange = {
+                journalDraft = it
+                journalSelections = journalSelections + CoachJournalDraftPolicy.matches(it)
+            },
+            onSelectionChange = { journalSelections = it },
+            onDictate = { launchSpeech(CoachSpeechTarget.JOURNAL) },
+            onDismiss = { journalDraftVisible = false },
+            onSave = {
+                actionSaving = true
+                vm.saveJournalDraft(journalSelections, journalDraft) { saved ->
+                    actionSaving = false
+                    if (saved) journalDraftVisible = false
+                }
+            },
+        )
+    }
+
+    if (routineDraftVisible) {
+        CoachRoutineDraftDialog(
+            name = routineName,
+            selections = routineSelections,
+            saving = actionSaving,
+            onNameChange = { routineName = it },
+            onSelectionChange = { routineSelections = it },
+            onDismiss = { routineDraftVisible = false },
+            onSave = {
+                actionSaving = true
+                vm.saveRoutineDraft(routineName, routineSelections) { saved ->
+                    actionSaving = false
+                    if (saved) routineDraftVisible = false
+                }
+            },
+        )
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
 
@@ -260,6 +439,17 @@ private fun CoachChat(vm: CoachViewModel) {
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                         .semantics { contentDescription = uiString(R.string.l10n_coach_screen_disconnect_provider_fa13625c) },
                 )
+                IconButton(
+                    onClick = { confirmClear = true },
+                    enabled = messages.isNotEmpty() && !sending,
+                ) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription = stringResource(R.string.coach_clear_title),
+                        tint = Palette.textSecondary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
             }
         }
 
@@ -285,6 +475,31 @@ private fun CoachChat(vm: CoachViewModel) {
         // Editable system prompt, inline in the settings, collapsed by default. Edits persist and
         // take effect on the next message (the engine reads the stored prompt fresh per send).
         CoachInstructions(vm = vm)
+        CoachMemoryPanel(vm = vm, memories = memories)
+        CoachCheckInCard(
+            enabled = checkInEnabled,
+            minutes = checkInMinutes,
+            error = checkInError,
+            onEnabledChange = ::setCheckIn,
+            onPickTime = {
+                TimePickerDialog(
+                    context,
+                    { _, hour, minute ->
+                        checkInMinutes = hour * 60 + minute
+                        if (checkInEnabled) {
+                            checkInEnabled = CoachCheckInReminder.setEnabled(
+                                context,
+                                true,
+                                checkInMinutes,
+                            )
+                        }
+                    },
+                    checkInMinutes / 60,
+                    checkInMinutes % 60,
+                    false,
+                ).show()
+            },
+        )
 
         // Transcript or empty-state with suggested prompts.
         if (messages.isEmpty()) {
@@ -313,6 +528,41 @@ private fun CoachChat(vm: CoachViewModel) {
                 modifier = Modifier.semantics { contentDescription = uiString(R.string.l10n_coach_screen_coach_error_error_ad9c8c46, error!!) },
             )
         }
+        if (speechError != null) {
+            Text(
+                speechError!!,
+                style = NoopType.subhead,
+                color = Palette.statusCritical,
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            CoachActionButton(
+                label = stringResource(R.string.coach_action_brief),
+                icon = Icons.Filled.Psychology,
+                enabled = !sending,
+            ) {
+                vm.send(context, "Give me today's concise coaching brief with a readiness summary, today's training plan, and one recovery action.")
+            }
+            CoachActionButton(
+                label = stringResource(R.string.coach_action_journal_short),
+                icon = Icons.AutoMirrored.Filled.MenuBook,
+            ) {
+                journalDraft = input
+                journalSelections = CoachJournalDraftPolicy.matches(input).toSet()
+                journalDraftVisible = true
+            }
+            CoachActionButton(
+                label = stringResource(R.string.coach_action_routine_short),
+                icon = Icons.Filled.FitnessCenter,
+            ) {
+                routineSelections = vm.suggestedRoutineExerciseIds()
+                routineDraftVisible = true
+            }
+        }
 
         // Input row + Send, a frosted overlay surface so the composer reads as a docked input bar.
         Row(
@@ -340,6 +590,16 @@ private fun CoachChat(vm: CoachViewModel) {
                 colors = coachFieldColors(),
                 shape = RoundedCornerShape(14.dp),
             )
+            IconButton(
+                onClick = { launchSpeech(CoachSpeechTarget.COMPOSER) },
+                enabled = !sending,
+            ) {
+                Icon(
+                    Icons.Filled.Mic,
+                    contentDescription = stringResource(R.string.coach_dictation_question),
+                    tint = Palette.textSecondary,
+                )
+            }
             SendButton(
                 enabled = input.isNotBlank() && !sending,
                 sending = sending,
@@ -352,6 +612,428 @@ private fun CoachChat(vm: CoachViewModel) {
 
         // Privacy note repeated under the input so it's always on screen.
         PrivacyNote(local = provider == AiProvider.CUSTOM)
+    }
+}
+
+private enum class CoachSpeechTarget { COMPOSER, JOURNAL }
+
+@Composable
+private fun CoachCheckInCard(
+    enabled: Boolean,
+    minutes: Int,
+    error: String?,
+    onEnabledChange: (Boolean) -> Unit,
+    onPickTime: () -> Unit,
+) {
+    val checkInAccessibility = stringResource(R.string.coach_check_in_accessibility)
+    NoopCard(padding = 14.dp, tint = Palette.chargeColor) {
+        Column(verticalArrangement = Arrangement.spacedBy(if (enabled || error != null) 10.dp else 0.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Notifications,
+                    contentDescription = null,
+                    tint = if (enabled) Palette.accent else Palette.textTertiary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        stringResource(R.string.coach_check_in_title),
+                        style = NoopType.subhead,
+                        color = Palette.textPrimary,
+                    )
+                    Text(
+                        stringResource(R.string.coach_check_in_body),
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                }
+                androidx.compose.material3.Switch(
+                    checked = enabled,
+                    onCheckedChange = onEnabledChange,
+                    modifier = Modifier.semantics {
+                        contentDescription = checkInAccessibility
+                    },
+                )
+            }
+            if (enabled) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.coach_check_in_time),
+                        style = NoopType.footnote,
+                        color = Palette.textSecondary,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onPickTime) {
+                        Text(
+                            LocalTime.of(minutes / 60, minutes % 60).format(
+                                DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT),
+                            ),
+                            color = Palette.accent,
+                        )
+                    }
+                }
+            }
+            if (error != null) {
+                Text(error, style = NoopType.footnote, color = Palette.statusCritical)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RowScope.CoachActionButton(
+    label: String,
+    icon: ImageVector,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    TextButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .weight(1f)
+            .heightIn(min = 48.dp)
+            .border(1.dp, Palette.hairline, RoundedCornerShape(8.dp)),
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(17.dp))
+            Text(label, style = NoopType.footnote, maxLines = 2)
+        }
+    }
+}
+
+@Composable
+private fun CoachJournalDraftDialog(
+    text: String,
+    selections: Set<String>,
+    saving: Boolean,
+    onTextChange: (String) -> Unit,
+    onSelectionChange: (Set<String>) -> Unit,
+    onDictate: () -> Unit,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.coach_journal_title)) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    stringResource(R.string.coach_journal_intro_short),
+                    style = NoopType.footnote,
+                    color = Palette.textSecondary,
+                )
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = onTextChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text(stringResource(R.string.coach_journal_example)) },
+                    minLines = 2,
+                    maxLines = 5,
+                    colors = coachFieldColors(),
+                    shape = RoundedCornerShape(10.dp),
+                )
+                TextButton(onClick = onDictate) {
+                    Icon(Icons.Filled.Mic, contentDescription = null)
+                    Spacer(Modifier.size(6.dp))
+                    Text(stringResource(R.string.coach_journal_dictate))
+                }
+                CoachJournalDraftPolicy.questions.forEach { question ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onSelectionChange(
+                                    if (question in selections) selections - question
+                                    else selections + question,
+                                )
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.material3.Checkbox(
+                            checked = question in selections,
+                            onCheckedChange = { checked ->
+                                onSelectionChange(
+                                    if (checked) selections + question else selections - question,
+                                )
+                            },
+                        )
+                        Text(
+                            question,
+                            style = NoopType.subhead,
+                            color = Palette.textPrimary,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onSave,
+                enabled = selections.isNotEmpty() && !saving,
+            ) {
+                Text(
+                    if (saving) stringResource(R.string.coach_saving)
+                    else stringResource(R.string.coach_journal_save_format, selections.size),
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !saving) {
+                Text(stringResource(R.string.coach_cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun CoachRoutineDraftDialog(
+    name: String,
+    selections: Set<String>,
+    saving: Boolean,
+    onNameChange: (String) -> Unit,
+    onSelectionChange: (Set<String>) -> Unit,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.coach_routine_title)) },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    stringResource(R.string.coach_routine_intro),
+                    style = NoopType.footnote,
+                    color = Palette.textSecondary,
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = onNameChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.coach_routine_name)) },
+                    singleLine = true,
+                    colors = coachFieldColors(),
+                    shape = RoundedCornerShape(10.dp),
+                )
+                StrengthTrainingContract.BUILT_IN_EXERCISES.forEach { exercise ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onSelectionChange(
+                                    if (exercise.id in selections) selections - exercise.id
+                                    else selections + exercise.id,
+                                )
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.material3.Checkbox(
+                            checked = exercise.id in selections,
+                            onCheckedChange = { checked ->
+                                onSelectionChange(
+                                    if (checked) selections + exercise.id
+                                    else selections - exercise.id,
+                                )
+                            },
+                        )
+                        Text(
+                            exercise.name,
+                            style = NoopType.subhead,
+                            color = Palette.textPrimary,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                Text(
+                    stringResource(R.string.coach_routine_detail),
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onSave,
+                enabled = name.isNotBlank() && selections.isNotEmpty() && !saving,
+            ) {
+                Text(
+                    if (saving) stringResource(R.string.coach_saving)
+                    else stringResource(R.string.coach_create),
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !saving) {
+                Text(stringResource(R.string.coach_cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun CoachMemoryPanel(
+    vm: CoachViewModel,
+    memories: List<com.noop.data.CoachMemoryRow>,
+) {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("") }
+    var editingId by remember { mutableStateOf<String?>(null) }
+    val headerInteraction = remember { MutableInteractionSource() }
+
+    NoopCard(padding = 14.dp, tint = Palette.chargeColor) {
+        Column(verticalArrangement = Arrangement.spacedBy(if (expanded) 10.dp else 0.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .liquidPress(headerInteraction)
+                    .clickable(
+                        interactionSource = headerInteraction,
+                        indication = null,
+                    ) { expanded = !expanded }
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Psychology,
+                    contentDescription = null,
+                    tint = Palette.accent,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    stringResource(R.string.coach_memory_title),
+                    style = NoopType.subhead,
+                    color = Palette.textPrimary,
+                )
+                if (memories.isNotEmpty()) {
+                    Text(
+                        stringResource(
+                            R.string.coach_memory_enabled_format,
+                            memories.count { it.enabled },
+                        ),
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Icon(
+                    if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = if (expanded) {
+                        stringResource(R.string.coach_memory_collapse)
+                    } else {
+                        stringResource(R.string.coach_memory_manage)
+                    },
+                    tint = Palette.textTertiary,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+
+            if (expanded) {
+                memories.forEach { memory ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        androidx.compose.material3.Switch(
+                            checked = memory.enabled,
+                            onCheckedChange = { vm.setMemoryEnabled(memory.id, it) },
+                            modifier = Modifier.semantics {
+                                contentDescription = context.getString(
+                                    R.string.coach_memory_use_format,
+                                    memory.text,
+                                )
+                            },
+                        )
+                        Text(
+                            memory.text,
+                            style = NoopType.subhead,
+                            color = if (memory.enabled) Palette.textPrimary else Palette.textTertiary,
+                            modifier = Modifier.weight(1f).padding(top = 8.dp),
+                        )
+                        IconButton(onClick = {
+                            editingId = memory.id
+                            draft = memory.text
+                        }) {
+                            Icon(
+                                Icons.Filled.Edit,
+                                contentDescription = stringResource(R.string.coach_memory_edit),
+                                tint = Palette.textSecondary,
+                                modifier = Modifier.size(17.dp),
+                            )
+                        }
+                        IconButton(onClick = { vm.deleteMemory(memory.id) }) {
+                            Icon(
+                                Icons.Filled.Delete,
+                                contentDescription = stringResource(R.string.coach_memory_delete),
+                                tint = Palette.statusCritical,
+                                modifier = Modifier.size(17.dp),
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = { draft = it.take(500) },
+                        modifier = Modifier.weight(1f),
+                        placeholder = {
+                            Text(stringResource(R.string.coach_memory_placeholder))
+                        },
+                        textStyle = NoopType.body,
+                        minLines = 1,
+                        maxLines = 3,
+                        colors = coachFieldColors(),
+                        shape = RoundedCornerShape(10.dp),
+                    )
+                    IconButton(
+                        onClick = {
+                            vm.saveMemory(editingId, draft)
+                            editingId = null
+                            draft = ""
+                        },
+                        enabled = draft.isNotBlank(),
+                    ) {
+                        Icon(
+                            if (editingId == null) Icons.Filled.Add else Icons.Filled.Check,
+                            contentDescription = if (editingId == null) {
+                                stringResource(R.string.coach_memory_add)
+                            } else {
+                                stringResource(R.string.coach_memory_save)
+                            },
+                            tint = Palette.accent,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

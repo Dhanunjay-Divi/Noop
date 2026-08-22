@@ -198,11 +198,15 @@ jobs:
             else
               echo "First release (no prior release tag) — skipping the auto PR breakdown."
             fi
-            {
-              printf '\n---\n\n**Downloads** — access follows repository visibility; private-repository assets require an authenticated collaborator:\n'
-              printf -- '- **Android** — `NOOP-android-v%s.apk` (privately signed staging identity, `com.noop.whoop.staging`, non-debuggable and unminified; SHA-256 sidecar and CycloneDX SBOM included)\n' "$NEW"
-              printf -- '- **macOS** — `NOOP-macos-v%s.zip` (unzip, then right-click → Open)\n' "$NEW"
-              printf -- '- **iOS** — `NOOP-ios-unsigned-v%s.ipa` (AltStore / Sideloadly)\n' "$NEW"
+          {
+            printf '\n---\n\n**Downloads** — access follows repository visibility; private-repository assets require an authenticated collaborator:\n'
+            # shellcheck disable=SC2016
+            # Backticks below are literal Markdown code spans, not shell command substitutions.
+            printf -- '- **Android** — `NOOP-android-v%s.apk` (privately signed staging identity, `com.noop.whoop.staging`, non-debuggable and unminified; SHA-256 sidecar and CycloneDX SBOM included)\n' "$NEW"
+            # shellcheck disable=SC2016
+            printf -- '- **macOS** — `NOOP-macos-v%s.zip` (unzip, then right-click → Open)\n' "$NEW"
+            # shellcheck disable=SC2016
+            printf -- '- **iOS** — `NOOP-ios-unsigned-v%s.ipa` (AltStore / Sideloadly)\n' "$NEW"
             } >> "$BODY"
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
               --target "$(git rev-parse HEAD)" \

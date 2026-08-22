@@ -873,6 +873,9 @@ object NoopPrefs {
     const val KEY_REPORT_STRAIN_TARGET = "noop.report.strainTarget"
     const val KEY_REPORT_STRAIN_TARGET_DAY = "noop.report.lastStrainTargetDay"
     const val KEY_REPORT_LAST_WORKOUT_TS = "noop.report.lastWorkoutTs"
+    // Same-day Daily Action self-check. Keys and values mirror BehaviorStore on Apple.
+    const val KEY_DAILY_ACTION_CHECK_IN_DAY = "behavior.dailyActionCheckIn.day"
+    const val KEY_DAILY_ACTION_CHECK_IN_VALUE = "behavior.dailyActionCheckIn.value"
 
     fun morningReportEnabled(context: Context): Boolean =
         of(context).getBoolean(KEY_REPORT_MORNING, false)
@@ -896,12 +899,42 @@ object NoopPrefs {
         of(context).edit().putString(KEY_REPORT_MORNING_DAY, day).apply()
     }
 
-    /** #593: opt-in (default OFF) for the once-a-day optimal-strain-reached nudge. */
+    /** #593: opt-in (default OFF) for the once-a-day evidence-gated Effort-marker nudge. */
     fun strainTargetEnabled(context: Context): Boolean =
         of(context).getBoolean(KEY_REPORT_STRAIN_TARGET, false)
 
     fun setStrainTargetEnabled(context: Context, enabled: Boolean) {
         of(context).edit().putBoolean(KEY_REPORT_STRAIN_TARGET, enabled).apply()
+    }
+
+    internal fun decodeDailyActionCheckIn(
+        today: String,
+        storedDay: String?,
+        storedValue: String?,
+    ): com.noop.analytics.DailyActionPlanner.CheckIn {
+        if (storedDay != today) return com.noop.analytics.DailyActionPlanner.CheckIn.UNANSWERED
+        return com.noop.analytics.DailyActionPlanner.CheckIn.fromStoredValue(storedValue)
+            ?: com.noop.analytics.DailyActionPlanner.CheckIn.UNANSWERED
+    }
+
+    fun dailyActionCheckIn(
+        context: Context,
+        day: String,
+    ): com.noop.analytics.DailyActionPlanner.CheckIn = decodeDailyActionCheckIn(
+        today = day,
+        storedDay = of(context).getString(KEY_DAILY_ACTION_CHECK_IN_DAY, null),
+        storedValue = of(context).getString(KEY_DAILY_ACTION_CHECK_IN_VALUE, null),
+    )
+
+    fun setDailyActionCheckIn(
+        context: Context,
+        day: String,
+        value: com.noop.analytics.DailyActionPlanner.CheckIn,
+    ) {
+        of(context).edit()
+            .putString(KEY_DAILY_ACTION_CHECK_IN_DAY, day)
+            .putString(KEY_DAILY_ACTION_CHECK_IN_VALUE, value.storedValue)
+            .apply()
     }
 
     /** Last local day (ISO yyyy-MM-dd) the strain-target nudge was posted, the once-a-day gate. */

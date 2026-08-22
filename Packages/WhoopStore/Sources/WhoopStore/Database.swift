@@ -691,6 +691,252 @@ extension WhoopStore {
                 t.add(column: "gravitySparse", .boolean)
             }
         }
+        // v39: editable nutrition log. `metricSeries` can hold only one scalar per nutrient/day; this
+        // richer source-of-truth preserves individual meals, timing, labels, notes, nullable nutrients,
+        // stable edit/delete ids, and origin. Daily sums are projected under `nutrition-log`.
+        //
+        // Existing `nutrition-csv` scalar history is migrated into one deterministic daily-summary row
+        // and copied to the new projection source. The original rows stay untouched for provenance and
+        // older readers. Additive only: no existing table or value is removed.
+        migrator.registerMigration("v39-nutrition-entry") { db in
+            try db.create(table: "nutritionEntry") { t in
+                t.column("id", .text).primaryKey()
+                t.column("deviceId", .text).notNull()
+                t.column("origin", .text).notNull()
+                t.column("day", .text).notNull()
+                t.column("occurredAt", .integer).notNull()
+                t.column("mealType", .text).notNull()
+                t.column("label", .text)
+                t.column("caloriesKcal", .double)
+                t.column("proteinG", .double)
+                t.column("carbsG", .double)
+                t.column("fatG", .double)
+                t.column("note", .text)
+                t.column("createdAt", .integer).notNull()
+                t.column("updatedAt", .integer).notNull()
+            }
+            try db.create(
+                index: "idx_nutritionEntry_device_day_occurredAt",
+                on: "nutritionEntry",
+                columns: ["deviceId", "day", "occurredAt"]
+            )
+            try db.create(
+                index: "idx_nutritionEntry_device_origin_day",
+                on: "nutritionEntry",
+                columns: ["deviceId", "origin", "day"]
+            )
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO nutritionEntry
+                    (id, deviceId, origin, day, occurredAt, mealType, label,
+                     caloriesKcal, proteinG, carbsG, fatG, note, createdAt, updatedAt)
+                SELECT
+                    'nutrition-csv:' || day,
+                    'nutrition-log',
+                    'nutrition-csv',
+                    day,
+                    COALESCE(CAST(strftime('%s', day || 'T12:00:00Z') AS INTEGER), 1),
+                    'daily_total',
+                    NULL,
+                    MAX(CASE WHEN key = 'calories_in' THEN value END),
+                    MAX(CASE WHEN key = 'protein_g' THEN value END),
+                    MAX(CASE WHEN key = 'carbs_g' THEN value END),
+                    MAX(CASE WHEN key = 'fat_g' THEN value END),
+                    NULL,
+                    COALESCE(CAST(strftime('%s', day || 'T12:00:00Z') AS INTEGER), 1),
+                    COALESCE(CAST(strftime('%s', day || 'T12:00:00Z') AS INTEGER), 1)
+                FROM metricSeries
+                WHERE deviceId = 'nutrition-csv'
+                  AND key IN ('calories_in', 'protein_g', 'carbs_g', 'fat_g')
+                GROUP BY day
+                """)
+            try db.execute(sql: """
+                INSERT INTO metricSeries (deviceId, day, key, value)
+                SELECT 'nutrition-log', day, key, value
+                FROM metricSeries
+                WHERE deviceId = 'nutrition-csv'
+                  AND key IN ('calories_in', 'protein_g', 'carbs_g', 'fat_g')
+                ON CONFLICT(deviceId, day, key) DO UPDATE SET value = excluded.value
+                """)
+        }
+        // v40: normalized local-first strength trainer. Session summaries remain separate from the
+        // generic `workout` table because one strength session owns many exercises and editable sets.
+        // Built-in exercise ids are stable storage identifiers; custom exercises use the same table.
+        migrator.registerMigration("v40-strength-training") { db in
+            try db.create(table: "strengthExercise") { t in
+                t.column("id", .text).primaryKey()
+                t.column("name", .text).notNull()
+                t.column("primaryMuscle", .text).notNull()
+                t.column("secondaryMusclesJSON", .text).notNull()
+                t.column("equipment", .text).notNull()
+                t.column("movementPattern", .text).notNull()
+                t.column("isCustom", .boolean).notNull()
+                t.column("archivedAt", .integer)
+                t.column("createdAt", .integer).notNull()
+                t.column("updatedAt", .integer).notNull()
+            }
+            try db.create(
+                index: "idx_strengthExercise_custom_archived_name",
+                on: "strengthExercise",
+                columns: ["isCustom", "archivedAt", "name"]
+            )
+            try db.create(table: "strengthRoutine") { t in
+                t.column("id", .text).primaryKey()
+                t.column("name", .text).notNull()
+                t.column("note", .text)
+                t.column("archivedAt", .integer)
+                t.column("createdAt", .integer).notNull()
+                t.column("updatedAt", .integer).notNull()
+            }
+            try db.create(
+                index: "idx_strengthRoutine_archived_updated",
+                on: "strengthRoutine",
+                columns: ["archivedAt", "updatedAt"]
+            )
+            try db.create(table: "strengthRoutineExercise") { t in
+                t.column("id", .text).primaryKey()
+                t.column("routineId", .text).notNull()
+                t.column("exerciseId", .text).notNull()
+                t.column("position", .integer).notNull()
+                t.column("targetSets", .integer).notNull()
+                t.column("targetRepsMin", .integer)
+                t.column("targetRepsMax", .integer)
+                t.column("targetRPE", .double)
+                t.column("restSeconds", .integer).notNull()
+                t.column("note", .text)
+                t.column("createdAt", .integer).notNull()
+                t.column("updatedAt", .integer).notNull()
+            }
+            try db.create(
+                index: "idx_strengthRoutineExercise_routine_position",
+                on: "strengthRoutineExercise",
+                columns: ["routineId", "position"],
+                unique: true
+            )
+            try db.create(table: "strengthSession") { t in
+                t.column("id", .text).primaryKey()
+                t.column("routineId", .text)
+                t.column("name", .text)
+                t.column("startedAt", .integer).notNull()
+                t.column("endedAt", .integer)
+                t.column("note", .text)
+                t.column("createdAt", .integer).notNull()
+                t.column("updatedAt", .integer).notNull()
+            }
+            try db.create(
+                index: "idx_strengthSession_startedAt",
+                on: "strengthSession",
+                columns: ["startedAt", "id"]
+            )
+            try db.create(table: "strengthSet") { t in
+                t.column("id", .text).primaryKey()
+                t.column("sessionId", .text).notNull()
+                t.column("exerciseId", .text).notNull()
+                t.column("exercisePosition", .integer).notNull()
+                t.column("setPosition", .integer).notNull()
+                t.column("setType", .text).notNull()
+                t.column("reps", .integer)
+                t.column("loadKg", .double)
+                t.column("durationS", .integer)
+                t.column("rpe", .double)
+                t.column("completedAt", .integer)
+                t.column("note", .text)
+                t.column("createdAt", .integer).notNull()
+                t.column("updatedAt", .integer).notNull()
+            }
+            try db.create(
+                index: "idx_strengthSet_session_order",
+                on: "strengthSet",
+                columns: ["sessionId", "exercisePosition", "setPosition"],
+                unique: true
+            )
+            try db.create(
+                index: "idx_strengthSet_exercise_completed",
+                on: "strengthSet",
+                columns: ["exerciseId", "completedAt"]
+            )
+
+            for exercise in StrengthTrainingContract.builtInExercises {
+                try db.execute(sql: """
+                    INSERT OR IGNORE INTO strengthExercise
+                        (id, name, primaryMuscle, secondaryMusclesJSON, equipment, movementPattern,
+                         isCustom, archivedAt, createdAt, updatedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, 0, NULL, 1, 1)
+                    """, arguments: [
+                        exercise.id, exercise.name, exercise.primaryMuscle,
+                        exercise.secondaryMusclesJSON, exercise.equipment, exercise.movementPattern,
+                    ])
+            }
+        }
+        // v41: retain an active workout's per-exercise rest target across editor closes and
+        // process restarts. The value is duplicated on each set so the five-table normalized
+        // contract remains intact; editor writes keep every set in an exercise block aligned.
+        migrator.registerMigration("v41-strength-set-rest") { db in
+            try db.alter(table: "strengthSet") { t in
+                t.add(column: "restSeconds", .integer)
+            }
+        }
+        // v42: durable local Coach transcript and explicit, user-managed memory. Neither table
+        // contains provider credentials; both travel with the encrypted/local SQLite backup.
+        migrator.registerMigration("v42-coach-history-memory") { db in
+            try db.create(table: "coachMessage") { t in
+                t.column("id", .text).primaryKey()
+                t.column("createdAt", .integer).notNull()
+                t.column("role", .text).notNull()
+                t.column("text", .text).notNull()
+            }
+            try db.create(
+                index: "idx_coachMessage_createdAt",
+                on: "coachMessage",
+                columns: ["createdAt", "id"]
+            )
+
+            try db.create(table: "coachMemory") { t in
+                t.column("id", .text).primaryKey()
+                t.column("text", .text).notNull()
+                t.column("enabled", .boolean).notNull()
+                t.column("createdAt", .integer).notNull()
+                t.column("updatedAt", .integer).notNull()
+            }
+            try db.create(
+                index: "idx_coachMemory_enabled_updatedAt",
+                on: "coachMemory",
+                columns: ["enabled", "updatedAt"]
+            )
+        }
+        // v43: saved foods/meals and successful barcode lookups share one local-first catalog.
+        // Unsaved Open Food Facts rows are durable cache entries; saved rows form the user's library.
+        migrator.registerMigration("v43-nutrition-catalog") { db in
+            try db.create(table: "nutritionCatalogItem") { t in
+                t.column("id", .text).primaryKey()
+                t.column("kind", .text).notNull()
+                t.column("name", .text).notNull()
+                t.column("brand", .text)
+                t.column("barcode", .text)
+                t.column("servingQuantity", .double)
+                t.column("servingUnit", .text)
+                t.column("caloriesKcal", .double)
+                t.column("proteinG", .double)
+                t.column("carbsG", .double)
+                t.column("fatG", .double)
+                t.column("mealType", .text).notNull()
+                t.column("source", .text).notNull()
+                t.column("isSaved", .boolean).notNull()
+                t.column("lastUsedAt", .integer)
+                t.column("createdAt", .integer).notNull()
+                t.column("updatedAt", .integer).notNull()
+            }
+            try db.create(
+                index: "idx_nutritionCatalogItem_barcode",
+                on: "nutritionCatalogItem",
+                columns: ["barcode"],
+                unique: true
+            )
+            try db.create(
+                index: "idx_nutritionCatalogItem_saved_used",
+                on: "nutritionCatalogItem",
+                columns: ["isSaved", "lastUsedAt", "updatedAt"]
+            )
+        }
         return migrator
     }
 }

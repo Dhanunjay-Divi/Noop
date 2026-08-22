@@ -89,12 +89,19 @@ struct WorkoutDateWindow: Equatable, Sendable {
 
 struct WorkoutsView: View {
     @EnvironmentObject var repo: Repository
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// #459: "Start Workout" used to live ONLY on the Live screen, so a user reaching Workouts (via the
     /// Quick-action FAB or the tab) had no way to begin one from the obvious place. Injected here so the
     /// header/empty-state can start a live session and present the in-exercise view directly.
     @EnvironmentObject var model: AppModel
     @State private var showLiveWorkout = false
     @State private var showStartSport = false
+    #if DEBUG
+    @State private var showStrengthTrainer =
+        ProcessInfo.processInfo.arguments.contains("--demo-strength-trainer")
+    #else
+    @State private var showStrengthTrainer = false
+    #endif
 
     // Imperial/Metric display preference (D#103). Workout distances are stored in metres; the toggle
     // re-labels them to miles/yards. Display-only — nothing on disk changes.
@@ -135,6 +142,17 @@ struct WorkoutsView: View {
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var hSizeClass
     #endif
+
+    /// The labelled workout actions fit side-by-side on Mac/iPad, but need a full-width stack on
+    /// compact iPhone widths. Keep the platform check here so the shared macOS target never references
+    /// the iOS-only size-class environment value.
+    private var usesCompactWorkoutActionLayout: Bool {
+        #if os(iOS)
+        hSizeClass == .compact
+        #else
+        false
+        #endif
+    }
 
     /// The add/edit sheet target: `.some(nil)` = add a new workout, `.some(row)` = edit `row`,
     /// `nil` = sheet closed. Wrapped in Identifiable so `.sheet(item:)` can drive presentation.
@@ -213,11 +231,34 @@ struct WorkoutsView: View {
                        topBackground: liquidScaffoldSky()) {
             if allRows.isEmpty {
                 VStack(alignment: .leading, spacing: NoopMetrics.space4) {
-                    ComingSoon(what: loaded
-                        ? "No workouts yet. They come from your WHOOP and Apple Health history. Import in Data Sources to bring them in, or add one you tracked elsewhere."
-                        : "Loading your sessions…")
                     if loaded {
-                        HStack(spacing: NoopMetrics.rowSpacing) { startLiveWorkoutButton; addWorkoutButton }
+                        ScreenStateCard(
+                            kind: .empty,
+                            title: "No workouts yet",
+                            message: "They come from your WHOOP and Apple Health history. Import in Data Sources to bring them in, or add one you tracked elsewhere.",
+                            symbol: "figure.run"
+                        )
+                    } else {
+                        ScreenStateCard(
+                            kind: .loading,
+                            title: "Loading workouts",
+                            message: "Reading your saved and imported sessions."
+                        )
+                    }
+                    if loaded {
+                        if usesCompactWorkoutActionLayout {
+                            VStack(spacing: NoopMetrics.rowSpacing) {
+                                startLiveWorkoutButton
+                                addWorkoutButton
+                                strengthTrainerButton
+                            }
+                        } else {
+                            HStack(spacing: NoopMetrics.rowSpacing) {
+                                startLiveWorkoutButton
+                                addWorkoutButton
+                            }
+                            strengthTrainerButton
+                        }
                     }
                 }
             } else {
@@ -231,7 +272,18 @@ struct WorkoutsView: View {
                 let groups = sportGroups(from: windowRows)
                 let zonesSummary = WorkoutZones.summary(from: windowRows)
 
-                HStack { startLiveWorkoutButton; Spacer() }
+                if usesCompactWorkoutActionLayout {
+                    VStack(spacing: NoopMetrics.rowSpacing) {
+                        startLiveWorkoutButton
+                        strengthTrainerButton
+                    }
+                } else {
+                    HStack(spacing: NoopMetrics.rowSpacing) {
+                        startLiveWorkoutButton
+                        strengthTrainerButton
+                        Spacer()
+                    }
+                }
                 rangeBar(rows: windowRows)
                 if let postLogNote { postLogBanner(postLogNote) }
                 if windowRows.isEmpty {
@@ -327,6 +379,10 @@ struct WorkoutsView: View {
                 model.startWorkout(sport: name)
                 showLiveWorkout = true
             }
+        }
+        .sheet(isPresented: $showStrengthTrainer) {
+            StrengthTrainerView()
+                .environmentObject(repo)
         }
         // #64: name the merged session when every selected row is a bare detected bout (there's no sport
         // to inherit). Reuses the "Start a workout" named-sport picker.
@@ -530,9 +586,13 @@ struct WorkoutsView: View {
             if stacked {
                 // iPhone: button on its own row, the range pill full-width below — no crushed sliver.
                 addWorkoutButton
-                SegmentedPillControl(Range.allCases, selection: $range,
-                                     adaptsToAvailableWidth: true) { $0.label }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if dynamicTypeSize.isAccessibilitySize {
+                    accessibleRangeMenu
+                } else {
+                    SegmentedPillControl(Range.allCases, selection: $range,
+                                         adaptsToAvailableWidth: true) { $0.label }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             } else {
                 HStack(spacing: 12) {
                     addWorkoutButton
@@ -549,6 +609,54 @@ struct WorkoutsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityLabel(caption)
         }
+    }
+
+    private var accessibleRangeMenu: some View {
+        Menu {
+            ForEach(Range.allCases, id: \.self) { option in
+                Button {
+                    range = option
+                } label: {
+                    if option == range {
+                        Label(option.label, systemImage: "checkmark")
+                    } else {
+                        Text(option.label)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(StrandPalette.accent)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Time range")
+                        .font(StrandFont.overline)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                    Text(range.label)
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .background(StrandPalette.surfaceInset,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(StrandPalette.hairline, lineWidth: 1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Time range")
+        .accessibilityValue(range.label)
     }
 
     private var customRangePicker: some View {
@@ -698,7 +806,12 @@ struct WorkoutsView: View {
     /// Opens the add sheet (editing == nil). Present on the populated screen and the empty state so a
     /// user with no imports can still log a session.
     private var addWorkoutButton: some View {
-        NoopButton("Add workout", systemImage: "plus", kind: .secondary) {
+        NoopButton(
+            "Add workout",
+            systemImage: "plus",
+            kind: .secondary,
+            fullWidth: usesCompactWorkoutActionLayout
+        ) {
             sheet = WorkoutSheetTarget(editing: nil)
         }
         .accessibilityLabel("Add a workout")
@@ -726,8 +839,22 @@ struct WorkoutsView: View {
                      : String(localized: "View active workout"))
             }
         }
-        .buttonStyle(NoopButtonStyle(.primary))
+        .buttonStyle(NoopButtonStyle(.primary, fullWidth: usesCompactWorkoutActionLayout))
         .accessibilityLabel(model.activeWorkout == nil ? "Start a workout" : "View the active workout")
+    }
+
+    /// Detailed resistance-training log. Kept separate from generic imported workout summaries so
+    /// editable exercises and sets never get flattened into one opaque workout row.
+    private var strengthTrainerButton: some View {
+        NoopButton(
+            "Strength Trainer",
+            systemImage: "dumbbell.fill",
+            kind: .secondary,
+            fullWidth: usesCompactWorkoutActionLayout
+        ) {
+            showStrengthTrainer = true
+        }
+        .accessibilityLabel(Text("appwide.strength.open"))
     }
 
     /// The active filter (#64), composed once. Sport / source / search all apply AFTER the window cut,

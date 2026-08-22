@@ -5,7 +5,8 @@ import org.junit.Test
 
 /**
  * Goal-formula tests for the Hydration tracker (MVP). Mirrors the Swift HydrationGoalTests so the daily
- * goal stays byte-parity across iOS and Android: baseline + effort bump + nearest-50 rounding + caps.
+ * goal stays byte-parity across iOS and Android: drink-water baseline + effort bump + nearest-50
+ * rounding + caps.
  *
  * Goldens are computed by hand from the closed-form rule:
  *   goal = round50(sexBaseline + clamp(round(effort/100 * 700), 0, 700))
@@ -14,17 +15,17 @@ class HydrationGoalTest {
 
     // ── Sex baseline ────────────────────────────────────────────────────────────
 
-    @Test fun baseline_male() = assertEquals(3700, HydrationGoal.baselineForSex("male"))
-    @Test fun baseline_female() = assertEquals(2700, HydrationGoal.baselineForSex("female"))
-    @Test fun baseline_nonbinary_is_other() = assertEquals(3200, HydrationGoal.baselineForSex("nonbinary"))
-    @Test fun baseline_unknown_is_other() = assertEquals(3200, HydrationGoal.baselineForSex("unspecified"))
-    @Test fun baseline_empty_is_other() = assertEquals(3200, HydrationGoal.baselineForSex(""))
+    @Test fun baseline_male() = assertEquals(2960, HydrationGoal.baselineForSex("male"))
+    @Test fun baseline_female() = assertEquals(2160, HydrationGoal.baselineForSex("female"))
+    @Test fun baseline_nonbinary_is_other() = assertEquals(2560, HydrationGoal.baselineForSex("nonbinary"))
+    @Test fun baseline_unknown_is_other() = assertEquals(2560, HydrationGoal.baselineForSex("unspecified"))
+    @Test fun baseline_empty_is_other() = assertEquals(2560, HydrationGoal.baselineForSex(""))
 
     @Test fun baseline_is_case_and_space_insensitive() {
-        assertEquals(3700, HydrationGoal.baselineForSex("  MALE "))
-        assertEquals(2700, HydrationGoal.baselineForSex("Female"))
-        assertEquals(3700, HydrationGoal.baselineForSex("M"))
-        assertEquals(2700, HydrationGoal.baselineForSex("f"))
+        assertEquals(2960, HydrationGoal.baselineForSex("  MALE "))
+        assertEquals(2160, HydrationGoal.baselineForSex("Female"))
+        assertEquals(2960, HydrationGoal.baselineForSex("M"))
+        assertEquals(2160, HydrationGoal.baselineForSex("f"))
     }
 
     // ── Effort bump (round + cap) ────────────────────────────────────────────────
@@ -50,26 +51,25 @@ class HydrationGoalTest {
     // ── Daily goal (baseline + bump, rounded to nearest 50) ───────────────────────
 
     @Test fun goal_no_effort_is_rounded_baseline() {
-        // Baselines are already multiples of 50 → unchanged.
-        assertEquals(3700, HydrationGoal.dailyGoalMl("male", null))
-        assertEquals(2700, HydrationGoal.dailyGoalMl("female", null))
-        assertEquals(3200, HydrationGoal.dailyGoalMl("nonbinary", null))
+        assertEquals(2950, HydrationGoal.dailyGoalMl("male", null))
+        assertEquals(2150, HydrationGoal.dailyGoalMl("female", null))
+        assertEquals(2550, HydrationGoal.dailyGoalMl("nonbinary", null))
     }
 
     @Test fun goal_full_effort_caps_at_baseline_plus_700() {
-        // 3700 + 700 = 4400 (already on the grid)
-        assertEquals(4400, HydrationGoal.dailyGoalMl("male", 100.0))
-        // 2700 + 700 = 3400
-        assertEquals(3400, HydrationGoal.dailyGoalMl("female", 100.0))
+        // 2960 + 700 = 3660 → 3650
+        assertEquals(3650, HydrationGoal.dailyGoalMl("male", 100.0))
+        // 2160 + 700 = 2860 → 2850
+        assertEquals(2850, HydrationGoal.dailyGoalMl("female", 100.0))
     }
 
     @Test fun goal_rounds_to_nearest_50() {
-        // male: 3700 + round(37/100*700=259) = 3959 → nearest 50 = 3950
-        assertEquals(3950, HydrationGoal.dailyGoalMl("male", 37.0))
-        // female: 2700 + round(63/100*700=441) = 3141 → nearest 50 = 3150
-        assertEquals(3150, HydrationGoal.dailyGoalMl("female", 63.0))
-        // other: 3200 + round(13/100*700=91) = 3291 → nearest 50 = 3300
-        assertEquals(3300, HydrationGoal.dailyGoalMl("nonbinary", 13.0))
+        // male: 2960 + round(37/100*700=259) = 3219 → nearest 50 = 3200
+        assertEquals(3200, HydrationGoal.dailyGoalMl("male", 37.0))
+        // female: 2160 + round(63/100*700=441) = 2601 → nearest 50 = 2600
+        assertEquals(2600, HydrationGoal.dailyGoalMl("female", 63.0))
+        // other: 2560 + round(13/100*700=91) = 2651 → nearest 50 = 2650
+        assertEquals(2650, HydrationGoal.dailyGoalMl("nonbinary", 13.0))
     }
 
     @Test fun goal_round_half_up() {

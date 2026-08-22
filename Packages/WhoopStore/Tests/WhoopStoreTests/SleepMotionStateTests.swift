@@ -31,8 +31,8 @@ final class SleepMotionStateTests: XCTestCase {
         XCTAssertTrue(cols.contains("gravitySparse"))
     }
 
-    func testSchemaVersionBumpedTo38() {
-        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 38)
+    func testSchemaVersionIsCurrent() {
+        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 43)
     }
 
     // MARK: motionJSON

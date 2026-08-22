@@ -7,6 +7,9 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
+/** Single source of truth for Room's schema version and the `.noopbak` manifest compatibility gate. */
+const val NOOP_DATABASE_SCHEMA_VERSION = 33
+
 /**
  * Local Room database, the Android port of the GRDB store in
  * Packages/WhoopStore (Database.swift schema). Holds phone-collected raw streams
@@ -50,8 +53,17 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PpgWaveformSampleEntity::class,
         RawImuSampleEntity::class,
         HealthConnectSyncStateRow::class,
+        NutritionEntryRow::class,
+        NutritionCatalogItemRow::class,
+        StrengthExerciseRow::class,
+        StrengthRoutineRow::class,
+        StrengthRoutineExerciseRow::class,
+        StrengthSessionRow::class,
+        StrengthSetRow::class,
+        CoachMessageRow::class,
+        CoachMemoryRow::class,
     ],
-    version = 28,
+    version = NOOP_DATABASE_SCHEMA_VERSION,
     // Build-time artifact only; this does not change runtime database behavior.
     exportSchema = true,
 )
@@ -699,6 +711,157 @@ abstract class WhoopDatabase : RoomDatabase() {
             }
         }
 
+        /** Editable nutrition rows + migration of the legacy one-scalar-per-day CSV projection. */
+        internal val NUTRITION_ENTRY_MIGRATION_SQL: List<String> = listOf(
+            "CREATE TABLE IF NOT EXISTS `nutritionEntry` (" +
+                "`id` TEXT NOT NULL, `deviceId` TEXT NOT NULL, `origin` TEXT NOT NULL, " +
+                "`day` TEXT NOT NULL, `occurredAt` INTEGER NOT NULL, `mealType` TEXT NOT NULL, " +
+                "`label` TEXT, `caloriesKcal` REAL, `proteinG` REAL, `carbsG` REAL, " +
+                "`fatG` REAL, `note` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`id`))",
+            "CREATE INDEX IF NOT EXISTS `idx_nutritionEntry_device_day_occurredAt` " +
+                "ON `nutritionEntry` (`deviceId`, `day`, `occurredAt`)",
+            "CREATE INDEX IF NOT EXISTS `idx_nutritionEntry_device_origin_day` " +
+                "ON `nutritionEntry` (`deviceId`, `origin`, `day`)",
+            "INSERT OR IGNORE INTO `nutritionEntry` " +
+                "(`id`, `deviceId`, `origin`, `day`, `occurredAt`, `mealType`, `label`, " +
+                "`caloriesKcal`, `proteinG`, `carbsG`, `fatG`, `note`, `createdAt`, `updatedAt`) " +
+                "SELECT 'nutrition-csv:' || `day`, 'nutrition-log', 'nutrition-csv', `day`, " +
+                "COALESCE(CAST(strftime('%s', `day` || 'T12:00:00Z') AS INTEGER), 1), " +
+                "'daily_total', NULL, " +
+                "MAX(CASE WHEN `key` = 'calories_in' THEN `value` END), " +
+                "MAX(CASE WHEN `key` = 'protein_g' THEN `value` END), " +
+                "MAX(CASE WHEN `key` = 'carbs_g' THEN `value` END), " +
+                "MAX(CASE WHEN `key` = 'fat_g' THEN `value` END), NULL, " +
+                "COALESCE(CAST(strftime('%s', `day` || 'T12:00:00Z') AS INTEGER), 1), " +
+                "COALESCE(CAST(strftime('%s', `day` || 'T12:00:00Z') AS INTEGER), 1) " +
+                "FROM `metricSeries` WHERE `deviceId` = 'nutrition-csv' " +
+                "AND `key` IN ('calories_in', 'protein_g', 'carbs_g', 'fat_g') GROUP BY `day`",
+            "INSERT INTO `metricSeries` (`deviceId`, `day`, `key`, `value`) " +
+                "SELECT 'nutrition-log', `day`, `key`, `value` FROM `metricSeries` " +
+                "WHERE `deviceId` = 'nutrition-csv' " +
+                "AND `key` IN ('calories_in', 'protein_g', 'carbs_g', 'fat_g') " +
+                "ON CONFLICT(`deviceId`, `day`, `key`) DO UPDATE SET `value` = excluded.`value`",
+        )
+
+        internal val MIGRATION_28_29 = object : Migration(28, 29) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (statement in NUTRITION_ENTRY_MIGRATION_SQL) db.execSQL(statement)
+            }
+        }
+
+        /** Normalized local-first strength trainer + stable owned starter exercise catalog. */
+        internal val STRENGTH_TRAINING_MIGRATION_SQL: List<String> = listOf(
+            "CREATE TABLE IF NOT EXISTS `strengthExercise` (" +
+                "`id` TEXT NOT NULL, `name` TEXT NOT NULL, `primaryMuscle` TEXT NOT NULL, " +
+                "`secondaryMusclesJSON` TEXT NOT NULL, `equipment` TEXT NOT NULL, " +
+                "`movementPattern` TEXT NOT NULL, `isCustom` INTEGER NOT NULL, " +
+                "`archivedAt` INTEGER, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`id`))",
+            "CREATE INDEX IF NOT EXISTS `idx_strengthExercise_custom_archived_name` " +
+                "ON `strengthExercise` (`isCustom`, `archivedAt`, `name`)",
+            "CREATE TABLE IF NOT EXISTS `strengthRoutine` (" +
+                "`id` TEXT NOT NULL, `name` TEXT NOT NULL, `note` TEXT, `archivedAt` INTEGER, " +
+                "`createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+            "CREATE INDEX IF NOT EXISTS `idx_strengthRoutine_archived_updated` " +
+                "ON `strengthRoutine` (`archivedAt`, `updatedAt`)",
+            "CREATE TABLE IF NOT EXISTS `strengthRoutineExercise` (" +
+                "`id` TEXT NOT NULL, `routineId` TEXT NOT NULL, `exerciseId` TEXT NOT NULL, " +
+                "`position` INTEGER NOT NULL, `targetSets` INTEGER NOT NULL, " +
+                "`targetRepsMin` INTEGER, `targetRepsMax` INTEGER, `targetRPE` REAL, " +
+                "`restSeconds` INTEGER NOT NULL, `note` TEXT, `createdAt` INTEGER NOT NULL, " +
+                "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+            "CREATE UNIQUE INDEX IF NOT EXISTS `idx_strengthRoutineExercise_routine_position` " +
+                "ON `strengthRoutineExercise` (`routineId`, `position`)",
+            "CREATE TABLE IF NOT EXISTS `strengthSession` (" +
+                "`id` TEXT NOT NULL, `routineId` TEXT, `name` TEXT, `startedAt` INTEGER NOT NULL, " +
+                "`endedAt` INTEGER, `note` TEXT, `createdAt` INTEGER NOT NULL, " +
+                "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+            "CREATE INDEX IF NOT EXISTS `idx_strengthSession_startedAt` " +
+                "ON `strengthSession` (`startedAt`, `id`)",
+            "CREATE TABLE IF NOT EXISTS `strengthSet` (" +
+                "`id` TEXT NOT NULL, `sessionId` TEXT NOT NULL, `exerciseId` TEXT NOT NULL, " +
+                "`exercisePosition` INTEGER NOT NULL, `setPosition` INTEGER NOT NULL, " +
+                "`setType` TEXT NOT NULL, `reps` INTEGER, `loadKg` REAL, `durationS` INTEGER, " +
+                "`rpe` REAL, `completedAt` INTEGER, `note` TEXT, `createdAt` INTEGER NOT NULL, " +
+                "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+            "CREATE UNIQUE INDEX IF NOT EXISTS `idx_strengthSet_session_order` " +
+                "ON `strengthSet` (`sessionId`, `exercisePosition`, `setPosition`)",
+            "CREATE INDEX IF NOT EXISTS `idx_strengthSet_exercise_completed` " +
+                "ON `strengthSet` (`exerciseId`, `completedAt`)",
+        ) + strengthBuiltInInsertSQL()
+
+        internal val MIGRATION_29_30 = object : Migration(29, 30) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (statement in STRENGTH_TRAINING_MIGRATION_SQL) db.execSQL(statement)
+            }
+        }
+
+        /** Persist the rest target chosen for each active-session exercise block. */
+        internal const val STRENGTH_SET_REST_MIGRATION_SQL =
+            "ALTER TABLE `strengthSet` ADD COLUMN `restSeconds` INTEGER"
+
+        internal val MIGRATION_30_31 = object : Migration(30, 31) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(STRENGTH_SET_REST_MIGRATION_SQL)
+            }
+        }
+
+        /** Durable local Coach transcript and explicit user-managed memory (GRDB v42 twin). */
+        internal val COACH_HISTORY_MEMORY_MIGRATION_SQL: List<String> = listOf(
+            "CREATE TABLE IF NOT EXISTS `coachMessage` (" +
+                "`id` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `role` TEXT NOT NULL, " +
+                "`text` TEXT NOT NULL, PRIMARY KEY(`id`))",
+            "CREATE INDEX IF NOT EXISTS `idx_coachMessage_createdAt` " +
+                "ON `coachMessage` (`createdAt`, `id`)",
+            "CREATE TABLE IF NOT EXISTS `coachMemory` (" +
+                "`id` TEXT NOT NULL, `text` TEXT NOT NULL, `enabled` INTEGER NOT NULL, " +
+                "`createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+            "CREATE INDEX IF NOT EXISTS `idx_coachMemory_enabled_updatedAt` " +
+                "ON `coachMemory` (`enabled`, `updatedAt`)",
+        )
+
+        internal val MIGRATION_31_32 = object : Migration(31, 32) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (statement in COACH_HISTORY_MEMORY_MIGRATION_SQL) db.execSQL(statement)
+            }
+        }
+
+        /** Saved foods/meals and successful Open Food Facts cache entries (GRDB v43 twin). */
+        internal val NUTRITION_CATALOG_MIGRATION_SQL: List<String> = listOf(
+            "CREATE TABLE IF NOT EXISTS `nutritionCatalogItem` (" +
+                "`id` TEXT NOT NULL, `kind` TEXT NOT NULL, `name` TEXT NOT NULL, " +
+                "`brand` TEXT, `barcode` TEXT, `servingQuantity` REAL, `servingUnit` TEXT, " +
+                "`caloriesKcal` REAL, `proteinG` REAL, `carbsG` REAL, `fatG` REAL, " +
+                "`mealType` TEXT NOT NULL, `source` TEXT NOT NULL, `isSaved` INTEGER NOT NULL, " +
+                "`lastUsedAt` INTEGER, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`id`))",
+            "CREATE UNIQUE INDEX IF NOT EXISTS `idx_nutritionCatalogItem_barcode` " +
+                "ON `nutritionCatalogItem` (`barcode`)",
+            "CREATE INDEX IF NOT EXISTS `idx_nutritionCatalogItem_saved_used` " +
+                "ON `nutritionCatalogItem` (`isSaved`, `lastUsedAt`, `updatedAt`)",
+        )
+
+        internal val MIGRATION_32_33 = object : Migration(32, 33) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (statement in NUTRITION_CATALOG_MIGRATION_SQL) db.execSQL(statement)
+            }
+        }
+
+        internal fun strengthBuiltInInsertSQL(): List<String> =
+            StrengthTrainingContract.BUILT_IN_EXERCISES.map { exercise ->
+                "INSERT OR IGNORE INTO `strengthExercise` " +
+                    "(`id`, `name`, `primaryMuscle`, `secondaryMusclesJSON`, `equipment`, " +
+                    "`movementPattern`, `isCustom`, `archivedAt`, `createdAt`, `updatedAt`) VALUES (" +
+                    "'${exercise.id.sqlLiteral()}', '${exercise.name.sqlLiteral()}', " +
+                    "'${exercise.primaryMuscle.sqlLiteral()}', " +
+                    "'${exercise.secondaryMusclesJSON.sqlLiteral()}', " +
+                    "'${exercise.equipment.sqlLiteral()}', " +
+                    "'${exercise.movementPattern.sqlLiteral()}', 0, NULL, 1, 1)"
+            }
+
+        private fun String.sqlLiteral(): String = replace("'", "''")
+
         private fun build(appContext: Context): WhoopDatabase =
             Room.databaseBuilder(appContext, WhoopDatabase::class.java, DB_NAME)
                 // #1014: replace ONLY the corruption handling of the default open-helper. The
@@ -716,7 +879,8 @@ abstract class WhoopDatabase : RoomDatabase() {
                     MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
                     MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22,
                     MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26,
-                    MIGRATION_26_27, MIGRATION_27_28,
+                    MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29,
+                    MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33,
                 )
                 // #1037: a FRESH install builds the schema straight at the current version and runs NO
                 // migrations, so the MIGRATION_7_8 "my-whoop" registry seed never fires and the WHOOP,
@@ -733,6 +897,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                                 "('my-whoop', 'WHOOP', 'WHOOP', NULL, 'liveBLE', " +
                                 "'${WhoopLiveCapabilities.encoded("WHOOP")}', 'active', $now, $now)",
                         )
+                        for (statement in strengthBuiltInInsertSQL()) db.execSQL(statement)
                     }
                 })
                 .build()

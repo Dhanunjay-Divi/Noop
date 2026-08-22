@@ -379,7 +379,7 @@ private fun CaptureDial(fraction: Float, value: String, unit: String, sub: Strin
             Text(value, style = NoopType.number(48f), color = Palette.metricPurple)
             Text(
                 unit,
-                style = NoopType.footnote.copy(letterSpacing = 0.8.sp),
+                style = NoopType.footnote.copy(letterSpacing = 0.sp),
                 color = Palette.textTertiary,
             )
             if (sub != null) {

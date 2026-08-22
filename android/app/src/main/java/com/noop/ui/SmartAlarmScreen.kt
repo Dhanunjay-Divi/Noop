@@ -28,6 +28,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,7 +39,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.noop.analytics.AnalyticsEngine
+import com.noop.analytics.ScoreConfidence
+import com.noop.analytics.SleepDebt
+import com.noop.analytics.SleepGoalMode
+import com.noop.analytics.SleepPlan
+import com.noop.analytics.SleepPlanner
 import com.noop.ble.PuffinExperiment
+import com.noop.data.SleepSession
+import com.noop.data.WhoopRepository
+import kotlin.math.abs
 
 /**
  * Smart alarm (#207) — Android phone-based wake, with a guaranteed hard-deadline fallback.
@@ -61,6 +71,10 @@ fun SmartAlarmScreen(vm: AppViewModel) {
     val targetMinutes by vm.phoneAlarmTargetMinutes.collectAsStateWithLifecycle()
     val windowMinutes by vm.phoneAlarmWindowMinutes.collectAsStateWithLifecycle()
     val buzzWhoop4 by vm.buzzWhoop4Enabled.collectAsStateWithLifecycle()
+    val sleepTargetMinutes by vm.windDownSleepNeedMinutes.collectAsStateWithLifecycle()
+    val sleepGoalMode by vm.windDownGoalMode.collectAsStateWithLifecycle()
+    val windDownLeadMinutes by vm.windDownLeadMinutes.collectAsStateWithLifecycle()
+    val days by vm.recentDays.collectAsStateWithLifecycle()
     // #536: the hint adapts to bond state — the strap can only be armed when a WHOOP 4.0 is connected.
     val liveState = vm.live.collectAsStateWithLifecycle().value
     val bonded = liveState.bonded
@@ -73,15 +87,69 @@ fun SmartAlarmScreen(vm: AppViewModel) {
     // it in Settings and come back — there's no result callback for this special-access permission.
     var canSchedule by remember { mutableStateOf(vm.canScheduleExactAlarms()) }
 
-    // PERF (#707): lazy scaffold — each of the four cards is one `item { }` (all unconditional). Order +
+    // Load the same full sleep-block union and learned main-night timing as the Sleep tab so recorded
+    // naps repay the planner's recent balance without changing the canonical nightly total.
+    var plannerSleeps by remember { mutableStateOf<List<SleepSession>>(emptyList()) }
+    var habitualMidsleep by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(days) {
+        plannerSleeps = runCatching {
+            val now = System.currentTimeMillis() / 1000L
+            val imported = vm.repo.sleepSessionsUnion(vm.activeStrapId, 0L, now)
+            val computed = vm.repo.computedSleepSessionsUnion(vm.activeStrapId, 0L, now)
+            WhoopRepository.mergeSleepRichness(imported, computed) { session ->
+                val offsetSec = (
+                    java.util.TimeZone.getDefault().getOffset(session.endTs * 1000) / 1000
+                    ).toLong()
+                AnalyticsEngine.dayString(session.endTs, offsetSec)
+            }.sortedBy { it.effectiveStartTs }
+        }.getOrDefault(emptyList())
+        habitualMidsleep = runCatching {
+            vm.repo.habitualMidsleepSec(vm.activeStrapId)
+        }.getOrNull()
+    }
+    val napMinutesByDay = remember(plannerSleeps, habitualMidsleep) {
+        napSleepMinutesByDay(plannerSleeps, habitualMidsleep)
+    }
+    val plannerLedger = remember(days, napMinutesByDay, sleepTargetMinutes) {
+        SleepDebt.ledger(
+            days.map { day ->
+                day.day to SleepDebt.creditedSleepMin(
+                    day.totalSleepMin,
+                    napMinutesByDay[day.day] ?: 0.0,
+                )
+            },
+            needHours = sleepTargetMinutes / 60.0,
+        )
+    }
+    val sleepPlan = remember(
+        targetMinutes,
+        sleepTargetMinutes,
+        sleepGoalMode,
+        windDownLeadMinutes,
+        plannerLedger,
+    ) {
+        SleepPlanner.plan(
+            wakeMinute = targetMinutes,
+            sleepTargetMinutes = sleepTargetMinutes,
+            windDownLeadMinutes = windDownLeadMinutes,
+            debtBalanceMinutes = plannerLedger.balanceMin.takeIf { plannerLedger.nightCount > 0 },
+            historyNights = plannerLedger.nightCount,
+            goalMode = sleepGoalMode,
+        )
+    }
+    LaunchedEffect(sleepPlan.recoveryMinutes) {
+        vm.setWindDownRecoveryMinutes(sleepPlan.recoveryMinutes)
+    }
+
+    // PERF (#707): lazy scaffold — each card is one `item`. Order +
     // spacing unchanged (LazyColumn reproduces the eager `spacedBy(20.dp)`); only on-screen cards compose +
     // are accessibility-walked.
     LazyScreenScaffold(
-        // #766: "Alarms" because this screen now holds the phone Wake Window, the strap's firmware
-        // wake-alarm (moved here from Automations), and the wind-down reminder, so the broader title fits.
-        title = uiString(R.string.l10n_smart_alarm_screen_alarms_131dd3d6),
-        subtitle = "Your wake window, the strap wake-alarm, and the evening wind-down reminder, in one place.",
+        title = stringResource(R.string.sleep_planner_title),
+        subtitle = stringResource(R.string.sleep_planner_subtitle),
     ) {
+        item { SleepPlanCard(sleepPlan, enabled, habitualMidsleep) }
+
         // The guaranteed-wake card always shows so the safety promise is the first thing read.
         item { WindowCard(enabled = enabled, targetMinutes = targetMinutes, windowMinutes = windowMinutes) }
 
@@ -176,7 +244,15 @@ fun SmartAlarmScreen(vm: AppViewModel) {
         item { StrapAlarmCard(vm) }
 
         // The cross-platform wind-down nudge lives here too.
-        item { WindDownCard(vm) }
+        item {
+            WindDownCard(
+                vm = vm,
+                plan = sleepPlan,
+                wakeMinutes = targetMinutes,
+                sleepTargetMinutes = sleepTargetMinutes,
+                leadMinutes = windDownLeadMinutes,
+            )
+        }
 
         // #821: the "how the smart wake works" explainer sat in the MIDDLE of the page (between the wake-alarm
         // settings and the strap alarm), which read as an interruption. It's reference detail, not a control,
@@ -282,6 +358,124 @@ private fun StrapAlarmCard(vm: AppViewModel) {
 
 // MARK: - Cards
 
+/** The shared planner readout. Reminder state affects delivery, never the underlying bedtime math. */
+@Composable
+private fun SleepPlanCard(
+    plan: SleepPlan,
+    reminderEnabled: Boolean,
+    habitualMidsleepSeconds: Long?,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Metrics.cardRadius)),
+    ) {
+        ScenicHeroBackground(modifier = Modifier.matchParentSize(), domain = DomainTheme.Rest)
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Overline(stringResource(R.string.sleep_planner_tonight_plan))
+                Spacer(Modifier.weight(1f))
+                Text(planConfidenceLabel(plan.confidence), style = NoopType.caption, color = Palette.textTertiary)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PlanTime(stringResource(R.string.sleep_planner_wind_down), plan.windDownMinute, DomainTheme.Rest.color, Modifier.weight(1f))
+                Text("→", style = NoopType.title2, color = Palette.textTertiary)
+                PlanTime(stringResource(R.string.sleep_planner_bedtime), plan.bedtimeMinute, DomainTheme.Rest.bright, Modifier.weight(1f))
+                Text("→", style = NoopType.title2, color = Palette.textTertiary)
+                PlanTime(stringResource(R.string.sleep_planner_wake), plan.wakeMinute, DomainTheme.Rest.bright, Modifier.weight(1f))
+            }
+            Text(planSummary(plan), style = NoopType.footnote, color = Palette.textSecondary)
+            observedTimingSummary(plan, habitualMidsleepSeconds)?.let { timing ->
+                Text(timing, style = NoopType.caption, color = Palette.textTertiary)
+            }
+            Text(
+                if (reminderEnabled)
+                    stringResource(R.string.sleep_planner_reminder_on, hhmm(plan.windDownMinute))
+                else
+                    stringResource(R.string.sleep_planner_reminder_off),
+                style = NoopType.caption,
+                color = Palette.textTertiary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PlanTime(label: String, minute: Int, color: androidx.compose.ui.graphics.Color, modifier: Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Overline(label)
+        Text(hhmm(minute), style = NoopType.number(24f), color = color)
+    }
+}
+
+@Composable
+private fun planSummary(plan: SleepPlan): String {
+    val opportunity = durationLabel(plan.sleepOpportunityMinutes)
+    when (plan.goalMode) {
+        SleepGoalMode.TARGET -> {
+            val balance = plan.debtBalanceMinutes
+            return if (balance != null && balance < -SleepDebt.ON_TARGET_BAND_MIN) {
+                "$opportunity fixed sleep opportunity. Recent history is " +
+                    "${durationLabel(abs(balance).toInt())} short, but Target mode does not " +
+                    "change the amount you set."
+            } else {
+                "$opportunity fixed sleep opportunity from the target you set."
+            }
+        }
+        SleepGoalMode.EXTRA_OPPORTUNITY ->
+            return "$opportunity sleep opportunity. Extra mode reserves at least 30 minutes " +
+                "beyond your target; a supported recent shortfall can raise that addition, " +
+                "capped at 1 hour."
+        SleepGoalMode.BALANCE -> Unit
+    }
+    if (plan.historyNights < SleepPlanner.MINIMUM_DEBT_NIGHTS) {
+        return stringResource(R.string.sleep_planner_summary_calibrating, opportunity)
+    }
+    if (plan.recoveryMinutes > 0) {
+        return stringResource(
+            R.string.sleep_planner_summary_recovery,
+            opportunity,
+            durationLabel(plan.baseSleepMinutes),
+            durationLabel(plan.recoveryMinutes),
+            durationLabel(abs(plan.debtBalanceMinutes ?: 0.0).toInt()),
+        )
+    }
+    val balance = plan.debtBalanceMinutes
+    if (balance != null && balance > SleepDebt.ON_TARGET_BAND_MIN) {
+        return stringResource(
+            R.string.sleep_planner_summary_surplus,
+            opportunity,
+            durationLabel(balance.toInt()),
+        )
+    }
+    return stringResource(R.string.sleep_planner_summary_on_target, opportunity)
+}
+
+@Composable
+private fun observedTimingSummary(plan: SleepPlan, habitualMidsleepSeconds: Long?): String? {
+    val shift = SleepPlanner.observedTimingShiftMinutes(plan, habitualMidsleepSeconds) ?: return null
+    if (abs(shift) <= 30) {
+        return "Tonight is within 30 minutes of your observed sleep timing."
+    }
+    val direction = if (shift < 0) "earlier" else "later"
+    return "Tonight is ${durationLabel(abs(shift))} $direction than your observed sleep timing. " +
+        "This describes your recent behavior, not a biological chronotype."
+}
+
+@Composable
+private fun planConfidenceLabel(confidence: ScoreConfidence): String = when (confidence) {
+    ScoreConfidence.CALIBRATING -> stringResource(R.string.sleep_planner_confidence_calibrating)
+    ScoreConfidence.BUILDING -> stringResource(R.string.sleep_planner_confidence_building)
+    ScoreConfidence.SOLID -> stringResource(R.string.sleep_planner_confidence_solid)
+}
+
 /**
  * The always-visible "you WILL be woken by" guarantee card — a small Rest-world frosted hero. The
  * wake window reads as a clean earliest→deadline time pairing in big rounded numerals over a scenic
@@ -337,14 +531,21 @@ private fun AlarmSettingsCard(content: @Composable () -> Unit) {
     }
 }
 
-/** The cross-platform evening wind-down nudge — a gentle reminder, not an alarm. Rest-tinted when on. */
+/** Planner inputs plus the cross-platform evening nudge. The plan remains useful with delivery off. */
 @Composable
-private fun WindDownCard(vm: AppViewModel) {
+private fun WindDownCard(
+    vm: AppViewModel,
+    plan: SleepPlan,
+    wakeMinutes: Int,
+    sleepTargetMinutes: Int,
+    leadMinutes: Int,
+) {
     val enabled by vm.windDownEnabled.collectAsStateWithLifecycle()
+    val goalMode by vm.windDownGoalMode.collectAsStateWithLifecycle()
     NoopCard(padding = 20.dp, tint = if (enabled) DomainTheme.Rest.color else null) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Overline("Evening")
+                Overline(stringResource(R.string.sleep_planner_evening))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Bedtime, contentDescription = null, tint = DomainTheme.Rest.color)
                     Spacer(Modifier.width(10.dp))
@@ -353,10 +554,126 @@ private fun WindDownCard(vm: AppViewModel) {
             }
             ToggleRowLocal(
                 label = uiString(R.string.l10n_smart_alarm_screen_remind_me_to_wind_down_4839f0d0),
-                help = "A gentle evening notification, timed from your wake time and usual sleep need, so you can settle in time. It's a suggestion, not an alarm.",
+                help = stringResource(R.string.sleep_planner_nudge_help),
                 checked = enabled,
                 onChange = { vm.setWindDownEnabled(it) },
             )
+            RowDividerLocal()
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    stringResource(R.string.appwide_sleep_tonights_goal),
+                    style = NoopType.body,
+                    color = Palette.textPrimary,
+                )
+                SegmentedPillControl(
+                    items = SleepGoalMode.entries,
+                    selection = goalMode,
+                    label = ::sleepGoalLabel,
+                    onSelect = vm::setWindDownGoalMode,
+                )
+                Text(
+                    sleepGoalHelp(goalMode),
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+            }
+            RowDividerLocal()
+            PlannerSettingRow(
+                label = stringResource(R.string.sleep_planner_sleep_target),
+                help = stringResource(R.string.sleep_planner_sleep_target_help),
+                value = durationLabel(sleepTargetMinutes),
+                canDecrease = sleepTargetMinutes > SleepPlanner.MINIMUM_SLEEP_MINUTES,
+                canIncrease = sleepTargetMinutes < SleepPlanner.MAXIMUM_SLEEP_MINUTES,
+                decreaseLabel = stringResource(R.string.sleep_planner_sleep_target_decrease),
+                increaseLabel = stringResource(R.string.sleep_planner_sleep_target_increase),
+                onDecrease = { vm.setWindDownSleepNeedMinutes(sleepTargetMinutes - 15) },
+                onIncrease = { vm.setWindDownSleepNeedMinutes(sleepTargetMinutes + 15) },
+            )
+            RowDividerLocal()
+            PlannerSettingRow(
+                label = stringResource(R.string.sleep_planner_wind_down_buffer),
+                help = stringResource(R.string.sleep_planner_wind_down_buffer_help),
+                value = durationLabel(leadMinutes),
+                canDecrease = leadMinutes > 0,
+                canIncrease = leadMinutes < 120,
+                decreaseLabel = stringResource(R.string.sleep_planner_wind_down_buffer_decrease),
+                increaseLabel = stringResource(R.string.sleep_planner_wind_down_buffer_increase),
+                onDecrease = { vm.setWindDownLeadMinutes(leadMinutes - 15) },
+                onIncrease = { vm.setWindDownLeadMinutes(leadMinutes + 15) },
+            )
+            RowDividerLocal()
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(stringResource(R.string.sleep_planner_wake_time), style = NoopType.body, color = Palette.textPrimary)
+                    Text(
+                        stringResource(R.string.sleep_planner_wake_time_help),
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                }
+                Spacer(Modifier.width(16.dp))
+                TimeChip(
+                    minutes = wakeMinutes,
+                    accessibilityLabel = stringResource(R.string.sleep_planner_wake_time),
+                    onPicked = { vm.setPhoneAlarmTargetMinutes(it) },
+                )
+            }
+            Text(
+                if (plan.recoveryMinutes > 0)
+                    stringResource(R.string.sleep_planner_recovery_added, durationLabel(plan.recoveryMinutes))
+                else
+                    stringResource(R.string.sleep_planner_recovery_none),
+                style = NoopType.footnote,
+                color = Palette.textSecondary,
+            )
+            if (enabled) {
+                Text(
+                    stringResource(R.string.sleep_planner_reminder_around, hhmm(plan.windDownMinute)),
+                    style = NoopType.footnote,
+                    color = Palette.textSecondary,
+                )
+            }
+        }
+    }
+}
+
+private fun sleepGoalLabel(mode: SleepGoalMode): String = when (mode) {
+    SleepGoalMode.TARGET -> "Target"
+    SleepGoalMode.BALANCE -> "Balance"
+    SleepGoalMode.EXTRA_OPPORTUNITY -> "Extra"
+}
+
+private fun sleepGoalHelp(mode: SleepGoalMode): String = when (mode) {
+    SleepGoalMode.TARGET ->
+        "Keep the sleep target fixed, even when recent history is short."
+    SleepGoalMode.BALANCE ->
+        "Add a bounded 15-minute-step adjustment when at least 3 recorded nights show a shortfall."
+    SleepGoalMode.EXTRA_OPPORTUNITY ->
+        "Reserve at least 30 extra minutes tonight. This is added opportunity, not a promise of better recovery."
+}
+
+@Composable
+private fun PlannerSettingRow(
+    label: String,
+    help: String,
+    value: String,
+    canDecrease: Boolean,
+    canIncrease: Boolean,
+    decreaseLabel: String,
+    increaseLabel: String,
+    onDecrease: () -> Unit,
+    onIncrease: () -> Unit,
+) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(label, style = NoopType.body, color = Palette.textPrimary)
+            Text(help, style = NoopType.footnote, color = Palette.textTertiary)
+        }
+        Spacer(Modifier.width(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StepperButton(symbol = "−", onClick = onDecrease, label = decreaseLabel, enabled = canDecrease)
+            Text(value, style = NoopType.bodyNumber, color = Palette.textPrimary)
+            StepperButton(symbol = "+", onClick = onIncrease, label = increaseLabel, enabled = canIncrease)
         }
     }
 }
@@ -440,6 +757,18 @@ private fun RowDividerLocal() {
 private fun hhmm(minutes: Int): String {
     val m = ((minutes % (24 * 60)) + 24 * 60) % (24 * 60)
     return "%02d:%02d".format(m / 60, m % 60)
+}
+
+@Composable
+private fun durationLabel(minutes: Int): String {
+    val safe = minutes.coerceAtLeast(0)
+    val hours = safe / 60
+    val remainder = safe % 60
+    return when {
+        hours == 0 -> stringResource(R.string.sleep_planner_duration_minutes, remainder)
+        remainder == 0 -> stringResource(R.string.sleep_planner_duration_hours, hours)
+        else -> stringResource(R.string.sleep_planner_duration_hours_minutes, hours, remainder)
+    }
 }
 
 /** Open the system page where the user grants the exact-alarm special-access permission (API 31+).

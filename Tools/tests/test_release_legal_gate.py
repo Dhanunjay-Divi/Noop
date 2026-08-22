@@ -22,7 +22,7 @@ class ReleaseLegalGateTests(unittest.TestCase):
             by_ecosystem[ecosystem] = by_ecosystem.get(ecosystem, 0) + 1
         self.assertEqual(
             by_ecosystem,
-            {"swiftpm": 5, "maven": 125, "pypi": 20},
+            {"swiftpm": 5, "maven": 127, "pypi": 20},
         )
         self.assertEqual(len(inventory["containers"]), 3)
 

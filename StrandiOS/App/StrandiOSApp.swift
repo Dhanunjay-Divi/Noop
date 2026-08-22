@@ -302,10 +302,24 @@ struct StrandiOSApp: App {
                 .task {
                     // Cold-launch adoption/cleanup: packet publishers may stay quiet while an activity
                     // from the prior process is still visible, so reconcile the cached sensor state too.
+                    watch.startStrengthRoutineHandler = {
+                        [weak model, weak router, weak watch] routineID in
+                        guard let model, let router, let watch else { return }
+                        Task { @MainActor in
+                            _ = try? await model.repo.startStrengthSession(routineID: routineID)
+                            router.openStrength()
+                            await watch.pushStrengthLatest(from: model)
+                        }
+                    }
                     watch.activate()
                     reconcileLiveActivity(repairHydration: true)
                     await model.reconcileAutomaticWorkoutSurfaces()
                     await watch.pushLatest(from: model)
+                }
+                .onReceive(
+                    NotificationCenter.default.publisher(for: .strengthTrainingChanged)
+                ) { _ in
+                    Task { await watch.pushStrengthLatest(from: model) }
                 }
         }
         // HealthKit authorization is intentionally NOT requested on launch. The system permission
@@ -539,6 +553,10 @@ enum DemoScreens {
         // capture it deterministically; the live wiring reads the same model shape.
         case "todayv2":  return AnyView(TodayV2View(model: .demo))
         case "v2calendar": return AnyView(V2MonthCalendarDemo())
+        // UI v3 "Instrument" — dense, flat-field, status-word instrument language.
+        case "todayv3":  return AnyView(TodayV3View(model: .demo))
+        // UI v4 "Useful" — NOOP 3D glyphs + BevelGauge, every block answers one real question.
+        case "todayv4":  return AnyView(TodayV4View(model: .demo))
         case "trends":   return AnyView(TrendsView())
         case "sleep":    return AnyView(SleepView())
         case "live":     return AnyView(LiveView())

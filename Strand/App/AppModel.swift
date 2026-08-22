@@ -1941,18 +1941,25 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// #593: once-a-day "optimal strain reached" nudge. Reads the resolved today-row (the same
-    /// logical-day resolution every dashboard surface uses), converts the stored 0-100 Effort to the
-    /// 0-21 coupled axis with the SHIPPED formatter (so it matches every Effort read-out), and gates
-    /// against the LOW end of today's recovery-derived optimal band (#43). The notifier's persisted
-    /// day gate makes this safe to fire on every days republish; nil recovery (calibrating) yields a
-    /// nil band → no target → no notification. Android twin: AppViewModel's days-collector call.
+    /// #593: once-a-day Effort-marker nudge. The old three-bucket recovery mapping is intentionally
+    /// gone: this uses DailyActionPlanner's personal-history range, which requires a current solid
+    /// multi-signal readiness read plus today's explicit "as usual" self-check. Missing/thin/shifted
+    /// evidence yields no target and therefore no notification. The gate stays on canonical 0–100
+    /// Effort so storage, planner, and notifier cannot disagree about conversion.
     func evaluateStrainTarget() {
         guard let row = repo.today else { return }
+        let plan = DailyActionPlanner.plan(
+            today: row.day,
+            readiness: ReadinessEngine.evaluate(days: repo.days, today: row.day),
+            checkIn: behavior.dailyActionCheckIn(for: row.day),
+            recentEffort: repo.days.map {
+                DailyActionPlanner.EffortDay(day: $0.day, effort: $0.strain)
+            }
+        )
         StrainTargetNotifier.onDayUpdate(
             day: row.day,
-            dayStrain21: row.strain.map { UnitFormatter.effortValue($0, scale: .whoop) },
-            target21: CoupledView.optimalStrainRange(recovery: row.recovery)?.lowerBound,
+            dayEffort: row.strain,
+            targetEffort: plan.target?.lower,
             enabled: behavior.strainTargetNudge)
     }
 

@@ -11,10 +11,11 @@ import StrandImport
 /// Settings → Backup & restore → "Export CSV…": serialize the merged WHOOP history (imported wins
 /// per day — exactly what the dashboards show; Apple Health rows are deliberately EXCLUDED so a
 /// re-import can't mis-attribute them as WHOOP data) into WHOOP's 4-CSV zip via
-/// StrandImport.WhoopCsvExporter. The zip re-imports into NOOP on Mac (Data Sources → WHOOP Export)
-/// and on Android. On-device computed rows are marked "noop (APPROXIMATE)" in the Source column so both
-/// importers route them to a computed namespace, never the official WHOOP-reference namespace; the
-/// .sqlite backup remains the full-fidelity restore path.
+/// StrandImport.WhoopCsvExporter. The same archive carries the versioned `noop_user_data.json`
+/// contract for editable nutrition and normalized Strength Trainer records. The zip re-imports into
+/// NOOP on Mac/iPhone/Android. On-device computed rows are marked "noop (APPROXIMATE)" in the Source
+/// column so both importers route them to a computed namespace, never the official WHOOP-reference
+/// namespace; the native encrypted backup remains the same-platform full-device restore path.
 ///
 /// #458 (the Android twin's bug, mirror-image here): every read goes through the repository's
 /// active∪canonical union ids (`importedReadIds`/`computedReadIds`, #814) — reading the ACTIVE id
@@ -109,6 +110,16 @@ enum CsvExport {
                 }
                 if !points.isEmpty { sidecar[id] = points }
             }
+            // Portable user-authored data that cannot fit the WHOOP-shaped CSV rows. Fetch complete
+            // archived catalogs and in-progress sessions so export never silently drops hidden history.
+            let nutritionEntries = try await store.nutritionEntries(from: fromDay, to: toDay)
+            let nutritionCatalogItems = try await store.nutritionCatalogItems(
+                savedOnly: false,
+                limit: 500_000
+            )
+            let strengthExercises = try await store.strengthExercises(includeArchived: true)
+            let strengthRoutines = try await store.strengthRoutines(includeArchived: true)
+            let strengthSessions = try await store.strengthSessions(includeInProgress: true)
 
             // The ONLY main-actor-isolated call in the assembly is Repository.localDayKey (Repository is
             // @MainActor). Precompute every session's local end-day HERE, on main, into a plain Sendable
@@ -161,6 +172,13 @@ enum CsvExport {
                 let workouts = (impWorkouts + compWorkouts)
                     .filter { seenWorkouts.insert("\($0.startTs)|\($0.sport)").inserted }
 
+                let portable = try PortableUserData(
+                    nutritionEntries: nutritionEntries,
+                    nutritionCatalogItems: nutritionCatalogItems,
+                    strengthExercises: strengthExercises,
+                    strengthRoutineSnapshots: strengthRoutines,
+                    strengthSessionSnapshots: strengthSessions
+                ).encodedData()
                 let entries: [(name: String, data: Data)] = [
                     ("physiological_cycles.csv",
                      Data(WhoopCsvExporter.cyclesCSV(days: days, series: series, sourceByDay: sourceByDay).utf8)),
@@ -175,6 +193,7 @@ enum CsvExport {
                      Data(WhoopCsvExporter.workoutsCSV(workouts, sourceLabel: { workoutSource($0, computedIds: computedIds) }).utf8)),
                     ("journal_entries.csv", Data(WhoopCsvExporter.journalCSV(journal).utf8)),
                     ("noop_metric_series.json", WhoopCsvExporter.metricSeriesJSON(sidecar)),
+                    (PortableUserData.fileName, portable),
                 ]
                 // Deflate to a temp path off main; the cheap atomic swap into the user's chosen destination
                 // stays on main (it needs the panel/picker result).
@@ -187,7 +206,7 @@ enum CsvExport {
             #if os(macOS)
             // Save panel — DataBackup.runExport precedent (NSSavePanel + .zip content type).
             let panel = NSSavePanel()
-            panel.title = String(localized: "Export NOOP data as CSV")
+            panel.title = String(localized: "Export NOOP portable data")
             panel.nameFieldStringValue = name
             panel.allowedContentTypes = [.zip]
             panel.canCreateDirectories = true
@@ -218,7 +237,7 @@ enum CsvExport {
             return .exported(dest)
             #endif
         } catch {
-            return .failure("CSV export failed: \(error.localizedDescription)")
+            return .failure("Portable export failed: \(error.localizedDescription)")
         }
     }
 

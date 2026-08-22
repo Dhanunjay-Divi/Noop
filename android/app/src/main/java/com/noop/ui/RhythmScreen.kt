@@ -264,10 +264,11 @@ private fun RhythmVisualization(
 
         if (allPoints.isEmpty()) {
             item {
-            DataPendingNote(
-                title = uiString(R.string.l10n_rhythm_screen_no_clear_reading_yet_92f40443),
-                body = "Rhythm only looks during quiet, still, resting windows, so it needs a calm night's worth of steady beats. Once there's a clean window, the scatter and its description show here.",
-            )
+                ScreenStateCard(
+                    kind = ScreenStateKind.Empty,
+                    title = uiString(R.string.l10n_rhythm_screen_no_clear_reading_yet_92f40443),
+                    body = uiString(R.string.state_rhythm_empty_body),
+                )
             }
         } else {
             item { SummaryCard(night = night, headline = headline) }

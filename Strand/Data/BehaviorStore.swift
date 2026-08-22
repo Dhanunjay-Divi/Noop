@@ -58,11 +58,16 @@ final class BehaviorStore: ObservableObject {
     @Published var batteryPredictiveAlerts: Bool { didSet { d.set(batteryPredictiveAlerts, forKey: K.batteryPredictiveAlerts) } }
 
     // MARK: Strain target nudge (#593)
-    /// Once-a-day "optimal strain reached" nudge when the day's Effort hits the low end of today's
-    /// recovery-derived optimal band. Default OFF like every other automation.
+    /// Once-a-day informational nudge when the day's Effort reaches the evidence-gated personal marker.
+    /// It is not presented as an optimum, a limit, or permission to keep pushing. Default OFF.
     @Published var strainTargetNudge: Bool { didSet { d.set(strainTargetNudge, forKey: K.strainTargetNudge) } }
 
     private let d = UserDefaults.standard
+    /// Stable cross-platform keys/read vocabulary for the same-day Daily Action self-check. The answer
+    /// is intentionally day-scoped: a prior day's response never unlocks a new day's planning range.
+    static let dailyActionCheckInDayKey = "behavior.dailyActionCheckIn.day"
+    static let dailyActionCheckInValueKey = "behavior.dailyActionCheckIn.value"
+
     private enum K {
         static let dtAction = "behavior.doubleTapAction"
         static let dtShortcut = "behavior.doubleTapShortcut"
@@ -107,6 +112,34 @@ final class BehaviorStore: ObservableObject {
         batteryAlerts = d.object(forKey: K.batteryAlerts) as? Bool ?? true
         batteryPredictiveAlerts = d.object(forKey: K.batteryPredictiveAlerts) as? Bool ?? true
         strainTargetNudge = d.object(forKey: K.strainTargetNudge) as? Bool ?? false
+    }
+
+    // MARK: Daily Action self-check
+
+    nonisolated static func decodeDailyActionCheckIn(
+        today: String,
+        storedDay: String?,
+        storedValue: String?
+    ) -> DailyActionPlanner.CheckIn {
+        guard storedDay == today,
+              let storedValue,
+              let value = DailyActionPlanner.CheckIn(rawValue: storedValue) else {
+            return .unanswered
+        }
+        return value
+    }
+
+    func dailyActionCheckIn(for day: String) -> DailyActionPlanner.CheckIn {
+        Self.decodeDailyActionCheckIn(
+            today: day,
+            storedDay: d.string(forKey: Self.dailyActionCheckInDayKey),
+            storedValue: d.string(forKey: Self.dailyActionCheckInValueKey)
+        )
+    }
+
+    func setDailyActionCheckIn(_ value: DailyActionPlanner.CheckIn, for day: String) {
+        d.set(day, forKey: Self.dailyActionCheckInDayKey)
+        d.set(value.rawValue, forKey: Self.dailyActionCheckInValueKey)
     }
 
     // MARK: Charge baseline recalibration

@@ -38,8 +38,8 @@ enum MetricEmptyStateCopy {
         switch metric.source {
         case "apple-health":
             return String(localized: "Connect Apple Health or import an Apple Health export to add this metric.")
-        case "nutrition-csv":
-            return String(localized: "Import a nutrition CSV in Data Sources to add this metric.")
+        case "nutrition-log", "nutrition-csv":
+            return String(localized: "Log a meal in NOOP or import a nutrition CSV in Data Sources to add this metric.")
         case "xiaomi-band":
             return String(localized: "Import Mi Fitness history in Data Sources to add this metric.")
         case "noop-mood":
@@ -1225,7 +1225,7 @@ struct MetricDetailView: View {
                     .foregroundStyle(StrandPalette.metricAmber)
                     .accessibilityHidden(true)
                 Text(title.uppercased())
-                    .font(StrandFont.overlineScaled(8)).tracking(0.7)
+                    .font(StrandFont.overlineScaled(8)).tracking(0)
                     .foregroundStyle(StrandPalette.textSecondary)
             }
             Text(energyNumber(value))

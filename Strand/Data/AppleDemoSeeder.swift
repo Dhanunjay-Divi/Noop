@@ -31,14 +31,116 @@ enum AppleDemoSeeder {
     /// launch … --demo-seed`).
     static var requested: Bool { CommandLine.arguments.contains("--demo-seed") }
 
+    /// Opt-in fixture for the real Nutrition screen. Kept separate from the broad demo seed so existing
+    /// screenshot baselines do not gain nutrition series unless the harness explicitly asks for them.
+    static var nutritionRequested: Bool {
+        CommandLine.arguments.contains("--demo-nutrition")
+    }
+
     /// Seed only if requested AND the store is empty. Safe to call on every launch.
     static func seedIfRequested(into store: WhoopStore, vitalityProfileAge: Int) async {
         guard requested else { return }
         seedDemoDeviceIfNeeded(into: store)
+        await seedNutritionIfRequested(into: store)
         let existing = (try? await store.dailyMetrics(deviceId: whoop, from: "0000-00-00", to: "9999-99-99")) ?? []
         guard existing.isEmpty else { return }
         do { try await seed(into: store, vitalityProfileAge: vitalityProfileAge) }
         catch { NSLog("AppleDemoSeeder: seed failed — \(error)") }
+    }
+
+    /// Deterministic mixed-source day plus reusable prior manual meals for provenance and quick-repeat
+    /// visual QA. The production contract still owns validation and projection; the fixture does not
+    /// bypass either path.
+    static func seedNutritionIfRequested(into store: WhoopStore) async {
+        guard nutritionRequested else { return }
+        let calendar = Calendar.current
+        let todayDate = calendar.startOfDay(for: Date())
+        guard let priorDate = calendar.date(byAdding: .day, value: -1, to: todayDate) else {
+            return
+        }
+        func localDayKey(_ date: Date) -> String {
+            let parts = calendar.dateComponents([.year, .month, .day], from: date)
+            return String(
+                format: "%04d-%02d-%02d",
+                parts.year ?? 0,
+                parts.month ?? 0,
+                parts.day ?? 0
+            )
+        }
+        let today = localDayKey(todayDate)
+        let priorDay = localDayKey(priorDate)
+        let todayStart = Int(todayDate.timeIntervalSince1970)
+        let priorStart = Int(priorDate.timeIntervalSince1970)
+        guard let importedAt = NutritionLogContract.importedOccurredAt(day: today) else {
+            return
+        }
+
+        let rows = [
+            NutritionEntryRow(
+                id: NutritionLogContract.csvEntryID(day: today),
+                origin: NutritionLogContract.csvOrigin,
+                day: today,
+                occurredAt: importedAt,
+                mealType: "daily_total",
+                label: "Cronometer",
+                caloriesKcal: 2_100,
+                proteinG: 140,
+                carbsG: 220,
+                fatG: 70,
+                createdAt: importedAt,
+                updatedAt: importedAt
+            ),
+            NutritionEntryRow(
+                id: "demo-nutrition-oats",
+                origin: NutritionLogContract.manualOrigin,
+                day: today,
+                occurredAt: todayStart + 8 * 3_600,
+                mealType: "breakfast",
+                label: "Oats and berries",
+                caloriesKcal: 480,
+                proteinG: 24,
+                carbsG: 72,
+                fatG: 12,
+                note: "Regular breakfast",
+                createdAt: todayStart + 8 * 3_600,
+                updatedAt: todayStart + 8 * 3_600
+            ),
+            NutritionEntryRow(
+                id: "demo-nutrition-shake",
+                origin: NutritionLogContract.manualOrigin,
+                day: today,
+                occurredAt: todayStart + 12 * 3_600,
+                mealType: "snack",
+                label: "Protein shake",
+                caloriesKcal: 260,
+                proteinG: 36,
+                carbsG: 18,
+                fatG: 5,
+                createdAt: todayStart + 12 * 3_600,
+                updatedAt: todayStart + 12 * 3_600
+            ),
+            NutritionEntryRow(
+                id: "demo-nutrition-salmon",
+                origin: NutritionLogContract.manualOrigin,
+                day: priorDay,
+                occurredAt: priorStart + 19 * 3_600,
+                mealType: "dinner",
+                label: "Salmon rice bowl",
+                caloriesKcal: 720,
+                proteinG: 48,
+                carbsG: 82,
+                fatG: 22,
+                createdAt: priorStart + 19 * 3_600,
+                updatedAt: priorStart + 19 * 3_600
+            ),
+        ]
+
+        do {
+            _ = try await store.upsertNutritionEntries(rows)
+            NSLog("AppleDemoSeeder: nutrition fixture ready for \(today)")
+        } catch {
+            NSLog("AppleDemoSeeder: nutrition fixture failed — \(error)")
+        }
     }
 
     /// DEBUG/demo-only: so the Devices screen renders with content under `--demo-seed`, pair a second

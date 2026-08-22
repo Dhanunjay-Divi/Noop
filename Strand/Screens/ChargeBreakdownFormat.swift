@@ -193,7 +193,7 @@ struct ConfidenceTierChip: View {
                 .accessibilityHidden(true)
             Text(tag)
                 .font(StrandFont.overline)
-                .tracking(0.4)
+                .tracking(0)
                 .foregroundStyle(hue)
         }
         .padding(.horizontal, 10)

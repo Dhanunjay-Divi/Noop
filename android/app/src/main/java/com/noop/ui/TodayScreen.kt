@@ -36,7 +36,6 @@ import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Accessibility
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.automirrored.filled.BatteryUnknown
@@ -125,6 +124,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -142,6 +144,7 @@ import com.noop.analytics.Baselines
 import com.noop.analytics.AgeMetricProfile
 import com.noop.analytics.BatteryEstimator
 import com.noop.analytics.ChargeDriver
+import com.noop.analytics.DailyActionPlanner
 import com.noop.analytics.HydrationGoal
 import com.noop.analytics.HydrationStore
 import com.noop.analytics.ReadinessEngine
@@ -244,7 +247,6 @@ private data class TodayLiveSnapshot(
 @Composable
 fun TodayScreen(
     viewModel: AppViewModel,
-    onQuickActions: () -> Unit = {},
     updateStore: UpdateStore? = null,
     onOpenUpdates: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
@@ -379,6 +381,38 @@ fun TodayScreen(
     // preference (SharedPreferences isn't reactive, a Settings write triggers recomposition).
     val context = LocalContext.current
     val massUnit = UnitPrefs.mass(context)
+    var dailyActionCheckIn by remember(selectedDayKey, selectedDayOffset) {
+        mutableStateOf(
+            if (selectedDayOffset == 0) {
+                NoopPrefs.dailyActionCheckIn(context, selectedDayKey)
+            } else {
+                DailyActionPlanner.CheckIn.UNANSWERED
+            }
+        )
+    }
+    val dailyActionReadiness = remember(days, selectedDayKey) {
+        ReadinessEngine.evaluate(days, today = selectedDayKey)
+    }
+    val dailyActionPlan = remember(days, selectedDayKey, dailyActionCheckIn) {
+        DailyActionPlanner.plan(
+            today = selectedDayKey,
+            readiness = dailyActionReadiness,
+            checkIn = dailyActionCheckIn,
+            recentEffort = days.map {
+                DailyActionPlanner.EffortDay(day = it.day, effort = it.strain)
+            },
+        )
+    }
+    val updateDailyActionCheckIn: (DailyActionPlanner.CheckIn) -> Unit = { value ->
+        if (selectedDayOffset == 0) {
+            NoopPrefs.setDailyActionCheckIn(
+                context = context,
+                day = selectedDayKey,
+                value = value,
+            )
+            dailyActionCheckIn = value
+        }
+    }
     // Effort display scale (#268), drives the Effort tile's value + caption. Display-only.
     val effortScale = UnitPrefs.effortScale(context)
     val profileWeightKg = remember { ProfileStore.from(context).weightKg }
@@ -1211,7 +1245,6 @@ fun TodayScreen(
                 lastSyncAt = liveSnap.lastSyncAt,
                 historySyncExperimental = liveSnap.historySyncExperimental,
                 onPickDay = { offset -> selectedDayOffset = offset },
-                onQuickActions = onQuickActions,
                 onOpenSettings = onOpenSettings,
                 onOpenDevices = onOpenDevices,
             )
@@ -1370,6 +1403,8 @@ fun TodayScreen(
                     selectedDayOffset == 0 && visibleDashboardCards.isNotEmpty()
                 TodaySection.JOURNAL ->
                     selectedDayOffset == 0 && journalReminderOn
+                TodaySection.TARGET ->
+                    selectedDayOffset == 0
                 else -> true
             }
             if (!sectionVisible) return@forEach
@@ -1458,6 +1493,20 @@ fun TodayScreen(
                                 }
                                 showLiveSession = true
                             },
+                        )
+                        TodaySection.WHY -> DailyPlanWhySection(
+                            readiness = dailyActionReadiness,
+                            modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
+                        )
+                        TodaySection.TARGET -> DailyPlanTargetSection(
+                            plan = dailyActionPlan,
+                            checkIn = dailyActionCheckIn,
+                            onCheckIn = updateDailyActionCheckIn,
+                            modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
+                        )
+                        TodaySection.WATCH -> DailyPlanWatchSection(
+                            readiness = dailyActionReadiness,
+                            modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
                         )
                         // The plain-English read-out, the Charge-tinted Synthesis card. Mirrors the iOS
                         // Synthesis InsightCard; carries the last scored day's read at the rollover (#543).
@@ -1715,6 +1764,502 @@ fun TodayScreen(
     }
 }
 
+// MARK: - Evidence-gated Daily Action
+
+@Composable
+private fun DailyPlanWhySection(
+    readiness: ReadinessEngine.Readiness,
+    modifier: Modifier = Modifier,
+) {
+    val signals = readiness.signals.filter { it.key in setOf("hrv", "rhr", "respRate") }
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(Metrics.space8),
+    ) {
+        SectionHeader(
+            title = stringResource(R.string.daily_plan_why_title),
+            trailing = stringResource(R.string.daily_plan_why_trailing),
+        )
+        NoopCard {
+            if (signals.isEmpty()) {
+                DailyPlanEmptyRow(
+                    icon = Icons.Filled.MonitorHeart,
+                    text = stringResource(R.string.daily_plan_why_unavailable),
+                )
+            } else {
+                Column {
+                    signals.forEachIndexed { index, signal ->
+                        if (index > 0) HorizontalDivider(color = Palette.hairline)
+                        DailyPlanSignalRow(signal)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DailyPlanTargetSection(
+    plan: DailyActionPlanner.Plan,
+    checkIn: DailyActionPlanner.CheckIn,
+    onCheckIn: (DailyActionPlanner.CheckIn) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var detailsExpanded by rememberSaveable(plan.day) { mutableStateOf(false) }
+    val detailsHint = stringResource(R.string.daily_plan_details_hint)
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(Metrics.space8),
+    ) {
+        SectionHeader(
+            title = stringResource(R.string.daily_plan_target_title),
+            trailing = stringResource(dailyPlanTargetStatusResource(plan)),
+        )
+        NoopCard {
+            Column(verticalArrangement = Arrangement.spacedBy(Metrics.space14)) {
+                Text(
+                    stringResource(R.string.daily_plan_check_in_question),
+                    style = NoopType.headline,
+                    color = Palette.textPrimary,
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
+                    DailyPlanCheckInOption(
+                        label = stringResource(R.string.daily_plan_check_in_as_usual),
+                        selected = checkIn == DailyActionPlanner.CheckIn.AS_USUAL,
+                        onClick = { onCheckIn(DailyActionPlanner.CheckIn.AS_USUAL) },
+                    )
+                    DailyPlanCheckInOption(
+                        label = stringResource(R.string.daily_plan_check_in_below_usual),
+                        selected = checkIn == DailyActionPlanner.CheckIn.BELOW_USUAL,
+                        onClick = { onCheckIn(DailyActionPlanner.CheckIn.BELOW_USUAL) },
+                    )
+                    DailyPlanCheckInOption(
+                        label = stringResource(R.string.daily_plan_check_in_pain_unwell),
+                        selected = checkIn == DailyActionPlanner.CheckIn.PAIN_OR_UNWELL,
+                        onClick = { onCheckIn(DailyActionPlanner.CheckIn.PAIN_OR_UNWELL) },
+                    )
+                }
+
+                HorizontalDivider(color = Palette.hairline)
+                when (plan.availability) {
+                    DailyActionPlanner.Availability.CHECK_IN_NEEDED -> DailyPlanStateRow(
+                        icon = Icons.Filled.Check,
+                        title = stringResource(R.string.daily_plan_state_check_in_title),
+                        body = stringResource(R.string.daily_plan_state_check_in_body),
+                        tint = Palette.textTertiary,
+                    )
+                    DailyActionPlanner.Availability.CALIBRATING -> DailyPlanStateRow(
+                        icon = Icons.Filled.Autorenew,
+                        title = stringResource(R.string.daily_plan_state_calibrating_title),
+                        body = stringResource(R.string.daily_plan_state_calibrating_body),
+                        action = dailyPlanActionLabel(plan.action),
+                        tint = Palette.statusWarning,
+                    )
+                    DailyActionPlanner.Availability.RECOVERY_SHIFT -> DailyPlanStateRow(
+                        icon = Icons.AutoMirrored.Filled.DirectionsWalk,
+                        title = stringResource(R.string.daily_plan_state_recovery_shift_title),
+                        body = stringResource(R.string.daily_plan_state_recovery_shift_body),
+                        action = dailyPlanActionLabel(plan.action),
+                        tint = Palette.statusWarning,
+                    )
+                    DailyActionPlanner.Availability.STOP -> DailyPlanStateRow(
+                        icon = Icons.Filled.Warning,
+                        title = stringResource(R.string.daily_plan_state_stop_title),
+                        body = stringResource(R.string.daily_plan_state_stop_body),
+                        action = dailyPlanActionLabel(plan.action),
+                        tint = Palette.statusCritical,
+                    )
+                    DailyActionPlanner.Availability.READY -> {
+                        val target = plan.target
+                        if (target == null) {
+                            DailyPlanStateRow(
+                                icon = Icons.Filled.Autorenew,
+                                title = stringResource(R.string.daily_plan_state_calibrating_title),
+                                body = stringResource(R.string.daily_plan_state_calibrating_body),
+                                tint = Palette.statusWarning,
+                            )
+                        } else {
+                            Column(
+                                modifier = Modifier.semantics(mergeDescendants = true) {},
+                                verticalArrangement = Arrangement.spacedBy(Metrics.space10),
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.Bottom,
+                                    horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                                ) {
+                                    Text(
+                                        stringResource(
+                                            R.string.appwide_range_format,
+                                            target.lower,
+                                            target.upper,
+                                        ),
+                                        style = NoopType.number(30f),
+                                        color = Palette.textPrimary,
+                                    )
+                                    Text(
+                                        stringResource(R.string.daily_plan_effort_scale),
+                                        style = NoopType.overline,
+                                        color = Palette.textTertiary,
+                                    )
+                                }
+                                Text(
+                                    stringResource(R.string.daily_plan_state_ready_body),
+                                    style = NoopType.subhead,
+                                    color = Palette.textSecondary,
+                                )
+                                DailyPlanActionRow(
+                                    text = dailyPlanActionLabel(plan.action),
+                                    tint = Palette.accent,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                TextButton(
+                    onClick = { detailsExpanded = !detailsExpanded },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 44.dp)
+                        .semantics {
+                            contentDescription = detailsHint
+                        },
+                ) {
+                    Text(
+                        stringResource(
+                            if (detailsExpanded) R.string.daily_plan_details_hide
+                            else R.string.daily_plan_details_show
+                        ),
+                        style = NoopType.caption,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Icon(
+                        if (detailsExpanded) Icons.Filled.KeyboardArrowUp
+                        else Icons.Filled.KeyboardArrowDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(Metrics.iconSmall),
+                    )
+                }
+
+                if (detailsExpanded) {
+                    DailyPlanEvidence(plan)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DailyPlanWatchSection(
+    readiness: ReadinessEngine.Readiness,
+    modifier: Modifier = Modifier,
+) {
+    val evaluated = readiness.signals
+    val watch = readiness.signals.filter {
+        it.flag == ReadinessEngine.Flag.WATCH || it.flag == ReadinessEngine.Flag.BAD
+    }
+    val trailing = when {
+        evaluated.isEmpty() -> stringResource(R.string.daily_plan_confidence_calibrating)
+        watch.isEmpty() -> stringResource(R.string.daily_plan_watch_clear)
+        else -> stringResource(R.string.daily_plan_watch_attention)
+    }
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(Metrics.space8),
+    ) {
+        SectionHeader(
+            title = stringResource(R.string.daily_plan_watch_title),
+            trailing = trailing,
+        )
+        NoopCard {
+            when {
+                evaluated.isEmpty() -> DailyPlanEmptyRow(
+                    icon = Icons.Filled.MonitorHeart,
+                    text = stringResource(R.string.daily_plan_watch_unavailable),
+                )
+                watch.isEmpty() -> DailyPlanEmptyRow(
+                    icon = Icons.Filled.Check,
+                    text = stringResource(R.string.daily_plan_watch_none),
+                )
+                else -> Column {
+                    watch.forEachIndexed { index, signal ->
+                        if (index > 0) HorizontalDivider(color = Palette.hairline)
+                        DailyPlanSignalRow(signal)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DailyPlanCheckInOption(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(8.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .clip(shape)
+            .background(if (selected) Palette.accent.copy(alpha = 0.12f) else Color.Transparent)
+            .border(
+                1.dp,
+                if (selected) Palette.accent.copy(alpha = 0.45f) else Palette.hairline,
+                shape,
+            )
+            .clickable(role = Role.RadioButton, onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                this.selected = selected
+                role = Role.RadioButton
+            }
+            .padding(horizontal = Metrics.space12, vertical = Metrics.space8),
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space10),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(20.dp)
+                .clip(CircleShape)
+                .background(if (selected) Palette.accent else Color.Transparent)
+                .border(1.dp, if (selected) Palette.accent else Palette.textTertiary, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) {
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+        }
+        Text(
+            label,
+            modifier = Modifier.weight(1f),
+            style = NoopType.subhead,
+            color = Palette.textPrimary,
+        )
+    }
+}
+
+@Composable
+private fun DailyPlanStateRow(
+    icon: ImageVector,
+    title: String,
+    body: String,
+    tint: Color,
+    action: String? = null,
+) {
+    Column(
+        modifier = Modifier.semantics(mergeDescendants = true) {},
+        verticalArrangement = Arrangement.spacedBy(Metrics.space10),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(24.dp),
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+            ) {
+                Text(title, style = NoopType.headline, color = Palette.textPrimary)
+                Text(body, style = NoopType.subhead, color = Palette.textSecondary)
+            }
+        }
+        if (action != null) {
+            DailyPlanActionRow(text = action, tint = tint)
+        }
+    }
+}
+
+@Composable
+private fun DailyPlanActionRow(text: String, tint: Color) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.Check,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(Metrics.iconSmall),
+        )
+        Text(text, style = NoopType.subhead, color = Palette.textPrimary)
+    }
+}
+
+@Composable
+private fun DailyPlanEvidence(plan: DailyActionPlanner.Plan) {
+    Column(
+        modifier = Modifier.semantics(mergeDescendants = true) {},
+        verticalArrangement = Arrangement.spacedBy(Metrics.space8),
+    ) {
+        Text(
+            stringResource(R.string.daily_plan_evidence_title),
+            style = NoopType.overline,
+            color = Palette.textTertiary,
+        )
+        plan.evidence.forEach { evidence ->
+            DailyPlanActionRow(
+                text = stringResource(dailyPlanEvidenceResource(evidence.source)),
+                tint = Palette.textTertiary,
+            )
+        }
+        Text(
+            stringResource(R.string.daily_plan_limitation),
+            style = NoopType.footnote,
+            color = Palette.textTertiary,
+        )
+    }
+}
+
+@Composable
+private fun DailyPlanEmptyRow(icon: ImageVector, text: String) {
+    Row(
+        modifier = Modifier.semantics(mergeDescendants = true) {},
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space10),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = Palette.textTertiary,
+            modifier = Modifier.size(24.dp),
+        )
+        Text(
+            text,
+            modifier = Modifier.weight(1f),
+            style = NoopType.subhead,
+            color = Palette.textSecondary,
+        )
+    }
+}
+
+@Composable
+private fun DailyPlanSignalRow(signal: ReadinessEngine.Signal) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = Metrics.space10)
+            .semantics(mergeDescendants = true) {},
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            dailyPlanSignalIcon(signal.key),
+            contentDescription = null,
+            tint = dailyPlanSignalTint(signal.flag),
+            modifier = Modifier.size(24.dp),
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Text(
+                    dailyPlanSignalLabel(signal),
+                    modifier = Modifier.weight(1f),
+                    style = NoopType.subhead,
+                    color = Palette.textPrimary,
+                )
+                Text(
+                    dailyPlanSignalStatus(signal.flag),
+                    style = NoopType.overline,
+                    color = dailyPlanSignalTint(signal.flag),
+                )
+            }
+            Text(signal.detail, style = NoopType.caption, color = Palette.textSecondary)
+            signal.evidence?.let {
+                Text(it, style = NoopType.captionNumber, color = Palette.textTertiary)
+            }
+        }
+    }
+}
+
+private fun dailyPlanSignalIcon(key: String): ImageVector = when (key) {
+    "hrv" -> Icons.Filled.MonitorHeart
+    "rhr" -> Icons.Filled.Favorite
+    "respRate" -> Icons.Filled.Air
+    "monotony" -> Icons.Filled.Functions
+    else -> Icons.Filled.TrackChanges
+}
+
+@Composable
+private fun dailyPlanSignalLabel(signal: ReadinessEngine.Signal): String {
+    return when (signal.key) {
+        "hrv" -> stringResource(R.string.daily_plan_signal_hrv)
+        "rhr" -> stringResource(R.string.daily_plan_signal_rhr)
+        "respRate" -> stringResource(R.string.daily_plan_signal_respiration)
+        "acwr" -> stringResource(R.string.daily_plan_signal_load)
+        "monotony" -> stringResource(R.string.daily_plan_signal_variety)
+        else -> signal.label
+    }
+}
+
+@Composable
+private fun dailyPlanSignalStatus(flag: ReadinessEngine.Flag): String = stringResource(
+    when (flag) {
+        ReadinessEngine.Flag.GOOD -> R.string.daily_plan_signal_good
+        ReadinessEngine.Flag.NEUTRAL -> R.string.daily_plan_signal_neutral
+        ReadinessEngine.Flag.WATCH -> R.string.daily_plan_signal_watch
+        ReadinessEngine.Flag.BAD -> R.string.daily_plan_signal_shifted
+    }
+)
+
+private fun dailyPlanSignalTint(flag: ReadinessEngine.Flag): Color = when (flag) {
+    ReadinessEngine.Flag.GOOD -> Palette.statusPositive
+    ReadinessEngine.Flag.NEUTRAL -> Palette.textTertiary
+    ReadinessEngine.Flag.WATCH -> Palette.statusWarning
+    ReadinessEngine.Flag.BAD -> Palette.statusCritical
+}
+
+private fun dailyPlanConfidenceResource(confidence: ScoreConfidence): Int = when (confidence) {
+    ScoreConfidence.CALIBRATING -> R.string.daily_plan_confidence_calibrating
+    ScoreConfidence.BUILDING -> R.string.daily_plan_confidence_building
+    ScoreConfidence.SOLID -> R.string.daily_plan_confidence_solid
+}
+
+private fun dailyPlanTargetStatusResource(plan: DailyActionPlanner.Plan): Int =
+    when (plan.availability) {
+        DailyActionPlanner.Availability.READY,
+        DailyActionPlanner.Availability.CALIBRATING -> dailyPlanConfidenceResource(plan.confidence)
+        DailyActionPlanner.Availability.CHECK_IN_NEEDED,
+        DailyActionPlanner.Availability.RECOVERY_SHIFT,
+        DailyActionPlanner.Availability.STOP -> R.string.daily_plan_target_withheld
+    }
+
+@Composable
+private fun dailyPlanActionLabel(action: DailyActionPlanner.Action): String = stringResource(
+    when (action) {
+        DailyActionPlanner.Action.COMPLETE_CHECK_IN -> R.string.daily_plan_action_complete_check_in
+        DailyActionPlanner.Action.KEEP_SLEEP_WINDOW -> R.string.daily_plan_action_keep_sleep_window
+        DailyActionPlanner.Action.PROTECT_EXTRA_SLEEP -> R.string.daily_plan_action_protect_extra_sleep
+        DailyActionPlanner.Action.CHOOSE_EASY_DAY -> R.string.daily_plan_action_choose_easy_day
+        DailyActionPlanner.Action.STOP_AND_ASSESS -> R.string.daily_plan_action_stop_and_assess
+    }
+)
+
+private fun dailyPlanEvidenceResource(source: DailyActionPlanner.EvidenceSource): Int = when (source) {
+    DailyActionPlanner.EvidenceSource.SELF_CHECK -> R.string.daily_plan_evidence_self_check
+    DailyActionPlanner.EvidenceSource.READINESS_BASELINE -> R.string.daily_plan_evidence_readiness
+    DailyActionPlanner.EvidenceSource.PERSONAL_EFFORT_HISTORY ->
+        R.string.daily_plan_evidence_effort_history
+    DailyActionPlanner.EvidenceSource.SLEEP_PLAN -> R.string.daily_plan_evidence_sleep_plan
+}
+
 /**
  * The accent quick-action "+" in the Today header's top-right. Moved off the bottom bar (now four clean
  * tabs) to balance the header and open the existing quick-action sheet. A small CONTAINED accent disc,  * the accented primary among an otherwise-neutral icon set, ~36dp, no float and no glow: a flat reset-blue
@@ -1913,35 +2458,6 @@ private fun TodayCardDismissButton(onClick: () -> Unit, modifier: Modifier = Mod
     }
 }
 
-@Composable
-private fun QuickActionDisc(onClick: () -> Unit) {
-    val interaction = remember { MutableInteractionSource() }
-    Box(
-        modifier = Modifier
-            // 34dp to sit level with the heart / avatar / battery ring in the liquid header cluster.
-            .size(34.dp)
-            .liquidPress(interaction)
-            .clip(CircleShape)
-            // A translucent-white disc so the + reads on the day-of-sky like the rest of the liquid cluster,
-            // with a crisp white glyph. Mirrors iOS LiquidAddButton (a "plus" on Circle().fill(.white@0.16)).
-            .background(Color.White.copy(alpha = 0.16f))
-            .clickable(
-                interactionSource = interaction,
-                indication = null,
-                onClick = onClick,
-            )
-            .semantics { contentDescription = uiString(R.string.l10n_today_screen_quick_actions_e47e8042) },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            Icons.Filled.Add,
-            contentDescription = null,
-            tint = Color.White,
-            modifier = Modifier.size(16.dp),
-        )
-    }
-}
-
 // MARK: - Scoring-guide affordances (ⓘ + first-run card)
 
 /**
@@ -2021,10 +2537,9 @@ private fun ScoringGuideIntroCard(onOpen: () -> Unit, onDismiss: () -> Unit) {
 //
 // A STRUCTURAL rebuild to mirror the iOS liquid Today header element-for-element (NOT the old numeric-date +
 // recording-light + bell header). LEFT: a tappable title block — the big rounded-bold day title over a human
-// date line ("Friday, 3 July"), tap opens the day picker. RIGHT: exactly the iOS four controls, in order —
-// a filled HEART (→ Support), the PROFILE AVATAR (→ Settings), a "+" ADD button (→ quick actions), and the
-// strap BATTERY RING (→ Devices). Each ~34dp, spacing ~8dp. There is no recording light and no bell here;
-// iOS's Today header has neither, and the Updates inbox is relocated into the "+" quick-actions sheet.
+// date line ("Friday, 3 July"), tap opens the day picker. RIGHT: the compact sync state, profile avatar,
+// and strap battery ring. Quick actions now live in the persistent floating + beside bottom navigation,
+// so this page-specific header stays calm and does not duplicate a global control.
 
 @Composable
 private fun LiquidTodayHeader(
@@ -2038,7 +2553,6 @@ private fun LiquidTodayHeader(
     lastSyncAt: Long? = null,
     historySyncExperimental: Boolean = false,
     onPickDay: (Int) -> Unit,
-    onQuickActions: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenDevices: () -> Unit,
     modifier: Modifier = Modifier,
@@ -2115,7 +2629,7 @@ private fun LiquidTodayHeader(
             )
         }
 
-        // RIGHT: the controls, in order — [sync chip] · avatar · + · battery ring. Each ~34dp, 8dp apart.
+        // RIGHT: the controls, in order — [sync chip] · avatar · battery ring. Each ~34dp, 8dp apart.
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2142,10 +2656,7 @@ private fun LiquidTodayHeader(
             ) {
                 ProfileAvatar(size = 34.dp)
             }
-            // (b) Quick-add (+), the accented primary. Mirrors iOS's LiquidAddButton (a glyph on a translucent
-            // disc → the quick-actions menu). Sized 34dp to match the rest of the liquid cluster.
-            QuickActionDisc(onClick = onQuickActions)
-            // (c) Strap battery ring showing the % (iOS LiquidBatteryButton). Tap → Devices.
+            // (b) Strap battery ring showing the % (iOS LiquidBatteryButton). Tap → Devices.
             LiquidBatteryRing(batteryPct = batteryPct, onClick = onOpenDevices)
         }
     }
@@ -2987,7 +3498,7 @@ private fun TodayEditAction(
             Spacer(Modifier.width(Metrics.space4))
             Text(
                 uiString(R.string.l10n_today_screen_edit_5301648d).uppercase(Locale.getDefault()),
-                style = NoopType.overline.copy(letterSpacing = 0.4.sp),
+                style = NoopType.overline.copy(letterSpacing = 0.sp),
                 color = Palette.accent,
             )
         }
@@ -3316,9 +3827,7 @@ private fun DashboardCardRow(
 ) {
     // A real number renders white; a placeholder (No Data, or the Stress calibrating state) renders dimmed.
     val hasValue = value != NO_DATA && value != STRESS_CALIBRATING
-    // iOS `cardLink` corner is 20 (a touch rounder than the app-wide 18dp card), with the SAME neutral
-    // surfaceRaised fill + plain hairline the frosted neutral surface already draws.
-    val rowShape = RoundedCornerShape(20.dp)
+    val rowShape = RoundedCornerShape(Metrics.cardRadius)
     // liquidPress: the tappable card settles inward on press (the iOS LiquidPressStyle feel). The SAME
     // interactionSource feeds the clickable and the press modifier, so it responds to the actual touch.
     // It is applied OUTSIDE the frosted surface so the whole card (surface + content) scales/dims as one.
@@ -3328,7 +3837,7 @@ private fun DashboardCardRow(
             .fillMaxWidth()
             .let { if (onClick != null) it.liquidPress(interaction) else it }
             .clip(rowShape)
-            .frostedCardSurface(cornerRadius = 20.dp)
+            .frostedCardSurface(cornerRadius = Metrics.cardRadius)
             .let {
                 if (onClick != null) {
                     it.clickable(interactionSource = interaction, indication = null, onClick = onClick)
@@ -3356,7 +3865,7 @@ private fun DashboardCardRow(
             // iOS: overline 11 / +1.0 tracking, textPrimary.
             Text(
                 card.title.uppercase(),
-                style = NoopType.overline.copy(fontSize = 11.sp, letterSpacing = 1.0.sp),
+                style = NoopType.overline.copy(fontSize = 11.sp, letterSpacing = 0.sp),
                 color = Palette.textPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -4586,7 +5095,7 @@ private fun LiquidKeyTile(
     ) {
         Text(
             data.label.uppercase(),
-            style = NoopType.overline.copy(fontSize = 9.sp, letterSpacing = 1.2.sp),
+            style = NoopType.overline.copy(fontSize = 9.sp, letterSpacing = 0.sp),
             color = Palette.textTertiary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

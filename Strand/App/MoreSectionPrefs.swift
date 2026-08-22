@@ -32,13 +32,13 @@ enum MoreSectionPrefs {
     /// shorter at rest without dropping a single row. Mirrors the Android `defaultExpanded` flags.
     static let defaultExpanded: Set<String> = ["Insights", "Body"]
 
-    /// A deliberately small shortcut row. Health readings remain in the primary tabs; these are utilities
-    /// users otherwise have to hunt for in four different groups.
+    /// A deliberately small shortcut row. Safety leads because a stressful moment is exactly when a user
+    /// should not have to remember which collapsed catalogue group owns the tool.
     static let quickAccess: [MoreQuickAccessItem] = [
+        .init(id: "safety", title: "Safety", systemImage: "shield.lefthalf.filled"),
         .init(id: "profile", title: "Profile", systemImage: "person.crop.circle.fill"),
         .init(id: "devices", title: "Devices", systemImage: "applewatch.side.right"),
-        .init(id: "workouts", title: "Workouts", systemImage: "figure.run"),
-        .init(id: "settings", title: "Settings", systemImage: "gearshape.fill")
+        .init(id: "friends", title: "Friends", systemImage: "person.2.fill")
     ]
 
     /// The default expressed as the stored CSV (sorted, so the seed string is deterministic and testable).

@@ -7,6 +7,8 @@ enum NoopNotificationRoute: String, Equatable, Sendable {
     case today
     case sleep
     case devices
+    case safety
+    case coach
 }
 
 /// Durable hand-off between `UNUserNotificationCenterDelegate` and the SwiftUI app shells.
@@ -140,7 +142,11 @@ enum DailyReviewNotifications {
     /// Reconcile persisted opt-in state after an upgrade or reinstall of pending notification requests.
     /// This never asks for permission; it only restores requests when authorization already exists.
     static func restoreScheduleIfAuthorized() {
-        guard isEnabled else { return }
+        guard isEnabled else {
+            UNUserNotificationCenter.current()
+                .removePendingNotificationRequests(withIdentifiers: requestIDs)
+            return
+        }
         Task { @MainActor in
             let settings = await UNUserNotificationCenter.current().notificationSettings()
             switch settings.authorizationStatus {

@@ -152,13 +152,34 @@ final class WhoopCsvExporterTests: XCTestCase {
                               remMin: 115, lightMin: 210, disturbances: 35, restingHr: 52,
                               avgHrv: 68.4, recovery: 72, strain: 12.5, exerciseCount: nil,
                               spo2Pct: 96.0, skinTempDevC: 33.1, respRateBpm: 14.2)
+        let portable = try PortableUserData(
+            exportedAt: 1_780_300_000,
+            nutritionEntries: [
+                NutritionEntryRow(
+                    id: "portable-meal",
+                    origin: NutritionLogContract.manualOrigin,
+                    day: "2026-06-01",
+                    occurredAt: 1_780_315_200,
+                    mealType: "lunch",
+                    label: "Lunch",
+                    proteinG: 35,
+                    createdAt: 1_780_315_200,
+                    updatedAt: 1_780_315_300
+                ),
+            ],
+            strengthExercises: [],
+            strengthRoutines: [],
+            strengthRoutineExercises: [],
+            strengthSessions: [],
+            strengthSets: []
+        )
         let entries: [(name: String, data: Data)] = [
             ("physiological_cycles.csv", Data(WhoopCsvExporter.cyclesCSV(days: [day], series: [:]).utf8)),
             ("sleeps.csv", Data(WhoopCsvExporter.sleepsCSV([], cycleStart: { _ in "" }).utf8)),
             ("workouts.csv", Data(WhoopCsvExporter.workoutsCSV([]).utf8)),
             ("journal_entries.csv", Data(WhoopCsvExporter.journalCSV([]).utf8)),
-            // The JSON sidecar is ignored; the optional Source column is parsed only for provenance routing.
             ("noop_metric_series.json", Data("[]".utf8)),
+            (PortableUserData.fileName, try portable.encodedData()),
         ]
         try WhoopCsvExporter.writeArchive(entries: entries, to: zipURL)
 
@@ -168,5 +189,8 @@ final class WhoopCsvExporterTests: XCTestCase {
         XCTAssertEqual(result.sleeps.count, 0)
         XCTAssertEqual(result.workouts.count, 0)
         XCTAssertEqual(result.journal.count, 0)
+        XCTAssertEqual(result.portableUserData?.nutritionEntries.first?.id, "portable-meal")
+        XCTAssertNil(result.portableUserData?.nutritionEntries.first?.caloriesKcal)
+        XCTAssertEqual(result.portableUserData?.nutritionEntries.first?.proteinG, 35)
     }
 }

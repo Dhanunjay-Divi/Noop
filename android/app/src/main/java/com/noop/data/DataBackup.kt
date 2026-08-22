@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
+import com.noop.BuildConfig
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -23,10 +24,11 @@ import java.util.zip.ZipOutputStream
  * file operations (a SAF document the user picks).
  *
  * Export: checkpoint the WAL into the main db file, write a private temporary ZIP containing the
- * SQLite file plus a small whitelisted `settings.json` entry (#1000; see [BackupSettingsCodec]),
+ * SQLite file plus a bounded, explicitly whitelisted `settings.json` entry (#1000; see
+ * [BackupSettingsCodec]),
  * then encrypt and authenticate it inside the cross-platform `NOOPBAK` v1 envelope before any byte
- * reaches the selected destination. A restore therefore brings back weight/height/units and not
- * just the rows. ZIP deflate typically reduces a
+ * reaches the selected destination. A restore therefore brings back profile, units, appearance,
+ * dashboard, HRV, Sleep Planner, and reminder setup—not just rows. ZIP deflate typically reduces a
  * 100 MB+ SQLite backup to 10–20 MB — SQLite's page-aligned text data compresses very
  * well. The plaintext container never leaves app-private cache and is always removed.
  *
@@ -47,9 +49,11 @@ object DataBackup {
 
     private const val MAX_BACKUP_SQLITE_BYTES = 2_147_483_648L
     private const val MAX_BACKUP_SETTINGS_BYTES = 1_048_576L
+    private const val MAX_BACKUP_MANIFEST_BYTES = 1_048_576L
     private const val MAX_BACKUP_ZIP_ENTRIES = 128
     private const val MAX_BACKUP_CONTAINER_BYTES =
-        MAX_BACKUP_SQLITE_BYTES + MAX_BACKUP_SETTINGS_BYTES + 128L * 1024L * 1024L
+        MAX_BACKUP_SQLITE_BYTES + MAX_BACKUP_SETTINGS_BYTES + MAX_BACKUP_MANIFEST_BYTES +
+            128L * 1024L * 1024L
 
     /** First 16 bytes of every SQLite 3 file: "SQLite format 3\0". */
     private val SQLITE_MAGIC: ByteArray =
@@ -107,7 +111,7 @@ object DataBackup {
             )
         }
 
-        // #1000: the whitelisted profile/display settings ride along as a second entry so a restore
+        // #1000: the whitelisted durable settings ride along as a second entry so a restore
         // brings back weight/height/units, not just the rows. Null (nothing user-set) degrades to the
         // legacy single-entry ZIP. The DB entry stays FIRST — older importers stop at the first
         // `.sqlite` entry, so entry order is part of the cross-platform container contract.
@@ -124,7 +128,12 @@ object DataBackup {
             // unaffected. Anything committed after the checkpoint above lives in the new WAL and
             // is simply (consistently) absent from this snapshot, same as before.
             db.runInTransaction {
-                writeBackupZip(dbFile, plaintextZip, settingsJson)
+                writeBackupZip(
+                    dbFile,
+                    plaintextZip,
+                    settingsJson,
+                    appVersion = BuildConfig.VERSION_NAME,
+                )
             }
             BackupEnvelope.encrypt(plaintextZip, encrypted, passphrase)
             val output = appContext.contentResolver.openOutputStream(uri, "wt")
@@ -153,9 +162,15 @@ object DataBackup {
         val decryptedContainer = File.createTempFile("noop-import-", ".zip", appContext.cacheDir)
         val tempSqlite = File.createTempFile("noop-import-", ".sqlite", appContext.cacheDir)
         val tempSettings = File.createTempFile("noop-import-settings-", ".json", appContext.cacheDir)
+        val tempManifest = File.createTempFile("noop-import-manifest-", ".json", appContext.cacheDir)
         tempSettings.delete()
+        tempManifest.delete()
         fun cleanup() {
-            encryptedInput.delete(); decryptedContainer.delete(); tempSqlite.delete(); tempSettings.delete()
+            encryptedInput.delete()
+            decryptedContainer.delete()
+            tempSqlite.delete()
+            tempSettings.delete()
+            tempManifest.delete()
         }
         fun failed(message: String): ImportResult.Failed { cleanup(); return ImportResult.Failed(message) }
 
@@ -199,14 +214,16 @@ object DataBackup {
         //    If it's a plain SQLite (legacy), copy it to the same temp file.
         //    The container-staging step is factored into [stageBackupSqlite] (a pure file/stream
         //    function) so it can be exercised under real file I/O in unit tests without Room/Context.
-        //    A `settings.json` entry (#1000) is staged alongside when present; the stale-delete first
-        //    matters, or a leftover from an earlier import could masquerade as THIS backup's settings.
+        //    `settings.json` and `manifest.json` are staged alongside when present; stale-delete first
+        //    matters, or a leftover from an earlier import could masquerade as THIS backup's metadata.
         try {
-            when (stageBackupSqlite(containerInput, header, tempSqlite, tempSettings)) {
+            when (stageBackupSqlite(containerInput, header, tempSqlite, tempSettings, tempManifest)) {
                 StageResult.OK -> Unit
                 StageResult.CANNOT_OPEN -> return failed("Could not open the chosen file.")
                 StageResult.NO_DB_IN_ZIP -> return failed("The backup archive doesn't contain a database file.")
                 StageResult.ENTRY_TOO_LARGE -> return failed("The backup archive is too large to restore safely.")
+                StageResult.DUPLICATE_ENTRY ->
+                    return failed("The backup archive contains duplicate database, settings, or manifest entries.")
                 StageResult.NOT_A_BACKUP -> return failed(
                     "That file is not a NOOP backup - it doesn't look like a .noopbak archive or a SQLite database."
                 )
@@ -215,12 +232,29 @@ object DataBackup {
             return failed("Could not read the chosen file: ${e.message}")
         }
 
-        // 3. Validate the extracted file is a real SQLite database (magic-byte check).
+        // 3. A current manifest rejects wrong-platform/future-schema restores before SQLite is opened
+        //    and verifies both extracted payloads. Manifest-less backups remain supported as legacy.
+        if (tempManifest.exists()) {
+            val manifest = runCatching {
+                BackupManifest.decode(tempManifest.readText(Charsets.UTF_8))
+            }.getOrNull() ?: return failed("This backup has an invalid or unreadable integrity manifest.")
+            manifest.validationProblem(
+                databaseFile = tempSqlite,
+                settingsFile = tempSettings.takeIf(File::exists),
+                expectedDatabaseEntryName = ZIP_ENTRY_NAME,
+                expectedSettingsEntryName = SETTINGS_ENTRY_NAME,
+                currentPlatform = BackupManifest.PLATFORM_ANDROID,
+                currentDatabaseEngine = BackupManifest.ENGINE_ROOM,
+                currentDatabaseSchemaVersion = NOOP_DATABASE_SCHEMA_VERSION,
+            )?.let { return failed(it) }
+        }
+
+        // 4. Validate the extracted file is a real SQLite database (magic-byte check).
         if (!isValidSqliteHeader(tempSqlite)) {
             return failed("The backup archive doesn't contain a valid NOOP database.")
         }
 
-        // 3b. Origin check (parity with the Apple side's GRDB-origin rejection). The SQLite magic
+        // 4b. Origin check (parity with the Apple side's GRDB-origin rejection). The SQLite magic
         //     passes for ANY SQLite file: a GRDB (Mac/iOS NOOP) backup or some other app's database
         //     would otherwise sail through and REPLACE the live Room store, stranding the user. Read
         //     the backup's table names READ-ONLY and reject anything that isn't a Room (this-app)
@@ -246,7 +280,7 @@ object DataBackup {
             BackupOrigin.ANDROID -> Unit // our own backup, proceed.
         }
 
-        // 3c. #1014 defence-in-depth: gates 3 and 3b read only the FIRST pages of the file — the
+        // 4c. #1014 defence-in-depth: gates 4 and 4b read only the FIRST pages of the file — the
         //     16-byte magic and sqlite_master both survive a backup that was truncated mid-upload or
         //     torn by a flaky drive/cloud client, and such a file then "restores" into a store that
         //     silently shows no data (the #1014 report; the #1000 settings code was exonerated, but
@@ -279,7 +313,14 @@ object DataBackup {
     // ── Container staging (pure file/stream layer, unit-tested under real file I/O) ──────
 
     /** Outcome of [stageBackupSqlite]: the SQLite was staged, or why it wasn't. */
-    enum class StageResult { OK, CANNOT_OPEN, NO_DB_IN_ZIP, NOT_A_BACKUP, ENTRY_TOO_LARGE }
+    enum class StageResult {
+        OK,
+        CANNOT_OPEN,
+        NO_DB_IN_ZIP,
+        NOT_A_BACKUP,
+        ENTRY_TOO_LARGE,
+        DUPLICATE_ENTRY,
+    }
 
     /**
      * Stage the SQLite payload of a backup into [dest], from an already-opened [input] stream whose
@@ -288,10 +329,8 @@ object DataBackup {
      * tests drive it with real `java.util.zip` archives and real files, exercising the exact extraction
      * the live import uses (no behaviour fork between test and production).
      *
-     * When [settingsDest] is given, a `settings.json` entry (#1000) is ALSO staged there if the ZIP
-     * carries one (legacy exporters may have written it in either entry order). Its absence
-     * is not an error — every pre-#1000 backup is a single-entry ZIP — and it never affects the
-     * returned [StageResult]: the DB is the payload that decides success.
+     * When destinations are given, optional `settings.json` and `manifest.json` entries are staged
+     * there. Their absence is not an extraction error because historical backups predate both.
      *
      * NOTE this does NOT validate the staged file's SQLite header or origin; [importFrom] does that
      * next, on the staged file. Keeping staging and validation separate keeps each pure-testable.
@@ -301,6 +340,7 @@ object DataBackup {
         header: ByteArray,
         dest: File,
         settingsDest: File? = null,
+        manifestDest: File? = null,
     ): StageResult {
         if (input == null) return StageResult.CANNOT_OPEN
         input.use { stream ->
@@ -308,6 +348,7 @@ object DataBackup {
                 header.startsWith(ZIP_MAGIC) -> {
                     var foundDb = false
                     var foundSettings = false
+                    var foundManifest = false
                     var entryCount = 0
                     ZipInputStream(stream).use { zip ->
                         var entry = zip.nextEntry
@@ -315,8 +356,9 @@ object DataBackup {
                             entryCount++
                             if (entryCount > MAX_BACKUP_ZIP_ENTRIES) return StageResult.ENTRY_TOO_LARGE
                             when {
-                                !entry.isDirectory && !foundDb &&
+                                !entry.isDirectory &&
                                     entry.name.substringAfterLast('/') == ZIP_ENTRY_NAME -> {
+                                    if (foundDb) return StageResult.DUPLICATE_ENTRY
                                     FileOutputStream(dest).use { out ->
                                         if (!copyBounded(zip, out, MAX_BACKUP_SQLITE_BYTES)) {
                                             dest.delete()
@@ -325,19 +367,33 @@ object DataBackup {
                                     }
                                     foundDb = true
                                 }
-                                !entry.isDirectory && !foundSettings && settingsDest != null &&
+                                !entry.isDirectory &&
                                     entry.name.substringAfterLast('/') == SETTINGS_ENTRY_NAME -> {
-                                    FileOutputStream(settingsDest).use { out ->
-                                        if (!copyBounded(zip, out, MAX_BACKUP_SETTINGS_BYTES)) {
-                                            settingsDest.delete()
-                                            return StageResult.ENTRY_TOO_LARGE
+                                    if (foundSettings) return StageResult.DUPLICATE_ENTRY
+                                    foundSettings = true
+                                    if (settingsDest != null) {
+                                        FileOutputStream(settingsDest).use { out ->
+                                            if (!copyBounded(zip, out, MAX_BACKUP_SETTINGS_BYTES)) {
+                                                settingsDest.delete()
+                                                return StageResult.ENTRY_TOO_LARGE
+                                            }
                                         }
                                     }
-                                    foundSettings = true
+                                }
+                                !entry.isDirectory &&
+                                    entry.name.substringAfterLast('/') == BackupManifest.ENTRY_NAME -> {
+                                    if (foundManifest) return StageResult.DUPLICATE_ENTRY
+                                    foundManifest = true
+                                    if (manifestDest != null) {
+                                        FileOutputStream(manifestDest).use { out ->
+                                            if (!copyBounded(zip, out, MAX_BACKUP_MANIFEST_BYTES)) {
+                                                manifestDest.delete()
+                                                return StageResult.ENTRY_TOO_LARGE
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                            // Everything we could want is staged - stop reading the archive.
-                            if (foundDb && (settingsDest == null || foundSettings)) break
                             entry = zip.nextEntry
                         }
                     }
@@ -370,21 +426,43 @@ object DataBackup {
     }
 
     /** Write [dbFile]'s bytes into the private deflate ZIP payload at [dest], DB entry first,
-     *  plus the optional `settings.json` entry (#1000) when [settingsJson] is non-null. Context-free
-     *  twin of the stream the live [exportTo] writes, so tests round-trip a real archive of either
-     *  shape (legacy single-entry when [settingsJson] is null). */
+     *  optional `settings.json` second, and the shared integrity/compatibility manifest last.
+     *  Keeping the two historical entries first preserves older readers; manifest-less inputs remain
+     *  accepted as legacy backups. */
     @Throws(IOException::class)
-    fun writeBackupZip(dbFile: File, dest: File, settingsJson: String? = null) {
+    fun writeBackupZip(
+        dbFile: File,
+        dest: File,
+        settingsJson: String? = null,
+        appVersion: String? = null,
+        createdAtEpochMs: Long = System.currentTimeMillis(),
+    ) {
+        val settingsBytes = settingsJson?.toByteArray(Charsets.UTF_8)
+        val manifestBytes = BackupManifest.create(
+            databaseFile = dbFile,
+            databaseEntryName = ZIP_ENTRY_NAME,
+            settingsBytes = settingsBytes,
+            settingsEntryName = SETTINGS_ENTRY_NAME,
+            createdAtEpochMs = createdAtEpochMs,
+            sourcePlatform = BackupManifest.PLATFORM_ANDROID,
+            databaseEngine = BackupManifest.ENGINE_ROOM,
+            databaseSchemaVersion = NOOP_DATABASE_SCHEMA_VERSION,
+            settingsSchemaVersion = settingsBytes?.let { BackupSettingsCodec.SCHEMA_VERSION },
+            appVersion = appVersion,
+        ).encode().toByteArray(Charsets.UTF_8)
         FileOutputStream(dest).use { out ->
             ZipOutputStream(out).use { zip ->
                 zip.putNextEntry(ZipEntry(ZIP_ENTRY_NAME))
                 dbFile.inputStream().use { input -> input.copyTo(zip) }
                 zip.closeEntry()
-                if (settingsJson != null) {
+                if (settingsBytes != null) {
                     zip.putNextEntry(ZipEntry(SETTINGS_ENTRY_NAME))
-                    zip.write(settingsJson.toByteArray(Charsets.UTF_8))
+                    zip.write(settingsBytes)
                     zip.closeEntry()
                 }
+                zip.putNextEntry(ZipEntry(BackupManifest.ENTRY_NAME))
+                zip.write(manifestBytes)
+                zip.closeEntry()
             }
         }
     }

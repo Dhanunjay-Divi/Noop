@@ -489,7 +489,7 @@ private fun HydrationHistoryBars(
             history.forEach { (dayKey, _) ->
                 Text(
                     weekdayInitial(dayKey),
-                    style = NoopType.overline.copy(letterSpacing = 0.2.sp),
+                    style = NoopType.overline.copy(letterSpacing = 0.sp),
                     color = Palette.textTertiary,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.weight(1f),

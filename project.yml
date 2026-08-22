@@ -111,8 +111,10 @@ targets:
         LSMinimumSystemVersion: "13.0"
         LSApplicationCategoryType: public.app-category.healthcare-fitness
         NSBluetoothAlwaysUsageDescription: "NOOP connects directly to your wearable and standards-compatible Bluetooth health devices, including an explicitly paired weight scale, to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server."
+        NSMicrophoneUsageDescription: "NOOP uses the microphone only while you explicitly dictate a Coach question or journal draft. Audio is transcribed by the system and is not stored by NOOP."
+        NSSpeechRecognitionUsageDescription: "NOOP uses system speech recognition only while you explicitly dictate a Coach question or journal draft."
         NSLocalNetworkUsageDescription: "NOOP connects to a self-hosted server on your local network only when you configure and enable that optional sync."
-        NSLocationWhenInUseUsageDescription: "NOOP records your route during an outdoor workout to show distance, pace, and a map. The route stays on your device. Nothing leaves it."
+        NSLocationWhenInUseUsageDescription: "NOOP uses location when you request an outdoor-workout route or choose to add one current location to a safety message. It stays on your device unless you deliberately share that message."
         # The AI Coach's "Custom (OpenAI-compatible)" provider talks to a LOCAL LLM server over plain
         # HTTP on loopback (Ollama / LM Studio / llama.cpp at http://localhost:…). ATS blocks cleartext
         # by default; NSAllowsLocalNetworking exempts loopback/.local/unqualified hosts ONLY — public
@@ -287,8 +289,11 @@ targets:
           - $(PRODUCT_BUNDLE_IDENTIFIER).debugexport
           - $(PRODUCT_BUNDLE_IDENTIFIER).refresh
         NSBluetoothAlwaysUsageDescription: "NOOP connects directly to your wearable and standards-compatible Bluetooth health devices, including an explicitly paired weight scale, to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server."
+        NSCameraUsageDescription: "NOOP uses the camera only while you explicitly scan a food barcode. Images and video are processed on-device and are not stored."
+        NSMicrophoneUsageDescription: "NOOP uses the microphone only while you explicitly dictate a Coach question or journal draft. Audio is transcribed by the system and is not stored by NOOP."
+        NSSpeechRecognitionUsageDescription: "NOOP uses system speech recognition only while you explicitly dictate a Coach question or journal draft."
         NSLocalNetworkUsageDescription: "NOOP connects to a self-hosted server on your local network only when you configure and enable that optional sync."
-        NSLocationWhenInUseUsageDescription: "NOOP records your route during an outdoor workout to show distance, pace, and a map, and keeps recording while the screen is off. The route stays on your device. Nothing leaves it."
+        NSLocationWhenInUseUsageDescription: "NOOP uses location when you request an outdoor-workout route or choose to add one current location to a safety message. Workout recording can continue with the screen off. Location stays on your device unless you deliberately share that message."
         NSHealthShareUsageDescription: "NOOP reads your Apple Health data to compute metrics locally. It uploads derived records only if you explicitly enable your own self-hosted server."
         NSHealthUpdateUsageDescription: "NOOP writes the metrics it computes from your strap back into Apple Health, on-device and only when you allow it."
         NSMotionUsageDescription: "NOOP reads your iPhone's step count for activity summaries. It uploads derived records only if you explicitly enable your own self-hosted server."
@@ -347,6 +352,20 @@ targets:
       # Build-from-source delivers it for certain; sideload install of the embedded watch app under a free
       # Apple ID is unproven (an Apple limitation), so the docs steer watch users to a source build for now.
       - target: NOOPWatch
+
+  NOOPiOSUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - NOOPiOSUITests
+    dependencies:
+      - target: NOOPiOS
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: $(BUNDLE_ID_PREFIX).noop.uitests
+        TEST_TARGET_NAME: NOOPiOS
 
   # WidgetKit + Live Activity extension — the iOS analogue of the macOS menu-bar
   # extra. Reads a tiny snapshot the app publishes into the shared App Group.
@@ -516,6 +535,10 @@ schemes:
         NOOPiOS: all
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - NOOPiOSUITests
   # `xcodebuild -scheme NOOPWatch …` compile-verifies the watchOS app + its embedded complication
   # extension (M3). Name matches the app-build CI matrix entry the verify script adds.
   NOOPWatch:

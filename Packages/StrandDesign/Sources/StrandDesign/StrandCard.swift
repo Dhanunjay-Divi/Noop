@@ -1,29 +1,25 @@
 import SwiftUI
 
-// MARK: - Obsidian dimensional card surface + StrandCard
+// MARK: - Quiet data surface + StrandCard
 //
-// Content stays on a solid surface for contrast; depth comes from a restrained
-// specular top edge, a low bevel and a soft ambient shadow. True Liquid Glass is
-// reserved for navigation and controls, following Apple's hierarchy guidance.
-// `.frostedCardSurface(tint:…)` is the one place the look lives so StrandCard /
-// NoopCard / ad-hoc surfaces all share it. Pass a domain tint (or nil for the neutral
-// flat raised surface).
+// Health data stays on a solid, high-contrast surface. Glass is reserved for
+// navigation and compact controls. `.frostedCardSurface(tint:...)` remains the
+// compatibility entry point used by StrandCard, NoopCard, and ad-hoc surfaces.
 
 public extension View {
     /// Apply the frosted-card surface as a background. `tint` colours the diagonal
     /// wash + border bias; nil uses the flat raised surface with no wash.
     func frostedCardSurface(
         tint: Color? = nil,
-        cornerRadius: CGFloat = 22,
+        cornerRadius: CGFloat = 16,
         washStrength: Double = 1.0
     ) -> some View {
         background(FrostedCardSurface(tint: tint, cornerRadius: cornerRadius, washStrength: washStrength))
     }
 }
 
-/// The frosted-card background fill and border. Standalone so it can be a
-/// `.background { }` (animation never reaches the card's content subtree — #104).
-/// No drop shadow — the Titanium surface reads off the hairline + tint alone.
+/// The shared card fill and border. It is standalone so surface preference changes
+/// never animate chart or text content in the foreground.
 public struct FrostedCardSurface: View {
     public var tint: Color?
     public var cornerRadius: CGFloat
@@ -32,13 +28,11 @@ public struct FrostedCardSurface: View {
     @Environment(\.noopAppearanceMode) private var appearanceMode
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var accessibilityContrast
-    /// #2b: Smooth mode / Low Power also take the opaque (blur-free) surface path.
-    @ObservedObject private var motion = NoopMotionState.shared
-    // "Card transparency" setting (reactive): fades the whole glass surface toward the background. 100 =
-    // solid (default). Reading it here makes every card update live when the Settings slider moves.
+    // "Card transparency" is reactive. It changes only the background surface,
+    // leaving foreground health data at full contrast.
     @AppStorage(CardAppearancePrefs.opacityKey) private var cardOpacityPercent = CardAppearancePrefs.defaultPercent
 
-    public init(tint: Color? = nil, cornerRadius: CGFloat = 22, washStrength: Double = 1.0) {
+    public init(tint: Color? = nil, cornerRadius: CGFloat = 16, washStrength: Double = 1.0) {
         self.tint = tint
         self.cornerRadius = cornerRadius
         self.washStrength = washStrength
@@ -47,57 +41,18 @@ public struct FrostedCardSurface: View {
     public var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         let op = max(0.0, min(1.0, Double(cardOpacityPercent) / 100.0))
-        // Reduced Transparency is an accessibility override, so it must win over the decorative
-        // card-opacity preference. Otherwise a user could ask for opaque surfaces and still receive
-        // a partially transparent card because the final modifier faded it again.
-        //
-        // #2b (perf, 2026-08-22): Smooth mode / Low Power now take the SAME opaque path.
-        // `.ultraThinMaterial` forces a real backdrop blur per card, and Today renders many cards in a
-        // scroll view — on non-ProMotion hardware that blur is the second big per-frame cost after the
-        // liquid sims. Swapping to a solid `surfaceRaised` fill removes the blur passes entirely with no
-        // layout change. Accessibility Reduce Transparency keeps its original behaviour.
-        let opaqueSurface = reduceTransparency || motion.poseStillIgnoringReduceMotion
-        let effectiveOpacity = opaqueSurface ? 1.0 : op
+        let effectiveOpacity = reduceTransparency ? 1.0 : op
         let increasedContrast = accessibilityContrast == .increased
         let oledBlack = appearanceMode == .black
-        let baseFill = opaqueSurface
-            ? AnyShapeStyle(StrandPalette.surfaceRaised)
-            : AnyShapeStyle(.ultraThinMaterial)
         shape
-            .fill(baseFill)
+            .fill(StrandPalette.surfaceRaised.opacity(effectiveOpacity))
             .overlay(
-                // Material supplies real background refraction; the scrim keeps dense
-                // health data readable. Reduced Transparency gets an opaque surface.
-                shape.fill(
-                    StrandPalette.surfaceRaised.opacity(
-                        opaqueSurface ? 1 : (scheme == .dark ? (oledBlack ? 0.84 : 0.70) : 0.58)
-                    )
-                )
-            )
-            .overlay(
+                // Domain colour is an annotation, not the card body.
                 shape.fill(
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(
-                                scheme == .dark
-                                    ? (increasedContrast ? 0.10 : (oledBlack ? 0.050 : 0.065))
-                                    : (increasedContrast ? 0.32 : 0.14)
-                            ),
-                            .clear,
-                            Color.black.opacity(scheme == .dark ? (oledBlack ? 0.28 : 0.20) : 0.025)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-            )
-            .overlay(
-                // A faint per-domain hue wash — only on tinted cards; neutral stays flat.
-                shape.fill(
-                    LinearGradient(
-                        colors: [
-                            (tint ?? .clear).opacity(0.035 * washStrength),
-                            (tint ?? .clear).opacity(0.010 * washStrength),
+                            (tint ?? .clear).opacity(0.024 * washStrength * effectiveOpacity),
+                            (tint ?? .clear).opacity(0.008 * washStrength * effectiveOpacity),
                             .clear
                         ],
                         startPoint: .topLeading, endPoint: .bottomTrailing
@@ -106,55 +61,24 @@ public struct FrostedCardSurface: View {
             )
             .overlay(
                 shape.strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(
-                                scheme == .dark
-                                    ? (increasedContrast ? 0.34 : (oledBlack ? 0.16 : 0.20))
-                                    : (increasedContrast ? 0.74 : 0.54)
-                            ),
-                            StrandPalette.bevelSide.opacity(increasedContrast ? 0.78 : 0.52),
-                            StrandPalette.bevelBottom.opacity(scheme == .dark ? 0.88 : 0.28)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 0.85
-                )
-            )
-            .overlay(
-                shape
-                    .inset(by: 1.1)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(scheme == .dark ? (oledBlack ? 0.040 : 0.055) : 0.15),
-                                .clear,
-                                Color.black.opacity(scheme == .dark ? 0.24 : 0.035),
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 0.65
-                    )
+                    increasedContrast ? StrandPalette.hairlineStrong : StrandPalette.hairline,
+                    lineWidth: increasedContrast ? 1.0 : 0.75
+                ).opacity(effectiveOpacity)
             )
             .shadow(
-                color: Color.black.opacity(scheme == .light ? 0.065 : (oledBlack ? 0.20 : 0.26)),
-                radius: scheme == .light ? 14 : (oledBlack ? 14 : 18),
-                x: 0, y: scheme == .light ? 5 : (oledBlack ? 6 : 8)
+                color: Color.black.opacity(
+                    effectiveOpacity * (scheme == .light ? 0.055 : (oledBlack ? 0.14 : 0.18))
+                ),
+                radius: scheme == .light ? 6 : 8,
+                x: 0,
+                y: scheme == .light ? 2 : 3
             )
-            // "Card transparency": fade the whole glass surface. The card's content sits above this
-            // background, so it stays fully readable regardless.
-            .opacity(effectiveOpacity)
     }
 }
 
 // MARK: - StrandCard (§9.4 Cards)
 //
-// The card container — now the Bevel frosted surface, but the PUBLIC API is
-// unchanged (padding, cornerRadius, content). Adds an optional `tint` (defaulted)
-// so callers can opt into a domain wash without breaking existing call sites.
-// Keeps the mandated hover lift via `.strandCardHover()`.
+// The card container. The public API is unchanged.
 
 public struct StrandCard<Content: View>: View {
 
@@ -165,7 +89,7 @@ public struct StrandCard<Content: View>: View {
 
     public init(
         padding: CGFloat = 16,
-        cornerRadius: CGFloat = 22,
+        cornerRadius: CGFloat = 16,
         tint: Color? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
@@ -193,7 +117,7 @@ public struct StrandCardHover: ViewModifier {
     @State private var hovering = false
     @Environment(\.colorScheme) private var scheme
 
-    public init(cornerRadius: CGFloat = 22) {
+    public init(cornerRadius: CGFloat = 16) {
         self.cornerRadius = cornerRadius
     }
 
@@ -226,7 +150,7 @@ public struct StrandCardHover: ViewModifier {
 
 public extension View {
     /// Apply the Strand card hover lift (shadow + -1px translate + border emphasis).
-    func strandCardHover(cornerRadius: CGFloat = 22) -> some View {
+    func strandCardHover(cornerRadius: CGFloat = 16) -> some View {
         modifier(StrandCardHover(cornerRadius: cornerRadius))
     }
 }

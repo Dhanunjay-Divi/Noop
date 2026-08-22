@@ -53,9 +53,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.data.DailyMetric
+import com.noop.data.NutritionLogContract
 import com.noop.data.MoodStore
 import com.noop.ingest.HealthConnectImporter
-import com.noop.ingest.NutritionCsvImporter
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.sqrt
@@ -203,12 +203,11 @@ private object CompareCatalog {
             2,
             note = "Absolute basal body temperature imported from Health Connect; not skin or sleeping-wrist temperature.",
         ),
-        // Nutrition (imported from a food-tracker CSV — calories-in next to calories-out).
-        // Mirrors the macOS MetricCatalog entries exactly (same keys + sources, v2.2.0 parity).
-        CompareMetric("calories_in", "Calories In", "Nutrition", "kcal", NutritionCsvImporter.SOURCE_ID, 0),
-        CompareMetric("protein_g", "Protein", "Nutrition", "g", NutritionCsvImporter.SOURCE_ID, 0),
-        CompareMetric("carbs_g", "Carbs", "Nutrition", "g", NutritionCsvImporter.SOURCE_ID, 0),
-        CompareMetric("fat_g", "Fat", "Nutrition", "g", NutritionCsvImporter.SOURCE_ID, 0),
+        // Nutrition: editable manual meals + migrated CSV daily summaries.
+        CompareMetric("calories_in", "Calories In", "Nutrition", "kcal", NutritionLogContract.DEVICE_ID, 0),
+        CompareMetric("protein_g", "Protein", "Nutrition", "g", NutritionLogContract.DEVICE_ID, 0),
+        CompareMetric("carbs_g", "Carbs", "Nutrition", "g", NutritionLogContract.DEVICE_ID, 0),
+        CompareMetric("fat_g", "Fat", "Nutrition", "g", NutritionLogContract.DEVICE_ID, 0),
         // Mind (daily mood check-in, 1–5; non-clinical self-tracking).
         CompareMetric("mood", "Mood", "Mind", "/5", MoodStore.MOOD_DEVICE_ID, 0),
     )

@@ -30,6 +30,12 @@ final class WatchLiveHR: ObservableObject {
     /// Ask for permission (idempotent) and start streaming. Call when the glance appears.
     func start() {
         #if canImport(HealthKit)
+        #if targetEnvironment(simulator)
+        // The Watch simulator has no heart-rate sensor. Requesting HealthKit there only raises a
+        // system sheet that can never produce a live sample, including in automated visual QA.
+        denied = true
+        return
+        #else
         guard HKHealthStore.isHealthDataAvailable(), let hrType else {
             denied = true
             return
@@ -46,6 +52,7 @@ final class WatchLiveHR: ObservableObject {
                 }
             }
         }
+        #endif
         #else
         denied = true
         #endif

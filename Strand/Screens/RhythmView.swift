@@ -461,7 +461,8 @@ struct RhythmView: View {
     // MARK: Empty / thin-night state
 
     private var emptyState: some View {
-        DataPendingNote(
+        ScreenStateCard(
+            kind: .empty,
             title: "No clear reading yet",
             message: "Rhythm only looks during quiet, still, resting windows, so it needs a calm night's worth of steady beats. Once there's a clean window, the scatter and its description show here.",
             symbol: "waveform.path"

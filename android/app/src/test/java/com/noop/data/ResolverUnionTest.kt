@@ -79,9 +79,10 @@ class ResolverUnionTest {
         assertNull(candidateSources(strap = reAdded, key = "recovery").find { it == "apple-health" })
     }
 
-    /** The Apple-preferred and single-source paths are UNTOUCHED by the union fix: Apple still resolves
+    /** The Apple-preferred and ordinary single-source paths are UNTOUCHED by the union fix: Apple resolves
      *  [apple, health-connect] (+ the computed strap sibling only for the two totals the strap genuinely
-     *  estimates), and any other source resolves itself only. */
+     *  estimates). Nutrition is the deliberate exception: the editable log wins and legacy CSV fills
+     *  only days not migrated/projected there. */
     @Test
     fun applePreferredAndSingleSourcePathsUnchanged() {
         assertEquals(
@@ -93,8 +94,12 @@ class ResolverUnionTest {
             WhoopRepository.sourceCandidates("steps", "apple-health", reAdded).map { it.source },
         )
         assertEquals(
-            listOf("nutrition-csv"),
-            WhoopRepository.sourceCandidates("calories_in", "nutrition-csv", reAdded).map { it.source },
+            listOf("nutrition-log", "nutrition-csv"),
+            WhoopRepository.sourceCandidates(
+                "calories_in",
+                NutritionLogContract.DEVICE_ID,
+                reAdded,
+            ).map { it.source },
         )
     }
 

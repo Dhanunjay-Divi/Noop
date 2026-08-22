@@ -18,6 +18,7 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
     case sleep = "Sleep"
     case trends = "Trends"
     case workouts = "Workouts"
+    case nutrition = "Nutrition"
     case health = "Health"
     case stress = "Stress"
     case labBook = "Lab Book"
@@ -31,6 +32,7 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
     case notifications = "Notifications"
     case automation = "Automations"
     case smartAlarm = "Smart Alarm"
+    case safety = "Safety"
     case settings = "Settings"
     case testCentre = "Test Centre"
 
@@ -54,6 +56,7 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
         case .sleep: return "Sleep"
         case .trends: return "Trends"
         case .workouts: return "Workouts"
+        case .nutrition: return "Nutrition"
         case .health: return "Health"
         case .stress: return "Stress"
         case .labBook: return "Lab Book"
@@ -66,10 +69,11 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
         case .devices: return "Devices"
         case .notifications: return "Notifications"
         case .automation: return "Automations"
-        // "Alarms" is the ONE alarm surface (#766): the strap's silent wake-alarm (moved in from
-        // Automations) and the evening wind-down reminder, in one place. Previously "Wind-Down" (#730).
+        // "Sleep Planner" is the ONE sleep-schedule surface (#766): tonight's target and recent-balance
+        // plan, the strap's silent wake-alarm, and the evening wind-down reminder in one place.
         // The case name and rawValue stay `smartAlarm`/"Smart Alarm" as the in-memory nav identifier only.
-        case .smartAlarm: return "Alarms"
+        case .smartAlarm: return "Sleep Planner"
+        case .safety: return "Safety"
         case .settings: return "Settings"
         case .testCentre: return "Test Centre"
         }
@@ -97,6 +101,7 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
         case .sleep: return String(localized: "Sleep")
         case .trends: return String(localized: "Trends")
         case .workouts: return String(localized: "Workouts")
+        case .nutrition: return String(localized: "Nutrition")
         case .health: return String(localized: "Health")
         case .stress: return String(localized: "Stress")
         case .labBook: return String(localized: "Lab Book")
@@ -109,8 +114,9 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
         case .devices: return String(localized: "Devices")
         case .notifications: return String(localized: "Notifications")
         case .automation: return String(localized: "Automations")
-        // Mirrors the `titleKey` remap above (#766): the row reads "Alarms", not the raw "Smart Alarm".
-        case .smartAlarm: return String(localized: "Alarms")
+        // Mirrors the `titleKey` remap above (#766), including localized sidebar search.
+        case .smartAlarm: return String(localized: "Sleep Planner")
+        case .safety: return String(localized: "Safety")
         case .settings: return String(localized: "Settings")
         case .testCentre: return String(localized: "Test Centre")
         }
@@ -132,6 +138,7 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
         case .sleep: return "moon.stars.fill"
         case .trends: return "chart.xyaxis.line"
         case .workouts: return "figure.run"
+        case .nutrition: return "fork.knife"
         case .health: return "heart.text.square.fill"
         case .stress: return "gauge.with.dots.needle.50percent"
         case .labBook: return "books.vertical.fill"
@@ -145,6 +152,7 @@ enum NavItem: String, CaseIterable, Identifiable, Hashable {
         case .notifications: return "bell.badge.fill"
         case .automation: return "wand.and.stars"
         case .smartAlarm: return "alarm.fill"
+        case .safety: return "shield.lefthalf.filled"
         case .settings: return "gearshape.fill"
         case .testCentre: return "stethoscope"
         }
@@ -169,9 +177,12 @@ struct NavGroup: Identifiable {
     static let all: [NavGroup] = [
         NavGroup(title: "Today", id: "today", items: [.today]),
         NavGroup(title: "Circle", id: "circle", items: [.friends]),
+        // Personal-safety tools stay a one-row, always-visible group. A user under stress should never
+        // need to expand Data & App or use search to find the manual check-in/share surface.
+        NavGroup(title: "Safety", id: "safety", items: [.safety]),
         NavGroup(title: "Sleep", id: "sleep", items: [.sleep]),
         NavGroup(title: "Body", id: "body", items: [
-            .workouts, .live, .health, .stress, .intervals, .breathe,
+            .workouts, .nutrition, .live, .health, .stress, .intervals, .breathe,
         ]),
         // S6: the overlapping insight surfaces (Intelligence / What Moves You / Insights / Insights Hub)
         // all collapse under this single Insights group rather than scattering across the flat list.
@@ -378,6 +389,7 @@ struct RootView: View {
         .onAppear {
             DailyReviewNotifications.restoreScheduleIfAuthorized()
             HydrationReminders.restoreScheduleIfAuthorized()
+            WindDownNudge.restoreScheduleIfAuthorized()
             // Defer one turn so NavigationSplitView has installed its initial selection before a
             // cold-launch reminder replaces it.
             Task { @MainActor in
@@ -398,6 +410,8 @@ struct RootView: View {
         case .sleep: selection = .sleep
         case .today: selection = .today
         case .devices: selection = .devices
+        case .safety: selection = .safety
+        case .coach: selection = .coach
         }
     }
 
@@ -465,6 +479,7 @@ struct RootView: View {
         case .sleep: SleepView()
         case .trends: TrendsView()
         case .workouts: WorkoutsView()
+        case .nutrition: NutritionLogView()
         case .health: HealthView()
         case .stress: StressView()
         case .labBook: LabBookView()
@@ -478,6 +493,7 @@ struct RootView: View {
         case .notifications: NotificationSettingsView()
         case .automation: AutomationsView()
         case .smartAlarm: SmartAlarmView()
+        case .safety: SafetyCenterView()
         case .settings: settingsDetail
         case .testCentre: TestCentreView()
         }

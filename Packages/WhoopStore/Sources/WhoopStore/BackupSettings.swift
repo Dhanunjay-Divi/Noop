@@ -9,9 +9,10 @@ import Foundation
 /// ZIP entry — `settings.json`, a flat JSON object — carrying exactly one WHITELISTED set of keys.
 ///
 /// The whitelist is the contract. Its v1 keys remain mirrored by Android's `BackupSettingsCodec`;
-/// v2's additive schema stamp and exact civil birthday are ignored safely by older/other-platform
-/// readers until they adopt them. Only stable, user-set,
-/// non-device-specific values are allowed. NEVER add device ids, peripheral ids, tokens, sync cursors,
+/// v2 added the schema stamp and exact civil birthday; v3 adds a bounded set of durable, user-authored
+/// display, dashboard, reminder, and Sleep Planner preferences. Additive fields are ignored safely by
+/// older readers. Only stable, user-set, non-device-specific values are allowed. NEVER add device ids,
+/// peripheral ids, tokens, sync cursors, delivery de-dup state, derived planner outputs,
 /// or anything anonymity-sensitive: backups get copied into cloud folders and attached to GitHub
 /// issues, so this file must stay safe to share. Unknown keys in an incoming `settings.json` are
 /// dropped on the floor; a backup with no `settings.json` (every pre-#1000 backup) is simply a
@@ -25,29 +26,30 @@ public enum BackupSettings {
     /// Canonical entry name inside the `.noopbak` ZIP. Matches the Android exporter.
     public static let entryName = "settings.json"
 
-    /// `settings.json` v1 carried whole-years age only. V2 adds an exact civil date of birth while
-    /// retaining that legacy age key for old readers and cross-platform downgrade compatibility.
-    public static let schemaVersion = 2
+    /// V1 carried profile/unit values; v2 added exact civil DOB; v3 adds explicitly allowlisted durable
+    /// preferences while retaining every older key for downgrade compatibility.
+    public static let schemaVersion = 3
     public static let schemaVersionKey = "settings.schemaVersion"
     public static let dateOfBirthKey = "profile.dateOfBirth"
 
     /// The JSON kind a whitelisted key must decode to. Anything else (wrong type, JSON bool posing
     /// as a number, nested objects) is dropped rather than guessed at.
     public enum Kind: Sendable {
-        case int, double, string, civilDate
+        case bool, int, double, string, civilDate
     }
 
     /// THE whitelist — the only keys `settings.json` may carry, keyed by their CANONICAL
-    /// (platform-neutral) names. V1 keys mirror Android's `BackupSettingsCodec.WHITELIST`; v2 fields
-    /// are additive and unknown-key-safe for older decoders.
+    /// (platform-neutral) names. All keys mirror Android's `BackupSettingsCodec.WHITELIST`; later
+    /// schema fields are additive and unknown-key-safe for older decoders.
     ///
     /// Profile: the body metrics that power HR zones / calories / recovery baselines, plus the manual
     /// HR-max override (`profile.hrMax`, 0 = auto/Tanaka). Display: the metric/imperial system, the
     /// separate temperature override ("" = match the system), and the Effort axis (#268) — the three
-    /// display prefs that exist with identical semantics on both platforms. Deliberately EXCLUDED:
-    /// step calibration (per-strap, not per-person), the avatar blob (bulky, and not "settings"),
-    /// steps-engine fitted outputs (derived), and every noop.* toggle that is device- or
-    /// install-specific.
+    /// display prefs that exist with identical semantics on both platforms.
+    ///
+    /// V3 adds only preferences that describe the person's intended app setup. Delivery cursors,
+    /// scheduled alarm epochs, planner-derived recovery minutes, permission/authorization receipts,
+    /// peripheral state, and feature experiments remain excluded.
     public static let whitelist: [String: Kind] = [
         schemaVersionKey: .int,
         "profile.age": .int,
@@ -58,8 +60,45 @@ public enum BackupSettings {
         "profile.waistCm": .double,
         "profile.hrMax": .int,
         "units.system": .string,
+        "units.mass": .string,
+        "units.height": .string,
         "units.temperature": .string,
         "effort.scale": .string,
+        "hrv.window": .string,
+        "theme.appearance": .string,
+        "chart.style": .string,
+        "trend.chart.style": .string,
+        "noop.showDayCycleBackground": .bool,
+        "noop.skyBehindCards": .bool,
+        "noop.cardOpacityPercent": .int,
+        "workoutKeepScreenOn": .bool,
+        "today.sectionOrder": .string,
+        "today.keyMetrics": .string,
+        "today.keyMetricsDetailed": .bool,
+        "today.keyMetricsWindowDays": .int,
+        "noop.hydrationTracking": .bool,
+        "windDown.enabled": .bool,
+        "windDown.sleepNeedMinutes": .int,
+        "windDown.goalMode": .string,
+        "windDown.leadMinutes": .int,
+        "sleepPlanner.wakeMinutes": .int,
+        "notif.masterEnabled": .bool,
+        "notif.onlyWhenWorn": .bool,
+        "notif.quietHoursEnabled": .bool,
+        "notif.quietStartMinutes": .int,
+        "notif.quietEndMinutes": .int,
+        "inactivity.enabled": .bool,
+        "inactivity.thresholdMinutes": .int,
+        "inactivity.reNudgeMinutes": .int,
+        "inactivity.buzzLoops": .int,
+        "inactivity.activeHoursEnabled": .bool,
+        "inactivity.activeStartMinutes": .int,
+        "inactivity.activeEndMinutes": .int,
+        "hydrationReminders.enabled": .bool,
+        "hydrationReminders.intervalMinutes": .int,
+        "hydrationReminders.activeStartMinutes": .int,
+        "hydrationReminders.activeEndMinutes": .int,
+        "hydrationReminders.strapBuzzEnabled": .bool,
     ]
 
     /// Canonical JSON key → this platform's UserDefaults key. Identity everywhere except
@@ -74,8 +113,45 @@ public enum BackupSettings {
         "profile.waistCm": "profile.waistCm",
         "profile.hrMax": "profile.hrMaxOverride",
         "units.system": "units.system",
+        "units.mass": "units.mass",
+        "units.height": "units.height",
         "units.temperature": "units.temperature",
         "effort.scale": "effort.scale",
+        "hrv.window": "hrv.window",
+        "theme.appearance": "theme.appearance",
+        "chart.style": "chart.style",
+        "trend.chart.style": "trend.chart.style",
+        "noop.showDayCycleBackground": "noop.showDayCycleBackground",
+        "noop.skyBehindCards": "noop.skyBehindCards",
+        "noop.cardOpacityPercent": "noop.cardOpacityPercent",
+        "workoutKeepScreenOn": "workoutKeepScreenOn",
+        "today.sectionOrder": "today.sectionOrder",
+        "today.keyMetrics": "today.keyMetrics",
+        "today.keyMetricsDetailed": "today.keyMetricsDetailed",
+        "today.keyMetricsWindowDays": "today.keyMetricsWindowDays",
+        "noop.hydrationTracking": "noop.hydrationTracking",
+        "windDown.enabled": "windDown.enabled",
+        "windDown.sleepNeedMinutes": "windDown.sleepNeedMinutes",
+        "windDown.goalMode": "windDown.goalMode",
+        "windDown.leadMinutes": "windDown.leadMinutes",
+        "sleepPlanner.wakeMinutes": "windDown.wakeMinutes",
+        "notif.masterEnabled": "notif.masterEnabled",
+        "notif.onlyWhenWorn": "notif.onlyWhenWorn",
+        "notif.quietHoursEnabled": "notif.quietHoursEnabled",
+        "notif.quietStartMinutes": "notif.quietStartMinutes",
+        "notif.quietEndMinutes": "notif.quietEndMinutes",
+        "inactivity.enabled": "inactivity.enabled",
+        "inactivity.thresholdMinutes": "inactivity.thresholdMinutes",
+        "inactivity.reNudgeMinutes": "inactivity.reNudgeMinutes",
+        "inactivity.buzzLoops": "inactivity.buzzLoops",
+        "inactivity.activeHoursEnabled": "inactivity.activeHoursEnabled",
+        "inactivity.activeStartMinutes": "inactivity.activeStartMinutes",
+        "inactivity.activeEndMinutes": "inactivity.activeEndMinutes",
+        "hydrationReminders.enabled": "hydrationReminders.enabled",
+        "hydrationReminders.intervalMinutes": "hydrationReminders.intervalMinutes",
+        "hydrationReminders.activeStartMinutes": "hydrationReminders.activeStartMinutes",
+        "hydrationReminders.activeEndMinutes": "hydrationReminders.activeEndMinutes",
+        "hydrationReminders.strapBuzzEnabled": "hydrationReminders.strapBuzzEnabled",
     ]
 
     // MARK: - Snapshot / apply (UserDefaults boundary)
@@ -90,7 +166,7 @@ public enum BackupSettings {
             guard canonical != schemaVersionKey else { continue }
             guard let storageKey = appleDefaultsKey[canonical],
                   let raw = defaults.object(forKey: storageKey),
-                  let coerced = coerce(raw, to: kind) else { continue }
+                  let coerced = normalized(raw, for: canonical, as: kind) else { continue }
             out[canonical] = coerced
         }
         return out
@@ -104,7 +180,7 @@ public enum BackupSettings {
         for (canonical, kind) in whitelist {
             guard canonical != schemaVersionKey, canonical != dateOfBirthKey else { continue }
             guard let raw = values[canonical],
-                  let coerced = coerce(raw, to: kind),
+                  let coerced = normalized(raw, for: canonical, as: kind),
                   let storageKey = appleDefaultsKey[canonical] else { continue }
             defaults.set(coerced, forKey: storageKey)
         }
@@ -113,7 +189,7 @@ public enum BackupSettings {
         // an older reader still sees a coherent value. V1: when no exact DOB exists, preserve the prior
         // migration behaviour and clear a target-device DOB so ProfileStore re-derives from restored age.
         if let rawDOB = values[dateOfBirthKey],
-           let encodedDOB = coerce(rawDOB, to: .civilDate) as? String,
+           let encodedDOB = normalized(rawDOB, for: dateOfBirthKey, as: .civilDate) as? String,
            let dob = civilDate(from: encodedDOB) {
             defaults.set(dob, forKey: dobDefaultsKey)
             defaults.set(age(on: Date(), from: dob), forKey: "profile.age")
@@ -143,7 +219,8 @@ public enum BackupSettings {
         var filtered: [String: Any] = [:]
         for (key, kind) in whitelist {
             guard key != schemaVersionKey else { continue }
-            guard let raw = values[key], let coerced = coerce(raw, to: kind) else { continue }
+            guard let raw = values[key],
+                  let coerced = normalized(raw, for: key, as: kind) else { continue }
             filtered[key] = coerced
         }
         guard !filtered.isEmpty else { return nil }
@@ -158,7 +235,8 @@ public enum BackupSettings {
         guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return [:] }
         var out: [String: Any] = [:]
         for (key, kind) in whitelist {
-            guard let raw = obj[key], let coerced = coerce(raw, to: kind) else { continue }
+            guard let raw = obj[key],
+                  let coerced = normalized(raw, for: key, as: kind) else { continue }
             out[key] = coerced
         }
         return out
@@ -171,19 +249,118 @@ public enum BackupSettings {
     /// for numeric kinds — `true` must never become age 1.
     private static func coerce(_ value: Any, to kind: Kind) -> Any? {
         switch kind {
+        case .bool:
+            guard let n = value as? NSNumber, isBoolean(n) else { return nil }
+            return n.boolValue
         case .string:
             return value as? String
         case .int:
             guard let n = value as? NSNumber, !isBoolean(n) else { return nil }
-            return n.intValue
+            let double = n.doubleValue
+            guard double.isFinite,
+                  double.rounded(.towardZero) == double,
+                  double >= Double(Int.min),
+                  double <= Double(Int.max) else { return nil }
+            return Int(double)
         case .double:
             guard let n = value as? NSNumber, !isBoolean(n) else { return nil }
-            return n.doubleValue
+            let double = n.doubleValue
+            return double.isFinite ? double : nil
         case .civilDate:
             if let date = value as? Date { return civilDateString(date) }
             guard let string = value as? String, civilDate(from: string) != nil else { return nil }
             return string
         }
+    }
+
+    /// Key-specific range/enum validation. A hand-edited backup can never install an impossible
+    /// schedule or unbounded layout string merely because it had the right primitive JSON type.
+    private static func normalized(_ value: Any, for key: String, as kind: Kind) -> Any? {
+        guard let coerced = coerce(value, to: kind) else { return nil }
+        switch key {
+        case "profile.age":
+            return boundedInt(coerced, 13...100)
+        case dateOfBirthKey:
+            guard let encoded = coerced as? String,
+                  let dob = civilDate(from: encoded),
+                  (13...100).contains(age(on: Date(), from: dob)) else { return nil }
+            return encoded
+        case "profile.sex":
+            return allowedString(coerced, ["male", "female", "nonbinary"])
+        case "profile.weightKg":
+            return boundedDouble(coerced, 30...250)
+        case "profile.heightCm":
+            return boundedDouble(coerced, 120...230)
+        case "profile.waistCm":
+            return boundedDouble(coerced, 0...200)
+        case "profile.hrMax":
+            return boundedInt(coerced, 0...230)
+        case "units.system":
+            return allowedString(coerced, ["metric", "imperial"])
+        case "units.mass":
+            return allowedString(coerced, ["", "kg", "lb"])
+        case "units.height":
+            return allowedString(coerced, ["", "cm", "ft_in"])
+        case "units.temperature":
+            return allowedString(coerced, ["", "celsius", "fahrenheit"])
+        case "effort.scale":
+            return allowedString(coerced, ["hundred", "whoop"])
+        case "hrv.window":
+            return allowedString(coerced, ["whole", "deep"])
+        case "theme.appearance":
+            return allowedString(coerced, ["system", "light", "dark", "black"])
+        case "chart.style":
+            return allowedString(coerced, ["titanium", "classic"])
+        case "trend.chart.style":
+            return allowedString(coerced, ["line", "bar"])
+        case "today.sectionOrder", "today.keyMetrics":
+            guard let string = coerced as? String,
+                  string.utf8.count <= 2_048,
+                  string.unicodeScalars.allSatisfy({
+                      CharacterSet.alphanumerics.union(
+                          CharacterSet(charactersIn: ".,_- ")).contains($0)
+                  }) else { return nil }
+            return string
+        case "noop.cardOpacityPercent":
+            return boundedInt(coerced, 0...100)
+        case "today.keyMetricsWindowDays":
+            guard let value = coerced as? Int, [2, 7, 14].contains(value) else { return nil }
+            return value
+        case "windDown.sleepNeedMinutes":
+            return boundedInt(coerced, 5 * 60...11 * 60)
+        case "windDown.goalMode":
+            return allowedString(coerced, ["target", "balance", "extraOpportunity"])
+        case "windDown.leadMinutes":
+            return boundedInt(coerced, 0...120)
+        case "sleepPlanner.wakeMinutes",
+             "notif.quietStartMinutes", "notif.quietEndMinutes",
+             "inactivity.activeStartMinutes", "inactivity.activeEndMinutes",
+             "hydrationReminders.activeStartMinutes", "hydrationReminders.activeEndMinutes":
+            return boundedInt(coerced, 0...(24 * 60 - 1))
+        case "inactivity.thresholdMinutes", "inactivity.reNudgeMinutes":
+            return boundedInt(coerced, 15...120)
+        case "inactivity.buzzLoops":
+            return boundedInt(coerced, 1...4)
+        case "hydrationReminders.intervalMinutes":
+            return boundedInt(coerced, 60...240)
+        default:
+            return coerced
+        }
+    }
+
+    private static func allowedString(_ value: Any, _ allowed: Set<String>) -> String? {
+        guard let string = value as? String, allowed.contains(string) else { return nil }
+        return string
+    }
+
+    private static func boundedInt(_ value: Any, _ range: ClosedRange<Int>) -> Int? {
+        guard let int = value as? Int, range.contains(int) else { return nil }
+        return int
+    }
+
+    private static func boundedDouble(_ value: Any, _ range: ClosedRange<Double>) -> Double? {
+        guard let double = value as? Double, range.contains(double) else { return nil }
+        return double
     }
 
     /// Encode/decode a birthday as a local civil date, never as an absolute timestamp. Birthdays are

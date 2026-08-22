@@ -1,9 +1,17 @@
 package com.noop.data
 
 import android.content.Context
+import android.content.SharedPreferences
+import com.noop.alarm.SmartAlarmStore
+import com.noop.alarm.WindDownScheduler
+import com.noop.alarm.WindDownStore
+import com.noop.notif.HydrationReminderScheduler
+import com.noop.ui.AppearancePrefs
+import com.noop.ui.ChartStylePrefs
 import com.noop.ui.NoopPrefs
 import com.noop.ui.ProfileStore
 import com.noop.ui.UnitPrefs
+import java.time.LocalDate
 import org.json.JSONObject
 
 /**
@@ -17,11 +25,14 @@ import org.json.JSONObject
  * ZIP entry — `settings.json`, a flat JSON object — carrying exactly one WHITELISTED set of keys.
  *
  * The whitelist is the contract, defined once per platform and mirrored byte-for-byte by the Apple
- * `BackupSettings.whitelist` (same canonical key strings, same JSON kinds). Only stable, user-set,
- * non-device-specific values are allowed. NEVER add device ids, peripheral ids, tokens, sync cursors,
- * or anything anonymity-sensitive: backups get copied into cloud folders and attached to GitHub
- * issues, so this file must stay safe to share. Unknown keys in an incoming `settings.json` are
- * dropped; a backup with no `settings.json` (every pre-#1000 backup) is a DB-only restore, as before.
+ * `BackupSettings.whitelist` (same canonical key strings, same JSON kinds). V1 carried profile/unit
+ * values, v2 added a schema stamp and exact civil birthday, and v3 adds a bounded set of durable,
+ * user-authored display, dashboard, reminder, HRV, and Sleep Planner preferences. Only stable,
+ * non-device-specific values are allowed. NEVER add credentials, device/peripheral/install ids,
+ * sync cursors, active alarm epochs, delivery de-dup state, or derived planner outputs: backups get
+ * copied into cloud folders and attached to GitHub issues, so this file must stay safe to share.
+ * Unknown keys in an incoming `settings.json` are dropped; a backup with no `settings.json` (every
+ * pre-#1000 backup) is a DB-only restore, as before.
  *
  * [BackupSettingsCodec] is pure JSON + whitelist (plain-JVM unit-testable, no Context); the
  * SharedPreferences boundary lives in [BackupSettingsBridge] below.
@@ -30,44 +41,88 @@ object BackupSettingsCodec {
 
     /** Canonical entry name inside the `.noopbak` ZIP. Matches the Apple exporter byte-for-byte. */
     const val ENTRY_NAME = "settings.json"
+    const val SCHEMA_VERSION = 3
+    const val SCHEMA_VERSION_KEY = "settings.schemaVersion"
+    const val DATE_OF_BIRTH_KEY = "profile.dateOfBirth"
 
     /** The JSON kind a whitelisted key must decode to. Anything else is dropped, never guessed at. */
-    enum class Kind { INT, DOUBLE, STRING }
+    enum class Kind { BOOL, INT, DOUBLE, STRING, CIVIL_DATE }
 
     /**
      * THE whitelist — the only keys `settings.json` may carry, keyed by their CANONICAL
      * (platform-neutral) names. Mirrors the Apple `BackupSettings.whitelist` exactly.
      *
-     * Profile: the body metrics that power HR zones / calories / recovery baselines, plus the manual
-     * HR-max override (`profile.hrMax`, 0 = auto/Tanaka). Display: the metric/imperial system, the
-     * separate temperature override ("" = match the system), and the Effort axis (#268). Deliberately
-     * EXCLUDED: step calibration (per-strap, not per-person), the steps-engine fitted outputs
-     * (derived), and every noop.* toggle that is device- or install-specific.
+     * Profile fields power zones/calories/baselines. V3 adds only preferences describing the user's
+     * intended setup. Deliberately excluded: credentials, step calibration, device bindings,
+     * permission receipts, install/migration state, sync cursors, scheduled-alarm epochs, notification
+     * delivery de-duplication, and planner-derived recovery minutes.
      */
     val WHITELIST: Map<String, Kind> = linkedMapOf(
+        SCHEMA_VERSION_KEY to Kind.INT,
         "profile.age" to Kind.INT,
+        DATE_OF_BIRTH_KEY to Kind.CIVIL_DATE,
         "profile.sex" to Kind.STRING,
         "profile.weightKg" to Kind.DOUBLE,
         "profile.heightCm" to Kind.DOUBLE,
         "profile.waistCm" to Kind.DOUBLE,
         "profile.hrMax" to Kind.INT,
         "units.system" to Kind.STRING,
+        "units.mass" to Kind.STRING,
+        "units.height" to Kind.STRING,
         "units.temperature" to Kind.STRING,
         "effort.scale" to Kind.STRING,
+        "hrv.window" to Kind.STRING,
+        "theme.appearance" to Kind.STRING,
+        "chart.style" to Kind.STRING,
+        "trend.chart.style" to Kind.STRING,
+        "noop.showDayCycleBackground" to Kind.BOOL,
+        "noop.skyBehindCards" to Kind.BOOL,
+        "noop.cardOpacityPercent" to Kind.INT,
+        "workoutKeepScreenOn" to Kind.BOOL,
+        "today.sectionOrder" to Kind.STRING,
+        "today.keyMetrics" to Kind.STRING,
+        "today.keyMetricsDetailed" to Kind.BOOL,
+        "today.keyMetricsWindowDays" to Kind.INT,
+        "noop.hydrationTracking" to Kind.BOOL,
+        "windDown.enabled" to Kind.BOOL,
+        "windDown.sleepNeedMinutes" to Kind.INT,
+        "windDown.goalMode" to Kind.STRING,
+        "windDown.leadMinutes" to Kind.INT,
+        "sleepPlanner.wakeMinutes" to Kind.INT,
+        "notif.masterEnabled" to Kind.BOOL,
+        "notif.onlyWhenWorn" to Kind.BOOL,
+        "notif.quietHoursEnabled" to Kind.BOOL,
+        "notif.quietStartMinutes" to Kind.INT,
+        "notif.quietEndMinutes" to Kind.INT,
+        "inactivity.enabled" to Kind.BOOL,
+        "inactivity.thresholdMinutes" to Kind.INT,
+        "inactivity.reNudgeMinutes" to Kind.INT,
+        "inactivity.buzzLoops" to Kind.INT,
+        "inactivity.activeHoursEnabled" to Kind.BOOL,
+        "inactivity.activeStartMinutes" to Kind.INT,
+        "inactivity.activeEndMinutes" to Kind.INT,
+        "hydrationReminders.enabled" to Kind.BOOL,
+        "hydrationReminders.intervalMinutes" to Kind.INT,
+        "hydrationReminders.activeStartMinutes" to Kind.INT,
+        "hydrationReminders.activeEndMinutes" to Kind.INT,
+        "hydrationReminders.strapBuzzEnabled" to Kind.BOOL,
     )
 
     /**
      * Encode the whitelisted subset of [values] as the flat `settings.json` object, or null when
-     * nothing whitelisted is present (the exporter then writes a DB-only backup — indistinguishable
-     * from a legacy one, which is exactly the right degrade).
+     * nothing whitelisted is present (the exporter then omits only `settings.json`; the database and
+     * integrity manifest are still written).
      */
     fun encode(values: Map<String, Any?>): String? {
         val obj = JSONObject()
         for ((key, kind) in WHITELIST) {
-            val coerced = coerce(values[key], kind) ?: continue
+            if (key == SCHEMA_VERSION_KEY) continue
+            val coerced = normalized(key, values[key], kind) ?: continue
             obj.put(key, coerced)
         }
-        return if (obj.length() == 0) null else obj.toString()
+        if (obj.length() == 0) return null
+        obj.put(SCHEMA_VERSION_KEY, SCHEMA_VERSION)
+        return obj.toString()
     }
 
     /**
@@ -80,7 +135,7 @@ object BackupSettingsCodec {
         val out = LinkedHashMap<String, Any>()
         for ((key, kind) in WHITELIST) {
             if (!obj.has(key)) continue
-            coerce(obj.opt(key), kind)?.let { out[key] = it }
+            normalized(key, obj.opt(key), kind)?.let { out[key] = it }
         }
         return out
     }
@@ -91,10 +146,75 @@ object BackupSettingsCodec {
      * refuses NSNumber-booleans explicitly for the same reason).
      */
     private fun coerce(value: Any?, kind: Kind): Any? = when (kind) {
+        Kind.BOOL -> value as? Boolean
         Kind.STRING -> value as? String
-        Kind.INT -> (value as? Number)?.toInt()
-        Kind.DOUBLE -> (value as? Number)?.toDouble()
+        Kind.INT -> (value as? Number)?.toDouble()?.takeIf {
+            it.isFinite() && it % 1.0 == 0.0 && it >= Int.MIN_VALUE && it <= Int.MAX_VALUE
+        }?.toInt()
+        Kind.DOUBLE -> (value as? Number)?.toDouble()?.takeIf(Double::isFinite)
+        Kind.CIVIL_DATE -> (value as? String)?.takeIf { raw ->
+            runCatching { LocalDate.parse(raw).toString() == raw }.getOrDefault(false)
+        }
     }
+
+    /** Type plus key-specific range/enum validation; malformed hand-edited preferences are dropped. */
+    private fun normalized(key: String, value: Any?, kind: Kind): Any? {
+        val coerced = coerce(value, kind) ?: return null
+        return when (key) {
+            "profile.age" -> boundedInt(coerced, 13..100)
+            DATE_OF_BIRTH_KEY -> (coerced as? String)?.takeIf { encoded ->
+                runCatching {
+                    val age = java.time.Period.between(LocalDate.parse(encoded), LocalDate.now()).years
+                    age in 13..100
+                }.getOrDefault(false)
+            }
+            "profile.sex" -> allowedString(coerced, setOf("male", "female", "nonbinary"))
+            "profile.weightKg" -> boundedDouble(coerced, 30.0..250.0)
+            "profile.heightCm" -> boundedDouble(coerced, 120.0..230.0)
+            "profile.waistCm" -> boundedDouble(coerced, 0.0..200.0)
+            "profile.hrMax" -> boundedInt(coerced, 0..230)
+            "units.system" -> allowedString(coerced, setOf("metric", "imperial"))
+            "units.mass" -> allowedString(coerced, setOf("", "kg", "lb"))
+            "units.height" -> allowedString(coerced, setOf("", "cm", "ft_in"))
+            "units.temperature" -> allowedString(coerced, setOf("", "celsius", "fahrenheit"))
+            "effort.scale" -> allowedString(coerced, setOf("hundred", "whoop"))
+            "hrv.window" -> allowedString(coerced, setOf("whole", "deep"))
+            "theme.appearance" ->
+                allowedString(coerced, setOf("system", "light", "dark", "black"))
+            "chart.style" -> allowedString(coerced, setOf("titanium", "classic"))
+            "trend.chart.style" -> allowedString(coerced, setOf("line", "bar"))
+            "today.sectionOrder", "today.keyMetrics" -> (coerced as? String)?.takeIf {
+                it.toByteArray(Charsets.UTF_8).size <= 2_048 &&
+                    it.all { char -> char.isLetterOrDigit() || char in ".,_- " }
+            }
+            "noop.cardOpacityPercent" -> boundedInt(coerced, 0..100)
+            "today.keyMetricsWindowDays" ->
+                (coerced as? Int)?.takeIf { it in setOf(2, 7, 14) }
+            "windDown.sleepNeedMinutes" -> boundedInt(coerced, 5 * 60..11 * 60)
+            "windDown.goalMode" ->
+                allowedString(coerced, setOf("target", "balance", "extraOpportunity"))
+            "windDown.leadMinutes" -> boundedInt(coerced, 0..120)
+            "sleepPlanner.wakeMinutes",
+            "notif.quietStartMinutes", "notif.quietEndMinutes",
+            "inactivity.activeStartMinutes", "inactivity.activeEndMinutes",
+            "hydrationReminders.activeStartMinutes", "hydrationReminders.activeEndMinutes" ->
+                boundedInt(coerced, 0 until 24 * 60)
+            "inactivity.thresholdMinutes", "inactivity.reNudgeMinutes" ->
+                boundedInt(coerced, 15..120)
+            "inactivity.buzzLoops" -> boundedInt(coerced, 1..4)
+            "hydrationReminders.intervalMinutes" -> boundedInt(coerced, 60..240)
+            else -> coerced
+        }
+    }
+
+    private fun allowedString(value: Any, allowed: Set<String>): String? =
+        (value as? String)?.takeIf(allowed::contains)
+
+    private fun boundedInt(value: Any, range: IntRange): Int? =
+        (value as? Int)?.takeIf(range::contains)
+
+    private fun boundedDouble(value: Any, range: ClosedFloatingPointRange<Double>): Double? =
+        (value as? Double)?.takeIf(range::contains)
 }
 
 /**
@@ -105,25 +225,106 @@ object BackupSettingsCodec {
  * Storage mapping (canonical key → where it actually lives here):
  *  - `profile.*`  → the `noop_profile` prefs via [ProfileStore.backupSnapshot]/[ProfileStore.applyBackup]
  *                   (canonical `profile.hrMax` ↔ ProfileStore's `hr_max_override`).
- *  - `units.*` / `effort.scale` → [NoopPrefs] under the SAME literal key strings as the canonical names
- *                   (they were already kept identical to the Apple @AppStorage keys).
+ *  - display, dashboard, and hydration-tracking keys → [NoopPrefs];
+ *  - notification, inactivity, hydration-reminder, wind-down, and Sleep Planner keys → their explicit
+ *    feature-owned preference files below.
  */
 object BackupSettingsBridge {
+    private val NOOP_PREFS_KEYS = linkedMapOf(
+        "units.system" to NoopPrefs.KEY_UNIT_SYSTEM,
+        "units.mass" to NoopPrefs.KEY_MASS_UNIT,
+        "units.height" to NoopPrefs.KEY_HEIGHT_UNIT,
+        "units.temperature" to NoopPrefs.KEY_TEMPERATURE_UNIT,
+        "effort.scale" to UnitPrefs.KEY_EFFORT_SCALE,
+        "hrv.window" to UnitPrefs.KEY_HRV_WINDOW,
+        "theme.appearance" to "theme.appearance",
+        "chart.style" to "chart.style",
+        "trend.chart.style" to UnitPrefs.KEY_TREND_CHART_STYLE,
+        "noop.showDayCycleBackground" to NoopPrefs.KEY_SHOW_DAY_CYCLE_BACKGROUND,
+        "noop.skyBehindCards" to NoopPrefs.KEY_SKY_BEHIND_CARDS,
+        "noop.cardOpacityPercent" to NoopPrefs.KEY_CARD_OPACITY,
+        "workoutKeepScreenOn" to "workoutKeepScreenOn",
+        "today.sectionOrder" to "today.sectionOrder",
+        "today.keyMetrics" to "today.keyMetrics",
+        "today.keyMetricsDetailed" to "today.keyMetricsDetailed",
+        "today.keyMetricsWindowDays" to "today.keyMetricsWindowDays",
+        "noop.hydrationTracking" to NoopPrefs.KEY_HYDRATION_TRACKING,
+    )
+    private val NOTIFICATION_KEYS = linkedMapOf(
+        "notif.masterEnabled" to "notif.masterEnabled",
+        "notif.onlyWhenWorn" to "notif.onlyWhenWorn",
+        "notif.quietHoursEnabled" to "notif.quietHoursEnabled",
+        "notif.quietStartMinutes" to "notif.quietStartMinutes",
+        "notif.quietEndMinutes" to "notif.quietEndMinutes",
+    )
+    private val INACTIVITY_KEYS = linkedMapOf(
+        "inactivity.enabled" to "inactivity.enabled",
+        "inactivity.thresholdMinutes" to "inactivity.thresholdMinutes",
+        "inactivity.reNudgeMinutes" to "inactivity.reNudgeMinutes",
+        "inactivity.buzzLoops" to "inactivity.buzzLoops",
+        "inactivity.activeHoursEnabled" to "inactivity.activeHoursEnabled",
+        "inactivity.activeStartMinutes" to "inactivity.activeStartMinutes",
+        "inactivity.activeEndMinutes" to "inactivity.activeEndMinutes",
+    )
+    private val HYDRATION_REMINDER_KEYS = linkedMapOf(
+        "hydrationReminders.enabled" to "hydration.reminders.enabled",
+        "hydrationReminders.intervalMinutes" to "hydration.reminders.intervalMinutes",
+        "hydrationReminders.activeStartMinutes" to "hydration.reminders.startMinutes",
+        "hydrationReminders.activeEndMinutes" to "hydration.reminders.endMinutes",
+        "hydrationReminders.strapBuzzEnabled" to "hydration.reminders.strapBuzz",
+    )
+    private val WIND_DOWN_KEYS = linkedMapOf(
+        "windDown.enabled" to "windDown.enabled",
+        "windDown.sleepNeedMinutes" to "windDown.sleepNeedMinutes",
+        "windDown.goalMode" to "windDown.goalMode",
+        "windDown.leadMinutes" to "windDown.leadMinutes",
+    )
+    private val SLEEP_PLANNER_KEYS = linkedMapOf(
+        "sleepPlanner.wakeMinutes" to "alarm.targetMinutes",
+    )
+
+    /** Canonical non-profile keys with an explicit SharedPreferences destination. */
+    internal val mappedCanonicalKeys: Set<String>
+        get() = buildSet {
+            addAll(NOOP_PREFS_KEYS.keys)
+            addAll(NOTIFICATION_KEYS.keys)
+            addAll(INACTIVITY_KEYS.keys)
+            addAll(HYDRATION_REMINDER_KEYS.keys)
+            addAll(WIND_DOWN_KEYS.keys)
+            addAll(SLEEP_PLANNER_KEYS.keys)
+        }
 
     /** The whitelisted, user-SET settings of this device as the `settings.json` string, or null. */
     fun snapshotJson(context: Context): String? {
         val values = LinkedHashMap<String, Any>()
         values.putAll(ProfileStore.from(context).backupSnapshot())
         val noop = NoopPrefs.of(context)
-        if (noop.contains(NoopPrefs.KEY_UNIT_SYSTEM)) {
-            noop.getString(NoopPrefs.KEY_UNIT_SYSTEM, null)?.let { values["units.system"] = it }
-        }
-        if (noop.contains(NoopPrefs.KEY_TEMPERATURE_UNIT)) {
-            noop.getString(NoopPrefs.KEY_TEMPERATURE_UNIT, null)?.let { values["units.temperature"] = it }
-        }
-        if (noop.contains(UnitPrefs.KEY_EFFORT_SCALE)) {
-            noop.getString(UnitPrefs.KEY_EFFORT_SCALE, null)?.let { values["effort.scale"] = it }
-        }
+        snapshot(noop, NOOP_PREFS_KEYS, values)
+        snapshot(
+            context.getSharedPreferences("noop_notif_prefs", Context.MODE_PRIVATE),
+            NOTIFICATION_KEYS,
+            values,
+        )
+        snapshot(
+            context.getSharedPreferences("noop_inactivity_prefs", Context.MODE_PRIVATE),
+            INACTIVITY_KEYS,
+            values,
+        )
+        snapshot(
+            context.getSharedPreferences("noop_hydration_reminders", Context.MODE_PRIVATE),
+            HYDRATION_REMINDER_KEYS,
+            values,
+        )
+        snapshot(
+            context.getSharedPreferences("noop_wind_down", Context.MODE_PRIVATE),
+            WIND_DOWN_KEYS,
+            values,
+        )
+        snapshot(
+            context.getSharedPreferences("noop_smart_alarm", Context.MODE_PRIVATE),
+            SLEEP_PLANNER_KEYS,
+            values,
+        )
         return BackupSettingsCodec.encode(values)
     }
 
@@ -138,15 +339,82 @@ object BackupSettingsBridge {
         if (values.isEmpty()) return
 
         ProfileStore.from(context).applyBackup(values)
+        apply(NoopPrefs.of(context), NOOP_PREFS_KEYS, values)
+        apply(
+            context.getSharedPreferences("noop_notif_prefs", Context.MODE_PRIVATE),
+            NOTIFICATION_KEYS,
+            values,
+        )
+        apply(
+            context.getSharedPreferences("noop_inactivity_prefs", Context.MODE_PRIVATE),
+            INACTIVITY_KEYS,
+            values,
+        )
+        apply(
+            context.getSharedPreferences("noop_hydration_reminders", Context.MODE_PRIVATE),
+            HYDRATION_REMINDER_KEYS,
+            values,
+        )
+        apply(
+            context.getSharedPreferences("noop_wind_down", Context.MODE_PRIVATE),
+            WIND_DOWN_KEYS,
+            values,
+        )
+        apply(
+            context.getSharedPreferences("noop_smart_alarm", Context.MODE_PRIVATE),
+            SLEEP_PLANNER_KEYS,
+            values,
+        )
+    }
 
-        val editor = NoopPrefs.of(context).edit()
-        (values["units.system"] as? String)?.let { editor.putString(NoopPrefs.KEY_UNIT_SYSTEM, it) }
-        (values["units.temperature"] as? String)?.let { raw ->
-            // "" is the Apple side's "match the length/mass system"; here that state is key-absent.
-            if (raw.isEmpty()) editor.remove(NoopPrefs.KEY_TEMPERATURE_UNIT)
-            else editor.putString(NoopPrefs.KEY_TEMPERATURE_UNIT, raw)
+    /** Refresh process mirrors and OS schedules after settings were committed with the restored DB. */
+    fun reconcileAfterRestore(context: Context) {
+        val appContext = context.applicationContext
+        AppearancePrefs.load(appContext)
+        ChartStylePrefs.load(appContext)
+        runCatching { HydrationReminderScheduler.reconcile(appContext) }
+        runCatching {
+            val windDown = WindDownStore.from(appContext)
+            if (windDown.enabled) {
+                WindDownScheduler.schedule(
+                    appContext,
+                    windDown,
+                    SmartAlarmStore.from(appContext).targetMinutes,
+                )
+            } else {
+                WindDownScheduler.cancel(appContext)
+            }
         }
-        (values["effort.scale"] as? String)?.let { editor.putString(UnitPrefs.KEY_EFFORT_SCALE, it) }
+    }
+
+    private fun snapshot(
+        prefs: SharedPreferences,
+        mapping: Map<String, String>,
+        destination: MutableMap<String, Any>,
+    ) {
+        val all = prefs.all
+        for ((canonical, stored) in mapping) {
+            if (!prefs.contains(stored)) continue
+            all[stored]?.let { destination[canonical] = it }
+        }
+    }
+
+    private fun apply(
+        prefs: SharedPreferences,
+        mapping: Map<String, String>,
+        values: Map<String, Any>,
+    ) {
+        val editor = prefs.edit()
+        for ((canonical, stored) in mapping) {
+            when (val value = values[canonical]) {
+                is Boolean -> editor.putBoolean(stored, value)
+                is Int -> editor.putInt(stored, value)
+                is String -> {
+                    if (canonical == "units.temperature" && value.isEmpty()) editor.remove(stored)
+                    else editor.putString(stored, value)
+                }
+            }
+        }
         editor.apply()
     }
 }

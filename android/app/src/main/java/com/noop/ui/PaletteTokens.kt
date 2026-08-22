@@ -104,8 +104,8 @@ data class PaletteTokens(
 // neutral chrome, WHOOP red→yellow→green recovery, green Charge, blue Effort, slate Rest,
 // amber Stress. The legacy `gold*` API remains blue for data-viz compatibility; chrome is monochrome.
 val DarkTokens = PaletteTokens(
-    surfaceBase = Color(0xFF0A0B0D), surfaceRaised = Color(0xFF15171A), surfaceOverlay = Color(0xFF1B1D21),
-    surfaceInset = Color(0xFF0F1114), hairline = Color(0xFF2D3137), hairlineStrong = Color(0xFF4B515A),
+    surfaceBase = Color(0xFF0C0D0F), surfaceRaised = Color(0xFF17191C), surfaceOverlay = Color(0xFF1D2024),
+    surfaceInset = Color(0xFF101215), hairline = Color(0xFF2A2E33), hairlineStrong = Color(0xFF434951),
     textPrimary = Color(0xFFF7F7F5), textSecondary = Color(0xFFC7C7C2), textTertiary = Color(0xFF989893),
     glowAmbient = Color(0xFFFFFFFF),
     accent = Color(0xFFF7F7F5), accentHover = Color(0xFFFFFFFF), accentMuted = Color(0xFF24262B), focusRing = Color(0xFFE7E7E2),
@@ -148,8 +148,8 @@ val BlackTokens = DarkTokens.copy(
 )
 
 val LightTokens = PaletteTokens(
-    surfaceBase = Color(0xFFEEF0F2), surfaceRaised = Color(0xFFFAFBFC), surfaceOverlay = Color(0xFFF6F7F9),
-    surfaceInset = Color(0xFFE5E8EB), hairline = Color(0xFFCDD1D6), hairlineStrong = Color(0xFFAEB4BC),
+    surfaceBase = Color(0xFFF4F5F7), surfaceRaised = Color(0xFFFFFFFF), surfaceOverlay = Color(0xFFFAFBFC),
+    surfaceInset = Color(0xFFECEFF2), hairline = Color(0xFFDEE2E7), hairlineStrong = Color(0xFFC5CBD3),
     textPrimary = Color(0xFF111317), textSecondary = Color(0xFF4A4E54), textTertiary = Color(0xFF686D75),
     glowAmbient = Color(0xFFE8E8E4),
     accent = Color(0xFF111111), accentHover = Color(0xFF2C2C2A), accentMuted = Color(0xFFE1E4E8), focusRing = Color(0xFF333330),

@@ -12,7 +12,9 @@ internal enum class NoopNotificationRoute(val navRoute: String) {
     TRENDS("trends"),
     SLEEP("sleep"),
     LIVE("live"),
-    HEALTH("health");
+    HEALTH("health"),
+    SAFETY("safety"),
+    COACH("coach");
 
     companion object {
         fun fromRaw(raw: String?): NoopNotificationRoute? = entries.firstOrNull { it.navRoute == raw }

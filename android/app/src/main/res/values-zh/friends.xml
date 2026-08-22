@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nav_friends">好友</string>
+    <string name="friends_title">好友</string>
+    <string name="friends_subtitle">私密分数。你的服务器。你的规则。</string>
+    <string name="friends_refresh">刷新好友</string>
+    <string name="friends_you">你</string>
+    <string name="friends_overflow_count">+%1$d</string>
+    <string name="friends_working">处理中…</string>
+    <string name="friends_action_ok">确定</string>
+    <string name="friends_action_cancel">取消</string>
+    <string name="friends_action_done">完成</string>
+    <string name="friends_action_save">保存共享设置</string>
+    <string name="friends_action_remove">移除</string>
+    <string name="friends_action_decline">拒绝</string>
+
+    <string name="friends_server_title">托管你的私密圈子</string>
+    <string name="friends_server_body">好友功能运行在你控制的 Noop 服务器上，无需 Noop 帐户，也没有公开资料。</string>
+    <string name="friends_server_setup_action">设置服务器</string>
+    <string name="friends_join_details">输入邀请信息</string>
+    <string name="friends_server_invite_note">邀请包含服务器地址和一次性代码。加入时不需要服务器管理员密钥。</string>
+    <string name="friends_pending_title">完成邀请</string>
+    <string name="friends_pending_body">服务器响应中断，因此 Noop 保存了这次加入尝试。请使用同一个一次性代码重试，或安全删除此次尝试在服务器上创建的任何资料。</string>
+    <string name="friends_pending_retry">重试邀请</string>
+    <string name="friends_pending_discard">取消此次尝试</string>
+    <string name="friends_pending_discard_title">取消此次加入尝试？</string>
+    <string name="friends_pending_discard_body">从此设备移除受保护凭据前，Noop 会要求服务器删除与这项待处理注册关联的任何资料和 Friends 摘要。</string>
+    <string name="friends_pending_discard_action">删除此次尝试</string>
+    <string name="friends_profile_title">创建私密资料</string>
+    <string name="friends_profile_body">只有 %1$s 上已接受的好友才能看到你的名字。</string>
+    <string name="friends_display_name">显示名称</string>
+    <string name="friends_create_profile">创建私密资料</string>
+    <string name="friends_profile_security_note">管理员密钥仅用于签发独立的成员凭据。好友功能不提供端到端加密，请使用你信任的服务器运营方。</string>
+
+    <string name="friends_circle_overline">你的圈子</string>
+    <plurals name="friends_people_count">
+        <item quantity="other">%1$d 人</item>
+    </plurals>
+    <string name="friends_invite_action">邀请好友</string>
+    <string name="friends_enter_invite_code">输入邀请码</string>
+    <string name="friends_requests_title">请求</string>
+    <string name="friends_request_incoming">希望加入你的圈子</string>
+    <string name="friends_request_outgoing">等待接受</string>
+    <string name="friends_accept_named">接受 %1$s</string>
+    <string name="friends_today_title">今天</string>
+    <string name="friends_private">私密</string>
+    <plurals name="friends_friend_count">
+        <item quantity="other">%1$d 位好友</item>
+    </plurals>
+    <string name="friends_empty_title">从这里建立你的圈子</string>
+    <string name="friends_empty_body">邀请你信任的人。对方加入且你接受请求后，分数才会显示。</string>
+    <string name="friends_waiting_shared_day">等待共享每日数据</string>
+    <string name="friends_scores_waiting">%1$s 上传每日摘要后，分数将显示在这里。</string>
+    <string name="friends_open_sharing_named">打开与 %1$s 的共享设置</string>
+    <string name="friends_score_charge">精力</string>
+    <string name="friends_score_effort">负荷</string>
+    <string name="friends_score_rest">休息</string>
+    <string name="friends_detail_sleep">睡眠 %1$s</string>
+    <string name="friends_detail_hrv">HRV %1$s 毫秒</string>
+    <string name="friends_detail_rhr">静息心率 %1$s 次/分</string>
+    <string name="friends_duration_hours_minutes">%1$d 小时 %2$d 分钟</string>
+    <string name="friends_shared_today">今天已共享</string>
+    <string name="friends_shared_yesterday">昨天已共享</string>
+    <string name="friends_last_shared">上次共享</string>
+    <string name="friends_last_shared_date">上次共享：%1$s</string>
+
+    <string name="friends_privacy_title">仅共享摘要</string>
+    <string name="friends_privacy_body">原始心率、R-R 间期、睡眠阶段、日志、锻炼、路线、导出内容和设备标识符绝不会显示在好友中。</string>
+    <string name="friends_leave_action">退出圈子并删除服务器副本</string>
+    <string name="friends_leave_title">退出这个圈子？</string>
+    <string name="friends_leave_body">Noop 将从此服务器移除好友关系、成员凭据和专用的好友摘要。设备上的健康数据及独立备份不会受影响。</string>
+
+    <string name="friends_invite_title">邀请好友</string>
+    <string name="friends_invite_body">一次性加入你的私密圈子。</string>
+    <string name="friends_invite_expires">有效期至 %1$s</string>
+    <string name="friends_invite_share">分享邀请</string>
+    <string name="friends_invite_subject">加入我的 Noop 私密圈子</string>
+    <string name="friends_invite_share_text">加入我的 Noop 私密圈子。\n\n服务器：%1$s\n一次性代码：%2$s\n\n在 Noop 中打开“更多”&gt;“好友”&gt;“输入邀请信息”。只有在我接受你的请求后才会开始共享。</string>
+    <string name="friends_invite_disclosure">代码会在 72 小时内过期，且只能使用一次。加入会创建请求，是否接受仍由你决定。</string>
+    <string name="friends_join_title">加入圈子</string>
+    <string name="friends_join_body">发送请求前，请检查目标服务器和披露信息。</string>
+    <string name="friends_server_address">服务器地址</string>
+    <string name="friends_invite_code">邀请码</string>
+    <string name="friends_join_default_title">默认共享</string>
+    <string name="friends_join_default_body">精力、负荷和休息</string>
+    <string name="friends_join_never_title">绝不发送到好友</string>
+    <string name="friends_join_never_body">原始心率和 R-R、睡眠阶段、日志、锻炼、路线、导出内容及设备标识符</string>
+    <string name="friends_join_trust_title">信任运营方</string>
+    <string name="friends_join_trust_body">好友功能不提供端到端加密。自托管服务器的运营方可以访问你选择发送的摘要字段。</string>
+    <string name="friends_join_send">发送加入请求</string>
+
+    <string name="friends_sharing_directional">共享按方向分别设置，并由你的服务器执行。</string>
+    <string name="friends_daily_scores">每日分数</string>
+    <string name="friends_additional_details">其他详情</string>
+    <string name="friends_sleep_duration">睡眠时长</string>
+    <string name="friends_hrv">HRV</string>
+    <string name="friends_rhr">静息心率</string>
+    <string name="friends_additional_default_note">每段新的好友关系都会默认关闭其他详情，直到你手动开启。</string>
+    <string name="friends_they_share">对方向你共享</string>
+    <string name="friends_shared">已共享</string>
+    <string name="friends_hidden">已隐藏</string>
+    <string name="friends_remove_named">移除 %1$s</string>
+    <string name="friends_remove_title">移除 %1$s？</string>
+    <string name="friends_remove_body">双方将无法再看到彼此的分数。若要重新连接，需要新的邀请。</string>
+
+    <string name="friends_upload_pending">好友数据已加载，但无法上传最新的允许摘要。Noop 将重试。</string>
+    <string name="friends_notice_profile_ready">私密资料已就绪</string>
+    <string name="friends_notice_request_sent">请求已发送。接受后才会开始共享。</string>
+    <string name="friends_notice_request_accepted">%1$s 已加入你的圈子</string>
+    <string name="friends_notice_request_declined">请求已拒绝</string>
+    <string name="friends_notice_privacy_saved">已更新与 %1$s 的共享设置</string>
+    <string name="friends_notice_removed">已移除 %1$s，并停止共享。</string>
+    <string name="friends_notice_profile_deleted">服务器资料已删除。本地健康数据已保留。</string>
+    <string name="friends_notice_pending_discarded">待处理邀请已删除</string>
+
+    <string name="friends_error_title">好友</string>
+    <string name="friends_error_input">请检查邀请信息后重试。</string>
+    <string name="friends_error_network">无法连接到私密好友服务器。</string>
+    <string name="friends_error_server">好友服务器拒绝了请求（HTTP %1$d）。</string>
+    <string name="friends_error_response">服务器返回了无法读取的好友响应。</string>
+    <string name="friends_error_storage">Noop 无法在此设备上安全保存好友资料。</string>
+    <string name="friends_error_unknown">好友请求未能完成。</string>
+</resources>

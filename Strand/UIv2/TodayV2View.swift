@@ -130,7 +130,7 @@ struct TodayV2View: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(model.dateText.uppercased())
                     .font(NoopV2.overline)
-                    .tracking(1.2)
+                    .tracking(0)
                     .foregroundStyle(NoopV2.inkTertiary)
                 Text(model.greeting)
                     .font(NoopV2.display)
@@ -179,12 +179,17 @@ struct TodayV2View: View {
     private var trendCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text("14-DAY \(model.headline.label.uppercased())")
+                Text(
+                    String(
+                        format: String(localized: "appwide.v2.trend.title_format"),
+                        model.headline.label.uppercased()
+                    )
+                )
                     .font(NoopV2.overline)
-                    .tracking(1.0)
+                    .tracking(0)
                     .foregroundStyle(NoopV2.inkTertiary)
                 Spacer(minLength: 8)
-                Text("dashed = your average")
+                Text("appwide.v2.trend.average")
                     .font(NoopV2.overline)
                     .foregroundStyle(NoopV2.inkTertiary)
             }
@@ -288,7 +293,7 @@ struct TodayV2View: View {
     }
 
     private var footer: some View {
-        Text("Estimates computed on this device from your own signals. Not a medical device and not medical advice.")
+        Text("appwide.disclaimer.estimates_advice")
             .font(NoopV2.caption)
             .foregroundStyle(NoopV2.inkTertiary)
             .fixedSize(horizontal: false, vertical: true)

@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nav_friends">Freunde</string>
+    <string name="friends_title">Freunde</string>
+    <string name="friends_subtitle">Private Werte. Dein Server. Deine Regeln.</string>
+    <string name="friends_refresh">Freunde aktualisieren</string>
+    <string name="friends_you">Du</string>
+    <string name="friends_overflow_count">+%1$d</string>
+    <string name="friends_working">Wird ausgeführt…</string>
+    <string name="friends_action_ok">OK</string>
+    <string name="friends_action_cancel">Abbrechen</string>
+    <string name="friends_action_done">Fertig</string>
+    <string name="friends_action_save">Freigabe speichern</string>
+    <string name="friends_action_remove">Entfernen</string>
+    <string name="friends_action_decline">Ablehnen</string>
+
+    <string name="friends_server_title">Hoste deinen privaten Kreis</string>
+    <string name="friends_server_body">Friends läuft auf einem Noop-Server, den du kontrollierst. Es gibt kein Noop-Konto und kein öffentliches Profil.</string>
+    <string name="friends_server_setup_action">Server einrichten</string>
+    <string name="friends_join_details">Einladungsdaten eingeben</string>
+    <string name="friends_server_invite_note">Eine Einladung enthält eine Serveradresse und einen Einmalcode. Du kannst ohne Administratorschlüssel beitreten.</string>
+    <string name="friends_pending_title">Einladung abschließen</string>
+    <string name="friends_pending_body">Noop hat diesen Beitrittsversuch gespeichert, weil die Serverantwort unterbrochen wurde. Versuche es mit demselben Einmalcode erneut oder lösche sicher jedes dabei erstellte Serverprofil.</string>
+    <string name="friends_pending_retry">Einladung erneut versuchen</string>
+    <string name="friends_pending_discard">Diesen Versuch abbrechen</string>
+    <string name="friends_pending_discard_title">Diesen Beitrittsversuch abbrechen?</string>
+    <string name="friends_pending_discard_body">Noop fordert den Server auf, alle mit dieser ausstehenden Anmeldung verknüpften Profile und Friends-Zusammenfassungen zu löschen, bevor die geschützten Zugangsdaten von diesem Gerät entfernt werden.</string>
+    <string name="friends_pending_discard_action">Versuch löschen</string>
+    <string name="friends_profile_title">Privates Profil erstellen</string>
+    <string name="friends_profile_body">Dein Name ist nur für bestätigte Freunde auf %1$s sichtbar.</string>
+    <string name="friends_display_name">Anzeigename</string>
+    <string name="friends_create_profile">Privates Profil erstellen</string>
+    <string name="friends_profile_security_note">Der Administratorschlüssel wird einmalig verwendet, um separate Mitgliedsdaten auszustellen. Friends ist nicht Ende-zu-Ende-verschlüsselt. Nutze daher einen vertrauenswürdigen Serverbetreiber.</string>
+
+    <string name="friends_circle_overline">Dein Kreis</string>
+    <plurals name="friends_people_count">
+        <item quantity="one">%1$d Person</item>
+        <item quantity="other">%1$d Personen</item>
+    </plurals>
+    <string name="friends_invite_action">Freund einladen</string>
+    <string name="friends_enter_invite_code">Einladungscode eingeben</string>
+    <string name="friends_requests_title">Anfragen</string>
+    <string name="friends_request_incoming">Möchte deinem Kreis beitreten</string>
+    <string name="friends_request_outgoing">Wartet auf Bestätigung</string>
+    <string name="friends_accept_named">%1$s annehmen</string>
+    <string name="friends_today_title">Heute</string>
+    <string name="friends_private">Privat</string>
+    <plurals name="friends_friend_count">
+        <item quantity="one">%1$d Freund</item>
+        <item quantity="other">%1$d Freunde</item>
+    </plurals>
+    <string name="friends_empty_title">Hier beginnt dein Kreis</string>
+    <string name="friends_empty_body">Lade eine vertrauenswürdige Person ein. Werte erscheinen erst, wenn sie beitritt und du die Anfrage annimmst.</string>
+    <string name="friends_waiting_shared_day">Warten auf einen geteilten Tag</string>
+    <string name="friends_scores_waiting">Werte erscheinen, nachdem %1$s eine Tageszusammenfassung hochgeladen hat.</string>
+    <string name="friends_open_sharing_named">Freigaben für %1$s öffnen</string>
+    <string name="friends_score_charge">Energie</string>
+    <string name="friends_score_effort">Belastung</string>
+    <string name="friends_score_rest">Erholung</string>
+    <string name="friends_detail_sleep">Schlaf %1$s</string>
+    <string name="friends_detail_hrv">HRV %1$s ms</string>
+    <string name="friends_detail_rhr">Ruhepuls %1$s bpm</string>
+    <string name="friends_duration_hours_minutes">%1$d Std. %2$d Min.</string>
+    <string name="friends_shared_today">Heute geteilt</string>
+    <string name="friends_shared_yesterday">Gestern geteilt</string>
+    <string name="friends_last_shared">Zuletzt geteilt</string>
+    <string name="friends_last_shared_date">Zuletzt geteilt: %1$s</string>
+
+    <string name="friends_privacy_title">Bewusst nur Zusammenfassungen</string>
+    <string name="friends_privacy_body">Roher Herzschlag, R-R-Intervalle, Schlafphasen, Tagebücher, Trainings, Routen, Exporte und Gerätekennungen erscheinen nie in Friends.</string>
+    <string name="friends_leave_action">Kreis verlassen und Serverkopie löschen</string>
+    <string name="friends_leave_title">Diesen Kreis verlassen?</string>
+    <string name="friends_leave_body">Noop entfernt Freundschaften, Mitgliedsdaten und eigene Friends-Zusammenfassungen von diesem Server. Gesundheitsdaten auf dem Gerät und dein separates Backup bleiben erhalten.</string>
+
+    <string name="friends_invite_title">Freund einladen</string>
+    <string name="friends_invite_body">Einmaliger Zugang zu deinem privaten Kreis.</string>
+    <string name="friends_invite_expires">Läuft am %1$s ab</string>
+    <string name="friends_invite_share">Einladung teilen</string>
+    <string name="friends_invite_subject">Tritt meinem privaten Noop-Kreis bei</string>
+    <string name="friends_invite_share_text">Tritt meinem privaten Noop-Kreis bei.\n\nServer: %1$s\nEinmalcode: %2$s\n\nÖffne in Noop Mehr &gt; Freunde &gt; Einladungsdaten eingeben. Die Freigabe beginnt erst, nachdem ich deine Anfrage angenommen habe.</string>
+    <string name="friends_invite_disclosure">Der Code läuft innerhalb von 72 Stunden ab und funktioniert einmal. Der Beitritt erstellt eine Anfrage; du entscheidest weiterhin über die Annahme.</string>
+    <string name="friends_join_title">Einem Kreis beitreten</string>
+    <string name="friends_join_body">Prüfe Ziel und Hinweise, bevor du eine Anfrage sendest.</string>
+    <string name="friends_server_address">Serveradresse</string>
+    <string name="friends_invite_code">Einladungscode</string>
+    <string name="friends_join_default_title">Standardmäßig geteilt</string>
+    <string name="friends_join_default_body">Energie, Belastung und Erholung</string>
+    <string name="friends_join_never_title">Nie an Friends gesendet</string>
+    <string name="friends_join_never_body">Roher Puls und R-R, Schlafphasen, Tagebuch, Trainings, Routen, Exporte und Gerätekennungen</string>
+    <string name="friends_join_trust_title">Vertrauen in den Betreiber</string>
+    <string name="friends_join_trust_body">Friends ist nicht Ende-zu-Ende-verschlüsselt. Der Betreiber des selbst gehosteten Servers kann auf die von dir freigegebenen Zusammenfassungsfelder zugreifen.</string>
+    <string name="friends_join_send">Beitrittsanfrage senden</string>
+
+    <string name="friends_sharing_directional">Freigaben gelten je Richtung und werden vom Server durchgesetzt.</string>
+    <string name="friends_daily_scores">Tageswerte</string>
+    <string name="friends_additional_details">Weitere Details</string>
+    <string name="friends_sleep_duration">Schlafdauer</string>
+    <string name="friends_hrv">HRV</string>
+    <string name="friends_rhr">Ruhepuls</string>
+    <string name="friends_additional_default_note">Weitere Details bleiben bei jeder neuen Freundschaft deaktiviert, bis du sie einschaltest.</string>
+    <string name="friends_they_share">Mit dir geteilt</string>
+    <string name="friends_shared">Geteilt</string>
+    <string name="friends_hidden">Ausgeblendet</string>
+    <string name="friends_remove_named">%1$s entfernen</string>
+    <string name="friends_remove_title">%1$s entfernen?</string>
+    <string name="friends_remove_body">Ihr seht die Werte des jeweils anderen nicht mehr. Eine neue Verbindung erfordert eine neue Einladung.</string>
+
+    <string name="friends_upload_pending">Friends wurde geladen, aber die neueste erlaubte Zusammenfassung konnte nicht hochgeladen werden. Noop versucht es erneut.</string>
+    <string name="friends_notice_profile_ready">Privates Profil ist bereit</string>
+    <string name="friends_notice_request_sent">Anfrage gesendet. Die Freigabe beginnt nach der Annahme.</string>
+    <string name="friends_notice_request_accepted">%1$s ist deinem Kreis beigetreten</string>
+    <string name="friends_notice_request_declined">Anfrage abgelehnt</string>
+    <string name="friends_notice_privacy_saved">Freigabe für %1$s aktualisiert</string>
+    <string name="friends_notice_removed">%1$s wurde entfernt. Freigabe beendet.</string>
+    <string name="friends_notice_profile_deleted">Serverprofil gelöscht. Lokale Gesundheitsdaten bleiben erhalten.</string>
+    <string name="friends_notice_pending_discarded">Ausstehende Einladung gelöscht</string>
+
+    <string name="friends_error_title">Freunde</string>
+    <string name="friends_error_input">Prüfe die Einladungsdaten und versuche es erneut.</string>
+    <string name="friends_error_network">Der private Friends-Server ist nicht erreichbar.</string>
+    <string name="friends_error_server">Der Friends-Server hat die Anfrage abgelehnt (HTTP %1$d).</string>
+    <string name="friends_error_response">Der Server hat eine unlesbare Friends-Antwort zurückgegeben.</string>
+    <string name="friends_error_storage">Noop konnte das Friends-Profil auf diesem Gerät nicht sicher speichern.</string>
+    <string name="friends_error_unknown">Friends konnte die Anfrage nicht abschließen.</string>
+</resources>

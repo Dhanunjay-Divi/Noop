@@ -170,6 +170,10 @@ public struct DeviceRegistryStore: Sendable {
         "rawImuSample",
         // v34: timestamped external body-weight readings are device-scoped canonical health data too.
         "bodyMeasurement",
+        // v39: editable manual/imported nutrition rows are user-owned and device-scoped under the
+        // dedicated `nutrition-log` id, so an explicit source deletion must remove both entries and
+        // their metricSeries projections.
+        "nutritionEntry",
     ]
 
     /// Permanently delete every recorded sample/derived row belonging to one device, across all

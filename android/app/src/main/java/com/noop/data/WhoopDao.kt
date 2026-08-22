@@ -750,6 +750,334 @@ interface WhoopDao : DeviceRegistryDao {
     @Query("DELETE FROM metricSeries WHERE deviceId = :deviceId AND key = :key")
     suspend fun deleteMetricSeries(deviceId: String, key: String): Int
 
+    // MARK: - Editable nutrition log (Swift nutritionEntry v39)
+
+    @Upsert
+    suspend fun upsertNutritionEntriesRaw(rows: List<NutritionEntryRow>)
+
+    @Query(
+        "SELECT * FROM nutritionEntry WHERE deviceId = :deviceId AND day >= :from AND day <= :to " +
+            "ORDER BY day ASC, occurredAt ASC, createdAt ASC, id ASC"
+    )
+    suspend fun nutritionEntries(
+        deviceId: String,
+        from: String,
+        to: String,
+    ): List<NutritionEntryRow>
+
+    @Query("SELECT * FROM nutritionEntry WHERE id = :id")
+    suspend fun nutritionEntry(id: String): NutritionEntryRow?
+
+    @Query(
+        "SELECT * FROM nutritionEntry WHERE deviceId = :deviceId AND origin = :origin " +
+            "AND day <= :throughDay ORDER BY occurredAt DESC, updatedAt DESC, id DESC LIMIT :limit"
+    )
+    suspend fun recentManualNutritionEntriesRaw(
+        deviceId: String,
+        origin: String,
+        throughDay: String,
+        limit: Int,
+    ): List<NutritionEntryRow>
+
+    @Query("DELETE FROM nutritionEntry WHERE id = :id")
+    suspend fun deleteNutritionEntryRaw(id: String)
+
+    @Transaction
+    suspend fun nutritionTotals(deviceId: String, day: String): NutritionDailyTotals =
+        NutritionLogContract.resolvedTotals(
+            entries = nutritionEntries(deviceId, day, day),
+            day = day,
+            deviceId = deviceId,
+        )
+
+    @Transaction
+    suspend fun recentManualNutritionEntries(
+        deviceId: String,
+        throughDay: String,
+        limit: Int,
+    ): List<NutritionEntryRow> {
+        val queryLimit = (limit * 12).coerceIn(24, 240)
+        val rows = recentManualNutritionEntriesRaw(
+            deviceId = deviceId,
+            origin = NutritionLogContract.MANUAL_ORIGIN,
+            throughDay = throughDay,
+            limit = queryLimit,
+        )
+        return NutritionLogContract.recentManualEntries(
+            entries = rows,
+            limit = limit,
+            deviceId = deviceId,
+        )
+    }
+
+    @Transaction
+    suspend fun upsertNutritionEntries(rows: List<NutritionEntryRow>) {
+        if (rows.isEmpty()) return
+        val clean = rows.map(NutritionLogContract::validated)
+        val touched = LinkedHashSet<Pair<String, String>>()
+        for (row in clean) {
+            nutritionEntry(row.id)?.let { touched += it.deviceId to it.day }
+        }
+        upsertNutritionEntriesRaw(clean)
+        for (row in clean) touched += row.deviceId to row.day
+        for ((deviceId, day) in touched) reprojectNutritionDay(deviceId, day)
+    }
+
+    @Transaction
+    suspend fun deleteNutritionEntry(id: String): Boolean {
+        val row = nutritionEntry(id) ?: return false
+        deleteNutritionEntryRaw(id)
+        reprojectNutritionDay(row.deviceId, row.day)
+        return true
+    }
+
+    @Transaction
+    suspend fun reprojectNutritionDay(deviceId: String, day: String) {
+        val totals = nutritionTotals(deviceId, day)
+        val values = listOf(
+            NutritionLogContract.CALORIES_KEY to totals.caloriesKcal,
+            NutritionLogContract.PROTEIN_KEY to totals.proteinG,
+            NutritionLogContract.CARBS_KEY to totals.carbsG,
+            NutritionLogContract.FAT_KEY to totals.fatG,
+        )
+        for ((key, value) in values) {
+            if (value != null) {
+                upsertMetricSeries(listOf(MetricSeriesRow(deviceId, day, key, value)))
+            } else {
+                deleteMetricSeriesPoint(deviceId, day, key)
+            }
+        }
+    }
+
+    // MARK: - Saved food/meal library and barcode cache (Swift v43)
+
+    @Upsert
+    suspend fun upsertNutritionCatalogItemsRaw(rows: List<NutritionCatalogItemRow>)
+
+    @Query(
+        "SELECT * FROM nutritionCatalogItem WHERE (:savedOnly = 0 OR isSaved = 1) " +
+            "ORDER BY isSaved DESC, COALESCE(lastUsedAt, 0) DESC, updatedAt DESC, " +
+            "name COLLATE NOCASE ASC, id ASC LIMIT :limit",
+    )
+    suspend fun nutritionCatalogItemsRaw(
+        savedOnly: Boolean,
+        limit: Int,
+    ): List<NutritionCatalogItemRow>
+
+    @Query("SELECT * FROM nutritionCatalogItem WHERE id = :id")
+    suspend fun nutritionCatalogItem(id: String): NutritionCatalogItemRow?
+
+    @Query("SELECT * FROM nutritionCatalogItem WHERE barcode = :barcode LIMIT 1")
+    suspend fun nutritionCatalogItemByBarcode(barcode: String): NutritionCatalogItemRow?
+
+    @Query(
+        "UPDATE nutritionCatalogItem SET lastUsedAt = :timestamp, " +
+            "updatedAt = MAX(updatedAt, :timestamp) WHERE id = :id",
+    )
+    suspend fun markNutritionCatalogItemUsedRaw(id: String, timestamp: Long): Int
+
+    @Query("DELETE FROM nutritionCatalogItem WHERE id = :id")
+    suspend fun deleteNutritionCatalogItemRaw(id: String): Int
+
+    suspend fun upsertNutritionCatalogItems(rows: List<NutritionCatalogItemRow>) {
+        if (rows.isEmpty()) return
+        upsertNutritionCatalogItemsRaw(rows.map(NutritionCatalogContract::validated))
+    }
+
+    suspend fun nutritionCatalogItems(
+        savedOnly: Boolean = true,
+        limit: Int = 250,
+    ): List<NutritionCatalogItemRow> =
+        nutritionCatalogItemsRaw(savedOnly, limit.coerceIn(1, 500_000))
+
+    suspend fun nutritionCatalogItemForBarcode(rawBarcode: String): NutritionCatalogItemRow? {
+        val barcode = requireNotNull(NutritionCatalogContract.normalizedBarcode(rawBarcode)) {
+            "invalid barcode"
+        }
+        return nutritionCatalogItemByBarcode(barcode)
+    }
+
+    suspend fun markNutritionCatalogItemUsed(id: String, timestamp: Long): Boolean {
+        require(timestamp > 0L) { "invalid nutrition catalog timestamp" }
+        return markNutritionCatalogItemUsedRaw(id, timestamp) > 0
+    }
+
+    suspend fun deleteNutritionCatalogItem(id: String): Boolean =
+        deleteNutritionCatalogItemRaw(id) > 0
+
+    // MARK: - Strength training (Swift v40)
+
+    @Upsert
+    suspend fun upsertStrengthExercisesRaw(rows: List<StrengthExerciseRow>)
+
+    @Query(
+        "SELECT * FROM strengthExercise WHERE (:includeArchived = 1 OR archivedAt IS NULL) " +
+            "ORDER BY isCustom ASC, name COLLATE NOCASE ASC, id ASC",
+    )
+    suspend fun strengthExercises(includeArchived: Boolean = false): List<StrengthExerciseRow>
+
+    @Query("SELECT * FROM strengthExercise WHERE id = :id")
+    suspend fun strengthExercise(id: String): StrengthExerciseRow?
+
+    @Query("SELECT COUNT(*) FROM strengthExercise WHERE id = :id")
+    suspend fun strengthExerciseCount(id: String): Int
+
+    @Upsert
+    suspend fun upsertStrengthRoutineRaw(row: StrengthRoutineRow)
+
+    @Upsert
+    suspend fun upsertStrengthRoutineExercisesRaw(rows: List<StrengthRoutineExerciseRow>)
+
+    @Query("DELETE FROM strengthRoutineExercise WHERE routineId = :routineId")
+    suspend fun deleteStrengthRoutineExercises(routineId: String)
+
+    @Query(
+        "SELECT * FROM strengthRoutine WHERE (:includeArchived = 1 OR archivedAt IS NULL) " +
+            "ORDER BY updatedAt DESC, name COLLATE NOCASE ASC, id ASC",
+    )
+    suspend fun strengthRoutineRows(includeArchived: Boolean = false): List<StrengthRoutineRow>
+
+    @Query("SELECT * FROM strengthRoutine WHERE id = :id")
+    suspend fun strengthRoutineRow(id: String): StrengthRoutineRow?
+
+    @Query(
+        "SELECT * FROM strengthRoutineExercise WHERE routineId = :routineId " +
+            "ORDER BY position ASC, id ASC",
+    )
+    suspend fun strengthRoutineExercises(routineId: String): List<StrengthRoutineExerciseRow>
+
+    @Query("SELECT COUNT(*) FROM strengthRoutine WHERE id = :id")
+    suspend fun strengthRoutineCount(id: String): Int
+
+    @Transaction
+    suspend fun saveStrengthRoutine(
+        routine: StrengthRoutineRow,
+        exercises: List<StrengthRoutineExerciseRow>,
+    ): StrengthRoutineSnapshot {
+        val cleanRoutine = StrengthTrainingContract.validated(routine)
+        val cleanExercises = exercises.map(StrengthTrainingContract::validated)
+        require(cleanExercises.all { it.routineId == cleanRoutine.id }) {
+            "strength routine exercise belongs to another routine"
+        }
+        for (exerciseId in cleanExercises.map { it.exerciseId }.distinct()) {
+            require(strengthExerciseCount(exerciseId) == 1) { "unknown strength exercise" }
+        }
+        upsertStrengthRoutineRaw(cleanRoutine)
+        deleteStrengthRoutineExercises(cleanRoutine.id)
+        if (cleanExercises.isNotEmpty()) {
+            upsertStrengthRoutineExercisesRaw(cleanExercises.sortedWith(compareBy({ it.position }, { it.id })))
+        }
+        return StrengthRoutineSnapshot(cleanRoutine, cleanExercises)
+    }
+
+    @Transaction
+    suspend fun strengthRoutines(includeArchived: Boolean = false): List<StrengthRoutineSnapshot> =
+        strengthRoutineRows(includeArchived).map { routine ->
+            StrengthRoutineSnapshot(routine, strengthRoutineExercises(routine.id))
+        }
+
+    @Upsert
+    suspend fun upsertStrengthSessionRaw(row: StrengthSessionRow)
+
+    @Upsert
+    suspend fun upsertStrengthSetsRaw(rows: List<StrengthSetRow>)
+
+    @Query("DELETE FROM strengthSet WHERE sessionId = :sessionId")
+    suspend fun deleteStrengthSets(sessionId: String)
+
+    @Query(
+        "SELECT * FROM strengthSession WHERE startedAt >= :from AND startedAt <= :to " +
+            "AND (:includeInProgress = 1 OR endedAt IS NOT NULL) ORDER BY startedAt DESC, id ASC",
+    )
+    suspend fun strengthSessionRows(
+        from: Long,
+        to: Long,
+        includeInProgress: Boolean = true,
+    ): List<StrengthSessionRow>
+
+    @Query("SELECT * FROM strengthSession WHERE id = :id")
+    suspend fun strengthSessionRow(id: String): StrengthSessionRow?
+
+    @Query(
+        "SELECT * FROM strengthSet WHERE sessionId = :sessionId " +
+            "ORDER BY exercisePosition ASC, setPosition ASC, id ASC",
+    )
+    suspend fun strengthSets(sessionId: String): List<StrengthSetRow>
+
+    @Query("SELECT COUNT(*) FROM strengthSession WHERE id = :id")
+    suspend fun strengthSessionCount(id: String): Int
+
+    @Query("DELETE FROM strengthSession WHERE id = :id")
+    suspend fun deleteStrengthSessionRaw(id: String)
+
+    @Transaction
+    suspend fun saveStrengthSession(
+        session: StrengthSessionRow,
+        sets: List<StrengthSetRow>,
+    ): StrengthSessionSnapshot {
+        val cleanSession = StrengthTrainingContract.validated(session)
+        val cleanSets = sets.map(StrengthTrainingContract::validated)
+        require(cleanSets.all { it.sessionId == cleanSession.id }) {
+            "strength set belongs to another session"
+        }
+        cleanSession.routineId?.let {
+            require(strengthRoutineCount(it) == 1) { "unknown strength routine" }
+        }
+        for (exerciseId in cleanSets.map { it.exerciseId }.distinct()) {
+            require(strengthExerciseCount(exerciseId) == 1) { "unknown strength exercise" }
+        }
+        upsertStrengthSessionRaw(cleanSession)
+        deleteStrengthSets(cleanSession.id)
+        if (cleanSets.isNotEmpty()) {
+            upsertStrengthSetsRaw(
+                cleanSets.sortedWith(
+                    compareBy({ it.exercisePosition }, { it.setPosition }, { it.id }),
+                ),
+            )
+        }
+        return StrengthSessionSnapshot(cleanSession, cleanSets)
+    }
+
+    @Transaction
+    suspend fun strengthSessions(
+        from: Long = 0,
+        to: Long = Long.MAX_VALUE,
+        includeInProgress: Boolean = true,
+    ): List<StrengthSessionSnapshot> =
+        strengthSessionRows(from, to, includeInProgress).map { session ->
+            StrengthSessionSnapshot(session, strengthSets(session.id))
+        }
+
+    @Transaction
+    suspend fun deleteStrengthSession(id: String): Boolean {
+        if (strengthSessionCount(id) != 1) return false
+        deleteStrengthSets(id)
+        deleteStrengthSessionRaw(id)
+        return true
+    }
+
+    @Query(
+        "SELECT COUNT(DISTINCT s.id) AS sessionCount, COUNT(st.id) AS completedSetCount, " +
+            "COALESCE(SUM(st.reps), 0) AS totalReps, " +
+            "COALESCE(SUM(CASE WHEN st.loadKg IS NOT NULL AND st.reps IS NOT NULL " +
+            "THEN st.loadKg * st.reps ELSE 0 END), 0) AS loadedVolumeKg, " +
+            "COALESCE(SUM(CASE WHEN st.loadKg IS NOT NULL AND st.reps IS NOT NULL " +
+            "THEN 1 ELSE 0 END), 0) AS loadedVolumeSetCount " +
+            "FROM strengthSession s LEFT JOIN strengthSet st " +
+            "ON st.sessionId = s.id AND st.completedAt IS NOT NULL " +
+            "WHERE s.startedAt >= :from AND s.startedAt <= :to AND s.endedAt IS NOT NULL",
+    )
+    suspend fun strengthSummary(from: Long, to: Long): StrengthSummary
+
+    @Query(
+        "SELECT :exerciseId AS exerciseId, COUNT(*) AS completedSetCount, " +
+            "MAX(loadKg) AS maxLoadKg, MAX(reps) AS maxReps, " +
+            "MAX(CASE WHEN loadKg IS NOT NULL AND reps IS NOT NULL " +
+            "THEN loadKg * reps END) AS bestSetVolumeKg " +
+            "FROM strengthSet WHERE exerciseId = :exerciseId AND completedAt IS NOT NULL",
+    )
+    suspend fun strengthExerciseProgress(exerciseId: String): StrengthExerciseProgress
+
     // MARK: - Lab Book markers (Swift labMarker, v17 / LabMarkerStore.swift)
     //
     // The book is `labMarker` (one row per dated reading the user entered themselves); the daily
@@ -1050,6 +1378,50 @@ interface WhoopDao : DeviceRegistryDao {
     /** Latest battery sample for a device (most recent ts), or null. */
     @Query("SELECT * FROM battery WHERE deviceId = :deviceId ORDER BY ts DESC LIMIT 1")
     suspend fun latestBattery(deviceId: String): BatterySample?
+
+    // MARK: - Durable Coach history and user-managed memory
+
+    @Upsert
+    suspend fun upsertCoachMessage(row: CoachMessageRow)
+
+    @Query(
+        "DELETE FROM coachMessage WHERE id NOT IN (" +
+            "SELECT id FROM coachMessage ORDER BY createdAt DESC, id DESC LIMIT :limit)"
+    )
+    suspend fun pruneCoachMessages(limit: Int)
+
+    @Query(
+        "SELECT * FROM (SELECT * FROM coachMessage ORDER BY createdAt DESC, id DESC LIMIT :limit) " +
+            "ORDER BY createdAt ASC, id ASC"
+    )
+    suspend fun coachMessages(limit: Int): List<CoachMessageRow>
+
+    @Query("DELETE FROM coachMessage")
+    suspend fun clearCoachMessages(): Int
+
+    @Transaction
+    suspend fun appendCoachMessage(row: CoachMessageRow, limit: Int) {
+        upsertCoachMessage(row)
+        pruneCoachMessages(limit)
+    }
+
+    @Upsert
+    suspend fun upsertCoachMemory(row: CoachMemoryRow)
+
+    @Query(
+        "SELECT * FROM coachMemory WHERE (:includeDisabled = 1 OR enabled = 1) " +
+            "ORDER BY updatedAt DESC, id DESC"
+    )
+    suspend fun coachMemories(includeDisabled: Boolean): List<CoachMemoryRow>
+
+    @Query("SELECT COUNT(*) FROM coachMemory")
+    suspend fun coachMemoryCount(): Int
+
+    @Query("SELECT COUNT(*) FROM coachMemory WHERE id = :id")
+    suspend fun coachMemoryCount(id: String): Int
+
+    @Query("DELETE FROM coachMemory WHERE id = :id")
+    suspend fun deleteCoachMemory(id: String): Int
 
     // MARK: - #547 one-time heal: purge rows polluted by a bad-strap-clock timestamp
     //

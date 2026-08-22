@@ -47,6 +47,7 @@ struct NOOPWatchApp: App {
         switch ProcessInfo.processInfo.environment["NOOP_DEMO_SCREEN"] {
         case "breathe":   WatchBreatheView()
         case "workout":   WatchWorkoutView()
+        case "strength":  WatchStrengthView()
         case "intervals": WatchIntervalView()
         case "glance":    WatchGlanceView()
         default:          WatchRootView()

@@ -436,7 +436,7 @@ private fun PhaseChip(label: String, color: Color) {
     Text(
         label,
         style = NoopType.number(15f, weight = androidx.compose.ui.text.font.FontWeight.Bold)
-            .copy(letterSpacing = 2.sp),
+            .copy(letterSpacing = 0.sp),
         color = color,
         modifier = Modifier
             .clip(shape)

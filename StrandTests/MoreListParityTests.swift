@@ -2,12 +2,12 @@ import XCTest
 @testable import Strand
 
 /// Guards the #805/#811 regression: the v7.3.1 #766 alarm consolidation folded Smart Alarm under a
-/// single "Alarms" entry in the macOS/iPad sidebar (`NavItem.smartAlarm`), but the iPhone `RootTabView`
-/// More list dropped the row, leaving Alarms unreachable on iPhone.
+/// single Sleep Planner entry in the macOS/iPad sidebar (`NavItem.smartAlarm`), but the iPhone
+/// `RootTabView` More list dropped the row, leaving the planner unreachable on iPhone.
 ///
 /// The iPhone More list is a `@ViewBuilder` (not directly introspectable), so this pins the *contract*
 /// it must mirror: the shared sidebar exposes the `smartAlarm` destination with the exact SF Symbol the
-/// restored `MoreRow("Alarms", "alarm.fill")` row uses. A future icon rename then fails here so the two
+/// restored `MoreRow("Sleep Planner", "alarm.fill")` row uses. A future icon rename then fails here so the two
 /// shells get fixed in lockstep rather than silently drifting apart again.
 ///
 /// Notifications (`NavItem.notifications`) is deliberately NOT mirrored on iPhone: its screen
@@ -22,11 +22,11 @@ final class MoreListParityTests: XCTestCase {
         return try String(contentsOf: repoRoot.appendingPathComponent(relativePath), encoding: .utf8)
     }
 
-    /// Alarms is the destination the iPhone More list had been missing; it must exist in the shared
-    /// sidebar enum (the iPhone `MoreRow("Alarms")` routes to the same `SmartAlarmView`).
+    /// Sleep Planner is the destination the iPhone More list had been missing; it must exist in the shared
+    /// sidebar enum (the iPhone row routes to the same `SmartAlarmView`).
     func testSidebarExposesAlarms() {
         XCTAssertTrue(NavItem.allCases.contains(.smartAlarm),
-                      "Alarms (smartAlarm) must stay a sidebar destination the iPhone More list mirrors.")
+                      "Sleep Planner (smartAlarm) must stay a sidebar destination the iPhone More list mirrors.")
     }
 
     /// The restored iPhone Alarms row pins this exact SF Symbol; keep it identical to the sidebar so the
@@ -39,6 +39,29 @@ final class MoreListParityTests: XCTestCase {
     /// More list, so this only documents that the enum case is still the macOS home for it.
     func testNotificationsRemainsAMacOSSidebarDestination() {
         XCTAssertTrue(NavItem.allCases.contains(.notifications))
+    }
+
+    /// Safety is intentionally a first-class destination on both app shells. It must not disappear
+    /// into Settings because a stressful moment is exactly when a user should not have to hunt.
+    func testSafetyRemainsAReachableSidebarDestination() {
+        XCTAssertTrue(NavItem.allCases.contains(.safety))
+        XCTAssertEqual(NavItem.safety.icon, "shield.lefthalf.filled")
+        XCTAssertEqual(NavGroup.group(containing: .safety)?.id, "safety",
+                       "Safety should remain an always-visible singleton group, not a buried app row.")
+    }
+
+    /// Nutrition is now an editable production surface, not only an import setting. Keep it reachable
+    /// in both shells and in the deterministic route used for visual-regression captures.
+    func testNutritionRemainsReachableAcrossAppShells() throws {
+        XCTAssertTrue(NavItem.allCases.contains(.nutrition))
+        XCTAssertEqual(NavItem.nutrition.icon, "fork.knife")
+        XCTAssertNotNil(NavGroup.group(containing: .nutrition))
+
+        let shell = try sourceText("StrandiOS/App/RootTabView.swift")
+        XCTAssertTrue(shell.contains("MoreRow(\"Nutrition\", \"fork.knife\", .nutrition)"))
+        XCTAssertTrue(shell.contains("case .nutrition:       NutritionLogView()"))
+        XCTAssertTrue(shell.contains("case \"nutrition\": return .nutrition"),
+                      "The real Nutrition destination needs a deterministic simulator capture route.")
     }
 
     // MARK: - M5 gate (S1 grouping): every destination stays reachable after grouping
@@ -187,10 +210,16 @@ final class MoreListParityTests: XCTestCase {
                       "Quick Access should lead the More index before the complete grouped catalogue.")
         XCTAssertTrue(shell.contains("ForEach(MoreSectionPrefs.quickAccess"),
                       "The rendered shortcuts must use the tested shared four-item contract.")
+        XCTAssertTrue(MoreSectionPrefs.quickAccess.contains(where: { $0.id == "safety" }),
+                      "Safety must stay in Quick Access so it is not hidden behind the collapsed App group.")
+        XCTAssertTrue(MoreSectionPrefs.quickAccess.contains(where: { $0.id == "friends" }),
+                      "Friends must remain one tap away after Workouts moves into primary navigation.")
         XCTAssertTrue(shell.contains("MoreQuickAccessLabel(item: item)"),
                       "Keep the tile view split out so RootTabView remains cheap to type-check.")
         XCTAssertTrue(shell.contains("MoreRow(\"Profile\", \"person.crop.circle.fill\", .profile)"),
                       "Profile must stay visible in the Body index instead of being buried in Settings.")
+        XCTAssertTrue(shell.contains("MoreRow(\"Friends\", \"person.2.fill\", .friends)"),
+                      "The private Friends surface must remain reachable from the complete index.")
         XCTAssertTrue(shell.contains("case .profile:         SettingsView(focus: .profile)"),
                       "The visible Profile row must open the focused editor backed by ProfileStore.")
     }

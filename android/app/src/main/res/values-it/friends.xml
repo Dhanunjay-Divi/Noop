@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nav_friends">Amici</string>
+    <string name="friends_title">Amici</string>
+    <string name="friends_subtitle">Punteggi privati. Il tuo server. Le tue regole.</string>
+    <string name="friends_refresh">Aggiorna Amici</string>
+    <string name="friends_you">Tu</string>
+    <string name="friends_overflow_count">+%1$d</string>
+    <string name="friends_working">Operazione in corso…</string>
+    <string name="friends_action_ok">OK</string>
+    <string name="friends_action_cancel">Annulla</string>
+    <string name="friends_action_done">Fine</string>
+    <string name="friends_action_save">Salva condivisione</string>
+    <string name="friends_action_remove">Rimuovi</string>
+    <string name="friends_action_decline">Rifiuta</string>
+
+    <string name="friends_server_title">Ospita la tua cerchia privata</string>
+    <string name="friends_server_body">Amici funziona su un server Noop sotto il tuo controllo. Non esistono account Noop o profili pubblici.</string>
+    <string name="friends_server_setup_action">Configura il server</string>
+    <string name="friends_join_details">Inserisci i dati dell\'invito</string>
+    <string name="friends_server_invite_note">Un invito include l\'indirizzo del server e un codice monouso. Puoi unirti senza la chiave amministratore.</string>
+    <string name="friends_pending_title">Completa l\'invito</string>
+    <string name="friends_pending_body">Noop ha salvato questo tentativo perché la risposta del server è stata interrotta. Riprova con lo stesso codice monouso oppure elimina in modo sicuro ogni profilo creato sul server.</string>
+    <string name="friends_pending_retry">Riprova l\'invito</string>
+    <string name="friends_pending_discard">Annulla questo tentativo</string>
+    <string name="friends_pending_discard_title">Annullare questo tentativo di accesso?</string>
+    <string name="friends_pending_discard_body">Noop chiederà al server di eliminare ogni profilo e riepilogo Friends collegato a questa registrazione in sospeso prima di rimuovere la credenziale protetta dal dispositivo.</string>
+    <string name="friends_pending_discard_action">Elimina tentativo</string>
+    <string name="friends_profile_title">Crea il tuo profilo privato</string>
+    <string name="friends_profile_body">Il tuo nome è visibile solo agli amici accettati su %1$s.</string>
+    <string name="friends_display_name">Nome visualizzato</string>
+    <string name="friends_create_profile">Crea profilo privato</string>
+    <string name="friends_profile_security_note">La chiave amministratore viene usata una volta per emettere credenziali membro separate. Amici non usa la crittografia end-to-end: scegli un gestore del server di cui ti fidi.</string>
+
+    <string name="friends_circle_overline">La tua cerchia</string>
+    <plurals name="friends_people_count">
+        <item quantity="one">%1$d persona</item>
+        <item quantity="other">%1$d persone</item>
+    </plurals>
+    <string name="friends_invite_action">Invita un amico</string>
+    <string name="friends_enter_invite_code">Inserisci un codice invito</string>
+    <string name="friends_requests_title">Richieste</string>
+    <string name="friends_request_incoming">Vuole unirsi alla tua cerchia</string>
+    <string name="friends_request_outgoing">In attesa di accettazione</string>
+    <string name="friends_accept_named">Accetta %1$s</string>
+    <string name="friends_today_title">Oggi</string>
+    <string name="friends_private">Privato</string>
+    <plurals name="friends_friend_count">
+        <item quantity="one">%1$d amico</item>
+        <item quantity="other">%1$d amici</item>
+    </plurals>
+    <string name="friends_empty_title">La tua cerchia inizia qui</string>
+    <string name="friends_empty_body">Invita una persona di fiducia. I punteggi appaiono dopo che si unisce e accetti la richiesta.</string>
+    <string name="friends_waiting_shared_day">In attesa di una giornata condivisa</string>
+    <string name="friends_scores_waiting">I punteggi appariranno dopo che %1$s avrà caricato un riepilogo giornaliero.</string>
+    <string name="friends_open_sharing_named">Apri i controlli di condivisione per %1$s</string>
+    <string name="friends_score_charge">Carica</string>
+    <string name="friends_score_effort">Sforzo</string>
+    <string name="friends_score_rest">Riposo</string>
+    <string name="friends_detail_sleep">Sonno %1$s</string>
+    <string name="friends_detail_hrv">HRV %1$s ms</string>
+    <string name="friends_detail_rhr">FC riposo %1$s bpm</string>
+    <string name="friends_duration_hours_minutes">%1$d h %2$d min</string>
+    <string name="friends_shared_today">Condiviso oggi</string>
+    <string name="friends_shared_yesterday">Condiviso ieri</string>
+    <string name="friends_last_shared">Ultima condivisione</string>
+    <string name="friends_last_shared_date">Ultima condivisione: %1$s</string>
+
+    <string name="friends_privacy_title">Solo riepiloghi, per scelta</string>
+    <string name="friends_privacy_body">Frequenza cardiaca grezza, intervalli R-R, fasi del sonno, diari, allenamenti, percorsi, esportazioni e identificativi del dispositivo non compaiono mai in Amici.</string>
+    <string name="friends_leave_action">Lascia la cerchia ed elimina la copia sul server</string>
+    <string name="friends_leave_title">Lasciare questa cerchia?</string>
+    <string name="friends_leave_body">Noop rimuoverà amicizie, credenziali membro e riepiloghi Amici dedicati da questo server. I dati sanitari sul dispositivo e il backup separato resteranno intatti.</string>
+
+    <string name="friends_invite_title">Invita un amico</string>
+    <string name="friends_invite_body">Accesso monouso alla tua cerchia privata.</string>
+    <string name="friends_invite_expires">Scade il %1$s</string>
+    <string name="friends_invite_share">Condividi invito</string>
+    <string name="friends_invite_subject">Unisciti alla mia cerchia Noop privata</string>
+    <string name="friends_invite_share_text">Unisciti alla mia cerchia Noop privata.\n\nServer: %1$s\nCodice monouso: %2$s\n\nIn Noop, apri Altro &gt; Amici &gt; Inserisci i dati dell\'invito. La condivisione inizia solo dopo che avrò accettato la richiesta.</string>
+    <string name="friends_invite_disclosure">Il codice scade entro 72 ore e funziona una sola volta. L\'adesione crea una richiesta; decidi comunque tu se accettarla.</string>
+    <string name="friends_join_title">Unisciti a una cerchia</string>
+    <string name="friends_join_body">Controlla destinazione e informativa prima di inviare una richiesta.</string>
+    <string name="friends_server_address">Indirizzo server</string>
+    <string name="friends_invite_code">Codice invito</string>
+    <string name="friends_join_default_title">Condiviso per impostazione predefinita</string>
+    <string name="friends_join_default_body">Carica, Sforzo e Riposo</string>
+    <string name="friends_join_never_title">Mai inviato ad Amici</string>
+    <string name="friends_join_never_body">FC e R-R grezzi, fasi del sonno, diario, allenamenti, percorsi, esportazioni e identificativi del dispositivo</string>
+    <string name="friends_join_trust_title">Fiducia nel gestore</string>
+    <string name="friends_join_trust_body">Amici non usa la crittografia end-to-end. Il gestore del server self-hosted può accedere ai campi di riepilogo che scegli di inviare.</string>
+    <string name="friends_join_send">Invia richiesta di adesione</string>
+
+    <string name="friends_sharing_directional">La condivisione è direzionale e viene applicata dal server.</string>
+    <string name="friends_daily_scores">Punteggi giornalieri</string>
+    <string name="friends_additional_details">Dettagli aggiuntivi</string>
+    <string name="friends_sleep_duration">Durata del sonno</string>
+    <string name="friends_hrv">HRV</string>
+    <string name="friends_rhr">Frequenza cardiaca a riposo</string>
+    <string name="friends_additional_default_note">I dettagli aggiuntivi restano disattivati per ogni nuova amicizia finché non li abiliti.</string>
+    <string name="friends_they_share">Condivide con te</string>
+    <string name="friends_shared">Condiviso</string>
+    <string name="friends_hidden">Nascosto</string>
+    <string name="friends_remove_named">Rimuovi %1$s</string>
+    <string name="friends_remove_title">Rimuovere %1$s?</string>
+    <string name="friends_remove_body">Nessuno dei due vedrà più i punteggi dell\'altro. Per riconnettervi servirà un nuovo invito.</string>
+
+    <string name="friends_upload_pending">Amici è stato caricato, ma non è stato possibile inviare l\'ultimo riepilogo consentito. Noop riproverà.</string>
+    <string name="friends_notice_profile_ready">Profilo privato pronto</string>
+    <string name="friends_notice_request_sent">Richiesta inviata. La condivisione inizia dopo l\'accettazione.</string>
+    <string name="friends_notice_request_accepted">%1$s si è unito alla tua cerchia</string>
+    <string name="friends_notice_request_declined">Richiesta rifiutata</string>
+    <string name="friends_notice_privacy_saved">Condivisione con %1$s aggiornata</string>
+    <string name="friends_notice_removed">%1$s rimosso. Condivisione interrotta.</string>
+    <string name="friends_notice_profile_deleted">Profilo sul server eliminato. Dati sanitari locali conservati.</string>
+    <string name="friends_notice_pending_discarded">Invito in sospeso eliminato</string>
+
+    <string name="friends_error_title">Amici</string>
+    <string name="friends_error_input">Controlla i dati dell\'invito e riprova.</string>
+    <string name="friends_error_network">Impossibile raggiungere il server Amici privato.</string>
+    <string name="friends_error_server">Il server Amici ha rifiutato la richiesta (HTTP %1$d).</string>
+    <string name="friends_error_response">Il server ha restituito una risposta Amici illeggibile.</string>
+    <string name="friends_error_storage">Noop non ha potuto salvare in modo sicuro il profilo Amici su questo dispositivo.</string>
+    <string name="friends_error_unknown">Amici non ha potuto completare la richiesta.</string>
+</resources>

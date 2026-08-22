@@ -109,6 +109,7 @@ interface DeviceRegistryDao {
     // delete*For DAO method is wired into deleteDeviceData so a future migration can't reintroduce the gap.
     @Query("DELETE FROM sleepStateSample WHERE deviceId = :deviceId") suspend fun deleteSleepStatesFor(deviceId: String)
     @Query("DELETE FROM labMarker WHERE deviceId = :deviceId") suspend fun deleteLabMarkersFor(deviceId: String)
+    @Query("DELETE FROM nutritionEntry WHERE deviceId = :deviceId") suspend fun deleteNutritionEntriesFor(deviceId: String)
     @Query("DELETE FROM liveSession WHERE deviceId = :deviceId") suspend fun deleteLiveSessionsFor(deviceId: String)
     @Query("DELETE FROM dismissedWorkout WHERE deviceId = :deviceId") suspend fun deleteDismissedWorkoutsFor(deviceId: String)
     @Query("DELETE FROM dismissedSleep WHERE deviceId = :deviceId") suspend fun deleteDismissedSleepsFor(deviceId: String)

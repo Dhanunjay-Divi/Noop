@@ -64,6 +64,14 @@ object ReadinessEngine {
         val acwr: Double?,
         /** Foster training monotony over the last week (null if not enough strain history). */
         val monotony: Double?,
+        /** Calendar day this read describes. Null only for legacy callers that did not select a day. */
+        val asOfDay: String? = null,
+        /** Certainty from current recovery-signal count and baseline coverage. */
+        val confidence: ScoreConfidence = ScoreConfidence.CALIBRATING,
+        /** Prior baseline days supporting the thinnest evaluated recovery signal. */
+        val baselineDays: Int = 0,
+        /** Evidence constraints a presentation can disclose beside the read. */
+        val limitations: List<String> = emptyList(),
     )
 
     /**
@@ -186,11 +194,21 @@ object ReadinessEngine {
             return Readiness(
                 level = Level.INSUFFICIENT,
                 headline = "Readiness",
-                summary = "Wear the strap for a few nights and your readiness read will appear here.",
+                summary = "A current daily row and enough prior nights are needed for this read.",
                 signals = emptyList(), acwr = null, monotony = null,
+                asOfDay = today, confidence = ScoreConfidence.CALIBRATING, baselineDays = 0,
+                limitations = listOf("No daily recovery row is available for this date."),
             )
         }
         val history = sorted.filter { it.day < latest.day }   // everything before today
+
+        // Metadata only: these counts explain the evidence supporting the read but never alter its level.
+        val trailing = history.takeLast(baselineWindow)
+        val baselineCountByKey = mapOf(
+            "hrv" to trailing.count { it.avgHrv != null },
+            "rhr" to trailing.count { it.restingHr != null },
+            "respRate" to trailing.count { it.respRateBpm != null },
+        )
 
         val signals = mutableListOf<Signal>()
 
@@ -298,9 +316,33 @@ object ReadinessEngine {
             signals = signals,
             hasHistory = history.isNotEmpty() || acwr != null,
         )
+        val recoveryKeys = setOf("hrv", "rhr", "respRate")
+        val recoverySignals = signals.filter { it.key in recoveryKeys }
+        val supportingCounts = recoverySignals.mapNotNull { baselineCountByKey[it.key] }
+        val baselineDays = supportingCounts.minOrNull() ?: baselineCountByKey.values.maxOrNull() ?: 0
+        val confidence = when {
+            recoverySignals.isEmpty() -> ScoreConfidence.CALIBRATING
+            recoverySignals.size >= 2 && baselineDays >= Baselines.minNightsTrust -> ScoreConfidence.SOLID
+            else -> ScoreConfidence.BUILDING
+        }
+        val limitations = buildList {
+            if (recoverySignals.isEmpty()) {
+                add("No current recovery signal has enough prior variation for comparison.")
+            } else if (recoverySignals.size == 1) {
+                add("This read is based on one current recovery signal.")
+            }
+            if (recoverySignals.isNotEmpty() && baselineDays < Baselines.minNightsTrust) {
+                add("The personal baseline has $baselineDays supporting prior days and is still building.")
+            }
+            if (acwr != null) {
+                add("The recent-load ratio is descriptive and does not affect readiness.")
+            }
+        }
         return Readiness(
             level = level, headline = headline, summary = summary,
             signals = signals, acwr = acwr, monotony = monotony,
+            asOfDay = latest.day, confidence = confidence,
+            baselineDays = baselineDays, limitations = limitations,
         )
     }
 

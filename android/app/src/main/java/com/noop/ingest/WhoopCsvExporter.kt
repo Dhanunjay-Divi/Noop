@@ -5,6 +5,9 @@ import android.net.Uri
 import com.noop.data.DailyMetric
 import com.noop.data.JournalEntry
 import com.noop.data.MetricSeriesRow
+import com.noop.data.PortableStrengthExercise
+import com.noop.data.PortableUserData
+import com.noop.data.PortableUserDataCodec
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
@@ -32,8 +35,10 @@ import kotlin.math.round
  * the only encoding that round-trips a timestamp back to the same instant. A trailing "Source"
  * column (which both parsers provably ignore — they key off named columns, never position) marks
  * on-device computed rows as "noop (APPROXIMATE)" per the house rules. A noop_metric_series.json
- * sidecar carries the full metricSeries for fidelity and is deliberately NOT re-imported — the
- * .noopdb backup remains the lossless restore path; this zip is the portable, WHOOP-shaped one.
+ * sidecar carries the full metricSeries for inspection. A separate versioned
+ * `noop_user_data.json` sidecar round-trips editable nutrition and normalized Strength Trainer
+ * records across Apple and Android; the native encrypted backup remains the same-platform
+ * full-device restore path.
  */
 object WhoopCsvExporter {
 
@@ -394,6 +399,26 @@ object WhoopCsvExporter {
                 }
             }
         }
+        val nutritionEntries = repo.nutritionEntries("0000-01-01", "9999-12-31")
+        val nutritionCatalogItems = repo.nutritionCatalogItems(
+            savedOnly = false,
+            limit = 500_000,
+        )
+        val strengthExercises = repo.strengthExercises(includeArchived = true)
+        val strengthRoutines = repo.strengthRoutines(includeArchived = true)
+        val strengthSessions = repo.strengthSessions(includeInProgress = true)
+        val portable = PortableUserDataCodec.encode(
+            PortableUserData(
+                exportedAt = System.currentTimeMillis() / 1_000L,
+                nutritionEntries = nutritionEntries,
+                nutritionCatalogItems = nutritionCatalogItems,
+                strengthExercises = strengthExercises.map(::PortableStrengthExercise),
+                strengthRoutines = strengthRoutines.map { it.routine },
+                strengthRoutineExercises = strengthRoutines.flatMap { it.exercises },
+                strengthSessions = strengthSessions.map { it.session },
+                strengthSets = strengthSessions.flatMap { it.sets },
+            ),
+        )
 
         // Classify a workout for the parser-ignored Source column. The on-device detected workouts
         // carry the "-noop" device id; manual logging uses source "manual"; everything else is an
@@ -416,11 +441,13 @@ object WhoopCsvExporter {
                 "workouts.csv" to workoutsCsv(workouts, ::workoutSource).toByteArray(),
                 "journal_entries.csv" to journalCsv(journal).toByteArray(),
                 "noop_metric_series.json" to metricSeriesJson(sidecarRows).toByteArray(),
+                PortableUserDataCodec.FILE_NAME to portable,
             ),
         )
         context.contentResolver.openOutputStream(uri)?.use { it.write(zip); it.flush() }
             ?: throw IOException("Could not open the chosen file for writing.")
         return "Exported ${daily.size} days, ${sleeps.size} sleeps, ${workouts.size} workouts, " +
-            "${journal.size} journal entries."
+            "${journal.size} journal entries, ${nutritionEntries.size} nutrition entries, and " +
+            "${strengthSessions.size} strength sessions."
     }
 }

@@ -26,6 +26,10 @@ final class WatchSessionBridge: NSObject, ObservableObject {
     /// Also one half of the push gate below: a rebuilt snapshot whose headline values match this one is
     /// not worth a budgeted transfer, so `pushLatest` skips it.
     @Published private(set) var lastSent: WatchScoreSnapshot?
+    /// Latest routine/active-session state sent independently of the score transfer budget.
+    @Published private(set) var lastStrengthPlan: WatchStrengthPlan?
+    /// Invoked on the main actor after the Watch asks to start a routine.
+    var startStrengthRoutineHandler: ((String) -> Void)?
     /// When the last snapshot was actually pushed, the other half of the push gate. nil until the first
     /// push of this process, which therefore always passes the spacing check.
     private var lastPushedAt: Date?
@@ -94,6 +98,55 @@ final class WatchSessionBridge: NSObject, ObservableObject {
     /// self-throttled the same way; named for the app-entry call site to read clearly.
     func pushLatest(from model: AppModel) async {
         await sendLatest(from: model)
+        await pushStrengthLatest(from: model)
+    }
+
+    /// Sync compact routine and active-session state. Unlike score snapshots, this is user-edited
+    /// latest state and is sent immediately when it changes rather than using the complication budget.
+    func pushStrengthLatest(from model: AppModel) async {
+        guard let trainer = try? await model.repo.strengthTrainerSnapshot() else { return }
+        let exerciseByID = Dictionary(
+            trainer.exercises.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let routines = trainer.routines.map { routine in
+            WatchStrengthRoutine(
+                id: routine.routine.id,
+                name: routine.routine.name,
+                exerciseNames: routine.exercises.compactMap {
+                    exerciseByID[$0.exerciseId]?.name
+                },
+                targetSetCount: routine.exercises.reduce(0) { $0 + $1.targetSets }
+            )
+        }
+        let active = trainer.activeSession
+        let next = WatchStrengthPlan(
+            routines: routines,
+            activeSessionName: active?.session.name ?? (active == nil ? nil : "Strength workout"),
+            activeCompletedSets: active?.sets.filter { $0.completedAt != nil }.count ?? 0,
+            activeTargetSets: active?.sets.count ?? 0,
+            updatedAt: Date()
+        )
+        guard Self.strengthContentChanged(from: lastStrengthPlan, to: next) else { return }
+        lastStrengthPlan = next
+        next.save()
+
+        guard let session, session.activationState == .activated,
+              let data = try? JSONEncoder().encode(next) else { return }
+        var context = session.applicationContext
+        context[WatchStrengthPlan.contextKey] = data
+        try? session.updateApplicationContext(context)
+    }
+
+    static func strengthContentChanged(
+        from last: WatchStrengthPlan?,
+        to next: WatchStrengthPlan
+    ) -> Bool {
+        guard let last else { return true }
+        return last.routines != next.routines
+            || last.activeSessionName != next.activeSessionName
+            || last.activeCompletedSets != next.activeCompletedSets
+            || last.activeTargetSets != next.activeTargetSets
     }
 
     /// The budget gate: complication/context transfers share a ~50/day system budget, so a push must
@@ -220,7 +273,9 @@ final class WatchSessionBridge: NSObject, ObservableObject {
             let data = try JSONEncoder().encode(snap)
             // updateApplicationContext replaces any previous context, so the watch always gets exactly
             // the latest snapshot and never a queued backlog.
-            try session.updateApplicationContext([Self.contextKey: data])
+            var context = session.applicationContext
+            context[Self.contextKey] = data
+            try session.updateApplicationContext(context)
         } catch {
             // A failed context update is non-fatal: the app-group mirror above still carries the latest
             // value, and the next dashboard refresh will try again.
@@ -263,17 +318,28 @@ extension WatchSessionBridge: WCSessionDelegate {
     nonisolated func session(_ session: WCSession,
                              didReceiveMessage message: [String: Any],
                              replyHandler: @escaping ([String: Any]) -> Void) {
+        if let routineID = message[WatchStrengthPlan.startRoutineMessageKey] as? String,
+           !routineID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Task { @MainActor in
+                self.startStrengthRoutineHandler?(routineID)
+            }
+            replyHandler(["accepted": true])
+            return
+        }
         guard message[Self.requestLatestKey] != nil else {
             replyHandler([:])
             return
         }
-        // Read the last value we mirrored into the shared group and hand it straight back. Done off the
-        // main actor since the request arrives on WC's queue; the app-group read is process-safe.
+        // Read the latest mirrored values and hand them straight back. Done off the main actor since
+        // the request arrives on WC's queue; app-group reads are process-safe.
+        var reply: [String: Any] = [:]
         if let snap = WatchScoreSnapshot.load(), let data = try? JSONEncoder().encode(snap) {
-            replyHandler([Self.contextKey: data])
-        } else {
-            replyHandler([:])
+            reply[Self.contextKey] = data
         }
+        if let plan = WatchStrengthPlan.load(), let data = try? JSONEncoder().encode(plan) {
+            reply[WatchStrengthPlan.contextKey] = data
+        }
+        replyHandler(reply)
     }
 }
 #endif

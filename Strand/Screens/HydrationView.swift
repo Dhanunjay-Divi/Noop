@@ -8,7 +8,7 @@ import StrandAnalytics
 // tinted the action blue, filling to today's fraction of goal with the litre figure counting up over it.
 // The day total sits in a filling `LiquidTube` (the same horizontal vessel Today's grid uses), the three
 // quick-log buttons (Sip / Cup / Bottle) stay in the secondary NoopButton style, and the 7-day mini bars
-// remain. Frosted `card {}` surfaces (rounded 22 + resting hairline), the day-of-sky backdrop, and
+// remain. Shared `card {}` surfaces, the day-of-sky backdrop, and
 // `LiquidPressStyle` on the tappable drink rows line the screen up with the liquid Today + batch-1 tabs.
 // BYTE-PARITY twin of the Android `HydrationScreen`: the day total + history come from the local-only
 // `HydrationStore` series (additive day total), and the goal is the pure `HydrationGoal` engine (profile
@@ -33,11 +33,6 @@ struct HydrationView: View {
     /// #798 - the user's custom container size (ml), editable from the custom-size sheet. Persisted local-only.
     @AppStorage(HydrationStore.customSizeKey) private var customSizeML = HydrationGoal.cupML
     @State private var showCustomSizeSheet = false
-
-    /// "Card transparency" (0–100, default 100): fades the hydration cards in lockstep with the frosted
-    /// cards; content stays readable. Mirrors Kotlin `NoopPrefs.cardOpacityPercent`.
-    @AppStorage(CardAppearancePrefs.opacityKey) private var cardOpacityPercent = CardAppearancePrefs.defaultPercent
-    private var cardOpacity: Double { max(0, min(1, Double(cardOpacityPercent) / 100)) }
 
     private var goalML: Int { repo.hydrationGoalML(profileSex: profile.sex) }
     private var fraction: Double { HydrationGoal.fraction(totalML: totalML, goalML: goalML) }
@@ -123,19 +118,13 @@ struct HydrationView: View {
         }
     }
 
-    // MARK: - Frosted card helper (matches LiquidTodayView.card: rounded 22 + resting hairline)
+    // MARK: - Shared card helper
 
     private func card<V: View>(padding: CGFloat = 16, @ViewBuilder _ content: () -> V) -> some View {
         content()
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(StrandPalette.surfaceRaised)
-                    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .strokeBorder(StrandPalette.hairline, lineWidth: 1))
-                    .opacity(cardOpacity)
-            )
+            .background(FrostedCardSurface(cornerRadius: NoopMetrics.cardRadius))
     }
 
     // MARK: - Quick log (Sip / Cup / Bottle, secondary style)

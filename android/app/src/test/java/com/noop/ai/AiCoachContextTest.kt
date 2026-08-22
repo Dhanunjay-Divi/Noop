@@ -122,4 +122,19 @@ class AiCoachContextTest {
         assertFalse(prompt.contains("Charge"))
         assertFalse(Regex("\\brest/sleep\\b", RegexOption.IGNORE_CASE).containsMatchIn(prompt))
     }
+
+    @Test
+    fun coachMemoryContextIsExplicitAndBounded() {
+        assertEquals("", AiCoach.coachMemoryContext(emptyList()))
+        val context = AiCoach.coachMemoryContext(
+            listOf("  Training for a 10K  ") + (0 until 15).map { "memory-$it" },
+        )
+        assertTrue(context.contains("USER-MANAGED COACH MEMORY"))
+        assertTrue(context.contains("- Training for a 10K"))
+        assertFalse(context.contains("memory-14"))
+
+        val long = AiCoach.coachMemoryContext(listOf("x".repeat(4_000)))
+        assertTrue(long.length < 2_300)
+        assertTrue(long.contains("not a medical record"))
+    }
 }

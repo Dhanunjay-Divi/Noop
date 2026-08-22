@@ -1850,7 +1850,7 @@ struct SettingsView: View {
                     Button {
                         runCsvExport()
                     } label: {
-                        backupButtonLabel(String(localized: "Export CSV…"), systemImage: "tablecells")
+                        backupButtonLabel(String(localized: "Export data…"), systemImage: "tablecells")
                     }
                     .buttonStyle(NoopButtonStyle(.secondary, fullWidth: true))
                     .disabled(backupBusy)
@@ -1870,7 +1870,9 @@ struct SettingsView: View {
                         .foregroundStyle(StrandPalette.textTertiary)
                         .font(.system(size: 13))
                         .accessibilityHidden(true)
-                    Text("Encrypted export protects the full backup with a passphrase using AES-256-GCM. The passphrase is never saved and cannot be recovered; this encrypted envelope currently imports only in NOOP on iPhone or Mac. Import also keeps compatibility with older unencrypted .noopbak, ZIP, and SQLite backups. It validates and stages without touching the open database; fully quit and reopen NOOP to apply it. Export CSV remains the portable Mac, iPhone, and Android data-transfer path. Folder and automatic backups are unencrypted because NOOP does not store their passphrase, so protect that folder with the storage provider's encryption.")
+                    (Text("appwide.backup.encryption_body")
+                     + Text(" ")
+                     + Text("Export data creates a portable ZIP with WHOOP-compatible CSVs plus readable NOOP JSON for editable nutrition and Strength Trainer records."))
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1944,8 +1946,8 @@ struct SettingsView: View {
             case .cancelled:
                 return
             case .exported(let url):
-                backupAlertTitle = String(localized: "CSV exported")
-                backupAlertMessage = String(localized: "Saved to \(url.lastPathComponent). The zip re-imports into NOOP (Data Sources → WHOOP Export) on any Mac, iPhone, or Android device.")
+                backupAlertTitle = String(localized: "Data exported")
+                backupAlertMessage = String(localized: "Saved to \(url.lastPathComponent). The portable zip re-imports into NOOP (Data Sources → WHOOP Export) on any Mac, iPhone, or Android device, including editable nutrition and Strength Trainer records.")
                 showBackupAlert = true
             case .failure(let message):
                 backupAlertTitle = String(localized: "Export problem")
@@ -1963,7 +1965,7 @@ struct SettingsView: View {
             return
         case .exported(let url):
             backupAlertTitle = String(localized: "Backup exported")
-            backupAlertMessage = String(localized: "Saved an encrypted backup to \(url.lastPathComponent). Keep its passphrase separately: NOOP never saves it and cannot recover it. This encrypted format currently restores in NOOP on iPhone and Mac.")
+            backupAlertMessage = String(localized: "Saved an encrypted Apple backup to \(url.lastPathComponent). It contains the Apple database plus durable profile, display, dashboard, Sleep Planner, and reminder settings—not credentials, hardware bindings, permissions, or volatile delivery state. Keep its passphrase separately: NOOP never saves it and cannot recover it.")
             showBackupAlert = true
         case .imported:
             backupAlertTitle = String(localized: "Backup ready")

@@ -190,6 +190,18 @@ android {
         }
     }
 
+    testOptions {
+        managedDevices {
+            allDevices {
+                create<com.android.build.api.dsl.ManagedVirtualDevice>("pixel2Api35") {
+                    device = "Pixel 2"
+                    apiLevel = 35
+                    systemImageSource = "aosp"
+                }
+            }
+        }
+    }
+
     sourceSets.getByName("main").assets.srcDir(legalAssetsDir)
 }
 
@@ -238,35 +250,41 @@ tasks.matching { it.name == "kspFullDebugKotlin" }.configureEach {
 val roomSchemaSnapshotDir = layout.buildDirectory.dir("roomSchemaOracle")
 val roomSchemaInputs = files(
     "src/main/java/com/noop/data/Entities.kt",
+    "src/main/java/com/noop/data/NutritionEntry.kt",
+    "src/main/java/com/noop/data/NutritionCatalogItem.kt",
     "src/main/java/com/noop/data/PairedDevice.kt",
+    "src/main/java/com/noop/data/StrengthTraining.kt",
     "src/main/java/com/noop/data/WhoopDatabase.kt",
 )
-val syncRoomSchemaSnapshot = tasks.register<Copy>("syncRoomSchemaSnapshot") {
-    from(roomSchemaDir)
-    into(roomSchemaSnapshotDir)
+val syncRoomSchemaSnapshot = tasks.register("syncRoomSchemaSnapshot") {
     inputs.files(roomSchemaInputs).withPropertyName("roomSchemaSources")
+    outputs.dir(roomSchemaSnapshotDir).withPropertyName("roomSchemaSnapshot")
+    // A Copy task is skipped as NO-SOURCE before its actions run when KSP's generated directory is
+    // materialized incrementally. Keep this small snapshot action explicit so the hash guard below
+    // always runs after the canonical KSP producer.
+    outputs.upToDateWhen { false }
     dependsOn(tasks.matching { it.name == "kspFullDebugKotlin" })
-    // Gradle validates Test task directory inputs before the test action runs. When Room has no
-    // schema JSON to copy (for example after a no-op incremental KSP pass), the producer directory may
-    // legitimately be empty. Copy is intentionally non-destructive so that pass cannot erase the last
-    // valid Room-generated snapshot; a clean build still starts without a snapshot and therefore must
-    // produce one before SchemaOracleTest can pass. Keep an empty destination as a valid optional
-    // snapshot; SchemaOracleTest still reports a useful failure when its JSON is actually missing.
     doLast {
+        val source = roomSchemaDir.get().asFile
         val destination = roomSchemaSnapshotDir.get().asFile.apply { mkdirs() }
         val marker = destination.resolve(".schema-inputs.sha256")
         val digest = MessageDigest.getInstance("SHA-256")
-        roomSchemaInputs.files.sortedBy { it.absolutePath }.forEach { source ->
-            digest.update(source.absolutePath.toByteArray())
+        roomSchemaInputs.files.sortedBy { it.absolutePath }.forEach { schemaInput ->
+            digest.update(schemaInput.absolutePath.toByteArray())
             digest.update(0)
-            digest.update(source.readBytes())
+            digest.update(schemaInput.readBytes())
             digest.update(0)
         }
         val sourceHash = digest.digest().joinToString("") { "%02x".format(it) }
-        val generatedSchemaExists = roomSchemaDir.get().asFile.walkTopDown()
+        val generatedSchemaExists = source.walkTopDown()
             .any { it.isFile && it.extension == "json" }
 
         if (generatedSchemaExists) {
+            project.copy {
+                from(source)
+                into(destination)
+                include("**/*.json")
+            }
             marker.writeText(sourceHash)
         } else {
             check(marker.isFile && marker.readText().trim() == sourceHash) {
@@ -320,6 +338,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.2") // collectAsStateWithLifecycle
     implementation("androidx.navigation:navigation-compose:2.7.7")
+
+    // Explicit food-barcode capture. The scanner is user-launched and always has a manual fallback.
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
     // --- Coroutines ---
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")

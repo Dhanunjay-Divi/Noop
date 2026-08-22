@@ -755,6 +755,64 @@
         }
       }
     },
+    "Charge": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Energie"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Charge"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Energía"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Énergie"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Energia"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Energia"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Заряд"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "能量"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "能量"
+          }
+        }
+      }
+    },
     "Recovery": {
       "localizations": {
         "de": {
@@ -1911,6 +1969,64 @@
           "stringUnit": {
             "state": "translated",
             "value": "重設"
+          }
+        }
+      }
+    },
+    "Rest": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erholung"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rest"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descanso"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Repos"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Riposo"
+          }
+        },
+        "pt-PT": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descanso"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отдых"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "休息"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "休息"
           }
         }
       }
@@ -3078,7 +3194,16 @@
           }
         }
       }
-    }
+    },
+    "watch.strength.title": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Strength"}},"de":{"stringUnit":{"state":"translated","value":"Kraft"}},"es":{"stringUnit":{"state":"translated","value":"Fuerza"}},"fr":{"stringUnit":{"state":"translated","value":"Force"}},"it":{"stringUnit":{"state":"translated","value":"Forza"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Força"}},"ru":{"stringUnit":{"state":"translated","value":"Сила"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"力量"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"肌力"}}}},
+    "watch.strength.in_progress": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"IN PROGRESS"}},"de":{"stringUnit":{"state":"translated","value":"LÄUFT"}},"es":{"stringUnit":{"state":"translated","value":"EN CURSO"}},"fr":{"stringUnit":{"state":"translated","value":"EN COURS"}},"it":{"stringUnit":{"state":"translated","value":"IN CORSO"}},"pt-PT":{"stringUnit":{"state":"translated","value":"EM CURSO"}},"ru":{"stringUnit":{"state":"translated","value":"В ПРОЦЕССЕ"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"进行中"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"進行中"}}}},
+    "watch.strength.workout": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Strength workout"}},"de":{"stringUnit":{"state":"translated","value":"Krafttraining"}},"es":{"stringUnit":{"state":"translated","value":"Entrenamiento de fuerza"}},"fr":{"stringUnit":{"state":"translated","value":"Entraînement de force"}},"it":{"stringUnit":{"state":"translated","value":"Allenamento di forza"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Treino de força"}},"ru":{"stringUnit":{"state":"translated","value":"Силовая тренировка"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"力量训练"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"肌力訓練"}}}},
+    "watch.strength.set_progress": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"%1$lld of %2$lld sets"}},"de":{"stringUnit":{"state":"translated","value":"%1$lld von %2$lld Sätzen"}},"es":{"stringUnit":{"state":"translated","value":"%1$lld de %2$lld series"}},"fr":{"stringUnit":{"state":"translated","value":"%1$lld séries sur %2$lld"}},"it":{"stringUnit":{"state":"translated","value":"%1$lld di %2$lld serie"}},"pt-PT":{"stringUnit":{"state":"translated","value":"%1$lld de %2$lld séries"}},"ru":{"stringUnit":{"state":"translated","value":"Подходов: %1$lld из %2$lld"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"已完成 %1$lld/%2$lld 组"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"已完成 %1$lld/%2$lld 組"}}}},
+    "watch.strength.continue_iphone": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Continue in NOOP on iPhone"}},"de":{"stringUnit":{"state":"translated","value":"In NOOP auf dem iPhone fortsetzen"}},"es":{"stringUnit":{"state":"translated","value":"Continuar en NOOP en el iPhone"}},"fr":{"stringUnit":{"state":"translated","value":"Continuer dans NOOP sur l’iPhone"}},"it":{"stringUnit":{"state":"translated","value":"Continua in NOOP su iPhone"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Continuar no NOOP no iPhone"}},"ru":{"stringUnit":{"state":"translated","value":"Продолжите в NOOP на iPhone"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"在 iPhone 上的 NOOP 中继续"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"在 iPhone 上的 NOOP 中繼續"}}}},
+    "watch.strength.routine_summary": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"%1$lld sets · %2$@"}},"de":{"stringUnit":{"state":"translated","value":"%1$lld Sätze · %2$@"}},"es":{"stringUnit":{"state":"translated","value":"%1$lld series · %2$@"}},"fr":{"stringUnit":{"state":"translated","value":"%1$lld séries · %2$@"}},"it":{"stringUnit":{"state":"translated","value":"%1$lld serie · %2$@"}},"pt-PT":{"stringUnit":{"state":"translated","value":"%1$lld séries · %2$@"}},"ru":{"stringUnit":{"state":"translated","value":"%1$lld подх. · %2$@"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"%1$lld 组 · %2$@"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"%1$lld 組 · %2$@"}}}},
+    "watch.strength.start_hint": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Starts this routine in NOOP on your iPhone"}},"de":{"stringUnit":{"state":"translated","value":"Startet diese Routine in NOOP auf deinem iPhone"}},"es":{"stringUnit":{"state":"translated","value":"Inicia esta rutina en NOOP en tu iPhone"}},"fr":{"stringUnit":{"state":"translated","value":"Démarre cette routine dans NOOP sur votre iPhone"}},"it":{"stringUnit":{"state":"translated","value":"Avvia questa routine in NOOP sul tuo iPhone"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Inicia esta rotina no NOOP no iPhone"}},"ru":{"stringUnit":{"state":"translated","value":"Запускает программу в NOOP на iPhone"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"在 iPhone 上的 NOOP 中开始此训练计划"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"在 iPhone 上的 NOOP 中開始此訓練計畫"}}}},
+    "watch.strength.create_iphone": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Create a routine on iPhone"}},"de":{"stringUnit":{"state":"translated","value":"Routine auf dem iPhone erstellen"}},"es":{"stringUnit":{"state":"translated","value":"Crea una rutina en el iPhone"}},"fr":{"stringUnit":{"state":"translated","value":"Créez une routine sur l’iPhone"}},"it":{"stringUnit":{"state":"translated","value":"Crea una routine su iPhone"}},"pt-PT":{"stringUnit":{"state":"translated","value":"Crie uma rotina no iPhone"}},"ru":{"stringUnit":{"state":"translated","value":"Создайте программу на iPhone"}},"zh-Hans":{"stringUnit":{"state":"translated","value":"在 iPhone 上创建训练计划"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"在 iPhone 上建立訓練計畫"}}}},
+    "watch.strength.sync_help": {"localizations":{"en":{"stringUnit":{"state":"translated","value":"Open NOOP on your iPhone to sync strength routines."}},"de":{"stringUnit":{"state":"translated","value":"Öffne NOOP auf deinem iPhone, um Kraftroutinen zu synchronisieren."}},"es":{"stringUnit":{"state":"translated","value":"Abre NOOP en el iPhone para sincronizar rutinas de fuerza."}},"fr":{"stringUnit":{"state":"translated","value":"Ouvrez NOOP sur votre iPhone pour synchroniser les routines de force."}},"it":{"stringUnit":{"state":"translated","value":"Apri NOOP su iPhone per sincronizzare le routine di forza."}},"pt-PT":{"stringUnit":{"state":"translated","value":"Abra o NOOP no iPhone para sincronizar rotinas de força."}},"ru":{"stringUnit":{"state":"translated","value":"Откройте NOOP на iPhone для синхронизации силовых программ."}},"zh-Hans":{"stringUnit":{"state":"translated","value":"在 iPhone 上打开 NOOP 以同步力量训练计划。"}},"zh-Hant":{"stringUnit":{"state":"translated","value":"在 iPhone 上開啟 NOOP 以同步肌力訓練計畫。"}}}}
   },
   "version": "1.0"
 }

@@ -801,13 +801,13 @@ struct AutomationsView: View {
         }
     }
 
-    // MARK: - Strain target nudge (#593)
+    // MARK: - Effort marker nudge (#593)
 
     private var strainTargetCard: some View {
-        Section2(icon: "flame", title: String(localized: "Strain target"),
-                 blurb: String(localized: "A once-a-day nudge when your Effort reaches the low end of today's optimal strain range, worked out from your recovery."),
+        Section2(icon: "flame", title: String(localized: "Effort marker"),
+                 blurb: String(localized: "A once-a-day nudge at a recovery-based Effort marker. It is a planning cue, not a limit or permission to keep pushing."),
                  active: behavior.strainTargetNudge) {
-            ToggleRow(label: String(localized: "Notify when optimal strain is reached"),
+            ToggleRow(label: String(localized: "Notify when the Effort marker is reached"),
                       help: String(localized: "Posts after your strap syncs and NOOP scores the day — not the exact second you cross it. At most once per day."),
                       isOn: $behavior.strainTargetNudge)
                 .onChangeCompat(of: behavior.strainTargetNudge) { on in

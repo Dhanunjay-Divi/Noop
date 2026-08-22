@@ -429,7 +429,7 @@ fun BreatheScreen(viewModel: AppViewModel) {
                                 .copy(shadow = Shadow(color = Color.Black.copy(alpha = 0.5f), offset = Offset(0f, 1f), blurRadius = 6f)),
                             color = Color.White,
                         )
-                        Text("BPM", style = NoopType.footnote.copy(letterSpacing = 0.8.sp), color = Palette.textTertiary)
+                        Text("BPM", style = NoopType.footnote.copy(letterSpacing = 0.sp), color = Palette.textTertiary)
                     }
                 }
 

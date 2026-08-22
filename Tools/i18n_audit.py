@@ -814,11 +814,20 @@ def apple_format_gaps(cat: dict, lang: str) -> list[str]:
     for key, entry in cat.get("strings", {}).items():
         if entry.get("shouldTranslate") is False:
             continue
+        source_values = [
+            unit.get("value", "")
+            for unit in _string_units(entry, "en")
+        ] or [key]
+        source_signatures = {tuple(signature(value)) for value in source_values}
         # Compare EVERY form independently against the key, never a folded concatenation: folding would
         # make the signature depend on how many plural categories the language HAS (ru/pl carry four,
         # zh one), so a correct translation would read as a format mismatch purely for having more forms.
+        # Named catalog keys carry their source text in the English localization instead of in `key`.
         values = [u.get("value", "") for u in _string_units(entry, lang)] or [""]
-        if any(signature(key) != signature(v) for v in values):
+        if len(source_signatures) != 1 or any(
+            tuple(signature(value)) not in source_signatures
+            for value in values
+        ):
             mismatched.append(key)
     return mismatched
 

@@ -224,7 +224,7 @@ struct IntervalTimerView: View {
                     .contentTransition(.numericText())
                 Text(isFinished ? "SESSION DONE" : "SECONDS")
                     .font(StrandFont.footnote)
-                    .tracking(1.5)
+                    .tracking(0)
                     .foregroundStyle(StrandPalette.textTertiary)
             }
             .padding(.horizontal, lineWidth + 4)
@@ -238,7 +238,7 @@ struct IntervalTimerView: View {
     private var phaseChip: some View {
         Text(phase.label)
             .font(StrandFont.rounded(15, weight: .heavy))
-            .tracking(2)
+            .tracking(0)
             .foregroundStyle(phaseColor)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)

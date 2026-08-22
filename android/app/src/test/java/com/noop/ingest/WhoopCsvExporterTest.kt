@@ -219,6 +219,7 @@ class WhoopCsvExporterTest {
             linkedMapOf(
                 "a.csv" to "x,y\r\n".toByteArray(),
                 "noop_metric_series.json" to "[]".toByteArray(),
+                "noop_user_data.json" to "{}".toByteArray(),
             ),
         )
         val names = ArrayList<String>()
@@ -226,6 +227,6 @@ class WhoopCsvExporterTest {
             var e = zis.nextEntry
             while (e != null) { names.add(e.name); e = zis.nextEntry }
         }
-        assertEquals(listOf("a.csv", "noop_metric_series.json"), names)
+        assertEquals(listOf("a.csv", "noop_metric_series.json", "noop_user_data.json"), names)
     }
 }

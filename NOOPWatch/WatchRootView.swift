@@ -14,6 +14,7 @@ struct WatchRootView: View {
             WatchGlanceView()
             WatchBreatheView()
             WatchWorkoutView()
+            WatchStrengthView()
             WatchIntervalView()
         }
         // watchOS page TabView shows the page-indicator dots by default; the iOS background-display-mode

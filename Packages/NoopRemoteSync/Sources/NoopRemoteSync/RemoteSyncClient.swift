@@ -433,6 +433,163 @@ public actor RemoteSyncClient: RemoteSyncUploading {
         )
     }
 
+    // MARK: - Emergency contacts and manual paging
+
+    public func bootstrapSafetyProfile(
+        _ profile: RemoteSafetyProfileBootstrap
+    ) async throws -> RemoteSafetyBootstrapResponse {
+        let request = try safetyJSONRequest(
+            path: "v1/safety/bootstrap",
+            method: "POST",
+            authorization: .admin,
+            body: profile
+        )
+        return try decode(
+            RemoteSafetyBootstrapResponse.self,
+            from: try await perform(request)
+        )
+    }
+
+    public func safetyContacts(
+        authorization: RemoteSafetyAuthorization
+    ) async throws -> RemoteSafetyContactsResponse {
+        let request = try safetyRequest(
+            path: "v1/safety/contacts",
+            method: "GET",
+            authorization: authorization
+        )
+        return try decode(
+            RemoteSafetyContactsResponse.self,
+            from: try await perform(request)
+        )
+    }
+
+    public func addSafetyContact(
+        _ contact: RemoteSafetyContactCreate,
+        authorization: RemoteSafetyAuthorization
+    ) async throws -> RemoteSafetyContactResponse {
+        let request = try safetyJSONRequest(
+            path: "v1/safety/contacts",
+            method: "POST",
+            authorization: authorization,
+            body: contact
+        )
+        return try decode(
+            RemoteSafetyContactResponse.self,
+            from: try await perform(request)
+        )
+    }
+
+    public func resendSafetyContactInvitation(
+        _ contactId: UUID,
+        authorization: RemoteSafetyAuthorization
+    ) async throws -> RemoteSafetyContactResponse {
+        let request = try safetyJSONRequest(
+            path: "v1/safety/contacts/\(contactId.uuidString.lowercased())/resend",
+            method: "POST",
+            authorization: authorization,
+            body: EmptyRemoteBody()
+        )
+        return try decode(
+            RemoteSafetyContactResponse.self,
+            from: try await perform(request)
+        )
+    }
+
+    public func removeSafetyContact(
+        _ contactId: UUID,
+        authorization: RemoteSafetyAuthorization
+    ) async throws {
+        let request = try safetyRequest(
+            path: "v1/safety/contacts/\(contactId.uuidString.lowercased())",
+            method: "DELETE",
+            authorization: authorization
+        )
+        _ = try await perform(request)
+    }
+
+    public func sendManualSafetyPage(
+        idempotencyKey: UUID,
+        authorization: RemoteSafetyAuthorization
+    ) async throws -> RemoteSafetyDispatch {
+        var request = try safetyJSONRequest(
+            path: "v1/safety/incidents",
+            method: "POST",
+            authorization: authorization,
+            body: RemoteSafetyPageCreate()
+        )
+        request.setValue(
+            idempotencyKey.uuidString.lowercased(),
+            forHTTPHeaderField: "Idempotency-Key"
+        )
+        return try decode(
+            RemoteSafetyDispatch.self,
+            from: try await perform(request)
+        )
+    }
+
+    public func safetyIncidents(
+        limit: Int = 20,
+        authorization: RemoteSafetyAuthorization
+    ) async throws -> RemoteSafetyIncidentList {
+        let request = try safetyRequest(
+            path: "v1/safety/incidents",
+            method: "GET",
+            authorization: authorization,
+            queryItems: [
+                URLQueryItem(
+                    name: "limit",
+                    value: String(min(max(limit, 1), 100))
+                ),
+            ]
+        )
+        return try decode(
+            RemoteSafetyIncidentList.self,
+            from: try await perform(request)
+        )
+    }
+
+    public func safetyIncident(
+        _ dispatchId: UUID,
+        authorization: RemoteSafetyAuthorization
+    ) async throws -> RemoteSafetyDispatch {
+        let request = try safetyRequest(
+            path: "v1/safety/incidents/\(dispatchId.uuidString.lowercased())",
+            method: "GET",
+            authorization: authorization
+        )
+        return try decode(
+            RemoteSafetyDispatch.self,
+            from: try await perform(request)
+        )
+    }
+
+    public func resolveSafetyIncident(
+        _ dispatchId: UUID,
+        note: String? = nil,
+        authorization: RemoteSafetyAuthorization
+    ) async throws -> RemoteSafetyDispatch {
+        try await transitionSafetyIncident(
+            dispatchId,
+            action: "resolve",
+            note: note,
+            authorization: authorization
+        )
+    }
+
+    public func cancelSafetyIncident(
+        _ dispatchId: UUID,
+        note: String? = nil,
+        authorization: RemoteSafetyAuthorization
+    ) async throws -> RemoteSafetyDispatch {
+        try await transitionSafetyIncident(
+            dispatchId,
+            action: "cancel",
+            note: note,
+            authorization: authorization
+        )
+    }
+
     /// Kept internal so tests can inspect the exact request before URLSession
     /// canonicalizes its body into an implementation-specific stream.
     func makeUploadRequest(_ envelope: RemoteSyncEnvelope) throws -> URLRequest {
@@ -508,6 +665,67 @@ public actor RemoteSyncClient: RemoteSyncUploading {
         return request
     }
 
+    private func safetyRequest(
+        path: String,
+        method: String,
+        authorization: RemoteSafetyAuthorization,
+        queryItems: [URLQueryItem] = []
+    ) throws -> URLRequest {
+        let bearer: String
+        switch authorization {
+        case .admin:
+            bearer = configuration.apiKey
+        case .safety(let token):
+            bearer = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !bearer.isEmpty else { throw RemoteSyncError.missingAPIKey }
+        }
+        return request(
+            path: path,
+            method: method,
+            authenticated: true,
+            bearerToken: bearer,
+            queryItems: queryItems
+        )
+    }
+
+    private func safetyJSONRequest<Body: Encodable>(
+        path: String,
+        method: String,
+        authorization: RemoteSafetyAuthorization,
+        body: Body
+    ) throws -> URLRequest {
+        var request = try safetyRequest(
+            path: path,
+            method: method,
+            authorization: authorization
+        )
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        do {
+            request.httpBody = try encoder.encode(body)
+        } catch {
+            throw RemoteSyncError.encoding(error.localizedDescription)
+        }
+        return request
+    }
+
+    private func transitionSafetyIncident(
+        _ dispatchId: UUID,
+        action: String,
+        note: String?,
+        authorization: RemoteSafetyAuthorization
+    ) async throws -> RemoteSafetyDispatch {
+        let request = try safetyJSONRequest(
+            path: "v1/safety/incidents/\(dispatchId.uuidString.lowercased())/\(action)",
+            method: "POST",
+            authorization: authorization,
+            body: RemoteSafetyIncidentTransition(note: note)
+        )
+        return try decode(
+            RemoteSafetyDispatch.self,
+            from: try await perform(request)
+        )
+    }
+
     private func bearerToken(for authorization: RemoteSocialAuthorization) throws -> String {
         switch authorization {
         case .admin:
@@ -573,7 +791,7 @@ public actor RemoteSyncClient: RemoteSyncUploading {
         // Join enrollment sends its client-generated member credential in the body. Treat it with
         // the same reflection protection as bearer credentials even though the server never
         // intentionally returns it.
-        return ["member_token"].compactMap { object[$0] as? String }
+        return ["member_token", "safety_token"].compactMap { object[$0] as? String }
     }
 
     private static func safeServerMessage(_ data: Data) -> String {
@@ -585,3 +803,5 @@ public actor RemoteSyncClient: RemoteSyncUploading {
         return String(String(decoding: data.prefix(300), as: UTF8.self))
     }
 }
+
+private struct EmptyRemoteBody: Encodable {}

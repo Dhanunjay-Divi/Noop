@@ -21,6 +21,8 @@ import com.noop.ui.AppearancePrefs
 import com.noop.widget.WidgetSnapshotStore
 import com.noop.widget.shouldRefreshSystemWidgetsForNightMode
 import com.noop.location.GpsSession
+import com.noop.safety.SafetyContactSetupReminderScheduler
+import com.noop.social.FriendsSyncScheduler
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -62,9 +64,16 @@ class NoopApplication : Application() {
         // Canonicalize the retired auto-save/Boolean preferences before any UI or background notifier
         // reads them. Ask remains approval-first and rollback cannot resurrect unattended writes.
         NoopPrefs.migrateAutoWorkoutMode(this)
+        // Repair the private three-day Safety setup reminder after process death, reboot, or an app
+        // update. It remains a no-op until onboarding presents Safety and cancels itself at two accepted
+        // contacts.
+        runCatching { SafetyContactSetupReminderScheduler.reconcile(this) }
         // Preference initialization only; no network work occurs here. Self-hosted upload remains
         // opt-in and is scheduled later from the activity after the user saves a destination.
         RemoteSyncService.initialize(this)
+        // Friends uses a distinct least-privilege member credential and a summary-only producer.
+        // Reconcile its network-constrained catch-up only after remote preferences are initialized.
+        FriendsSyncScheduler.reconcile(this)
         // Record any uncaught crash to a file so it rides along in the shareable strap log — a
         // device-specific crash (e.g. Insights #224/#267) is otherwise lost to an unreachable logcat.
         CrashCapture.install(this)

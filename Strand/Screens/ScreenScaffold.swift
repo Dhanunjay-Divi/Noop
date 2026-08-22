@@ -65,7 +65,7 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
             #if os(iOS)
             // Unified side margins matching the liquid home (16pt) so every page's cards + header line up
             // to the same edges (2026-07-02); macOS keeps the classic 28 in the #else branch.
-            .padding(.horizontal, 16)
+            .padding(.horizontal, NoopMetrics.screenHPadding)
             .padding(.top, 24)
             .padding(.bottom, NoopMetrics.space4)
             // A vertical ScrollView accepts a child's ideal horizontal size. Several full-width cards
@@ -162,9 +162,7 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
         return HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 if let title {
-                    // Match the liquid home's title face (SF Rounded 28) so every page's header reads
-                    // identically (2026-07-02 cohesion pass).
-                    Text(title).font(StrandFont.rounded(28)).foregroundStyle(titleColor)
+                    Text(title).font(StrandFont.title1).foregroundStyle(titleColor)
                 }
                 if let subtitle {
                     Text(subtitle).font(StrandFont.subhead).foregroundStyle(subtitleColor)
@@ -204,27 +202,118 @@ private struct RefreshableIfNeeded: ViewModifier {
     }
 }
 
-/// Empty / pending-data placeholder for screens still gathering history. Mirrors `DataPendingNote`'s
-/// icon-anchored card so an empty screen reads as an intentional state rather than a stray text box.
+/// The production screen-state vocabulary. Keeping these states explicit prevents an empty result,
+/// a still-loading query, and a failed query from collapsing into the same vague placeholder.
+enum ScreenStateKind: String, CaseIterable, Sendable {
+    case loading
+    case empty
+    case partial
+    case stale
+    case error
+
+    fileprivate var symbol: String {
+        switch self {
+        case .loading: return "arrow.triangle.2.circlepath"
+        case .empty:   return "tray"
+        case .partial: return "chart.line.uptrend.xyaxis"
+        case .stale:   return "clock.badge.exclamationmark"
+        case .error:   return "exclamationmark.triangle.fill"
+        }
+    }
+
+    fileprivate var tone: Color {
+        switch self {
+        case .loading: return StrandPalette.accent
+        case .empty:   return StrandPalette.textSecondary
+        case .partial: return StrandPalette.statusWarning
+        case .stale:   return StrandPalette.statusWarning
+        case .error:   return StrandPalette.statusCritical
+        }
+    }
+}
+
+/// One accessible, action-capable card for loading, empty, partial, stale, and error states.
+/// The descriptive block is announced once; any recovery action remains a separate control.
+struct ScreenStateCard: View {
+    let kind: ScreenStateKind
+    let title: LocalizedStringKey
+    let message: LocalizedStringKey
+    var symbol: String?
+    var actionTitle: LocalizedStringKey?
+    var action: (() -> Void)?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(kind: ScreenStateKind,
+         title: LocalizedStringKey,
+         message: LocalizedStringKey,
+         symbol: String? = nil,
+         actionTitle: LocalizedStringKey? = nil,
+         action: (() -> Void)? = nil) {
+        self.kind = kind
+        self.title = title
+        self.message = message
+        self.symbol = symbol
+        self.actionTitle = actionTitle
+        self.action = action
+    }
+
+    var body: some View {
+        StrandCard(padding: 20) {
+            VStack(alignment: .leading, spacing: NoopMetrics.space4) {
+                HStack(alignment: .top, spacing: NoopMetrics.space3) {
+                    stateMark
+                        .frame(width: 22, height: 22)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                        Text(title)
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(message)
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(title))
+                .accessibilityValue(Text(message))
+
+                if let actionTitle, let action {
+                    Button(action: action) {
+                        Text(actionTitle)
+                    }
+                    .buttonStyle(NoopButtonStyle(.secondary))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var stateMark: some View {
+        if kind == .loading && !reduceMotion {
+            ProgressView()
+                .controlSize(.small)
+                .tint(kind.tone)
+        } else {
+            Image(systemName: symbol ?? kind.symbol)
+                .font(StrandFont.headline)
+                .foregroundStyle(kind.tone)
+        }
+    }
+}
+
+/// Compatibility wrapper for older call sites. New work should choose a precise `ScreenStateKind`.
 struct ComingSoon: View {
     let what: LocalizedStringKey
     var symbol: String = "sparkles"
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbol)
-                .font(StrandFont.headline)
-                .foregroundStyle(StrandPalette.accent)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Coming together")
-                    .font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
-                Text(what)
-                    .font(StrandFont.body).foregroundStyle(StrandPalette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(20).frame(maxWidth: .infinity, alignment: .leading)
-        .frostedCardSurface()
+        ScreenStateCard(
+            kind: .empty,
+            title: "Coming together",
+            message: what,
+            symbol: symbol
+        )
     }
 }
 
@@ -271,24 +360,7 @@ struct DataPendingNote: View {
     var symbol: String = "sparkles"
 
     var body: some View {
-        StrandCard(padding: 20) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: symbol)
-                    .font(StrandFont.headline)
-                    .foregroundStyle(StrandPalette.accent)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title)
-                        .font(StrandFont.headline)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(message)
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(StrandPalette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
+        ScreenStateCard(kind: .partial, title: title, message: message, symbol: symbol)
     }
 }
 

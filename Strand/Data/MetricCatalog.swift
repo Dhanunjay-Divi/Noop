@@ -107,7 +107,7 @@ struct MetricDescriptor: Identifiable, Hashable {
         switch source {
         case "apple-health": return "Apple Health"
         case "xiaomi-band":  return "Mi Band"
-        case "nutrition-csv": return String(localized: "Nutrition")
+        case "nutrition-log", "nutrition-csv": return String(localized: "Nutrition")
         case "noop-mood":    return String(localized: "Mood")
         // `my-whoop` is the local strap namespace. Its series can resolve to directly measured
         // strap rows OR to a sibling `-noop` series calculated on-device; calling the whole namespace
@@ -302,11 +302,11 @@ enum MetricCatalog {
           String(localized: "An absolute sleeping wrist-temperature reading from Apple Health, kept separate from body temperature and WHOOP skin-temperature deviation.")),
         d("stress", String(localized: "Day Stress"), "Health", "/3", "my-whoop", "gauge.with.dots.needle.50percent", 1, false),
 
-        // ── Nutrition (imported from a food-tracker CSV: calories-in alongside calories-out)
-        d("calories_in", String(localized: "Calories In"), "Nutrition", "kcal", "nutrition-csv", "fork.knife", 0, nil),
-        d("protein_g", String(localized: "Protein"), "Nutrition", "g", "nutrition-csv", "p.circle", 0, nil),
-        d("carbs_g", String(localized: "Carbs"), "Nutrition", "g", "nutrition-csv", "c.circle", 0, nil),
-        d("fat_g", String(localized: "Fat"), "Nutrition", "g", "nutrition-csv", "f.circle", 0, nil),
+        // ── Nutrition (editable manual meals + migrated CSV daily summaries).
+        d("calories_in", String(localized: "Calories In"), "Nutrition", "kcal", "nutrition-log", "fork.knife", 0, nil),
+        d("protein_g", String(localized: "Protein"), "Nutrition", "g", "nutrition-log", "p.circle", 0, nil),
+        d("carbs_g", String(localized: "Carbs"), "Nutrition", "g", "nutrition-log", "c.circle", 0, nil),
+        d("fat_g", String(localized: "Fat"), "Nutrition", "g", "nutrition-log", "f.circle", 0, nil),
 
         // ── Mind (daily mood check-in, 1–5; non-clinical self-tracking)
         d("mood", String(localized: "Mood"), "Mind", "/5", "noop-mood", "face.smiling", 0, true),

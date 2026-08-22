@@ -21,6 +21,8 @@ import com.noop.analytics.SleepMark
 import com.noop.analytics.SleepMarkType
 import com.noop.analytics.Sport
 import com.noop.analytics.Calories
+import com.noop.analytics.DailyActionPlanner
+import com.noop.analytics.ReadinessEngine
 import com.noop.analytics.StrainScorer
 import com.noop.analytics.UserProfile
 import com.noop.analytics.WorkoutSport
@@ -495,6 +497,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _windDownEnabled = MutableStateFlow(windDownStore.enabled)
     /** Whether the evening wind-down nudge is scheduled. */
     val windDownEnabled: StateFlow<Boolean> = _windDownEnabled.asStateFlow()
+    private val _windDownSleepNeedMinutes = MutableStateFlow(windDownStore.sleepNeedMinutes)
+    /** User-controlled baseline sleep target; the planner never silently changes it. */
+    val windDownSleepNeedMinutes: StateFlow<Int> = _windDownSleepNeedMinutes.asStateFlow()
+    private val _windDownGoalMode = MutableStateFlow(windDownStore.goalMode)
+    /** Transparent planner behavior: fixed target, recent-balance adjustment, or extra opportunity. */
+    val windDownGoalMode: StateFlow<com.noop.analytics.SleepGoalMode> =
+        _windDownGoalMode.asStateFlow()
+    private val _windDownLeadMinutes = MutableStateFlow(windDownStore.leadMinutes)
+    /** Time reserved to settle before the suggested bedtime. */
+    val windDownLeadMinutes: StateFlow<Int> = _windDownLeadMinutes.asStateFlow()
+    private val _windDownRecoveryMinutes = MutableStateFlow(windDownStore.recoveryMinutes)
+    /** Planner-derived bounded addition from recent debt (0–60 minutes). */
+    val windDownRecoveryMinutes: StateFlow<Int> = _windDownRecoveryMinutes.asStateFlow()
 
     // MARK: - Today's cached metrics
 
@@ -701,16 +716,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     // Morning recap delivery intentionally does not live in this generic database
                     // collector. An old/imported row can republish here on launch; the recap is posted
                     // only by WhoopBleClient after a fresh offload's scoring transaction commits.
-                    // #593: once-a-day optimal-strain-reached nudge. Convert the stored 0-100 Effort to the
-                    // 0-21 coupled axis with the SHIPPED formatter (so it matches every Effort read-out), and
-                    // gate against the LOW end of today's recovery-derived optimal band (#43). The notifier's
-                    // persisted day gate makes this safe to fire on every republish; null recovery (calibrating)
-                    // yields a null band → no target → no notification.
+                    // #593: evidence-gated Effort-marker nudge. The legacy three-bucket recovery mapping
+                    // is intentionally gone. A personal-history range exists only after today's explicit
+                    // "as usual" check-in and a current solid multi-signal readiness read. Otherwise the
+                    // target is null and the notifier stays silent. Everything remains on canonical 0-100.
+                    val dailyPlan = DailyActionPlanner.plan(
+                        today = todayRow.day,
+                        readiness = ReadinessEngine.evaluate(days, today = todayRow.day),
+                        checkIn = NoopPrefs.dailyActionCheckIn(appContext, todayRow.day),
+                        recentEffort = days.map {
+                            DailyActionPlanner.EffortDay(day = it.day, effort = it.strain)
+                        },
+                    )
                     StrainTargetNotifier.onStrainTarget(
                         context = appContext,
                         day = todayRow.day,
-                        dayStrain21 = todayRow.strain?.let { UnitFormatter.effortValue(it, EffortScale.WHOOP) },
-                        target21 = optimalStrainRange(todayRow.recovery)?.low,
+                        dayEffort = todayRow.strain,
+                        targetEffort = dailyPlan.target?.lower,
                     )
                 }
                 // v5 skin-temp suite: run the Cycle / Body-clock / Illness-heads-up engines over the same
@@ -2397,6 +2419,38 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _windDownEnabled.value = enabled
         if (enabled) WindDownScheduler.schedule(appContext, windDownStore, phoneAlarmStore.targetMinutes)
         else WindDownScheduler.cancel(appContext)
+    }
+
+    fun setWindDownSleepNeedMinutes(minutes: Int) {
+        windDownStore.sleepNeedMinutes = minutes
+        _windDownSleepNeedMinutes.value = windDownStore.sleepNeedMinutes
+        if (windDownStore.enabled) {
+            WindDownScheduler.schedule(appContext, windDownStore, phoneAlarmStore.targetMinutes)
+        }
+    }
+
+    fun setWindDownGoalMode(mode: com.noop.analytics.SleepGoalMode) {
+        windDownStore.goalMode = mode
+        _windDownGoalMode.value = windDownStore.goalMode
+    }
+
+    fun setWindDownLeadMinutes(minutes: Int) {
+        windDownStore.leadMinutes = minutes
+        _windDownLeadMinutes.value = windDownStore.leadMinutes
+        if (windDownStore.enabled) {
+            WindDownScheduler.schedule(appContext, windDownStore, phoneAlarmStore.targetMinutes)
+        }
+    }
+
+    /** Refresh the persisted planner addition without creating a reschedule loop when unchanged. */
+    fun setWindDownRecoveryMinutes(minutes: Int) {
+        val next = minutes.coerceIn(0, WindDownStore.RECOVERY_MAX)
+        if (next == windDownStore.recoveryMinutes) return
+        windDownStore.recoveryMinutes = next
+        _windDownRecoveryMinutes.value = windDownStore.recoveryMinutes
+        if (windDownStore.enabled) {
+            WindDownScheduler.schedule(appContext, windDownStore, phoneAlarmStore.targetMinutes)
+        }
     }
 
     // --- Illness watch (opt-out; the evaluation itself is the pure IllnessWatch.evaluate).

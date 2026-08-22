@@ -131,6 +131,27 @@ class ProfileStoreAgeMigrationTest {
         val profile = ProfileStore(prefs)
         profile.setAge(45)
         assertEquals(45, (profile.backupSnapshot()["profile.age"] as? Int))
+        assertTrue(
+            (profile.backupSnapshot()["profile.dateOfBirth"] as? String)
+                ?.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) == true,
+        )
+    }
+
+    @Test
+    fun backupRestore_exactCivilBirthdayWinsOverLossyAge() {
+        val profile = ProfileStore(FakeSharedPreferences())
+        profile.applyBackup(
+            mapOf(
+                "profile.age" to 99,
+                "profile.dateOfBirth" to "1992-11-03",
+            ),
+        )
+        val zone = java.time.ZoneId.systemDefault()
+        val restored = java.time.Instant.ofEpochMilli(profile.dateOfBirthMillis)
+            .atZone(zone)
+            .toLocalDate()
+        assertEquals(java.time.LocalDate.of(1992, 11, 3), restored)
+        assertTrue("The exact birthday must override compatibility age 99", profile.age != 99)
     }
 
     @Test

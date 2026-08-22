@@ -475,11 +475,11 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
                 },
             )
             RowDivider()
-            // #593: NOOP's own optimal-strain-reached nudge (not WHOOP's copy).
+            // #593: NOOP's own recovery-based Effort marker nudge (not WHOOP's copy).
             FormToggleRow(
                 label = uiString(R.string.l10n_notifications_settings_screen_optimal_strain_reached_2862ec2b),
-                help = "Once a day, a notification when your Effort reaches the low end of today's optimal " +
-                    "strain range (from your recovery). Posts after your strap syncs and NOOP scores the day.",
+                help = "Once a day, a notification at a recovery-based Effort marker. It is a planning cue, " +
+                    "not a limit or permission to keep pushing. Posts after your strap syncs and NOOP scores the day.",
                 checked = strainTargetReport,
                 onChange = {
                     strainTargetReport = it

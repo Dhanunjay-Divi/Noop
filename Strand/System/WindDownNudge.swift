@@ -1,5 +1,6 @@
 import Foundation
 import UserNotifications
+import StrandAnalytics
 
 /// The wind-down nudge (#207) — a gentle, NON-critical evening local notification suggesting it's
 /// time to start winding down so the user can reach their usual wake time well-rested.
@@ -19,6 +20,8 @@ enum WindDownNudge {
     private enum K {
         static let enabled = "windDown.enabled"
         static let sleepNeed = "windDown.sleepNeedMinutes"   // default 8h
+        static let goalMode = "windDown.goalMode"
+        static let recovery = "windDown.recoveryMinutes"     // planner-derived, default 0m
         static let lead = "windDown.leadMinutes"             // default 30m
         static let wake = "windDown.wakeMinutes"             // earliest wake, minutes since midnight
         // PR#554 (MumiZed) — per-day wake overrides. A JSON map of {weekday(1=Sun…7=Sat): wakeMinutes}.
@@ -33,6 +36,21 @@ enum WindDownNudge {
         let v = UserDefaults.standard.object(forKey: K.sleepNeed) as? Int ?? 8 * 60
         return min(max(v, 5 * 60), 11 * 60)
     }
+
+    static var goalMode: SleepGoalMode {
+        guard let raw = UserDefaults.standard.string(forKey: K.goalMode),
+              let mode = SleepGoalMode(rawValue: raw) else { return .balance }
+        return mode
+    }
+
+    /// A bounded extra opportunity from the recent sleep-balance ledger. This is a planner output,
+    /// not a second user target: 0–60 minutes, refreshed when the Sleep Planner sees new history.
+    static var recoveryMinutes: Int {
+        let v = UserDefaults.standard.object(forKey: K.recovery) as? Int ?? 0
+        return min(max(v, 0), 60)
+    }
+
+    static var targetSleepMinutes: Int { sleepNeedMinutes + recoveryMinutes }
 
     static var leadMinutes: Int {
         let v = UserDefaults.standard.object(forKey: K.lead) as? Int ?? 30
@@ -90,7 +108,7 @@ enum WindDownNudge {
     /// The nudge minute-of-day for a given weekday — that day's wake (override or default) minus sleep need
     /// minus lead, wrapped into [0, 1440). Pure; mirrors `nudgeMinuteOfDay()` per-day. (PR#554)
     static func nudgeMinuteOfDay(forWeekday weekday: Int) -> Int {
-        let raw = wakeMinutes(forWeekday: weekday) - sleepNeedMinutes - leadMinutes
+        let raw = wakeMinutes(forWeekday: weekday) - targetSleepMinutes - leadMinutes
         let day = 24 * 60
         return ((raw % day) + day) % day
     }
@@ -161,9 +179,56 @@ enum WindDownNudge {
         if isEnabled { schedule() }
     }
 
+    /// Update the user's explicit baseline target. The planner may add a bounded recovery buffer,
+    /// but never silently changes this value.
+    static func setSleepNeedMinutes(_ minutes: Int) {
+        UserDefaults.standard.set(min(max(minutes, 5 * 60), 11 * 60), forKey: K.sleepNeed)
+        if isEnabled { schedule() }
+    }
+
+    static func setGoalMode(_ mode: SleepGoalMode) {
+        guard mode != goalMode else { return }
+        UserDefaults.standard.set(mode.rawValue, forKey: K.goalMode)
+    }
+
+    static func setLeadMinutes(_ minutes: Int) {
+        UserDefaults.standard.set(min(max(minutes, 0), 120), forKey: K.lead)
+        if isEnabled { schedule() }
+    }
+
+    /// Persist the planner's bounded recovery addition so a notification already scheduled in the
+    /// OS remains aligned with the plan after NOOP closes.
+    static func setRecoveryMinutes(_ minutes: Int) {
+        let next = min(max(minutes, 0), 60)
+        guard next != recoveryMinutes else { return }
+        UserDefaults.standard.set(next, forKey: K.recovery)
+        if isEnabled { schedule() }
+    }
+
+    /// Repair or remove the OS schedule from persisted state without requesting permission. This runs
+    /// on normal shell appearance and after a cold backup restore, so a restored OFF value cannot leave
+    /// an older target-device reminder behind and a restored ON value becomes live only when the user
+    /// has already authorized notifications.
+    static func restoreScheduleIfAuthorized() {
+        let center = UNUserNotificationCenter.current()
+        guard isEnabled else {
+            center.removePendingNotificationRequests(withIdentifiers: [requestId] + perDayRequestIds)
+            return
+        }
+        Task { @MainActor in
+            let settings = await center.notificationSettings()
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                schedule()
+            default:
+                break
+            }
+        }
+    }
+
     /// The minute-of-day the nudge fires: wake − sleepNeed − lead, wrapped into [0, 1440).
     static func nudgeMinuteOfDay() -> Int {
-        let raw = wakeMinutes - sleepNeedMinutes - leadMinutes
+        let raw = wakeMinutes - targetSleepMinutes - leadMinutes
         let day = 24 * 60
         return ((raw % day) + day) % day
     }
@@ -182,7 +247,7 @@ enum WindDownNudge {
 
         let content = UNMutableNotificationContent()
         content.title = String(localized: "Time to wind down")
-        content.body = String(localized: "A calm hour now helps you hit your wake time well-rested.")
+        content.body = String(localized: "Your planned bedtime is coming up. Start settling down when it works for you.")
         content.sound = .default
 
         // PR#554 — with per-day overrides set, fan out to seven weekday-pinned triggers each at that day's

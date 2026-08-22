@@ -409,6 +409,18 @@ final class BluetoothAvailabilityNotificationsTests: XCTestCase {
             .devices
         )
     }
+
+    func testSafetyReminderRoutesOnlyToTrustedSafetyDestination() {
+        XCTAssertEqual(
+            NotificationRouteBridge.route(
+                from: [NotificationRouteBridge.userInfoKey: NoopNotificationRoute.safety.rawValue]
+            ),
+            .safety
+        )
+        XCTAssertNil(NotificationRouteBridge.route(
+            from: [NotificationRouteBridge.userInfoKey: "https://example.com"]
+        ))
+    }
 }
 
 @MainActor

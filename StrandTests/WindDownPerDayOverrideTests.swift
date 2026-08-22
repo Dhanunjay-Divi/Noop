@@ -14,17 +14,24 @@ final class WindDownPerDayOverrideTests: XCTestCase {
 
     private let perDayKey = "windDown.perDayWakeMinutes"
     private let wakeKey = "windDown.wakeMinutes"
+    private let sleepNeedKey = "windDown.sleepNeedMinutes"
+    private let recoveryKey = "windDown.recoveryMinutes"
+    private let leadKey = "windDown.leadMinutes"
 
     override func setUp() {
         super.setUp()
-        UserDefaults.standard.removeObject(forKey: perDayKey)
-        UserDefaults.standard.removeObject(forKey: wakeKey)
+        clearPlannerDefaults()
     }
 
     override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: perDayKey)
-        UserDefaults.standard.removeObject(forKey: wakeKey)
+        clearPlannerDefaults()
         super.tearDown()
+    }
+
+    private func clearPlannerDefaults() {
+        [perDayKey, wakeKey, sleepNeedKey, recoveryKey, leadKey].forEach {
+            UserDefaults.standard.removeObject(forKey: $0)
+        }
     }
 
     func testNoOverrides_everyDayUsesDefaultWake() {
@@ -60,12 +67,26 @@ final class WindDownPerDayOverrideTests: XCTestCase {
         // nudge 00:00 the previous day's evening? No — 09:00 − 8:30 = 00:30. Just assert it tracks the math.
         WindDownNudge.setWakeMinutes(7 * 60)
         WindDownNudge.setWakeOverride(weekday: 7, minutes: 9 * 60)
-        let need = WindDownNudge.sleepNeedMinutes, lead = WindDownNudge.leadMinutes
-        let expectedSat = (((9 * 60 - need - lead) % 1440) + 1440) % 1440
+        let target = WindDownNudge.targetSleepMinutes, lead = WindDownNudge.leadMinutes
+        let expectedSat = (((9 * 60 - target - lead) % 1440) + 1440) % 1440
         XCTAssertEqual(WindDownNudge.nudgeMinuteOfDay(forWeekday: 7), expectedSat)
         // A non-overridden day uses the default wake.
-        let expectedDefault = (((7 * 60 - need - lead) % 1440) + 1440) % 1440
+        let expectedDefault = (((7 * 60 - target - lead) % 1440) + 1440) % 1440
         XCTAssertEqual(WindDownNudge.nudgeMinuteOfDay(forWeekday: 3), expectedDefault)
+    }
+
+    func testPlannerRecoveryShiftsReminderAndIsClamped() {
+        WindDownNudge.setWakeMinutes(7 * 60)
+        WindDownNudge.setSleepNeedMinutes(8 * 60)
+        WindDownNudge.setLeadMinutes(30)
+        WindDownNudge.setRecoveryMinutes(45)
+
+        XCTAssertEqual(WindDownNudge.targetSleepMinutes, 8 * 60 + 45)
+        XCTAssertEqual(WindDownNudge.nudgeMinuteOfDay(), 21 * 60 + 45)
+
+        WindDownNudge.setRecoveryMinutes(500)
+        XCTAssertEqual(WindDownNudge.recoveryMinutes, 60)
+        XCTAssertEqual(WindDownNudge.nudgeMinuteOfDay(), 21 * 60 + 30)
     }
 
     func testOverrideMinutesAreClamped() {

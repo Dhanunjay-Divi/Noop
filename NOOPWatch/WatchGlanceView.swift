@@ -3,7 +3,7 @@ import StrandDesign
 
 // MARK: - WatchGlanceView — the watch app's single primary screen
 //
-// The Apple-Fitness-x-WHOOP look scaled to the wrist: the three NOOP rings (Recovery / Effort / Sleep) with
+// The Apple-Fitness-x-WHOOP look scaled to the wrist: the three NOOP rings (Charge / Effort / Rest) with
 // their numbers in SF-Rounded, each honouring confidence (a calibrating score shows a dash plus a small
 // "cal" marker, NEVER a fabricated number), a live heart-rate readout from the watch's own sensor, and a
 // one-line sleep summary. When nothing has synced yet we show a friendly "open NOOP on your iPhone" state,
@@ -26,7 +26,14 @@ struct WatchGlanceView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(StrandPalette.surfaceBase.ignoresSafeArea())
-        .onAppear { liveHR.start() }
+        .onAppear {
+            #if DEBUG
+            // Screenshot routes run without a paired phone and must not be covered by Health's
+            // first-run authorization sheet. Normal debug and every release build still request it.
+            guard ProcessInfo.processInfo.environment["NOOP_DEMO_SCREEN"] == nil else { return }
+            #endif
+            liveHR.start()
+        }
         .onDisappear { liveHR.stop() }
     }
 
@@ -45,13 +52,13 @@ struct WatchGlanceView: View {
             HStack(spacing: 8) {
                 // The labels ride a plain String property into ScoreRing, so they must be wrapped HERE;
                 // a bare literal would bypass the string catalog entirely.
-                ScoreRing(label: String(localized: "Recovery"), value: snap.charge,
+                ScoreRing(label: String(localized: "Charge"), value: snap.charge,
                           calibrating: snap.chargeCalibrating || stale,
                           color: StrandPalette.chargeColor)
                 ScoreRing(label: String(localized: "Effort"), value: snap.effort,
                           calibrating: snap.effortCalibrating || stale,
                           color: StrandPalette.effortColor)
-                ScoreRing(label: String(localized: "Sleep"), value: snap.rest,
+                ScoreRing(label: String(localized: "Rest"), value: snap.rest,
                           calibrating: snap.restCalibrating || stale,
                           color: StrandPalette.restColor)
             }

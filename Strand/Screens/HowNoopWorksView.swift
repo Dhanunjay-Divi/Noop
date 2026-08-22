@@ -308,7 +308,7 @@ struct HowNoopWorksView: View {
                     .foregroundStyle(StrandPalette.textPrimary)
                 Text(m.family)
                     .font(StrandFont.overline)
-                    .tracking(0.4)
+                    .tracking(0)
                     .foregroundStyle(m.tint)
                 Spacer(minLength: 0)
             }

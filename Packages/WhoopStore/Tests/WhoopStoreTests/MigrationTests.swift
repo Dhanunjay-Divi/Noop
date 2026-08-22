@@ -73,9 +73,18 @@ final class MigrationTests: XCTestCase {
             let cols = try await store.columnNamesForTest(table: table)
             XCTAssertTrue(cols.contains("synced"), "\(table) missing synced column")
         }
-        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 38)
+        XCTAssertEqual(WhoopStoreInfo.schemaVersion, 43)
         let tableNames = try await store.tableNames()
         XCTAssertTrue(tableNames.contains("healthKitSyncState"))
+        XCTAssertTrue(tableNames.contains("nutritionEntry"))
+        XCTAssertTrue(tableNames.contains("strengthExercise"))
+        XCTAssertTrue(tableNames.contains("strengthRoutine"))
+        XCTAssertTrue(tableNames.contains("strengthRoutineExercise"))
+        XCTAssertTrue(tableNames.contains("strengthSession"))
+        XCTAssertTrue(tableNames.contains("strengthSet"))
+        XCTAssertTrue(tableNames.contains("coachMessage"))
+        XCTAssertTrue(tableNames.contains("coachMemory"))
+        XCTAssertTrue(tableNames.contains("nutritionCatalogItem"))
     }
 
     func testV30AddsPartialPendingIndexesForEveryRemoteStream() async throws {

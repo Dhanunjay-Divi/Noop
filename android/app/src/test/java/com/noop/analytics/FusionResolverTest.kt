@@ -28,7 +28,7 @@ class FusionResolverTest {
         )
         assertEquals(FusionSource.XIAOMI_BAND, point?.winningSource)
         assertEquals(8420.0, point?.value)
-        assertEquals("counts directly", point?.contributors?.first()?.reason)
+        assertEquals("device step count", point?.contributors?.first()?.reason)
     }
 
     @Test
@@ -43,12 +43,12 @@ class FusionResolverTest {
         )
         assertEquals(FusionSource.WHOOP_IMPORT, point?.winningSource)
         assertEquals(432.0, point?.value)
-        assertEquals("best stager", point?.contributors?.first()?.reason)
+        assertEquals("WHOOP staged-sleep import", point?.contributors?.first()?.reason)
     }
 
     @Test
     fun restingHrStrapBeatsPhone() {
-        // The strap measures HR directly (tier 0); the phone aggregates it (tier 2).
+        // Imported WHOOP HR is preferred here (tier 0); the phone health aggregate is tier 2.
         val point = FusionResolver.resolve(
             "rhr",
             listOf(
@@ -258,6 +258,33 @@ class FusionResolverTest {
         assertEquals(MetricArbitrationPolicy.MetricKind.STEPS, MetricArbitrationPolicy.kind("steps"))
         assertEquals(
             MetricArbitrationPolicy.MetricKind.OTHER, MetricArbitrationPolicy.kind("made_up_key"),
+        )
+    }
+
+    @Test
+    fun evidenceReasonsNeverRelabelImportsAsDirectSensors() {
+        assertEquals(
+            "WHOOP import",
+            MetricArbitrationPolicy.reason(
+                MetricArbitrationPolicy.MetricKind.HRV, FusionSource.WHOOP_IMPORT,
+            ),
+        )
+        assertEquals(
+            "health-data import",
+            MetricArbitrationPolicy.reason(
+                MetricArbitrationPolicy.MetricKind.SKIN_TEMP, FusionSource.APPLE_HEALTH,
+            ),
+        )
+        assertEquals(
+            "device-derived",
+            MetricArbitrationPolicy.reason(
+                MetricArbitrationPolicy.MetricKind.HEART_RATE, FusionSource.XIAOMI_BAND,
+            ),
+        )
+        assertTrue(
+            !MetricArbitrationPolicy.reason(
+                MetricArbitrationPolicy.MetricKind.HRV, FusionSource.WHOOP_IMPORT,
+            ).contains("direct sensor"),
         )
     }
 }

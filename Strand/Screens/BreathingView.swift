@@ -377,7 +377,7 @@ private struct BreathingContent: View {
                     }
                     Text(String(localized: "BPM"))
                         .font(StrandFont.footnote)
-                        .tracking(0.8)
+                        .tracking(0)
                         .foregroundStyle(StrandPalette.onDarkSecondary)
                 }
                 .shadow(color: .black.opacity(0.5), radius: 6, y: 1)

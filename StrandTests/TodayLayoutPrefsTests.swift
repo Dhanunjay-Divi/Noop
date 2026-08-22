@@ -12,12 +12,17 @@ final class TodayLayoutPrefsTests: XCTestCase {
     }
 
     func testEncodeDecodeRoundTripsAReorderedList() {
+        // A COMPLETE reordered list (every case present) must round-trip exactly. It has to be complete,
+        // because decodeOrder deliberately re-inserts any section missing from a saved order — that is the
+        // "never hide a section" contract, and it is what makes adding a new section in a later version
+        // safe for users who already customised their layout.
         let reordered: [TodaySection] = [
             .heartRate, .hero, .yourCards, .liveSession, .synthesis, .keyMetrics, .workouts, .recoveryVitals,
-            .journal,
+            .why, .target, .watch, .journal,
         ]
+        XCTAssertEqual(Set(reordered), Set(TodaySection.allCases), "the round-trip list must be complete")
         let encoded = TodayLayoutPrefs.encode(reordered)
-        XCTAssertEqual(encoded, "heartRate,hero,yourCards,liveSession,synthesis,keyMetrics,workouts,recoveryVitals,journal")
+        XCTAssertEqual(encoded, "heartRate,hero,yourCards,liveSession,synthesis,keyMetrics,workouts,recoveryVitals,why,target,watch,journal")
         XCTAssertEqual(TodayLayoutPrefs.decodeOrder(encoded), reordered)
     }
 
@@ -28,8 +33,8 @@ final class TodayLayoutPrefsTests: XCTestCase {
         let firstCut = "synthesis,keyMetrics,workouts,heartRate,recoveryVitals,yourCards"
         XCTAssertEqual(
             TodayLayoutPrefs.decodeOrder(firstCut),
-            // journal(8) follows everything saved → appended.
-            [.hero, .liveSession, .synthesis, .keyMetrics, .workouts, .heartRate, .recoveryVitals, .yourCards, .journal]
+            // why/target/watch precede synthesis in defaultOrder → inserted before it; journal appended.
+            [.hero, .liveSession, .why, .target, .watch, .synthesis, .keyMetrics, .workouts, .heartRate, .recoveryVitals, .yourCards, .journal]
         )
     }
 
@@ -37,7 +42,7 @@ final class TodayLayoutPrefsTests: XCTestCase {
         let partial = "heartRate,synthesis,keyMetrics,recoveryVitals"
         XCTAssertEqual(
             TodayLayoutPrefs.decodeOrder(partial),
-            [.hero, .liveSession, .workouts, .heartRate, .synthesis, .keyMetrics, .recoveryVitals, .yourCards, .journal]
+            [.hero, .liveSession, .why, .target, .watch, .workouts, .heartRate, .synthesis, .keyMetrics, .recoveryVitals, .yourCards, .journal]
         )
     }
 
@@ -45,7 +50,7 @@ final class TodayLayoutPrefsTests: XCTestCase {
         let messy = "yourCards,BOGUS,yourCards,heartRate, ,heartRate"
         XCTAssertEqual(
             TodayLayoutPrefs.decodeOrder(messy),
-            [.hero, .liveSession, .synthesis, .keyMetrics, .workouts, .recoveryVitals, .yourCards, .heartRate, .journal]
+            [.hero, .liveSession, .why, .target, .watch, .synthesis, .keyMetrics, .workouts, .recoveryVitals, .yourCards, .heartRate, .journal]
         )
     }
 
@@ -66,7 +71,7 @@ final class TodayLayoutPrefsTests: XCTestCase {
         // Pin the exact wire strings — they must match the Android TodaySection byte-for-byte.
         XCTAssertEqual(
             raws,
-            ["hero", "liveSession", "synthesis", "keyMetrics", "workouts", "heartRate", "recoveryVitals", "yourCards", "journal"]
+            ["hero", "liveSession", "synthesis", "why", "target", "watch", "keyMetrics", "workouts", "heartRate", "recoveryVitals", "yourCards", "journal"]
         )
     }
 }

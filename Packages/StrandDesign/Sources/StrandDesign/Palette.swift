@@ -98,22 +98,22 @@ public enum StrandPalette {
     // Light avoids pure white over the full canvas (less glare); Dark is a dimensional charcoal; Black
     // preserves true-black negative space while keeping raised cards visible by luminance, not shadow.
     public static var surfaceBase: Color {
-        chrome(light: "#EEF0F2", dark: "#0A0B0D", black: "#000000")
+        chrome(light: "#F4F5F7", dark: "#0C0D0F", black: "#000000")
     }
     public static var surfaceRaised: Color {
-        chrome(light: "#FAFBFC", dark: "#15171A", black: "#0A0A0B")
+        chrome(light: "#FFFFFF", dark: "#17191C", black: "#0A0A0B")
     }
     public static var surfaceOverlay: Color {
-        chrome(light: "#F6F7F9", dark: "#1B1D21", black: "#111113")
+        chrome(light: "#FAFBFC", dark: "#1D2024", black: "#111113")
     }
     public static var surfaceInset: Color {
-        chrome(light: "#E5E8EB", dark: "#0F1114", black: "#050506")
+        chrome(light: "#ECEFF2", dark: "#101215", black: "#050506")
     }
     public static var hairline: Color {
-        chrome(light: "#CDD1D6", dark: "#2D3137", black: "#242427")
+        chrome(light: "#DEE2E7", dark: "#2A2E33", black: "#242427")
     }
     public static var hairlineStrong: Color {
-        chrome(light: "#AEB4BC", dark: "#4B515A", black: "#414147")
+        chrome(light: "#C5CBD3", dark: "#434951", black: "#414147")
     }
 
     // MARK: Dimensional chrome — shared by glass, cards and extruded glyphs

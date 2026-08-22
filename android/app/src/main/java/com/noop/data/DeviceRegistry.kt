@@ -126,6 +126,7 @@ class DeviceRegistry(
             dao.deleteDayOwnershipFor(id)
             dao.deleteSleepStatesFor(id)
             dao.deleteLabMarkersFor(id)
+            dao.deleteNutritionEntriesFor(id)
             dao.deleteLiveSessionsFor(id)
             dao.deleteDismissedWorkoutsFor(id)
             dao.deleteDismissedSleepsFor(id)

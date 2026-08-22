@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nav_friends">Amigos</string>
+    <string name="friends_title">Amigos</string>
+    <string name="friends_subtitle">Puntuaciones privadas. Tu servidor. Tus reglas.</string>
+    <string name="friends_refresh">Actualizar Amigos</string>
+    <string name="friends_you">Tú</string>
+    <string name="friends_overflow_count">+%1$d</string>
+    <string name="friends_working">Procesando…</string>
+    <string name="friends_action_ok">Aceptar</string>
+    <string name="friends_action_cancel">Cancelar</string>
+    <string name="friends_action_done">Listo</string>
+    <string name="friends_action_save">Guardar uso compartido</string>
+    <string name="friends_action_remove">Eliminar</string>
+    <string name="friends_action_decline">Rechazar</string>
+
+    <string name="friends_server_title">Aloja tu círculo privado</string>
+    <string name="friends_server_body">Amigos funciona en un servidor Noop bajo tu control. No hay una cuenta Noop ni un perfil público.</string>
+    <string name="friends_server_setup_action">Configurar tu servidor</string>
+    <string name="friends_join_details">Introducir datos de invitación</string>
+    <string name="friends_server_invite_note">Una invitación incluye una dirección de servidor y un código de un solo uso. Puedes unirte sin la clave de administrador.</string>
+    <string name="friends_pending_title">Completa tu invitación</string>
+    <string name="friends_pending_body">Noop guardó este intento de unión porque se interrumpió la respuesta del servidor. Vuelve a intentarlo con el mismo código de un solo uso o elimina de forma segura cualquier perfil creado en el servidor.</string>
+    <string name="friends_pending_retry">Reintentar invitación</string>
+    <string name="friends_pending_discard">Cancelar este intento</string>
+    <string name="friends_pending_discard_title">¿Cancelar este intento de unión?</string>
+    <string name="friends_pending_discard_body">Noop pedirá al servidor que elimine cualquier perfil y resumen de Friends vinculado a esta inscripción pendiente antes de retirar la credencial protegida de este dispositivo.</string>
+    <string name="friends_pending_discard_action">Eliminar intento</string>
+    <string name="friends_profile_title">Crea tu perfil privado</string>
+    <string name="friends_profile_body">Solo los amigos aceptados en %1$s pueden ver tu nombre.</string>
+    <string name="friends_display_name">Nombre visible</string>
+    <string name="friends_create_profile">Crear perfil privado</string>
+    <string name="friends_profile_security_note">La clave de administrador se usa una vez para emitir una credencial de miembro independiente. Amigos no tiene cifrado de extremo a extremo; usa un operador de servidor de confianza.</string>
+
+    <string name="friends_circle_overline">Tu círculo</string>
+    <plurals name="friends_people_count">
+        <item quantity="one">%1$d persona</item>
+        <item quantity="other">%1$d personas</item>
+    </plurals>
+    <string name="friends_invite_action">Invitar a un amigo</string>
+    <string name="friends_enter_invite_code">Introducir un código de invitación</string>
+    <string name="friends_requests_title">Solicitudes</string>
+    <string name="friends_request_incoming">Quiere unirse a tu círculo</string>
+    <string name="friends_request_outgoing">Esperando aceptación</string>
+    <string name="friends_accept_named">Aceptar a %1$s</string>
+    <string name="friends_today_title">Hoy</string>
+    <string name="friends_private">Privado</string>
+    <plurals name="friends_friend_count">
+        <item quantity="one">%1$d amigo</item>
+        <item quantity="other">%1$d amigos</item>
+    </plurals>
+    <string name="friends_empty_title">Tu círculo empieza aquí</string>
+    <string name="friends_empty_body">Invita a alguien de confianza. Las puntuaciones aparecen cuando se une y aceptas la solicitud.</string>
+    <string name="friends_waiting_shared_day">Esperando un día compartido</string>
+    <string name="friends_scores_waiting">Las puntuaciones aparecerán cuando %1$s suba un resumen diario.</string>
+    <string name="friends_open_sharing_named">Abrir controles para compartir con %1$s</string>
+    <string name="friends_score_charge">Carga</string>
+    <string name="friends_score_effort">Esfuerzo</string>
+    <string name="friends_score_rest">Descanso</string>
+    <string name="friends_detail_sleep">Sueño %1$s</string>
+    <string name="friends_detail_hrv">VFC %1$s ms</string>
+    <string name="friends_detail_rhr">FC reposo %1$s lpm</string>
+    <string name="friends_duration_hours_minutes">%1$d h %2$d min</string>
+    <string name="friends_shared_today">Compartido hoy</string>
+    <string name="friends_shared_yesterday">Compartido ayer</string>
+    <string name="friends_last_shared">Último dato compartido</string>
+    <string name="friends_last_shared_date">Último dato compartido: %1$s</string>
+
+    <string name="friends_privacy_title">Solo resúmenes por diseño</string>
+    <string name="friends_privacy_body">La frecuencia cardíaca sin procesar, los intervalos R-R, las fases del sueño, diarios, entrenamientos, rutas, exportaciones e identificadores de dispositivo nunca aparecen en Amigos.</string>
+    <string name="friends_leave_action">Salir del círculo y borrar la copia del servidor</string>
+    <string name="friends_leave_title">¿Salir de este círculo?</string>
+    <string name="friends_leave_body">Noop eliminará tus amistades, la credencial de miembro y los resúmenes de Amigos de este servidor. Los datos de salud del dispositivo y tu copia de seguridad independiente se conservarán.</string>
+
+    <string name="friends_invite_title">Invitar a un amigo</string>
+    <string name="friends_invite_body">Acceso de un solo uso a tu círculo privado.</string>
+    <string name="friends_invite_expires">Caduca el %1$s</string>
+    <string name="friends_invite_share">Compartir invitación</string>
+    <string name="friends_invite_subject">Únete a mi círculo privado de Noop</string>
+    <string name="friends_invite_share_text">Únete a mi círculo privado de Noop.\n\nServidor: %1$s\nCódigo de un solo uso: %2$s\n\nEn Noop, abre Más &gt; Amigos &gt; Introducir datos de invitación. Solo se empezará a compartir cuando acepte tu solicitud.</string>
+    <string name="friends_invite_disclosure">El código caduca en 72 horas y solo funciona una vez. Al unirte se crea una solicitud; tú sigues decidiendo si la aceptas.</string>
+    <string name="friends_join_title">Unirse a un círculo</string>
+    <string name="friends_join_body">Revisa el destino y la información antes de enviar la solicitud.</string>
+    <string name="friends_server_address">Dirección del servidor</string>
+    <string name="friends_invite_code">Código de invitación</string>
+    <string name="friends_join_default_title">Compartido de forma predeterminada</string>
+    <string name="friends_join_default_body">Carga, Esfuerzo y Descanso</string>
+    <string name="friends_join_never_title">Nunca se envía a Amigos</string>
+    <string name="friends_join_never_body">FC y R-R sin procesar, fases del sueño, diario, entrenamientos, rutas, exportaciones e identificadores de dispositivo</string>
+    <string name="friends_join_trust_title">Confianza en el operador</string>
+    <string name="friends_join_trust_body">Amigos no tiene cifrado de extremo a extremo. El operador del servidor autoalojado puede acceder a los campos de resumen que decidas enviar.</string>
+    <string name="friends_join_send">Enviar solicitud de unión</string>
+
+    <string name="friends_sharing_directional">El uso compartido es direccional y tu servidor lo aplica.</string>
+    <string name="friends_daily_scores">Puntuaciones diarias</string>
+    <string name="friends_additional_details">Detalles adicionales</string>
+    <string name="friends_sleep_duration">Duración del sueño</string>
+    <string name="friends_hrv">VFC</string>
+    <string name="friends_rhr">Frecuencia cardíaca en reposo</string>
+    <string name="friends_additional_default_note">Los detalles adicionales permanecen desactivados en cada amistad nueva hasta que los actives.</string>
+    <string name="friends_they_share">Comparte contigo</string>
+    <string name="friends_shared">Compartido</string>
+    <string name="friends_hidden">Oculto</string>
+    <string name="friends_remove_named">Eliminar a %1$s</string>
+    <string name="friends_remove_title">¿Eliminar a %1$s?</string>
+    <string name="friends_remove_body">Ninguno podrá ver las puntuaciones del otro. Para volver a conectar hará falta una invitación nueva.</string>
+
+    <string name="friends_upload_pending">Amigos se ha cargado, pero no se pudo subir el último resumen permitido. Noop volverá a intentarlo.</string>
+    <string name="friends_notice_profile_ready">Perfil privado listo</string>
+    <string name="friends_notice_request_sent">Solicitud enviada. Se compartirá tras la aceptación.</string>
+    <string name="friends_notice_request_accepted">%1$s se ha unido a tu círculo</string>
+    <string name="friends_notice_request_declined">Solicitud rechazada</string>
+    <string name="friends_notice_privacy_saved">Se actualizó lo compartido con %1$s</string>
+    <string name="friends_notice_removed">Se eliminó a %1$s. Se dejó de compartir.</string>
+    <string name="friends_notice_profile_deleted">Perfil del servidor eliminado. Se conservaron los datos de salud locales.</string>
+    <string name="friends_notice_pending_discarded">Invitación pendiente eliminada</string>
+
+    <string name="friends_error_title">Amigos</string>
+    <string name="friends_error_input">Revisa los datos de la invitación e inténtalo de nuevo.</string>
+    <string name="friends_error_network">No se pudo acceder al servidor privado de Amigos.</string>
+    <string name="friends_error_server">El servidor de Amigos rechazó la solicitud (HTTP %1$d).</string>
+    <string name="friends_error_response">El servidor devolvió una respuesta de Amigos ilegible.</string>
+    <string name="friends_error_storage">Noop no pudo guardar de forma segura el perfil de Amigos en este dispositivo.</string>
+    <string name="friends_error_unknown">Amigos no pudo completar la solicitud.</string>
+</resources>

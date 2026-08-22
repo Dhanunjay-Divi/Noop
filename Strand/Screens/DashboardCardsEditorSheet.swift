@@ -118,7 +118,7 @@ struct DashboardCardsEditorSheet: View {
             Toggle(isOn: item.enabled) {
                 Text(card.title.uppercased())
                     .font(StrandFont.subhead.weight(.semibold))
-                    .tracking(0.4)
+                    .tracking(0)
                     .foregroundStyle(enabled ? StrandPalette.textPrimary : StrandPalette.textTertiary)
             }
             .toggleStyle(.switch)

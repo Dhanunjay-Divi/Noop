@@ -1,5 +1,7 @@
 import SwiftUI
 import StrandDesign
+import StrandAnalytics
+import WhoopStore
 #if os(iOS)
 import UIKit
 #elseif os(macOS)
@@ -21,6 +23,7 @@ struct SmartAlarmView: View {
     // alarm over BLE) and the behavior store (the alarm's persisted on/time/weekdays).
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var behavior: BehaviorStore
+    @EnvironmentObject private var repo: Repository
 
     @State private var windDownOn = WindDownNudge.isEnabled
     /// Shown when the user flips the nudge on but notifications are denied at the OS level — the reminder
@@ -28,6 +31,11 @@ struct SmartAlarmView: View {
     @State private var showNotifDeniedAlert = false
     /// Earliest wake time the nudge is derived from (minutes since midnight). Seeded from the store.
     @State private var wakeMinutes = WindDownNudge.wakeMinutes
+    @State private var sleepTargetMinutes = WindDownNudge.sleepNeedMinutes
+    @State private var sleepGoalMode = WindDownNudge.goalMode
+    @State private var windDownLeadMinutes = WindDownNudge.leadMinutes
+    @State private var allSleepSessions: [CachedSleepSession] = []
+    @State private var habitualMidsleepSec: Int?
 
     // PR#554 (MumiZed) — per-day wake overrides. `perDayOn` reflects whether ANY override is set; the
     // `overrides` map mirrors the store so the pickers stay in sync. Additive: with none set, the nudge
@@ -43,10 +51,8 @@ struct SmartAlarmView: View {
     nonisolated private static let weekdayOrder = [2, 3, 4, 5, 6, 7, 1]
 
     var body: some View {
-        // #766: retitled to "Alarms" because it now holds BOTH the strap's silent wake-alarm and the
-        // evening wind-down reminder, so naming it "Wind-Down" undersold it. One surface, clearly labelled.
-        ScreenScaffold(title: "Alarms",
-                       subtitle: "Your strap wake-alarm and the evening wind-down reminder, in one place.") {
+        ScreenScaffold(title: "Sleep Planner",
+                       subtitle: "Tonight's plan, wind-down reminder, and wake alarms in one place.") {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 windowHero
                 strapAlarmCard
@@ -54,6 +60,17 @@ struct SmartAlarmView: View {
                 honestyCard
                 windDownCard
             }
+        }
+        .task(id: repo.refreshSeq) {
+            allSleepSessions = await repo.allSleepSessions()
+            habitualMidsleepSec = await repo.habitualMidsleepSec()
+            WindDownNudge.setRecoveryMinutes(sleepPlan.recoveryMinutes)
+        }
+        .onAppear {
+            WindDownNudge.setRecoveryMinutes(sleepPlan.recoveryMinutes)
+        }
+        .onChangeCompat(of: sleepPlan.recoveryMinutes) { minutes in
+            WindDownNudge.setRecoveryMinutes(minutes)
         }
         .alert(String(localized: "Notifications are off"), isPresented: $showNotifDeniedAlert) {
             Button(String(localized: "Open Settings")) { Self.openNotificationSettings() }
@@ -77,33 +94,96 @@ struct SmartAlarmView: View {
         #endif
     }
 
-    // A small Rest-tinted hero — the wind-down readout as a clean time pairing (wind-down → wake)
-    // over a scenic Rest backdrop, so a glance gives the night's shape. It's about winding down to
-    // sleep, so it reads in the Rest world (indigo) rather than the brand-green chrome below.
+    /// One plan, derived from the same explicit target and recent arithmetic balance used by the card.
+    /// Naps contribute only when they have recorded sleep stages; missing nights remain skipped.
+    private var sleepPlan: SleepPlan {
+        SleepPlanner.plan(
+            wakeMinute: wakeMinutes,
+            sleepTargetMinutes: sleepTargetMinutes,
+            windDownLeadMinutes: windDownLeadMinutes,
+            debtBalanceMinutes: plannerLedger.nightCount == 0 ? nil : plannerLedger.balanceMin,
+            historyNights: plannerLedger.nightCount,
+            goalMode: sleepGoalMode
+        )
+    }
+
+    private var plannerLedger: SleepDebtLedger {
+        SleepDebt.ledger(
+            series: repo.days.map { day in
+                (
+                    day: day.day,
+                    totalSleepMin: SleepDebt.creditedSleepMin(
+                        mainSleepMin: day.totalSleepMin,
+                        napSleepMin: plannerNapMinutesByDay[day.day] ?? 0
+                    )
+                )
+            },
+            needHours: Double(sleepTargetMinutes) / 60.0
+        )
+    }
+
+    private var plannerNapMinutesByDay: [String: Double] {
+        let groups = Dictionary(grouping: allSleepSessions) { session in
+            Repository.localDayKey(Date(timeIntervalSince1970: TimeInterval(session.endTs)))
+        }
+        return groups.mapValues {
+            SleepView.napSleepMinutes($0, habitualMidsleepSec: habitualMidsleepSec)
+        }
+    }
+
+    // A Rest-tinted plan hero. It is useful even with reminders off: reminder state changes delivery,
+    // not the underlying bedtime math.
     private var windowHero: some View {
-        ZStack {
+        let plan = sleepPlan
+        return ZStack {
             ScenicHeroBackground(domain: .rest)
                 .clipShape(RoundedRectangle(cornerRadius: NoopMetrics.cardRadius, style: .continuous))
             VStack(alignment: .leading, spacing: 12) {
-                Text("Tonight").strandOverline()
-                HStack(alignment: .firstTextBaseline, spacing: 14) {
+                HStack {
+                    Text("Tonight's plan").strandOverline()
+                    Spacer()
+                    Text(planConfidenceLabel(plan.confidence))
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
                     heroTime(label: "Wind down",
-                             time: windDownOn ? timeLabel(WindDownNudge.nudgeMinuteOfDay()) : "—",
+                             time: timeLabel(plan.windDownMinute),
                              tint: StrandPalette.restColor)
                     Image(systemName: "arrow.right")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(StrandPalette.textTertiary)
                         .accessibilityHidden(true)
+                    heroTime(label: "Bedtime",
+                             time: timeLabel(plan.bedtimeMinute),
+                             tint: StrandPalette.restBright)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .accessibilityHidden(true)
                     heroTime(label: "Wake",
-                             time: timeLabel(wakeMinutes),
+                             time: timeLabel(plan.wakeMinute),
                              tint: StrandPalette.restBright)
                     Spacer(minLength: 0)
                 }
-                Text(windDownOn
-                     ? "A calm nudge \(WindDownNudge.sleepNeedMinutes / 60)h \(WindDownNudge.leadMinutes)m before your wake time."
-                     : "Turn on the wind-down reminder below to land at your wake time rested.")
+                Text(planSummary(plan))
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let timing = observedTimingSummary(plan) {
+                    Label(timing, systemImage: "clock.arrow.circlepath")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text(windDownOn
+                     ? String(
+                        format: String(localized: "appwide.sleep.reminder.scheduled_format"),
+                        timeLabel(plan.windDownMinute)
+                     )
+                     : String(localized: "appwide.sleep.reminder.off"))
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(20)
@@ -115,8 +195,72 @@ struct SmartAlarmView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).strandOverline()
             Text(time)
-                .font(StrandFont.number(28))
+                .font(StrandFont.number(24))
                 .foregroundStyle(tint)
+        }
+    }
+
+    private func planSummary(_ plan: SleepPlan) -> String {
+        let opportunity = durationLabel(plan.sleepOpportunityMinutes)
+        switch plan.goalMode {
+        case .target:
+            if let balance = plan.debtBalanceMinutes, balance < -SleepDebt.onTargetBandMin {
+                return String(localized: "\(opportunity) fixed sleep opportunity. Recent history is \(durationLabel(Int(abs(balance)))) short, but Target mode does not change the amount you set.")
+            }
+            return String(localized: "\(opportunity) fixed sleep opportunity from the target you set.")
+        case .extraOpportunity:
+            return String(localized: "\(opportunity) sleep opportunity. Extra mode reserves at least 30 minutes beyond your target; a supported recent shortfall can raise that addition, capped at 1 hour.")
+        case .balance:
+            break
+        }
+        if plan.historyNights < SleepPlanner.minimumDebtNights {
+            return String(localized: "\(opportunity) sleep opportunity from your target. Add at least 3 recorded nights to calibrate a recent-balance adjustment.")
+        }
+        if plan.recoveryMinutes > 0 {
+            return String(localized: "\(opportunity) sleep opportunity: your \(durationLabel(plan.baseSleepMinutes)) target plus \(durationLabel(plan.recoveryMinutes)) to ease a recent \(durationLabel(Int(abs(plan.debtBalanceMinutes ?? 0)))) shortfall. The addition is capped at 1 hour.")
+        }
+        if let balance = plan.debtBalanceMinutes, balance > SleepDebt.onTargetBandMin {
+            return String(localized: "\(opportunity) sleep opportunity. Your recent balance is \(durationLabel(Int(balance))) ahead, but NOOP never trims your target because of a surplus.")
+        }
+        return String(localized: "\(opportunity) sleep opportunity. Your recent sleep balance is on target, so no recovery time was added.")
+    }
+
+    private func observedTimingSummary(_ plan: SleepPlan) -> String? {
+        guard let shift = SleepPlanner.observedTimingShiftMinutes(
+            plan: plan,
+            habitualMidsleepSeconds: habitualMidsleepSec
+        ) else { return nil }
+        if abs(shift) <= 30 {
+            return String(localized: "Tonight is within 30 minutes of your observed sleep timing.")
+        }
+        let direction = shift < 0 ? String(localized: "earlier") : String(localized: "later")
+        return String(localized: "Tonight is \(durationLabel(abs(shift))) \(direction) than your observed sleep timing. This describes your recent behavior, not a biological chronotype.")
+    }
+
+    private func sleepGoalLabel(_ mode: SleepGoalMode) -> String {
+        switch mode {
+        case .target: return String(localized: "Target")
+        case .balance: return String(localized: "Balance")
+        case .extraOpportunity: return String(localized: "Extra")
+        }
+    }
+
+    private func sleepGoalHelp(_ mode: SleepGoalMode) -> String {
+        switch mode {
+        case .target:
+            return String(localized: "Keep the sleep target fixed, even when recent history is short.")
+        case .balance:
+            return String(localized: "Add a bounded 15-minute-step adjustment when at least 3 recorded nights show a shortfall.")
+        case .extraOpportunity:
+            return String(localized: "Reserve at least 30 extra minutes tonight. This is added opportunity, not a promise of better recovery.")
+        }
+    }
+
+    private func planConfidenceLabel(_ confidence: ScoreConfidence) -> String {
+        switch confidence {
+        case .calibrating: return String(localized: "Calibrating")
+        case .building: return String(localized: "Building")
+        case .solid: return String(localized: "Solid basis")
         }
     }
 
@@ -272,7 +416,7 @@ struct SmartAlarmView: View {
                         Text("Remind me to wind down")
                             .font(StrandFont.body)
                             .foregroundStyle(StrandPalette.textPrimary)
-                        Text("A calm evening reminder, timed from your wake time and usual sleep need. It's a suggestion, not an alarm.")
+                        Text("A gentle notification at the plan's wind-down time. It is a suggestion, not a guaranteed alarm.")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -294,29 +438,118 @@ struct SmartAlarmView: View {
                 }
                 .frame(minHeight: 42)
 
-                if windDownOn {
-                    Divider().overlay(StrandPalette.hairline)
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Wake time")
-                                .font(StrandFont.body)
-                                .foregroundStyle(StrandPalette.textPrimary)
-                            Text("The nudge fires \(WindDownNudge.sleepNeedMinutes / 60)h \(WindDownNudge.leadMinutes)m before this.")
-                                .font(StrandFont.footnote)
-                                .foregroundStyle(StrandPalette.textTertiary)
-                        }
-                        Spacer()
-                        DatePicker("", selection: wakeBinding, displayedComponents: .hourAndMinute)
-                            .labelsHidden()
-                            .accessibilityLabel("Wake time")
+                Divider().overlay(StrandPalette.hairline)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("appwide.sleep.tonights_goal")
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    SegmentedPillControl(
+                        SleepGoalMode.allCases,
+                        selection: $sleepGoalMode,
+                        label: sleepGoalLabel
+                    )
+                    Text(sleepGoalHelp(sleepGoalMode))
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .onChangeCompat(of: sleepGoalMode) { mode in
+                    WindDownNudge.setGoalMode(mode)
+                }
+
+                Divider().overlay(StrandPalette.hairline)
+                plannerValueRow(
+                    title: "Sleep target",
+                    help: "Your baseline opportunity before any small recent-balance addition.",
+                    value: durationLabel(sleepTargetMinutes),
+                    decrementEnabled: sleepTargetMinutes > SleepPlanner.minimumSleepMinutes,
+                    incrementEnabled: sleepTargetMinutes < SleepPlanner.maximumSleepMinutes,
+                    decrementLabel: "Reduce sleep target by 15 minutes",
+                    incrementLabel: "Increase sleep target by 15 minutes",
+                    onDecrement: {
+                        sleepTargetMinutes = max(
+                            SleepPlanner.minimumSleepMinutes,
+                            sleepTargetMinutes - 15
+                        )
+                        WindDownNudge.setSleepNeedMinutes(sleepTargetMinutes)
+                    },
+                    onIncrement: {
+                        sleepTargetMinutes = min(
+                            SleepPlanner.maximumSleepMinutes,
+                            sleepTargetMinutes + 15
+                        )
+                        WindDownNudge.setSleepNeedMinutes(sleepTargetMinutes)
                     }
-                    Text("You'll be reminded around \(timeLabel(WindDownNudge.nudgeMinuteOfDay())).")
+                )
+
+                Divider().overlay(StrandPalette.hairline)
+                plannerValueRow(
+                    title: "Wind-down buffer",
+                    help: "Time to settle before the suggested bedtime.",
+                    value: durationLabel(windDownLeadMinutes),
+                    decrementEnabled: windDownLeadMinutes > 0,
+                    incrementEnabled: windDownLeadMinutes < 120,
+                    decrementLabel: "Reduce wind-down buffer by 15 minutes",
+                    incrementLabel: "Increase wind-down buffer by 15 minutes",
+                    onDecrement: {
+                        windDownLeadMinutes = max(0, windDownLeadMinutes - 15)
+                        WindDownNudge.setLeadMinutes(windDownLeadMinutes)
+                    },
+                    onIncrement: {
+                        windDownLeadMinutes = min(120, windDownLeadMinutes + 15)
+                        WindDownNudge.setLeadMinutes(windDownLeadMinutes)
+                    }
+                )
+
+                Divider().overlay(StrandPalette.hairline)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Planner wake time")
+                            .font(StrandFont.body)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text("Bedtime and wind-down count backward from this time.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                    Spacer()
+                    DatePicker("", selection: wakeBinding, displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                        .accessibilityLabel("Planner wake time")
+                }
+                if behavior.smartAlarmEnabled && behavior.smartAlarmMinutes != wakeMinutes {
+                    Button("Use strap alarm time") {
+                        wakeMinutes = behavior.smartAlarmMinutes
+                        WindDownNudge.setWakeMinutes(wakeMinutes)
+                    }
+                    .font(StrandFont.footnote)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(StrandPalette.accent)
+                    .accessibilityHint("Aligns the sleep plan with the separate strap wake alarm")
+                }
+
+                Text(sleepPlan.recoveryMinutes > 0
+                     ? String(
+                        format: String(localized: "appwide.sleep.recovery.added_format"),
+                        durationLabel(sleepPlan.recoveryMinutes)
+                     )
+                     : String(localized: "appwide.sleep.recovery.none"))
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if windDownOn {
+                    Text(
+                        String(
+                            format: String(localized: "appwide.sleep.reminder.around_format"),
+                            timeLabel(sleepPlan.windDownMinute)
+                        )
+                    )
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textSecondary)
-
-                    Divider().overlay(StrandPalette.hairline)
-                    perDaySection
                 }
+
+                Divider().overlay(StrandPalette.hairline)
+                perDaySection
             }
         }
     }
@@ -437,8 +670,80 @@ struct SmartAlarmView: View {
         )
     }
 
+    private func plannerValueRow(
+        title: LocalizedStringKey,
+        help: LocalizedStringKey,
+        value: String,
+        decrementEnabled: Bool,
+        incrementEnabled: Bool,
+        decrementLabel: String,
+        incrementLabel: String,
+        onDecrement: @escaping () -> Void,
+        onIncrement: @escaping () -> Void
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(StrandFont.body)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(help)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            HStack(spacing: 8) {
+                plannerStepButton(
+                    systemName: "minus",
+                    enabled: decrementEnabled,
+                    accessibilityLabel: decrementLabel,
+                    action: onDecrement
+                )
+                Text(value)
+                    .font(StrandFont.bodyNumber)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .frame(minWidth: 60)
+                    .accessibilityLabel(value)
+                plannerStepButton(
+                    systemName: "plus",
+                    enabled: incrementEnabled,
+                    accessibilityLabel: incrementLabel,
+                    action: onIncrement
+                )
+            }
+        }
+        .frame(minHeight: 44)
+    }
+
+    private func plannerStepButton(
+        systemName: String,
+        enabled: Bool,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(enabled ? StrandPalette.accent : StrandPalette.textTertiary)
+                .frame(width: 32, height: 32)
+                .background(StrandPalette.surfaceInset, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
     private func timeLabel(_ minutes: Int) -> String {
         String(format: "%02d:%02d", minutes / 60, minutes % 60)
+    }
+
+    private func durationLabel(_ minutes: Int) -> String {
+        let safe = max(minutes, 0)
+        let hours = safe / 60
+        let remainder = safe % 60
+        if hours == 0 { return String(localized: "\(remainder)m") }
+        if remainder == 0 { return String(localized: "\(hours)h") }
+        return String(localized: "\(hours)h \(remainder)m")
     }
 
     // MARK: - Strap alarm weekday picker (#766, moved here from Automations, behaviour intact)

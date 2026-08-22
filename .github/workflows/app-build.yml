@@ -1,4 +1,4 @@
-# Compile-only verification for the macOS and iOS app targets.
+# Build and test verification for the macOS and iOS app targets.
 #
 # Why this exists: the iOS app is a build-from-source community port (no App Store —
 # NOOP stays anonymous), so it isn't exercised on a device by the maintainer. This job
@@ -14,6 +14,7 @@ on:
     paths:
       - 'Strand/**'
       - 'StrandiOS/**'
+      - 'NOOPiOSUITests/**'
       - 'StrandiOSShared/**'
       - 'StrandiOSWidgets/**'
       - 'Packages/**'
@@ -24,6 +25,7 @@ on:
     paths:
       - 'Strand/**'
       - 'StrandiOS/**'
+      - 'NOOPiOSUITests/**'
       - 'StrandiOSShared/**'
       - 'StrandiOSWidgets/**'
       - 'Packages/**'
@@ -79,15 +81,20 @@ jobs:
           build
 
       # Run the app-target unit tests (StrandTests, wired into the Strand scheme's test action in
-      # project.yml). ONLY the macOS/Strand leg: StrandTests is hosted in the macOS app; the NOOPiOS
-      # leg stays compile-only. Uses a concrete (runnable) macOS destination, not the universal
-      # generic one above. This is what runs the pure app-target logic tests (backfill continuation,
-      # scheduled-report / strain-target policy, etc.) that swift-packages can't reach.
+      # project.yml). Uses a concrete (runnable) macOS destination, not the universal generic one.
       - name: Test ${{ matrix.scheme }}
         if: matrix.scheme == 'Strand'
         run: >-
           xcodebuild -scheme Strand -configuration Debug
           -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          test
+
+      - name: Test iOS production shell
+        if: matrix.scheme == 'NOOPiOS'
+        run: >-
+          xcodebuild -scheme NOOPiOS -configuration Debug
+          -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=latest'
           CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
           test
 

@@ -45,7 +45,7 @@ struct V2MonthCalendar: View {
                         let isOn = (active?.id == m.id)
                         Text(m.title)
                             .font(NoopV2.overline)
-                            .tracking(0.6)
+                            .tracking(0)
                             .foregroundStyle(isOn ? .black.opacity(0.85) : NoopV2.inkSecondary)
                             .padding(.horizontal, 14)
                             .frame(minHeight: 44)                     // C5: HIG minimum
@@ -157,10 +157,10 @@ struct V2MonthCalendarDemo: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: NoopV2.sectionGap) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("AUGUST 2026".uppercased())
-                            .font(NoopV2.overline).tracking(1.2)
+                        Text("appwide.v2.demo.month")
+                            .font(NoopV2.overline).tracking(0)
                             .foregroundStyle(NoopV2.inkTertiary)
-                        Text("Your month")
+                        Text("appwide.calendar.your_month")
                             .font(NoopV2.display)
                             .foregroundStyle(NoopV2.ink)
                     }
@@ -170,7 +170,7 @@ struct V2MonthCalendarDemo: View {
                                     dayCount: 31,
                                     today: 22)
                         .v2Card()
-                    Text("Each square is one day: red is a low day, amber middling, mint strong. An empty outline means no data — gaps stay gaps.")
+                    Text("appwide.calendar.legend_body")
                         .font(NoopV2.caption)
                         .foregroundStyle(NoopV2.inkTertiary)
                 }

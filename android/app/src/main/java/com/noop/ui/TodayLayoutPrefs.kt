@@ -26,6 +26,12 @@ enum class TodaySection(val raw: String, val title: String) {
     HERO("hero", "Recovery / Effort / Sleep"),
     LIVE_SESSION("liveSession", "Start session"),
     SYNTHESIS("synthesis", "Synthesis"),
+    // NEW (2026-08-22) — mirrors the Swift TodaySection byte-for-byte (same raw wire strings, same
+    // declared order). These three answer, in reading order: why is my score that number, what should I
+    // do about it, and is anything off.
+    WHY("why", "Why today reads this way"),
+    TARGET("target", "Today's target"),
+    WATCH("watch", "Worth watching"),
     KEY_METRICS("keyMetrics", "Key Metrics"),
     WORKOUTS("workouts", "Workouts"),
     HEART_RATE("heartRate", "Heart Rate"),
@@ -39,8 +45,8 @@ enum class TodaySection(val raw: String, val title: String) {
         /** The original, hard-coded section order — the default when the layout isn't customised. The
          *  journal widget (#656) is last by default, where it was first added, above the data-sources card. */
         val defaultOrder: List<TodaySection> = listOf(
-            HERO, LIVE_SESSION, SYNTHESIS, KEY_METRICS, WORKOUTS, HEART_RATE, RECOVERY_VITALS, YOUR_CARDS,
-            JOURNAL,
+            HERO, LIVE_SESSION, WHY, TARGET, WATCH, SYNTHESIS, KEY_METRICS, WORKOUTS, HEART_RATE,
+            RECOVERY_VITALS, YOUR_CARDS, JOURNAL,
         )
     }
 }

@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nav_friends">Friends</string>
+    <string name="friends_title">Friends</string>
+    <string name="friends_subtitle">Private scores. Your server. Your rules.</string>
+    <string name="friends_refresh">Refresh Friends</string>
+    <string name="friends_you">You</string>
+    <string name="friends_overflow_count">+%1$d</string>
+    <string name="friends_working">Working…</string>
+    <string name="friends_action_ok">OK</string>
+    <string name="friends_action_cancel">Cancel</string>
+    <string name="friends_action_done">Done</string>
+    <string name="friends_action_save">Save sharing</string>
+    <string name="friends_action_remove">Remove</string>
+    <string name="friends_action_decline">Decline</string>
+
+    <string name="friends_server_title">Host your private circle</string>
+    <string name="friends_server_body">Friends runs on a Noop server you control. There is no Noop account or public profile.</string>
+    <string name="friends_server_setup_action">Set up your server</string>
+    <string name="friends_join_details">Enter invite details</string>
+    <string name="friends_server_invite_note">An invitation includes a server address and one-time code. You can join without the server administrator key.</string>
+    <string name="friends_pending_title">Finish your invitation</string>
+    <string name="friends_pending_body">Noop saved this join attempt because the server response was interrupted. Retry with the same one-time code, or securely delete any server profile created by the attempt.</string>
+    <string name="friends_pending_retry">Retry invitation</string>
+    <string name="friends_pending_discard">Cancel this attempt</string>
+    <string name="friends_pending_discard_title">Cancel this join attempt?</string>
+    <string name="friends_pending_discard_body">Noop will ask the server to delete any profile and Friends summaries tied to this pending enrollment before removing its protected credential from this device.</string>
+    <string name="friends_pending_discard_action">Delete attempt</string>
+    <string name="friends_profile_title">Create your private profile</string>
+    <string name="friends_profile_body">Your name is visible only to accepted friends on %1$s.</string>
+    <string name="friends_display_name">Display name</string>
+    <string name="friends_create_profile">Create private profile</string>
+    <string name="friends_profile_security_note">The administrator key is used once to issue a separate member credential. Friends is not end-to-end encrypted, so use a server operator you trust.</string>
+
+    <string name="friends_circle_overline">Your circle</string>
+    <plurals name="friends_people_count">
+        <item quantity="one">%1$d person</item>
+        <item quantity="other">%1$d people</item>
+    </plurals>
+    <string name="friends_invite_action">Invite a friend</string>
+    <string name="friends_enter_invite_code">Enter an invite code</string>
+    <string name="friends_requests_title">Requests</string>
+    <string name="friends_request_incoming">Wants to join your circle</string>
+    <string name="friends_request_outgoing">Waiting for acceptance</string>
+    <string name="friends_accept_named">Accept %1$s</string>
+    <string name="friends_today_title">Today</string>
+    <string name="friends_private">Private</string>
+    <plurals name="friends_friend_count">
+        <item quantity="one">%1$d friend</item>
+        <item quantity="other">%1$d friends</item>
+    </plurals>
+    <string name="friends_empty_title">Your circle starts here</string>
+    <string name="friends_empty_body">Invite someone you trust. Scores appear only after they join and you accept the request.</string>
+    <string name="friends_waiting_shared_day">Waiting for a shared day</string>
+    <string name="friends_scores_waiting">Scores will appear after %1$s uploads a daily summary.</string>
+    <string name="friends_open_sharing_named">Open sharing controls for %1$s</string>
+    <string name="friends_score_charge">Charge</string>
+    <string name="friends_score_effort">Effort</string>
+    <string name="friends_score_rest">Rest</string>
+    <string name="friends_detail_sleep">Sleep %1$s</string>
+    <string name="friends_detail_hrv">HRV %1$s ms</string>
+    <string name="friends_detail_rhr">RHR %1$s bpm</string>
+    <string name="friends_duration_hours_minutes">%1$d h %2$d min</string>
+    <string name="friends_shared_today">Shared today</string>
+    <string name="friends_shared_yesterday">Shared yesterday</string>
+    <string name="friends_last_shared">Last shared</string>
+    <string name="friends_last_shared_date">Last shared %1$s</string>
+
+    <string name="friends_privacy_title">Summary-only by design</string>
+    <string name="friends_privacy_body">Raw heart rate, R-R intervals, sleep stages, journals, workouts, routes, exports, and device identifiers never appear in Friends.</string>
+    <string name="friends_leave_action">Leave circle and delete server copy</string>
+    <string name="friends_leave_title">Leave this circle?</string>
+    <string name="friends_leave_body">Noop will remove your friendships, member credential, and dedicated Friends summaries from this server. On-device health data and your separate backup stay intact.</string>
+
+    <string name="friends_invite_title">Invite a friend</string>
+    <string name="friends_invite_body">One-time access to your private circle.</string>
+    <string name="friends_invite_expires">Expires %1$s</string>
+    <string name="friends_invite_share">Share invitation</string>
+    <string name="friends_invite_subject">Join my private Noop circle</string>
+    <string name="friends_invite_share_text">Join my private Noop circle.\n\nServer: %1$s\nOne-time code: %2$s\n\nIn Noop, open More &gt; Friends &gt; Enter invite details. Sharing starts only after I accept your request.</string>
+    <string name="friends_invite_disclosure">The code expires within 72 hours and works once. Joining creates a request; you still decide whether to accept.</string>
+    <string name="friends_join_title">Join a circle</string>
+    <string name="friends_join_body">Review the destination and disclosure before sending a request.</string>
+    <string name="friends_server_address">Server address</string>
+    <string name="friends_invite_code">Invite code</string>
+    <string name="friends_join_default_title">Shared by default</string>
+    <string name="friends_join_default_body">Charge, Effort, and Rest</string>
+    <string name="friends_join_never_title">Never sent to Friends</string>
+    <string name="friends_join_never_body">Raw HR and R-R, sleep stages, journal, workouts, routes, exports, and device identifiers</string>
+    <string name="friends_join_trust_title">Operator trust</string>
+    <string name="friends_join_trust_body">Friends is not end-to-end encrypted. The self-hosted server operator can access summary fields you choose to send.</string>
+    <string name="friends_join_send">Send join request</string>
+
+    <string name="friends_sharing_directional">Sharing is directional and enforced by your server.</string>
+    <string name="friends_daily_scores">Daily scores</string>
+    <string name="friends_additional_details">Additional details</string>
+    <string name="friends_sleep_duration">Sleep duration</string>
+    <string name="friends_hrv">HRV</string>
+    <string name="friends_rhr">Resting heart rate</string>
+    <string name="friends_additional_default_note">Additional details stay off for every new friendship until you enable them.</string>
+    <string name="friends_they_share">They share with you</string>
+    <string name="friends_shared">Shared</string>
+    <string name="friends_hidden">Hidden</string>
+    <string name="friends_remove_named">Remove %1$s</string>
+    <string name="friends_remove_title">Remove %1$s?</string>
+    <string name="friends_remove_body">Neither of you will see the other\'s scores. Reconnecting requires a new invite.</string>
+
+    <string name="friends_upload_pending">Friends loaded, but the latest allowed summary could not be uploaded. Noop will retry.</string>
+    <string name="friends_notice_profile_ready">Private profile ready</string>
+    <string name="friends_notice_request_sent">Request sent. Sharing starts after acceptance.</string>
+    <string name="friends_notice_request_accepted">%1$s joined your circle</string>
+    <string name="friends_notice_request_declined">Request declined</string>
+    <string name="friends_notice_privacy_saved">Sharing with %1$s updated</string>
+    <string name="friends_notice_removed">%1$s removed. Sharing stopped.</string>
+    <string name="friends_notice_profile_deleted">Server profile deleted. Local health data kept.</string>
+    <string name="friends_notice_pending_discarded">Pending invitation deleted</string>
+
+    <string name="friends_error_title">Friends</string>
+    <string name="friends_error_input">Check the invite details and try again.</string>
+    <string name="friends_error_network">Could not reach the private Friends server.</string>
+    <string name="friends_error_server">The Friends server rejected the request (HTTP %1$d).</string>
+    <string name="friends_error_response">The server returned an unreadable Friends response.</string>
+    <string name="friends_error_storage">Noop could not securely save the Friends profile on this device.</string>
+    <string name="friends_error_unknown">Friends could not complete the request.</string>
+</resources>

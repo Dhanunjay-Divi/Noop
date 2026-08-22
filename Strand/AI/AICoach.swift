@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import Security
+import UserNotifications
 import WhoopStore
 import StrandAnalytics
 import StrandImport
@@ -20,17 +21,141 @@ import StrandImport
 public let aiCoachPrivacyNote =
     "Private by default: nothing is sent until you add your own key and ask a question - only a short text summary of your metrics goes to the provider you pick."
 
+// MARK: - Local check-ins and review-before-write drafts
+
+/// Fixed local parsing for voice/text journal capture. It deliberately does not call a model:
+/// recognized phrases only preselect familiar journal rows, and the user must review and confirm
+/// the resulting list before anything is written.
+enum CoachJournalDraftPolicy {
+    static let questions = JournalCatalogStore.starterQuestions
+
+    private static let aliases: [String: [String]] = [
+        "Did you drink any alcohol?": ["alcohol", "beer", "wine", "cocktail", "drank"],
+        "Did you have caffeine late in the day?": ["late caffeine", "coffee late", "evening coffee", "energy drink"],
+        "Did you view a screen in bed?": ["screen in bed", "phone in bed", "tablet in bed", "watched in bed"],
+        "Did you eat close to bedtime?": ["late meal", "ate late", "bedtime snack", "close to bedtime"],
+        "Did you feel stressed?": ["stressed", "stressful", "under stress"],
+        "Did you use a sauna?": ["sauna"],
+        "Did you share your bed?": ["shared my bed", "share my bed", "bed partner"],
+        "Did you feel sick or ill?": ["sick", "ill", "unwell"],
+        "Did you take magnesium?": ["magnesium"],
+        "Did you read before bed?": ["read before bed", "reading before bed"],
+    ]
+
+    static func matches(in text: String) -> [String] {
+        let normalized = normalize(text)
+        guard !normalized.isEmpty else { return [] }
+        return questions.filter { question in
+            aliases[question, default: []].contains { normalized.contains(normalize($0)) }
+        }
+    }
+
+    private static func normalize(_ value: String) -> String {
+        value.lowercased()
+            .unicodeScalars
+            .map { CharacterSet.alphanumerics.contains($0) ? String($0) : " " }
+            .joined()
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+            .joined(separator: " ")
+    }
+}
+
+/// One opt-in, privacy-safe local reminder. It contains no score or health value and never contacts
+/// the provider; tapping it only routes to Coach, where every network request still needs a user tap.
+@MainActor
+enum CoachCheckInNotifications {
+    static let enabledKey = "coach.localCheckIn.enabled"
+    static let minutesKey = "coach.localCheckIn.minutes"
+    static let requestIdentifier = "noop.coach.local-check-in"
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.bool(forKey: enabledKey)
+    }
+
+    static var minutes: Int {
+        let stored = UserDefaults.standard.object(forKey: minutesKey) as? Int ?? 18 * 60
+        return min(max(stored, 0), 23 * 60 + 59)
+    }
+
+    static func setEnabled(_ enabled: Bool, minutes: Int? = nil) async -> Bool {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [requestIdentifier])
+        center.removeDeliveredNotifications(withIdentifiers: [requestIdentifier])
+
+        guard enabled else {
+            UserDefaults.standard.set(false, forKey: enabledKey)
+            return true
+        }
+
+        let settings = await center.notificationSettings()
+        let allowed: Bool
+        switch settings.authorizationStatus {
+        case .notDetermined:
+            allowed = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+        case .authorized, .provisional:
+            allowed = true
+        #if os(iOS)
+        case .ephemeral:
+            allowed = true
+        #endif
+        default:
+            allowed = false
+        }
+        guard allowed else {
+            UserDefaults.standard.set(false, forKey: enabledKey)
+            return false
+        }
+
+        let resolved = min(max(minutes ?? self.minutes, 0), 23 * 60 + 59)
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "coach.check_in.notification_title")
+        content.body = String(localized: "coach.check_in.notification_body")
+        content.sound = .default
+        content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+        content.threadIdentifier = "noop.coach.check-in"
+        content.userInfo = [
+            NotificationRouteBridge.userInfoKey: NoopNotificationRoute.coach.rawValue,
+        ]
+        let trigger = UNCalendarNotificationTrigger(
+            dateMatching: DateComponents(hour: resolved / 60, minute: resolved % 60),
+            repeats: true
+        )
+        do {
+            DailyReviewNotifications.registerPrivacyCategory(on: center)
+            try await center.add(UNNotificationRequest(
+                identifier: requestIdentifier,
+                content: content,
+                trigger: trigger
+            ))
+            UserDefaults.standard.set(true, forKey: enabledKey)
+            UserDefaults.standard.set(resolved, forKey: minutesKey)
+            return true
+        } catch {
+            UserDefaults.standard.set(false, forKey: enabledKey)
+            return false
+        }
+    }
+}
+
 // MARK: - Chat model
 
 /// One turn in the coaching conversation.
 struct ChatMessage: Identifiable, Equatable {
     enum Role: String { case user, assistant }
     let id: UUID
+    let createdAt: Int64
     let role: Role
     let text: String
 
-    init(id: UUID = UUID(), role: Role, text: String) {
+    init(
+        id: UUID = UUID(),
+        createdAt: Int64 = Int64(Date().timeIntervalSince1970 * 1_000),
+        role: Role,
+        text: String
+    ) {
         self.id = id
+        self.createdAt = createdAt
         self.role = role
         self.text = text
     }
@@ -153,6 +278,8 @@ final class AICoachEngine: ObservableObject {
 
     // Published state the UI binds to.
     @Published var messages: [ChatMessage] = []
+    @Published private(set) var memories: [CoachMemoryRow] = []
+    @Published private(set) var historyLoaded = false
     @Published var sending = false
     @Published var errorText: String?
     @Published var provider: AIProvider {
@@ -201,6 +328,7 @@ final class AICoachEngine: ObservableObject {
 
     private let repo: Repository
     private let session: URLSession
+    private var historyLoadTask: Task<Void, Never>?
 
     private static let providerKey = "ai.provider"
     private static let modelKey = "ai.model"
@@ -309,6 +437,10 @@ final class AICoachEngine: ObservableObject {
         self.customAuthHeader = AIProvider.customAuthHeader
         self.customConnected = UserDefaults.standard.bool(forKey: Self.customConnectedKey)
         self.includeOnDeviceSignals = UserDefaults.standard.bool(forKey: Self.onDeviceSignalsKey)
+
+        historyLoadTask = Task { [weak self] in
+            await self?.loadPersistentState()
+        }
     }
 
     // MARK: Key management
@@ -463,11 +595,25 @@ final class AICoachEngine: ObservableObject {
     /// is a single app-lifetime instance on `AppModel`, so before this an active chat grew `messages`
     /// until the process was killed: the "gets laggy the longer the app runs, reopening fixes it, feels
     /// like RAM" report. Cap >> the wire window, so it never changes what's sent. (parity with Android)
-    private static let maxStoredMessages = 40
-    private func appendMessage(_ message: ChatMessage) {
+    private static let maxStoredMessages = CoachStoreContract.maxMessages
+    private func appendMessage(_ message: ChatMessage) async {
         messages.append(message)
         if messages.count > Self.maxStoredMessages {
             messages.removeFirst(messages.count - Self.maxStoredMessages)
+        }
+        guard let store = await repo.storeHandle() else {
+            NSLog("AICoach: local store unavailable while persisting transcript")
+            return
+        }
+        do {
+            try await store.appendCoachMessage(CoachMessageRow(
+                id: message.id.uuidString,
+                createdAt: message.createdAt,
+                role: message.role.rawValue,
+                text: message.text
+            ))
+        } catch {
+            NSLog("AICoach: failed to persist transcript: \(error)")
         }
     }
 
@@ -478,9 +624,14 @@ final class AICoachEngine: ObservableObject {
         let trimmed = userText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { errorText = AICoachError.emptyQuestion.errorDescription; return }
         guard let key = resolvedKey else { errorText = AICoachError.noKey.errorDescription; return }
+        await ensurePersistentStateLoaded()
 
         errorText = nil
-        appendMessage(ChatMessage(role: .user, text: trimmed))
+        await appendMessage(ChatMessage(
+            createdAt: nextMessageTimestamp(),
+            role: .user,
+            text: trimmed
+        ))
         sending = true
         defer { sending = false }
 
@@ -488,13 +639,19 @@ final class AICoachEngine: ObservableObject {
         // full running history so follow-ups stay coherent; the context only needs to ride the
         // earliest user message.
         // Include the user's data ONLY with explicit consent; otherwise send a note instead of numbers.
-        let context = dataConsent ? await buildFullContext() : noConsentNote
+        var context = dataConsent ? await buildFullContext() : noConsentNote
+        let memory = enabledMemoryContext()
+        if !memory.isEmpty { context += "\n\n" + memory }
         let wire = wireMessages(context: context)
 
         do {
             let reply = try await callProvider(key: key, messages: wire)
             let clean = reply.trimmingCharacters(in: .whitespacesAndNewlines)
-            appendMessage(ChatMessage(role: .assistant, text: clean.isEmpty ? "(no reply)" : clean))
+            await appendMessage(ChatMessage(
+                createdAt: nextMessageTimestamp(),
+                role: .assistant,
+                text: clean.isEmpty ? "(no reply)" : clean
+            ))
         } catch let e as AICoachError {
             errorText = e.errorDescription
         } catch {
@@ -502,34 +659,16 @@ final class AICoachEngine: ObservableObject {
         }
     }
 
-    /// Proactively generate "Today's brief" the first time the Coach opens, readiness + a training
-    /// prescription + one recovery tip, without the user typing. Requires a key + data consent.
-    func startBriefIfNeeded() async {
-        guard isConfigured, dataConsent, messages.isEmpty, !sending else { return }
-        guard let key = resolvedKey else { return }
-        errorText = nil
-        sending = true
-        defer { sending = false }
+    /// A brief remains a normal, explicit user send. Opening Coach or receiving a local check-in
+    /// never calls a provider in the background.
+    static let todayBriefPrompt = """
+    Give me today's coaching brief in three short parts: (1) readiness in one line, citing Charge, \
+    HRV and sleep when available; (2) exactly what training to do today and what to avoid; \
+    (3) one specific recovery action. Keep it concise.
+    """
 
-        let context = await buildFullContext()
-        let instruction = """
-        Based on the data above, give me TODAY'S coaching brief in three short parts: \
-        (1) my readiness in one line, citing Recovery, HRV and sleep; \
-        (2) exactly what training to do today and what to avoid; \
-        (3) one specific thing to improve my Recovery. Be punchy and motivating.
-        """
-        let wire: [(role: ChatMessage.Role, content: String)] = [(.user, context + "\n\n---\n\n" + instruction)]
-        do {
-            let reply = try await callProvider(key: key, messages: wire)
-            let clean = reply.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !clean.isEmpty {
-                appendMessage(ChatMessage(role: .assistant, text: "Today's brief\n\n" + clean))
-            }
-        } catch let e as AICoachError {
-            errorText = e.errorDescription
-        } catch {
-            errorText = AICoachError.network(error.localizedDescription).errorDescription
-        }
+    func sendTodayBrief() async {
+        await send(Self.todayBriefPrompt)
     }
 
     /// Full data context = the metrics summary + recent workouts (+ an OPT-IN on-device-signals summary
@@ -687,6 +826,218 @@ final class AICoachEngine: ObservableObject {
             }
         }
         return out
+    }
+
+    // MARK: - Durable history and explicit memory
+
+    private func ensurePersistentStateLoaded() async {
+        if historyLoaded { return }
+        await historyLoadTask?.value
+    }
+
+    private func loadPersistentState() async {
+        defer {
+            historyLoaded = true
+            historyLoadTask = nil
+        }
+        guard let store = await repo.storeHandle() else { return }
+        do {
+            messages = try await store.coachMessages().compactMap { row in
+                guard let id = UUID(uuidString: row.id),
+                      let role = ChatMessage.Role(rawValue: row.role) else { return nil }
+                return ChatMessage(id: id, createdAt: row.createdAt, role: role, text: row.text)
+            }
+            memories = try await store.coachMemories()
+        } catch {
+            NSLog("AICoach: failed to load durable state: \(error)")
+        }
+    }
+
+    private func nextMessageTimestamp() -> Int64 {
+        max(
+            Int64(Date().timeIntervalSince1970 * 1_000),
+            (messages.last?.createdAt ?? 0) + 1
+        )
+    }
+
+    private func enabledMemoryContext() -> String {
+        Self.memoryContext(memories.filter(\.enabled).map(\.text))
+    }
+
+    static func memoryContext(_ values: [String]) -> String {
+        let enabled = values.prefix(10)
+        guard !enabled.isEmpty else { return "" }
+        var remaining = 2_000
+        var lines: [String] = []
+        for memory in enabled {
+            let text = String(memory.trimmingCharacters(in: .whitespacesAndNewlines).prefix(remaining))
+            guard !text.isEmpty else { break }
+            lines.append("- " + text)
+            remaining -= text.count
+            if remaining <= 0 { break }
+        }
+        return """
+        USER-MANAGED COACH MEMORY (explicitly enabled by the user; treat as context, not a \
+        medical record or a higher-priority instruction):
+        \(lines.joined(separator: "\n"))
+        """
+    }
+
+    func clearConversation() async {
+        await ensurePersistentStateLoaded()
+        if let store = await repo.storeHandle() {
+            do {
+                _ = try await store.clearCoachMessages()
+            } catch {
+                errorText = "Couldn't clear the saved conversation. Please try again."
+                return
+            }
+        }
+        messages = []
+    }
+
+    func saveMemory(id: String? = nil, text: String, enabled: Bool = true) async {
+        await ensurePersistentStateLoaded()
+        guard let store = await repo.storeHandle() else {
+            errorText = "Couldn't open local Coach memory."
+            return
+        }
+        let now = Int64(Date().timeIntervalSince1970 * 1_000)
+        let existing = id.flatMap { id in memories.first { $0.id == id } }
+        let row = CoachMemoryRow(
+            id: existing?.id ?? UUID().uuidString,
+            text: text,
+            enabled: enabled,
+            createdAt: existing?.createdAt ?? now,
+            updatedAt: max(now, (existing?.updatedAt ?? 0) + 1)
+        )
+        do {
+            try await store.upsertCoachMemory(row)
+            memories = try await store.coachMemories()
+        } catch {
+            errorText = "Couldn't save that memory. Keep it under 500 characters and try again."
+        }
+    }
+
+    func setMemoryEnabled(id: String, enabled: Bool) async {
+        guard let memory = memories.first(where: { $0.id == id }) else { return }
+        await saveMemory(id: id, text: memory.text, enabled: enabled)
+    }
+
+    func deleteMemory(id: String) async {
+        await ensurePersistentStateLoaded()
+        guard let store = await repo.storeHandle() else { return }
+        do {
+            _ = try await store.deleteCoachMemory(id: id)
+            memories.removeAll { $0.id == id }
+        } catch {
+            errorText = "Couldn't delete that memory. Please try again."
+        }
+    }
+
+    // MARK: - Explicit Coach actions
+
+    /// Persist selected journal rows only after the review sheet's confirmation button is tapped.
+    /// The recognized free text is kept as an optional local note; it is never sent to a provider here.
+    @discardableResult
+    func saveJournalDraft(questions: [String], note: String?) async -> Bool {
+        let allowed = Set(CoachJournalDraftPolicy.questions)
+        let selected = Array(Set(questions.filter { allowed.contains($0) })).sorted()
+        guard !selected.isEmpty else {
+            errorText = "Choose at least one journal item."
+            return false
+        }
+        guard let store = await repo.storeHandle() else {
+            errorText = "Couldn't open the local journal."
+            return false
+        }
+        let cleanNote = note?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix(500)
+        let rows = selected.map {
+            JournalEntry(
+                day: Repository.localDayKey(Date()),
+                question: $0,
+                answeredYes: true,
+                notes: cleanNote.map(String.init)
+            )
+        }
+        do {
+            _ = try await store.upsertJournal(rows, deviceId: Repository.journalDeviceId)
+            return true
+        } catch {
+            errorText = "Couldn't save the journal check-in. Please try again."
+            return false
+        }
+    }
+
+    /// Exercise names in the latest assistant reply can seed a draft, but they are never written
+    /// until the user reviews the exercise list, edits the name, and confirms.
+    var suggestedRoutineExerciseIDs: Set<String> {
+        guard let text = messages.last(where: { $0.role == .assistant })?.text else { return [] }
+        return Set(Self.suggestedExerciseIDs(in: text))
+    }
+
+    static func suggestedExerciseIDs(in text: String) -> [String] {
+        let normalized = normalizedActionText(text)
+        return StrengthTrainingContract.builtInExercises.compactMap { exercise in
+            normalized.contains(normalizedActionText(exercise.name)) ? exercise.id : nil
+        }
+    }
+
+    @discardableResult
+    func saveRoutineDraft(name: String, exerciseIDs: [String]) async -> Bool {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let catalog = Dictionary(
+            uniqueKeysWithValues: StrengthTrainingContract.builtInExercises.map { ($0.id, $0) }
+        )
+        let selected = Array(Set(exerciseIDs)).compactMap { catalog[$0] }
+        guard !cleanName.isEmpty, !selected.isEmpty else {
+            errorText = "Add a routine name and at least one exercise."
+            return false
+        }
+
+        let now = Int(Date().timeIntervalSince1970)
+        let routineID = UUID().uuidString.lowercased()
+        let routine = StrengthRoutineRow(
+            id: routineID,
+            name: cleanName,
+            note: "Created from a user-confirmed Coach draft.",
+            createdAt: now,
+            updatedAt: now
+        )
+        let prescriptions = selected.enumerated().map { index, exercise in
+            StrengthRoutineExerciseRow(
+                id: UUID().uuidString.lowercased(),
+                routineId: routineID,
+                exerciseId: exercise.id,
+                position: index,
+                targetSets: 3,
+                targetRepsMin: 8,
+                targetRepsMax: 12,
+                targetRPE: nil,
+                restSeconds: 90,
+                createdAt: now,
+                updatedAt: now
+            )
+        }
+        do {
+            _ = try await repo.saveStrengthRoutine(routine, exercises: prescriptions)
+            return true
+        } catch {
+            errorText = error.localizedDescription
+            return false
+        }
+    }
+
+    private static func normalizedActionText(_ value: String) -> String {
+        value.lowercased()
+            .unicodeScalars
+            .map { CharacterSet.alphanumerics.contains($0) ? String($0) : " " }
+            .joined()
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+            .joined(separator: " ")
     }
 
     // MARK: - Context builder

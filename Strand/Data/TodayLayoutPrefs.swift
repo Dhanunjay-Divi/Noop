@@ -22,6 +22,16 @@ enum TodaySection: String, CaseIterable, Identifiable {
     case hero
     case liveSession
     case synthesis
+    // NEW (2026-08-22): the three blocks that answer the questions Today never answered directly.
+    // Added as reorderable sections so NOTHING existing is removed or displaced — a user who never
+    // opens the Arrange sheet simply gets them in the default order below, and every previously saved
+    // order keeps working (decodeOrder appends unknown/new cases rather than dropping them).
+    /// "Why is my score that number?" — the drivers, each read against the user's OWN baseline.
+    case why
+    /// "What should I actually do today?" — a concrete effort target range + one action line.
+    case target
+    /// "Is anything off?" — deviations worth watching; silent when everything is normal.
+    case watch
     case keyMetrics
     case workouts
     case heartRate
@@ -37,6 +47,9 @@ enum TodaySection: String, CaseIterable, Identifiable {
         case .hero:           return String(localized: "Recovery / Effort / Sleep")
         case .liveSession:    return String(localized: "Start session")
         case .synthesis:      return String(localized: "Synthesis")
+        case .why:            return String(localized: "Why today reads this way")
+        case .target:         return String(localized: "Today's target")
+        case .watch:          return String(localized: "Worth watching")
         case .keyMetrics:     return String(localized: "Key Metrics")
         case .workouts:       return String(localized: "Workouts")
         case .heartRate:      return String(localized: "Heart Rate")
@@ -48,9 +61,13 @@ enum TodaySection: String, CaseIterable, Identifiable {
 
     /// The original, hard-coded section order — the default when the layout isn't customised. The journal
     /// widget (#656) is last by default, where it was first added, above the data-sources card.
+    /// Default order. The three new question-answering blocks (2026-08-22) sit immediately under the hero,
+    /// because that is the order a person actually reads in the morning: the score, then WHY it is that
+    /// score, then WHAT to do about it, then anything WORTH WATCHING — before the detailed metric cards.
+    /// `decodeOrder` inserts them at these positions for users who already have a saved order.
     static let defaultOrder: [TodaySection] = [
-        .hero, .liveSession, .synthesis, .keyMetrics, .workouts, .heartRate, .recoveryVitals, .yourCards,
-        .journal,
+        .hero, .liveSession, .why, .target, .watch, .synthesis, .keyMetrics, .workouts, .heartRate,
+        .recoveryVitals, .yourCards, .journal,
     ]
 }
 

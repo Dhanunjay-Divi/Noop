@@ -2,6 +2,7 @@ package com.noop.alarm
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.noop.analytics.SleepGoalMode
 
 /**
  * Persisted state for the wind-down nudge (#207) — a gentle evening local notification suggesting
@@ -23,6 +24,17 @@ class WindDownStore(private val prefs: SharedPreferences) {
         get() = prefs.getInt(KEY_SLEEP_NEED, DEFAULT_SLEEP_NEED).coerceIn(SLEEP_MIN, SLEEP_MAX)
         set(v) = prefs.edit().putInt(KEY_SLEEP_NEED, v.coerceIn(SLEEP_MIN, SLEEP_MAX)).apply()
 
+    var goalMode: SleepGoalMode
+        get() = SleepGoalMode.fromPersisted(prefs.getString(KEY_GOAL_MODE, null))
+        set(v) = prefs.edit().putString(KEY_GOAL_MODE, v.persistedValue).apply()
+
+    /** Planner-derived extra sleep opportunity from recent debt. Never reduces [sleepNeedMinutes]. */
+    var recoveryMinutes: Int
+        get() = prefs.getInt(KEY_RECOVERY, 0).coerceIn(0, RECOVERY_MAX)
+        set(v) = prefs.edit().putInt(KEY_RECOVERY, v.coerceIn(0, RECOVERY_MAX)).apply()
+
+    val targetSleepMinutes: Int get() = sleepNeedMinutes + recoveryMinutes
+
     /** Lead time (minutes) before bed to nudge, so winding down actually finishes by lights-out. */
     var leadMinutes: Int
         get() = prefs.getInt(KEY_LEAD, DEFAULT_LEAD).coerceIn(LEAD_MIN, LEAD_MAX)
@@ -33,7 +45,7 @@ class WindDownStore(private val prefs: SharedPreferences) {
      * wrapped into [0, 1440). With an 06:30 wake, 8 h need and 30 min lead this is 22:00.
      */
     fun nudgeMinuteOfDay(wakeMinutes: Int): Int {
-        val raw = wakeMinutes - sleepNeedMinutes - leadMinutes
+        val raw = wakeMinutes - targetSleepMinutes - leadMinutes
         val day = 24 * 60
         return ((raw % day) + day) % day
     }
@@ -42,6 +54,8 @@ class WindDownStore(private val prefs: SharedPreferences) {
         private const val PREFS = "noop_wind_down"
         private const val KEY_ENABLED = "windDown.enabled"
         private const val KEY_SLEEP_NEED = "windDown.sleepNeedMinutes"
+        private const val KEY_GOAL_MODE = "windDown.goalMode"
+        private const val KEY_RECOVERY = "windDown.recoveryMinutes"
         private const val KEY_LEAD = "windDown.leadMinutes"
 
         const val DEFAULT_SLEEP_NEED = 8 * 60
@@ -50,6 +64,7 @@ class WindDownStore(private val prefs: SharedPreferences) {
         const val SLEEP_MAX = 11 * 60
         const val LEAD_MIN = 0
         const val LEAD_MAX = 120
+        const val RECOVERY_MAX = 60
 
         fun from(context: Context): WindDownStore =
             WindDownStore(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE))

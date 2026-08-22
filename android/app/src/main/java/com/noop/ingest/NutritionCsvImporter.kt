@@ -114,6 +114,7 @@ object NutritionCsvImporter {
 
         repo.upsertDevice(deviceId, name = "Nutrition CSV")
         repo.upsertMetricSeries(rows)
+        repo.upsertImportedNutritionDays(rows)
 
         val days = rows.map { it.day }
         val firstDay = days.minOrNull()

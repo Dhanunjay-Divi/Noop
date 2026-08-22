@@ -46,7 +46,7 @@ public struct OnboardingWizard: View {
     // handles the bond→celebration transition without re-rendering the root.
 
     private enum Step: Int, CaseIterable {
-        case welcome, what, expectations, bluetooth, wear, scan, bonded, profile, importData, notifications, appearance, done
+        case welcome, what, expectations, bluetooth, wear, scan, bonded, profile, importData, notifications, safetyContacts, appearance, done
 
         var isFirst: Bool { self == .welcome }
         var isLast: Bool { self == .done }
@@ -83,6 +83,7 @@ public struct OnboardingWizard: View {
                     case .profile:    ProfileStep()
                     case .importData: ImportStep()
                     case .notifications: NotificationsStep(dailyReviewOptIn: $dailyReviewOptIn)
+                    case .safetyContacts: SafetyContactsStep()
                     case .appearance: AppearanceStep()
                     case .done:       DoneStep()
                     }
@@ -217,6 +218,7 @@ public struct OnboardingWizard: View {
             return dailyReviewOptIn
                 ? String(localized: "Enable & Continue")
                 : String(localized: "Not now")
+        case .safetyContacts: return String(localized: "Finish later")
         case .appearance: return String(localized: "Continue")
         case .done:       return String(localized: "Enter NOOP")
         }
@@ -1301,7 +1303,39 @@ private struct NotificationsStep: View {
     }
 }
 
-// MARK: - Step 10 · Done
+// MARK: - Safety contacts
+
+private struct SafetyContactsStep: View {
+    @StateObject private var service = SafetyPagingService()
+
+    var body: some View {
+        StepShell(
+            title: String(localized: "safety.onboarding.title"),
+            subtitle: String(localized: "safety.onboarding.subtitle")
+        ) {
+            VStack(spacing: 20) {
+                Image(systemName: "person.2.badge.shield.checkmark.fill")
+                    .font(.system(size: 48, weight: .medium))
+                    .foregroundStyle(StrandPalette.statusPositive)
+                    .frame(height: 72)
+
+                NoopCard {
+                    SafetyContactsSetupView(service: service)
+                }
+                .frame(maxWidth: 520)
+
+                Text("safety.onboarding.pending_body")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 460)
+            }
+        }
+    }
+}
+
+// MARK: - Done
 
 private struct DoneStep: View {
     @State private var appear = false

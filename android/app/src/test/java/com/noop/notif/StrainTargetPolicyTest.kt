@@ -1,11 +1,14 @@
 package com.noop.notif
 
+import com.noop.analytics.DailyActionPlanner
+import com.noop.ui.NoopPrefs
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pins the pure gate + copy of the #593 optimal-strain-reached notification (the ScheduledReportPolicy /
+ * Pins the pure gate + copy of the #593 evidence-gated Effort-marker notification (the ScheduledReportPolicy /
  * BatteryAlertPolicy crossing-dedupe idiom). The Android notifier just wires this to a channel + the
  * persisted day marker, so all the decision logic is verified here without android.*. Contract: fire at
  * most once per day, only when strain has genuinely reached a KNOWN target, never on a guessed one.
@@ -51,7 +54,7 @@ class StrainTargetPolicyTest {
     }
 
     @Test fun suppressedWhenTargetUnknownCalibrating() {
-        // Null recovery ⇒ no optimal band ⇒ null target ⇒ never fire (never guess a target).
+        // Planner withheld the range ⇒ null target ⇒ never fire (never guess a target).
         assertFalse(
             StrainTargetPolicy.shouldNotify(
                 enabled = true, dayStrain = 18.0, target = null, lastNotifiedDay = null, today = "2026-07-18",
@@ -70,9 +73,27 @@ class StrainTargetPolicyTest {
     @Test fun copyUsesNoopWordingAndTheTarget() {
         val (title, body) = StrainTargetPolicy.copy(target = 14)
         // NOOP's own copy — must NOT reproduce WHOOP's decompiled strings.
-        assertTrue(title.contains("Optimal strain"))
+        assertTrue(title.contains("Effort marker"))
         assertFalse(title.contains("Target Strain Reached"))
         assertTrue(body.contains("14"))
         assertFalse(body.contains("for this activity"))
+        assertFalse(body.contains("earned", ignoreCase = true))
+        assertFalse(body.contains("optimal", ignoreCase = true))
+        assertTrue(body.contains("not a limit", ignoreCase = true))
+    }
+
+    @Test fun dailyActionCheckInIsStrictlyDayScopedAndFailClosed() {
+        assertEquals(
+            DailyActionPlanner.CheckIn.AS_USUAL,
+            NoopPrefs.decodeDailyActionCheckIn("2026-08-22", "2026-08-22", "asUsual"),
+        )
+        assertEquals(
+            DailyActionPlanner.CheckIn.UNANSWERED,
+            NoopPrefs.decodeDailyActionCheckIn("2026-08-22", "2026-08-21", "asUsual"),
+        )
+        assertEquals(
+            DailyActionPlanner.CheckIn.UNANSWERED,
+            NoopPrefs.decodeDailyActionCheckIn("2026-08-22", "2026-08-22", "unexpected"),
+        )
     }
 }

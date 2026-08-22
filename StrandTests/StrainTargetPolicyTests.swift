@@ -2,7 +2,7 @@ import XCTest
 @testable import Strand
 
 /// `StrainTargetNotifier.StrainTargetPolicy` — the pure once-per-day crossing gate + copy behind the
-/// #593 optimal-strain-reached nudge. Mirrors the Android `StrainTargetPolicyTest` byte-for-byte (same
+/// #593 evidence-gated Effort-marker nudge. Mirrors the Android `StrainTargetPolicyTest` byte-for-byte (same
 /// fixtures, same expectations). No notification/UserDefaults runtime needed here. Contract: fire at
 /// most once per day, only when strain has genuinely reached a KNOWN target, never on a guessed one.
 final class StrainTargetPolicyTests: XCTestCase {
@@ -32,7 +32,7 @@ final class StrainTargetPolicyTests: XCTestCase {
     }
 
     func testSuppressedWhenTargetUnknownCalibrating() {
-        // nil recovery ⇒ no optimal band ⇒ nil target ⇒ never fire (never guess a target).
+        // Planner withheld the range ⇒ nil target ⇒ never fire (never guess a target).
         XCTAssertFalse(Policy.shouldNotify(
             enabled: true, dayStrain: 18.0, target: nil, lastNotifiedDay: nil, today: "2026-07-18"))
     }
@@ -45,9 +45,33 @@ final class StrainTargetPolicyTests: XCTestCase {
     func testCopyUsesNoopWordingAndTheTarget() {
         let copy = Policy.copy(target: 14)
         // NOOP's own copy — must NOT reproduce WHOOP's decompiled strings.
-        XCTAssertTrue(copy.title.contains("Optimal strain"))
+        XCTAssertTrue(copy.title.contains("Effort marker"))
         XCTAssertFalse(copy.title.contains("Target Strain Reached"))
         XCTAssertTrue(copy.body.contains("14"))
         XCTAssertFalse(copy.body.contains("for this activity"))
+        XCTAssertFalse(copy.body.localizedCaseInsensitiveContains("earned"))
+        XCTAssertFalse(copy.body.localizedCaseInsensitiveContains("optimal"))
+        XCTAssertTrue(copy.body.localizedCaseInsensitiveContains("not a limit"))
+    }
+
+    func testDailyActionCheckInIsStrictlyDayScopedAndFailClosed() {
+        XCTAssertEqual(
+            BehaviorStore.decodeDailyActionCheckIn(
+                today: "2026-08-22", storedDay: "2026-08-22", storedValue: "asUsual"
+            ),
+            .asUsual
+        )
+        XCTAssertEqual(
+            BehaviorStore.decodeDailyActionCheckIn(
+                today: "2026-08-22", storedDay: "2026-08-21", storedValue: "asUsual"
+            ),
+            .unanswered
+        )
+        XCTAssertEqual(
+            BehaviorStore.decodeDailyActionCheckIn(
+                today: "2026-08-22", storedDay: "2026-08-22", storedValue: "unexpected"
+            ),
+            .unanswered
+        )
     }
 }

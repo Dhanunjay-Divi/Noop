@@ -26,6 +26,7 @@ struct LiquidTodayView: View {
     // only publishes connect/discovery state, never HR. Injected at the app roots beside .environmentObject(model).
     @EnvironmentObject var ble: BLEManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// Shared with the real Today's card-customise editor so the two stay in sync.
     @AppStorage(DashboardCardPrefs.selectionKey) private var dashboardCardsRaw = ""
@@ -103,6 +104,11 @@ struct LiquidTodayView: View {
     @AppStorage(KeyMetricPrefs.layoutKey) private var keyMetricsRaw = ""
     @State private var showKeyMetricsEditor = false
     private var enabledKeyMetrics: [KeyMetric] { KeyMetricPrefs.decodeEnabled(keyMetricsRaw) }
+    // Daily Action uses the same stable, day-scoped keys as BehaviorStore without observing AppModel.
+    // AppStorage keeps the control reactive while the expensive planner result is cached with readiness.
+    @AppStorage(BehaviorStore.dailyActionCheckInDayKey) private var dailyActionCheckInDay = ""
+    @AppStorage(BehaviorStore.dailyActionCheckInValueKey) private var dailyActionCheckInValue = ""
+    @State private var dailyPlanExpanded = false
 
     // day navigation (0 = today, 1 = yesterday, …)
     @State private var selectedDayOffset = 0
@@ -113,6 +119,7 @@ struct LiquidTodayView: View {
     // Resolve both ONCE per data/day change in load() and read the cache in body (O(1)).
     @State private var cachedDisplayDay: DailyMetric?
     @State private var cachedReadiness: ReadinessEngine.Readiness?
+    @State private var cachedDailyActionPlan: DailyActionPlanner.Plan?
     /// The exact day currently supporting the readiness read. Kept beside the cached result so Today can
     /// stamp freshness/confidence without recomputing or implying a carried night belongs to today.
     @State private var readinessAsOfDay: String?
@@ -262,6 +269,7 @@ struct LiquidTodayView: View {
     private static let topAnchorID = "liquidToday.top"
     private static let bottomAnchorID = "liquidToday.bottom"
     private static let patternsAnchorID = "liquidToday.patterns"
+    private static let dailyPlanAnchorID = "liquidToday.dailyPlan"
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -302,6 +310,16 @@ struct LiquidTodayView: View {
                         switch section {
                         case .hero: heroCard
                         case .liveSession: if liveSessionsBeta { liveSessionStartRow }
+                        // NEW (2026-08-22) — the three blocks that answer, in reading order: why is my
+                        // score that number, what should I do about it, and is anything off. They reuse
+                        // this screen's own card/glyph language and its already-loaded data, so nothing
+                        // existing moved and no new plumbing was introduced.
+                        case .why: whySection
+                        case .target:
+                            if selectedDayOffset == 0 {
+                                targetSection.id(Self.dailyPlanAnchorID)
+                            }
+                        case .watch: watchSection
                         case .synthesis: synthesisSection
                         case .keyMetrics: keyMetricsSection
                         case .workouts: lastWorkoutsSection
@@ -367,7 +385,7 @@ struct LiquidTodayView: View {
         .liquidSelectionHaptic(trigger: selectedDayOffset)
         // A firm tick when the pull passes the release threshold (the custom liquid refresh).
         .liquidMediumHaptic(trigger: pullHaptic)
-        .task(id: "\(repo.refreshSeq)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(profile.ageMetricStateToken)") {
+        .task(id: "\(repo.refreshSeq)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(profile.ageMetricStateToken)-\(dailyActionCheckInDay)-\(dailyActionCheckInValue)") {
             await load()
         }
         #if DEBUG
@@ -380,7 +398,9 @@ struct LiquidTodayView: View {
             // layout pass. A single yield can still run before the preference-driven bottom padding is
             // applied, leaving a deterministic "bottom" screenshot one bar-height short on cold launch.
             try? await Task.sleep(nanoseconds: 250_000_000)
-            if CommandLine.arguments.contains("--demo-patterns") {
+            if CommandLine.arguments.contains("--demo-daily-plan") {
+                proxy.scrollTo(Self.dailyPlanAnchorID, anchor: .top)
+            } else if CommandLine.arguments.contains("--demo-patterns") {
                 proxy.scrollTo(Self.patternsAnchorID, anchor: .center)
             } else if CommandLine.arguments.contains("--demo-scroll-bottom") {
                 // Simulator-only layout proof for the custom (non-ScreenScaffold) Today scroll.
@@ -512,7 +532,6 @@ struct LiquidTodayView: View {
                     }
                     .buttonStyle(LiquidPressStyle())
                     .accessibilityLabel("Profile")
-                    LiquidAddButton()
                     LiquidBatteryButton()
                     // Keep page customisation in one conventional overflow instead of giving three
                     // editing actions equal visual weight beside live health controls.
@@ -583,7 +602,7 @@ struct LiquidTodayView: View {
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.onDarkPrimary)
                 Text("BETA")
-                    .font(StrandFont.overlineScaled(8.5)).tracking(1.2)
+                    .font(StrandFont.overlineScaled(8.5)).tracking(0)
                     .foregroundStyle(StrandPalette.onDarkSecondary)
                     .padding(.horizontal, 8).padding(.vertical, 2.5)
                     .background(Capsule().fill(.white.opacity(0.05))
@@ -783,14 +802,14 @@ struct LiquidTodayView: View {
     private var yourCardsSection: some View {
         VStack(spacing: 8) {
             HStack {
-                Text("YOUR CARDS").font(StrandFont.overline).tracking(1.6)
+                Text("YOUR CARDS").font(StrandFont.overline).tracking(0)
                     .foregroundStyle(StrandPalette.textTertiary)
                 Spacer()
                 Button { showCustomise = true } label: {
                     // #492 item 4 parity: unify the Your Cards / Key Metrics edit affordance to "EDIT" across
                     // platforms (Android #563). Reuse the localized "Edit" key, uppercased at display, so this
                     // stays translated (BEARBEITEN / MODIFIER / …) without a new literal.
-                    Text(String(localized: "Edit").uppercased()).font(StrandFont.overlineScaled(11)).tracking(1.0)
+                    Text(String(localized: "Edit").uppercased()).font(StrandFont.overlineScaled(11)).tracking(0)
                         .foregroundStyle(StrandPalette.accent)
                 }
                 .buttonStyle(.plain)
@@ -888,7 +907,7 @@ struct LiquidTodayView: View {
             HStack(spacing: 12) {
                 MetricGlyph(symbol, size: 32)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(title.uppercased()).font(StrandFont.overlineScaled(11)).tracking(1.0)
+                    Text(title.uppercased()).font(StrandFont.overlineScaled(11)).tracking(0)
                         .foregroundStyle(StrandPalette.textPrimary)
                     Text(sub).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
                 }
@@ -924,7 +943,7 @@ struct LiquidTodayView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 5) {
                             Text(card.title.uppercased())
-                                .font(StrandFont.overlineScaled(11)).tracking(1.0)
+                                .font(StrandFont.overlineScaled(11)).tracking(0)
                                 .foregroundStyle(StrandPalette.textPrimary)
                             Image(systemName: "info.circle")
                                 .font(.system(size: 11, weight: .semibold))
@@ -949,7 +968,7 @@ struct LiquidTodayView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.65)
                         Text(energyHeadlineLabel.uppercased())
-                            .font(StrandFont.overlineScaled(8.5)).tracking(0.9)
+                            .font(StrandFont.overlineScaled(8.5)).tracking(0)
                             .foregroundStyle(StrandPalette.textTertiary)
                     }
                     Spacer(minLength: 4)
@@ -972,7 +991,7 @@ struct LiquidTodayView: View {
                 .font(StrandFont.captionNumber)
                 .foregroundStyle(value == nil ? StrandPalette.textTertiary : StrandPalette.textPrimary)
             Text(label)
-                .font(StrandFont.overlineScaled(7.5)).tracking(0.7)
+                .font(StrandFont.overlineScaled(7.5)).tracking(0)
                 .foregroundStyle(StrandPalette.textTertiary)
         }
         .frame(minWidth: 48, alignment: .trailing)
@@ -1073,7 +1092,7 @@ struct LiquidTodayView: View {
                             .fixedSize(horizontal: false, vertical: true)
                         HStack(spacing: NoopMetrics.space2) {
                             Text(readinessConfidenceLabel.uppercased())
-                                .font(StrandFont.overlineScaled(8)).tracking(0.8)
+                                .font(StrandFont.overlineScaled(8)).tracking(0)
                             Text(readinessAsOfLabel)
                                 .font(StrandFont.caption)
                         }
@@ -1101,6 +1120,400 @@ struct LiquidTodayView: View {
         }
     }
 
+    // MARK: - WHY / TARGET / WATCH
+
+    /// Only physiology signals that actually participate in Readiness belong under WHY. Recent-load
+    /// context remains visible in the detailed Readiness card but must not look like a readiness vote.
+    private var dailyPlanWhySignals: [ReadinessEngine.Signal] {
+        readiness.signals.filter { ["hrv", "rhr", "respRate"].contains($0.key) }
+    }
+
+    private var dailyPlanWatchSignals: [ReadinessEngine.Signal] {
+        readiness.signals.filter { $0.flag == .watch || $0.flag == .bad }
+    }
+
+    private var whySection: some View {
+        let signals = dailyPlanWhySignals
+        return VStack(spacing: 8) {
+            sectionHead("daily_plan.why.title", trailing: "daily_plan.why.trailing")
+            card {
+                if signals.isEmpty {
+                    dailyPlanEmptyRow(
+                        symbol: "waveform.path.ecg",
+                        text: String(localized: "daily_plan.why.unavailable")
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(signals.enumerated()), id: \.offset) { index, signal in
+                            if index > 0 { dailyPlanDivider }
+                            dailyPlanSignalRow(signal)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var targetSection: some View {
+        let plan = dailyActionPlan
+        return VStack(spacing: 8) {
+            sectionHead("daily_plan.target.title", trailing: dailyPlanTargetStatusKey(plan))
+            card {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("daily_plan.check_in.question")
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textPrimary)
+
+                    VStack(spacing: 8) {
+                        dailyPlanCheckInButton(.asUsual, label: "daily_plan.check_in.as_usual")
+                        dailyPlanCheckInButton(.belowUsual, label: "daily_plan.check_in.below_usual")
+                        dailyPlanCheckInButton(.painOrUnwell, label: "daily_plan.check_in.pain_unwell")
+                    }
+
+                    dailyPlanDivider
+                    dailyPlanResult(plan)
+
+                    Button {
+                        withAnimation(StrandMotion.interactive) {
+                            dailyPlanExpanded.toggle()
+                        }
+                    } label: {
+                        HStack {
+                            Text(dailyPlanExpanded
+                                 ? "daily_plan.details.hide"
+                                 : "daily_plan.details.show")
+                                .font(StrandFont.caption)
+                            Spacer()
+                            Image(systemName: dailyPlanExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint(Text("daily_plan.details.hint"))
+
+                    if dailyPlanExpanded {
+                        dailyPlanEvidence(plan)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func dailyPlanResult(_ plan: DailyActionPlanner.Plan) -> some View {
+        switch plan.availability {
+        case .checkInNeeded:
+            dailyPlanStateRow(
+                symbol: "checkmark.circle",
+                title: "daily_plan.state.check_in.title",
+                body: "daily_plan.state.check_in.body",
+                tint: StrandPalette.textTertiary
+            )
+        case .calibrating:
+            dailyPlanStateRow(
+                symbol: "chart.line.uptrend.xyaxis",
+                title: "daily_plan.state.calibrating.title",
+                body: "daily_plan.state.calibrating.body",
+                tint: StrandPalette.statusWarning,
+                action: dailyPlanActionLabel(plan.action)
+            )
+        case .recoveryShift:
+            dailyPlanStateRow(
+                symbol: "figure.walk",
+                title: "daily_plan.state.recovery_shift.title",
+                body: "daily_plan.state.recovery_shift.body",
+                tint: StrandPalette.statusWarning,
+                action: dailyPlanActionLabel(plan.action)
+            )
+        case .stop:
+            dailyPlanStateRow(
+                symbol: "pause.circle.fill",
+                title: "daily_plan.state.stop.title",
+                body: "daily_plan.state.stop.body",
+                tint: StrandPalette.statusCritical,
+                action: dailyPlanActionLabel(plan.action)
+            )
+        case .ready:
+            VStack(alignment: .leading, spacing: 10) {
+                if let target = plan.target {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(
+                            String(
+                                format: String(localized: "appwide.range.format"),
+                                target.lower,
+                                target.upper
+                            )
+                        )
+                            .font(StrandFont.number(30))
+                            .foregroundStyle(StrandPalette.textPrimary)
+                            .monospacedDigit()
+                        Text(String(localized: "daily_plan.effort.scale"))
+                            .font(StrandFont.overline)
+                            .tracking(0)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                    Text("daily_plan.state.ready.body")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Label(dailyPlanActionLabel(plan.action),
+                      systemImage: plan.action == .protectExtraSleep ? "moon.zzz.fill" : "bed.double.fill")
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textPrimary)
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func dailyPlanCheckInButton(
+        _ value: DailyActionPlanner.CheckIn,
+        label: LocalizedStringKey
+    ) -> some View {
+        let selected = currentDailyActionCheckIn == value
+        return Button {
+            setDailyActionCheckIn(value)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selected ? StrandPalette.accent : StrandPalette.textTertiary)
+                Text(label)
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(selected ? StrandPalette.accent.opacity(0.12) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(selected ? StrandPalette.accent.opacity(0.45) : StrandPalette.hairline,
+                            lineWidth: 1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func dailyPlanStateRow(
+        symbol: String,
+        title: LocalizedStringKey,
+        body: LocalizedStringKey,
+        tint: Color,
+        action: String? = nil
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: symbol)
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text(body)
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if let action {
+                Label(action, systemImage: "checkmark.circle")
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textPrimary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func dailyPlanEvidence(_ plan: DailyActionPlanner.Plan) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("daily_plan.evidence.title")
+                .font(StrandFont.overline)
+                .tracking(0)
+                .foregroundStyle(StrandPalette.textTertiary)
+            ForEach(Array(plan.evidence.enumerated()), id: \.offset) { _, evidence in
+                Label(dailyPlanEvidenceLabel(evidence.source), systemImage: "checkmark.circle")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textSecondary)
+            }
+            Text("daily_plan.limitation")
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var watchSection: some View {
+        let evaluated = readiness.signals
+        let watch = dailyPlanWatchSignals
+        return VStack(spacing: 8) {
+            sectionHead(
+                "daily_plan.watch.title",
+                trailing: evaluated.isEmpty
+                    ? "daily_plan.confidence.calibrating"
+                    : (watch.isEmpty ? "daily_plan.watch.clear" : "daily_plan.watch.attention")
+            )
+            card {
+                if evaluated.isEmpty {
+                    dailyPlanEmptyRow(
+                        symbol: "waveform.path.ecg",
+                        text: String(localized: "daily_plan.watch.unavailable")
+                    )
+                } else if watch.isEmpty {
+                    dailyPlanEmptyRow(
+                        symbol: "checkmark.seal.fill",
+                        text: String(localized: "daily_plan.watch.none")
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(watch.enumerated()), id: \.offset) { index, signal in
+                            if index > 0 { dailyPlanDivider }
+                            dailyPlanSignalRow(signal)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var dailyPlanDivider: some View {
+        Rectangle().fill(StrandPalette.hairline).frame(height: 0.5)
+    }
+
+    private func dailyPlanEmptyRow(symbol: String, text: String) -> some View {
+        HStack(spacing: 10) {
+            MetricGlyph(symbol, size: 26)
+            Text(text)
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func dailyPlanSignalRow(_ signal: ReadinessEngine.Signal) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            MetricGlyph(dailyPlanSignalSymbol(signal.key), size: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                if !dynamicTypeSize.isAccessibilitySize {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(dailyPlanSignalLabel(signal))
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Spacer(minLength: 8)
+                        Text(dailyPlanSignalStatus(signal.flag))
+                            .font(StrandFont.overlineScaled(8))
+                            .foregroundStyle(dailyPlanSignalTint(signal.flag))
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(dailyPlanSignalLabel(signal))
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text(dailyPlanSignalStatus(signal.flag))
+                            .font(StrandFont.overlineScaled(8))
+                            .foregroundStyle(dailyPlanSignalTint(signal.flag))
+                    }
+                }
+                Text(signal.detail)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let evidence = signal.evidence {
+                    Text(evidence)
+                        .font(StrandFont.caption.monospacedDigit())
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+            }
+        }
+        .padding(.vertical, 11)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func dailyPlanSignalSymbol(_ key: String) -> String {
+        switch key {
+        case "hrv": return "waveform.path.ecg"
+        case "rhr": return "heart.text.square.fill"
+        case "respRate": return "lungs.fill"
+        case "monotony": return "chart.bar.xaxis"
+        default: return "chart.line.uptrend.xyaxis"
+        }
+    }
+
+    private func dailyPlanSignalLabel(_ signal: ReadinessEngine.Signal) -> String {
+        switch signal.key {
+        case "hrv": return String(localized: "daily_plan.signal.hrv")
+        case "rhr": return String(localized: "daily_plan.signal.rhr")
+        case "respRate": return String(localized: "daily_plan.signal.respiration")
+        case "acwr": return String(localized: "daily_plan.signal.load")
+        case "monotony": return String(localized: "daily_plan.signal.variety")
+        default: return signal.label
+        }
+    }
+
+    private func dailyPlanSignalStatus(_ flag: ReadinessEngine.Flag) -> String {
+        switch flag {
+        case .good: return String(localized: "daily_plan.signal.good")
+        case .neutral: return String(localized: "daily_plan.signal.neutral")
+        case .watch: return String(localized: "daily_plan.signal.watch")
+        case .bad: return String(localized: "daily_plan.signal.shifted")
+        }
+    }
+
+    private func dailyPlanSignalTint(_ flag: ReadinessEngine.Flag) -> Color {
+        switch flag {
+        case .good: return StrandPalette.statusPositive
+        case .neutral: return StrandPalette.textTertiary
+        case .watch: return StrandPalette.statusWarning
+        case .bad: return StrandPalette.statusCritical
+        }
+    }
+
+    private func dailyPlanConfidenceKey(_ confidence: ScoreConfidence) -> String {
+        switch confidence {
+        case .calibrating: return "daily_plan.confidence.calibrating"
+        case .building: return "daily_plan.confidence.building"
+        case .solid: return "daily_plan.confidence.solid"
+        }
+    }
+
+    private func dailyPlanTargetStatusKey(_ plan: DailyActionPlanner.Plan) -> String {
+        switch plan.availability {
+        case .ready, .calibrating:
+            return dailyPlanConfidenceKey(plan.confidence)
+        case .checkInNeeded, .recoveryShift, .stop:
+            return "daily_plan.target.withheld"
+        }
+    }
+
+    private func dailyPlanActionLabel(_ action: DailyActionPlanner.Action) -> String {
+        switch action {
+        case .completeCheckIn: return String(localized: "daily_plan.action.complete_check_in")
+        case .keepSleepWindow: return String(localized: "daily_plan.action.keep_sleep_window")
+        case .protectExtraSleep: return String(localized: "daily_plan.action.protect_extra_sleep")
+        case .chooseEasyDay: return String(localized: "daily_plan.action.choose_easy_day")
+        case .stopAndAssess: return String(localized: "daily_plan.action.stop_and_assess")
+        }
+    }
+
+    private func dailyPlanEvidenceLabel(_ source: DailyActionPlanner.EvidenceSource) -> String {
+        switch source {
+        case .selfCheck: return String(localized: "daily_plan.evidence.self_check")
+        case .readinessBaseline: return String(localized: "daily_plan.evidence.readiness")
+        case .personalEffortHistory: return String(localized: "daily_plan.evidence.effort_history")
+        case .sleepPlan: return String(localized: "daily_plan.evidence.sleep_plan")
+        }
+    }
+
     // MARK: - Recovery vitals
 
     private var recoveryVitalsSection: some View {
@@ -1112,7 +1525,7 @@ struct LiquidTodayView: View {
         return card {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("RECOVERY VITALS").font(StrandFont.overline).tracking(1.6)
+                    Text("RECOVERY VITALS").font(StrandFont.overline).tracking(0)
                         .foregroundStyle(StrandPalette.textSecondary)
                     Spacer()
                     if let line = vitalsProvenanceLine {
@@ -1243,7 +1656,7 @@ struct LiquidTodayView: View {
             HStack(alignment: .center, spacing: NoopMetrics.space2) {
                 MetricGlyph(symbol, size: 28)
                 Text(String(localized: "Calories").uppercased())
-                    .font(StrandFont.overlineScaled(9.5)).tracking(1.1)
+                    .font(StrandFont.overlineScaled(9.5)).tracking(0)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -1261,7 +1674,7 @@ struct LiquidTodayView: View {
                 Text("kcal").font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
             }
             Text(energyHeadlineLabel.uppercased())
-                .font(StrandFont.overlineScaled(7.5)).tracking(0.7)
+                .font(StrandFont.overlineScaled(7.5)).tracking(0)
                 .foregroundStyle(StrandPalette.textTertiary)
 
             HStack(spacing: 8) {
@@ -1292,7 +1705,7 @@ struct LiquidTodayView: View {
     private func energyKpiMini(_ label: String, _ value: Double?) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(label.uppercased())
-                .font(StrandFont.overlineScaled(7)).tracking(0.6)
+                .font(StrandFont.overlineScaled(7)).tracking(0)
                 .foregroundStyle(StrandPalette.textTertiary)
             Text(kcalText(value, includesUnit: false))
                 .font(StrandFont.captionNumber)
@@ -1310,7 +1723,7 @@ struct LiquidTodayView: View {
                 MetricGlyph(symbol, size: 28)
                 Text(label.uppercased())
                     .font(StrandFont.overlineScaled(9.5))
-                    .tracking(1.1)
+                    .tracking(0)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
@@ -1464,7 +1877,7 @@ struct LiquidTodayView: View {
         return HStack(alignment: .firstTextBaseline) {
             Text(LocalizedStringKey(title))
                 .font(StrandFont.overline)
-                .tracking(1.6)
+                .tracking(0)
                 .foregroundStyle(color)
             Spacer()
             Text(LocalizedStringKey(trailing))
@@ -1480,7 +1893,7 @@ struct LiquidTodayView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                FrostedCardSurface(cornerRadius: 22)
+                FrostedCardSurface(cornerRadius: NoopMetrics.cardRadius)
             )
     }
 
@@ -1502,8 +1915,20 @@ struct LiquidTodayView: View {
         // current row into nil, which asks ReadinessEngine to fall back to the newest stored row — so a
         // stale import could masquerade as today's pattern. An explicit absent key correctly yields
         // `.insufficient`.
-        cachedReadiness = ReadinessEngine.evaluate(days: repo.days, today: selectedDayKey)
-        readinessAsOfDay = cachedReadiness?.asOfDay
+        let readinessResult = ReadinessEngine.evaluate(days: repo.days, today: selectedDayKey)
+        cachedReadiness = readinessResult
+        readinessAsOfDay = readinessResult.asOfDay
+        let dailyPlan = makeDailyActionPlan(readiness: readinessResult)
+        cachedDailyActionPlan = dailyPlan
+        #if DEBUG
+        if CommandLine.arguments.contains("--demo-daily-plan") {
+            NSLog(
+                "Daily Plan QA availability=\(dailyPlan.availability.rawValue) " +
+                "checkIn=\(currentDailyActionCheckIn.rawValue) " +
+                "target=\(dailyPlan.target.map { "\($0.lower)-\($0.upper)" } ?? "none")"
+            )
+        }
+        #endif
         // Prior-day vitals carry, resolved ONCE here (never in body). Bound to today's own key so it can't
         // echo today's still-forming row; only on today (a past day's own row is the whole story).
         let tkey = cachedDisplayDay?.day ?? selectedDayKey
@@ -1643,6 +2068,60 @@ struct LiquidTodayView: View {
     /// before the first load() populates the cache.
     private var readiness: ReadinessEngine.Readiness {
         cachedReadiness ?? ReadinessEngine.evaluate(days: repo.days, today: selectedDayKey)
+    }
+
+    private var currentDailyActionCheckIn: DailyActionPlanner.CheckIn {
+        guard selectedDayOffset == 0 else { return .unanswered }
+        #if DEBUG
+        if let demo = Self.demoDailyActionCheckIn { return demo }
+        #endif
+        return BehaviorStore.decodeDailyActionCheckIn(
+            today: selectedDayKey,
+            storedDay: dailyActionCheckInDay,
+            storedValue: dailyActionCheckInValue
+        )
+    }
+
+    #if DEBUG
+    private static var demoDailyActionCheckIn: DailyActionPlanner.CheckIn? {
+        let arguments = CommandLine.arguments
+        guard let index = arguments.firstIndex(of: "--demo-daily-plan-check-in"),
+              index + 1 < arguments.count else {
+            return nil
+        }
+        return DailyActionPlanner.CheckIn(rawValue: arguments[index + 1])
+    }
+    #endif
+
+    private var dailyActionPlan: DailyActionPlanner.Plan {
+        cachedDailyActionPlan ?? makeDailyActionPlan(readiness: readiness)
+    }
+
+    private func makeDailyActionPlan(
+        readiness: ReadinessEngine.Readiness
+    ) -> DailyActionPlanner.Plan {
+        DailyActionPlanner.plan(
+            today: selectedDayKey,
+            readiness: readiness,
+            checkIn: currentDailyActionCheckIn,
+            recentEffort: repo.days.map {
+                DailyActionPlanner.EffortDay(day: $0.day, effort: $0.strain)
+            }
+        )
+    }
+
+    private func setDailyActionCheckIn(_ value: DailyActionPlanner.CheckIn) {
+        guard selectedDayOffset == 0 else { return }
+        dailyActionCheckInDay = selectedDayKey
+        dailyActionCheckInValue = value.rawValue
+        cachedDailyActionPlan = DailyActionPlanner.plan(
+            today: selectedDayKey,
+            readiness: readiness,
+            checkIn: value,
+            recentEffort: repo.days.map {
+                DailyActionPlanner.EffortDay(day: $0.day, effort: $0.strain)
+            }
+        )
     }
 
     /// One card-level provenance label. Identical winners collapse to one name; mixed scores show at most
@@ -1997,7 +2476,7 @@ private struct TodaySignalPatternsCard: View {
                     if let confidence = result.findings.first?.confidence {
                         Text(confidence.label.uppercased())
                             .font(StrandFont.overlineScaled(8))
-                            .tracking(0.8)
+                            .tracking(0)
                             .foregroundStyle(tint)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 5)
@@ -2374,7 +2853,7 @@ private struct HeroScoreCell: View {
                 HStack(spacing: 3) {
                     // #74: one line, shrink-to-fit rather than wrap under large Dynamic Type (mirrors
                     // the score number above) so labels never grow the hero card to two lines.
-                    Text(label.uppercased()).font(StrandFont.overline).tracking(1.6)
+                    Text(label.uppercased()).font(StrandFont.overline).tracking(0)
                         .lineLimit(1).minimumScaleFactor(0.7)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .semibold))
@@ -2460,10 +2939,10 @@ private struct FitnessAgeHeroRow: View {
                     HStack(spacing: 6) {
                         Text("FITNESS AGE")
                             .font(StrandFont.overlineScaled(10))
-                            .tracking(1.3)
+                            .tracking(0)
                         Text("WEEKLY")
                             .font(StrandFont.overlineScaled(8))
-                            .tracking(0.9)
+                            .tracking(0)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
                             .background(StrandPalette.chargeColor.opacity(0.14), in: Capsule())
@@ -2635,23 +3114,6 @@ private struct TodayArrangeSheet: View {
     }
 }
 
-private struct LiquidAddButton: View {
-    @EnvironmentObject var router: NavRouter
-    var body: some View {
-        Button { router.requestQuickActions() } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(StrandPalette.textPrimary)
-                .frame(width: 34, height: 34)
-                .background(Circle().fill(StrandPalette.surfaceRaised.opacity(0.82)))
-                .overlay(Circle().strokeBorder(StrandPalette.hairlineStrong.opacity(0.72), lineWidth: 1))
-                .shadow(color: .black.opacity(0.14), radius: 8, y: 4)
-        }
-        .buttonStyle(LiquidPressStyle())
-        .accessibilityLabel("Quick actions")
-    }
-}
-
 /// The live heart-rate readout leaf. Owns LiveState so the ~1 Hz HR notifies re-render ONLY this card,
 /// never the whole Today (the isolation the classic Today depends on). Keeps its own rolling buffer of
 /// live samples, shows the current bpm live with a beat-by-beat trace, and falls back to today's banked
@@ -2683,7 +3145,7 @@ private struct LiquidLiveHR: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("BEATS PER MINUTE").font(StrandFont.overline).tracking(1.6)
+                    Text("BEATS PER MINUTE").font(StrandFont.overline).tracking(0)
                         .foregroundStyle(StrandPalette.textSecondary)
                     Text(subtitle).font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
                 }
@@ -2910,7 +3372,7 @@ private struct LiquidBatteryButton: View {
                     VStack(alignment: .leading, spacing: -1) {
                         Text("BAND")
                             .font(.system(size: 6, weight: .bold))
-                            .tracking(0.7)
+                            .tracking(0)
                             .foregroundStyle(StrandPalette.textSecondary)
                         Text(batteryValue)
                             .font(.system(size: 10, weight: .bold, design: .rounded))

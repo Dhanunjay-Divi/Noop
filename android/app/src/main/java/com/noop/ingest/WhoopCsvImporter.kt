@@ -6,6 +6,9 @@ import com.noop.data.DailyMetric
 import com.noop.data.ImportSummary
 import com.noop.data.JournalEntry
 import com.noop.data.MetricSeriesRow
+import com.noop.data.PortableUserData
+import com.noop.data.PortableUserDataCodec
+import com.noop.data.PortableUserDataImportSummary
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
@@ -20,7 +23,8 @@ import java.util.zip.ZipInputStream
 import kotlin.math.roundToInt
 
 /**
- * Imports a WHOOP CSV export (the four-CSV bundle, zipped or loose) into the local Room store.
+ * Imports a WHOOP CSV export (the four-CSV bundle, zipped or loose) plus NOOP's optional versioned
+ * user-data sidecar into the local Room store.
  *
  * This is the Android port of the macOS source of truth
  * `Packages/StrandImport/Sources/StrandImport/WhoopExportImporter.swift`
@@ -124,16 +128,26 @@ object WhoopCsvImporter {
         repo: WhoopRepository,
         deviceId: String = WHOOP_DEVICE,
     ): ImportSummary {
-        val (csvData, truncated) = try {
+        val loaded = try {
             loadCsvData(context, uri)
         } catch (e: Exception) {
             return ImportSummary.failure(SOURCE_LABEL, "Could not read export: ${e.message ?: "unknown error"}")
         }
-
-        if (csvData.isEmpty()) {
+        val csvData = loaded.csvData
+        val truncated = loaded.truncated
+        val portable: PortableUserData? = try {
+            loaded.portableData?.let(PortableUserDataCodec::decode)
+        } catch (e: Exception) {
             return ImportSummary.failure(
                 SOURCE_LABEL,
-                "No WHOOP CSVs found (expected physiological_cycles.csv, sleeps.csv, workouts.csv or journal_entries.csv)."
+                "NOOP user data could not be validated: ${e.message ?: "invalid portable data"}",
+            )
+        }
+
+        if (csvData.isEmpty() && portable == null) {
+            return ImportSummary.failure(
+                SOURCE_LABEL,
+                "No supported data found (expected WHOOP CSVs or ${PortableUserDataCodec.FILE_NAME})."
             )
         }
 
@@ -200,9 +214,22 @@ object WhoopCsvImporter {
 
         if (daily.isEmpty() && localDaily.isEmpty() &&
             sleepSessions.isEmpty() && localSleepSessions.isEmpty() &&
-            workouts.isEmpty() && localWorkouts.isEmpty() && journal.isEmpty()
+            workouts.isEmpty() && localWorkouts.isEmpty() && journal.isEmpty() &&
+            (portable?.recordCount ?: 0) == 0
         ) {
             return ImportSummary.failure(SOURCE_LABEL, "Export contained no usable WHOOP rows.")
+        }
+
+        // The complete JSON graph was decoded and validated before any write. Merge its accepted rows
+        // in one Room transaction now, before the legacy CSV writes; a database-level sidecar failure
+        // therefore cannot leave a partial nutrition/strength restore behind.
+        val portableSummary: PortableUserDataImportSummary? = try {
+            portable?.let { repo.importPortableUserData(it) }
+        } catch (e: Exception) {
+            return ImportSummary.failure(
+                SOURCE_LABEL,
+                "NOOP user data could not be imported: ${e.message ?: "database error"}",
+            )
         }
 
         if (daily.isNotEmpty() || sleepSessions.isNotEmpty() || workouts.isNotEmpty() ||
@@ -247,6 +274,16 @@ object WhoopCsvImporter {
         if (cycleSeries.isNotEmpty() || localCycleSeries.isNotEmpty()) {
             counts["metricSeries"] = cycleSeries.size + localCycleSeries.size
         }
+        portableSummary?.let { summary ->
+            if (summary.nutritionEntries > 0) counts["nutritionEntries"] = summary.nutritionEntries
+            if (summary.strengthExercises > 0) counts["strengthExercises"] = summary.strengthExercises
+            if (summary.strengthRoutines > 0) counts["strengthRoutines"] = summary.strengthRoutines
+            if (summary.strengthRoutineExercises > 0) {
+                counts["strengthRoutineExercises"] = summary.strengthRoutineExercises
+            }
+            if (summary.strengthSessions > 0) counts["strengthSessions"] = summary.strengthSessions
+            if (summary.strengthSets > 0) counts["strengthSets"] = summary.strengthSets
+        }
 
         // Date span across everything we wrote.
         val days = ArrayList<String>()
@@ -257,6 +294,10 @@ object WhoopCsvImporter {
         days.addAll(localSleepSessions.map { epochSecondsToDay(it.startTs) })
         days.addAll(workouts.map { epochSecondsToDay(it.startTs) })
         days.addAll(localWorkouts.map { epochSecondsToDay(it.startTs) })
+        portable?.let { data ->
+            days.addAll(data.nutritionEntries.map { it.day })
+            days.addAll(data.strengthSessions.map { epochSecondsToDay(it.startedAt) })
+        }
         val firstDay = days.minOrNull()
         val lastDay = days.maxOrNull()
 
@@ -264,7 +305,7 @@ object WhoopCsvImporter {
         val message = buildString {
             append("Imported ")
             append(total)
-            append(" WHOOP rows")
+            append(" portable rows")
             if (firstDay != null && lastDay != null) append(" ($firstDay → $lastDay)")
             append(".")
             // #70: never silently truncate. If the aggregate RAM budget tripped, the retained CSV set was
@@ -288,13 +329,20 @@ object WhoopCsvImporter {
      * Accepts a `.zip` (iterated with [ZipInputStream], routed by base filename) or a single
      * `.csv`. Mirrors Swift `loadCSVData` filename routing.
      */
+    private data class LoadedImportData(
+        val csvData: Map<String, ByteArray>,
+        val portableData: ByteArray?,
+        val truncated: Boolean,
+    )
+
     private fun loadCsvData(
         context: Context,
         uri: Uri,
         maxTotalBytes: Long = MAX_TOTAL_BYTES,
-    ): Pair<Map<String, ByteArray>, Boolean> {
+    ): LoadedImportData {
         val wanted = setOf(CYCLES_NAME, SLEEPS_NAME, WORKOUTS_NAME, JOURNAL_NAME)
         val result = LinkedHashMap<String, ByteArray>()
+        var portableData: ByteArray? = null
         var total = 0L
         var truncated = false
 
@@ -311,8 +359,26 @@ object WhoopCsvImporter {
                     while (entry != null) {
                         if (!entry.isDirectory) {
                             val base = baseName(entry.name).lowercase()
+                            if (base == PortableUserDataCodec.FILE_NAME && portableData == null) {
+                                val declared = entry.size
+                                if (declared > PortableUserDataCodec.MAX_FILE_BYTES) {
+                                    throw IllegalArgumentException(
+                                        "${PortableUserDataCodec.FILE_NAME} exceeds the 64 MB limit",
+                                    )
+                                }
+                                val bytes = zis.readEntryCapped(
+                                    PortableUserDataCodec.MAX_FILE_BYTES.toLong(),
+                                ) ?: throw IllegalArgumentException(
+                                    "${PortableUserDataCodec.FILE_NAME} exceeds the 64 MB limit",
+                                )
+                                if (total + bytes.size > maxTotalBytes) {
+                                    truncated = true
+                                    break
+                                }
+                                portableData = bytes
+                                total += bytes.size
                             // Only inspect CSVs (skip the export's GPX/ECG/other files).
-                            if (base.endsWith(".csv")) {
+                            } else if (base.endsWith(".csv")) {
                                 val declared = entry.size // -1 when unknown
                                 if (declared <= MAX_ENTRY_BYTES) {
                                     val bytes = zis.readEntryCapped(MAX_ENTRY_BYTES)
@@ -338,7 +404,9 @@ object WhoopCsvImporter {
                     }
                 }
             }
-            if (result.isNotEmpty()) return result to truncated
+            if (result.isNotEmpty() || portableData != null) {
+                return LoadedImportData(result, portableData, truncated)
+            }
         }
 
         // Not a (useful) zip — treat the input as a single CSV. Route by display name; if the
@@ -349,10 +417,16 @@ object WhoopCsvImporter {
             name != null && localizedAlias(baseName(name)) != null -> localizedAlias(baseName(name))
             else -> sniffCsvKind(firstBytes)
         }
-        if (routed != null) {
+        if (name != null && baseName(name) == PortableUserDataCodec.FILE_NAME) {
+            require(firstBytes.size <= PortableUserDataCodec.MAX_FILE_BYTES) {
+                "${PortableUserDataCodec.FILE_NAME} exceeds the 64 MB limit"
+            }
+            portableData = firstBytes
+        } else if (routed != null) {
             result[routed] = firstBytes
         }
-        return result to false   // single-CSV path holds one file — the budget can't trip here
+        // Single-file input holds one retained file — the aggregate budget cannot trip here.
+        return LoadedImportData(result, portableData, truncated = false)
     }
 
     /** Whether the leading bytes are a local-file-header zip signature ("PK"). */

@@ -108,6 +108,7 @@ import com.noop.analytics.Zones
 import com.noop.R
 import com.noop.ble.PuffinExperiment
 import com.noop.ble.WhoopModel
+import com.noop.data.BackupSettingsCodec
 import com.noop.data.DataBackup
 import com.noop.ingest.RawSensorExport
 import com.noop.ingest.WhoopCsvExporter
@@ -357,10 +358,17 @@ class ProfileStore(private val prefs: SharedPreferences) {
     /** The user-SET profile fields, keyed canonically, for the backup exporter. */
     fun backupSnapshot(): Map<String, Any> {
         val out = LinkedHashMap<String, Any>()
-        // #146: age is now derived from a DOB; export the current derived Int under the legacy
-        // `profile.age` key (the whitelist carries an Int, not a Date). A never-touched profile
-        // (neither key set) still stays out of the snapshot.
-        if (prefs.contains(KEY_DOB) || prefs.contains(KEY_AGE)) out["profile.age"] = age
+        // V2 keeps the exact civil birthday and the derived whole-years compatibility field. A civil
+        // date survives time-zone moves without shifting a day; old readers still consume age.
+        if (prefs.contains(KEY_DOB) || prefs.contains(KEY_AGE)) {
+            out["profile.age"] = age
+            val zone = java.time.ZoneId.systemDefault()
+            out[BackupSettingsCodec.DATE_OF_BIRTH_KEY] = java.time.Instant
+                .ofEpochMilli(dateOfBirthMillis)
+                .atZone(zone)
+                .toLocalDate()
+                .toString()
+        }
         if (prefs.contains(KEY_SEX)) out["profile.sex"] = sex
         if (prefs.contains(KEY_WEIGHT)) out["profile.weightKg"] = weightKg
         if (prefs.contains(KEY_HEIGHT)) out["profile.heightCm"] = heightCm
@@ -375,10 +383,19 @@ class ProfileStore(private val prefs: SharedPreferences) {
      * through the property setters, so the usual range clamps apply.
      */
     fun applyBackup(values: Map<String, Any>) {
-        // #146: a restore carries only an Int age. Route it through setAge so the restored age
-        // re-anchors this device's DOB (clearing any stale local DOB) and then advances on its own —
-        // the deterministic twin of the Apple side clearing `profile.dateOfBirth` on apply.
-        (values["profile.age"] as? Number)?.let { setAge(it.toInt()) }
+        // V2 exact DOB wins over the lossy compatibility age. A malformed/missing civil date falls
+        // back to the v1 age behavior so every historical backup still restores.
+        val exactDob = (values[BackupSettingsCodec.DATE_OF_BIRTH_KEY] as? String)?.let { raw ->
+            runCatching { java.time.LocalDate.parse(raw) }.getOrNull()
+        }
+        if (exactDob != null) {
+            dateOfBirthMillis = exactDob
+                .atStartOfDay(java.time.ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli()
+        } else {
+            (values["profile.age"] as? Number)?.let { setAge(it.toInt()) }
+        }
         (values["profile.sex"] as? String)?.let { sex = it }
         (values["profile.weightKg"] as? Number)?.let { weightKg = it.toDouble() }
         (values["profile.heightCm"] as? Number)?.let { heightCm = it.toDouble() }
@@ -693,7 +710,7 @@ fun SettingsScreen(
                 onSuccess = {
                     Toast.makeText(
                         context,
-                        "Backup exported. Copy this file to your new phone and use Import there to restore everything.",
+                        "Backup exported. It restores this Android database plus durable profile, display, dashboard, Sleep Planner, and reminder settings; credentials, hardware bindings, permissions, and volatile delivery state are intentionally excluded.",
                         Toast.LENGTH_LONG,
                     ).show()
                 },
@@ -704,7 +721,7 @@ fun SettingsScreen(
         }
     }
 
-    // CSV export — the 4-CSV WHOOP-format zip NOOP's own importers re-import (Android + Mac).
+    // Portable export — WHOOP-compatible CSVs plus NOOP's versioned nutrition/strength JSON.
     val csvExportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip"),
     ) { uri ->
@@ -725,7 +742,7 @@ fun SettingsScreen(
                     ).show()
                 },
                 onFailure = { e ->
-                    Toast.makeText(context, "CSV export problem: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Data export problem: ${e.message}", Toast.LENGTH_LONG).show()
                 },
             )
         }
@@ -2672,7 +2689,7 @@ fun SettingsScreen(
         SettingsSection(
             icon = Icons.Filled.Storage,
             title = uiString(R.string.l10n_settings_screen_backup_restore_a1616284),
-            blurb = "Move all your NOOP data to another phone. Export saves everything (history, sleeps, workouts, settings) to a single file you can copy across; import replaces this phone's data with a backup.",
+            blurb = "Move this Android database to another phone. Export includes history, sleep, workouts, nutrition, strength data, and durable profile, display, dashboard, Sleep Planner, and reminder settings. Credentials, hardware bindings, permissions, and volatile delivery state are intentionally excluded.",
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 // Three equal-width buttons share the row (each takes a third via weight) — mirrors the

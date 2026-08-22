@@ -112,6 +112,7 @@ class DeviceRegistryTest {
         }
         override suspend fun deleteSleepStatesFor(deviceId: String) { deletedTables += "sleepStateSample" to deviceId }
         override suspend fun deleteLabMarkersFor(deviceId: String) { deletedTables += "labMarker" to deviceId }
+        override suspend fun deleteNutritionEntriesFor(deviceId: String) { deletedTables += "nutritionEntry" to deviceId }
         override suspend fun deleteLiveSessionsFor(deviceId: String) { deletedTables += "liveSession" to deviceId }
         override suspend fun deleteDismissedWorkoutsFor(deviceId: String) { deletedTables += "dismissedWorkout" to deviceId }
         override suspend fun deleteDismissedSleepsFor(deviceId: String) { deletedTables += "dismissedSleep" to deviceId }
@@ -249,7 +250,8 @@ class DeviceRegistryTest {
             "hrSample", "rrInterval", "spo2Sample", "skinTempSample", "respSample", "gravitySample",
             "stepSample", "ppgHrSample", "ppgWaveformSample", "rawImuSample", "event", "battery", "dailyMetric", "sleepSession",
             "journal", "workout", "appleDaily", "metricSeries", "dayOwnership",
-            "sleepStateSample", "labMarker", "liveSession", "dismissedWorkout", "dismissedSleep",
+            "sleepStateSample", "labMarker", "nutritionEntry", "liveSession",
+            "dismissedWorkout", "dismissedSleep",
         )
         assertEquals(expectedTables, dao.deletedTables.map { it.first }.toSet())
         // Every delete was scoped to the requested device, not the seeded my-whoop.

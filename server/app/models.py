@@ -222,6 +222,72 @@ class FriendRequestDecision(StrictModel):
     decision: Literal["accept", "decline"]
 
 
+PHONE_E164_PATTERN = r"^\+[1-9][0-9]{7,14}$"
+
+
+class SafetyProfileBootstrap(StrictModel):
+    """Retry-safe enrollment for one app installation's safety credential."""
+
+    display_name: str = Field(min_length=1, max_length=64)
+    installation_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=IDENTIFIER_PATTERN,
+    )
+    enrollment_id: UUID
+    safety_token: SecretStr
+
+    _display_name = field_validator("display_name")(validate_display_name)
+
+    @field_validator("safety_token")
+    @classmethod
+    def valid_safety_token(cls, value: SecretStr) -> SecretStr:
+        plaintext = value.get_secret_value()
+        suffix = plaintext.removeprefix("noop_safety_")
+        if (
+            not plaintext.startswith("noop_safety_")
+            or not 43 <= len(suffix) <= 86
+            or re.fullmatch(r"[A-Za-z0-9_-]+", suffix) is None
+        ):
+            raise ValueError(
+                "safety_token must be a 256-bit URL-safe Noop safety token"
+            )
+        return value
+
+
+class SafetyContactCreate(StrictModel):
+    display_name: str = Field(min_length=1, max_length=64)
+    phone_e164: str = Field(pattern=PHONE_E164_PATTERN)
+
+    _display_name = field_validator("display_name")(validate_display_name)
+
+
+class SafetyInvitationDecision(StrictModel):
+    decision: Literal["accept", "decline"]
+
+
+class SafetyPageCreate(StrictModel):
+    """The only currently validated escalation entry point.
+
+    Wellness/anomaly estimates are deliberately not accepted here. A future
+    automated trigger needs a separately validated critical-event contract.
+    """
+
+    trigger: Literal["manual_sos"] = "manual_sos"
+
+
+class SafetyIncidentTransition(StrictModel):
+    note: str | None = Field(default=None, max_length=160)
+
+    @field_validator("note")
+    @classmethod
+    def clean_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        compact = " ".join(value.split())
+        return compact or None
+
+
 class FriendVisibility(StrictModel):
     """Daily summary fields an owner exposes to one accepted friend.
 

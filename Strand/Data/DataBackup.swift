@@ -19,8 +19,9 @@ import ZIPFoundation
 /// (`<AppSupport>/OpenWhoop/whoop.sqlite`, plus the `-wal`/`-shm` sidecars while the store is open).
 /// Export uses SQLite's online-backup API to create a private, immutable standalone snapshot, then
 /// wraps that snapshot in a ZIP written as `.noopbak`, alongside a
-/// small `settings.json` entry (#1000) carrying the whitelisted profile/display settings (see
-/// `BackupSettings`) so a restore also brings back weight/height/units, not just the rows.
+/// bounded `settings.json` entry (#1000) carrying explicitly whitelisted durable preferences (see
+/// `BackupSettings`) so a restore also brings back profile, units, appearance, dashboard, Sleep
+/// Planner, and reminder setup—not just database rows.
 /// ZIP deflate typically cuts a 100 MB+ SQLite backup to 10–20 MB. Manual Apple exports are then
 /// protected by a versioned, passphrase-derived AES-256-GCM envelope. Folder/automatic snapshots
 /// remain standard ZIP files because NOOP deliberately never stores a passphrase for unattended use.
@@ -37,6 +38,8 @@ import ZIPFoundation
 enum DataBackup {
     private static let maxBackupSQLiteBytes: Int64 = 2_147_483_648
     private static let maxBackupSettingsBytes: Int64 = 1_048_576
+    private static let maxBackupManifestBytes: Int64 = 1_048_576
+    private static let maxBackupArchiveEntries = 128
 
     /// A streaming authenticated-encryption envelope for Apple `.noopbak` exports.
     ///
@@ -714,30 +717,57 @@ enum DataBackup {
     }
 
     /// Write the live SQLite at `dbURL` into a fresh deflate ZIP at `dest`: the DB under the canonical
-    /// entry name `noop-backup.sqlite`, plus (#1000) an optional second entry `settings.json` carrying
-    /// the whitelisted profile/display settings, so a restore brings back weight/height/units and not
-    /// just the rows. Entry names, entry ORDER (DB first — older importers stop at the first `.sqlite`
-    /// entry) and deflate compression match the Android exporter byte-for-byte at the container level,
-    /// so a `.noopbak` produced on either platform imports on the other. `settingsJSON == nil` writes
-    /// the legacy single-entry ZIP. Mirrors the `Archive` idiom in `WhoopCsvExporter`.
+    /// entry name `noop-backup.sqlite`, optional `settings.json`, then the shared `manifest.json`.
+    /// Entry ORDER is a compatibility contract: DB first because legacy importers stop at the first
+    /// SQLite entry, settings second because pre-manifest importers already understand it, manifest
+    /// last so it is additive. The manifest records source engine/schema and streaming SHA-256 payload
+    /// hashes; old manifest-less backups remain import-compatible.
     private static func writeBackupZip(dbURL: URL, to dest: URL, settingsJSON: Data?) throws {
         let archive = try Archive(url: dest, accessMode: .create)
         try archive.addEntry(with: backupEntryName, fileURL: dbURL, compressionMethod: .deflate)
-        guard let settingsJSON else { return }
-        // Stage the JSON through a temp file so the settings entry uses the exact same file-URL
-        // addEntry idiom as the DB entry (one container code path, no provider-API variant to drift).
         let fm = FileManager.default
-        let tmpJSON = fm.temporaryDirectory
-            .appendingPathComponent("noop-settings-\(UUID().uuidString).json")
-        defer { try? fm.removeItem(at: tmpJSON) }
-        try settingsJSON.write(to: tmpJSON)
-        applyPrivateTemporaryFileProtection(to: tmpJSON)
-        try archive.addEntry(with: BackupSettings.entryName, fileURL: tmpJSON, compressionMethod: .deflate)
+        var temporaryFiles: [URL] = []
+        defer { temporaryFiles.forEach { try? fm.removeItem(at: $0) } }
+        if let settingsJSON {
+            // Stage the JSON through a temp file so every entry uses the same file-URL addEntry path.
+            let tmpJSON = fm.temporaryDirectory
+                .appendingPathComponent("noop-settings-\(UUID().uuidString).json")
+            try settingsJSON.write(to: tmpJSON)
+            applyPrivateTemporaryFileProtection(to: tmpJSON)
+            temporaryFiles.append(tmpJSON)
+            try archive.addEntry(
+                with: BackupSettings.entryName,
+                fileURL: tmpJSON,
+                compressionMethod: .deflate)
+        }
+
+        let manifest = try BackupManifest.make(
+            databaseAt: dbURL,
+            databaseEntryName: backupEntryName,
+            settingsData: settingsJSON,
+            settingsEntryName: BackupSettings.entryName,
+            createdAtEpochMs: Int64((Date().timeIntervalSince1970 * 1_000).rounded()),
+            sourcePlatform: .apple,
+            databaseEngine: .grdb,
+            databaseSchemaVersion: WhoopStoreInfo.schemaVersion,
+            settingsSchemaVersion: settingsJSON == nil ? nil : BackupSettings.schemaVersion,
+            appVersion: Bundle.main.object(
+                forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        )
+        let manifestURL = fm.temporaryDirectory
+            .appendingPathComponent("noop-manifest-\(UUID().uuidString).json")
+        try manifest.encoded().write(to: manifestURL)
+        applyPrivateTemporaryFileProtection(to: manifestURL)
+        temporaryFiles.append(manifestURL)
+        try archive.addEntry(
+            with: BackupManifest.entryName,
+            fileURL: manifestURL,
+            compressionMethod: .deflate)
     }
 
-    /// This device's whitelisted profile/display settings (see `BackupSettings.whitelist`) as the
-    /// `settings.json` payload, or nil when nothing whitelisted was ever set (a fresh install then
-    /// exports a legacy DB-only ZIP, which is the right degrade). UserDefaults is thread-safe, so
+    /// This device's whitelisted durable settings (see `BackupSettings.whitelist`) as the
+    /// `settings.json` payload, or nil when nothing whitelisted was ever set. The backup still carries
+    /// its database and manifest; only the optional settings payload is omitted. UserDefaults is thread-safe, so
     /// the detached export tasks may call this off the main actor.
     private static func currentSettingsJSON() -> Data? {
         BackupSettings.encode(BackupSettings.snapshot(from: .standard))
@@ -772,7 +802,8 @@ enum DataBackup {
     /// Test seam: write a `.noopbak` for an EXPLICIT source database (no checkpoint, no `StorePaths`),
     /// so a unit test can round-trip a throwaway SQLite through the exact ZIP container the app writes.
     /// `settings` (canonical `BackupSettings` keys) adds the `settings.json` entry; nil writes the
-    /// legacy single-entry ZIP — tests cover both shapes. Not used by app code; production goes
+    /// current manifest-bearing ZIP — tests build legacy containers explicitly where needed. Not used
+    /// by app code; production goes
     /// through `writeBackup(checkpoint:to:)`.
     static func writeBackupForTesting(databaseAt dbURL: URL, to dest: URL,
                                       settings: [String: Any]? = nil) throws {
@@ -971,11 +1002,32 @@ enum DataBackup {
                 try? fm.removeItem(at: tmpExtract)
                 return .failure(String(localized: "Couldn't open the backup archive: \(error.localizedDescription)"))
             }
-            guard let sqliteEntry = (try? fm.contentsOfDirectory(
-                at: tmpExtract, includingPropertiesForKeys: nil))?
-                .first(where: { $0.pathExtension == "sqlite" }) else {
+            let sqliteEntry = tmpExtract.appendingPathComponent(backupEntryName)
+            guard fm.fileExists(atPath: sqliteEntry.path) else {
                 try? fm.removeItem(at: tmpExtract)
                 return .failure(String(localized: "The backup archive doesn't contain a database file."))
+            }
+            let settingsURL = tmpExtract.appendingPathComponent(BackupSettings.entryName)
+            let manifestURL = tmpExtract.appendingPathComponent(BackupManifest.entryName)
+            if fm.fileExists(atPath: manifestURL.path) {
+                do {
+                    let manifest = try BackupManifest.decoded(from: Data(contentsOf: manifestURL))
+                    if let problem = manifest.validationProblem(
+                        databaseAt: sqliteEntry,
+                        settingsAt: fm.fileExists(atPath: settingsURL.path) ? settingsURL : nil,
+                        expectedDatabaseEntryName: backupEntryName,
+                        expectedSettingsEntryName: BackupSettings.entryName,
+                        currentPlatform: .apple,
+                        currentDatabaseEngine: .grdb,
+                        currentDatabaseSchemaVersion: WhoopStoreInfo.schemaVersion
+                    ) {
+                        try? fm.removeItem(at: tmpExtract)
+                        return .failure(problem)
+                    }
+                } catch {
+                    try? fm.removeItem(at: tmpExtract)
+                    return .failure(String(localized: "This backup has an invalid or unreadable integrity manifest."))
+                }
             }
             source = sqliteEntry
             extractedDir = tmpExtract
@@ -1046,18 +1098,26 @@ enum DataBackup {
 
     // MARK: - Helpers
 
-    /// Canonical entry name for the SQLite inside a plaintext `.noopbak` ZIP. Matches the Android
-    /// exporter so a plaintext backup produced on either platform restores on the other. Manual Apple
-    /// export wraps this exact ZIP in its authenticated envelope after compression.
+    /// Canonical entry name for the engine-native SQLite inside a plaintext `.noopbak` ZIP. Apple and
+    /// Android intentionally share the container entry name, but their GRDB and Room databases are
+    /// not interchangeable. The manifest rejects a cross-platform database replacement before SQLite
+    /// is opened; portable CSV remains the supported Apple/Android history-transfer path. Manual
+    /// Apple export wraps this exact ZIP in its authenticated envelope after compression.
     private static let backupEntryName = "noop-backup.sqlite"
 
     private enum BackupArchiveError: LocalizedError {
         case entryTooLarge(String)
+        case tooManyEntries
+        case duplicateEntry(String)
 
         var errorDescription: String? {
             switch self {
             case .entryTooLarge(let name):
                 return "\(name) is too large to restore safely."
+            case .tooManyEntries:
+                return "The backup archive contains too many entries."
+            case .duplicateEntry(let name):
+                return "The backup archive contains more than one \(name) entry."
             }
         }
     }
@@ -1166,7 +1226,13 @@ enum DataBackup {
     /// before it lands on disk.
     private static func extractBackupZip(at zipURL: URL, into destDir: URL) throws {
         let archive = try Archive(url: zipURL, accessMode: .read)
+        var entryCount = 0
+        var seenCanonicalEntries: Set<String> = []
         for entry in archive where entry.type == .file {
+            entryCount += 1
+            guard entryCount <= maxBackupArchiveEntries else {
+                throw BackupArchiveError.tooManyEntries
+            }
             let name = (entry.path as NSString).lastPathComponent
             let limit: Int64
             switch name {
@@ -1174,11 +1240,15 @@ enum DataBackup {
                 limit = maxBackupSQLiteBytes
             case BackupSettings.entryName:
                 limit = maxBackupSettingsBytes
+            case BackupManifest.entryName:
+                limit = maxBackupManifestBytes
             default:
                 continue
             }
+            guard seenCanonicalEntries.insert(name).inserted else {
+                throw BackupArchiveError.duplicateEntry(name)
+            }
             let out = destDir.appendingPathComponent(name)
-            if FileManager.default.fileExists(atPath: out.path) { try FileManager.default.removeItem(at: out) }
             FileManager.default.createFile(atPath: out.path, contents: nil)
             let handle = try FileHandle(forWritingTo: out)
             defer { try? handle.close() }

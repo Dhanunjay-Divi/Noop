@@ -19,24 +19,82 @@ final class BackupSettingsTests: XCTestCase {
             "profile.waistCm": 71.0,
             "profile.hrMax": 191,
             "units.system": "imperial",
+            "units.mass": "lb",
+            "units.height": "ft_in",
             "units.temperature": "celsius",
             "effort.scale": "whoop",
+            "hrv.window": "deep",
+            "theme.appearance": "black",
+            "chart.style": "classic",
+            "trend.chart.style": "bar",
+            "noop.showDayCycleBackground": false,
+            "noop.skyBehindCards": true,
+            "noop.cardOpacityPercent": 86,
+            "workoutKeepScreenOn": true,
+            "today.sectionOrder": "summary,sleep,health",
+            "today.keyMetrics": "charge,hrv,restingHr",
+            "today.keyMetricsDetailed": true,
+            "today.keyMetricsWindowDays": 7,
+            "noop.hydrationTracking": true,
+            "windDown.enabled": true,
+            "windDown.sleepNeedMinutes": 510,
+            "windDown.goalMode": "extraOpportunity",
+            "windDown.leadMinutes": 45,
+            "sleepPlanner.wakeMinutes": 390,
+            "notif.masterEnabled": true,
+            "notif.onlyWhenWorn": true,
+            "notif.quietHoursEnabled": true,
+            "notif.quietStartMinutes": 1_320,
+            "notif.quietEndMinutes": 420,
+            "inactivity.enabled": true,
+            "inactivity.thresholdMinutes": 45,
+            "inactivity.reNudgeMinutes": 30,
+            "inactivity.buzzLoops": 2,
+            "inactivity.activeHoursEnabled": true,
+            "inactivity.activeStartMinutes": 540,
+            "inactivity.activeEndMinutes": 1_020,
+            "hydrationReminders.enabled": true,
+            "hydrationReminders.intervalMinutes": 120,
+            "hydrationReminders.activeStartMinutes": 480,
+            "hydrationReminders.activeEndMinutes": 1_260,
+            "hydrationReminders.strapBuzzEnabled": false,
         ]
+        XCTAssertEqual(
+            Set(values.keys).union([BackupSettings.schemaVersionKey]),
+            Set(BackupSettings.whitelist.keys),
+            "This fixture must cover every settings-schema field"
+        )
         let data = try XCTUnwrap(BackupSettings.encode(values))
         let back = BackupSettings.decode(data)
 
         XCTAssertEqual(back["profile.age"] as? Int, 34)
         XCTAssertEqual(back["profile.dateOfBirth"] as? String, "1992-11-03")
-        XCTAssertEqual(back[BackupSettings.schemaVersionKey] as? Int, 2)
+        XCTAssertEqual(back[BackupSettings.schemaVersionKey] as? Int, 3)
         XCTAssertEqual(back["profile.sex"] as? String, "female")
         XCTAssertEqual(back["profile.weightKg"] as? Double, 62.5)
         XCTAssertEqual(back["profile.heightCm"] as? Double, 168.0)
         XCTAssertEqual(back["profile.waistCm"] as? Double, 71.0)
         XCTAssertEqual(back["profile.hrMax"] as? Int, 191)
         XCTAssertEqual(back["units.system"] as? String, "imperial")
+        XCTAssertEqual(back["units.mass"] as? String, "lb")
+        XCTAssertEqual(back["units.height"] as? String, "ft_in")
         XCTAssertEqual(back["units.temperature"] as? String, "celsius")
         XCTAssertEqual(back["effort.scale"] as? String, "whoop")
-        XCTAssertEqual(back.count, values.count + 1, "Only the v2 schema stamp should be added")
+        XCTAssertEqual(back["hrv.window"] as? String, "deep")
+        XCTAssertEqual(back["noop.showDayCycleBackground"] as? Bool, false)
+        XCTAssertEqual(back["today.keyMetricsDetailed"] as? Bool, true)
+        XCTAssertEqual(back["windDown.goalMode"] as? String, "extraOpportunity")
+        XCTAssertEqual(back["sleepPlanner.wakeMinutes"] as? Int, 390)
+        XCTAssertEqual(back["hydrationReminders.intervalMinutes"] as? Int, 120)
+        XCTAssertEqual(back.count, values.count + 1, "Only the v3 schema stamp should be added")
+    }
+
+    func testEveryPayloadFieldHasAnAppleDefaultsMapping() {
+        XCTAssertEqual(
+            Set(BackupSettings.appleDefaultsKey.keys),
+            Set(BackupSettings.whitelist.keys).subtracting([BackupSettings.schemaVersionKey]),
+            "A schema field must never be encodable without a restore destination"
+        )
     }
 
     func testEncodeIsDeterministic() throws {
@@ -74,11 +132,12 @@ final class BackupSettingsTests: XCTestCase {
 
     func testWrongTypedValuesAreDroppedNotCoerced() {
         // Strings where numbers belong, numbers where strings belong, booleans posing as ints.
-        let crafted = Data(#"{"profile.age": true, "profile.sex": 5, "profile.weightKg": "heavy", "profile.hrMax": 185}"#.utf8)
+        let crafted = Data(#"{"profile.age": true, "profile.sex": 5, "profile.weightKg": "heavy", "profile.hrMax": 185, "today.keyMetricsDetailed": 1}"#.utf8)
         let back = BackupSettings.decode(crafted)
         XCTAssertNil(back["profile.age"], "JSON true must never become age 1")
         XCTAssertNil(back["profile.sex"])
         XCTAssertNil(back["profile.weightKg"])
+        XCTAssertNil(back["today.keyMetricsDetailed"], "JSON 1 must never become true")
         XCTAssertEqual(back["profile.hrMax"] as? Int, 185, "Valid siblings still decode")
     }
 
@@ -86,6 +145,25 @@ final class BackupSettingsTests: XCTestCase {
         // Android writes JSON numbers; 34.0 for an int-kind key must land as Int 34.
         let crafted = Data(#"{"profile.age": 34.0}"#.utf8)
         XCTAssertEqual(BackupSettings.decode(crafted)["profile.age"] as? Int, 34)
+    }
+
+    func testFractionalIntegersAndOutOfRangeOrInvalidValuesAreDropped() {
+        let crafted = Data(
+            #"{"profile.age":34.5,"profile.weightKg":900,"profile.hrMax":231,"profile.sex":"unknown","units.mass":"pounds","hrv.window":"last-hour","today.sectionOrder":"sleep,<script>","today.keyMetricsWindowDays":30,"windDown.sleepNeedMinutes":100,"sleepPlanner.wakeMinutes":1440,"inactivity.buzzLoops":9,"hydrationReminders.intervalMinutes":30}"#.utf8
+        )
+        let back = BackupSettings.decode(crafted)
+        XCTAssertNil(back["profile.age"], "Fractional numbers must not be truncated into integer fields")
+        XCTAssertNil(back["profile.weightKg"])
+        XCTAssertNil(back["profile.hrMax"])
+        XCTAssertNil(back["profile.sex"])
+        XCTAssertNil(back["units.mass"])
+        XCTAssertNil(back["hrv.window"])
+        XCTAssertNil(back["today.sectionOrder"])
+        XCTAssertNil(back["today.keyMetricsWindowDays"])
+        XCTAssertNil(back["windDown.sleepNeedMinutes"])
+        XCTAssertNil(back["sleepPlanner.wakeMinutes"])
+        XCTAssertNil(back["inactivity.buzzLoops"])
+        XCTAssertNil(back["hydrationReminders.intervalMinutes"])
     }
 
     // MARK: - Degradation
@@ -117,7 +195,7 @@ final class BackupSettingsTests: XCTestCase {
         let snap = BackupSettings.snapshot(from: defaults)
         XCTAssertEqual(snap["profile.age"] as? Int, 29)
         XCTAssertEqual(snap["profile.dateOfBirth"] as? String, "1997-04-09")
-        XCTAssertEqual(snap[BackupSettings.schemaVersionKey] as? Int, 2)
+        XCTAssertEqual(snap[BackupSettings.schemaVersionKey] as? Int, 3)
         XCTAssertEqual(snap["profile.weightKg"] as? Double, 82.5)
         XCTAssertEqual(snap["profile.hrMax"] as? Int, 198, "hrMaxOverride surfaces under the canonical key")
         XCTAssertEqual(snap["units.system"] as? String, "imperial")
@@ -143,6 +221,37 @@ final class BackupSettingsTests: XCTestCase {
                        "Keys absent from the payload keep the target's value")
         XCTAssertNil(defaults.object(forKey: "profile.hrMax"),
                      "The canonical name itself is never written to defaults")
+    }
+
+    func testSnapshotAndApplyDurablePreferencesIncludingWakeMapping() throws {
+        let source = try freshDefaults()
+        source.set("deep", forKey: "hrv.window")
+        source.set("black", forKey: "theme.appearance")
+        source.set(false, forKey: "noop.showDayCycleBackground")
+        source.set("charge,hrv,restingHr", forKey: "today.keyMetrics")
+        source.set(true, forKey: "windDown.enabled")
+        source.set(6 * 60 + 45, forKey: "windDown.wakeMinutes")
+        source.set(120, forKey: "hydrationReminders.intervalMinutes")
+
+        let snapshot = BackupSettings.snapshot(from: source)
+        XCTAssertEqual(snapshot["hrv.window"] as? String, "deep")
+        XCTAssertEqual(snapshot["theme.appearance"] as? String, "black")
+        XCTAssertEqual(snapshot["noop.showDayCycleBackground"] as? Bool, false)
+        XCTAssertEqual(snapshot["sleepPlanner.wakeMinutes"] as? Int, 405)
+        XCTAssertNil(snapshot["windDown.wakeMinutes"],
+                     "The platform storage name must not leak into the portable payload")
+
+        let target = try freshDefaults()
+        BackupSettings.apply(BackupSettings.decode(try XCTUnwrap(BackupSettings.encode(snapshot))),
+                             to: target)
+
+        XCTAssertEqual(target.string(forKey: "hrv.window"), "deep")
+        XCTAssertEqual(target.string(forKey: "theme.appearance"), "black")
+        XCTAssertEqual(target.object(forKey: "noop.showDayCycleBackground") as? Bool, false)
+        XCTAssertEqual(target.string(forKey: "today.keyMetrics"), "charge,hrv,restingHr")
+        XCTAssertEqual(target.object(forKey: "windDown.enabled") as? Bool, true)
+        XCTAssertEqual(target.object(forKey: "windDown.wakeMinutes") as? Int, 405)
+        XCTAssertEqual(target.object(forKey: "hydrationReminders.intervalMinutes") as? Int, 120)
     }
 
     /// #146: applying a restored age must clear a pre-existing `profile.dateOfBirth`, so the target's

@@ -646,6 +646,78 @@ class WhoopRepository private constructor(
         dao.sessionSleepStateJson(deviceId, sessionStart)?.let { decodeIntArray(it) }
 
     suspend fun upsertMetricSeries(rows: List<MetricSeriesRow>) = dao.upsertMetricSeries(rows)
+    suspend fun upsertNutritionEntries(rows: List<NutritionEntryRow>) = dao.upsertNutritionEntries(rows)
+    suspend fun deleteNutritionEntry(id: String): Boolean = dao.deleteNutritionEntry(id)
+    suspend fun nutritionEntries(
+        from: String,
+        to: String,
+        deviceId: String = NutritionLogContract.DEVICE_ID,
+    ): List<NutritionEntryRow> = dao.nutritionEntries(deviceId, from, to)
+    suspend fun nutritionTotals(
+        day: String,
+        deviceId: String = NutritionLogContract.DEVICE_ID,
+    ): NutritionDailyTotals = dao.nutritionTotals(deviceId, day)
+    suspend fun recentManualNutritionEntries(
+        throughDay: String,
+        limit: Int = 4,
+        deviceId: String = NutritionLogContract.DEVICE_ID,
+    ): List<NutritionEntryRow> = dao.recentManualNutritionEntries(deviceId, throughDay, limit)
+
+    suspend fun upsertNutritionCatalogItems(rows: List<NutritionCatalogItemRow>) =
+        dao.upsertNutritionCatalogItems(rows)
+
+    suspend fun nutritionCatalogItems(
+        savedOnly: Boolean = true,
+        limit: Int = 250,
+    ): List<NutritionCatalogItemRow> = dao.nutritionCatalogItems(savedOnly, limit)
+
+    suspend fun nutritionCatalogItem(id: String): NutritionCatalogItemRow? =
+        dao.nutritionCatalogItem(id)
+
+    suspend fun nutritionCatalogItemForBarcode(barcode: String): NutritionCatalogItemRow? =
+        dao.nutritionCatalogItemForBarcode(barcode)
+
+    /** Cache first; the network is reached only after an explicit UI lookup misses locally. */
+    suspend fun lookupNutritionBarcode(barcode: String): NutritionCatalogItemRow {
+        dao.nutritionCatalogItemForBarcode(barcode)?.let { return it }
+        return OpenFoodFactsClient.product(barcode).also {
+            dao.upsertNutritionCatalogItems(listOf(it))
+        }
+    }
+
+    suspend fun markNutritionCatalogItemUsed(id: String, timestamp: Long): Boolean =
+        dao.markNutritionCatalogItemUsed(id, timestamp)
+
+    suspend fun deleteNutritionCatalogItem(id: String): Boolean =
+        dao.deleteNutritionCatalogItem(id)
+
+    /** Convert legacy importer scalar rows into one deterministic editable summary row per day. */
+    suspend fun upsertImportedNutritionDays(
+        points: List<MetricSeriesRow>,
+        updatedAt: Long = System.currentTimeMillis() / 1_000L,
+    ) {
+        val grouped = points
+            .filter { it.key in NutritionLogContract.NUTRIENT_KEYS }
+            .groupBy { it.day }
+        val rows = grouped.keys.sorted().mapNotNull { day ->
+            val occurredAt = NutritionLogContract.importedOccurredAt(day) ?: return@mapNotNull null
+            val values = grouped.getValue(day).associate { it.key to it.value }
+            NutritionEntryRow(
+                id = NutritionLogContract.csvEntryId(day),
+                origin = NutritionLogContract.CSV_ORIGIN,
+                day = day,
+                occurredAt = occurredAt,
+                mealType = "daily_total",
+                caloriesKcal = values[NutritionLogContract.CALORIES_KEY],
+                proteinG = values[NutritionLogContract.PROTEIN_KEY],
+                carbsG = values[NutritionLogContract.CARBS_KEY],
+                fatG = values[NutritionLogContract.FAT_KEY],
+                createdAt = occurredAt,
+                updatedAt = maxOf(updatedAt, occurredAt),
+            )
+        }
+        dao.upsertNutritionEntries(rows)
+    }
     suspend fun upsertJournal(rows: List<JournalEntry>) = dao.upsertJournal(rows)
     suspend fun upsertWorkouts(rows: List<WorkoutRow>) = dao.upsertWorkouts(rows)
     suspend fun upsertAppleDaily(rows: List<AppleDaily>) = dao.upsertAppleDaily(rows)
@@ -655,6 +727,37 @@ class WhoopRepository private constructor(
     suspend fun upsertLiveSession(row: LiveSessionRow) = dao.upsertLiveSession(row)
     suspend fun recentLiveSessions(deviceId: String, limit: Int): List<LiveSessionRow> =
         dao.recentLiveSessions(deviceId, limit)
+
+    // MARK: - Durable Coach
+
+    suspend fun appendCoachMessage(row: CoachMessageRow, limit: Int = COACH_MESSAGE_LIMIT) {
+        require(row.id.isNotBlank() && row.id.length <= 128)
+        require(row.createdAt > 0)
+        require(row.role in COACH_ROLES)
+        require(row.text.isNotBlank() && row.text.length <= COACH_MESSAGE_MAX_CHARS)
+        dao.appendCoachMessage(row.copy(text = row.text.trim()), limit.coerceIn(1, COACH_MESSAGE_LIMIT))
+    }
+
+    suspend fun coachMessages(limit: Int = COACH_MESSAGE_LIMIT): List<CoachMessageRow> =
+        dao.coachMessages(limit.coerceIn(1, COACH_MESSAGE_LIMIT))
+
+    suspend fun clearCoachMessages(): Int = dao.clearCoachMessages()
+
+    suspend fun upsertCoachMemory(row: CoachMemoryRow) {
+        val clean = row.copy(text = row.text.trim())
+        require(clean.id.isNotBlank() && clean.id.length <= 128)
+        require(clean.text.isNotEmpty() && clean.text.length <= COACH_MEMORY_MAX_CHARS)
+        require(clean.createdAt > 0 && clean.updatedAt >= clean.createdAt)
+        if (dao.coachMemoryCount(clean.id) == 0) {
+            require(dao.coachMemoryCount() < COACH_MEMORY_LIMIT) { "Coach memory limit reached." }
+        }
+        dao.upsertCoachMemory(clean)
+    }
+
+    suspend fun coachMemories(includeDisabled: Boolean = true): List<CoachMemoryRow> =
+        dao.coachMemories(includeDisabled)
+
+    suspend fun deleteCoachMemory(id: String): Boolean = dao.deleteCoachMemory(id) > 0
 
     // MARK: - Lab Book markers (Swift labMarker, v17). Writing also projects the daily series into
     // metricSeries under WhoopDao.LAB_BOOK_SOURCE_ID, so Compare/Explore/Coach see markers unchanged.
@@ -970,6 +1073,125 @@ class WhoopRepository private constructor(
     suspend fun deleteWorkout(row: WorkoutRow) {
         if (row.source.lowercase().endsWith("-noop")) { dismissDetected(row); return }
         dao.deleteWorkoutByKey(row.deviceId, row.startTs, row.sport)
+    }
+
+    // MARK: - Strength training
+
+    suspend fun upsertStrengthExercises(rows: List<StrengthExerciseRow>) =
+        dao.upsertStrengthExercisesRaw(rows.map(StrengthTrainingContract::validated))
+
+    suspend fun strengthExercises(includeArchived: Boolean = false): List<StrengthExerciseRow> =
+        dao.strengthExercises(includeArchived)
+
+    suspend fun saveStrengthRoutine(
+        routine: StrengthRoutineRow,
+        exercises: List<StrengthRoutineExerciseRow>,
+    ): StrengthRoutineSnapshot = dao.saveStrengthRoutine(routine, exercises)
+
+    suspend fun strengthRoutines(includeArchived: Boolean = false): List<StrengthRoutineSnapshot> =
+        dao.strengthRoutines(includeArchived)
+
+    suspend fun saveStrengthSession(
+        session: StrengthSessionRow,
+        sets: List<StrengthSetRow>,
+    ): StrengthSessionSnapshot = dao.saveStrengthSession(session, sets)
+
+    suspend fun strengthSessions(
+        from: Long = 0,
+        to: Long = Long.MAX_VALUE,
+        includeInProgress: Boolean = true,
+    ): List<StrengthSessionSnapshot> = dao.strengthSessions(from, to, includeInProgress)
+
+    suspend fun deleteStrengthSession(id: String): Boolean = dao.deleteStrengthSession(id)
+
+    suspend fun strengthSummary(from: Long, to: Long): StrengthSummary =
+        dao.strengthSummary(from, to)
+
+    suspend fun strengthExerciseProgress(exerciseId: String): StrengthExerciseProgress =
+        dao.strengthExerciseProgress(exerciseId)
+
+    /**
+     * Merge the validated open-export graph in one production Room transaction. Stable IDs make the
+     * operation idempotent; an incoming editable row must be strictly newer than the local row, and
+     * built-in exercise definitions can never overwrite either a local built-in or a colliding custom
+     * exercise. Routine/session children are replaced only when their parent wins the timestamp merge.
+     */
+    suspend fun importPortableUserData(
+        payload: PortableUserData,
+    ): PortableUserDataImportSummary {
+        val clean = PortableUserDataCodec.validated(payload)
+        var result: PortableUserDataImportSummary? = null
+        identityTransactor {
+            var nutritionImported = 0
+            var nutritionCatalogImported = 0
+            var exercisesImported = 0
+            var routinesImported = 0
+            var routineExercisesImported = 0
+            var sessionsImported = 0
+            var setsImported = 0
+
+            val nutritionToImport = clean.nutritionEntries.filter { incoming ->
+                val existing = dao.nutritionEntry(incoming.id)
+                existing == null || incoming.updatedAt > existing.updatedAt
+            }
+            if (nutritionToImport.isNotEmpty()) {
+                dao.upsertNutritionEntries(nutritionToImport)
+                nutritionImported = nutritionToImport.size
+            }
+
+            val nutritionCatalogToImport = clean.nutritionCatalogItems.filter { incoming ->
+                val existing = dao.nutritionCatalogItem(incoming.id)
+                existing == null || incoming.updatedAt > existing.updatedAt
+            }
+            if (nutritionCatalogToImport.isNotEmpty()) {
+                dao.upsertNutritionCatalogItems(nutritionCatalogToImport)
+                nutritionCatalogImported = nutritionCatalogToImport.size
+            }
+
+            val exercisesToImport = clean.strengthExercises.map { it.toRow() }.filter { incoming ->
+                val existing = dao.strengthExercise(incoming.id)
+                when {
+                    existing == null -> true
+                    !existing.isCustom || !incoming.isCustom -> false
+                    else -> incoming.updatedAt > existing.updatedAt
+                }
+            }
+            if (exercisesToImport.isNotEmpty()) {
+                dao.upsertStrengthExercisesRaw(exercisesToImport)
+                exercisesImported = exercisesToImport.size
+            }
+
+            val prescriptions = clean.strengthRoutineExercises.groupBy { it.routineId }
+            for (routine in clean.strengthRoutines) {
+                val existing = dao.strengthRoutineRow(routine.id)
+                if (existing != null && routine.updatedAt <= existing.updatedAt) continue
+                val children = prescriptions[routine.id].orEmpty()
+                dao.saveStrengthRoutine(routine, children)
+                routinesImported += 1
+                routineExercisesImported += children.size
+            }
+
+            val sets = clean.strengthSets.groupBy { it.sessionId }
+            for (session in clean.strengthSessions) {
+                val existing = dao.strengthSessionRow(session.id)
+                if (existing != null && session.updatedAt <= existing.updatedAt) continue
+                val children = sets[session.id].orEmpty()
+                dao.saveStrengthSession(session, children)
+                sessionsImported += 1
+                setsImported += children.size
+            }
+
+            result = PortableUserDataImportSummary(
+                nutritionEntries = nutritionImported,
+                nutritionCatalogItems = nutritionCatalogImported,
+                strengthExercises = exercisesImported,
+                strengthRoutines = routinesImported,
+                strengthRoutineExercises = routineExercisesImported,
+                strengthSessions = sessionsImported,
+                strengthSets = setsImported,
+            )
+        }
+        return checkNotNull(result)
     }
 
     /**
@@ -1697,6 +1919,12 @@ class WhoopRepository private constructor(
         /** Default row cap on range reads. Matches the Swift call sites' bounded scans. */
         const val DEFAULT_LIMIT = 100_000
 
+        const val COACH_MESSAGE_LIMIT = 40
+        const val COACH_MESSAGE_MAX_CHARS = 16_000
+        const val COACH_MEMORY_LIMIT = 50
+        const val COACH_MEMORY_MAX_CHARS = 500
+        val COACH_ROLES: Set<String> = setOf("user", "assistant")
+
         /** #423: rolling retention for the raw-IMU capture table (1 row/strap-second, ~1.2 KB each). One
          *  hour ≈ 3600 rows ≈ 4 MB caps the table hard, so an enabled capture can never balloon the DB
          *  during a multi-day offload replay. Instrument-first bounded window; nothing consumes it yet. */
@@ -1817,7 +2045,8 @@ class WhoopRepository private constructor(
          *    vitals with a declared 1:1 mapping);
          *  • Apple-preferred → [Apple] (+ computed strap ONLY for steps/active_kcal, which the strap
          *    estimates and Apple may not carry);
-         *  • any other source → itself only (nutrition/mood are single-source by design).
+         *  • nutrition-log → editable combined log, then legacy nutrition-csv as a migration fallback;
+         *  • any other source → itself only.
          */
         internal fun sourceCandidates(
             key: String,
@@ -1863,6 +2092,12 @@ class WhoopRepository private constructor(
                     candidates.add(MetricSourceCandidate(computedSource, key))
                 }
                 return uniqued(candidates)
+            }
+            if (preferredSource == NutritionLogContract.DEVICE_ID) {
+                return listOf(
+                    MetricSourceCandidate(NutritionLogContract.DEVICE_ID, key),
+                    MetricSourceCandidate(NutritionLogContract.CSV_ORIGIN, key),
+                )
             }
             return listOf(MetricSourceCandidate(preferredSource, key))
         }

@@ -12,12 +12,16 @@ import androidx.core.app.NotificationCompat
 import com.noop.R
 import com.noop.ui.appLaunchIntent
 import java.util.Calendar
+import java.util.TimeZone
 
 /**
  * The wind-down nudge (#207) — a gentle, NON-safety-critical evening local notification.
  *
- * Deliberately INEXACT: a missed wind-down nudge costs nothing, so we use a daily repeating inexact
- * alarm (no exact-alarm permission needed) rather than the privileged primitive the wake alarm uses.
+ * Deliberately INEXACT: a missed wind-down nudge costs nothing, so we use a one-shot inexact alarm
+ * (no exact-alarm permission needed) rather than the privileged primitive the wake alarm uses.
+ * The receiver computes the next local wall-clock occurrence after every fire. A repeating
+ * INTERVAL_DAY alarm is incorrect here because it drifts by an hour when daylight-saving time
+ * changes.
  * The nudge minute is derived from the user's earliest wake time via [WindDownStore.nudgeMinuteOfDay].
  *
  * The fired notification is low-key (default importance, no full-screen, no DND bypass) — it's a
@@ -40,12 +44,12 @@ object WindDownScheduler {
         val pi = nudgePendingIntent(context)
         am.cancel(pi)
         val minuteOfDay = store.nudgeMinuteOfDay(wakeMinutes)
-        val first = nextOccurrence(minuteOfDay)
-        // Inexact, repeating, NOT wakeup — a wind-down reminder doesn't need to punch through Doze.
-        am.setInexactRepeating(
+        val next = nextOccurrenceEpochMillis(minuteOfDay)
+        // Inexact, one-shot, NOT wakeup — a wind-down reminder doesn't need to punch through Doze.
+        // WindDownReceiver schedules the following local occurrence after this one fires.
+        am.set(
             AlarmManager.RTC,
-            first.timeInMillis,
-            AlarmManager.INTERVAL_DAY,
+            next,
             pi,
         )
     }
@@ -65,8 +69,8 @@ object WindDownScheduler {
             )
             val n = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_heart)
-                .setContentTitle("Time to wind down")
-                .setContentText("A calm hour now helps you hit your wake time well-rested.")
+                .setContentTitle(context.getString(R.string.wind_down_notification_title))
+                .setContentText(context.getString(R.string.wind_down_notification_body))
                 .setContentIntent(open)
                 .setCategory(NotificationCompat.CATEGORY_REMINDER)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -92,30 +96,52 @@ object WindDownScheduler {
             val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (mgr.getNotificationChannel(CHANNEL_ID) != null) return
             mgr.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Wind-down nudge", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                    description = "An optional evening reminder to start winding down before bed."
+                NotificationChannel(
+                    CHANNEL_ID,
+                    context.getString(R.string.wind_down_channel_name),
+                    NotificationManager.IMPORTANCE_DEFAULT,
+                ).apply {
+                    description = context.getString(R.string.wind_down_channel_description)
                     setShowBadge(false)
                 },
             )
         }
     }
 
-    private fun nextOccurrence(minuteOfDay: Int): Calendar =
-        Calendar.getInstance().apply {
+    /**
+     * Next strictly-future local wall-clock occurrence. Clock and zone are injectable so DST and
+     * travel behavior remain covered by plain JVM tests.
+     */
+    internal fun nextOccurrenceEpochMillis(
+        minuteOfDay: Int,
+        nowMs: Long = System.currentTimeMillis(),
+        timeZone: TimeZone = TimeZone.getDefault(),
+    ): Long =
+        Calendar.getInstance(timeZone).apply {
+            timeInMillis = nowMs
             set(Calendar.HOUR_OF_DAY, minuteOfDay / 60)
             set(Calendar.MINUTE, minuteOfDay % 60)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
-            if (timeInMillis <= System.currentTimeMillis()) add(Calendar.DAY_OF_YEAR, 1)
-        }
+            if (timeInMillis <= nowMs) add(Calendar.DAY_OF_YEAR, 1)
+        }.timeInMillis
 }
 
-/** Receives the daily wind-down nudge alarm and raises the reminder notification. Inexact repeating
- *  alarms survive reboot on most OEMs, but we also re-schedule from [SmartAlarmBootReceiver] to be
- *  safe. Not exported. */
+/** Receives a one-shot wind-down nudge, raises the reminder, and schedules the next local occurrence.
+ *  [SmartAlarmBootReceiver] also re-arms it after reboot and wall-clock/timezone changes. */
 class WindDownReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent?.action != WindDownScheduler.ACTION_NUDGE) return
         WindDownScheduler.fireNotification(context)
+        runCatching {
+            val wind = WindDownStore.from(context)
+            if (wind.enabled) {
+                WindDownScheduler.schedule(
+                    context,
+                    wind,
+                    SmartAlarmStore.from(context).targetMinutes,
+                )
+            }
+        }
     }
 }

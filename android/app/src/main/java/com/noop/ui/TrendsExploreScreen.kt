@@ -47,9 +47,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.R
 import com.noop.data.DailyMetric
 import com.noop.data.MoodStore
+import com.noop.data.NutritionLogContract
 import com.noop.data.WhoopRepository
 import com.noop.ingest.HealthConnectImporter
-import com.noop.ingest.NutritionCsvImporter
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -113,7 +113,7 @@ private data class MetricSpec(
     val dailyPick: ((DailyMetric) -> Double?)? = null,
     val seriesKey: String? = null,
     /** Source (deviceId) the [seriesKey] lives under when it is NOT the strap's own , e.g. the
-     *  nutrition-csv import or the noop-mood check-in write under dedicated source ids (v2.2.0
+     *  nutrition-log or noop-mood write under dedicated source ids (v2.2.0
      *  parity with the macOS MetricCatalog, whose descriptors carry key+source). */
     val seriesSource: String? = null,
     /** A short localized one-liner (the Explore header subtitle / catalog blurb). Only the
@@ -286,7 +286,7 @@ fun TrendsExploreScreen(vm: AppViewModel) {
 
     // Extra long-format keys from the metricSeries table (anything beyond the built-ins) , from the
     // strap source AND the dedicated import/check-in sources, which write under their OWN deviceIds
-    // (nutrition-csv, noop-mood) and were invisible to a strap-only key scan (v2.2.0 parity).
+    // (nutrition-log, noop-mood) and were invisible to a strap-only key scan (v2.2.0 parity).
     var extraKeys by remember { mutableStateOf<List<Pair<String, String?>>>(emptyList()) }
     LaunchedEffect(deviceId) {
         // Scan the strap's series keys across the active-id ∪ canonical "my-whoop" union (SPINE / #814), so a
@@ -297,7 +297,7 @@ fun TrendsExploreScreen(vm: AppViewModel) {
             .distinct()
             .map { it to null as String? }
         val sourced = listOf(
-            NutritionCsvImporter.SOURCE_ID,
+            NutritionLogContract.DEVICE_ID,
             MoodStore.MOOD_DEVICE_ID,
             HealthConnectImporter.DEVICE_ID,
         ).flatMap { src ->
@@ -358,7 +358,7 @@ fun TrendsExploreScreen(vm: AppViewModel) {
             }
             seriesKeyLoaded = selected.key
         } else if (selected.seriesKey != null) {
-            // Series-backed metrics live under their own source id when imported/checked-in (nutrition-csv,
+            // Series-backed metrics live under their own source id when imported/checked-in (nutrition-log,
             // noop-mood): read from that source. A STRAP series (seriesSource == null) is read across the
             // active-id ∪ canonical "my-whoop" union (SPINE / #814), deduped per day with the active id
             // winning, so a re-added strap still shows the canonically-stored series; a single-WHOOP install

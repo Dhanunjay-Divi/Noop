@@ -137,6 +137,7 @@ fun WorkoutsScreen(vm: AppViewModel) {
     val recentDays by vm.recentDays.collectAsStateWithLifecycle()
     var loaded by remember { mutableStateOf(false) }
     var range by remember { mutableStateOf(WorkoutRange.All) }
+    var showStrengthTrainer by remember { mutableStateOf(false) }
     // Pick the default range ONCE on first non-empty load; later mutations must not fight a range the
     // user chose. Mirrors macOS, which sets the default only in `.task` / first onAppear.
     var didPickDefaultRange by remember { mutableStateOf(false) }
@@ -248,6 +249,14 @@ fun WorkoutsScreen(vm: AppViewModel) {
         item {
         WorkoutStartSection(vm)
         }
+        item {
+            NoopButton(
+                text = stringResource(R.string.strength_title),
+                leadingIcon = Icons.Filled.FitnessCenter,
+                kind = NoopButtonKind.Secondary,
+                fullWidth = true,
+            ) { showStrengthTrainer = true }
+        }
 
         if (allRows.isEmpty()) {
             item {
@@ -352,6 +361,10 @@ fun WorkoutsScreen(vm: AppViewModel) {
             },
         )
     }
+
+    if (showStrengthTrainer) {
+        StrengthTrainerSheet(vm = vm, onDismiss = { showStrengthTrainer = false })
+    }
 }
 
 /** Drives the manual add/edit dialog. [editing] null = add a new workout, non-null = edit it. */
@@ -366,13 +379,20 @@ private data class WorkoutRecoveryTrendPoint(
 
 @Composable
 private fun EmptyWorkouts(loaded: Boolean, onAdd: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        DataPendingNote(
+    if (loaded) {
+        ScreenStateCard(
+            kind = ScreenStateKind.Empty,
             title = uiString(R.string.l10n_workouts_screen_no_workouts_yet_85a92042),
-            body = "No workouts yet. They come from your WHOOP and Apple Health history. " +
-                "Import in Data Sources to bring them in, or add one you tracked elsewhere.",
+            body = uiString(R.string.state_workouts_empty_body),
+            actionLabel = uiString(R.string.l10n_workouts_screen_add_workout_a196a2cc),
+            onAction = onAdd,
         )
-        if (loaded) AddWorkoutButton(onAdd)
+    } else {
+        ScreenStateCard(
+            kind = ScreenStateKind.Loading,
+            title = uiString(R.string.state_workouts_loading_title),
+            body = uiString(R.string.state_workouts_loading_body),
+        )
     }
 }
 

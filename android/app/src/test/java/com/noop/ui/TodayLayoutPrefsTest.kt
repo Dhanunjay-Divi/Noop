@@ -23,11 +23,12 @@ class TodayLayoutPrefsTest {
         val reordered = listOf(
             TodaySection.HEART_RATE, TodaySection.HERO, TodaySection.YOUR_CARDS,
             TodaySection.LIVE_SESSION, TodaySection.SYNTHESIS, TodaySection.KEY_METRICS,
-            TodaySection.WORKOUTS, TodaySection.RECOVERY_VITALS, TodaySection.JOURNAL,
+            TodaySection.WORKOUTS, TodaySection.RECOVERY_VITALS, TodaySection.WHY,
+            TodaySection.TARGET, TodaySection.WATCH, TodaySection.JOURNAL,
         )
         val encoded = TodayLayoutPrefs.encode(reordered)
         assertEquals(
-            "heartRate,hero,yourCards,liveSession,synthesis,keyMetrics,workouts,recoveryVitals,journal",
+            "heartRate,hero,yourCards,liveSession,synthesis,keyMetrics,workouts,recoveryVitals,why,target,watch,journal",
             encoded,
         )
         assertEquals(reordered, TodayLayoutPrefs.decodeOrder(encoded))
@@ -42,9 +43,10 @@ class TodayLayoutPrefsTest {
         assertEquals(
             listOf(
                 TodaySection.HERO, TodaySection.LIVE_SESSION,
+                TodaySection.WHY, TodaySection.TARGET, TodaySection.WATCH,
                 TodaySection.SYNTHESIS, TodaySection.KEY_METRICS, TodaySection.WORKOUTS,
                 TodaySection.HEART_RATE, TodaySection.RECOVERY_VITALS, TodaySection.YOUR_CARDS,
-                // journal(8) follows everything saved → appended:
+                // journal follows everything saved -> appended:
                 TodaySection.JOURNAL,
             ),
             TodayLayoutPrefs.decodeOrder(firstCut),
@@ -60,12 +62,12 @@ class TodayLayoutPrefsTest {
         assertEquals(TodaySection.entries.size, decoded.size)
         assertEquals(
             listOf(
-                // hero(0), liveSession(1), workouts(4) all precede heartRate(5) in default order, so all
-                // insert before the saved heartRate, in default order among themselves:
-                TodaySection.HERO, TodaySection.LIVE_SESSION, TodaySection.WORKOUTS,
+                // Every missing section before heartRate inserts in default order.
+                TodaySection.HERO, TodaySection.LIVE_SESSION,
+                TodaySection.WHY, TodaySection.TARGET, TodaySection.WATCH, TodaySection.WORKOUTS,
                 TodaySection.HEART_RATE, TodaySection.SYNTHESIS, TodaySection.KEY_METRICS,
                 TodaySection.RECOVERY_VITALS,
-                // yourCards(7) then journal(8) follow everything saved → appended in default order:
+                // yourCards then journal follow everything saved -> appended in default order.
                 TodaySection.YOUR_CARDS, TodaySection.JOURNAL,
             ),
             decoded,
@@ -81,10 +83,11 @@ class TodayLayoutPrefsTest {
             listOf(
                 // Every missing section's default index precedes yourCards(7), so each inserts before it,
                 // accumulating in default order; the saved yourCards→heartRate order is preserved at the end.
-                TodaySection.HERO, TodaySection.LIVE_SESSION, TodaySection.SYNTHESIS,
+                TodaySection.HERO, TodaySection.LIVE_SESSION,
+                TodaySection.WHY, TodaySection.TARGET, TodaySection.WATCH, TodaySection.SYNTHESIS,
                 TodaySection.KEY_METRICS, TodaySection.WORKOUTS, TodaySection.RECOVERY_VITALS,
                 TodaySection.YOUR_CARDS, TodaySection.HEART_RATE,
-                // journal(8) follows everything → appended last:
+                // journal follows everything -> appended last.
                 TodaySection.JOURNAL,
             ),
             decoded,
@@ -111,7 +114,7 @@ class TodayLayoutPrefsTest {
         // Pin the exact wire strings — they cross the .noopbak boundary and must match macOS byte-for-byte.
         assertEquals(
             listOf(
-                "hero", "liveSession", "synthesis", "keyMetrics",
+                "hero", "liveSession", "synthesis", "why", "target", "watch", "keyMetrics",
                 "workouts", "heartRate", "recoveryVitals", "yourCards", "journal",
             ),
             raws,

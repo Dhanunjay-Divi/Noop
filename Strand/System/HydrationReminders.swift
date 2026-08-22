@@ -142,7 +142,10 @@ enum HydrationReminders {
 
     /// Rebuild pending requests after an upgrade without ever prompting for permission on launch.
     static func restoreScheduleIfAuthorized() {
-        guard isEnabled else { return }
+        guard isEnabled else {
+            removeScheduledRequests()
+            return
+        }
         Task { @MainActor in
             let settings = await UNUserNotificationCenter.current().notificationSettings()
             switch settings.authorizationStatus {
