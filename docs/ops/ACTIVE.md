@@ -6,13 +6,22 @@ Last updated: **2026-08-22**
 
 - Repository visibility: private at the time of the last verified push.
 - Active branch: `codex/day4-sync-performance`.
-- Last implementation commit: `241f2000` (`Improve metric truth and Live Activity reliability`).
+- Last implementation commit: `972a126b` (`Prepare first App Store preview release`).
 - Version line inherited from the integration branch: NOOP 9.2.0.
 - Public distribution is not cleared: the distribution legal gate still flags
   inherited WHOOP 4 expression without an explicit software license.
 
 ## Last completed implementation evidence
 
+- App Store preparation now includes a versioned local launch gate, public
+  privacy/support links, channel-correct update and trial behavior, an App
+  Privacy/compliance worksheet, submission/reviewer checklists, opaque
+  provisional iPhone media, and an archive-time fail-closed gate for the
+  ignored verifier configuration.
+- Focused launch/distribution/project/update tests passed 28/28 and the
+  consolidated unsigned iOS Release simulator build passed. These do not prove
+  signing, App Review acceptance, physical BLE/background behavior, or public
+  redistribution rights.
 - Today/detail metric resolution preserves source truth and measured-versus-
   estimated distinctions.
 - Live Activity selection and reconciliation are deterministic, freshness
@@ -25,10 +34,12 @@ Last updated: **2026-08-22**
 
 ## Next priority round
 
-An App Store public-submission round is active. It must first verify the paid
-Apple team and App Store Connect role, add a non-plaintext launch gate, preserve
-the existing app container, and clear every signing, privacy, build, review, and
-distribution legal gate before upload or public release.
+The App Store public-submission round is blocked before upload. The inherited
+redistribution-rights gate must be resolved first. The release owner must then
+generate the ignored verifier interactively, complete App Store Connect and
+export-compliance decisions, provide final reviewer media/access, create and
+inspect a signed archive, and run the physical-device matrix. Passing App Review
+would not itself grant third-party rights.
 
 After that release preflight, the next engineering round must diagnose the
 user-reported physical-iPhone state rather than infer a cause from the

@@ -2,12 +2,13 @@
 
 ## Status
 
-- State: `in progress`
+- State: `blocked before public upload`
 - Owner: project team
 - Branch: `codex/day4-sync-performance`
 - Start commit: `241f2000`
-- End implementation commit: pending
-- Record commit or PR: pending
+- End implementation commit: `972a126b`
+- Record commit or PR: documentation-only follow-up immediately after
+  `972a126b`; no PR opened
 
 ## Objective
 
@@ -163,12 +164,16 @@ part of this round only when every final gate remains green.
 - Changed paths: the round includes local App Store documentation, the
   screenshot validator/tests, and mechanical alpha removal from provisional
   iPhone screenshots in addition to other release work recorded above.
-- Commits: none in this round.
-- Branch and remote state: local branch matches its private remote at the start
-  commit; documentation changes remain local.
+- Commits: implementation and release-preparation commit `972a126b`; this round
+  record is finalized in the documentation-only commit immediately after it.
+- Branch and remote state: the private branch matched its private remote at the
+  start commit. The two round commits are prepared for a private push; no PR or
+  App Store upload is part of this evidence.
 - Repository visibility verified: private in the preceding audit; recheck before
   push.
-- Version/build impact: pending.
+- Version/build impact: iOS remains 9.2.0 (229) and Android remains 9.2.0
+  (303). The iOS Release product filename is now `NOOP.app`; bundle and App
+  Group identities remain unchanged.
 - Release or distribution impact: no upload or release yet.
 - Website deployment: Sites version 8 is live at the existing production URL;
   the App Store binary is not uploaded.
@@ -180,7 +185,7 @@ part of this round only when every final gate remains green.
   removes it.
 - A client-side shared-secret gate is only a preview-access deterrent, not strong
   authentication; this limitation must be disclosed.
-- Decision-log entry: pending final implementation.
+- Decision-log entry: D-010.
 
 ## Open risks and honest limitations
 
@@ -207,7 +212,11 @@ part of this round only when every final gate remains green.
 
 ## Next round
 
-1. Complete signing, legal, implementation, and App Store Connect preflight.
+1. Resolve the third-party redistribution gate or complete an independently
+   reviewed replacement before any public archive upload.
+2. Generate the ignored launch verifier interactively, then complete signing,
+   App Store Connect owner decisions, final media, reviewer access, signed-
+   archive inspection, and physical-device validation.
 
 ## Privacy check
 

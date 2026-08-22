@@ -65,6 +65,18 @@ passed. The commit did not modify BLE backfill/storage hot paths and therefore
 does not close the later user report of Day-4 calibration stalling at 3/4 or of
 physical-phone scroll lag.
 
+## 2026-08-22 — first App Store preview preparation
+
+Commit `972a126b` added the temporary versioned launch gate, App Store metadata
+and review/privacy worksheets, public in-app policy/support links, Apple-managed
+update behavior, background-task and HealthKit disclosure corrections, media
+validation tooling, and a protocol-rights remediation plan. Focused policy
+tests and an unsigned consolidated Release simulator build passed. No signed
+archive was uploaded: public distribution remains blocked by inherited
+third-party expression without an explicit software license, and signing,
+review access/media, export decisions, and physical-device validation remain
+open.
+
 ## Ledger transition
 
 Contemporaneous round records begin on 2026-08-21. Future work must update the
