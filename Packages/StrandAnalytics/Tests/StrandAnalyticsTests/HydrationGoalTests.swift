@@ -9,20 +9,20 @@ final class HydrationGoalTests: XCTestCase {
     // MARK: - Sex baseline
 
     func testSexBaseline() {
-        XCTAssertEqual(HydrationGoal.baselineForSex("male"), 3700)
-        XCTAssertEqual(HydrationGoal.baselineForSex("female"), 2700)
+        XCTAssertEqual(HydrationGoal.baselineForSex("male"), 2960)   // 3700 total-water AI x 80% beverage
+        XCTAssertEqual(HydrationGoal.baselineForSex("female"), 2160) // 2700 x 80%
         // Anything else falls to the unspecified baseline — never a guess.
-        XCTAssertEqual(HydrationGoal.baselineForSex("nonbinary"), 3200)
-        XCTAssertEqual(HydrationGoal.baselineForSex("other"), 3200)
-        XCTAssertEqual(HydrationGoal.baselineForSex(""), 3200)
+        XCTAssertEqual(HydrationGoal.baselineForSex("nonbinary"), 2560) // 3200 x 80%
+        XCTAssertEqual(HydrationGoal.baselineForSex("other"), 2560)
+        XCTAssertEqual(HydrationGoal.baselineForSex(""), 2560)
     }
 
     func testSexBaselineNormalisation() {
         // Case- and whitespace-insensitive, plus the m/f shorthands (matches the Kotlin twin).
-        XCTAssertEqual(HydrationGoal.baselineForSex("MALE"), 3700)
-        XCTAssertEqual(HydrationGoal.baselineForSex(" Female "), 2700)
-        XCTAssertEqual(HydrationGoal.baselineForSex("m"), 3700)
-        XCTAssertEqual(HydrationGoal.baselineForSex("F"), 2700)
+        XCTAssertEqual(HydrationGoal.baselineForSex("MALE"), 2960)
+        XCTAssertEqual(HydrationGoal.baselineForSex(" Female "), 2160)
+        XCTAssertEqual(HydrationGoal.baselineForSex("m"), 2960)
+        XCTAssertEqual(HydrationGoal.baselineForSex("F"), 2160)
     }
 
     // MARK: - Effort bump
@@ -61,19 +61,19 @@ final class HydrationGoalTests: XCTestCase {
     // MARK: - Full goal
 
     func testDailyGoalNoEffort() {
-        // No Effort yet → just the rounded baseline (already a multiple of 50).
-        XCTAssertEqual(HydrationGoal.dailyGoalML(sex: "male", effort: nil), 3700)
-        XCTAssertEqual(HydrationGoal.dailyGoalML(sex: "female", effort: nil), 2700)
-        XCTAssertEqual(HydrationGoal.dailyGoalML(sex: "other", effort: nil), 3200)
+        // No Effort yet → the rounded drink-water baseline (total-water AI × 80% beverage fraction).
+        XCTAssertEqual(HydrationGoal.dailyGoalML(sex: "male", effort: nil), 2950)    // 2960 → nearest 50
+        XCTAssertEqual(HydrationGoal.dailyGoalML(sex: "female", effort: nil), 2150)  // 2160 → nearest 50
+        XCTAssertEqual(HydrationGoal.dailyGoalML(sex: "other", effort: nil), 2550)   // 2560 → nearest 50
     }
 
     func testDailyGoalWithEffortRoundsTo50() {
-        // male 3700 + round(63/100·700)=441 = 4141 → nearest 50 = 4150.
-        XCTAssertEqual(HydrationGoal.dailyGoalML(sex: "male", effort: 63), 4150)
-        // female 2700 + 350 (effort 50) = 3050, already a multiple of 50.
-        XCTAssertEqual(HydrationGoal.dailyGoalML(sex: "female", effort: 50), 3050)
-        // male 3700 + 700 (cap) = 4400.
-        XCTAssertEqual(HydrationGoal.dailyGoalML(sex: "male", effort: 100), 4400)
+        // male 2960 + round(63/100·700)=441 = 3401 → nearest 50 = 3400.
+        XCTAssertEqual(HydrationGoal.dailyGoalML(sex: "male", effort: 63), 3400)
+        // female 2160 + 350 (effort 50) = 2510 → nearest 50 = 2500.
+        XCTAssertEqual(HydrationGoal.dailyGoalML(sex: "female", effort: 50), 2500)
+        // male 2960 + 700 (cap) = 3660 → nearest 50 = 3650.
+        XCTAssertEqual(HydrationGoal.dailyGoalML(sex: "male", effort: 100), 3650)
     }
 
     func testDailyGoalIsAlwaysMultipleOf50() {
@@ -114,9 +114,9 @@ final class HydrationGoalTests: XCTestCase {
     }
 
     func testWeightBaselineFallsBackToSexWhenAbsentOrInvalid() {
-        XCTAssertEqual(HydrationGoal.weightBaselineML(sex: "male", weightKg: nil), 3700)
-        XCTAssertEqual(HydrationGoal.weightBaselineML(sex: "female", weightKg: 0), 2700)
-        XCTAssertEqual(HydrationGoal.weightBaselineML(sex: "female", weightKg: -5), 2700)
+        XCTAssertEqual(HydrationGoal.weightBaselineML(sex: "male", weightKg: nil), 2960)
+        XCTAssertEqual(HydrationGoal.weightBaselineML(sex: "female", weightKg: 0), 2160)
+        XCTAssertEqual(HydrationGoal.weightBaselineML(sex: "female", weightKg: -5), 2160)
     }
 
     func testWeightBaselineClampsToSaneRange() {

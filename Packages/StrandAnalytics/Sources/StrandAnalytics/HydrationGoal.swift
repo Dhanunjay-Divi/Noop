@@ -20,11 +20,28 @@ public enum HydrationGoal {
 
     // MARK: - Constants (mirror these EXACTLY in the Android twin — they are Int there)
 
-    /// Baseline target by sex, in millilitres, before the Effort bump.
-    public static let baselineMaleML = 3700
-    public static let baselineFemaleML = 2700
+    // ACCURACY CORRECTION (2026-08-22, peer review — noop_WIP/research/AGENT-SCIENCE-ACCURACY.md §12):
+    // 3700 / 2700 / 3200 ml are the IOM (2005) / EFSA **TOTAL WATER** Adequate Intakes — they INCLUDE the
+    // ~20% of daily water that arrives in FOOD. NOOP's hydration tracker logs DRINKS (sip/cup/bottle), so
+    // using a total-water AI as a "drink this much" target over-stated the goal by ~500–800 ml. The
+    // beverage fraction below converts the AI onto the drink-water construct, which also brings the sex
+    // fallback into agreement with the 35 ml/kg weight path (previously they could disagree by ~1 L for
+    // the same person). Integer percent so Swift and Kotlin round identically.
+
+    /// IOM/EFSA total-water Adequate Intakes (ml/day) — water from ALL sources, food included.
+    public static let totalWaterAIMaleML = 3700
+    public static let totalWaterAIFemaleML = 2700
+    public static let totalWaterAIOtherML = 3200
+
+    /// Share of total water intake that comes from beverages (~80%; the rest comes from food).
+    public static let beverageFractionPercent = 80
+
+    /// Baseline DRINK-water target by sex (ml) = total-water AI × beverage fraction, before the Effort
+    /// bump. male ≈ 2960, female ≈ 2160, unspecified ≈ 2560.
+    public static let baselineMaleML = totalWaterAIMaleML * beverageFractionPercent / 100
+    public static let baselineFemaleML = totalWaterAIFemaleML * beverageFractionPercent / 100
     /// Used for "unspecified" / "other" / any unrecognised sex token.
-    public static let baselineOtherML = 3200
+    public static let baselineOtherML = totalWaterAIOtherML * beverageFractionPercent / 100
 
     /// The most the Effort bump can add (ml) — reached at Effort 100.
     public static let maxEffortBumpML = 700

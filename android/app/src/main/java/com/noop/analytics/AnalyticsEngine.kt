@@ -894,9 +894,14 @@ object RestScorer {
 
     /** Component weights (sum 1.0 when all present). Byte-identical to Swift. */
     const val wDuration: Double = 0.50
-    // R1 (2026-08-21): efficiency 0.20→0.10, consistency 0.10→0.20. Mirrors Swift
-    // AnalyticsEngine.Rest — sleep-regularity is a stronger independent outcome predictor than
-    // in-bed efficiency. Weights still sum to 1.0. MUST stay byte-identical to Swift.
+    // R1 (2026-08-21): efficiency 0.20->0.10, consistency 0.10->0.20.
+    //
+    // HONESTY CORRECTION (2026-08-22, peer review): an earlier comment cited the Sleep Regularity Index
+    // (Phillips 2017; Windred 2023) to justify this. That over-claimed: the `consistency` value callers
+    // supply is 1 - CV(nightly sleep DURATIONS), a duration-variability proxy, not the clock-time SRI.
+    // The re-weight stands on the narrower ground that duration stability beats in-bed efficiency (which
+    // partly duplicates the duration term). Restore the SRI citation only when a true SRI feeds this slot.
+    // Weights still sum to 1.0 and MUST stay byte-identical to the Swift twin.
     const val wEfficiency: Double = 0.10
     const val wRestorative: Double = 0.20
     const val wConsistency: Double = 0.20

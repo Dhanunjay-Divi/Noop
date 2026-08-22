@@ -20,10 +20,24 @@ import kotlin.math.roundToInt
  */
 object HydrationGoal {
 
-    /** Sex baselines (ml), matching the Swift source exactly. */
-    const val BASELINE_MALE: Int = 3700
-    const val BASELINE_FEMALE: Int = 2700
-    const val BASELINE_OTHER: Int = 3200
+    // ACCURACY CORRECTION (2026-08-22, peer review): 3700/2700/3200 ml are the IOM(2005)/EFSA TOTAL WATER
+    // Adequate Intakes and INCLUDE the ~20% of daily water that comes from FOOD. NOOP logs DRINKS, so
+    // using them directly over-stated the target by ~500-800 ml and disagreed with the 35 ml/kg weight
+    // path by ~1 L. The beverage fraction converts them onto the drink-water construct.
+    // BYTE-IDENTICAL to the Swift twin.
+
+    /** IOM/EFSA total-water Adequate Intakes (ml/day) — all sources, food included. */
+    const val TOTAL_WATER_AI_MALE: Int = 3700
+    const val TOTAL_WATER_AI_FEMALE: Int = 2700
+    const val TOTAL_WATER_AI_OTHER: Int = 3200
+
+    /** Share of total water intake that comes from beverages (~80%; the rest from food). */
+    const val BEVERAGE_FRACTION_PERCENT: Int = 80
+
+    /** Baseline DRINK-water targets (ml) = total-water AI * beverage fraction. male ~2960, female ~2160. */
+    const val BASELINE_MALE: Int = TOTAL_WATER_AI_MALE * BEVERAGE_FRACTION_PERCENT / 100
+    const val BASELINE_FEMALE: Int = TOTAL_WATER_AI_FEMALE * BEVERAGE_FRACTION_PERCENT / 100
+    const val BASELINE_OTHER: Int = TOTAL_WATER_AI_OTHER * BEVERAGE_FRACTION_PERCENT / 100
 
     /** The most extra fluid a hard day can add (ml). The effort bump is capped here. */
     const val MAX_EFFORT_BUMP: Int = 700
