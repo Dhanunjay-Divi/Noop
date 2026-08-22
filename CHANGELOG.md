@@ -56,6 +56,18 @@ Released **2026-08-13**.
   still.
 - Widgets and Live Activities use the timestamp of the actual HR packet. Stale and duplicate surfaces
   end deterministically, while Bluetooth connection and heart-rate freshness are shown separately.
+- **Safety messages and check-ins fail visibly.** A one-shot location expires after five minutes
+  instead of silently sharing an old fix, disabled reminder delivery is shown with a settings or
+  repair path, and tapping the reminder returns directly to Safety. NOOP still does not monitor,
+  message contacts, or dispatch emergency help.
+- **Safety now speaks the app's language.** The complete Safety Center, user-reviewed draft, local
+  reminder, and Android reminder channel are localized across all nine maintained languages.
+  VoiceOver and TalkBack get full labels for compact choices and clearer single-action controls;
+  NOOP still never monitors or dispatches emergency services.
+- **Nutrition totals no longer double-count imports.** When an imported daily summary and manual
+  meals share a day, imported values take priority per nutrient and manual meals fill only missing
+  fields. Recent manual meals can now be logged again in one tap, and localized decimal/grouping
+  separators round-trip safely.
 
 **Upgrade note**
 

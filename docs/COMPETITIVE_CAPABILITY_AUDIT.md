@@ -1,6 +1,6 @@
 # Wearable capability and evidence audit
 
-Last reviewed: **2026-08-11**
+Last reviewed: **2026-08-22**
 
 This audit compares NOOP with the current public capabilities of Apple Watch, WHOOP,
 Oura Ring 4, RingConn Gen 3, and Hume Band 2.0. It is a product and engineering contract, not a
@@ -37,7 +37,7 @@ trend is not a diagnosis.
 | **ECG / AFib** | **Raw MG ECG acquisition can be researched. Clinical classification cannot ship from protocol decoding alone.** | Validate waveform scale, lead/contact quality, sampling and loss against a reference; then undertake medical-device software, clinical, regional, labeling, and post-market work. R-R/Poincare views remain nonclinical and must not produce an AFib conclusion. |
 | **Blood pressure** | **Not from the current NOOP sensor inputs.** A cuff-calibrated research model is possible but is not a substitute for clinical validation. | Use a compatible sensor or prospective cuff-ground-truth protocol, follow current cuffless-BP guidance, quantify calibration drift and subgroup error, and obtain any required authorization. Do not infer mmHg from HR/HRV/PPG alone in the consumer build. |
 | **Pregnancy coaching** | **A careful educational trend companion is buildable. Clinical coaching is not currently justified.** | User-entered pregnancy dates/phase, explicit opt-in, seven-day personal trends, uncertainty and symptom-escalation copy reviewed by qualified clinicians, deletion/export, and no fetal/maternal diagnosis or normative verdicts. |
-| **Full Strength Trainer** | **Yes.** This is product engineering plus validation, not a sensor/regulatory blocker. | Exercise library, routines, live set/reps/load/RPE, editing, rest timer, history/PRs, goals, watch/phone flow, import/export, and a separately validated muscular-load method. Manual truth must remain editable; automatic rep recognition must show confidence. |
+| **Full Strength Trainer** | **The manual product loop is implemented; sensor-derived load is not.** | NOOP has an exercise library, routines, live set/reps/load/time/RPE entry, editing, rest timer, completed/per-exercise history, all-time PRs, weekly goals, muscle exposure, Watch-to-iPhone handoff, import/export, portable backup, and transparent loaded volume. Manual truth remains editable. Automatic rep recognition and muscular-load claims require confidence UX and participant/device-held-out validation. |
 | **Guaranteed background delivery** | **No on general-purpose iOS/Android.** The operating system and wearable decide when work runs and may suspend or terminate it. | Provide state restoration, bounded backlog replay, foreground catch-up, HealthKit/Health Connect observer paths, Android foreground service where justified, freshness/completeness UI, and explicit stale-data alerts. Say **best effort**, never guaranteed. |
 
 ## Capability landscape
@@ -50,7 +50,7 @@ check does not imply that a public API exposes the raw signal.
 | Optical/motion/temperature inputs | PPG, accelerometer, peripheral temperature; SpO2 derived. MG adds single-lead ECG contact hardware. | Green/red/IR optical sensing, accelerometer, digital peripheral-temperature sensor. | Public material supports optical pulse/SpO2, motion, and temperature trends but does not publish a complete sensor BOM. | Vendor states 5 LEDs, 4 photodiodes, accelerometer, and skin-temperature tracking. | Store only decoded/exposed signals with device, units, quality, and provenance. Raw ADC is not calibrated SpO2 or temperature. |
 | Daily readiness/recovery | Proprietary Recovery. | Proprietary Readiness. | Proprietary wellness/readiness summaries. | Proprietary recovery/metabolic/longevity summaries. | Transparent **Charge** plus separately imported vendor references; no name or formula parity claim. |
 | Activity/training load | Strain, HR zones, auto-detection, Strength Trainer. | Activity Score, goals, 40+ auto-detected activities; phone GPS for live route. | Steps, calories, activity intensity, limited workout modes. | Activity, strain, coaching. | **Effort**, zones, manual/GPS workouts, conservative five-class Ask detector, broad imports. Activity breadth and held-out validation remain gaps. |
-| Sleep | Proprietary four-state staging, need/debt/planner, haptic alarm. | Four-state staging, Sleep Score, bedtime, chronotype/body clock. | Staging, score, vitals, breathing-interruption/apnea-risk wellness output. | Staging, score/efficiency, recovery debt. | Duration/stages/need/debt/consistency and alarms exist, but staging and planner flows still require comparative validation and refinement. |
+| Sleep | Proprietary four-state staging, need/debt/planner, haptic alarm. | Four-state staging, Sleep Score, bedtime, chronotype/body clock. | Staging, score, vitals, breathing-interruption/apnea-risk wellness output. | Staging, score/efficiency, recovery debt. | Duration/stages/need/debt/consistency, three explicit planner goal modes, per-day wake overrides, behavioral timing context, wind-down reminders, and alarms exist. Staging/planner accuracy, biological chronotype, and physical travel/DST behavior still need validation. |
 | Stress/resilience/illness | Stress Monitor, Health Monitor, Recovery drivers. | Daytime Stress, Resilience, Cumulative Stress, Symptom Radar. | HRV-derived stress and wellness summaries. | Stress/recovery/chronic-risk marketing outputs. | Local stress/autonomic proxy, illness-change patterns, cross-metric briefs, and explanations. Do not infer emotion, cause, disease, or diagnosis. |
 | Haptics and behavior nudges | Strap haptics support alarms; WHOOP also offers guided breathwork, but public material does not establish every prompt as a strap vibration. | No haptic motor or on-ring vibration is documented in the Ring 4 specifications. | Gen 3 advertises configurable vibration for health shifts, sedentary reminders, and low battery. | No documented Band 2.0 haptic-reminder contract was found. | Guided breathing can pace the WHOOP strap or Apple Watch; opt-in stress, inactivity, and hydration nudges use privacy-safe gates. OS reminders are durable; a WHOOP buzz is best effort only while a fresh encrypted link is active. |
 | Fitness/vascular age | WHOOP Age/Pace of Aging from nine documented contributor families but proprietary transforms. | Cardiovascular Age from PPG morphology; Cardio Capacity/VO2 estimate. | Vascular-load/BP trends, not an absolute BP sensor. | Physiological/biological-age and lifespan marketing outputs. | Fitness Age, Vitality, and experimental Wellness Age are transparent, coverage-gated, and nonclinical. Do not call them WHOOP Age or whole-body biological age. |
@@ -164,23 +164,37 @@ check does not imply that a public API exposes the raw signal.
    separate immutable series.
 5. Enforce health-claim copy in CI so a later UI change cannot silently turn a wellness
    visualization into an AFib, BP, fall, clinical-grade, or guaranteed-background claim.
+6. Keep source preference rank separate from evidence class. A preferred WHOOP export
+   remains labelled as an import, device-firmware output as device-derived, and HealthKit
+   or Health Connect values as health-data imports; winning a fusion tier never turns a
+   processed or imported value into a "direct sensor" reading.
 
 ### P1 — high-value product parity
 
-1. **Strength:** live exercise/set/reps/load/RPE, routine builder, timers, corrections,
-   history/PRs, weekly goals, Watch/phone handoff, and transparent training-volume load.
+1. **Strength:** retain the shipped manual editor, per-exercise history/PRs, weekly
+   session/set goals, factual muscle exposure, Watch-to-iPhone routine handoff,
+   import/export, and transparent external-load volume. Keep automatic reps and
+   muscular load unavailable until confidence UX and held-out validation are complete.
 2. **Activity:** expand beyond five labels, add user-confirm/edit/dismiss feedback,
    preserve detector/firmware revision, and train/tune only on participant/device-held-out
    data with per-class precision/recall and false-prompts-per-day.
-3. **Sleep:** complete goal-based planner modes, chronotype/body-clock education,
-   time-zone/DST handling, nap/main-sleep rules, and source-by-source staging comparison.
+3. **Sleep:** build on the shipped Target/Balance/Extra Opportunity modes, wake and
+   wind-down planning, debt bounds, per-day overrides, behavioral timing context, and
+   local-wall-clock rescheduling. Add physical travel/DST tests, nap/main-sleep rules,
+   source-by-source staging comparison, and any evidence-backed chronotype education.
 4. **Women’s health:** local cycle/pregnancy logging and trend context with opt-in privacy,
    uncertainty, delete/export, and clinician-reviewed educational copy. Keep fertile
    window, contraception, complication, fetal-health, and diagnosis claims out.
-5. **Coach/plans:** user-managed memory, proactive but dismissible check-ins, explainable
-   weekly goals, journal voice/text capture, and confirmation before any record mutation.
+5. **Coach/plans:** build on local user-managed memory, opt-in dismissible check-ins,
+   voice/text Journal drafts, and confirmed Journal/routine writes. Add broader
+   explainable goals and activity actions only with preview, confirmation, undo, and
+   deterministic audit history.
 6. **Oura cloud completeness:** ingest the supported v2 endpoints, deletes, backfill,
    webhooks, stale-source states, and per-endpoint provenance.
+7. **Social expansion:** retain the shipped invitation-only Apple/Android Friends
+   experience, directional summary privacy, retry-safe enrollment, and deletion. Treat
+   teams, challenges, rankings, moderation, abuse handling, and product-scale load as a
+   separate program rather than weakening the private-circle trust boundary.
 
 ### Wellness-nudge delivery contract
 
@@ -212,6 +226,16 @@ check does not imply that a public API exposes the raw signal.
    program that records protocol provenance and survives firmware changes.
 
 ## Accuracy and release gates
+
+### Distribution provenance
+
+The checked dependency inventory passes, but the release distribution gate
+intentionally fails closed: inherited WHOOP 4 protocol/store and collection
+expression is attributed to `johnmiddleton12/my-whoop` / `wearable`, whose pinned
+source has no explicit software license. Attribution is not redistribution
+permission. External source or binary publication requires either an explicit
+rights-holder license or an independently implemented replacement with a
+reviewed clean-room provenance audit.
 
 ### Device/transport matrix
 

@@ -395,6 +395,13 @@ Import a daily-nutrition CSV exported from **Cronometer** or **MacroFactor** to 
 macros onto the same timeline as your Recovery, Sleep Score and HRV — so you can explore and correlate
 food against how you feel. Parsed locally; nothing is uploaded.
 
+The production Nutrition log also supports private, editable per-meal calories/macros, meal time,
+type, label, and notes. Recent manual meals can be logged again in one action. If an imported daily
+summary and manual meals share a day, imported values take priority independently per nutrient and
+manual sums fill only nutrients missing from the import, preventing silent double-counting while
+keeping every source visible and removable. Missing nutrients remain missing rather than becoming
+zero, and locale-formatted decimal/grouping separators are parsed without lossy comma replacement.
+
 ### WHOOP Strap (Live BLE)
 Shows whether the strap is bonded and streaming. Pairs directly over Bluetooth — no WHOOP app,
 no cloud. Open **Live** to pair if it isn't connected.
@@ -424,6 +431,50 @@ on this Mac.
 > Wrist *delivery* of macOS notifications is not live yet — it needs a small on-device watcher
 > (coming in an update). Your per-app choices and patterns are saved now and apply automatically
 > once delivery ships. Everything stays on this Mac.
+
+---
+
+## Safety Center
+
+**More / Sidebar: Safety · user-confirmed contact paging, help sharing, and personal check-ins.**
+
+The Safety Center is a fast fallback for situations where the user wants to contact someone they
+trust. It is deliberately not presented as fall detection, monitoring, or emergency dispatch.
+
+- During onboarding, invite **two to five** emergency contacts. A contact counts only after accepting
+  the expiring invitation. NOOP keeps a private setup reminder active until two contacts have
+  accepted; onboarding remains finishable while another person responds.
+- After explicit confirmation, **Page accepted contacts** opens one durable incident. Each accepted
+  contact receives an SMS with **I'm responding / I cannot respond** controls; an unacknowledged
+  incident falls back to a voice call with equivalent keypad choices. The owner sees delivery and
+  response state and can resolve or cancel the incident.
+- Page submission is retry-safe and delivery work survives an API or worker restart. Bounded retries,
+  leases, provider receipts, and immutable attempts make failures visible. At-least-once delivery can
+  produce a duplicate after an ambiguous provider response, and a provider receipt cannot guarantee
+  that a person saw or acted on the page.
+- Choose a plain-language intent such as **I need help now**, **I feel unsafe**, or **I missed a
+  check-in**, add an optional name or note, then review the exact message before opening the system
+  share sheet. This separate sharing path never selects a recipient or presses Send.
+- Add an optional **one-shot location** only after granting location permission. The captured time
+  and accuracy stay visible; the fix expires after five minutes and must be refreshed before it can
+  be included. Message construction checks freshness again at the final share boundary. Location is
+  not attached to Safety Network pages.
+- Arm one local **personal check-in** timer. The reminder is best-effort: Apple notification
+  authorization or the pending request can disappear, and Android can defer WorkManager or block the
+  app/channel. Safety shows those states and offers the relevant Settings or repair path.
+- Tapping the reminder returns directly to Safety. An overdue timer never sends a message or
+  escalates on its own.
+- The entire flow—including the reviewed outgoing draft, timer status, errors, local reminder, and
+  Android reminder channel—is localized in English, German, Spanish, French, Italian, European
+  Portuguese, Russian, Simplified Chinese, and Traditional Chinese. Dates and countdown units follow
+  the device locale.
+- Compact choices expose complete VoiceOver and TalkBack labels, and the location setting is one
+  understandable switch action rather than several competing targets.
+
+NOOP pages contacts only after the user confirms the page. It does not monitor location in the
+background, turn an overdue timer or wellness/anomaly reading into a page, detect falls, dispatch
+emergency services, or guarantee carrier delivery or human response. For immediate danger, use the
+phone's native emergency calling or SOS features.
 
 ---
 

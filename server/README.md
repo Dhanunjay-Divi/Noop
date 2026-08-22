@@ -64,6 +64,18 @@ private. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md).
 | `NOOP_RATE_LIMIT_ORIGIN_REQUESTS_PER_MINUTE` | no | `300` | Per-process API request ceiling for each trusted direct peer/client address |
 | `NOOP_RATE_LIMIT_MAX_KEYS` | no | `10000` | Maximum in-memory limiter identities before new identities share a fail-closed overflow bucket |
 | `NOOP_DASHBOARD_ENABLED` | no | `true` | Serve the static dashboard |
+| `NOOP_PUBLIC_BASE_URL` | for paging | none | Exact public HTTPS origin used in responder links and Twilio signature validation |
+| `NOOP_TWILIO_ACCOUNT_SID` | for paging | none | Twilio account SID |
+| `NOOP_TWILIO_AUTH_TOKEN` | for paging | none | Twilio REST credential and webhook-signature secret |
+| `NOOP_TWILIO_FROM_PHONE` | for paging | none | SMS-and-voice-capable E.164 sender |
+| `NOOP_TWILIO_STATUS_CALLBACK_SECRET` | for paging | none | Independent random callback capability, at least 32 bytes |
+| `NOOP_SAFETY_CAPABILITY_SECRET` | for paging | none | Independent random responder-link signing secret, at least 32 bytes |
+| `NOOP_SAFETY_ACKNOWLEDGEMENT_TIMEOUT_SECONDS` | no | `90` | Delay before an unacknowledged SMS page becomes eligible for voice fallback |
+| `NOOP_SAFETY_INCIDENT_TTL_SECONDS` | no | `1800` | Open-incident and responder-link lifetime |
+| `NOOP_SAFETY_WORKER_POLL_SECONDS` | no | `2` | Idle delivery-worker poll interval |
+| `NOOP_SAFETY_DELIVERY_LEASE_SECONDS` | no | `30` | Crash-recovery lease; must exceed the poll interval and provider request time |
+| `NOOP_SAFETY_RETRY_BASE_SECONDS` | no | `5` | Initial bounded exponential delivery retry delay |
+| `NOOP_SAFETY_PROVIDER_RECEIPT_TIMEOUT_SECONDS` | no | `300` | Age at which a provider submission without a receipt becomes `unknown` |
 | `NOOP_PORT` | Compose only | `8080` | Loopback host port |
 | `NOOP_BACKUP_SECRET_FILE` | Compose only | `./secrets/backup-passphrase.txt` | Host path to an untracked file containing at least 32 random bytes |
 | `NOOP_BACKUP_INTERVAL_SECONDS` | no | `86400` | Seconds between encrypted PostgreSQL backups; one backup also runs at container start |
@@ -72,6 +84,12 @@ private. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md).
 
 Changing `NOOP_API_TOKEN` invalidates existing app/dashboard connections. Never
 commit `.env`, put the token in a URL, or send it in a bug report.
+
+Paging remains disabled unless all six required paging values are present. A
+partial configuration fails startup, and `NOOP_PUBLIC_BASE_URL` must be a public
+HTTPS origin. Complete carrier registration and geographic permissions before
+enabling it. See [SAFETY.md](SAFETY.md) for the incident contract, staging test,
+monitoring thresholds, and the explicit non-emergency boundary.
 
 ## API contract
 
@@ -320,6 +338,8 @@ discovery.
 - `GET /v1/social/me`
 - `DELETE /v1/social/me` with
   `X-Noop-Confirm: DELETE MY SOCIAL PROFILE`
+- `DELETE /v1/social/enrollments/{enrollment_id}` with
+  `X-Noop-Confirm: DELETE PENDING SOCIAL ENROLLMENT`
 - `POST /v1/social/invites`
 - `DELETE /v1/social/invites/{id}`
 - `POST /v1/social/invites/join`
@@ -340,7 +360,9 @@ until the owner enables each field for that specific friend. Raw samples,
 events, location, journals, workouts, sleep stages, metadata, and provenance are
 never returned by the Friends API. A member-confirmed self-delete removes only
 that profile's exact dedicated social producer and social graph state, not the
-separate full-data archive producer.
+separate full-data archive producer. Pending-enrollment deletion is
+credential-bound, idempotent, and exists so a client can safely clean up after
+an interrupted first-join response.
 
 Export before destructive operations:
 

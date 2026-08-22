@@ -149,6 +149,10 @@ Content-Type: application/json
 ```
 
 `decision` is either `accept` or `decline`.
+Repeating redemption with the same member returns the original request even
+after invite expiry; another member still receives the indistinguishable
+invalid/expired response. Repeating the same request decision returns the
+recorded result, while an opposite decision returns `409`.
 
 ### Joining without an administrator token
 
@@ -205,6 +209,21 @@ leave an orphan profile.
   "token_notice": "The supplied member token was stored only as a digest; the request field contains the current friendship decision state."
 }
 ```
+
+If the client no longer wants to recover an interrupted first join, it can
+delete only the profile matching its saved enrollment UUID and member-token
+digest:
+
+```http
+DELETE /v1/social/enrollments/{enrollment_id}
+Authorization: Bearer <saved pending member token>
+X-Noop-Confirm: DELETE PENDING SOCIAL ENROLLMENT
+```
+
+The operation also works after administrative disable and is idempotent after
+successful deletion. A token mismatch returns `403`; an enrollment that was
+never created or was already deleted returns `204`. This route lets the client
+wait for server acknowledgement before removing its protected local credential.
 
 ## Member summary upload
 
@@ -285,6 +304,7 @@ sleep stages. An explicit JSON `null` is also rejected; send `true` or `false`
 for every field included in a patch.
 
 Remove a friendship with `DELETE /v1/social/friends/{friend_profile_id}`.
+Repeating the same removal is an idempotent `204`.
 Block/unblock with:
 
 ```text

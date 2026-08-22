@@ -163,12 +163,13 @@ black/pearl chrome, dimensional system-symbol plates, solid high-contrast conten
 cards, and restrained glass for navigation and controls. Physiological colors
 remain reserved for Recovery, Effort, Sleep Score, heart-rate zones, and alerts. On iPhone,
 the private **Circle** stays visible at the top of More, while Devices and **Live
-HR** are separate destinations; Mac exposes the same Circle in its sidebar.
+HR** are separate destinations; Mac exposes the same Circle in its sidebar, and
+Android exposes Friends from More.
 
 | Screen | What it does |
 |---|---|
 | **Today** (Control Center) | Home dashboard: recovery ring, a "today's synthesis" insight, a grid of stat tiles (recovery, strain, sleep, HRV, RHR, SpO₂, respiratory, steps, weight, calories) each with a 14-day sparkline, live strap **battery %** and HR trend, recent workouts, and a data-sources footer. |
-| **Friends** (Circle; iPhone and Mac) | Invitation-only sharing through a server the circle operates. Accepted friends can see the latest daily Recovery, Effort, and Sleep Score values; sleep duration, HRV, and resting HR are separate per-friend opt-ins. There is no public profile, discovery, follower count, team ranking, or raw-data view. |
+| **Friends** (Circle; Apple and Android) | Invitation-only sharing through a server the circle operates. Accepted friends can see the latest daily Recovery, Effort, and Sleep Score values; sleep duration, HRV, and resting HR are separate per-friend opt-ins. There is no public profile, discovery, follower count, team ranking, or raw-data view. |
 | **Readiness** | An on-device trend read that synthesizes HRV vs your baseline, resting-HR drift, sleeping respiratory-rate drift, and training monotony into a headline (Primed / Balanced / Strained / Run down) with the drivers behind it. A separate 7-day/28-day recorded-strain ratio is shown as neutral arithmetic context only: it does not affect the headline or prescribe training, and is not Training Stress Balance or an injury-risk prediction. Pure local math, not medical advice. |
 | **Live HR** | Real-time view of the connected strap — heart rate and beat-to-beat signal as they arrive. Pairing and band switching live in the separate Devices screen. |
 | **Breathe** | **HRV haptic breathing biofeedback.** The strap both *measures* HRV (R-R intervals) and *buzzes* its haptic motor, so NOOP paces your breath with felt cues (one buzz inhale, two exhale) and shows live HR + rolling RMSSD responding as the session deepens. Presets: Relax 4-6, Coherence 5.5, Box 4-4. Each session reports a **pre/post HRV outcome** so you can see how much you settled. |
@@ -528,13 +529,13 @@ law, and breach response.
 
 ## Private Friends
 
-Friends is a small-group sharing layer on the self-hosted server, currently
-available in the iPhone and Mac clients. It is deliberately not a public social
-network:
+Friends is a small-group sharing layer on the self-hosted server, available in
+the Apple and Android clients. It is deliberately not a public social network:
 
 - A server owner bootstraps a local profile once with `NOOP_API_TOKEN`. The app
-  stores the separately issued member token in this-device-only Keychain storage;
-  the administrator token is never placed in an invitation.
+  stores the separately issued member token in this-device-only Keychain storage
+  on Apple or encrypted preferences backed by Android Keystore; the administrator
+  token is never placed in an invitation.
 - An invitation is shared as plain text: the full server address plus a
   short-lived, single-use code. The recipient reviews and enters both values
   manually. NOOP deliberately does not put this bearer capability in a custom
@@ -561,9 +562,13 @@ network:
   self-hosted server operator can inspect the summary fields the app sends.
   Share the server address and code only with the intended recipient, and join
   only a server whose operator you trust.
-- Foreground activation performs a best-effort catch-up, throttled to one
-  automatic attempt per 15 minutes. iOS does not guarantee background delivery;
-  opening Friends provides the reliable manual refresh path.
+- Apple foreground activation and Android WorkManager perform best-effort
+  catch-up; neither OS guarantees a delivery time. Opening Friends provides the
+  reliable manual refresh path.
+- If a first-join response is interrupted, Android preserves the original
+  enrollment identity and credential instead of creating another profile. The
+  user can retry the same invitation or ask the server to idempotently delete
+  any profile tied to that pending enrollment before the local secret is removed.
 - **Leave & delete profile** removes the member profile, credential, social
   relationships, and dedicated Friends summary copy from the server. It leaves
   local health data and any separately configured full self-hosted backup intact.
@@ -573,8 +578,7 @@ network:
 
 The server API also supports token rotation, profile disable, invite revocation,
 and blocking. See [`server/FRIENDS.md`](server/FRIENDS.md) for the complete
-authorization and projection contract. Android does not yet expose the Friends
-UI.
+authorization and projection contract.
 
 ---
 
@@ -678,8 +682,10 @@ That's it — copy away.
 - [`ATTRIBUTION.md`](ATTRIBUTION.md) — full credits and licensing notes.
 - [`docs/FEATURE_PARITY.md`](docs/FEATURE_PARITY.md) — honest WHOOP capability comparison, gaps, and parallel-reference workflow.
 - [`docs/COMPETITIVE_CAPABILITY_AUDIT.md`](docs/COMPETITIVE_CAPABILITY_AUDIT.md) — measured-versus-derived comparison for WHOOP, Oura, RingConn, and Hume, with evidence and release gates.
+- [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md) — verified code status and the hardware, carrier, study, signing, store, and regulatory gates that code alone cannot close.
 - [`docs/DEVICE_SUPPORT_ROADMAP.md`](docs/DEVICE_SUPPORT_ROADMAP.md) — source-by-source live, platform-bridge, and owner-import support boundaries.
 - [`server/README.md`](server/README.md) — deploy, secure, back up, export, and operate the optional self-hosted service.
+- [`server/SAFETY.md`](server/SAFETY.md) — configure, stage, monitor, and test acknowledged Safety Network paging.
 - [`server/FRIENDS.md`](server/FRIENDS.md) — invitation, member-token, per-friend visibility, and feed projection contract.
 - [`project.yml`](project.yml) — XcodeGen project definition (source of `Strand.xcodeproj`).
 
