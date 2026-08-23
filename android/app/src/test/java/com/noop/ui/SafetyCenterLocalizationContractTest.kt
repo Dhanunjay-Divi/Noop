@@ -40,7 +40,7 @@ class SafetyCenterLocalizationContractTest {
         assumeTrue("Safety locale resources unavailable", files.values.all { it != null })
         val values = files.mapValues { safetyStrings(it.value!!) }
         val base = values.getValue("values")
-        assertEquals(198, base.size)
+        assertEquals(204, base.size)
 
         val placeholder = Regex("""%\d+\$[ds]""")
         for ((folder, localized) in values) {

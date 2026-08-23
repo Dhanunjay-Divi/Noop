@@ -39,7 +39,7 @@ class AppWideLocalizationContractTest {
         assumeTrue("App-wide locale resources unavailable", files.values.all { it != null })
         val values = files.mapValues { appWideStrings(it.value!!) }
         val base = values.getValue("values")
-        assertEquals(61, base.size)
+        assertEquals(71, base.size)
 
         val placeholder = Regex("""%\d+\$[ds]""")
         for ((folder, localized) in values) {

@@ -24,8 +24,9 @@ final class AppleHealthImporterTests: XCTestCase {
         XCTAssertTrue(types.contains("RespiratoryRate"))
         XCTAssertTrue(types.contains("StepCount"))
         XCTAssertTrue(types.contains("SleepAnalysis"))
+        XCTAssertTrue(types.contains("DietaryWater"))
         // An irrelevant type stays excluded.
-        XCTAssertFalse(types.contains("DietaryWater"))
+        XCTAssertFalse(types.contains("HKCorrelationTypeIdentifierBloodPressure"))
     }
 
     func testStaticExportMapsBodyAndWristTemperatureToSeparateSeries() throws {
