@@ -1,7 +1,8 @@
 # Release blockers & production readiness
 
 **Assessed:** 2026-08-23
-**Commit:** `main` @ the consolidation merge (see `git log -1`)
+**Implementation commit:** `94661a17` (use `git log -1` for the later handoff
+documentation commit)
 **Verdict:** engineering gates are **green**. Commercial distribution is
 blocked by the three unresolved rights entries in
 `docs/provenance/rights-status.json`.
@@ -16,14 +17,26 @@ Current continuation instructions:
 | Gate | Result | Command |
 |---|---|---|
 | iOS app (`NOOPiOS`, Debug) | ✅ BUILD SUCCEEDED | `xcodebuild -scheme NOOPiOS -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build` |
+| iOS production-shell UI suite | PASS, 16 tests, 0 failures | `xcodebuild -scheme NOOPiOS -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test` |
+| Profile keyboard regression | PASS, 5/5 on iPhone 17 Pro and 5/5 on compact iPhone 17e | `testProfileMeasurementsCanBeClearedAndRetyped` with `-test-iterations 5` |
+| Charging fixture regression | PASS, 5/5 UI iterations and 2/2 focused unit contracts | Charging UI test on a new simulator plus `AppleDemoSeederTests` |
 | macOS app (`Strand`, Debug) | ✅ BUILD SUCCEEDED | `xcodebuild -scheme Strand -destination 'platform=macOS' build` |
-| macOS app tests | ✅ **1389** tests, 0 failures, 1 skipped | `xcodebuild test -scheme Strand -destination 'platform=macOS'` |
+| macOS app tests | ✅ **1390** tests, 0 failures, 1 skipped | `xcodebuild test -scheme Strand -destination 'platform=macOS'` |
 | Swift engines | ✅ **1322** tests, 0 failures | `cd Packages/StrandAnalytics && swift test` |
 | **Android unit tests** | ✅ **3564** tests, 0 failures, 6 skipped (471 classes) | `cd android && ./gradlew :app:testFullDebugUnitTest` |
 | Release legal inventory | ✅ 152 runtime components, 3 container inputs | `python3 Tools/release-legal-gate.py check` |
 
 Android was previously flagged as compiler-unverified in the earlier handoff. **That gap is now closed** —
 JDK 17 and the SDK were present at `~/Library/Android/sdk`; export `ANDROID_HOME` and the suite runs.
+
+Hosted i18n run `32670362251` and health-claims run `32670362291` passed at
+`94661a17`. Hosted app run `32668839522` is intentionally retained as a failed
+attempt: its macOS leg passed and its iOS leg failed only the charging-state UI
+assertion. Commit `94661a17` moves that DEBUG fixture ahead of first render;
+local full-suite, clean-simulator repetition, and unit-contract evidence all
+pass after the change. Final hosted app run `32670362286` passed both jobs at
+`94661a17`: universal macOS build and tests, plus iOS simulator build and 16/16
+production-shell tests including the charging assertion.
 
 ---
 

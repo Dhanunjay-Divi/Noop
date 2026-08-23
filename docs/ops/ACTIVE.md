@@ -9,6 +9,8 @@ Last updated: **2026-08-23**
 - Active branch: `main`; local and `origin/main` match after the completed push.
 - Remote branches: only `origin/main` remains after merged-branch cleanup.
 - GitHub reports `isFork=false`, no parent, and `main` as the default branch.
+- Final implementation checkpoint before the current documentation update:
+  `94661a17`.
 - Hosting independence is complete. Commercial source independence is not.
 - Current agent instructions:
   [`../handoff/AGENT-HANDOFF-20260823.md`](../handoff/AGENT-HANDOFF-20260823.md)
@@ -24,7 +26,18 @@ provenance enforcement.
 Final engineering evidence includes 25/25 tool tests, Android compile and unit
 tests, iOS and macOS app builds, exact legal inventory verification, health-copy
 scanning, workflow parsing, server tests, i18n regression coverage, ops
-validation, and private-data/diff hygiene.
+validation, and private-data/diff hygiene. The final local iOS production-shell
+suite passed 16/16. Focused profile editing passed 5/5 on both iPhone 17 Pro and
+compact iPhone 17e, the clean charging-state regression passed 5/5, and the
+focused seeder contract passed 2/2.
+
+Hosted i18n run `32670362251` and health-claims run `32670362291` passed at
+`94661a17`. The immediately preceding hosted app run exposed a first-frame
+DEBUG charging-fixture race; the synchronous remediation is included in
+`94661a17` and the failed run remains recorded in the round rather than being
+hidden. Final hosted app run `32670362286` then passed both Apple jobs: the
+universal macOS build and 1,390-test suite passed with 1 skipped, and the iOS
+simulator build plus 16/16 production-shell tests passed.
 
 The stricter distribution gate intentionally fails on:
 

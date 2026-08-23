@@ -6,7 +6,7 @@
 - Owner: project team
 - Branch: `main`
 - Start commit: `236f3b73`
-- End implementation commit: the commit containing this record
+- End implementation commit: `94661a17`
 - Record commit or PR: the same direct-to-`main` commit requested by the owner
 
 ## Objective
@@ -83,6 +83,13 @@ has reviewable evidence.
   and 166 unique Apple literals. The no-new-literal gate remains strict.
 - Restored focus-locale catalog completeness and applied the pinned Ruff format
   to two server files that hosted CI identified.
+- Stabilized profile measurement editing so the bottom action inset is removed
+  while the software keyboard is open, the measurement fields are revealed
+  after `keyboardDidShow`, and clear/retype controls remain reachable on both
+  standard and compact iPhone layouts.
+- Moved the DEBUG charging fixture to synchronous live-state setup before the
+  first frame. This removed a hosted-only race between the Today masthead and
+  the asynchronous database seed without changing production behavior.
 
 ## Data, privacy, and medical truth
 
@@ -115,6 +122,12 @@ has reviewable evidence.
 | First hosted `main` run | i18n and server Ruff-format jobs failed | Canonical CI caught debt hidden while 46 commits were local-only | Product or release readiness |
 | `python3 Tools/i18n_audit.py --ci origin/main` after migration | Passed; 247 Android and 166 Apple unique literals baseline-tracked | Focus locales are structurally complete and future literal additions fail CI | Translation of baseline entries or native-speaker approval |
 | Ruff 0.12.2 and local server tests | `ruff check` and format check passed; 59 tests passed, 4 database-dependent tests skipped | Python style and non-database server behavior are green | TimescaleDB, containers, backup restore, or production deployment |
+| Profile measurement UI regression | 5/5 passed on iPhone 17 Pro and 5/5 on compact iPhone 17e | Weight and height can be cleared and retyped while the height field and clear action remain hittable above the software keyboard | Physical-device keyboards, accessibility review, or every Dynamic Type size |
+| Full local iOS production-shell suite at `94661a17` | 16/16 passed on iPhone 17 Pro | The production navigation, metrics, reminders, profile, sleep, terms, charging, and calendar UI contracts pass together | Physical BLE, HealthKit, background, haptic, battery, or medical behavior |
+| Clean charging fixture regression | 5/5 UI iterations passed on a newly created simulator; `AppleDemoSeederTests` passed 2/2 | Charging live state is present before the first frame and remains inert without `--demo-seed` | Real band charging telemetry |
+| Hosted app run `32668839522` | macOS passed; iOS failed only `testBandBatteryShowsChargingStateFromLiveFixture` before `94661a17` | The failure was isolated to first-frame DEBUG fixture timing and was retained rather than rewritten as a pass | The subsequent remediation result |
+| Final hosted app run `32670362286` at `94661a17` | Passed: universal macOS build plus 1,390 tests with 1 skipped; iOS simulator build plus 16/16 production-shell tests, including charging | The first-frame remediation passes on clean hosted runners across both Apple jobs | Signing, physical hardware, or store readiness |
+| Hosted i18n run `32670362251` and health-claims run `32670362291` at `94661a17` | Passed | The final implementation checkpoint preserves both hosted policy gates | App compilation or runtime behavior |
 | Ops validator, private-data guard, JSON parse, and `git diff --check` | Passed | Documentation structure, filename privacy guard, structured state, and whitespace are clean | A full secret-history audit |
 | Authenticated GitHub inspection | Private; default `main`; `isFork=false`; parent absent | The canonical hosting repository is standalone in GitHub metadata | Ownership of inherited source |
 | Git ancestry checks | All three legacy branches and `origin/main` were ancestors of local `main` | Mainline push and branch deletion do not discard unique branch commits | Correctness of every historical commit |
@@ -122,7 +135,9 @@ has reviewable evidence.
 ## Physical device and deployment
 
 - Install/update action: not run.
-- Generalized device and OS class: not applicable to this repository round.
+- Simulator evidence: iPhone 17 Pro and compact iPhone 17e on iOS 26.5.
+- Generalized physical device and OS class: not applicable to this repository
+  round.
 - Data-preservation result: no device or application data was mutated.
 - BLE/background/haptic/battery scenarios exercised: not run.
 - Unrun hardware gates: the complete iOS, Android OEM, Watch, WHOOP 5/MG,
@@ -133,7 +148,8 @@ has reviewable evidence.
 - Changed paths: legal/provenance tooling and tests, terms, notices, workflow
   names, repository/ops documentation, and obsolete artifact removals.
 - Commits: one repository-independence commit on top of the 45 completed local
-  commits, followed by a bounded hosted-CI remediation commit.
+  commits, followed by bounded hosted-CI, profile-keyboard, and demo-fixture
+  remediation commits through `94661a17`.
 - Branch and remote state: local `main` matches `origin/main`; merged remote
   feature branches are removed; `origin/HEAD` resolves to `origin/main`.
 - Repository visibility verified: private.

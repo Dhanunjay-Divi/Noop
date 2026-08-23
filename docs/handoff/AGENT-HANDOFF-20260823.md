@@ -18,6 +18,8 @@ blocked.
 - Default and only active remote branch: `main`.
 - GitHub metadata: `isFork=false`, no parent repository.
 - Local and remote `main` must resolve to the same commit after a fresh fetch.
+- Final implementation checkpoint before this documentation update:
+  `94661a17`.
 - This source tree remains the auditable, noncommercial reference codebase.
   Standalone hosting does not make inherited source commercially independent.
 
@@ -37,6 +39,11 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
 - Hosted CI migration debt is explicit: 247 Android and 166 Apple unique
   hardcoded or unextracted literals are baseline-tracked, and future additions
   fail the i18n gate.
+- Profile measurements remain editable above the iOS software keyboard on both
+  standard and compact layouts; the bottom action inset leaves the layout while
+  editing and returns afterward.
+- The DEBUG charging fixture now initializes live state before the first frame,
+  removing a hosted UI-test race without changing Release behavior.
 
 ## Verified gates
 
@@ -50,6 +57,16 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
 - i18n: focus-locale completeness and the no-new-literal regression gate pass.
 - Server: pinned Ruff checks pass; local tests pass 59 with 4
   database-dependent skips.
+- iOS production shell: 16/16 tests passed locally at `94661a17`.
+- Profile keyboard regression: 5/5 passed on iPhone 17 Pro and 5/5 on compact
+  iPhone 17e; both assert the lower measurement controls remain hittable.
+- Charging fixture regression: 5/5 passed on a newly created simulator, and the
+  focused `AppleDemoSeederTests` contract passed 2/2.
+- Hosted app run `32670362286` passed at `94661a17`: the universal macOS build
+  and 1,390-test suite passed with 1 skipped, while the iOS simulator build and
+  16/16 production-shell tests passed, including the charging assertion.
+- Hosted i18n run `32670362251` and health-claims run `32670362291` passed at
+  `94661a17`.
 - Workflow YAML parsing, ops records, private-data filename guard, JSON parsing,
   and diff whitespace checks passed.
 - GitHub authentication and standalone repository metadata were verified.
@@ -102,6 +119,9 @@ git status --short --branch
 git branch -r
 git rev-parse HEAD
 git rev-parse origin/main
+gh repo view Dhanunjay-Divi/Noop \
+  --json visibility,isFork,parent,defaultBranchRef
+gh run view 32670362286
 python3 Tools/release-legal-gate.py check
 python3 Tools/release-legal-gate.py distribution
 python3 Tools/i18n_audit.py --ci origin/main
