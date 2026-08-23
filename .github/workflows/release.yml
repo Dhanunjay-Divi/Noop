@@ -1,4 +1,4 @@
-# Community release workflow: bump the version and cut a proper release (not a rolling snapshot) so the in-app
+# Release workflow: bump the version and cut a proper release (not a rolling snapshot) so the in-app
 # "Check for updates" — which reads GitHub `releases/latest`, and GitHub excludes prereleases —
 # points at the canonical project release.
 #

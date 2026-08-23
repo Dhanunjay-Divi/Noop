@@ -38,7 +38,7 @@ import com.noop.R
  * `Terms.currentVersion`. The full text ships in TERMS.md.
  */
 object Terms {
-    const val CURRENT_VERSION = "2.2"
+    const val CURRENT_VERSION = "2.3"
 
     /**
      * Plain-English summary of TERMS.md §1–§6 — kept identical to the macOS `Terms.points`. Each is

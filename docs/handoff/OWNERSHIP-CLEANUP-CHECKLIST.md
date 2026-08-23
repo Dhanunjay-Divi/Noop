@@ -1,4 +1,12 @@
-# Ownership cleanup — the checklist I will execute once the code is yours
+# Ownership cleanup checklist
+
+**Current decision (2026-08-23):** the owner selected a commercially independent
+NOOP repository. The local remote now targets `Dhanunjay-Divi/Noop` rather than
+the prior repository, but this checkout still has the inherited source and
+multi-author history. It is therefore the reference codebase, not a clean
+commercial implementation. Authenticated GitHub inspection verified the
+canonical repository is standalone (`isFork=false`, no parent, zero child
+forks).
 
 **Purpose:** the owner is having the inherited code rewritten. When that lands, attribution for code that
 no longer exists is stale text and removing it is correct. This file is the gate that makes each removal
@@ -10,27 +18,33 @@ verification command that must pass first.
 
 ---
 
-## 0. Corrected scope (earlier estimate was wrong)
+## 0. Corrected cross-platform scope
 
 I previously said ~209,000 lines were vendored from the unlicensed source. **That was wrong** — the count
-included `.build/checkouts/` (GRDB and other SwiftPM dependencies), which are not inherited code. Actual:
+included `.build/checkouts/` (GRDB and other SwiftPM dependencies), which are not inherited code. A later
+`15,980`-line estimate was also incomplete because it described only the known Apple package core and
+omitted the Android and Apple transport/collection assessment surfaces.
 
-| Target | Files | Lines | Notes |
+| Target | Source files | Source lines | Status |
 |---|---|---|---|
-| `Packages/WhoopProtocol/Sources` | 30 | **6,425** | the real reimplementation target |
-| `Packages/WhoopProtocol/Tests` | 50 | 6,410 | rewrite alongside |
-| `Packages/WhoopStore/Sources` | 38 | **9,555** | the real reimplementation target |
-| `Packages/WhoopStore/Tests` | 53 | 7,461 | rewrite alongside |
-| **Source subtotal** | **68** | **15,980** | what must actually be written fresh |
-| `Strand/BLE` | 24 | 12,154 | ATTRIBUTION says "adapted from"; needs per-file assessment |
-| `Strand/Collect` | 8 | 1,510 | same |
-| Repo total (excl. build dirs) | — | 461,598 | for proportion |
+| `Packages/WhoopProtocol/Sources` | 30 Swift | **6,425** | known replacement core |
+| `Packages/WhoopStore/Sources` | 38 Swift | **9,555** | known replacement core |
+| `Strand/BLE` | 24 Swift | 12,154 | per-file classification/replacement |
+| `Strand/Collect` | 8 Swift | 1,510 | per-file classification/replacement |
+| `android/.../protocol` | 22 Kotlin | 4,369 | per-file classification/replacement |
+| `android/.../ble` | 32 Kotlin | 15,155 | per-file classification; also contains separately developed device paths |
+| **Review ceiling** | **154** | **49,168** | not every classified file will necessarily require replacement |
 
-So the clean-room target is **~16k lines of source**, not 200k+. That is a real project but a finite one.
+The **15,980-line Apple package core is the known minimum**, not the complete
+clean-room target. Tests and fixtures must be independently regenerated or
+licensed alongside production code; they are not included in the table's source
+line totals.
 
-**What is already free and reusable:** every BLE UUID, frame layout, CRC parameter, command/event number and
-byte offset. `LICENSE` states it, and it is correct in law — those are facts about bytes on a wire, not
-copyrightable expression. The rewrite must produce new *expression* of the same *facts*.
+BLE UUIDs, frame layouts, CRC parameters, command/event numbers, and byte
+offsets are observable wire facts that can be documented independently. That
+does not permit copying source expression or a protectable selection or
+arrangement. The replacement must express independently collected facts in new
+code, and the final rights review should be performed by qualified counsel.
 
 **Precedent in this repo:** `ATTRIBUTION.md` already records Oura as "original clean-room work",
 `XiaomiBandImporter` as "re-derived … no code is copied", and WHOOP 5.0 as facts-only. The method is proven
@@ -76,8 +90,9 @@ project**. So the app code outside the two packages is not fully yours to relice
 
 Three honest ways to close it:
 
-1. **Written relicensing consent** from each contributor above (a short e-mail granting permission to
-   relicense their contributions is enough; keep the replies).
+1. **Written relicensing consent** from each contributor above in a form and
+   scope reviewed by qualified counsel; keep the grants outside the public
+   repository when they contain personal information.
 2. **Rewrite their contributions too** — much larger than 16k lines; likely not worth it.
 3. **Stay noncommercial** for the forked app and ship the commercial product as the *new* codebase (below).
 
@@ -92,7 +107,8 @@ that, and rewriting published history would destroy the audit trail that current
 
 So:
 
-- **`Whoop-Noop` (this repo)** stays as-is: honest lineage, PolyForm Noncommercial, the historical record.
+- **This reference checkout** stays as-is: honest lineage, PolyForm
+  Noncommercial, and the historical record.
 - **New repo (e.g. `noop-band`)** starts from the clean-room packages plus originally-authored app code,
   with your own licence from commit one. Nothing to scrub, nothing inherited, no contributor-consent
   problem, and the provenance question never arises at App Store review.
@@ -101,29 +117,29 @@ That is also the cheaper path: you are already writing new hardware-first code f
 
 ---
 
-## 4. Execution order (what I will do, in this order)
+## 4. Execution order
 
-1. **Wait** for the other agent's clean-room packages to land.
-2. **Verify 1.1**: obtain the original `my-whoop` sources, diff structure/naming/expression against the new
+1. Create a separate empty repository/history for the independent
+   implementation; do not push this repository's `main` into it.
+2. Give a behavior-only specification to an implementer who has not inspected
+   the restricted implementation.
+3. **Verify 1.1**: obtain the original `my-whoop` sources, diff structure/naming/expression against the new
    ones, confirm only facts survive. Record the comparison.
-3. **Verify 1.2**: per-file pass over `Strand/BLE` + `Strand/Collect`.
-4. **Run every gate**: iOS + macOS builds, macOS app suite, `StrandAnalytics`, Android
+4. **Verify 1.2**: per-file pass over `Strand/BLE` + `Strand/Collect`.
+5. **Run every gate**: iOS + macOS builds, macOS app suite, `StrandAnalytics`, Android
    `:app:testFullDebugUnitTest`, `Tools/release-legal-gate.py check`.
-5. **Then edit the text** — remove 1.1/1.2 from `ATTRIBUTION.md`, `NOTICE`, `DISCLAIMER.md`; keep 1.7
+6. **Then edit the text** — remove 1.1/1.2 from `ATTRIBUTION.md`, `NOTICE`, `DISCLAIMER.md`; keep 1.7
    intact; leave 1.3 alone until §2 is decided.
-6. **Add a gate** so this cannot silently drift: a test asserting TERMS ↔ LICENSE ↔ README agree on the
-   commercial posture (`Tools/release-legal-gate.py` currently checks only the dependency inventory).
-7. **Re-run all gates** and commit with the verification evidence in the message.
+7. Update `docs/provenance/rights-status.json` with the reviewed evidence. The
+   release gate now rejects missing blockers and removed provenance markers.
+8. **Re-run all gates** and commit with the verification evidence in the message.
 
 ---
 
-## 5. What I need from you at step 5
+## 5. Current blocker
 
-One line confirming the posture, because the docs must state something true:
-
-- **Noncommercial** → I revert the TERMS/DISCLAIMER drift and fix `TERMS.md:156`; shippable free today.
-- **Commercial** → I need §2 resolved (consent, or the new-repo route) before the docs can claim it.
-
-Until then the tree stays internally inconsistent on exactly one axis: TERMS no longer says
-"non-commercial", while `LICENSE` and `README.md:668` still do. It is recorded in
-`docs/handoff/RELEASE-BLOCKERS.md` §1 and is not a code defect.
+The commercial posture is selected, but §2 is not resolved. The independent
+repository must begin with independently authored or separately licensed code;
+copying this tree and deleting its references does not satisfy that requirement.
+The machine-readable state is
+`docs/provenance/rights-status.json`.

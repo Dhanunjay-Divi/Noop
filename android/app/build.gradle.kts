@@ -9,8 +9,7 @@ plugins {
 
 // Release signing is fail-closed. Credentials live in `keystore.properties` (git-ignored, never
 // committed) or the four NOOP_RELEASE_* environment variables used by CI. Debug builds continue
-// to use Gradle's per-machine debug key; the tracked historical fork-debug.keystore is deliberately
-// not referenced because its public credentials cannot establish a trusted update identity.
+// to use Gradle's per-machine debug key.
 val keystorePropsFile = rootProject.file("keystore.properties")
 val keystoreProps = Properties().apply {
     if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }

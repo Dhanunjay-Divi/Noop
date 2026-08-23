@@ -2,7 +2,7 @@
 """Refresh the homepage stat badges (docs/stats/*.json) from the live GitHub API.
 
 The README shows shields.io `endpoint` badges that read these public raw JSON files, so the
-stars/forks/issue counts etc. stay current. Run on a schedule or at release time.
+stars/issue counts etc. stay current. Run on a schedule or at release time.
 
 Reads counts from the GitHub API (https://api.github.com/repos/Dhanunjay-Divi/Noop)
 using the token
@@ -38,7 +38,6 @@ resolved=search_count("repo:Dhanunjay-Divi/Noop is:issue is:closed")
 write("docs/stats/release.json","latest",latest["tag_name"],"E8B84B")
 write("docs/stats/released.json","released",(latest.get("published_at") or "")[:10],"6B737B")
 write("docs/stats/stars.json","stars",repo.get("stargazers_count",0),"E8B84B")
-write("docs/stats/forks.json","forks",repo.get("forks_count",0),"6B737B")
 write("docs/stats/open.json","open issues",open_issues,"E8B84B")
 write("docs/stats/resolved.json","resolved",resolved,"C8902F")
 write("docs/stats/lastcommit.json","last commit",last,"6B737B")

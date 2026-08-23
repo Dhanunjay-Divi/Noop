@@ -296,10 +296,9 @@ owned-hardware accuracy.
   is the alternative. Private releases remain collaborator-only.
 - Android release and staging-release variants now fail closed without a private
   signing identity supplied through gitignored local configuration or four CI
-  secrets. The tracked `android/fork-debug.keystore` has public credentials and
-  is no longer used by Gradle or release workflows; it remains untrusted,
-  forgeable historical material. Local debug builds remain available but are
-  disposable and are not a distribution/update identity.
+  secrets. The historical shared debug keystore was removed from the current
+  tree. Local debug builds use per-machine identities, remain disposable, and
+  are not a distribution/update identity.
 - Moving existing `com.noop.whoop.staging` users from the historical public key
   to the private staging key is a signing-identity migration, not an in-place
   update. Testers must export and verify a backup before uninstalling the old

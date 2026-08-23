@@ -261,11 +261,8 @@ staging key stored in Actions secrets. Because the repository is private, its
 release URL also requires an authenticated collaborator; it is not an anonymous
 friend-download link.
 
-The tracked `android/fork-debug.keystore` is a historical artifact and is not
-used by Gradle or the release workflows. Its credentials are public, so APKs
-signed with it are forgeable and disposable, not a trusted update channel. Local
-debug builds use Gradle's per-machine debug identity and likewise must not be
-redistributed as trusted releases.
+No shared debug keystore is tracked. Local debug builds use Gradle's per-machine
+debug identity and must not be redistributed as trusted releases.
 
 This intentionally rotates away from the historical public signature. Android
 therefore will not install a new privately signed `com.noop.whoop.staging` APK as

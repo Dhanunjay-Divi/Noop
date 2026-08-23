@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "assessedAt": "2026-08-23",
+  "canonicalRepository": "https://github.com/Dhanunjay-Divi/Noop",
+  "intendedPosture": "commercial-independent",
+  "distributionStatus": "blocked",
+  "hosting": {
+    "localCheckoutLegacyRemoteDetached": true,
+    "githubForkRelationship": "standalone-verified",
+    "githubForkVerifiedAt": "2026-08-23",
+    "repositoryVisibility": "private",
+    "independentHistoryEstablished": false
+  },
+  "blockers": [
+    {
+      "id": "polyform-upstream-lineage",
+      "status": "unresolved",
+      "summary": "The current source and history derive from the PolyForm Noncommercial ryanbr/noop codebase."
+    },
+    {
+      "id": "unlicensed-whoop4-expression",
+      "status": "unresolved",
+      "summary": "The current protocol, store, and collection surface includes expression attributed to an upstream repository with no explicit software license."
+    },
+    {
+      "id": "contributor-relicensing-rights",
+      "status": "unresolved",
+      "summary": "The current multi-author history has no recorded CLA or complete set of commercial relicensing grants."
+    }
+  ],
+  "clearanceRequirements": {
+    "resolvedBlockerEvidence": [
+      "resolution route",
+      "affected source manifest",
+      "reviewed commit",
+      "independent reviewer",
+      "evidence location or digest"
+    ],
+    "allowedRoutes": [
+      "rights-holder-license",
+      "independent-replacement",
+      "removal"
+    ]
+  }
+}

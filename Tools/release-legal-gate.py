@@ -29,6 +29,57 @@ SERVER_LICENSE_PATHS = [
     ROOT / "server" / "LICENSE",
     ROOT / "server" / "backup" / "LICENSE",
 ]
+RIGHTS_STATUS_PATH = ROOT / "docs" / "provenance" / "rights-status.json"
+REQUIRED_RIGHTS_BLOCKERS = {
+    "polyform-upstream-lineage",
+    "unlicensed-whoop4-expression",
+    "contributor-relicensing-rights",
+}
+REQUIRED_REFERENCE_REPOSITORIES = {
+    "johnmiddleton12/wearable",
+    "ryanbr/noop",
+}
+UNRESOLVED_PROVENANCE_MARKERS = {
+    "LICENSE": (
+        "PolyForm Noncommercial License 1.0.0",
+        "Required Notice: Copyright 2026 NoopApp",
+    ),
+    "NOTICE": (
+        "ryanbr/noop",
+        "johnmiddleton12/my-whoop",
+        "Attribution is not permission",
+    ),
+    "ThirdPartyNotices/NOTICE.preamble.md": (
+        "ryanbr/noop",
+        "johnmiddleton12/my-whoop",
+        "Attribution is not permission",
+    ),
+    "ATTRIBUTION.md": (
+        "ryanbr/noop",
+        "johnmiddleton12/my-whoop",
+    ),
+    "README.md": (
+        "PolyForm Noncommercial License 1.0.0",
+        "ryanbr/noop",
+        "johnmiddleton12/my-whoop",
+    ),
+    "TERMS.md": (
+        "PolyForm Noncommercial",
+        "One inherited source lineage",
+        "licensed only for permitted non-commercial",
+    ),
+    "DISCLAIMER.md": (
+        "PolyForm Noncommercial",
+        "One inherited lineage",
+    ),
+}
+TERMS_VERSION_SOURCES = {
+    "TERMS.md": r"\*\*Version ([0-9]+\.[0-9]+)\*\*",
+    "Strand/App/Terms.swift": r'currentVersion = "([0-9]+\.[0-9]+)"',
+    "android/app/src/main/java/com/noop/ui/TermsGate.kt": (
+        r'CURRENT_VERSION = "([0-9]+\.[0-9]+)"'
+    ),
+}
 
 APPLE = {
     "grdb.swift": (
@@ -341,6 +392,149 @@ def render_notice(data: dict[str, object]) -> str:
     return "\n".join(chunks).rstrip() + "\n"
 
 
+def verified_rights_status() -> dict[str, object]:
+    if not RIGHTS_STATUS_PATH.is_file():
+        raise GateError(
+            "repository rights status is missing; deleting provenance state does not clear it"
+        )
+    data = json.loads(RIGHTS_STATUS_PATH.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise GateError("repository rights status must be a JSON object")
+    if data.get("schemaVersion") != 1:
+        raise GateError("unsupported repository rights-status schema")
+    if data.get("distributionStatus") not in {"blocked", "cleared"}:
+        raise GateError("rights status must declare distributionStatus blocked or cleared")
+
+    blockers = data.get("blockers")
+    if not isinstance(blockers, list):
+        raise GateError("rights status blockers must be a list")
+    by_id = {}
+    for blocker in blockers:
+        if not isinstance(blocker, dict) or not isinstance(blocker.get("id"), str):
+            raise GateError("every rights blocker must have a string id")
+        blocker_id = blocker["id"]
+        if blocker_id in by_id:
+            raise GateError(f"duplicate rights blocker: {blocker_id}")
+        if blocker.get("status") not in {"unresolved", "resolved"}:
+            raise GateError(f"invalid status for rights blocker: {blocker_id}")
+        by_id[blocker_id] = blocker
+
+    missing = REQUIRED_RIGHTS_BLOCKERS - set(by_id)
+    if missing:
+        raise GateError(
+            "required rights blockers were removed without resolution: "
+            + ", ".join(sorted(missing))
+        )
+
+    unresolved = [
+        blocker_id
+        for blocker_id, blocker in by_id.items()
+        if blocker["status"] == "unresolved"
+    ]
+    if unresolved:
+        for relative, markers in UNRESOLVED_PROVENANCE_MARKERS.items():
+            path = ROOT / relative
+            if not path.is_file():
+                raise GateError(
+                    f"required provenance document is missing: {relative}"
+                )
+            text = path.read_text(encoding="utf-8")
+            absent = [marker for marker in markers if marker not in text]
+            if absent:
+                raise GateError(
+                    f"{relative} removed unresolved provenance marker(s): "
+                    + ", ".join(absent)
+                )
+
+        references = json.loads(
+            (ROOT / "docs/reference-repositories.lock.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        repositories = (
+            references.get("repositories", references)
+            if isinstance(references, dict)
+            else references
+        )
+        if not isinstance(repositories, list):
+            raise GateError("reference repository lock must contain a repository list")
+        repository_names = {
+            item.get("repo")
+            for item in repositories
+            if isinstance(item, dict) and isinstance(item.get("repo"), str)
+        }
+        missing_repositories = REQUIRED_REFERENCE_REPOSITORIES - repository_names
+        if missing_repositories:
+            raise GateError(
+                "reference lock removed unresolved provenance repository entries: "
+                + ", ".join(sorted(missing_repositories))
+            )
+
+    for blocker_id, blocker in by_id.items():
+        if blocker["status"] != "resolved":
+            continue
+        evidence = blocker.get("evidence")
+        if not isinstance(evidence, dict):
+            raise GateError(
+                f"resolved rights blocker lacks structured evidence: {blocker_id}"
+            )
+        required_evidence = {
+            "route",
+            "affectedSourceManifest",
+            "reviewedCommit",
+            "independentReviewer",
+            "evidenceLocationOrDigest",
+        }
+        missing_evidence = required_evidence - set(evidence)
+        if missing_evidence:
+            raise GateError(
+                f"resolved rights blocker has incomplete evidence ({blocker_id}): "
+                + ", ".join(sorted(missing_evidence))
+            )
+        empty_evidence = [
+            key
+            for key in required_evidence
+            if not isinstance(evidence[key], str) or not evidence[key].strip()
+        ]
+        if empty_evidence:
+            raise GateError(
+                f"resolved rights blocker has empty evidence ({blocker_id}): "
+                + ", ".join(sorted(empty_evidence))
+            )
+        if evidence["route"] not in {
+            "rights-holder-license",
+            "independent-replacement",
+            "removal",
+        }:
+            raise GateError(f"invalid resolution route for rights blocker: {blocker_id}")
+
+    if data["distributionStatus"] == "cleared" and unresolved:
+        raise GateError(
+            "rights status cannot be cleared while blockers remain unresolved: "
+            + ", ".join(sorted(unresolved))
+        )
+    return data
+
+
+def verified_terms_version() -> str:
+    versions = {}
+    for relative, pattern in TERMS_VERSION_SOURCES.items():
+        path = ROOT / relative
+        if not path.is_file():
+            raise GateError(f"terms version source is missing: {relative}")
+        match = re.search(pattern, path.read_text(encoding="utf-8"))
+        if not match:
+            raise GateError(f"terms version is missing or invalid: {relative}")
+        versions[relative] = match.group(1)
+    unique = set(versions.values())
+    if len(unique) != 1:
+        detail = ", ".join(
+            f"{relative}={version}" for relative, version in sorted(versions.items())
+        )
+        raise GateError(f"terms acknowledgment versions disagree: {detail}")
+    return unique.pop()
+
+
 def checked_data() -> dict[str, object]:
     actual = inventory()
     if not INVENTORY_PATH.is_file():
@@ -367,30 +561,25 @@ def checked_data() -> dict[str, object]:
     dockerfile = (ROOT / "server/Dockerfile").read_text(encoding="utf-8")
     if "--require-hashes --requirement requirements.lock" not in dockerfile:
         raise GateError("server image is not installing the exact hash-locked runtime")
+    verified_rights_status()
+    verified_terms_version()
     return actual
 
 
 def distribution_gate() -> None:
     checked_data()
-    references = json.loads(
-        (ROOT / "docs/reference-repositories.lock.json").read_text(encoding="utf-8")
+    rights_status = verified_rights_status()
+    unresolved = sorted(
+        blocker["id"]
+        for blocker in rights_status["blockers"]
+        if blocker["status"] == "unresolved"
     )
-    repositories = (
-        references.get("repositories", references)
-        if isinstance(references, dict)
-        else references
-    )
-    inherited = [
-        item
-        for item in repositories
-        if "johnmiddleton12/" in item.get("repo", "")
-        and item.get("license") == "NOASSERTION"
-    ]
-    if inherited:
+    if rights_status["distributionStatus"] != "cleared" or unresolved:
+        details = ", ".join(unresolved) if unresolved else "manual clearance pending"
         raise GateError(
-            "DISTRIBUTION BLOCKED: inherited johnmiddleton12 WHOOP 4 expression has no explicit "
-            "software license. Obtain a rights-holder license or independently replace and audit "
-            "that expression; repository-owner permission cannot waive third-party rights."
+            "DISTRIBUTION BLOCKED: repository independence is not established "
+            f"({details}). A new remote, fork detachment, renamed history, or deleted attribution "
+            "does not grant source rights; resolve the recorded blockers with reviewed evidence."
         )
 
 

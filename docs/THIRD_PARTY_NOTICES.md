@@ -40,7 +40,7 @@ fails intentionally. The active base describes WHOOP 4 protocol/store and
 collection expression as inherited from `johnmiddleton12/my-whoop` (now
 `johnmiddleton12/wearable`), whose pinned repository has no explicit software
 license. Attribution cannot create redistribution permission, and permission
-from this fork's owner cannot grant a third party's rights.
+from this codebase's owner cannot grant a third party's rights.
 
 Both artifact-publishing workflows run this fail-closed gate before they create
 or replace a release. To remove the gate legitimately, obtain an explicit

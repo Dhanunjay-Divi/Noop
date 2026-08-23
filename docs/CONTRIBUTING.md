@@ -570,7 +570,7 @@ Contributions toward these are welcome — open an issue to coordinate first.
   the shared packages' behavior.
 - **Android (shipped).** A full, native Kotlin/Gradle client lives under `android/`, re-implementing
   the same wire protocol against Android's BLE stack — it pairs, offloads, persists and scores
-  on-device, and imports WHOOP / Apple Health / Health Connect. This fork is
+  on-device, and imports WHOOP / Apple Health / Health Connect. This codebase is
   currently build-from-source; its future artifacts will be published under
   [`Dhanunjay-Divi/Noop` Releases](https://github.com/Dhanunjay-Divi/Noop/releases).
   Continued real-hardware testing across more devices is always welcome

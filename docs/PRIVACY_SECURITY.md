@@ -891,7 +891,7 @@ hardware the user owns, used for interoperability:
   collection layer are adapted from.
 - **`b-nnett/goose`** — published observed WHOOP 5.0 protocol facts (the
   `fd4b0001-…` service family, the CRC16-Modbus header, and the "puffin" packet
-  types). Its repository has no explicit software license; this fork copies none
+  types). Its repository has no explicit software license; this codebase copies none
   of its source or assets.
 - **`groue/GRDB.swift`** — the SQLite persistence layer.
 - **`weichsel/ZIPFoundation`** — the archive reader used by the importers.

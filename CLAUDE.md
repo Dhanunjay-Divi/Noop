@@ -116,7 +116,7 @@ xcodegen generate && xcodebuild -project Strand.xcodeproj -scheme Strand \
 | `swift-packages.yml` | `swift test` for **`Packages/**` only** (WhoopProtocol, WhoopStore, StrandAnalytics, StrandImport, StrandDesign, NoopLocalAccess) | macos-15 | **active** |
 | `app-build.yml` | **Compile-only** of the **app targets** (`Strand` macOS + `NOOPiOS` iOS). iOS leg needs **macos-26** (iOS 26 SDK / `glassEffect`). | macos-15 / macos-26 | **disabled** (on-demand) |
 | `android.yml` | `assembleFullDebug` + `testFullDebugUnitTest` | ubuntu | **disabled** (compile Android locally) |
-| `fork-testing-build.yml` / `fork-release.yml` | Legacy-named staging / community-release builds (apk + mac + ios) | — | on dispatch |
+| `testing-build.yml` / `release.yml` | Staging / community-release builds (apk + mac + ios) | — | on dispatch |
 
 **The trap:** `swift-packages` does **NOT** compile the app targets. So if you touch **app-target
 Swift** — anything under `Strand/`, `StrandiOS/`, `StrandiOSShared/`, `StrandiOSWidgets/` (Views,

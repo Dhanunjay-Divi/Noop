@@ -133,11 +133,8 @@ review requirements still apply. Every release path, including `-PplayRelease`, 
 unless the private signing configuration above is present.
 
 Ordinary local debug builds still work without release secrets and use Gradle's
-per-machine debug identity. The tracked `fork-debug.keystore` is retained only as
-a historical artifact and is no longer referenced by Gradle or release workflows:
-its credentials are public, so any APK bearing that signature is forgeable and
-must be treated as disposable. It cannot be a trusted update or production
-identity.
+per-machine debug identity. No shared debug keystore is tracked. Debug APKs are
+disposable and cannot be a trusted update or production identity.
 
 Changing away from the historical public signature means a privately signed
 `com.noop.whoop.staging` APK cannot update an older public-key staging install.

@@ -1,6 +1,6 @@
 # NOOP — Terms of Use & Acknowledgment
 
-**Version 2.2**
+**Version 2.3**
 
 > **This is not legal advice.** This document was drafted with the help of an AI tool, not a lawyer.
 > It is offered honestly and in good faith, but the NOOP maintainers are not lawyers and nothing here
@@ -16,9 +16,14 @@ remove it.
 
 ## 1. What NOOP is — and who provides it
 
-NOOP is an independent, local-first application for macOS, Android and iOS
+This reference NOOP codebase is an unofficial, non-commercial, local-first application for macOS, Android and iOS
 that can read supported wearables and health stores. Its core database stays on your device by default;
 NOOP does not require a NOOP account or automatic NOOP-operated cloud storage.
+
+The current source and builds are licensed only for permitted non-commercial
+purposes under `LICENSE` and are not cleared for commercial distribution. A
+future commercial NOOP product must come from independently authored or
+separately licensed code and will publish its own reviewed terms.
 
 **NOOP Band is in development and is not available yet.** Until NOOP Band is announced ready,
 current direct-band support interoperates with compatible third-party WHOOP hardware owned by the
@@ -35,7 +40,7 @@ NOOP is currently maintained by its project maintainers and contributors, referr
 
 ## 2. Current third-party hardware compatibility
 
-NOOP is developed independently. It is **not affiliated with, endorsed by, sponsored by, or connected
+NOOP is developed independently of WHOOP, Inc. It is **not affiliated with, endorsed by, sponsored by, or connected
 to WHOOP, Inc. in any way.** "WHOOP" is a trademark of WHOOP, Inc., used here only
 **descriptively (nominative fair use)** to identify the third-party hardware NOOP interoperates with —
 never to suggest origin, sponsorship, or endorsement, and never as NOOP's own brand. All other
@@ -111,7 +116,8 @@ law that applies to you** — for example, liability for death or personal injur
 or for fraud. Where a limitation above is not permitted by your local law, it applies only to the
 fullest extent that law allows, and the rest of these terms remain in effect.
 
-Because this is early-access software and the third-party interoperability path is clearly disclosed,
+Because this is early-access software distributed on a non-commercial basis and
+the third-party interoperability path is clearly disclosed,
 you accept that this allocation of risk is reasonable.
 
 ## 7. Your acknowledgment
@@ -153,5 +159,6 @@ apply. A failure to enforce any part is not a waiver of it.
 
 ---
 
-*NOOP is free, local-first, and independent. Thank you for using it responsibly. See also `LICENSE`
-(PolyForm Noncommercial) and `DISCLAIMER.md`.*
+*This NOOP build is non-commercial, local-first, and independent of WHOOP, Inc. Thank you for
+using it responsibly. See also `LICENSE` (PolyForm Noncommercial) and
+`DISCLAIMER.md`.*

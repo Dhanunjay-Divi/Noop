@@ -1,4 +1,4 @@
-# One on-demand community testing build that publishes all platforms into one draft candidate.
+# One on-demand testing build that publishes all platforms into one draft candidate.
 #
 # A `meta` job creates one run-specific DRAFT candidate, then the android / macOS / iOS jobs each
 # attach their artifact to that candidate. Only after every build passes and the complete asset set

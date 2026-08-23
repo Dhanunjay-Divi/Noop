@@ -36,7 +36,7 @@ Project lineage and interoperability research
 ---------------------------------------------
 
 ryanbr/noop — https://github.com/ryanbr/noop
-  This repository forks that active PolyForm Noncommercial codebase. Its Git
+  This codebase derives from that active PolyForm Noncommercial codebase. Its Git
   history, license, Required Notice (`Copyright 2026 NoopApp`), and contributor
   attribution are preserved.
 

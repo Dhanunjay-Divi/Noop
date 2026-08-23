@@ -2,8 +2,12 @@
 
 **Assessed:** 2026-08-23
 **Commit:** `main` @ the consolidation merge (see `git log -1`)
-**Verdict:** engineering gates are **green**. There is **one non-engineering blocker** (§1) that only the
-owner can clear, and it is the thing standing between this build and a paid/commercial release.
+**Verdict:** engineering gates are **green**. Commercial distribution is
+blocked by the three unresolved rights entries in
+`docs/provenance/rights-status.json`.
+
+Current continuation instructions:
+[`AGENT-HANDOFF-20260823.md`](AGENT-HANDOFF-20260823.md).
 
 ---
 
@@ -23,9 +27,11 @@ JDK 17 and the SDK were present at `~/Library/Android/sdk`; export `ANDROID_HOME
 
 ---
 
-## 1. BLOCKER — the licence does not permit the commercial posture the docs now take
+## 1. BLOCKER — the current licence does not permit commercial distribution
 
-**This is not a bug and I did not "fix" it. It is an owner decision, and probably a lawyer's.**
+The owner selected a commercially independent product, with this tree retained
+as the non-commercial reference codebase. Qualified counsel still needs to
+review the completed provenance evidence and commercial terms.
 
 What is true in the tree right now:
 
@@ -33,16 +39,15 @@ What is true in the tree right now:
 |---|---|
 | `LICENSE` | **PolyForm Noncommercial License 1.0.0** ("Copyright 2026 NoopApp"); 7 noncommercial references |
 | `README.md:668` | "**Keep it non-commercial** … PolyForm Noncommercial — mirror and use freely, **just don't sell it or ship it in a paid product**" |
-| `TERMS.md` §1 (**changed this session**) | "NOOP is a free, independent, **non-commercial**, local-first application" → "NOOP is an independent, local-first application" |
-| `TERMS.md` §risk (**changed**) | "Because NOOP is provided **free of charge, on a non-commercial basis**…" → "Because this is **early-access software**…" |
-| `TERMS.md` §1 (**changed**) | "published anonymously by an **unpaid hobbyist** maintainer" → "maintained by its project maintainers" |
-| `TERMS.md:156` (**left behind**) | still says "NOOP is **free**, local-first, and independent" — now contradicts its own §1 |
-| `DISCLAIMER.md` (**changed**) | dropped "non-commercial project by an individual hobbyist" |
-| `README`, `docs/CONTRIBUTING.md:585`, `docs/PRIVACY_SECURITY.md:875` | **still** describe NOOP as non-commercial / hobbyist |
+| `TERMS.md` 2.3 | This codebase is non-commercial and not cleared for commercial distribution |
+| Apple and Android terms gates | Both require acknowledgment version `2.3`; CI verifies parity |
+| `DISCLAIMER.md` | PolyForm Noncommercial applies to this tree's original work |
+| `README`, `docs/CONTRIBUTING.md`, `docs/PRIVACY_SECURITY.md` | Describe this reference codebase as non-commercial |
 | `codex/day4-sync-performance` (**merged in**) | "Prepare first App Store preview release" |
 
-So the terms have been quietly repositioned toward a commercial product while the licence that governs the
-code still forbids selling it, and the rest of the docs still say "non-commercial". Those cannot all be true.
+The earlier Terms/README mismatch was corrected in the repository-independence
+pass. This makes the current tree internally consistent; it does not grant
+commercial rights.
 
 ### The harder half — inherited code you may not have permission to sell
 
@@ -58,28 +63,39 @@ licence is not yours to relicense**, and "no licence" means no permission to red
 commercially. A free App Store listing is a weaker version of the same question; a paid product or bundled
 hardware makes it sharper.
 
-**Scope (corrected 2026-08-23):** the inherited surface is `Packages/WhoopProtocol/Sources` (6,425 lines) +
-`Packages/WhoopStore/Sources` (9,555 lines) = **15,980 lines of source**, plus a per-file assessment of
-`Strand/BLE` (12,154) and `Strand/Collect` (1,510). An earlier figure of ~209,000 lines in this document's
-history was wrong: it counted `.build/checkouts/` SwiftPM dependencies (GRDB and friends), which are not
-inherited code. A rewrite is a finite project, and every BLE UUID, frame layout, CRC parameter and byte
-offset is reusable free of charge because those are uncopyrightable facts (as `LICENSE` already states).
+**Scope (corrected 2026-08-23):** the **known minimum** replacement core is
+`Packages/WhoopProtocol/Sources` (6,425 Swift lines) plus
+`Packages/WhoopStore/Sources` (9,555 Swift lines), or **15,980 lines**. The
+complete classification surface also includes `Strand/BLE` (12,154),
+`Strand/Collect` (1,510), Android protocol (4,369 Kotlin lines), and Android BLE
+(15,155). That is a review ceiling of **49,168 source lines across 154 files**;
+some transport files may prove independently developed, but that must be shown
+file by file. Tests and fixtures require the same provenance treatment. An
+earlier ~209,000-line figure counted `.build/checkouts/` dependencies and was
+wrong. Observable wire constants can be documented independently, but source
+expression must not be copied.
 
 A rewrite of those packages does **not** by itself clear the fork lineage: the app is multi-author under
 PolyForm Noncommercial with no CLA. See `docs/handoff/OWNERSHIP-CLEANUP-CHECKLIST.md` §2.
 
 ### What must happen before a commercial release
 
-1. **Decide the posture**: stay noncommercial (revert the TERMS wording) *or* go commercial (then §2 below).
-2. If commercial: **establish provenance for the inherited `my-whoop`/`wearable` code** — obtain a licence,
+1. Keep this reference tree non-commercial under its existing terms.
+2. For the separate commercial implementation, **establish provenance for the
+   inherited `my-whoop`/`wearable` behavior** — obtain a licence,
    or clean-room reimplement the adapted parts, or remove them.
-3. Re-licence NOOP's own code deliberately (a new `LICENSE`, not silence).
-4. Make every doc consistent: `TERMS.md:156`, `README.md:627/646/650/668`, `docs/CONTRIBUTING.md:585`,
-   `docs/PRIVACY_SECURITY.md:875`, `DISCLAIMER.md`.
-5. Add a gate so this cannot drift again — `Tools/release-legal-gate.py` verifies the **dependency**
-   inventory but does **not** check TERMS ↔ LICENSE ↔ README coherence. It should.
+3. Give the independently authored commercial repository its own deliberately
+   chosen licence and counsel-reviewed terms.
+4. Record contributor grants or independent replacement evidence for every
+   affected component, not only the protocol packages.
+5. Keep the new repository-rights gate green. It now rejects missing blockers,
+   deleted provenance entries, and removed markers while rights remain
+   unresolved.
+6. Put the commercial implementation in a genuinely new history containing
+   only independently authored or separately licensed code. Changing `origin`
+   is hosting migration, not source clearance.
 
-**Until 1–4 are done, the honest release channel is a free, noncommercial distribution.**
+**Until 2–4 are done, this tree is not a commercial release candidate.**
 
 ---
 
@@ -115,42 +131,15 @@ PolyForm Noncommercial with no CLA. See `docs/handoff/OWNERSHIP-CLEANUP-CHECKLIS
 
 ---
 
-## 4. Branch consolidation
+## 4. Repository migration
 
-Everything now lives on **`main`**. Fully contained in it (safe to delete):
+The local `origin` now targets
+`https://github.com/Dhanunjay-Divi/Noop.git`. Cached remote-tracking refs from
+the prior server were removed. Authenticated GitHub inspection verified
+the private canonical repository reports `isFork=false`, has no parent, and has
+zero child forks.
 
-```
-origin/codex/day4-sync-performance             origin/codex/public-beta-feedback
-origin/codex/noop-production-handoff-20260823  origin/codex/reference-integration
-origin/ui-v2
-```
-
-Deliberately **not** merged:
-
-| Branch | Why |
-|---|---|
-| `origin/codex/noop` | **Unrelated history** (no merge base) and explicitly archived — tip is "docs: archive project", 2026-07-23. Merging would graft a foreign 1,869-commit lineage. |
-| `origin/codex/noop-fullstack` | Stale: merge-base *and* tip are both 2026-07-24 while this line moved 42 commits since. Dry-run merge produced **89 conflicts**. Its server work appears superseded (`server/app/safety_repository.py`, migrations 005–007, current test suite). If anything there is still wanted — `server/tests/test_api.py` is the one file with no obvious successor — cherry-pick it deliberately. |
-
-Optional cleanup (**destructive to shared refs — run only if you agree**; SHAs recorded above so any can be
-restored):
-
-```bash
-git push origin --delete codex/day4-sync-performance codex/public-beta-feedback \
-                          codex/reference-integration ui-v2
-```
-
-Keep `codex/noop` (archive) and `codex/noop-fullstack` (unmerged) until §4 is decided.
-
-### Recorded branch tips (2026-08-23) — restore any deleted branch with these
-
-```
-origin/codex/day4-sync-performance                 b82c4da277266cd54df039559af27c9c46682aa3
-origin/codex/noop                                  33cea3fd88412486b91fc693970329fb484a4600
-origin/codex/noop-fullstack                        49ada8e5fc5af9c0b64de680ef2bcc6c57a32ae2
-origin/codex/noop-production-handoff-20260823      6ca08b577a941abf756b10a51334978818c579c0
-origin/codex/public-beta-feedback                  9bb157a292882d7cb9c47b935af3fdb0c738c942
-origin/codex/reference-integration                 d2b201c5e9cb4e3616dec89cd262c99bf6e7d045
-origin/main                                        849fc99bd8f86df9713ba9f44722a4de0383be1f
-origin/ui-v2                                       332583d6ac5ff984827ea01e30f356021f51985f
-```
+Do not push this inherited `main` into an empty repository intended to be the
+commercial clean codebase. Follow
+`docs/REPOSITORY_INDEPENDENCE.md` and keep this checkout as the auditable
+reference until an independent implementation and rights review are complete.

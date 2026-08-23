@@ -401,7 +401,7 @@ NOOP's BLE protocol work builds on community reverse-engineering of the WHOOP st
 
 - **johnmiddleton12/my-whoop** — WHOOP 4.0 protocol.
 - **b-nnett/goose** — observed WHOOP 5.0 protocol facts; no source or assets
-  from its unlicensed repository are copied by this fork.
+  from its unlicensed repository are copied by this codebase.
 
 See [`ATTRIBUTION.md`](../ATTRIBUTION.md) for full credits and [`DISCLAIMER.md`](../DISCLAIMER.md) for
 the non-affiliation and not-a-medical-device notice.

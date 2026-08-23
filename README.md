@@ -681,6 +681,7 @@ The repository's own license cannot grant rights held by third-party authors.
 - [`docs/FEATURE_PARITY.md`](docs/FEATURE_PARITY.md) — honest WHOOP capability comparison, gaps, and parallel-reference workflow.
 - [`docs/COMPETITIVE_CAPABILITY_AUDIT.md`](docs/COMPETITIVE_CAPABILITY_AUDIT.md) — measured-versus-derived comparison for WHOOP, Oura, RingConn, and Hume, with evidence and release gates.
 - [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md) — verified code status and the hardware, carrier, study, signing, store, and regulatory gates that code alone cannot close.
+- [`docs/REPOSITORY_INDEPENDENCE.md`](docs/REPOSITORY_INDEPENDENCE.md) — canonical-host migration, commercial provenance status, and the evidence required before attribution can change.
 - [`docs/DEVICE_SUPPORT_ROADMAP.md`](docs/DEVICE_SUPPORT_ROADMAP.md) — source-by-source live, platform-bridge, and owner-import support boundaries.
 - [`server/README.md`](server/README.md) — deploy, secure, back up, export, and operate the optional self-hosted service.
 - [`server/SAFETY.md`](server/SAFETY.md) — configure, stage, monitor, and test acknowledged Safety Network paging.
