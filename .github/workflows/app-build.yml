@@ -1,11 +1,8 @@
 # Build and test verification for the macOS and iOS app targets.
 #
-# Why this exists: the iOS app is a build-from-source community port (no App Store —
-# NOOP stays anonymous), so it isn't exercised on a device by the maintainer. This job
-# compiles both app targets on every relevant change so a shared-code change can't
-# silently break iOS (or regress macOS). It is anonymity-safe: CODE_SIGNING_ALLOWED=NO,
-# no secrets, no signing identity, no artifacts uploaded — it only checks that it builds.
-# (The shipped macOS .app is still produced and anonymized by hand; this is a compile gate.)
+# This job compiles both app targets on every relevant change so a shared-code
+# change cannot silently break iOS or regress macOS. It is a compile-only gate:
+# CODE_SIGNING_ALLOWED=NO, no secrets, no signing identity, and no uploaded artifacts.
 name: App build (macOS + iOS)
 
 on:
@@ -55,8 +52,8 @@ jobs:
             extra_args: 'ARCHS="x86_64 arm64" ONLY_ACTIVE_ARCH=NO'
             runner: macos-15
           # iOS needs the iOS 26 SDK (Liquid Glass's `glassEffect`, landed 2026-07-07) which macos-15's
-          # default Xcode doesn't ship — matches the runner fork-testing-build.yml / fork-release.yml
-          # already use for their NOOPiOS legs. macos-15 stays correct for the macOS/Strand leg above.
+          # default Xcode doesn't ship — matches the runner used by the community packaging
+          # workflows for their NOOPiOS legs. macos-15 stays correct for the macOS/Strand leg above.
           - scheme: NOOPiOS
             destination: 'generic/platform=iOS Simulator'
             extra_args: ''
@@ -99,6 +96,7 @@ jobs:
           test
 
   # Fork-only housekeeping: on-demand app-build runs are dispatched from disposable `ci/<name>` branches
+  # Repository housekeeping: on-demand app-build runs may use disposable `ci/<name>` branches
   # (a PR's content pushed somewhere the workflow can run). Once the build finishes (pass OR fail —
   # always()), delete that branch so GitHub's "Compare & pull request" banner doesn't linger after each
   # run. Guarded to ci/-prefixed BRANCH refs only — a dispatch from main or any real branch is untouched.

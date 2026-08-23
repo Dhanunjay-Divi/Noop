@@ -6,7 +6,7 @@
 	<string>$(APP_GROUP_ID)</string>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>$(PRODUCT_BUNDLE_IDENTIFIER).debugexport</string>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER).diagnosticexport</string>
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER).refresh</string>
 	</array>
 	<key>CFBundleDevelopmentRegion</key>
@@ -53,6 +53,16 @@
 	<string>public.app-category.healthcare-fitness</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NOOPLaunchGateIterations</key>
+	<string>$(NOOP_LAUNCH_GATE_ITERATIONS)</string>
+	<key>NOOPLaunchGateRequired</key>
+	<string>$(NOOP_LAUNCH_GATE_REQUIRED)</string>
+	<key>NOOPLaunchGateSaltHex</key>
+	<string>$(NOOP_LAUNCH_GATE_SALT_HEX)</string>
+	<key>NOOPLaunchGateVerifierHex</key>
+	<string>$(NOOP_LAUNCH_GATE_VERIFIER_HEX)</string>
+	<key>NOOPLaunchGateVersion</key>
+	<string>$(NOOP_LAUNCH_GATE_VERSION)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
@@ -62,22 +72,22 @@
 	<string>NOOP connects directly to your wearable and standards-compatible Bluetooth health devices, including an explicitly paired weight scale, to store sensor data locally. It uploads decoded data only if you explicitly enable your own self-hosted server.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>NOOP uses the camera only while you explicitly scan a food barcode. Images and video are processed on-device and are not stored.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>NOOP uses the microphone only while you explicitly dictate a Coach question or journal draft. Audio is transcribed by the system and is not stored by NOOP.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>NOOP uses system speech recognition only while you explicitly dictate a Coach question or journal draft.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>NOOP reads your Apple Health data to compute metrics locally. It uploads derived records only if you explicitly enable your own self-hosted server.</string>
+	<string>NOOP reads your Apple Health data to compute your metrics locally on this device. Nothing leaves the device unless you turn it on yourself: derived records go to your own self-hosted server only if you enable it, and a short text summary of your metrics goes to the AI provider you choose only after you add your own API key and allow it.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>NOOP writes the metrics it computes from your strap back into Apple Health, on-device and only when you allow it.</string>
+	<string>NOOP writes the metrics it computes from your band back into Apple Health, along with workouts and sleep sessions, on-device and only when you allow it.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>NOOP connects to a self-hosted server on your local network only when you configure and enable that optional sync.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>NOOP uses location when you enable Today weather, record an outdoor-workout route, prepare a safety message, or explicitly send an SOS page. Safety location is shared only for the active page.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>When you explicitly enable the band SOS gesture, Always location access lets NOOP keep the latest location fix available to your accepted contacts while an SOS page is active. NOOP retains no route history and stops sharing when the page ends.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>NOOP uses location when you enable Today weather, record an outdoor-workout route, prepare a safety message, or explicitly send an SOS page. Safety location is shared only for the active page.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>NOOP uses the microphone only while you explicitly dictate a Coach question or journal draft. Audio is transcribed by the system and is not stored by NOOP.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>NOOP reads your iPhone's step count for activity summaries. It uploads derived records only if you explicitly enable your own self-hosted server.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>NOOP uses system speech recognition only while you explicitly dictate a Coach question or journal draft.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>OURA_CLIENT_ID</key>

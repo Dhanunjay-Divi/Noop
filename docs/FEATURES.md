@@ -7,8 +7,9 @@ and computes its own daily scores locally — **Recovery**, **Effort**, and **Sl
 alongside HRV and the raw signals.
 These are honest approximations from published methods, **not WHOOP's scores**. The macOS app (in `Strand/`) is the
 reference implementation; Android (in `android/`) is a full native app; and iOS
-ships as the `NOOPiOS` target. This fork is currently build-from-source on all
-three platforms (see [build instructions](BUILD.md) and [iOS notes](IOS.md)).
+ships as the `NOOPiOS` target. Development builds are available from source on
+all three platforms; public binaries require the applicable release and
+redistribution gates (see [build instructions](BUILD.md) and [iOS notes](IOS.md)).
 iOS shares NOOP's analysis code, so its results match
 macOS; it is newer and less battle-tested, with live BLE on a physical iPhone not yet fully
 validated.
@@ -24,7 +25,7 @@ NOOP is built on community interoperability and protocol-documentation work, wit
 | Project | Contribution |
 | --- | --- |
 | [`johnmiddleton12/my-whoop`](https://github.com/johnmiddleton12/my-whoop) | WHOOP 4.0 BLE protocol — framing, commands, decoding |
-| [`b-nnett/goose`](https://github.com/b-nnett/goose) | Observed WHOOP 5.0 / MG BLE protocol facts; no source/assets copied |
+| [`b-nnett/goose`](https://github.com/b-nnett/goose) | Observed WHOOP 5.0 / MG BLE protocol facts; unlicensed lineage remains under distribution-rights review |
 | [`groue/GRDB.swift`](https://github.com/groue/GRDB.swift) | On-device SQLite persistence |
 
 ---

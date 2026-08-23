@@ -51,15 +51,12 @@
 
 ## Build and run
 
-Source builds are the canonical, most trustworthy distribution. Community-signed
-artifacts may also appear under
-[`Dhanunjay-Divi/Noop` Releases](https://github.com/Dhanunjay-Divi/Noop/releases).
-Verify that an artifact URL belongs to that repository; older `ryanbr/noop`
-artifacts are upstream builds and do not contain this fork's self-hosted sync
-and comparison work. While this repository is private, its release page and
-assets require an authenticated collaborator; those URLs are not an anonymous
-friend-install channel, and its raw AltStore manifest cannot be fetched by a
-sideloader.
+Source builds are currently the canonical distribution. App Store distribution
+must remain disabled until every signing, privacy, physical-device, and
+redistribution gate in
+[`docs/APP_STORE_RELEASE.md`](docs/APP_STORE_RELEASE.md) passes. When builds are
+published, use only artifacts linked from the canonical
+[`Dhanunjay-Divi/Noop` repository](https://github.com/Dhanunjay-Divi/Noop).
 
 Want to test a downloadable build against WHOOP or another wearable? Read the
 [beta testing guide](docs/BETA_TESTING.md), then submit aggregate,
@@ -74,9 +71,8 @@ person's data.
 | **Android** | `cd android && ./gradlew assembleFullDebug` | Android 8+; install the generated debug APK on a real Bluetooth-capable device. |
 | **iOS** | Generate the project and run the `NOOPiOS` scheme | iOS 17+ on a real iPhone; select your own signing team. |
 
-See [`docs/BUILD.md`](docs/BUILD.md) and [`docs/IOS.md`](docs/IOS.md). The
-[active upstream project](https://github.com/ryanbr/noop) has its own release
-channel, but those artifacts are upstream builds and are not this fork.
+See [`docs/BUILD.md`](docs/BUILD.md), [`docs/IOS.md`](docs/IOS.md), and the
+[`App Store release gates`](docs/APP_STORE_RELEASE.md).
 
 Collection and analysis work **offline**. Data-bearing network features are
 separate opt-ins: the **AI Coach** uses your own provider/key, **Oura cloud
@@ -246,8 +242,8 @@ import required.
 | Platform | Status |
 |---|---|
 | **macOS** | ✅ Full app (`Strand/`, SwiftUI, macOS 13+). Pairs over BLE, offloads the strap's history, and scores recovery / strain / sleep on-device. The complete feature set above runs here. |
-| **Android** | ✅ Full app (`android/`, Jetpack Compose, Android 8+). Pairs over BLE, persists and scores on-device, and imports WHOOP / Apple Health / Health Connect. Build from source or use the clearly labeled staging artifact on this fork's Releases page. |
-| **iOS** | 📲 Build and sign the `NOOPiOS` target yourself, or re-sign this fork's unsigned community IPA when available (see [docs/IOS.md](docs/IOS.md)). It shares the cross-platform Swift packages, so scoring matches macOS. Newer and less battle-tested than macOS/Android; live BLE on a real iPhone is still being validated, and Apple Health plus Live Activity widgets can be limited under a free signing identity. |
+| **Android** | ✅ Full app (`android/`, Jetpack Compose, Android 8+). Pairs over BLE, persists and scores on-device, and imports WHOOP / Apple Health / Health Connect. Build from source or use a clearly labeled artifact from the canonical Releases page after its release gates pass. |
+| **iOS** | 📲 Build and sign the `NOOPiOS` target yourself for development. App Store archives must not be uploaded until every gate in [docs/APP_STORE_RELEASE.md](docs/APP_STORE_RELEASE.md) passes. It shares the cross-platform Swift packages, so scoring matches macOS. Newer and less battle-tested than macOS/Android; live BLE on a real iPhone is still being validated, and Apple Health plus Live Activity widgets can be limited under a free signing identity. |
 
 ### Strap support
 
@@ -602,18 +598,20 @@ backup/export.
 NOOP stands on community interoperability and protocol-documentation work. With
 thanks:
 
-- **[`ryanbr/noop`](https://github.com/ryanbr/noop)** — the active cross-platform
-  NOOP base this repository forks, with its license, history, and contributor
-  attribution preserved.
+- **[`ryanbr/noop`](https://github.com/ryanbr/noop)** — the cross-platform
+  source baseline from which this codebase derives, with its license, history,
+  and contributor attribution preserved.
 - **[`tigercraft4/goose`](https://github.com/tigercraft4/goose)** — the
-  self-hosting direction that inspired this fork's independently implemented
+  self-hosting direction that inspired NOOP's independently implemented
   server and client sync. No source from that repository is copied here.
 - **`johnmiddleton12/my-whoop`** — the WHOOP 4.0 BLE protocol; the `WhoopProtocol`
   and `WhoopStore` packages and the collection logic are adapted from this work.
 - **[`b-nnett/goose`](https://github.com/b-nnett/goose)** — documented observed
   WHOOP 5.0 / MG interoperability facts (the `fd4b0001-…` service family,
   CRC16-Modbus header, and "puffin" packet types). Its repository has no explicit
-  software license; this fork copies none of its source or assets.
+  software license. See [`ATTRIBUTION.md`](ATTRIBUTION.md) for exact provenance
+  and [`docs/reference-repositories.lock.json`](docs/reference-repositories.lock.json)
+  for the pinned audit record.
 - **`groue/GRDB.swift`** — SQLite persistence.
 - **`weichsel/ZIPFoundation`** — export unzipping.
 
@@ -650,34 +648,34 @@ a proper software license with patent terms; it is deliberately *not* an OSI
 non-commercial nature rules out.)
 
 The license covers NOOP's own original code and docs. Third-party source remains
-under its own terms; NOOP's protocol implementation uses independently observed
-interoperability facts. Bundled dependencies keep their own licenses (GRDB.swift
-and ZIPFoundation are MIT — see
+under its own terms; review [`ATTRIBUTION.md`](ATTRIBUTION.md), [`NOTICE`](NOTICE),
+and the release legal gate before redistribution. Bundled dependencies keep
+their own licenses (GRDB.swift and ZIPFoundation are MIT — see
 [`NOTICE`](NOTICE)). By opening a pull request you agree your contribution is licensed
 under the same terms — see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
 
-### Mirroring & forking
+### Source redistribution
 
-NOOP is public and built to be hard to erase. **Clone it freely** —
-`git clone https://github.com/Dhanunjay-Divi/Noop.git` — and you're welcome to
-**mirror or fork it** to Codeberg, GitLab or your own server. More copies make
-the project more resilient.
+Private development clones do not by themselves grant redistribution rights.
+Before publishing a source mirror or binary, run
+`python3 Tools/release-legal-gate.py distribution` and resolve every reported
+third-party provenance or license blocker.
 
-Two simple asks:
+Where redistribution is authorized:
 
-- **Keep it non-commercial** and keep the [`LICENSE`](LICENSE) + `Copyright 2026 NoopApp` notice intact (PolyForm Noncommercial — mirror and use freely, just don't sell it or ship it in a paid product).
-- **Point people back to this fork's canonical home,
-  [github.com/Dhanunjay-Divi/Noop](https://github.com/Dhanunjay-Divi/Noop)**.
-  Its active upstream base remains
-  [github.com/ryanbr/noop](https://github.com/ryanbr/noop).
+- **Keep it non-commercial** and retain the [`LICENSE`](LICENSE), [`NOTICE`](NOTICE),
+  [`ATTRIBUTION.md`](ATTRIBUTION.md), and copyright notices.
+- **Identify the canonical project home:**
+  [github.com/Dhanunjay-Divi/Noop](https://github.com/Dhanunjay-Divi/Noop).
 
-That's it — copy away.
+The repository's own license cannot grant rights held by third-party authors.
 
 ---
 
 ## Docs
 
 - [`CHANGELOG.md`](CHANGELOG.md) — release history and what to expect (also shown in-app under **What's new**).
+- [`docs/ops/README.md`](docs/ops/README.md) — round-by-round operating record, active handoff, durable decisions, and verification evidence.
 - [`DISCLAIMER.md`](DISCLAIMER.md) — trademark, interoperability, and medical/legal notice.
 - [`ATTRIBUTION.md`](ATTRIBUTION.md) — full credits and licensing notes.
 - [`docs/FEATURE_PARITY.md`](docs/FEATURE_PARITY.md) — honest WHOOP capability comparison, gaps, and parallel-reference workflow.
@@ -700,7 +698,6 @@ protocol alongside us — this project is built on it.
 <p>
   <a href="https://github.com/Dhanunjay-Divi/Noop/issues"><img alt="Open issues" src="https://img.shields.io/github/issues/Dhanunjay-Divi/Noop?style=flat-square"></a>
   <a href="https://github.com/Dhanunjay-Divi/Noop/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/Dhanunjay-Divi/Noop?style=flat-square"></a>
-  <a href="https://github.com/Dhanunjay-Divi/Noop/forks"><img alt="Forks" src="https://img.shields.io/github/forks/Dhanunjay-Divi/Noop?style=flat-square"></a>
   <img alt="Last commit" src="https://img.shields.io/github/last-commit/Dhanunjay-Divi/Noop?style=flat-square">
 </p>
 

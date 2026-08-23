@@ -1,20 +1,23 @@
-# iOS — Install & Build
+# iOS — Install, Build & Release
 
-Building and signing the app yourself remains the highest-trust iOS path.
-Unsigned community `.ipa` files may also be published under
-[`Dhanunjay-Divi/Noop`](https://github.com/Dhanunjay-Divi/Noop/releases) and
-prepended to this fork's `altstore-source.json`. This repository is currently
-private, so its Releases page requires authenticated collaborator access and its
-raw manifest is not a usable AltStore/SideStore feed. Historical entries in the
-manifest point to upstream builds; only a download URL under
-`Dhanunjay-Divi/Noop` contains this fork's self-hosted-sync changes.
+Building and signing the app yourself is the supported development path. A
+legacy unsigned-artifact pipeline also exists for explicitly authorized
+development testing, but it is not the App Store distribution lane. This
+repository is currently private, so its Releases page requires authenticated
+collaborator access and its raw manifest is not a public install feed.
 
 Build and run the `NOOPiOS` scheme on a real iPhone with your own signing team.
 The CI job in [`app-build.yml`](../.github/workflows/app-build.yml) compile-checks
 the iOS target, but a compile pass is not a substitute for real-device BLE
 validation.
 
-## Install (sideload)
+The Release configuration produces the customer-facing `NOOP.app` product while
+Debug retains the existing `NOOP Staging.app` filename. Both configurations use
+the same configured bundle identifier, so this filename change does not create a
+new application container. App Store archive and upload gates are documented in
+[`APP_STORE_RELEASE.md`](APP_STORE_RELEASE.md).
+
+## Authorized development install (legacy unsigned artifact)
 
 The community `.ipa` has no Apple developer signature. Before packaging, NOOP applies a replaceable
 ad-hoc capability template so AltStore/SideStore can discover HealthKit and the App Group shared with
@@ -23,7 +26,7 @@ the widget; iOS still will not run it until the sideloader signs it on your devi
 1. Install [AltStore](https://altstore.io), [SideStore](https://sidestore.io),
    or another sideloader and complete its one-time setup.
 2. If your GitHub account is an authorized repository collaborator, download
-   `NOOP-ios-unsigned-v<version>.ipa` from this fork's
+   `NOOP-ios-unsigned-v<version>.ipa` from the canonical project's
    [Releases](https://github.com/Dhanunjay-Divi/Noop/releases) page. Otherwise,
    there is no anonymous download from the private repository.
 3. Open the `.ipa` with the sideloader. First launch may require trusting your
@@ -45,9 +48,9 @@ HTTPS hosting (or the repository itself is made public). Until then, authorized
 testers must download the IPA in an authenticated browser and import that local
 file into their sideloader.
 
-Only entries whose download URL points to `Dhanunjay-Divi/Noop` contain this
-fork's self-hosted-sync changes. Older manifest entries may still identify their
-historical upstream release.
+Historical manifest entries are not release authority. Use only an artifact
+associated with a reviewed canonical-project commit, and do not distribute it
+while the repository's distribution legal gate is blocked.
 
 > ### Two honest limitations of free-Apple-ID sideloading
 > - **7-day expiry.** Apps signed with a *free* Apple ID stop launching after 7 days and need
@@ -68,10 +71,9 @@ there is currently no guaranteed background-processing task for server upload.
 
 ## Build from source
 
-Prefer to build it yourself (which also grants HealthKit/widgets under your own Apple ID)? Run
-`xcodegen generate`, then build the **`NOOPiOS`** scheme in Xcode. The reconciliation that brought the
-[upstream PR #42](https://github.com/ryanbr/noop/pull/42) port onto current `main` is summarised in **"Lessons from the fold-in"**
-below.
+Run `xcodegen generate`, then build the **`NOOPiOS`** scheme in Xcode. The
+historical design notes later in this document explain how the native iOS target
+was reconciled with the shared Apple implementation.
 
 > 🛠️ **Signing it under your own Apple ID** (thanks @gingerbeardman for the original recipe). Apple
 > requires a bundle id and app group unique to *your* developer account — otherwise the build collides
@@ -129,16 +131,17 @@ the package manifests are authoritative where an older planning example differs.
 > not affiliated with, endorsed by, or connected to WHOOP, Inc. "WHOOP" is used
 > nominatively only to identify the hardware the app interoperates with — your own
 > device and your own data. NOOP performs no DRM circumvention and ships no WHOOP
-> proprietary code, firmware, or assets. **NOOP is not a medical device;** all
+> firmware or vendor assets. Its protocol implementation remains subject to the
+> [redistribution-rights gate](PROTOCOL_RIGHTS_REMEDIATION.md). **NOOP is not a medical device;** all
 > metrics (HR, HRV, recovery, strain, sleep, SpO₂, temperature) are approximations
 > and not clinically validated.
 
 The reverse-engineering that makes any of this possible is built on prior
 community work: the WHOOP 4.0 implementation from
 **`johnmiddleton12/my-whoop`** and observed WHOOP 5.0 / MG protocol facts
-documented by **`b-nnett/goose`**. No source or assets from the unlicensed
-`b-nnett/goose` repository are copied by this fork. See
-[`../ATTRIBUTION.md`](../ATTRIBUTION.md).
+documented by **`b-nnett/goose`**. See [`../ATTRIBUTION.md`](../ATTRIBUTION.md)
+for lineage and [`PROTOCOL_RIGHTS_REMEDIATION.md`](PROTOCOL_RIGHTS_REMEDIATION.md)
+for the unresolved redistribution plan.
 
 ---
 
@@ -211,9 +214,8 @@ charts, and palette render on iOS as-is.
 ## The macOS app today (the reference implementation)
 
 The macOS app target lives in [`Strand/`](../Strand/). It is the reference
-implementation; Android ships as a full app (`android/`), and the iOS app is an
-experimental, build-from-source community port ([upstream PR #42](https://github.com/ryanbr/noop/pull/42)). The macOS app composes
-the packages like this:
+implementation; Android ships as a full app (`android/`), and iOS ships as the
+native `NOOPiOS` target. The macOS app composes the packages like this:
 
 - `Strand/App/StrandApp.swift` — the `@main` SwiftUI `App`. Declares a `WindowGroup`
   and a `MenuBarExtra` scene.

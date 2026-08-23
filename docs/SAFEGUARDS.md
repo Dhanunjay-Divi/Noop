@@ -33,7 +33,7 @@ When replying across many issues/PRs (e.g. a board sweep), vary the wording and/
 Batch API operations; don't burst-create commits, issues, or comments. Stats badges (`refresh-stats-badges.py`) write to the working tree and ride the normal commit — they no longer push a burst of API commits.
 
 **5. Keep GitHub Actions bounded and reviewable.**
-This fork uses CI for Swift, Android, server, and localization checks. Workflows
+This repository uses CI for Swift, Android, server, and localization checks. Workflows
 should run only on relevant branches/paths, use least-privilege permissions,
 cancel superseded work where practical, and avoid automation that mass-creates
 issues, comments, releases, or commits. Review every third-party action/version

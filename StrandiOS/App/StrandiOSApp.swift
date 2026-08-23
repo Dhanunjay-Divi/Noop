@@ -16,6 +16,9 @@ import WidgetKit
 /// `RootTabView` so the iOS app keeps the same gating without depending on the macOS-only shell.
 @main
 struct StrandiOSApp: App {
+    /// Temporary App Store launch-access state. A successful gate version is persisted in this-device-only
+    /// Keychain storage; it does not alter the app container, database, onboarding, or Terms state.
+    @StateObject private var launchAccess: LaunchAccessController
     @StateObject private var model: AppModel
     @StateObject private var health: HealthKitBridge
     /// The phone→watch link. Built + activated here so the watch app actually receives snapshots on a
@@ -71,6 +74,8 @@ struct StrandiOSApp: App {
         // is open, so a user testing the wind-down reminder with NOOP foregrounded sees nothing. Register
         // before the first scene so any early-fired notification is presented.
         UNUserNotificationCenter.current().delegate = NotificationPresenter.shared
+        let access = LaunchAccessController()
+        _launchAccess = StateObject(wrappedValue: access)
         let model = AppModel()
         _model = StateObject(wrappedValue: model)
         let bridge = HealthKitBridge(
@@ -95,14 +100,17 @@ struct StrandiOSApp: App {
         // before a SwiftUI scene becomes active. Install observers at this process-launch boundary for
         // returning users only. The bridge checks NOOP's prior explicit-consent marker and never opens a
         // permission sheet, so a fresh install still reaches the in-app rationale first.
-        bridge.registerObserversAtLaunchIfPreviouslyRequested()
+        if access.isUnlocked {
+            bridge.registerObserversAtLaunchIfPreviouslyRequested()
+        }
         // Register the general maintenance refresh while launch is still in progress. This is an
         // opportunistic iOS wake, not a timer: CoreBluetooth restoration and HealthKit observers remain
         // the primary background paths, and every foreground still performs the authoritative catch-up.
         // The injected operation preserves each feature's existing privacy gate: Health reads require a
         // prior explicit grant, self-hosted upload remains opt-in, and Friends needs an enrolled member.
         BackgroundSyncScheduler.register { [weak model, weak bridge] in
-            guard UserDefaults.standard.string(forKey: "noop.acceptedTermsVersion")
+            guard await MainActor.run(body: { access.isUnlocked }),
+                  UserDefaults.standard.string(forKey: "noop.acceptedTermsVersion")
                     == Terms.currentVersion,
                   let model,
                   let bridge,
@@ -139,16 +147,35 @@ struct StrandiOSApp: App {
     var body: some Scene {
         WindowGroup {
             iOSRootView()
+                .environmentObject(launchAccess)
                 .environmentObject(model)
                 .onAppear {
                     model.setRealtimeForeground(
-                        acceptedTermsVersion == Terms.currentVersion && scenePhase == .active
+                        launchAccess.isUnlocked
+                            && acceptedTermsVersion == Terms.currentVersion
+                            && scenePhase == .active
                     )
                 }
                 .onChange(of: acceptedTermsVersion) { _, version in
+                    let allowed = launchAccess.isUnlocked && version == Terms.currentVersion
+                    model.setRealtimeForeground(allowed && scenePhase == .active)
+                    if allowed { resumeOperationalWorkAfterUnlock() }
+                }
+                .onChange(of: launchAccess.state) { _, state in
+                    let unlocked = state == .unlocked
                     model.setRealtimeForeground(
-                        version == Terms.currentVersion && scenePhase == .active
+                        unlocked
+                            && acceptedTermsVersion == Terms.currentVersion
+                            && scenePhase == .active
                     )
+                    guard unlocked else {
+                        Task { await liveActivity.end() }
+                        return
+                    }
+                    // A fresh user sees Terms before any operational read/sync resumes. A returning user
+                    // who already accepted the current Terms continues immediately after unlocking.
+                    guard acceptedTermsVersion == Terms.currentVersion else { return }
+                    resumeOperationalWorkAfterUnlock()
                 }
                 .environmentObject(model.ble)   // #334: Today pull-to-sync reads BLEManager (no HR churn)
                 .environmentObject(model.live)
@@ -177,6 +204,8 @@ struct StrandiOSApp: App {
                 // clipping; the common Larger-Text range still scales fully.
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                 .onReceive(model.live.heartRateSamplePublisher) { sample in
+                    guard launchAccess.isUnlocked,
+                          acceptedTermsVersion == Terms.currentVersion else { return }
                     // #911: anchor the Live Activity on the SAME shared `Repository.widgetAnchor` the
                     // Home/Lock widget and the watch snapshot use, so this fourth surface can't drift to a
                     // different day at the rollover (it previously read `days.last(where: recovery != nil)`,
@@ -194,6 +223,8 @@ struct StrandiOSApp: App {
                 }
                 // End the Live Activity the moment the link drops, even if no further HR tick arrives.
                 .onReceive(model.live.$connected) { isConnected in
+                    guard launchAccess.isUnlocked,
+                          acceptedTermsVersion == Terms.currentVersion else { return }
                     // #911: same shared anchor as the heartRate site above, so the Live Activity, the
                     // widget, the watch and Today never disagree about which day they describe.
                     let day = Repository.widgetAnchor(days: model.repo.days)
@@ -233,7 +264,9 @@ struct StrandiOSApp: App {
                 // exempt); a background bump is covered by the widget's own 15-minute timeline policy and
                 // by the .active republish on return.
                 .onReceive(model.repo.$refreshSeq.dropFirst()) { _ in
-                    guard scenePhase == .active else { return }
+                    guard launchAccess.isUnlocked,
+                          acceptedTermsVersion == Terms.currentVersion,
+                          scenePhase == .active else { return }
                     Task { await WidgetSnapshot.publish(from: model) }
                     // The watch rides the same active-only hook because the bridge now SELF-THROTTLES
                     // (30-minute spacing + headline-change dedup, both must pass, see WatchSessionBridge),
@@ -246,11 +279,15 @@ struct StrandiOSApp: App {
                 // low-frequency (battery ~every 8 min; connection flips are rare), so no throttle is needed
                 // and foreground-initiated reloads are budget-exempt. dropFirst() skips the attach replay.
                 .onReceive(model.live.$batteryPct.dropFirst()) { _ in
-                    guard scenePhase == .active else { return }
+                    guard launchAccess.isUnlocked,
+                          acceptedTermsVersion == Terms.currentVersion,
+                          scenePhase == .active else { return }
                     Task { await WidgetSnapshot.publish(from: model) }
                 }
                 .onReceive(model.live.$connected.dropFirst()) { _ in
-                    guard scenePhase == .active else { return }
+                    guard launchAccess.isUnlocked,
+                          acceptedTermsVersion == Terms.currentVersion,
+                          scenePhase == .active else { return }
                     Task { await WidgetSnapshot.publish(from: model) }
                 }
                 // #114 (follow-up): `WidgetSnapshot.bpm` reads `model.bpm` (WidgetPublish.swift), the
@@ -262,7 +299,9 @@ struct StrandiOSApp: App {
                 // `HRPublishThrottle` (60 s, mirroring Android's PushGate HR cadence) so it can't re-run
                 // publish's `exploreSeries` read + `reloadAllTimelines()` on every tick.
                 .onReceive(model.$bpm.dropFirst()) { _ in
-                    guard scenePhase == .active else { return }
+                    guard launchAccess.isUnlocked,
+                          acceptedTermsVersion == Terms.currentVersion,
+                          scenePhase == .active else { return }
                     guard WidgetSnapshot.HRPublishThrottle.admit() else { return }
                     Task { await WidgetSnapshot.publish(from: model) }
                 }
@@ -270,6 +309,8 @@ struct StrandiOSApp: App {
                 // HealthKit-free payload. Filter on the host so other future schemes don't trip the
                 // importer; macOS never registers the scheme so this stays iOS-only.
                 .onOpenURL { url in
+                    guard launchAccess.isUnlocked,
+                          acceptedTermsVersion == Terms.currentVersion else { return }
                     if let destination = NOOPWidgetDestination(url: url) {
                         switch destination {
                         case .today: router.openToday()
@@ -301,6 +342,10 @@ struct StrandiOSApp: App {
                 // waiting for the next foreground. activate() is idempotent + a no-op where WC isn't
                 // supported, so this is safe on every device/simulator combination.
                 .task {
+                    guard launchAccess.isUnlocked else {
+                        await liveActivity.end()
+                        return
+                    }
                     // Cold-launch adoption/cleanup: packet publishers may stay quiet while an activity
                     // from the prior process is still visible, so reconcile the cached sensor state too.
                     watch.startStrengthRoutineHandler = {
@@ -336,7 +381,8 @@ struct StrandiOSApp: App {
             // Dense Live/workout/session streaming is foreground-only. Logical leases survive so the
             // same visible opted-in session resumes on return; connection/history sync and the separate
             // Continuous HRV background preference are intentionally unaffected.
-            guard acceptedTermsVersion == Terms.currentVersion else {
+            guard launchAccess.isUnlocked,
+                  acceptedTermsVersion == Terms.currentVersion else {
                 model.setRealtimeForeground(false)
                 return
             }
@@ -381,6 +427,11 @@ struct StrandiOSApp: App {
     }
 
     private func reconcileLiveActivity(repairHydration: Bool = false) {
+        guard launchAccess.isUnlocked,
+              acceptedTermsVersion == Terms.currentVersion else {
+            Task { await liveActivity.end() }
+            return
+        }
         let day = Repository.widgetAnchor(days: model.repo.days)
         let bpm = model.live.connected ? (model.bpm ?? model.live.heartRate) : nil
         let recovery = liveActivityShowsCharge
@@ -400,6 +451,28 @@ struct StrandiOSApp: App {
             )
         }
     }
+
+    /// Resumes only work a locked launch deliberately skipped. Every call is idempotent or internally
+    /// rate-limited, so the access-unlock and Terms-acceptance edges can safely converge here.
+    private func resumeOperationalWorkAfterUnlock() {
+        guard launchAccess.isUnlocked,
+              acceptedTermsVersion == Terms.currentVersion else { return }
+        health.registerObserversAtLaunchIfPreviouslyRequested()
+        watch.activate()
+        guard scenePhase == .active else { return }
+        reconcileLiveActivity(repairHydration: true)
+        model.drainPendingIntents()
+        model.applySmartAlarm()
+        model.ble.requestSync(.foreground)
+        Task {
+            await model.reconcileAutomaticWorkoutSurfaces()
+            health.refreshAuthIfPreviouslyGranted()
+            await health.foregroundCatchUp()
+            await WidgetSnapshot.publish(from: model)
+            await watch.pushLatest(from: model)
+        }
+        Task { await FriendsService.catchUpIfDue(repo: model.repo) }
+    }
 }
 
 /// iOS root — the `RootTabView` shell with the first-run onboarding/pairing wizard overlaid until
@@ -410,6 +483,7 @@ struct StrandiOSApp: App {
 /// excluded `RootView()` sidebar for `RootTabView()`. The shared `OnboardingWizard`, `TermsGateView`,
 /// `WhatsNewView`, `AppChangelog`, and `Terms` symbols all compile into the iOS target unchanged.
 private struct iOSRootView: View {
+    @EnvironmentObject private var launchAccess: LaunchAccessController
     @AppStorage("noop.onboarded") private var onboarded = false
     @AppStorage("noop.lastSeenChangelogVersion") private var lastSeenChangelog = ""
     @AppStorage("noop.acceptedTermsVersion") private var acceptedTerms = ""
@@ -444,12 +518,12 @@ private struct iOSRootView: View {
         ZStack {
             // Do not mount the operational shell before clickwrap acceptance. RootTabView starts repository
             // refresh, backup catch-up and optional remote sync from its task modifier.
-            if acceptedTerms == Terms.currentVersion || demoBypass {
+            if hasLaunchAccess && (acceptedTerms == Terms.currentVersion || demoBypass) {
                 RootTabView()
             } else {
                 StrandPalette.surfaceBase.ignoresSafeArea()
             }
-            if acceptedTerms == Terms.currentVersion && !onboarded && !demoBypass {
+            if hasLaunchAccess && acceptedTerms == Terms.currentVersion && !onboarded && !demoBypass {
                 OnboardingWizard(onFinished: {
                     onboarded = true
                     // A brand-new user just saw the expectations in onboarding — don't also pop the
@@ -461,7 +535,7 @@ private struct iOSRootView: View {
             }
             // Terms acknowledgment gate — before onboarding or the operational shell until
             // the current terms version is accepted; re-appears if the terms materially change.
-            if acceptedTerms != Terms.currentVersion && !demoBypass {
+            if hasLaunchAccess && acceptedTerms != Terms.currentVersion && !demoBypass {
                 TermsGateView(onAccept: {
                     acceptedTermsAt = ISO8601DateFormatter().string(from: Date())
                     acceptedTerms = Terms.currentVersion
@@ -471,7 +545,7 @@ private struct iOSRootView: View {
             }
             // Trial disclosure sits above Terms/onboarding so it is the first thing a tester sees on a
             // fresh install or newer build. The DEBUG demo harness bypasses it for deterministic captures.
-            if TrialNoticePolicy.shouldPresent(
+            if hasLaunchAccess && TrialNoticePolicy.shouldPresent(
                 acknowledgedBuildIdentifier: acknowledgedTrialBuild,
                 currentBuildIdentifier: TrialNoticePolicy.currentBuildIdentifier(),
                 demoBypass: demoBypass
@@ -482,7 +556,15 @@ private struct iOSRootView: View {
                 .transition(.opacity)
                 .zIndex(3)
             }
+            // Launch access is above every other first-run layer. The operational tab shell is not even
+            // mounted while locked, so its refresh/upload tasks cannot start behind this screen.
+            if !hasLaunchAccess {
+                LaunchAccessGateView(controller: launchAccess)
+                    .transition(.opacity)
+                    .zIndex(4)
+            }
         }
+        .animation(.easeInOut(duration: 0.2), value: launchAccess.state)
         .animation(.easeInOut(duration: 0.35), value: onboarded)
         .animation(.easeInOut(duration: 0.35), value: acceptedTerms)
         .animation(.easeInOut(duration: 0.35), value: acknowledgedTrialBuild)
@@ -503,6 +585,7 @@ private struct iOSRootView: View {
         }
         .onChange(of: acceptedTerms) { _, _ in showWhatsNewIfDue() }
         .onChange(of: acknowledgedTrialBuild) { _, _ in showWhatsNewIfDue() }
+        .onChange(of: launchAccess.state) { _, _ in showWhatsNewIfDue() }
     }
 
     /// DEBUG: launched with --demo-seed, skip the first-run gates (onboarding / terms / What's New) so the
@@ -515,8 +598,12 @@ private struct iOSRootView: View {
         #endif
     }
 
+    private var hasLaunchAccess: Bool {
+        launchAccess.isUnlocked || demoBypass
+    }
+
     private func showWhatsNewIfDue() {
-        if demoBypass { return }
+        if demoBypass || !launchAccess.isUnlocked { return }
         // Existing users who updated: their last-seen release is genuinely behind the current one.
         // Persist before presentation so an interactive swipe-dismiss or process termination cannot make
         // the same release notes replay on the next launch. They remain manually available in Settings.

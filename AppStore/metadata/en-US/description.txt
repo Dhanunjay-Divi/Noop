@@ -1,0 +1,11 @@
+NOOP gives you a private view of the health and fitness signals your supported wearable already captures.
+
+See sleep, recovery, activity, heart-rate, HRV, respiratory, blood-oxygen, temperature, workout, and long-term trend information when compatible inputs are available. NOOP keeps measured, imported, and estimated values clearly distinguished and leaves missing inputs missing.
+
+Your core history is stored locally on your device. There is no required NOOP account or NOOP-operated cloud. Optional features—including Apple Health, supported wearable links, manual import of compatible Oura, Fitbit, or Garmin export files, an OpenAI-compatible coach, and your own self-hosted server—remain under your control and request permission before use.
+
+NOOP supports local export and backup so you can keep a portable copy of your history. Widgets and Live Activities can show selected information at a glance when you enable them.
+
+NOOP is an independent, unofficial project and is not affiliated with or endorsed by WHOOP, Oura, Apple, Fitbit, Garmin, or another wearable manufacturer.
+
+NOOP is intended for general wellness and fitness information. It is not a medical device, does not diagnose or treat any condition, and is not a substitute for professional medical advice or emergency services. Feature availability and background delivery depend on your hardware, permissions, data quality, and operating-system scheduling.

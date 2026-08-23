@@ -11,18 +11,40 @@ enum TrialNoticePolicy {
     enum DistributionChannel: Equatable {
         case testFlight
         case privatePreview
+        case appStore
     }
 
     /// TestFlight receipts live in `sandboxReceipt`; an Xcode/AltStore/SideStore developer install
     /// does not. Do not label a Personal Team build as TestFlight when the user never received one.
     static func distributionChannel(receiptURL: URL? = Bundle.main.appStoreReceiptURL) -> DistributionChannel {
-        receiptURL?.lastPathComponent == "sandboxReceipt" ? .testFlight : .privatePreview
+        guard let receiptURL else { return .privatePreview }
+        return receiptURL.lastPathComponent == "sandboxReceipt" ? .testFlight : .appStore
     }
 
     static func channelLabel(_ channel: DistributionChannel) -> String {
         switch channel {
         case .testFlight: return String(localized: "TESTFLIGHT TRIAL")
         case .privatePreview: return String(localized: "PRIVATE PREVIEW")
+        case .appStore: return String(localized: "APP STORE")
+        }
+    }
+
+    static func title(_ channel: DistributionChannel) -> String {
+        switch channel {
+        case .testFlight: return String(localized: "TestFlight access to NOOP")
+        case .privatePreview: return String(localized: "A private preview of NOOP")
+        case .appStore: return String(localized: "Welcome to NOOP")
+        }
+    }
+
+    static func summary(_ channel: DistributionChannel) -> String {
+        switch channel {
+        case .testFlight:
+            return String(localized: "Use this TestFlight build to view and compare experimental wellness metrics from your wearable.")
+        case .privatePreview:
+            return String(localized: "Use this preview to view and compare experimental wellness metrics from your wearable.")
+        case .appStore:
+            return String(localized: "View and compare wellness metrics from your wearable, calculated locally on this device.")
         }
     }
 
@@ -50,9 +72,12 @@ enum TrialNoticePolicy {
     static func shouldPresent(
         acknowledgedBuildIdentifier: String,
         currentBuildIdentifier: String,
-        demoBypass: Bool
+        demoBypass: Bool,
+        channel: DistributionChannel = distributionChannel()
     ) -> Bool {
-        guard !demoBypass else { return false }
+        // Beta/private-preview disclosure is inappropriate in a production App Store binary. The
+        // product's durable local-data and non-medical disclosures remain in onboarding and Terms.
+        guard !demoBypass, channel != .appStore else { return false }
         guard let current = BuildIdentity(currentBuildIdentifier) else {
             // Fail safe for an invalid current bundle identity: show once for that exact value, but do not
             // get stuck in an every-launch loop after it has been acknowledged.
@@ -123,6 +148,10 @@ enum TrialNoticePolicy {
 struct TrialNoticeView: View {
     let onContinue: () -> Void
 
+    private var channel: TrialNoticePolicy.DistributionChannel {
+        TrialNoticePolicy.distributionChannel()
+    }
+
     var body: some View {
         ZStack {
             StrandPalette.surfaceBase.ignoresSafeArea()
@@ -133,9 +162,7 @@ struct TrialNoticeView: View {
 
                     BrandMark(size: 88)
 
-                    Text(TrialNoticePolicy.channelLabel(
-                        TrialNoticePolicy.distributionChannel()
-                    ))
+                    Text(TrialNoticePolicy.channelLabel(channel))
                         .font(StrandFont.overline)
                         .tracking(StrandFont.overlineTracking)
                         .foregroundStyle(StrandPalette.textSecondary)
@@ -147,12 +174,12 @@ struct TrialNoticeView: View {
                         )
 
                     VStack(spacing: NoopMetrics.space3) {
-                        Text("A private preview of NOOP")
+                        Text(TrialNoticePolicy.title(channel))
                             .font(StrandFont.title1)
                             .foregroundStyle(StrandPalette.textPrimary)
                             .multilineTextAlignment(.center)
 
-                        Text("Use this trial to view and compare experimental wellness metrics from your wearable.")
+                        Text(TrialNoticePolicy.summary(channel))
                             .font(StrandFont.body)
                             .foregroundStyle(StrandPalette.textSecondary)
                             .multilineTextAlignment(.center)
@@ -163,7 +190,7 @@ struct TrialNoticeView: View {
                         trialPoint(
                             icon: "iphone.gen3",
                             title: "Stored on this iPhone",
-                            body: "NOOP has no account or NOOP-operated cloud in this trial. Metrics stay on this device by default."
+                            body: "NOOP has no account or NOOP-operated cloud. Metrics stay on this device by default."
                         )
                         trialPoint(
                             icon: "arrow.up.forward.app",

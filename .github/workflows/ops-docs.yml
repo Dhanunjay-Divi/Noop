@@ -1,0 +1,37 @@
+name: Operations Record
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - 'docs/ops/**'
+      - 'Tools/validate-ops-rounds.py'
+      - '.github/workflows/ops-docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-record-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, pinned 2026-08-11
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate operations record
+        if: github.event_name != 'pull_request'
+        run: python3 Tools/validate-ops-rounds.py --all .
+
+      - name: Require a round record for the pull request
+        if: github.event_name == 'pull_request'
+        run: python3 Tools/validate-ops-rounds.py --all --require-round-change "${{ github.event.pull_request.base.sha }}" .

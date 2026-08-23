@@ -1,6 +1,6 @@
-# Fork-only: bump the version and cut a proper RELEASE (not a rolling snapshot) so the in-app
+# Community release workflow: bump the version and cut a proper release (not a rolling snapshot) so the in-app
 # "Check for updates" — which reads GitHub `releases/latest`, and GitHub excludes prereleases —
-# points at this fork.
+# points at the canonical project release.
 #
 # The `bump` input (patch / minor / major / none) increments the version IN SOURCE — both
 # android/app/build.gradle.kts (versionName + versionCode) and project.yml (MARKETING_VERSION +
@@ -13,9 +13,9 @@
 # published release (isNewer strips the `-staging` suffix, so an installed
 # staging build compares clean).
 #
-# Contrast with fork-testing-build.yml: THAT publishes the rolling `testing-latest` PRERELEASE (a
+# Contrast with the testing workflow: it publishes the rolling `testing-latest` PRERELEASE (a
 # snapshot), which releases/latest deliberately ignores. THIS never touches testing-latest.
-name: Release build (fork)
+name: Community release build
 
 on:
   workflow_dispatch:
@@ -189,8 +189,8 @@ jobs:
               AUTO=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
                 -f tag_name="$TAG" -f previous_tag_name="$PREV" -f target_commitish="$(git rev-parse HEAD)" \
                 --jq '.body' 2>/dev/null || true)
-              # Drop the per-PR "by @author" credit and any "New Contributors" block — this is a solo fork,
-              # so the auto notes needn't stamp the handle on every line. Keeps the PR titles + links.
+              # Drop the per-PR "by @author" suffix and any generated "New Contributors" block;
+              # the curated release notes retain the required contributor and lineage credits.
               AUTO=$(printf '%s' "$AUTO" \
                 | sed -E 's/ by @[A-Za-z0-9_-]+//g' \
                 | awk 'BEGIN{skip=0} /^#+ *New Contributors/{skip=1; next} /^#+ /{skip=0} skip{next} {print}')
@@ -198,15 +198,11 @@ jobs:
             else
               echo "First release (no prior release tag) — skipping the auto PR breakdown."
             fi
-          {
-            printf '\n---\n\n**Downloads** — access follows repository visibility; private-repository assets require an authenticated collaborator:\n'
-            # shellcheck disable=SC2016
-            # Backticks below are literal Markdown code spans, not shell command substitutions.
-            printf -- '- **Android** — `NOOP-android-v%s.apk` (privately signed staging identity, `com.noop.whoop.staging`, non-debuggable and unminified; SHA-256 sidecar and CycloneDX SBOM included)\n' "$NEW"
-            # shellcheck disable=SC2016
-            printf -- '- **macOS** — `NOOP-macos-v%s.zip` (unzip, then right-click → Open)\n' "$NEW"
-            # shellcheck disable=SC2016
-            printf -- '- **iOS** — `NOOP-ios-unsigned-v%s.ipa` (AltStore / Sideloadly)\n' "$NEW"
+            {
+              printf '\n---\n\n**Downloads** — access follows repository visibility; private-repository assets require an authenticated collaborator:\n'
+              printf -- '- **Android** — `NOOP-android-v%s.apk` (privately signed staging identity, `com.noop.whoop.staging`, non-debuggable and unminified; SHA-256 sidecar and CycloneDX SBOM included)\n' "$NEW"
+              printf -- '- **macOS** — `NOOP-macos-v%s.zip` (unzip, then right-click → Open)\n' "$NEW"
+              printf -- '- **iOS** — `NOOP-ios-unsigned-v%s.ipa` (unsigned community artifact for authorized development installation)\n' "$NEW"
             } >> "$BODY"
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft \
               --target "$(git rev-parse HEAD)" \

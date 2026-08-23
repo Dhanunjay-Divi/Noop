@@ -83,6 +83,8 @@ generated output (`Strand.xcodeproj/`) or any secrets, keystores, or `local.prop
 4. For analytics changes, add a test and cite the method.
 5. For UI changes, use `StrandDesign` tokens only — no hardcoded colors, fonts,
    or spacing.
+6. For a material engineering, research, device, or release round, update the
+   [`docs/ops` round record](docs/ops/README.md) in the same branch.
 
 By opening a pull request you agree your contribution is licensed under the same
 terms as the project — see [`LICENSE`](LICENSE).

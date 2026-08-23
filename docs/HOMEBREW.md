@@ -1,15 +1,11 @@
 # Homebrew Cask (macOS)
 
-This fork does **not** currently publish a Homebrew tap. Build the app from
-source, or use a macOS artifact attached to a release in
+NOOP does **not** currently publish a Homebrew tap. Build the app from source,
+or use a macOS artifact attached to a release in
 [`Dhanunjay-Divi/Noop`](https://github.com/Dhanunjay-Divi/Noop/releases) once one
-exists.
+exists and the distribution gate passes.
 
-The historical `NoopApp/homebrew-noop` tap belongs to the upstream project. Its
-artifacts do not contain this fork's self-hosted sync and comparison work, so
-this repository never updates or publishes to that tap.
-
-## Publishing a fork-owned tap
+## Publishing the project tap
 
 Release maintainers may create a separate public
 `Dhanunjay-Divi/homebrew-noop` repository. After it exists, users can install
@@ -27,7 +23,7 @@ before trusting it. The macOS release is ad-hoc signed rather than notarized, so
 Gatekeeper may also require **System Settings → Privacy & Security → Open
 Anyway** on first launch.
 
-The release helper refuses to guess a tap owner. To update a fork-owned tap,
+The release helper refuses to guess a tap owner. To update the project tap,
 provide it explicitly:
 
 ```bash
@@ -49,5 +45,5 @@ The helper:
 - never targets a Forge mirror unless `NOOP_HOMEBREW_FORGE=1` and all `FORGE_*`
   coordinates are supplied explicitly.
 
-Scope the token to **Contents: read and write** on the fork-owned tap repository
-only. Do not reuse a token belonging to the upstream project.
+Scope the token to **Contents: read and write** on the project tap repository
+only. Do not reuse a token from another project or repository.

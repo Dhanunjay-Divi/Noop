@@ -42,7 +42,13 @@ enum ScheduledDebugExport {
     /// BUNDLE_ID_PREFIX (see Config/BundleId.xcconfig) automatically and always matches the iOS target's
     /// `BGTaskSchedulerPermittedIdentifiers` (Info.plist), which is built from `$(PRODUCT_BUNDLE_IDENTIFIER)`
     /// the same way. Must also be registered at launch for `submit` to succeed — wired in the app entry point.
-    static let bgTaskIdentifier = (Bundle.main.bundleIdentifier ?? "com.noopapp.noop") + ".debugexport"
+    static let bgTaskIdentifier = (Bundle.main.bundleIdentifier ?? "com.noopapp.noop") + ".diagnosticexport"
+
+    /// Identifier used by builds before the App Store submission cleanup. Keep only for cancelling an
+    /// already-pending request after an in-place upgrade; the persisted opt-in settings and exported files
+    /// deliberately retain their existing keys/names so the update cannot lose user state or diagnostics.
+    private static let legacyBGTaskIdentifier =
+        (Bundle.main.bundleIdentifier ?? "com.noopapp.noop") + ".debugexport"
 
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: K.enabled) }
 
@@ -122,6 +128,7 @@ enum ScheduledDebugExport {
         macTimer = nil
         #elseif os(iOS)
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: bgTaskIdentifier)
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: legacyBGTaskIdentifier)
         #endif
     }
 
@@ -214,6 +221,9 @@ enum ScheduledDebugExport {
     /// the task. Both live in the iOS app target — call this from `StrandiOSApp.init()`. Safe to leave
     /// uncalled: `submitBackgroundRequest()` fails gracefully and the macOS path + "Run now" still work.
     static func register() {
+        // An older build may have left a one-shot request queued under the engineering-era identifier.
+        // It is no longer permitted or registered, so remove it before registering the shipping name.
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: legacyBGTaskIdentifier)
         BGTaskScheduler.shared.register(forTaskWithIdentifier: bgTaskIdentifier, using: nil) { task in
             // Write the drop, then immediately request the next one (BGAppRefresh is single-shot).
             if isEnabled { catchUpIfDue() }

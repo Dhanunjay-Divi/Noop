@@ -13,9 +13,9 @@ packages** that make that possible. They are designed to be vendored and reused
 independently of the reference macOS app.
 
 > **Not affiliated with WHOOP.** "WHOOP" is used nominatively only to identify
-> the hardware these packages interoperate with. NOOP contains no WHOOP
-> proprietary code, firmware, or assets and works only with the user's own
-> device and data. **NOOP is not a medical device.** Every derived metric (HR,
+> the hardware these packages interoperate with. NOOP ships no WHOOP firmware
+> or vendor assets and works only with the user's own device and data. Protocol
+> redistribution remains subject to the repository legal gate. **NOOP is not a medical device.** Every derived metric (HR,
 > HRV, recovery, strain, sleep, SpO₂, temperature) is an approximation and is
 > not clinically validated.
 
@@ -29,7 +29,7 @@ interoperability work:
 - **`b-nnett/goose`** — observed WHOOP 5.0 / MG protocol facts (the
   `fd4b0001-…` service family, CRC16-Modbus header, `CLIENT_HELLO`, and the
   "puffin" packet types). Its repository has no explicit software license; this
-  fork copies none of its source or assets.
+  lineage remains under distribution-rights review.
 - **`groue/GRDB.swift`** — SQLite persistence used by `WhoopStore`.
 
 ---
@@ -74,6 +74,10 @@ owns the CoreBluetooth transport, wraps the protocol library's UUID *strings* in
 (the iOS target is build-from-source only) consume these packages directly, and
 an Android app ships alongside them; the pure packages run unchanged across macOS
 and iOS.
+
+See [`ATTRIBUTION.md`](../ATTRIBUTION.md) for lineage and
+[`PROTOCOL_RIGHTS_REMEDIATION.md`](PROTOCOL_RIGHTS_REMEDIATION.md) for the open
+redistribution blocker and acceptance criteria.
 
 ---
 

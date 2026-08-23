@@ -11,7 +11,8 @@ NOOP is a **local-first, on-device** companion app for WHOOP 4.0 and 5.0/MG stra
 **experimental** Oura support in the tree — gated behind `ExperimentalBrand`, not a shipped supported
 strap). It pairs over Bluetooth, stores everything in on-device SQLite, and computes recovery / strain
 / HRV / sleep locally. There is **no required account, Noop-operated cloud, or telemetry**, and the
-project stays **anonymous** (iOS/Android ship build-from-source / sideload, not via the App Store).
+public distribution is permitted only after its signing, privacy, device-validation,
+and redistribution gates pass.
 Optional network features are explicit opt-ins: bring-your-own-provider Coach, Oura import, and
 replication/private friend sharing through a server the user operates. The core BLE, storage, and
 analytics path must remain fully useful offline.
@@ -22,8 +23,9 @@ These are hard constraints, not preferences. A PR is out of scope if it:
 - weakens self-hosted sharing boundaries: member credentials must be scoped, secrets stored securely,
   invites short-lived, and every shared metric revocable server-side;
 - adds analytics/telemetry/crash-reporting that phones home;
-- adds WHOOP firmware, decompiled app code, logos/assets, or any DRM circumvention. NOOP is
-  **clean-room interoperability** with hardware the user owns — keep it that way.
+- adds WHOOP firmware, decompiled app code, logos/assets, or any DRM circumvention. Protocol work
+  must use documented provenance and pass the redistribution gate; never claim clean-room status
+  without a complete, independently auditable record.
 
 Licensing: by opening a PR you agree your contribution is under the repo's
 [PolyForm Noncommercial 1.0.0](LICENSE) license.
@@ -114,7 +116,7 @@ xcodegen generate && xcodebuild -project Strand.xcodeproj -scheme Strand \
 | `swift-packages.yml` | `swift test` for **`Packages/**` only** (WhoopProtocol, WhoopStore, StrandAnalytics, StrandImport, StrandDesign, NoopLocalAccess) | macos-15 | **active** |
 | `app-build.yml` | **Compile-only** of the **app targets** (`Strand` macOS + `NOOPiOS` iOS). iOS leg needs **macos-26** (iOS 26 SDK / `glassEffect`). | macos-15 / macos-26 | **disabled** (on-demand) |
 | `android.yml` | `assembleFullDebug` + `testFullDebugUnitTest` | ubuntu | **disabled** (compile Android locally) |
-| `fork-testing-build.yml` / `fork-release.yml` | Staging / release builds (apk + mac + ios) | — | on dispatch |
+| `fork-testing-build.yml` / `fork-release.yml` | Legacy-named staging / community-release builds (apk + mac + ios) | — | on dispatch |
 
 **The trap:** `swift-packages` does **NOT** compile the app targets. So if you touch **app-target
 Swift** — anything under `Strand/`, `StrandiOS/`, `StrandiOSShared/`, `StrandiOSWidgets/` (Views,
@@ -178,7 +180,7 @@ Swift, you MUST build the app yourself: `xcodebuild … build` locally, or run `
 - **Versioning (SemVer):** bump `MARKETING_VERSION` in `project.yml` **and** `versionName` in
   `android/app/build.gradle.kts` together; build numbers increment independently. The parts are
   counters, not decimals (`2.0.10` follows `2.0.9`).
-- **Voice:** docs/comments are neutral, third-person, project-voice. Keep upstream credits intact.
+- **Voice:** docs/comments are neutral, third-person, project-voice. Keep required lineage and contributor credits intact.
 
 When in doubt, open an issue to coordinate first, and prefer the smallest change that's correct and
 covered by a test that runs without a strap.

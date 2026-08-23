@@ -13,8 +13,8 @@
 # (Dhanunjay-Divi/Noop) as a draft, assets are uploaded and verified, and only
 # then is it published as latest. A Forgejo mirror is attempted only when the
 # operator explicitly sets NOOP_RELEASE_FORGE=1 and supplies that script's
-# FORGE_DOMAIN/FORGE_ORG/FORGE_REPO variables. This prevents a fork checkout
-# from accidentally publishing into historical upstream infrastructure.
+# FORGE_DOMAIN/FORGE_ORG/FORGE_REPO variables. This prevents another checkout
+# from accidentally publishing into unrelated release infrastructure.
 #
 # Same args as forgejo-release.sh: <version> <asset...> [-- notes].
 # Idempotent: re-running clobbers the release's assets (and edits the title/notes)
@@ -44,7 +44,7 @@ while [ $# -gt 0 ]; do
 done
 
 # ── iOS asset: ONE canonical name ────────────────────────────────────────────
-# Match the fork workflows and public docs: NOOP-ios-unsigned-v<V>.ipa.
+# Match the community packaging workflows and release docs: NOOP-ios-unsigned-v<V>.ipa.
 # Normalize any locally supplied IPA to that name so the uploaded asset and the
 # AltStore URL cannot drift apart.
 NEW_ASSETS=()
@@ -225,7 +225,7 @@ if [ "$GH_OK" = 1 ]; then
     "$HERE/update-homebrew-cask.sh" "$VER" "$ZIP_ASSET" \
       || echo "  ⚠ Homebrew cask update failed — run Tools/update-homebrew-cask.sh by hand" >&2
   elif [ -n "$ZIP_ASSET" ]; then
-    echo "→ Homebrew tap update disabled (set NOOP_RELEASE_HOMEBREW=1 after configuring a fork-owned tap)"
+    echo "→ Homebrew tap update disabled (set NOOP_RELEASE_HOMEBREW=1 after configuring the project tap)"
   fi
 fi
 
