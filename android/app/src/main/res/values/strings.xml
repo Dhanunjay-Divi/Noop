@@ -1693,8 +1693,10 @@
     <string name="l10n_today_screen_calories_3e62ecfe">Calories</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">Choose which tiles show on your Control Center and reorder them with the arrows.</string>
-    <string name="key_metrics_selection_instructions">Choose up to five metrics for your Control Center and put the most important first.</string>
+    <string name="key_metrics_selection_instructions">Choose 3 to 5 metrics for your Control Center and put the most important first.</string>
     <string name="key_metrics_selection_count">%1$d of %2$d selected</string>
+    <string name="key_metrics_show_selected">Show selected metrics</string>
+    <string name="key_metrics_show_all_count">Show all metrics (%1$d)</string>
     <string name="l10n_today_screen_data_label_data_value_data_unit_27f6fd6b">%1$s %2$s %3$s</string>
     <string name="l10n_today_screen_data_unit_c768ef8c"> %1$s</string>
     <string name="l10n_today_screen_daytitle_humandate_tap_to_pick_a_7e12ce96">%1$s, %2$s. Tap to pick a day, swipe to change day.</string>

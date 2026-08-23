@@ -204,8 +204,16 @@ private struct FlatStatusBarScrim: View {
         GeometryReader { geometry in
             let measuredInset = max(geometry.safeAreaInsets.top, windowTopInset)
             VStack(spacing: 0) {
-                StrandPalette.surfaceBase
-                    .frame(height: (measuredInset > 0 ? measuredInset : 44) + 6)
+                LinearGradient(
+                    colors: [
+                        StrandPalette.surfaceBase.opacity(0.78),
+                        StrandPalette.surfaceBase.opacity(0.46),
+                        .clear,
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: (measuredInset > 0 ? measuredInset : 44) + 12)
                 Spacer(minLength: 0)
             }
             .ignoresSafeArea(edges: .top)

@@ -1514,8 +1514,10 @@
     <string name="l10n_today_screen_calories_3e62ecfe">Calorías</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">Elige qué mosaicos se muestran en tu Control Center y reordénalos con las flechas.</string>
-    <string name="key_metrics_selection_instructions">Elige hasta cinco métricas para tu Centro de control y coloca primero la más importante.</string>
+    <string name="key_metrics_selection_instructions">Elige entre 3 y 5 métricas para tu Centro de control y coloca primero la más importante.</string>
     <string name="key_metrics_selection_count">%1$d de %2$d seleccionadas</string>
+    <string name="key_metrics_show_selected">Mostrar métricas seleccionadas</string>
+    <string name="key_metrics_show_all_count">Mostrar todas las métricas (%1$d)</string>
     <string name="l10n_today_screen_data_label_data_value_data_unit_27f6fd6b">%1$s %2$s %3$s</string>
     <string name="l10n_today_screen_data_unit_c768ef8c">%1$s</string>
     <string name="l10n_today_screen_daytitle_humandate_tap_to_pick_a_7e12ce96">%1$s, %2$s. Toca para elegir un día, gira para cambiar el día.</string>

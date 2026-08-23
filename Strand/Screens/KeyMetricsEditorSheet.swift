@@ -5,7 +5,7 @@ import StrandDesign
 //
 // A Today-local sheet (no new nav destination — another lane owns the nav graph) for choosing which
 // Key-Metric tiles show on the Control Center and in what order. Display-only: it edits the persisted
-// `today.keyMetrics` layout string, never any stored metric. One to five selected tiles render in the
+// `today.keyMetrics` layout string, never any stored metric. Three to five selected tiles render in the
 // list's order; the up/down chevrons reorder them. Explicit controls behave identically on macOS and iOS
 // without depending on List EditMode.
 
@@ -76,6 +76,7 @@ struct KeyMetricsEditorSheet: View {
 
     private func row(_ item: Item, at index: Int) -> some View {
         let accent = accent(for: item.metric)
+        let toggleLocked = toggleIsLocked(item)
         return NoopCard(padding: 12, tint: item.enabled ? accent : nil) {
             HStack(spacing: 12) {
                 MetricGlyph(item.metric.icon, size: 30)
@@ -86,9 +87,9 @@ struct KeyMetricsEditorSheet: View {
                         .font(StrandFont.body)
                         .foregroundStyle(item.enabled ? StrandPalette.textPrimary : StrandPalette.textTertiary)
                 }
-                .toggleStyle(.switch)
-                .tint(StrandPalette.accent)
-                .disabled(toggleIsLocked(item))
+                .toggleStyle(KeyMetricSelectionToggleStyle())
+                .disabled(toggleLocked)
+                .accessibilityIdentifier("noop.key-metric.toggle.\(item.metric.rawValue)")
                 .accessibilityLabel("Show \(item.metric.title)")
                 .accessibilityHint(toggleHint(item))
 
@@ -151,7 +152,7 @@ struct KeyMetricsEditorSheet: View {
             Text("Edit Key Metrics")
                 .font(StrandFont.rounded(24, weight: .bold))
                 .foregroundStyle(StrandPalette.textPrimary)
-            Text("Choose up to five metrics for your Control Center and put the most important first.")
+            Text("Choose 3 to 5 metrics for your Control Center and put the most important first.")
                 .font(StrandFont.subhead)
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -159,7 +160,7 @@ struct KeyMetricsEditorSheet: View {
                 .font(StrandFont.captionNumber)
                 .foregroundStyle(
                     selectedCount == KeyMetricPrefs.maximumSelectionCount
-                        ? StrandPalette.accent
+                        ? StrandPalette.statusPositive
                         : StrandPalette.textTertiary
                 )
         }
@@ -173,12 +174,20 @@ struct KeyMetricsEditorSheet: View {
                 .foregroundStyle(StrandPalette.textSecondary)
                 .accessibilityLabel("Reset Key Metrics to default")
             Spacer()
-            Button("Done") {
+            Button {
                 commit()
                 dismiss()
+            } label: {
+                Text("Done")
+                    .font(StrandFont.body)
+                    .foregroundStyle(Color.black)
+                    .padding(.horizontal, 22)
+                    .frame(minHeight: 44)
+                    .background {
+                        Capsule().fill(StrandPalette.statusPositive)
+                    }
             }
-            .buttonStyle(.borderedProminent)
-            .tint(StrandPalette.accent)
+            .buttonStyle(.plain)
             .accessibilityLabel("Done editing Key Metrics")
         }
     }
@@ -210,7 +219,7 @@ struct KeyMetricsEditorSheet: View {
 
     private func toggleHint(_ item: Item) -> String {
         if item.enabled, selectedCount <= KeyMetricPrefs.minimumSelectionCount {
-            return String(localized: "At least one metric must stay selected.")
+            return String(localized: "At least three metrics must stay selected.")
         }
         if !item.enabled, selectedCount >= KeyMetricPrefs.maximumSelectionCount {
             return String(localized: "Five metrics are already selected.")
@@ -234,6 +243,38 @@ struct KeyMetricsEditorSheet: View {
     /// default order on next open, so nothing is lost.
     private func commit() {
         layoutRaw = KeyMetricPrefs.encode(items.filter { $0.enabled }.map(\.metric))
+    }
+}
+
+/// Keeps boundary-locked metrics visibly selected while `Toggle.disabled` exposes the real state to
+/// VoiceOver and Switch Control. The guarded binding remains the persistence boundary for other callers.
+private struct KeyMetricSelectionToggleStyle: ToggleStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 10) {
+            configuration.label
+            Spacer(minLength: 8)
+            ZStack {
+                Capsule()
+                    .fill(
+                        configuration.isOn
+                            ? StrandPalette.statusPositive
+                            : StrandPalette.textTertiary.opacity(0.55)
+                    )
+                Circle()
+                    .fill(Color.white)
+                    .padding(2)
+                    .offset(x: configuration.isOn ? 10 : -10)
+                    .animation(.easeInOut(duration: 0.18), value: configuration.isOn)
+            }
+            .frame(width: 51, height: 31)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard isEnabled else { return }
+            configuration.isOn.toggle()
+        }
     }
 }
 

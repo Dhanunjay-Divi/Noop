@@ -194,7 +194,10 @@ final class NutritionLocalizationAccessibilityContractTests: XCTestCase {
         XCTAssertFalse(android.contains("NutritionMixedSourceCard"))
 
         XCTAssertTrue(shell.contains("expandedReservedHeight: CGFloat = 88"))
-        XCTAssertTrue(shell.contains(".padding(.bottom, visibleTabBarHeight)"))
+        XCTAssertTrue(shell.contains(
+            ".contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)"
+        ))
+        XCTAssertFalse(shell.contains(".padding(.bottom, visibleTabBarHeight)"))
         XCTAssertFalse(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
         XCTAssertFalse(shell.contains("floatingTabBarClearance"))
     }
@@ -295,7 +298,7 @@ final class SafetyCenterLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 182)
+        XCTAssertEqual(source.count, 204)
         for (key, translations) in source {
             XCTAssertTrue(key.hasPrefix("safety."), key)
             XCTAssertEqual(Set(translations.keys), locales, key)
@@ -390,7 +393,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 61)
+        XCTAssertEqual(source.count, 71)
         for (key, translations) in source {
             XCTAssertTrue(key.hasPrefix("appwide."), key)
             XCTAssertEqual(Set(translations.keys), locales, key)

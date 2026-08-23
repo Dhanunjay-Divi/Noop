@@ -112,7 +112,12 @@ final class AppleHealthAutomaticIngestionContractTests: XCTestCase {
         XCTAssertTrue(bridge.contains("deleteAllAppleHealthPeriodStarts"))
         XCTAssertTrue(optIn.contains("can ask to read cycle-start dates from Apple Health"),
                       "The in-app rationale must precede the dedicated system prompt.")
-        XCTAssertTrue(optIn.contains("never flow intensity, symptoms, fertility or contraception data"))
+        XCTAssertTrue(optIn.contains(
+            "Optional flow and symptom details stay private and are used only as context."
+        ))
+        XCTAssertTrue(optIn.contains(
+            "Awareness only: not contraception, not a fertility predictor, not a medical service."
+        ))
     }
 
     func testCoreHealthConsentExcludesOptionalBodyAndHighVolumeScopes() throws {

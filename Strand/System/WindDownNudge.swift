@@ -176,6 +176,20 @@ enum WindDownNudge {
     /// (overrides present) or keeps the single daily trigger (none).
     static var hasPerDayOverrides: Bool { !perDayWakeOverrides.isEmpty }
 
+    #if DEBUG
+    /// Seeds the real persisted planner state before `SmartAlarmView` initializes. UI tests use this
+    /// instead of tapping the final switch through the floating navigation overlay.
+    static func applyDemoLaunchArgumentsIfNeeded(
+        arguments: [String] = CommandLine.arguments,
+        defaults: UserDefaults = .standard
+    ) {
+        guard arguments.contains("--demo-sleep-per-day") else { return }
+        let value = min(max(wakeMinutes, 0), 24 * 60 - 1)
+        guard let data = try? JSONEncoder().encode(["1": value]) else { return }
+        defaults.set(data, forKey: K.perDayWake)
+    }
+    #endif
+
     /// Set or clear a single weekday's wake override (pass nil to clear → that day reverts to the default),
     /// rescheduling if enabled. Clamps the minute-of-day so a bad value can't be stored.
     static func setWakeOverride(weekday: Int, minutes: Int?) {

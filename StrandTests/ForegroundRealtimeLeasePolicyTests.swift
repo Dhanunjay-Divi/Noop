@@ -57,7 +57,7 @@ final class ForegroundRealtimeLeasePolicyTests: XCTestCase {
                                 encoding: .utf8)
         XCTAssertTrue(source.contains("@State private var liveTrackingOptedIn = false"))
         XCTAssertTrue(source.contains("Start Live Tracking"))
-        XCTAssertTrue(source.contains("uses more strap and phone battery"))
+        XCTAssertTrue(source.contains("uses more Noop Band and phone battery"))
         XCTAssertTrue(source.contains("only while this Live screen and NOOP are in the foreground"))
         XCTAssertTrue(source.contains("Continuous HRV capture is a separate option in Settings"))
         XCTAssertTrue(source.contains(".onAppear { refreshConnectionSnapshot(); consumeActiveWorkoutRequest() }"),

@@ -50,9 +50,6 @@ internal fun lastWorkoutsFeed(rows: List<WorkoutRow>): List<WorkoutRow> =
         .sortedByDescending { it.startTs }
         .take(4)
 
-/** S5: the Key-Metric overflow cap, mirroring TodayView.metricsCollapsedCap (two columns, three rows). */
-internal const val METRICS_COLLAPSED_CAP = 6
-
 /** The Weight tile's display string and an honest caption. */
 internal data class WeightTileText(val value: String, val caption: String?)
 

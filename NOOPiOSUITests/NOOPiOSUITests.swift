@@ -177,6 +177,39 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "onboarding-editable-measurements")
     }
 
+    func testKeyMetricSelectionEnforcesAccessibleThreeToFiveBoundaries() {
+        let app = launchDemoScreen("keymetricseditor")
+        let recovery = app.switches["noop.key-metric.toggle.charge"]
+        let hrv = app.switches["noop.key-metric.toggle.hrv"]
+        let restingHR = app.switches["noop.key-metric.toggle.restingHr"]
+        let bloodOxygen = app.switches["noop.key-metric.toggle.bloodOxygen"]
+
+        XCTAssertTrue(recovery.waitForExistence(timeout: 20))
+        XCTAssertTrue(hrv.exists)
+        XCTAssertEqual(recovery.value as? String, "1")
+        XCTAssertFalse(recovery.isEnabled)
+        XCTAssertEqual(hrv.value as? String, "0")
+        XCTAssertTrue(hrv.isEnabled)
+
+        hrv.tap()
+        XCTAssertTrue(app.staticTexts["4 of 5 selected"].waitForExistence(timeout: 3))
+        XCTAssertEqual(hrv.value as? String, "1")
+        XCTAssertTrue(recovery.isEnabled)
+
+        recovery.tap()
+        XCTAssertTrue(app.staticTexts["3 of 5 selected"].waitForExistence(timeout: 3))
+        XCTAssertEqual(recovery.value as? String, "0")
+        XCTAssertFalse(hrv.isEnabled)
+
+        recovery.tap()
+        XCTAssertTrue(app.staticTexts["4 of 5 selected"].waitForExistence(timeout: 3))
+        restingHR.tap()
+        XCTAssertTrue(app.staticTexts["5 of 5 selected"].waitForExistence(timeout: 3))
+        XCTAssertEqual(restingHR.value as? String, "1")
+        XCTAssertFalse(bloodOxygen.isEnabled)
+        keepScreenshot(app, name: "key-metrics-accessible-color-boundaries")
+    }
+
     func testMetricScreensExposeTheirOwnReminderControls() {
         var app = launchDemoScreen("hydration")
         let waterReminders = app.staticTexts["Water reminders"]
@@ -200,7 +233,7 @@ final class NOOPiOSUITests: XCTestCase {
             "metricdetail",
             extraArguments: ["--demo-metric", "hrv", "--demo-source", "my-whoop"]
         )
-        let metricReminder = app.staticTexts["Metric check-in"]
+        let metricReminder = app.staticTexts["Metric review"]
         for _ in 0..<6 where !metricReminder.exists { app.swipeUp() }
         XCTAssertTrue(metricReminder.waitForExistence(timeout: 3))
         XCTAssertTrue(
@@ -266,13 +299,18 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(finalControl.waitForExistence(timeout: 20))
         XCTAssertTrue(compactNavigation.waitForExistence(timeout: 5))
         XCTAssertTrue(quickActions.exists)
-        for _ in 0..<10 where !finalControl.isHittable { app.swipeUp() }
-        XCTAssertTrue(finalControl.isHittable)
-
-        let firstFloatingControlY = min(
+        var firstFloatingControlY = min(
             compactNavigation.frame.minY,
             quickActions.frame.minY
         )
+        for _ in 0..<10 where finalControl.frame.maxY + 8 > firstFloatingControlY {
+            app.swipeUp()
+            firstFloatingControlY = min(
+                compactNavigation.frame.minY,
+                quickActions.frame.minY
+            )
+        }
+        XCTAssertTrue(finalControl.isHittable)
         XCTAssertLessThanOrEqual(
             finalControl.frame.maxY + 8,
             firstFloatingControlY,
@@ -287,21 +325,26 @@ final class NOOPiOSUITests: XCTestCase {
             "--demo-seed",
             "--demo-more-route", "alarms",
             "--demo-compact-tab-bar",
+            "--demo-sleep-per-day",
         ]
         app.launch()
 
-        let monday = app.staticTexts["noop.sleep-planner.weekday.2"]
-        let summary = app.staticTexts["noop.sleep-planner.weekday-summary"]
+        let monday = app.staticTexts["Monday"]
+        let sundayWakeTime = app.descendants(matching: .any)["Sunday wake time"]
         let compactNavigation = app.buttons["noop.tab.compact"]
         let quickActions = app.buttons["noop.quick-actions"]
-        XCTAssertTrue(monday.waitForExistence(timeout: 20))
-        XCTAssertTrue(summary.exists)
-        XCTAssertTrue(monday.isHittable)
-        XCTAssertTrue(summary.isHittable)
-
-        let firstFloatingControlY = min(compactNavigation.frame.minY, quickActions.frame.minY)
-        XCTAssertLessThanOrEqual(monday.frame.maxY + 8, firstFloatingControlY)
-        XCTAssertLessThanOrEqual(summary.frame.maxY + 8, firstFloatingControlY)
+        let perDay = app.switches["noop.sleep-planner.per-day"]
+        XCTAssertTrue(perDay.waitForExistence(timeout: 20))
+        XCTAssertEqual(perDay.value as? String, "1")
+        XCTAssertTrue(monday.waitForExistence(timeout: 5))
+        XCTAssertTrue(sundayWakeTime.waitForExistence(timeout: 5))
+        var firstFloatingControlY = min(compactNavigation.frame.minY, quickActions.frame.minY)
+        for _ in 0..<8 where sundayWakeTime.frame.maxY + 8 > firstFloatingControlY {
+            app.swipeUp()
+            firstFloatingControlY = min(compactNavigation.frame.minY, quickActions.frame.minY)
+        }
+        XCTAssertTrue(sundayWakeTime.isHittable)
+        XCTAssertLessThanOrEqual(sundayWakeTime.frame.maxY + 8, firstFloatingControlY)
     }
 
     private func keepScreenshot(_ app: XCUIApplication, name: String) {

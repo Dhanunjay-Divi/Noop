@@ -78,4 +78,20 @@ final class OnboardingUnitsPickerTests: XCTestCase {
         XCTAssertTrue(source.contains("@AppStorage(UnitPrefs.heightKey)"),
                       "Keyboard/layout work must not fold weight and height back into one unit choice.")
     }
+
+    func testOnboardingRemovesDistributionAndLegacyBandNoticesButKeepsHistoryImport() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let onboarding = try String(
+            contentsOf: root.appendingPathComponent("Strand/Onboarding/OnboardingWizard.swift")
+        )
+        let changelog = try String(
+            contentsOf: root.appendingPathComponent("Strand/System/AppChangelog.swift")
+        )
+
+        XCTAssertFalse(onboarding.contains("Delivered through Apple"))
+        XCTAssertFalse(changelog.contains("WHOOP 4.0 is the supported path"))
+        XCTAssertTrue(onboarding.contains("StepShell(title: String(localized: \"Bring your history\")"))
+        XCTAssertTrue(onboarding.contains("Import WHOOP export"))
+        XCTAssertTrue(onboarding.contains("Import Apple Health export"))
+    }
 }

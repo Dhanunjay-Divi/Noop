@@ -3,7 +3,7 @@ import SwiftUI
 
 // MARK: - Editable Key-Metrics layout (#251)
 //
-// The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin one to five in
+// The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin three to five in
 // their preferred order. A fresh install starts with NOOP's three core daily signals — Recovery, Effort,
 // and Sleep — while every other metric remains available in the editor. Persistence is display-only: no
 // metric is computed or stored differently.
@@ -88,7 +88,7 @@ enum KeyMetric: String, CaseIterable, Identifiable {
 enum KeyMetricPrefs {
     /// UserDefaults key — a comma-joined list of `KeyMetric` rawValues in display order.
     static let layoutKey = "today.keyMetrics"
-    static let minimumSelectionCount = 1
+    static let minimumSelectionCount = 3
     static let maximumSelectionCount = 5
 
     /// Encode a valid ordered pin set. This boundary also protects callers other than the editor from
@@ -112,15 +112,28 @@ enum KeyMetricPrefs {
                 if result.count == maximumSelectionCount { break }
             }
         }
-        return result.isEmpty ? KeyMetric.defaultSelection : result
+        return normalized(result)
     }
 
-    /// Ordered dedupe + cap shared by encoding and tests. An empty request falls back to the product
-    /// default because Today must always retain at least one useful metric.
+    /// Ordered dedupe + bounds shared by encoding and tests. A short or empty request is completed from
+    /// the three product defaults first, then the canonical catalog. This migrates older one/two-tile
+    /// preferences without discarding the user's chosen order.
     static func normalized(_ metrics: [KeyMetric]) -> [KeyMetric] {
         var seen = Set<KeyMetric>()
-        let selected = metrics.filter { seen.insert($0).inserted }
-            .prefix(maximumSelectionCount)
-        return selected.isEmpty ? KeyMetric.defaultSelection : Array(selected)
+        var selected = Array(metrics.filter { seen.insert($0).inserted }
+            .prefix(maximumSelectionCount))
+        for fallback in KeyMetric.defaultSelection + KeyMetric.defaultOrder
+        where selected.count < minimumSelectionCount && seen.insert(fallback).inserted {
+            selected.append(fallback)
+        }
+        return selected
+    }
+
+    /// The full dashboard catalog with the user's pinned metrics first. "Show all" uses this display-only
+    /// order so every prior tile remains reachable without changing or expanding the saved 3-to-5 selection.
+    static func catalogOrder(startingWith metrics: [KeyMetric]) -> [KeyMetric] {
+        let selected = normalized(metrics)
+        let selectedSet = Set(selected)
+        return selected + KeyMetric.defaultOrder.filter { !selectedSet.contains($0) }
     }
 }

@@ -104,14 +104,15 @@ struct DashboardCardsEditorSheet: View {
         let card = item.wrappedValue.card
         let enabled = item.wrappedValue.enabled
         HStack(spacing: 12) {
-            // The card's own thin-line icon, flat WHOOP styling — accent when on, grey when off.
+            // Enabled is a semantic positive state here, so use green rather than the shell's monochrome
+            // accent. The switch, icon and label now communicate the same on/off state at a glance.
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill((enabled ? StrandPalette.accent : StrandPalette.textTertiary).opacity(0.14))
+                .fill((enabled ? StrandPalette.statusPositive : StrandPalette.textTertiary).opacity(0.14))
                 .frame(width: 30, height: 30)
                 .overlay(
                     Image(systemName: card.icon)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(enabled ? StrandPalette.accent : StrandPalette.textTertiary)
+                        .foregroundStyle(enabled ? StrandPalette.statusPositive : StrandPalette.textTertiary)
                 )
                 .accessibilityHidden(true)
 
@@ -122,7 +123,7 @@ struct DashboardCardsEditorSheet: View {
                     .foregroundStyle(enabled ? StrandPalette.textPrimary : StrandPalette.textTertiary)
             }
             .toggleStyle(.switch)
-            .tint(StrandPalette.accent)
+            .tint(StrandPalette.statusPositive)
             .accessibilityLabel("Show \(card.title)")
         }
     }

@@ -56,6 +56,7 @@ struct StrandiOSApp: App {
         // MUST live here, not in StrandApp.swift — that is the macOS @main and is excluded from the iOS
         // target, so the hook there never runs on iOS.
         DemoDayHarness.applyLaunchArgsIfNeeded()
+        WindDownNudge.applyDemoLaunchArgumentsIfNeeded()
         #endif
         // Debug-only canary: trips if the App Group entitlement is missing on this target before any
         // silent no-op (PendingIntents, WidgetSnapshot.publish, Live Activity) can mask the issue as
@@ -593,6 +594,10 @@ enum DemoScreens {
         case "terms": return AnyView(TermsGateView(onAccept: {}))
         case "hydration": return AnyView(HydrationView())
         case "smartalarm", "sleepplanner": return AnyView(SmartAlarmView())
+        case "keymetricseditor":
+            return AnyView(KeyMetricsEditorSheet(layoutRaw: .constant("")))
+        case "dashboardeditor":
+            return AnyView(DashboardCardsEditorSheet(selectionRaw: .constant("")))
         case "widgets": return AnyView(WidgetSettingsView())
         case "onboarding": return AnyView(OnboardingWizard(onFinished: {}))
         case "chargebreakdown": return AnyView(ChargeBreakdownDemoHost())

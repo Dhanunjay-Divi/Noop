@@ -7,9 +7,7 @@ import org.junit.Test
 
 /**
  * A1/S4/S5 parity twins of the iOS TodayChargeTapCollapseTests: the one-word readiness read kept on the
- * hero (#205), the collapsed "Synced from: ..." footer summary (S5), and the metrics-grid overflow cap
- * (S5). These mirror the Swift TodayView.readinessWord / syncedFromSummary / metricsCollapsedCap EXACTLY,
- * so a drift in either platform's labels/numbers fails here.
+ * hero (#205), the collapsed "Synced from: ..." footer summary (S5), and full-catalog metric ordering.
  */
 class TodayChargeTapCollapseTest {
 
@@ -76,16 +74,11 @@ class TodayChargeTapCollapseTest {
     }
 
     @Test
-    fun metricsCollapsedCap_isSixTilesThreeRows() {
-        assertEquals(6, METRICS_COLLAPSED_CAP)
-    }
-
-    @Test
-    fun metricsCollapse_keepsLeadingTilesInOrder() {
-        // The collapse slices from the FRONT of the saved order, so a pinned/selected tile is never
-        // dropped or reordered (#251); only the tail folds. Mirrors MetricGrid's take(cap).
-        val saved = (0 until 10).toList()
-        val visible = if (saved.size <= METRICS_COLLAPSED_CAP) saved else saved.take(METRICS_COLLAPSED_CAP)
-        assertEquals(listOf(0, 1, 2, 3, 4, 5), visible)
+    fun expandedMetricsKeepPinsFirstAndRestoreTheWholeCatalog() {
+        val pins = listOf(KeyMetric.STEPS, KeyMetric.HRV, KeyMetric.BLOOD_OXYGEN)
+        val expanded = KeyMetricPrefs.catalogOrder(pins)
+        assertEquals(pins, expanded.take(pins.size))
+        assertEquals(KeyMetric.entries.toSet(), expanded.toSet())
+        assertEquals(KeyMetric.entries.size, expanded.size)
     }
 }

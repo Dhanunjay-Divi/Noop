@@ -171,11 +171,10 @@ struct RootTabView: View {
     }
 
     var body: some View {
-        // Keep the custom bar in the root's bottom alignment and reserve its largest measured height on
-        // the TabView itself. A safe-area inset does not reliably cross TabView -> NavigationStack on
-        // iOS 26; pushed screens could still settle their final text beneath the glass. Root padding is
-        // deliberately singular and screen-agnostic, so custom ScrollViews receive the same clearance
-        // while the full-screen shell canvas remains visible behind the translucent controls.
+        // Keep the custom bar in the root's bottom alignment and reserve its largest measured height as a
+        // scroll-content margin. Unlike outer padding, this leaves every page viewport and backdrop
+        // edge-to-edge behind the floating controls while still letting the final row scroll fully above
+        // them. The margin is inherited by scrollable roots inside each NavigationStack.
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
                 tab(todayTabRoot, "Today", "square.grid.2x2", tag: IPhonePrimaryTab.today.rawValue,
@@ -207,7 +206,7 @@ struct RootTabView: View {
             // steal gestures from Trends' year strip (and other horizontally scrolling controls), while
             // pushed pages already need the system edge-swipe for Back. Native iOS tab bars do not require
             // page swiping, so leave horizontal gestures to the content that owns them.
-            .padding(.bottom, visibleTabBarHeight)
+            .contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)
 
             if !keyboardVisible {
                 HStack(alignment: .bottom, spacing: 6) {
@@ -253,7 +252,13 @@ struct RootTabView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(StrandPalette.surfaceBase.ignoresSafeArea())
+        .background {
+            ZStack {
+                StrandPalette.surfaceBase
+                LiquidScaffoldSky()
+            }
+            .ignoresSafeArea()
+        }
         .background {
             WindowStatusBarContrastGuard(visible: statusBarGuardVisible)
         }
@@ -1003,10 +1008,13 @@ private final class WindowAttachmentProbe: UIView {
     }
 }
 
-/// Opaque throughout the status safe area, then fading over a fixed 24pt into scrolling content.
+/// A translucent contrast veil throughout the status safe area, fading over 24pt into scrolling content.
+/// The page scene remains visible beneath it; Reduced Transparency keeps the accessibility-safe solid fill.
 private final class StatusBarContrastOverlayView: UIView {
     static let fadeHeight: CGFloat = 24
 
+    private let blurView = UIVisualEffectView()
+    private let blurMask = CAGradientLayer()
     private let gradient = CAGradientLayer()
     private var reduceTransparency = false
 
@@ -1015,7 +1023,12 @@ private final class StatusBarContrastOverlayView: UIView {
         isUserInteractionEnabled = false
         isAccessibilityElement = false
         backgroundColor = .clear
+        blurView.isUserInteractionEnabled = false
+        blurView.layer.mask = blurMask
+        addSubview(blurView)
         layer.addSublayer(gradient)
+        blurMask.startPoint = CGPoint(x: 0.5, y: 0)
+        blurMask.endPoint = CGPoint(x: 0.5, y: 1)
         gradient.startPoint = CGPoint(x: 0.5, y: 0)
         gradient.endPoint = CGPoint(x: 0.5, y: 1)
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
@@ -1047,24 +1060,36 @@ private final class StatusBarContrastOverlayView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        blurView.frame = bounds
+        blurMask.frame = bounds
         gradient.frame = bounds
         updateGradient()
     }
 
     private func updateGradient() {
         guard bounds.height > 0 else { return }
+        blurView.effect = reduceTransparency ? nil : UIBlurEffect(style: .systemThinMaterial)
         let base = UIColor(StrandPalette.surfaceBase).resolvedColor(with: traitCollection)
         let safeTop = max(0, bounds.height - Self.fadeHeight)
         let solidEnd = NSNumber(value: min(1, safeTop / bounds.height))
         let softEnd = NSNumber(value: min(1, (safeTop + Self.fadeHeight * 0.48) / bounds.height))
 
+        let crownAlpha: CGFloat = reduceTransparency ? 1 : 0.52
+        let shoulderAlpha: CGFloat = reduceTransparency ? 0.82 : 0.30
         gradient.colors = [
-            base.withAlphaComponent(1).cgColor,
-            base.withAlphaComponent(1).cgColor,
-            base.withAlphaComponent(reduceTransparency ? 0.82 : 0.70).cgColor,
+            base.withAlphaComponent(crownAlpha).cgColor,
+            base.withAlphaComponent(crownAlpha).cgColor,
+            base.withAlphaComponent(shoulderAlpha).cgColor,
             base.withAlphaComponent(0).cgColor,
         ]
         gradient.locations = [0, solidEnd, softEnd, 1]
+        blurMask.colors = [
+            UIColor.white.cgColor,
+            UIColor.white.cgColor,
+            UIColor.white.withAlphaComponent(0.55).cgColor,
+            UIColor.clear.cgColor,
+        ]
+        blurMask.locations = [0, solidEnd, softEnd, 1]
     }
 }
 

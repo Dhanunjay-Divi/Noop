@@ -171,8 +171,10 @@
     <string name="strength_exercise_biceps_curl">Сгибания на бицепс</string>
     <string name="strength_exercise_triceps_pushdown">Разгибания на трицепс в блоке</string>
     <string name="strength_exercise_plank">Планка</string>
-    <string name="key_metrics_selection_instructions">Выберите до пяти метрик для Пульта управления и поставьте самую важную первой.</string>
+    <string name="key_metrics_selection_instructions">Выберите от 3 до 5 метрик для Пульта управления и поставьте самую важную первой.</string>
     <string name="key_metrics_selection_count">Выбрано %1$d из %2$d</string>
+    <string name="key_metrics_show_selected">Показать выбранные метрики</string>
+    <string name="key_metrics_show_all_count">Показать все метрики (%1$d)</string>
     <string name="hydration_adaptive_timing_label">Адаптивное расписание</string>
     <string name="hydration_adaptive_timing_help">Корректирует сегодняшний интервал по Нагрузке и подтверждённому потреблению воды. Недостающие данные не оцениваются.</string>
     <string name="hydration_adaptive_timing_status">Сейчас каждые %1$d мин. Расписание меняется только при наличии подтверждающих данных за сегодня.</string>

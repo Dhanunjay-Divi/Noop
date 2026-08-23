@@ -4,7 +4,7 @@ import android.content.Context
 
 // MARK: - Editable Key-Metrics layout (#251)
 //
-// The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin one to five in
+// The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin three to five in
 // their preferred order. A fresh install starts with NOOP's three core daily signals — Recovery, Effort,
 // and Sleep — while every other metric remains available in the editor. Persistence is display-only.
 //
@@ -58,7 +58,7 @@ enum class KeyMetric(
  */
 object KeyMetricPrefs {
     internal const val KEY_LAYOUT = "today.keyMetrics"
-    const val MIN_SELECTION_COUNT = 1
+    const val MIN_SELECTION_COUNT = 3
     const val MAX_SELECTION_COUNT = 5
     private const val KEY_DETAILED = "today.keyMetricsDetailed"
 
@@ -109,10 +109,22 @@ object KeyMetricPrefs {
                 KeyMetric.fromRaw(token.trim())?.let { seen.add(it) }
             }
         }
-        return if (seen.isEmpty()) KeyMetric.defaultSelection else seen.toList()
+        return normalized(seen.toList())
     }
 
-    /** Ordered dedupe + cap. Today always retains at least the product-default metric set. */
-    fun normalized(metrics: List<KeyMetric>): List<KeyMetric> =
-        metrics.distinct().take(MAX_SELECTION_COUNT).ifEmpty { KeyMetric.defaultSelection }
+    /** Ordered dedupe + bounds. Short legacy selections retain their order and fill from the defaults. */
+    fun normalized(metrics: List<KeyMetric>): List<KeyMetric> {
+        val selected = LinkedHashSet(metrics.distinct().take(MAX_SELECTION_COUNT))
+        (KeyMetric.defaultSelection + KeyMetric.defaultOrder).forEach { fallback ->
+            if (selected.size < MIN_SELECTION_COUNT) selected.add(fallback)
+        }
+        return selected.take(MAX_SELECTION_COUNT)
+    }
+
+    /** Full catalog with the saved 3-to-5 pins first; expanding it never mutates the saved selection. */
+    fun catalogOrder(startingWith: List<KeyMetric>): List<KeyMetric> {
+        val selected = normalized(startingWith)
+        val selectedSet = selected.toHashSet()
+        return selected + KeyMetric.defaultOrder.filter { it !in selectedSet }
+    }
 }

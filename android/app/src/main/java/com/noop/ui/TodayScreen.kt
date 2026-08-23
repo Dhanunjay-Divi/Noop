@@ -712,9 +712,8 @@ fun TodayScreen(
     val journalReminderOn = remember { NoopPrefs.journalReminderEnabled(context) }
     // S4: the Synthesis card collapses to a one-liner that expands on tap (default collapsed). Mirrors iOS.
     var synthesisExpanded by remember { mutableStateOf(false) }
-    // S5: the Key Metrics grid caps at the first METRICS_COLLAPSED_CAP tiles behind a "Show all metrics"
-    // expander, and the Data Sources footer collapses to a single "Synced from: ..." line. Both default
-    // collapsed and are NOT persisted, so the home screen reopens compact. Mirrors iOS.
+    // Key Metrics starts with the user's three-to-five pins and can expand to the complete ten-tile
+    // catalog without mutating them. Data Sources still collapses to its summary. Neither state persists.
     var metricsExpanded by remember { mutableStateOf(false) }
     var sourcesExpanded by remember { mutableStateOf(false) }
     var scoringCardSeen by remember { mutableStateOf(ScoringGuidePrefs.cardSeen(context)) }
@@ -4239,7 +4238,7 @@ private fun DashboardCardsEditorDialog(
                                 onCheckedChange = { items[index] = item.copy(enabled = it) },
                                 colors = SwitchDefaults.colors(
                                     checkedThumbColor = Palette.surfaceBase,
-                                    checkedTrackColor = Palette.accent,
+                                    checkedTrackColor = Palette.statusPositive,
                                     uncheckedThumbColor = Palette.textSecondary,
                                     uncheckedTrackColor = Palette.surfaceInset,
                                     uncheckedBorderColor = Palette.hairline,
@@ -5082,9 +5081,7 @@ private fun MetricGrid(
     enabledMetrics: List<KeyMetric> = KeyMetric.defaultOrder,
     isToday: Boolean = false,
     onScoreInfo: (ScoreSection) -> Unit = {},
-    // S5: cap the grid to the first METRICS_COLLAPSED_CAP tiles behind a "Show all metrics" expander,
-    // collapsing OVERFLOW only (never dropping or reordering a user-selected tile, #251). Defaults keep the
-    // grid fully expanded for any caller that doesn't opt into the cap.
+    // Compact mode shows the saved three-to-five pins. Expanded mode appends all unpinned catalog metrics.
     metricsExpanded: Boolean = true,
     onToggleMetrics: () -> Unit = {},
     // Detailed tiles (the #251 editor's switch): squarer tiles with a 14-day trend graph under the bar.
@@ -5221,9 +5218,10 @@ private fun MetricGrid(
         },
     )
 
-    // Resolve the enabled tiles to their descriptors (keeping the metric for the tap mapping), dropping
-    // any unknown key defensively.
-    val allTiles = enabledMetrics.mapNotNull { m -> descriptors[m]?.let { m to it } }
+    // Resolve pins and the full catalog separately. Expansion is display-only: the saved list stays 3-to-5.
+    val pinnedTiles = enabledMetrics.mapNotNull { m -> descriptors[m]?.let { m to it } }
+    val catalogTiles = KeyMetricPrefs.catalogOrder(enabledMetrics)
+        .mapNotNull { m -> descriptors[m]?.let { m to it } }
     // Tile tap -> its focused trend TIMELINE (the Sleep night-detail pattern), uniformly for every tile
     // with a windowed series: Recovery/Effort/Rest open their new trend details; the vitals +
     // Steps/Calories open the same vital_detail trends the Health cards use. Today's Charge DRIVERS stay
@@ -5241,10 +5239,8 @@ private fun MetricGrid(
         KeyMetric.CALORIES -> ({ onOpenMetric("active_kcal") })
         KeyMetric.WEIGHT -> null
     }
-    // S5: slice from the FRONT of the saved order so a pinned/selected tile is never dropped or reordered
-    // (#251); only the tail folds behind the expander. Mirrors the iOS visibleKeyMetrics prefix(cap).
-    val hasOverflow = allTiles.size > METRICS_COLLAPSED_CAP
-    val tiles = if (metricsExpanded || !hasOverflow) allTiles else allTiles.take(METRICS_COLLAPSED_CAP)
+    val hasOverflow = catalogTiles.size > pinnedTiles.size
+    val tiles = if (metricsExpanded) catalogTiles else pinnedTiles
 
     // iOS `keyMetricsSection` LazyVGrid: 3 columns, spacing 8. Build from rows so tile heights tile uniformly
     // and a partial last row pads with empty weight so the columns stay aligned.
@@ -5269,17 +5265,20 @@ private fun MetricGrid(
                 repeat(3 - rowTiles.size) { Spacer(Modifier.weight(1f)) }
             }
         }
-        // S5: the "Show all metrics" / "Show fewer" expander - a centered link like iOS. Toggles visibility
-        // only, never WHICH tiles are enabled or their order (that stays the #251 editor's job).
+        // The centered expander changes visibility only; the editor remains the owner of saved pins.
         if (hasOverflow) {
-            val hidden = allTiles.size - METRICS_COLLAPSED_CAP
+            val hidden = catalogTiles.size - pinnedTiles.size
             TextButton(
                 onClick = onToggleMetrics,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.textButtonColors(contentColor = Palette.accent),
             ) {
                 Text(
-                    if (metricsExpanded) "Show fewer" else "Show all metrics ($hidden)",
+                    if (metricsExpanded) {
+                        stringResource(R.string.key_metrics_show_selected)
+                    } else {
+                        stringResource(R.string.key_metrics_show_all_count, hidden)
+                    },
                     style = NoopType.subhead,
                 )
                 Spacer(Modifier.width(4.dp))
@@ -6939,7 +6938,7 @@ private fun KeyMetricsEditorDialog(
                         onCheckedChange = { detailed = it },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Palette.surfaceBase,
-                            checkedTrackColor = Palette.accent,
+                            checkedTrackColor = Palette.statusPositive,
                             uncheckedThumbColor = Palette.textSecondary,
                             uncheckedTrackColor = Palette.surfaceInset,
                             uncheckedBorderColor = Palette.hairline,
@@ -6966,6 +6965,11 @@ private fun KeyMetricsEditorDialog(
                         .verticalScroll(rememberScrollState()),
                 ) {
                     items.forEachIndexed { index, item ->
+                        val toggleEnabled = if (item.enabled) {
+                            selectedCount > KeyMetricPrefs.MIN_SELECTION_COUNT
+                        } else {
+                            selectedCount < KeyMetricPrefs.MAX_SELECTION_COUNT
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -6973,24 +6977,20 @@ private fun KeyMetricsEditorDialog(
                             Switch(
                                 checked = item.enabled,
                                 onCheckedChange = { enabled ->
-                                    val canChange = when {
-                                        enabled == item.enabled -> true
-                                        enabled -> selectedCount < KeyMetricPrefs.MAX_SELECTION_COUNT
-                                        else -> selectedCount > KeyMetricPrefs.MIN_SELECTION_COUNT
-                                    }
-                                    if (canChange) items[index] = item.copy(enabled = enabled)
+                                    items[index] = item.copy(enabled = enabled)
                                 },
-                                enabled = if (item.enabled) {
-                                    selectedCount > KeyMetricPrefs.MIN_SELECTION_COUNT
-                                } else {
-                                    selectedCount < KeyMetricPrefs.MAX_SELECTION_COUNT
-                                },
+                                enabled = toggleEnabled,
                                 colors = SwitchDefaults.colors(
                                     checkedThumbColor = Palette.surfaceBase,
-                                    checkedTrackColor = Palette.accent,
+                                    checkedTrackColor = Palette.statusPositive,
                                     uncheckedThumbColor = Palette.textSecondary,
                                     uncheckedTrackColor = Palette.surfaceInset,
                                     uncheckedBorderColor = Palette.hairline,
+                                    disabledCheckedThumbColor = Palette.surfaceBase,
+                                    disabledCheckedTrackColor = Palette.statusPositive,
+                                    disabledUncheckedThumbColor = Palette.textSecondary,
+                                    disabledUncheckedTrackColor = Palette.surfaceInset,
+                                    disabledUncheckedBorderColor = Palette.hairline,
                                 ),
                                 modifier = Modifier.semantics { contentDescription = uiString(R.string.l10n_today_screen_show_item_metric_title_81803daf, item.metric.title) },
                             )
@@ -7048,8 +7048,8 @@ private fun KeyMetricsEditorDialog(
                     Button(
                         onClick = { onSave(items.filter { it.enabled }.map { it.metric }, detailed, windowDays) },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Palette.accent,
-                            contentColor = Palette.surfaceBase,
+                            containerColor = Palette.statusPositive,
+                            contentColor = Palette.accentInk,
                         ),
                     ) { Text(uiString(R.string.l10n_today_screen_done_e9b450d1), style = NoopType.captionNumber) }
                 }

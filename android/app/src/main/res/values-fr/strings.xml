@@ -1514,8 +1514,10 @@
     <string name="l10n_today_screen_calories_3e62ecfe">Calories</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">Choisissez les vignettes à afficher dans votre Centre de contrôle et réorganisez-les avec les flèches.</string>
-    <string name="key_metrics_selection_instructions">Choisissez jusqu’à cinq métriques pour votre Centre de contrôle et placez la plus importante en premier.</string>
+    <string name="key_metrics_selection_instructions">Choisissez de 3 à 5 métriques pour votre Centre de contrôle et placez la plus importante en premier.</string>
     <string name="key_metrics_selection_count">%1$d sur %2$d sélectionnées</string>
+    <string name="key_metrics_show_selected">Afficher les métriques sélectionnées</string>
+    <string name="key_metrics_show_all_count">Afficher toutes les métriques (%1$d)</string>
     <string name="l10n_today_screen_data_label_data_value_data_unit_27f6fd6b">%1$s %2$s %3$s</string>
     <string name="l10n_today_screen_data_unit_c768ef8c">%1$s</string>
     <string name="l10n_today_screen_daytitle_humandate_tap_to_pick_a_7e12ce96">%1$s, %2$s. Tapez pour choisir un jour, faites glisser pour changer le jour.</string>

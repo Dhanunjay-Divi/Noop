@@ -435,26 +435,17 @@ private struct ExpectationsStep: View {
                 }
 
                 #if os(iOS)
-                Group {
-                    if IOSDiagnostics.capture().isSideloaded == true {
-                        // Free-development / AltStore builds still need periodic re-signing.
-                        expectationRow(
-                            icon: "iphone.gen3",
-                            title: String(localized: "Installed outside the App Store"),
-                            body: String(localized: "On iPhone this is a sideloaded build. Re-sign it about every 7 days on a free Apple ID (longer on a paid account). After your phone reboots, unlock it once so NOOP can read and sync its data.")
-                        )
-                    } else {
-                        // TestFlight/App Store receipts must not receive the old seven-day sideload warning.
-                        expectationRow(
-                            icon: "checkmark.seal",
-                            title: String(localized: "Delivered through Apple"),
-                            body: String(localized: "This trial updates through TestFlight. Individual beta builds are available for up to 90 days, so install the latest version when TestFlight prompts you.")
-                        )
-                    }
+                if IOSDiagnostics.capture().isSideloaded == true {
+                    // Free-development / AltStore builds still need periodic re-signing.
+                    expectationRow(
+                        icon: "iphone.gen3",
+                        title: String(localized: "Installed outside the App Store"),
+                        body: String(localized: "On iPhone this is a sideloaded build. Re-sign it about every 7 days on a free Apple ID (longer on a paid account). After your phone reboots, unlock it once so NOOP can read and sync its data.")
+                    )
+                    .opacity(shown ? 1 : 0)
+                    .offset(y: shown ? 0 : 8)
+                    .animation(StrandMotion.gentle.delay(Double(AppChangelog.expectations.count) * 0.08), value: shown)
                 }
-                .opacity(shown ? 1 : 0)
-                .offset(y: shown ? 0 : 8)
-                .animation(StrandMotion.gentle.delay(Double(AppChangelog.expectations.count) * 0.08), value: shown)
                 #endif
             }
         }

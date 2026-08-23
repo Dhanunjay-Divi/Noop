@@ -5,7 +5,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.Shield
-import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.ui.graphics.vector.ImageVector
 
 internal const val VITALITY_WELLNESS_AGE_INPUT_CLAIM =
@@ -19,7 +18,6 @@ internal const val VITALITY_WELLNESS_AGE_INPUT_CLAIM =
 //
 // Icon mapping (SF Symbol → Material, all verified to resolve in material-icons-extended):
 //   flask           → Icons.Outlined.Science        (independent / experimental)
-//   checkmark.seal  → Icons.Outlined.VerifiedUser   (the supported path)
 //   hourglass       → Icons.Outlined.HourglassEmpty (scores build over time)
 //   lock.shield     → Icons.Outlined.Shield         (everything stays on-device)
 
@@ -2572,11 +2570,6 @@ object AppChangelog {
             icon = Icons.Outlined.Science,
             title = uiString(R.string.l10n_app_changelog_independent_and_experimental_f9b65317),
             body = "NOOP is a personal, open project - not the WHOOP app, and not affiliated with WHOOP. It reads a strap you own, on your own device. Treat it as a capable work-in-progress rather than a finished product.",
-        ),
-        Expectation(
-            icon = Icons.Outlined.VerifiedUser,
-            title = uiString(R.string.l10n_app_changelog_whoop_4_0_is_the_supported_16893d9d),
-            body = "WHOOP 4.0 is tested and works end to end. WHOOP 5.0/MG is newer: live heart rate works today, but deeper metrics (recovery, strain, sleep) for 5/MG are still being figured out. NOOP always tells you what's live versus still building.",
         ),
         Expectation(
             icon = Icons.Outlined.HourglassEmpty,

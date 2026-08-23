@@ -75,7 +75,7 @@ final class StressModelCarryTests: XCTestCase {
             SourcedDailyMetric(metric: $0, source: .appleHealth)
         }
         let model = StressModel(sourceRows: apple + direct)
-        XCTAssertEqual(model?.sourceTitle, "NOOP strap")
+        XCTAssertEqual(model?.sourceTitle, "Noop Band")
         XCTAssertGreaterThanOrEqual(model?.baselineDays ?? 0, 7)
     }
 

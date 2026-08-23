@@ -116,22 +116,51 @@ final class MoreListParityTests: XCTestCase {
     }
 
     /// The iPhone shell owns one custom bar outside the native TabView. Its clearance must come from
-    /// that bar's rendered height and be applied once to the TabView itself. A safe-area inset does not
-    /// reliably propagate through nested NavigationStacks on iOS 26; direct root padding keeps every
-    /// shared and custom scroll view above the controls without per-screen magic spacers.
+    /// that bar's rendered height and be applied once as an inherited scroll-content margin. This keeps
+    /// final rows reachable without shrinking the full-bleed page backdrop into opaque top/bottom bands.
     func testCustomiPhoneTabBarHasOneMeasuredFullScreenReservation() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
         let scaffold = try sourceText("Strand/Screens/ScreenScaffold.swift")
         let liquidToday = try sourceText("Strand/Liquid/LiquidTodayView.swift")
+        let visualHarness = try sourceText("Tools/ios-tab-shell-visual-qa.sh")
 
         XCTAssertTrue(shell.contains("FloatingTabBarHeightPreferenceKey"))
         XCTAssertTrue(shell.contains("value: geometry.size.height"))
-        XCTAssertEqual(shell.components(separatedBy: ".padding(.bottom, visibleTabBarHeight)").count - 1, 1,
-                       "The measured custom-bar clearance must be reserved exactly once at the TabView root.")
+        XCTAssertEqual(
+            shell.components(separatedBy:
+                ".contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)"
+            ).count - 1,
+            1,
+            "The measured custom-bar clearance must be reserved once as a scroll-content margin."
+        )
+        XCTAssertFalse(shell.contains(".padding(.bottom, visibleTabBarHeight)"),
+                       "Outer padding creates an opaque band behind the floating controls.")
         XCTAssertFalse(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"),
                        "A nested safe-area inset can leave pushed-screen footers beneath the custom bar.")
-        XCTAssertTrue(shell.contains(".background(StrandPalette.surfaceBase.ignoresSafeArea())"),
-                      "The full-screen adaptive canvas must remain behind the translucent controls.")
+        let interactionEnvironment = try XCTUnwrap(
+            shell.range(of: #".environment(\.liquidInteractionInProgress"#)
+        )
+        let beforeInteractionEnvironment = String(shell[..<interactionEnvironment.lowerBound])
+        let rootFrame = try XCTUnwrap(
+            beforeInteractionEnvironment.range(
+                of: ".frame(maxWidth: .infinity, maxHeight: .infinity)",
+                options: .backwards
+            )
+        )
+        let rootComposition = String(beforeInteractionEnvironment[rootFrame.lowerBound...])
+        XCTAssertTrue(rootComposition.contains("ZStack {"))
+        XCTAssertTrue(rootComposition.contains("StrandPalette.surfaceBase"))
+        XCTAssertTrue(rootComposition.contains("LiquidScaffoldSky()"),
+                      "The dimensional page backdrop must continue through the shell safe areas.")
+        XCTAssertTrue(rootComposition.contains(".ignoresSafeArea()"),
+                      "The actual root backdrop, not an unrelated destination, must remain full-screen.")
+        XCTAssertTrue(rootComposition.contains("WindowStatusBarContrastGuard(visible: statusBarGuardVisible)"))
+        XCTAssertTrue(shell.contains("UIBlurEffect(style: .systemThinMaterial)"),
+                      "The translucent status guard must blur scrolling text instead of using an opaque band.")
+        XCTAssertTrue(shell.contains("reduceTransparency ? nil"),
+                      "Reduced Transparency must disable the blur and retain the solid accessibility fallback.")
+        XCTAssertTrue(visualHarness.contains(#"-theme.appearance "$appearance""#),
+                      "Visual QA must force NOOP's app appearance, not only the simulator shell.")
         XCTAssertTrue(shell.contains(".frame(maxWidth: .infinity, maxHeight: .infinity)"),
                       "The overlay alignment needs a full-screen shell or the bar can settle mid-layout.")
         XCTAssertFalse(shell.contains("DragGesture(minimumDistance: 24)"),

@@ -121,7 +121,14 @@ struct LiquidTodayView: View {
     // compact 14-day trace for immediate context; window controls and exact values remain in Trends/detail.
     @AppStorage(KeyMetricPrefs.layoutKey) private var keyMetricsRaw = ""
     @State private var showKeyMetricsEditor = false
+    @State private var keyMetricsExpanded = false
     private var enabledKeyMetrics: [KeyMetric] { KeyMetricPrefs.decodeEnabled(keyMetricsRaw) }
+    private var allKeyMetricsInDisplayOrder: [KeyMetric] {
+        KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)
+    }
+    private var visibleKeyMetrics: [KeyMetric] {
+        keyMetricsExpanded ? allKeyMetricsInDisplayOrder : enabledKeyMetrics
+    }
     /// One shared, selected-day-anchored history cache for the compact tile traces. Building this in
     /// `load()` keeps the grid body O(1), and prevents an older selected day from seeing future readings.
     @State private var keyMetricTrends: [KeyMetric: [Double]] = [:]
@@ -1889,9 +1896,9 @@ struct LiquidTodayView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Edit Key Metrics")
             }
-            // #430 parity: the grid honours the Key-Metrics editor's ordered set of up to five choices
-            // from the ten-metric catalog. The bespoke Sleep-hours ktile gives way to the shared REST
-            // score tile, aligning the liquid grid with the classic macOS grid and Android.
+            // The compact grid honours the editor's ordered set of three to five choices. Expanding appends
+            // every unpinned catalog metric without altering the saved selection, so none of the previous
+            // dashboard metrics disappears merely because the default view is focused.
             // Two columns give values and units enough room to breathe on a phone. Three columns
             // made long labels and five-digit values compete for the same narrow sliver, which looked
             // like a diagnostic table rather than a premium daily dashboard.
@@ -1899,15 +1906,45 @@ struct LiquidTodayView: View {
                 columns: Array(repeating: GridItem(.flexible(), spacing: NoopMetrics.space3), count: 2),
                 spacing: NoopMetrics.space3
             ) {
-                ForEach(enabledKeyMetrics) { metric in
+                ForEach(visibleKeyMetrics) { metric in
                     ktileFor(metric, hrv: hrv, rhr: rhr)
                 }
             }
-            NavigationLink(value: TabRoute.metricExplorer) {
-                Text("Show all metrics").font(StrandFont.subhead).foregroundStyle(StrandPalette.accent)
-                    .frame(maxWidth: .infinity).padding(.top, 2)
+            Button {
+                withAnimation(StrandMotion.interactive) { keyMetricsExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(keyMetricsExpanded ? "Show selected metrics" : "Show all metrics")
+                        .font(StrandFont.subhead)
+                    if !keyMetricsExpanded {
+                        Text("\(allKeyMetricsInDisplayOrder.count - enabledKeyMetrics.count)")
+                            .font(StrandFont.captionNumber)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                    Image(systemName: keyMetricsExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .bold))
+                }
+                .foregroundStyle(StrandPalette.accent)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 2)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(
+                keyMetricsExpanded
+                    ? "Show selected metrics"
+                    : "Show all metrics, \(allKeyMetricsInDisplayOrder.count - enabledKeyMetrics.count) more"
+            )
+
+            if keyMetricsExpanded {
+                NavigationLink(value: TabRoute.metricExplorer) {
+                    Label("Open all metric history", systemImage: "clock.arrow.circlepath")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 

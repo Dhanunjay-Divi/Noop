@@ -171,8 +171,10 @@
     <string name="strength_exercise_biceps_curl">二頭彎舉</string>
     <string name="strength_exercise_triceps_pushdown">三頭下壓</string>
     <string name="strength_exercise_plank">平板支撐</string>
-    <string name="key_metrics_selection_instructions">最多為控制中心選擇五項指標，並將最重要的指標排在最前面。</string>
+    <string name="key_metrics_selection_instructions">為控制中心選擇 3 到 5 項指標，並將最重要的指標排在最前面。</string>
     <string name="key_metrics_selection_count">已選取 %1$d/%2$d 項</string>
+    <string name="key_metrics_show_selected">顯示已選指標</string>
+    <string name="key_metrics_show_all_count">顯示所有指標（%1$d）</string>
     <string name="hydration_adaptive_timing_label">自動調整時間</string>
     <string name="hydration_adaptive_timing_help">根據今天的運動負荷和已確認飲水量調整間隔。不會推估缺少的資料。</string>
     <string name="hydration_adaptive_timing_status">目前每 %1$d 分鐘一次。只有在今天的資料充分支持時才會調整時間。</string>

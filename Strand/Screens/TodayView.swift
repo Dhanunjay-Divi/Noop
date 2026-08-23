@@ -438,13 +438,10 @@ struct TodayView: View {
     // persisted) so a relaunch starts collapsed again.
     @State private var synthesisExpanded = false
 
-    // S5: the Key Metrics grid caps at the first `metricsCollapsedCap` tiles behind a "Show all metrics"
-    // expander, collapsing OVERFLOW only (never dropping or reordering a user-selected tile, #251). @State
-    // (not persisted) so the home screen reopens compact.
+    // The compact Key Metrics grid shows the user's three-to-five pinned tiles. "Show all metrics" appends
+    // the rest of the ten-tile catalog without mutating that saved choice. @State (not persisted) so the
+    // home screen reopens focused.
     @State private var metricsExpanded = false
-    /// The number of Key-Metric tiles shown before the "Show all metrics" expander (S5). Two columns, so
-    /// six fills three clean rows; the rest fold behind the expander. Static so the cap is unit-testable.
-    static let metricsCollapsedCap = 6
 
     // S5: the Data Sources footer collapses to a single "Synced from: …" summary line that expands inline
     // to the full per-source rows + strap battery/sync on tap. Default collapsed so the home screen ends
@@ -3227,10 +3224,8 @@ struct TodayView: View {
                 .accessibilityLabel("Edit Key Metrics")
                 .help("Choose which Key Metrics show and reorder them")
             }
-            // Render the enabled tiles in the saved order; an empty layout still shows the default set.
-            // S5: cap the grid to the first `metricsCollapsedCap` tiles behind a "Show all metrics" expander.
-            // This collapses OVERFLOW ONLY (the visible tiles stay in the user's saved order), and no
-            // pinned/selected tile is dropped or reordered (#251); the rest just fold until the expander.
+            // At rest, render the three-to-five pins in saved order. Expansion appends every unpinned
+            // catalog metric, so the focused dashboard never makes the prior tiles inaccessible.
             LazyVGrid(columns: grid, alignment: .leading, spacing: NoopMetrics.gap) {
                 ForEach(visibleKeyMetrics) { metric in
                     // Pin every tile to one height so the grid reads as an even matrix. A LazyVGrid only
@@ -3252,27 +3247,25 @@ struct TodayView: View {
         }
     }
 
-    /// S5: the Key-Metric tiles actually rendered: all of them when expanded, else the first
-    /// `metricsCollapsedCap` (overflow folds behind the expander). Order is the user's saved order, sliced
-    /// from the front, so a pinned tile is never dropped or reordered (#251); only the tail collapses.
+    /// Pinned metrics stay first. The expanded list appends the unselected catalog without changing storage.
     private var visibleKeyMetrics: [KeyMetric] {
-        let all = enabledKeyMetrics
-        if metricsExpanded || all.count <= Self.metricsCollapsedCap { return all }
-        return Array(all.prefix(Self.metricsCollapsedCap))
+        metricsExpanded
+            ? KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)
+            : enabledKeyMetrics
     }
 
-    /// True when there are more enabled tiles than the collapsed cap, so the expander is worth showing.
-    private var metricsHasOverflow: Bool { enabledKeyMetrics.count > Self.metricsCollapsedCap }
+    private var metricsHasOverflow: Bool {
+        KeyMetric.defaultOrder.count > enabledKeyMetrics.count
+    }
 
-    /// S5: the "Show all metrics" / "Show fewer" expander under the capped grid. Toggles `metricsExpanded`
-    /// only; it never changes WHICH tiles are enabled or their order (that stays the #251 editor's job).
+    /// Toggles catalog visibility only; the editor remains the sole owner of the saved three-to-five pins.
     private var metricsExpander: some View {
-        let hidden = max(0, enabledKeyMetrics.count - Self.metricsCollapsedCap)
+        let hidden = max(0, KeyMetric.defaultOrder.count - enabledKeyMetrics.count)
         return Button {
             withAnimation(StrandMotion.interactive) { metricsExpanded.toggle() }
         } label: {
             HStack(spacing: 6) {
-                Text(metricsExpanded ? "Show fewer" : "Show all metrics")
+                Text(metricsExpanded ? "Show selected metrics" : "Show all metrics")
                     .font(StrandFont.footnote)
                 if !metricsExpanded {
                     Text("\(hidden)")
@@ -3288,7 +3281,7 @@ struct TodayView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(metricsExpanded ? "Show fewer metrics" : "Show all metrics, \(hidden) more")
+        .accessibilityLabel(metricsExpanded ? "Show selected metrics" : "Show all metrics, \(hidden) more")
     }
 
     /// A carried recovery-vital tile's (value, caption): today's own value wins (with the metric's

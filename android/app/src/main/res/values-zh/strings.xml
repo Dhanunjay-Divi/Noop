@@ -1641,8 +1641,10 @@
     <string name="l10n_today_screen_calories_3e62ecfe">卡路里</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">选择要在控制台中显示的磁贴，并通过箭头图标上下调整它们的顺序。</string>
-    <string name="key_metrics_selection_instructions">最多为控制中心选择五项指标，并将最重要的指标排在最前面。</string>
+    <string name="key_metrics_selection_instructions">为控制中心选择 3 到 5 项指标，并将最重要的指标排在最前面。</string>
     <string name="key_metrics_selection_count">已选择 %1$d/%2$d 项</string>
+    <string name="key_metrics_show_selected">显示已选指标</string>
+    <string name="key_metrics_show_all_count">显示全部指标（%1$d）</string>
     <string name="l10n_today_screen_data_label_data_value_data_unit_27f6fd6b">%1$s %2$s %3$s</string>
     <string name="l10n_today_screen_data_unit_c768ef8c">%1$s</string>
     <string name="l10n_today_screen_daytitle_humandate_tap_to_pick_a_7e12ce96">%1$s, %2$s。点击选择日期，左右滑动切换前/后一天。</string>

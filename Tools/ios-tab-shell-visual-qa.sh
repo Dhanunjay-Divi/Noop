@@ -328,6 +328,7 @@ capture_scenario() {
                 --stderr="$redirected_stderr" \
                 "$current_udid" \
                 "$bundle_id" \
+                -theme.appearance "$appearance" \
                 --demo-seed \
                 "${app_arguments[@]}"
         ); then
@@ -354,7 +355,7 @@ capture_scenario() {
         "$content_size" \
         "$contrast" \
         "${screenshot:t}" \
-        "${(j: :)app_arguments}" \
+        "-theme.appearance $appearance ${(j: :)app_arguments}" \
         >> "$manifest"
     print -r -- "Captured ${current_device_dir:t}/$scenario"
 }
