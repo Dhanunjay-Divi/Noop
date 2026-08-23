@@ -3,6 +3,7 @@ import SwiftUI
 import StrandDesign
 import Foundation
 import Combine
+import UIKit
 
 /// Scroll-position scratch space for the adaptive navigation bar. Reference semantics are intentional:
 /// offsets arrive for every display-linked ScrollView update, but only a real phase/state transition
@@ -30,7 +31,8 @@ private final class TabBarScrollTracker {
 /// "More" list. Every screen is the same `StrandDesign`-built view the macOS app uses.
 struct RootTabView: View {
     @EnvironmentObject private var repo: Repository
-    /// Cross-screen navigation requests (e.g. Live → "Manage devices"). Devices isn't a tab — it lives
+    @EnvironmentObject private var profile: ProfileStore
+    /// Cross-screen navigation requests (e.g. Live → "Manage devices"). Devices isn't a tab - it lives
     /// behind the More list — so a request switches to More and pushes it in that tab's stack.
     @EnvironmentObject private var router: NavRouter
 
@@ -48,10 +50,13 @@ struct RootTabView: View {
     /// tab; a duplicated magic spacer inevitably drifts and hides the last card again.
     @State private var measuredTabBarHeight: CGFloat = FloatingTabBar.expandedReservedHeight
     /// The navigation chrome follows the user's vertical gesture: an upward swipe (reading farther down
-    /// the page) compacts it to an icon rail; a downward swipe expands the labels again. The state is
+    /// the page) compacts it to one current-tab control; a downward swipe expands the labels again. The state is
     /// visual only — the shell keeps reserving the largest measured height so changing modes can never
     /// move the scroll endpoint or strand the final card behind the bar.
     @State private var tabBarCompact = Self.initialTabBarCompact
+    /// Keeps the DEBUG compact-state launch hook deterministic long enough for screenshot/UI-test capture.
+    /// A tap on the compact control or any destination change releases it; production always starts false.
+    @State private var demoCompactPinned = Self.initialTabBarCompact
     /// Mutable scroll bookkeeping deliberately lives in a non-observable reference. Actual offsets change
     /// on every drag/deceleration frame; keeping them in `@State` invalidates the whole shell and hitches the
     /// scroll. `scrollMotionActive` changes only when movement begins/settles. Together with the gesture
@@ -59,6 +64,9 @@ struct RootTabView: View {
     @State private var tabBarScrollTracker = TabBarScrollTracker()
     @GestureState private var contentGestureActive = false
     @State private var scrollMotionActive = false
+    /// Once scrolling content reaches the system status area, a short adaptive fade protects the
+    /// clock and system indicators. It remains absent at the top so scenic headers stay full-bleed.
+    @State private var statusBarGuardVisible = false
     /// A safe-area inset follows the software keyboard and can leave a custom tab bar floating halfway
     /// up the display. Native tab bars disappear while typing, so mirror that behaviour here and let the
     /// tab content use the keyboard-adjusted safe area on its own.
@@ -83,7 +91,7 @@ struct RootTabView: View {
     private var expandedMoreSections: Set<String> { MoreSectionPrefs.decode(expandedMoreSectionsCSV) }
     /// A discoverable quick finish control in the More header. The full visual selector remains in
     /// Settings; this menu changes the same shared preference without adding clutter to Today's masthead.
-    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.defaultMode.rawValue
     /// V8 liquid redesign is the default Today; the Settings toggle lets a user fall back to the classic
     /// Today if they prefer it (keyed identically to the SettingsView toggle). Default ON.
     @AppStorage("noop.liquidTodayEnabled") private var liquidTodayEnabled = true
@@ -163,10 +171,11 @@ struct RootTabView: View {
     }
 
     var body: some View {
-        // Keep the custom bar in the root's bottom alignment and reserve its MEASURED height in the
-        // TabView itself. This is deliberately more direct than passing a safe-area inset through
-        // TabView + NavigationStack: that propagation is inconsistent for nested scroll views and left
-        // LiquidToday / some pushed pages unable to expose their final card above the overlay.
+        // Keep the custom bar in the root's bottom alignment and reserve its largest measured height on
+        // the TabView itself. A safe-area inset does not reliably cross TabView -> NavigationStack on
+        // iOS 26; pushed screens could still settle their final text beneath the glass. Root padding is
+        // deliberately singular and screen-agnostic, so custom ScrollViews receive the same clearance
+        // while the full-screen shell canvas remains visible behind the translucent controls.
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
                 tab(todayTabRoot, "Today", "square.grid.2x2", tag: IPhonePrimaryTab.today.rawValue,
@@ -198,28 +207,34 @@ struct RootTabView: View {
             // steal gestures from Trends' year strip (and other horizontally scrolling controls), while
             // pushed pages already need the system edge-swipe for Back. Native iOS tab bars do not require
             // page swiping, so leave horizontal gestures to the content that owns them.
-            // A hard layout reservation covers every tab root and pushed destination, including custom
-            // ScrollViews that do not use ScreenScaffold. Nutrition keeps its initial viewport useful by
-            // expressing source precedence once, inside the totals card, instead of stacking a duplicate
-            // warning card above the first actions.
             .padding(.bottom, visibleTabBarHeight)
 
             if !keyboardVisible {
                 HStack(alignment: .bottom, spacing: 6) {
-                    FloatingTabBar(selection: $selectedTab, compact: tabBarCompact, onReselect: { tag in
-                        // Re-tapping the active tab refreshes that page's data (2026-07-02) and, from a
-                        // subpage, pops that tab's stack back to its root (#135) — an animated pop via the
-                        // path, not a rebuild. At the root the pop is skipped, so scroll position survives
-                        // and the refresh doesn't double with a re-run of the root's `.task` (#198).
-                        Task { await repo.refresh() }
-                        tabBarCompact = false
-                        if !tabPaths[tag].isEmpty {
-                            tabPaths[tag] = NavigationPath()
-                        } else {
-                            scrollTop[tag] += 1
-                        }
+                    FloatingTabBar(
+                        selection: $selectedTab,
+                        compact: tabBarCompact,
+                        onExpand: {
+                            demoCompactPinned = false
+                            withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.28)) {
+                                tabBarCompact = false
+                            }
+                            resetTabBarScrollTracking()
+                        },
+                        onReselect: { tag in
+                            // Re-tapping the active tab refreshes that page's data (2026-07-02) and, from a
+                            // subpage, pops that tab's stack back to its root (#135) — an animated pop via the
+                            // path, not a rebuild. At the root the pop is skipped, so scroll position survives
+                            // and the refresh doesn't double with a re-run of the root's `.task` (#198).
+                            Task { await repo.refresh() }
+                            tabBarCompact = false
+                            if !tabPaths[tag].isEmpty {
+                                tabPaths[tag] = NavigationPath()
+                            } else {
+                                scrollTop[tag] += 1
+                            }
                     })
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                     FloatingQuickAddButton(compact: tabBarCompact) {
                         withAnimation(Self.sheetEase) { quickAction = .menu }
@@ -236,10 +251,12 @@ struct RootTabView: View {
                     }
                 }
             }
-
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(StrandPalette.surfaceBase.ignoresSafeArea())
+        .background {
+            WindowStatusBarContrastGuard(visible: statusBarGuardVisible)
+        }
         .environment(\.liquidInteractionInProgress, contentGestureActive || scrollMotionActive)
         // This observer only marks the immediate touch phase; actual bar state comes from each screen's
         // top-marker position below. Keeping the gesture simultaneous preserves charts, day swipes and
@@ -264,12 +281,15 @@ struct RootTabView: View {
         .onChange(of: selectedTab) { _, _ in
             // A new destination starts with the fully labelled wayfinding state. It may compact again
             // as soon as the user resumes scrolling down that page.
+            demoCompactPinned = false
             tabBarCompact = false
+            statusBarGuardVisible = false
             resetTabBarScrollTracking()
         }
         .onAppear {
             DailyReviewNotifications.restoreScheduleIfAuthorized()
             HydrationReminders.restoreScheduleIfAuthorized()
+            MetricReviewReminders.restoreScheduleIfAuthorized()
             WindDownNudge.restoreScheduleIfAuthorized()
             SafetyContactReminders.restore()
             // Let TabView finish mounting before a cold-launch notification changes its selection.
@@ -294,6 +314,8 @@ struct RootTabView: View {
                     try? await Task.sleep(nanoseconds: 50_000_000)
                 }
             }
+            WindDownNudge.refreshPersonalization(from: repo.vitalRows)
+            await refreshAdaptiveHydrationContext()
             // Backup & Sync: on-launch catch-up (see RootView). Detached + utility priority so a
             // 100MB+ whole-DB ZIP never blocks startup; gated on the auto toggle (default OFF). (Must-fix #4.)
             let backupRepo = repo
@@ -305,6 +327,8 @@ struct RootTabView: View {
             await safetyPaging.refresh()
         }
         .onChange(of: repo.refreshSeq) { _, _ in
+            WindDownNudge.refreshPersonalization(from: repo.vitalRows)
+            Task { await refreshAdaptiveHydrationContext() }
             Task { await RemoteSyncService.catchUpIfDue(repo: repo) }
         }
         // Quick-action sheet presents with the calm easing (~0.42s) per the README sheet spec —
@@ -339,6 +363,17 @@ struct RootTabView: View {
         keyboardVisible ? 0 : measuredTabBarHeight
     }
 
+    private func refreshAdaptiveHydrationContext() async {
+        let day = Repository.localDayKey(Date())
+        let reading = await repo.hydrationReading(day: day)
+        HydrationReminders.updateAdaptiveContext(
+            temperatureC: nil,
+            effort: repo.localCalendarToday?.strain,
+            consumedML: reading?.valueML,
+            goalML: repo.hydrationGoalML(profileSex: profile.sex)
+        )
+    }
+
     /// A lightweight interaction-phase observer. It does not decide compact/expanded state and never
     /// writes per-sample `@State`; its sole job is to yield the liquid animation budget immediately,
     /// before the first scroll-offset preference arrives.
@@ -357,7 +392,12 @@ struct RootTabView: View {
     /// after a deliberate return gesture or whenever the page reaches its top band.
     private func reportScrollPosition(_ offset: CGFloat, for tab: Int) {
         guard tab == selectedTab, offset.isFinite else { return }
+        updateStatusBarGuard(for: offset)
         let tracker = tabBarScrollTracker
+        if demoCompactPinned {
+            tracker.lastOffset = offset
+            return
+        }
 
         guard let previous = tracker.lastOffset else {
             tracker.lastOffset = offset
@@ -384,6 +424,14 @@ struct RootTabView: View {
             tabBarCompact = false
             tracker.directionalTravel = 0
         }
+    }
+
+    /// Separate show/hide thresholds prevent the status fade from flickering around the scroll origin.
+    /// The guard is visual only and never changes safe-area layout or scroll position.
+    private func updateStatusBarGuard(for offset: CGFloat) {
+        let shouldShow = statusBarGuardVisible ? offset < -3 : offset < -14
+        guard shouldShow != statusBarGuardVisible else { return }
+        statusBarGuardVisible = shouldShow
     }
 
     /// Treat the offset stream as a scroll phase: every movement postpones the idle edge. One lightweight
@@ -470,9 +518,14 @@ struct RootTabView: View {
             case .sleep:
                 tabPaths[IPhonePrimaryTab.sleep.rawValue] = NavigationPath()
                 selectedTab = IPhonePrimaryTab.sleep.rawValue
+            case .hydration:
+                quickAction = .hydration
             case .today:
                 tabPaths[IPhonePrimaryTab.today.rawValue] = NavigationPath()
                 selectedTab = IPhonePrimaryTab.today.rawValue
+            case .trends:
+                tabPaths[IPhonePrimaryTab.trends.rawValue] = NavigationPath()
+                selectedTab = IPhonePrimaryTab.trends.rawValue
             case .devices:
                 routeToMore(.devices)
             case .safety:
@@ -682,15 +735,19 @@ struct RootTabView: View {
             // bar background keeps the sky edge-to-edge. On the flat (no-sky) screens this is visually
             // identical at rest — the destination's own surfaceBase background shows through the bar.
             .navigationDestination(for: MoreDestination.self) { route in
-                route.destination
-                    .background(StrandPalette.surfaceBase.ignoresSafeArea())
-                    .navigationBarTitleDisplayMode(.inline)
-                    // Focused fields can ask UIKit to scroll their page upward. Keep the normal
-                    // edge-to-edge sky while browsing, but give the pinned Back control a real
-                    // surface while the keyboard is present so scrolling titles pass behind
-                    // coherent navigation chrome instead of visibly colliding with the button.
-                    .toolbarBackground(StrandPalette.surfaceBase, for: .navigationBar)
-                    .toolbarBackground(keyboardVisible ? .visible : .hidden, for: .navigationBar)
+                ZStack {
+                    StrandPalette.surfaceBase.ignoresSafeArea()
+                    route.destination
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .navigationBarTitleDisplayMode(.inline)
+                // Focused fields can ask UIKit to scroll their page upward. Keep the normal
+                // edge-to-edge sky while browsing, but give the pinned Back control a real
+                // surface while the keyboard is present so scrolling titles pass behind
+                // coherent navigation chrome instead of visibly colliding with the button.
+                .toolbarBackground(StrandPalette.surfaceBase, for: .navigationBar)
+                .toolbarBackground(keyboardVisible ? .visible : .hidden, for: .navigationBar)
             }
         }
         // Scroll the More index to the top on an at-root re-tap (#198 follow-up); read by its ScreenScaffold.
@@ -834,6 +891,181 @@ struct RootTabView: View {
         }
     }
 
+}
+
+/// SwiftUI overlays are clipped to the hosting controller's content-safe frame on some iOS versions,
+/// so they cannot protect the actual clock/Dynamic Island region. This clear representable installs one
+/// noninteractive gradient directly in the same UIWindow and removes it with the tab shell.
+private struct WindowStatusBarContrastGuard: UIViewRepresentable {
+    let visible: Bool
+
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> WindowAttachmentProbe {
+        let probe = WindowAttachmentProbe()
+        let coordinator = context.coordinator
+        probe.windowDidChange = { [weak coordinator] window in
+            coordinator?.attach(to: window)
+        }
+        return probe
+    }
+
+    func updateUIView(_ uiView: WindowAttachmentProbe, context: Context) {
+        context.coordinator.attach(to: uiView.window)
+        context.coordinator.update(
+            visible: visible,
+            reduceTransparency: reduceTransparency
+        )
+    }
+
+    static func dismantleUIView(_ uiView: WindowAttachmentProbe, coordinator: Coordinator) {
+        uiView.windowDidChange = nil
+        coordinator.detach()
+    }
+
+    final class Coordinator {
+        private weak var window: UIWindow?
+        private let overlay = StatusBarContrastOverlayView()
+        private var constraints: [NSLayoutConstraint] = []
+        private var visible = false
+        private var reduceTransparency = false
+
+        func attach(to newWindow: UIWindow?) {
+            guard let newWindow else {
+                detach()
+                return
+            }
+            if window === newWindow {
+                newWindow.bringSubviewToFront(overlay)
+                return
+            }
+
+            detach()
+            window = newWindow
+            overlay.translatesAutoresizingMaskIntoConstraints = false
+            newWindow.addSubview(overlay)
+            constraints = [
+                overlay.topAnchor.constraint(equalTo: newWindow.topAnchor),
+                overlay.leadingAnchor.constraint(equalTo: newWindow.leadingAnchor),
+                overlay.trailingAnchor.constraint(equalTo: newWindow.trailingAnchor),
+                overlay.bottomAnchor.constraint(
+                    equalTo: newWindow.safeAreaLayoutGuide.topAnchor,
+                    constant: StatusBarContrastOverlayView.fadeHeight
+                ),
+            ]
+            NSLayoutConstraint.activate(constraints)
+            overlay.alpha = visible ? 1 : 0
+            overlay.configure(reduceTransparency: reduceTransparency)
+            newWindow.bringSubviewToFront(overlay)
+        }
+
+        func update(visible: Bool, reduceTransparency: Bool) {
+            if self.reduceTransparency != reduceTransparency {
+                self.reduceTransparency = reduceTransparency
+                overlay.configure(reduceTransparency: reduceTransparency)
+            }
+            guard self.visible != visible else { return }
+            self.visible = visible
+            overlay.setVisible(visible)
+        }
+
+        func detach() {
+            NSLayoutConstraint.deactivate(constraints)
+            constraints.removeAll()
+            overlay.removeFromSuperview()
+            window = nil
+        }
+    }
+}
+
+private final class WindowAttachmentProbe: UIView {
+    var windowDidChange: ((UIWindow?) -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+        backgroundColor = .clear
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        windowDidChange?(window)
+    }
+}
+
+/// Opaque throughout the status safe area, then fading over a fixed 24pt into scrolling content.
+private final class StatusBarContrastOverlayView: UIView {
+    static let fadeHeight: CGFloat = 24
+
+    private let gradient = CAGradientLayer()
+    private var reduceTransparency = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+        backgroundColor = .clear
+        layer.addSublayer(gradient)
+        gradient.startPoint = CGPoint(x: 0.5, y: 0)
+        gradient.endPoint = CGPoint(x: 0.5, y: 1)
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            (view: StatusBarContrastOverlayView, _: UITraitCollection) in
+            view.updateGradient()
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(reduceTransparency: Bool) {
+        self.reduceTransparency = reduceTransparency
+        updateGradient()
+    }
+
+    func setVisible(_ visible: Bool) {
+        layer.removeAllAnimations()
+        UIView.animate(
+            withDuration: visible ? 0.16 : 0.22,
+            delay: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseOut]
+        ) {
+            self.alpha = visible ? 1 : 0
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        gradient.frame = bounds
+        updateGradient()
+    }
+
+    private func updateGradient() {
+        guard bounds.height > 0 else { return }
+        let base = UIColor(StrandPalette.surfaceBase).resolvedColor(with: traitCollection)
+        let safeTop = max(0, bounds.height - Self.fadeHeight)
+        let solidEnd = NSNumber(value: min(1, safeTop / bounds.height))
+        let softEnd = NSNumber(value: min(1, (safeTop + Self.fadeHeight * 0.48) / bounds.height))
+
+        gradient.colors = [
+            base.withAlphaComponent(1).cgColor,
+            base.withAlphaComponent(1).cgColor,
+            base.withAlphaComponent(reduceTransparency ? 0.82 : 0.70).cgColor,
+            base.withAlphaComponent(0).cgColor,
+        ]
+        gradient.locations = [0, solidEnd, softEnd, 1]
+    }
 }
 
 /// Every screen the More index links to, as a `Hashable` value the tab's `NavigationPath` can carry
@@ -1124,9 +1356,9 @@ private struct FloatingTabBarHeightPreferenceKey: PreferenceKey {
     }
 }
 
-/// The signature bottom bar: two frosted "glass" islands (Today·Trends / Sleep·More) with the gold
-/// action button nested cleanly in the gap between them — no overlap, no glow. Real iOS 26 Liquid
-/// Glass where available, a `.ultraThinMaterial` fallback below. Replaces the hidden native tab bar.
+/// The signature bottom bar: one smoked glass navigation rail plus a separate quick-action button.
+/// The selected capsule moves inside the rail, then becomes the current-tab button when scrolling
+/// compacts navigation. Real iOS 26 Liquid Glass is used where available, with a material fallback.
 private struct FloatingTabBar: View {
     /// Reserve the expanded bar from the first layout pass. Its fixed 62pt body plus 4pt breathing room
     /// measures about 66pt; 88pt leaves an optical/touch margin and keeps the next card's rounded edge
@@ -1140,6 +1372,9 @@ private struct FloatingTabBar: View {
     /// keeps labels expanded even when this is true; compact mode remains an icon-only visual choice,
     /// never a loss of VoiceOver naming or tap-target size.
     var compact = false
+    /// Compact mode is an explicit disclosure control, not a re-select gesture. Expanding must therefore
+    /// preserve the current navigation stack, scroll position, and cached data.
+    var onExpand: () -> Void = {}
     /// Fires when the user taps the ALREADY-active tab (2026-07-02: re-tap should refresh).
     var onReselect: (Int) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1148,6 +1383,7 @@ private struct FloatingTabBar: View {
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.noopAppearanceMode) private var appearanceMode
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Namespace private var navigationMorph
 
     private struct Item: Identifiable { let title: LocalizedStringKey; let icon: String; let tag: Int; var id: Int { tag } }
     private let nav = [
@@ -1159,24 +1395,33 @@ private struct FloatingTabBar: View {
     ]
 
     private var visuallyCompact: Bool { compact && !dynamicTypeSize.isAccessibilitySize }
+    private var currentItem: Item {
+        nav.first(where: { $0.tag == selection }) ?? nav[0]
+    }
+    private func visualTitle(for item: Item) -> LocalizedStringKey {
+        item.tag == IPhonePrimaryTab.activity.rawValue ? "Train" : item.title
+    }
     private var navigationGlassTint: Color {
-        // Dark keeps the smoked optical island. Light uses a pearl-clear lens so the page remains
-        // visibly continuous under the bar instead of stacking two black layers into a grey slab.
+        // OLED black uses a smoked clear lens so page context remains visible without letting labels
+        // and chart marks behind the rail compete with navigation.
+        // Dark keeps a restrained smoke tint; Light uses the same optical continuity over pearl.
         // Reduced Transparency receives a deliberately opaque neutral surface below.
         if reduceTransparency || colorSchemeContrast == .increased {
             return colorScheme == .dark ? .black.opacity(0.94) : .white.opacity(0.96)
         }
         if colorScheme == .dark {
-            return .black.opacity(appearanceMode == .black ? 0.76 : 0.52)
+            return appearanceMode == .black
+                ? .black.opacity(0.24)
+                : .black.opacity(0.22)
         }
-        return .white.opacity(0.08)
+        return .black.opacity(0.11)
     }
     private var navigationScrim: Color {
         guard !reduceTransparency, colorSchemeContrast != .increased else { return .clear }
         if colorScheme == .dark {
-            return .black.opacity(appearanceMode == .black ? 0.22 : 0.12)
+            return .black.opacity(appearanceMode == .black ? 0.21 : 0.10)
         }
-        return .black.opacity(0.035)
+        return .black.opacity(0.025)
     }
     private var navigationGlassOpacity: Double {
         // Clear Glass still carries a strong milk-white optical body over a pearl canvas. Fade only
@@ -1184,49 +1429,138 @@ private struct FloatingTabBar: View {
         // lens over the page rather than another white card. Dark and Reduced Transparency stay solid.
         reduceTransparency || colorSchemeContrast == .increased
             ? 1
-            : (colorScheme == .dark ? 0.88 : 0.34)
+            : (colorScheme == .dark
+               ? (appearanceMode == .black ? 0.76 : 0.72)
+               : 0.62)
     }
     private func navigationInk(active: Bool) -> Color {
         if colorScheme == .dark {
-            return active ? .white : .white.opacity(colorSchemeContrast == .increased ? 0.82 : 0.70)
+            return active
+                ? StrandPalette.chargeColor
+                : .white.opacity(colorSchemeContrast == .increased ? 0.82 : 0.70)
         }
         return active ? .black.opacity(0.92) : .black.opacity(colorSchemeContrast == .increased ? 0.76 : 0.62)
     }
+    private var selectedPillFill: Color {
+        if reduceTransparency || colorSchemeContrast == .increased {
+            return colorScheme == .dark ? .white.opacity(0.18) : .black.opacity(0.10)
+        }
+        return colorScheme == .dark
+            ? .white.opacity(appearanceMode == .black ? 0.12 : 0.15)
+            : .black.opacity(0.075)
+    }
+    private var selectedPillStroke: Color {
+        colorScheme == .dark ? .white.opacity(0.11) : .black.opacity(0.085)
+    }
 
     var body: some View {
-        // One frosted glass bar with five evenly-spaced tabs. The separate circular quick-action
-        // control is composed beside this island by RootTabView, so it remains app-wide.
-        HStack(spacing: IPhonePrimaryTab.itemSpacing) {
-            ForEach(nav) { item in tabButton(item) }
+        ZStack(alignment: .bottomLeading) {
+            if visuallyCompact {
+                compactButton
+                    .transition(.scale(scale: 0.72, anchor: .bottomLeading).combined(with: .opacity))
+            } else {
+                expandedBar
+                    .transition(.scale(scale: 0.84, anchor: .bottomLeading).combined(with: .opacity))
+            }
         }
-        .padding(.vertical, visuallyCompact ? 2 : 6)
-        .padding(.horizontal, visuallyCompact ? IPhonePrimaryTab.compactInnerHorizontalPadding : 8)
-        .frame(height: visuallyCompact ? 48 : 62)
+        .frame(width: visuallyCompact ? IPhonePrimaryTab.compactControlDimension : nil,
+               height: visuallyCompact ? IPhonePrimaryTab.compactControlDimension : 56,
+               alignment: .bottomLeading)
         .background {
-            Capsule()
-                .fill(.clear)
-                .navigationGlass(in: Capsule(), tint: navigationGlassTint)
-                .opacity(navigationGlassOpacity)
+            if visuallyCompact {
+                Circle()
+                    .fill(.clear)
+                    .navigationGlass(in: Circle(), tint: navigationGlassTint)
+                    .opacity(navigationGlassOpacity)
+            } else {
+                Capsule()
+                    .fill(.clear)
+                    .navigationGlass(in: Capsule(), tint: navigationGlassTint)
+                    .opacity(navigationGlassOpacity)
+            }
         }
-        .background(navigationScrim, in: Capsule())
-        // A quiet optical rim defines the glass without turning it into an opaque white slab.
-        .overlay(
-            Capsule().strokeBorder(
-                LinearGradient(colors: [
-                    .white.opacity(colorScheme == .dark ? (appearanceMode == .black ? 0.16 : 0.22) : 0.58),
-                    .white.opacity(colorScheme == .dark ? 0.040 : 0.13),
-                    .black.opacity(colorScheme == .dark ? 0.30 : 0.065),
-                ],
-                               startPoint: .top, endPoint: .bottom),
-                lineWidth: 0.7)
-        )
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.26 : 0.075),
+        .background {
+            if visuallyCompact {
+                Circle().fill(navigationScrim)
+            } else {
+                Capsule().fill(navigationScrim)
+            }
+        }
+        .overlay {
+            if visuallyCompact {
+                Circle().strokeBorder(
+                    colorScheme == .dark
+                        ? StrandPalette.chargeColor.opacity(0.30)
+                        : Color.black.opacity(0.10),
+                    lineWidth: 0.7
+                )
+            } else {
+                Capsule().strokeBorder(
+                    LinearGradient(colors: [
+                        .white.opacity(colorScheme == .dark ? 0.11 : 0.50),
+                        .white.opacity(colorScheme == .dark ? 0.025 : 0.10),
+                        .black.opacity(colorScheme == .dark ? 0.15 : 0.06),
+                    ], startPoint: .top, endPoint: .bottom),
+                    lineWidth: 0.7
+                )
+            }
+        }
+        .shadow(color: .black.opacity(colorScheme == .dark
+                                     ? (appearanceMode == .black ? 0.18 : 0.26)
+                                     : 0.075),
                 radius: visuallyCompact ? 10 : 14, x: 0, y: visuallyCompact ? 4 : 7)
         // Native tab bars keep their labels compact while destination content honors Larger Text.
         // Cap only this navigation chrome so five stable destinations never truncate or overlap.
         .dynamicTypeSize(...DynamicTypeSize.xxLarge)
         .animation(reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.28),
                    value: visuallyCompact)
+    }
+
+    /// The full wayfinding state. The separate circular quick-action control is composed beside this
+    /// island by RootTabView, so it remains app-wide in both expanded and compact presentations.
+    private var expandedBar: some View {
+        HStack(spacing: IPhonePrimaryTab.itemSpacing) {
+            ForEach(nav) { item in tabButton(item) }
+        }
+        .padding(.vertical, 3)
+        .padding(.horizontal, 8)
+        .frame(height: 56)
+        .animation(
+            reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.26),
+            value: selection
+        )
+    }
+
+    /// Farther down a screen, navigation yields to one unmistakable current-tab icon. Tapping it expands
+    /// the full rail; a downward content gesture does the same through the shell's scroll tracker.
+    private var compactButton: some View {
+        Button(action: onExpand) {
+            Image(systemName: selection == IPhonePrimaryTab.more.rawValue
+                  ? "ellipsis.circle"
+                  : currentItem.icon)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(navigationInk(active: true))
+                .frame(
+                    width: IPhonePrimaryTab.compactControlDimension,
+                    height: IPhonePrimaryTab.compactControlDimension
+                )
+                .background {
+                    Circle()
+                        .fill(selectedPillFill)
+                        .overlay(Circle().strokeBorder(selectedPillStroke, lineWidth: 0.6))
+                        .padding(3)
+                        .matchedGeometryEffect(
+                            id: "selected-tab-indicator",
+                            in: navigationMorph
+                        )
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Show navigation")
+        .accessibilityValue(Text(currentItem.title))
+        .accessibilityHint("Expands the tab bar")
+        .accessibilityIdentifier("noop.tab.compact")
     }
 
     private func tabButton(_ item: Item) -> some View {
@@ -1240,46 +1574,38 @@ private struct FloatingTabBar: View {
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: item.icon)
-                    .font(.system(size: visuallyCompact ? 19 : 18,
-                                  weight: active ? .semibold : .regular))
+                    .font(.system(size: 18, weight: active ? .semibold : .regular))
                     // Selection gets one brief, physical lift. It communicates the tab change without
                     // turning navigation into another continuously moving part of the health dashboard.
-                    .scaleEffect(active ? (visuallyCompact ? 1.04 : 1.08) : 1)
-                    .offset(y: active && !visuallyCompact ? -1 : 0)
-                if !visuallyCompact {
-                    Text(item.title)
-                        .font(StrandFont.footnote.weight(active ? .semibold : .medium))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .transition(.opacity.combined(with: .scale(scale: 0.88, anchor: .top)))
-                }
+                    .scaleEffect(active ? 1.08 : 1)
+                    .offset(y: active ? -1 : 0)
+                Text(visualTitle(for: item))
+                    // Native tab labels remain optically stable while destination content follows
+                    // Dynamic Type. The concise visible "Train" label keeps the five-item rail whole;
+                    // VoiceOver and the destination title continue to identify it as Workouts.
+                    .font(.system(size: 11, weight: active ? .semibold : .medium, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .foregroundStyle(navigationInk(active: active))
             .frame(maxWidth: .infinity)
             .frame(minWidth: IPhonePrimaryTab.minimumTouchDimension)
             .frame(minHeight: IPhonePrimaryTab.minimumTouchDimension)
-            // In compact mode the 44pt frame is the whole hit region. Padding outside it would make
-            // five buttons overflow the 320pt geometry even though each individual frame still tests 44pt.
-            .padding(.horizontal, visuallyCompact
-                ? IPhonePrimaryTab.compactItemHorizontalPadding
-                : 2)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(active
-                          ? (colorScheme == .dark ? Color.white.opacity(0.14) : Color.black.opacity(0.045))
-                          : .clear)
-                    .padding(.horizontal, visuallyCompact ? 0 : 4)
-                    .padding(.vertical, visuallyCompact ? 0 : 2)
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(active
-                                  ? (colorScheme == .dark ? Color.white.opacity(0.13) : Color.black.opacity(0.075))
-                                  : .clear,
-                                  lineWidth: 0.6)
-                    .padding(.horizontal, visuallyCompact ? 0 : 4)
-                    .padding(.vertical, visuallyCompact ? 0 : 2)
-            )
+            .padding(.horizontal, 2)
+            .background {
+                if active {
+                    Capsule(style: .continuous)
+                        .fill(selectedPillFill)
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(selectedPillStroke, lineWidth: 0.6)
+                        )
+                        .matchedGeometryEffect(
+                            id: "selected-tab-indicator",
+                            in: navigationMorph
+                        )
+                }
+            }
             .contentShape(Capsule(style: .continuous))
             .animation(NoopMotion.gated(NoopMotion.value, reduced: reduceMotion), value: active)
         }
@@ -1297,13 +1623,17 @@ private struct FloatingQuickAddButton: View {
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.noopAppearanceMode) private var appearanceMode
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var visuallyCompact: Bool { compact && !dynamicTypeSize.isAccessibilitySize }
 
     var body: some View {
         Button(action: action) {
             Image(systemName: "plus")
-                .font(.system(size: compact ? 18 : 20, weight: .semibold))
-                .foregroundStyle(colorScheme == .dark ? Color.white : Color.black.opacity(0.9))
-                .frame(width: compact ? 44 : 48, height: compact ? 44 : 48)
+                .font(.system(size: visuallyCompact ? 18 : 20, weight: .semibold))
+                .foregroundStyle(colorScheme == .dark ? StrandPalette.chargeColor : Color.black.opacity(0.9))
+                .frame(width: visuallyCompact ? 44 : 48, height: visuallyCompact ? 44 : 48)
                 .background {
                     Circle()
                         .fill(.clear)
@@ -1311,19 +1641,22 @@ private struct FloatingQuickAddButton: View {
                             in: Circle(),
                             tint: reduceTransparency
                                 ? (colorScheme == .dark ? .black.opacity(0.96) : .white.opacity(0.98))
-                                : .white.opacity(colorScheme == .dark ? 0.08 : 0.05)
+                                : (colorScheme == .dark
+                                   ? .black.opacity(appearanceMode == .black ? 0.30 : 0.24)
+                                   : .black.opacity(0.09))
                         )
+                        .opacity(reduceTransparency ? 1 : (colorScheme == .dark ? 0.86 : 0.72))
                 }
                 .overlay(
                     Circle().strokeBorder(
                         colorScheme == .dark
-                            ? Color.white.opacity(0.22)
+                            ? StrandPalette.chargeColor.opacity(0.46)
                             : Color.black.opacity(0.10),
                         lineWidth: 0.7
                     )
                 )
                 .shadow(
-                    color: .black.opacity(colorScheme == .dark ? 0.28 : 0.10),
+                    color: .black.opacity(colorScheme == .dark ? 0.20 : 0.10),
                     radius: 12,
                     x: 0,
                     y: 6

@@ -2,6 +2,77 @@ import Foundation
 import UserNotifications
 import StrandAnalytics
 
+enum ReminderSleepSource: String, Equatable, Sendable { case wearable, appleHealth, mixed, none }
+
+struct ReminderSleepObservation: Equatable, Sendable {
+    let day: String
+    let minutes: Double
+    let source: ReminderSleepSource
+}
+
+struct ReminderSleepContext: Equatable, Sendable {
+    let recoveryMinutes: Int
+    let historyNights: Int
+    let latestDay: String?
+    let source: ReminderSleepSource
+    let isCurrent: Bool
+    static let unavailable = Self(recoveryMinutes: 0, historyNights: 0, latestDay: nil,
+                                  source: .none, isCurrent: false)
+}
+
+enum ReminderDataPolicy {
+    static let lookbackDays = 14
+    static let maximumLatestAgeDays = 2
+
+    static func sleepContext(observations: [ReminderSleepObservation], targetMinutes: Int,
+                             goalMode: SleepGoalMode, now: Date = Date(),
+                             calendar: Calendar = .current) -> ReminderSleepContext {
+        let today = calendar.startOfDay(for: now)
+        guard let oldest = calendar.date(byAdding: .day, value: -(lookbackDays - 1), to: today) else {
+            return .unavailable
+        }
+        let eligible = observations.compactMap { item -> (ReminderSleepObservation, Date)? in
+            let fields = item.day.split(separator: "-").compactMap { Int($0) }
+            guard fields.count == 3, item.minutes.isFinite, (120.0...900.0).contains(item.minutes),
+                  item.source == .wearable || item.source == .appleHealth,
+                  let date = calendar.date(from: DateComponents(
+                    year: fields[0], month: fields[1], day: fields[2]
+                  )).map({ calendar.startOfDay(for: $0) }),
+                  date >= oldest, date <= today else { return nil }
+            return (item, date)
+        }
+        var byDay: [String: (ReminderSleepObservation, Date)] = [:]
+        for candidate in eligible.sorted(by: {
+            if $0.0.day != $1.0.day { return $0.0.day < $1.0.day }
+            return $0.0.source == .wearable && $1.0.source != .wearable
+        }) where byDay[candidate.0.day] == nil {
+            byDay[candidate.0.day] = candidate
+        }
+        let selected = byDay.values.sorted { $0.1 < $1.1 }
+        guard let latest = selected.last else { return .unavailable }
+        let age = calendar.dateComponents([.day], from: latest.1, to: today).day ?? Int.max
+        guard (0...maximumLatestAgeDays).contains(age) else {
+            return .init(recoveryMinutes: 0, historyNights: 0, latestDay: latest.0.day,
+                         source: .none, isCurrent: false)
+        }
+        let ledger = SleepDebt.ledger(
+            series: selected.map { (day: $0.0.day, totalSleepMin: Optional($0.0.minutes)) },
+            needHours: Double(targetMinutes) / 60,
+            window: lookbackDays
+        )
+        let recovery = SleepPlanner.plan(
+            wakeMinute: 0, sleepTargetMinutes: targetMinutes, windDownLeadMinutes: 0,
+            debtBalanceMinutes: ledger.balanceMin, historyNights: ledger.nightCount,
+            goalMode: goalMode
+        ).recoveryMinutes
+        let sources = Set(selected.map(\.0.source))
+        return .init(recoveryMinutes: recovery, historyNights: ledger.nightCount,
+                     latestDay: latest.0.day,
+                     source: sources.count > 1 ? .mixed : (sources.first ?? .none),
+                     isCurrent: true)
+    }
+}
+
 /// The wind-down nudge (#207) — a gentle, NON-critical evening local notification suggesting it's
 /// time to start winding down so the user can reach their usual wake time well-rested.
 ///
@@ -24,6 +95,10 @@ enum WindDownNudge {
         static let recovery = "windDown.recoveryMinutes"     // planner-derived, default 0m
         static let lead = "windDown.leadMinutes"             // default 30m
         static let wake = "windDown.wakeMinutes"             // earliest wake, minutes since midnight
+        static let personalizationSource = "windDown.personalizationSource"
+        static let personalizationNights = "windDown.personalizationNights"
+        static let personalizationLatestDay = "windDown.personalizationLatestDay"
+        static let personalizationCurrent = "windDown.personalizationCurrent"
         // PR#554 (MumiZed) — per-day wake overrides. A JSON map of {weekday(1=Sun…7=Sat): wakeMinutes}.
         // Empty / no entry for a day = that day uses the default `wakeMinutes`, so the feature is purely
         // additive (no override → exactly the old single-time behaviour).
@@ -60,6 +135,19 @@ enum WindDownNudge {
     static var wakeMinutes: Int {
         let v = UserDefaults.standard.object(forKey: K.wake) as? Int ?? 7 * 60   // 07:00
         return min(max(v, 0), 24 * 60 - 1)
+    }
+
+    static var personalization: ReminderSleepContext {
+        let defaults = UserDefaults.standard
+        let source = defaults.string(forKey: K.personalizationSource)
+            .flatMap(ReminderSleepSource.init(rawValue:)) ?? .none
+        return ReminderSleepContext(
+            recoveryMinutes: recoveryMinutes,
+            historyNights: max(0, defaults.integer(forKey: K.personalizationNights)),
+            latestDay: defaults.string(forKey: K.personalizationLatestDay),
+            source: source,
+            isCurrent: defaults.bool(forKey: K.personalizationCurrent)
+        )
     }
 
     // MARK: - Per-day wake overrides (PR#554)
@@ -115,7 +203,7 @@ enum WindDownNudge {
 
     // MARK: - Public API
 
-    /// The result of enabling the nudge — lets the UI react instead of silently persisting an "on" toggle
+    /// The result of enabling the nudge - lets the UI react instead of silently persisting an "on" toggle
     /// that can never fire. `.denied` means the OS won't deliver (permission off), so the caller should
     /// revert the switch and point the user at Settings.
     enum EnableOutcome: Sendable { case scheduled, denied, off }
@@ -205,6 +293,52 @@ enum WindDownNudge {
         if isEnabled { schedule() }
     }
 
+    /// Refresh adaptive sleep opportunity from source-labelled repository rows. A wearable owns a day
+    /// it observed; Apple Health fills only missing days. Stale or insufficient history clears any old
+    /// recovery addition so taking the band off can never turn yesterday's estimate into a standing fact.
+    static func refreshPersonalization(
+        from rows: [SourcedDailyMetric],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) {
+        let observations = rows.compactMap { row -> ReminderSleepObservation? in
+            guard let minutes = row.metric.totalSleepMin else { return nil }
+            let source: ReminderSleepSource
+            switch row.source {
+            case .whoopImport, .noopComputed:
+                source = .wearable
+            case .appleHealth:
+                source = .appleHealth
+            case .localCache:
+                return nil
+            }
+            return ReminderSleepObservation(
+                day: row.metric.day,
+                minutes: minutes,
+                source: source
+            )
+        }
+        let context = ReminderDataPolicy.sleepContext(
+            observations: observations,
+            targetMinutes: sleepNeedMinutes,
+            goalMode: goalMode,
+            now: now,
+            calendar: calendar
+        )
+        let defaults = UserDefaults.standard
+        let changed = context != personalization
+        defaults.set(context.recoveryMinutes, forKey: K.recovery)
+        defaults.set(context.historyNights, forKey: K.personalizationNights)
+        defaults.set(context.source.rawValue, forKey: K.personalizationSource)
+        defaults.set(context.isCurrent, forKey: K.personalizationCurrent)
+        if let latest = context.latestDay {
+            defaults.set(latest, forKey: K.personalizationLatestDay)
+        } else {
+            defaults.removeObject(forKey: K.personalizationLatestDay)
+        }
+        if changed, isEnabled { schedule() }
+    }
+
     /// Repair or remove the OS schedule from persisted state without requesting permission. This runs
     /// on normal shell appearance and after a cold backup restore, so a restored OFF value cannot leave
     /// an older target-device reminder behind and a restored ON value becomes live only when the user
@@ -246,9 +380,12 @@ enum WindDownNudge {
         center.removePendingNotificationRequests(withIdentifiers: [requestId] + perDayRequestIds)
 
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "Time to wind down")
-        content.body = String(localized: "Your planned bedtime is coming up. Start settling down when it works for you.")
+        content.title = String(localized: "Wind down for tonight")
+        content.subtitle = notificationSubtitle()
+        content.body = notificationBody()
         content.sound = .default
+        content.threadIdentifier = "noop.sleep"
+        content.userInfo = [NotificationRouteBridge.userInfoKey: NoopNotificationRoute.sleep.rawValue]
 
         // PR#554 — with per-day overrides set, fan out to seven weekday-pinned triggers each at that day's
         // own nudge time; with none, keep the single daily trigger (identical to the pre-#554 behaviour).
@@ -274,5 +411,47 @@ enum WindDownNudge {
         // center, not the process), so the nudge keeps firing each evening without the app running.
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
         center.add(UNNotificationRequest(identifier: requestId, content: content, trigger: trigger))
+    }
+
+    private static func notificationSubtitle() -> String {
+        let bedtime = SleepPlanner.wrappedMinute(wakeMinutes - targetSleepMinutes)
+        return String(localized: "Start \(clockText(nudgeMinuteOfDay())) · In bed \(clockText(bedtime))")
+    }
+
+    private static func notificationBody() -> String {
+        let duration = durationText(targetSleepMinutes)
+        let context = personalization
+        guard context.isCurrent,
+              context.historyNights >= SleepPlanner.minimumDebtNights else {
+            return String(localized: "Protect your \(duration) sleep target with a calm wind-down.")
+        }
+
+        let basis: String
+        switch context.source {
+        case .wearable:
+            basis = String(localized: "recent wearable sleep")
+        case .appleHealth:
+            basis = String(localized: "recent Apple Health sleep")
+        case .mixed:
+            basis = String(localized: "recent wearable and Apple Health sleep")
+        case .none:
+            basis = String(localized: "your sleep target")
+        }
+        return String(localized: "Based on \(basis) across \(context.historyNights) nights, allow \(duration) for sleep tonight.")
+    }
+
+    private static func clockText(_ minute: Int) -> String {
+        var components = DateComponents()
+        components.hour = minute / 60
+        components.minute = minute % 60
+        return (Calendar.current.date(from: components) ?? Date())
+            .formatted(date: .omitted, time: .shortened)
+    }
+
+    private static func durationText(_ minutes: Int) -> String {
+        let hours = minutes / 60
+        let remainder = minutes % 60
+        if remainder == 0 { return String(localized: "\(hours) hr") }
+        return String(localized: "\(hours) hr \(remainder) min")
     }
 }

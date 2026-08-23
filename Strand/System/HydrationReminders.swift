@@ -14,13 +14,24 @@ enum HydrationReminders {
     static let activeStartMinutesKey = "hydrationReminders.activeStartMinutes"
     static let activeEndMinutesKey = "hydrationReminders.activeEndMinutes"
     static let strapBuzzEnabledKey = "hydrationReminders.strapBuzzEnabled"
+    static let adaptiveEnabledKey = "hydrationReminders.adaptiveEnabled"
+    static let doubleTapConfirmEnabledKey = "hydrationReminders.doubleTapConfirmEnabled"
+    static let doubleTapAmountMLKey = "hydrationReminders.doubleTapAmountML"
+    static let doubleTapWindowMinutesKey = "hydrationReminders.doubleTapWindowMinutes"
+    static let bandFirstEnabledKey = "hydrationReminders.bandFirstEnabled"
     /// One-time boundary between the legacy combined reminder switch and the independent phone/wrist
     /// channels. An old hidden wrist flag must never become active merely because the app was updated.
     static let independentChannelsMigrationKey = "hydrationReminders.independentChannels.v1"
 
     private static let scheduledRequestIDsKey = "hydrationReminders.scheduledRequestIDs"
     private static let lastClaimedStrapSlotKey = "hydrationReminders.lastClaimedStrapSlot"
+    private static let lastConfirmedStrapSlotKey = "hydrationReminders.lastConfirmedStrapSlot"
+    private static let pendingEscalationSlotKey = "hydrationReminders.pendingEscalationSlot"
     private static let requestIDPrefix = "hydration-reminder-"
+    private static let missedResponseRequestID = "hydration-reminder-missed-response"
+    private static let adaptiveIntervalKey = "hydrationReminders.adaptiveIntervalMinutes"
+    private static let adaptiveReasonKey = "hydrationReminders.adaptiveReason"
+    private static let adaptiveDayKey = "hydrationReminders.adaptiveDay"
     private static let masterWristAlertsKey = "notif.masterEnabled"
     private static let quietHoursEnabledKey = "notif.quietHoursEnabled"
     private static let quietStartMinutesKey = "notif.quietStartMinutes"
@@ -50,6 +61,19 @@ enum HydrationReminders {
         var token: String { "\(localDay)-\(minuteOfDay)" }
     }
 
+    struct AdaptiveContext: Equatable, Sendable {
+        let temperatureC: Double?
+        let effort: Double?
+        let consumedML: Double?
+        let goalML: Int?
+        let minuteOfDay: Int
+    }
+
+    struct AdaptivePlan: Equatable, Sendable {
+        let intervalMinutes: Int
+        let reasons: [String]
+    }
+
     static var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: enabledKey)
     }
@@ -73,6 +97,75 @@ enum HydrationReminders {
         UserDefaults.standard.bool(forKey: strapBuzzEnabledKey)
     }
 
+    static var adaptiveEnabled: Bool {
+        UserDefaults.standard.object(forKey: adaptiveEnabledKey) as? Bool ?? true
+    }
+
+    static var doubleTapConfirmEnabled: Bool {
+        UserDefaults.standard.bool(forKey: doubleTapConfirmEnabledKey)
+    }
+
+    static var doubleTapAmountML: Int {
+        let raw = UserDefaults.standard.object(forKey: doubleTapAmountMLKey) as? Int ?? 250
+        return min(max(raw, 50), 1_000)
+    }
+
+    static var doubleTapWindowMinutes: Int {
+        let raw = UserDefaults.standard.object(forKey: doubleTapWindowMinutesKey) as? Int ?? 10
+        return min(max(raw, 5), 30)
+    }
+
+    static var bandFirstEnabled: Bool {
+        UserDefaults.standard.bool(forKey: bandFirstEnabledKey)
+            && strapBuzzEnabled
+            && doubleTapConfirmEnabled
+    }
+
+    /// Opens an explicit confirmation window only after NOOP issued a band-cue command. No tap means
+    /// no intake is written; a later HealthKit import remains the other source of confirmed water. The
+    /// optional phone escalation is tied to this exact occurrence and is cancelled only after its log.
+    static func armDoubleTapConfirmation(for slot: DueSlot, now: Date = Date()) {
+        guard doubleTapConfirmEnabled else { return }
+        TapAutomationStore.arm(
+            PendingTapAutomation(
+                kind: .hydrationConfirm,
+                value: doubleTapAmountML,
+                contextKey: slot.token,
+                now: now,
+                windowMinutes: doubleTapWindowMinutes
+            ),
+            now: now
+        )
+        if bandFirstEnabled, isEnabled {
+            scheduleMissedResponse(for: slot)
+        }
+    }
+
+    static func markDoubleTapConfirmed(contextKey: String?) {
+        guard let contextKey, !contextKey.isEmpty else { return }
+        let defaults = UserDefaults.standard
+        defaults.set(contextKey, forKey: lastConfirmedStrapSlotKey)
+        guard defaults.string(forKey: pendingEscalationSlotKey) == contextKey else { return }
+        cancelMissedResponse()
+    }
+
+    static var effectiveIntervalMinutes: Int {
+        guard adaptiveEnabled,
+              UserDefaults.standard.string(forKey: adaptiveDayKey) == Repository.localDayKey(Date())
+        else { return intervalMinutes }
+        let stored = UserDefaults.standard.object(forKey: adaptiveIntervalKey) as? Int ?? intervalMinutes
+        return clampedInterval(stored)
+    }
+
+    static var adaptiveSummary: String {
+        guard adaptiveEnabled else { return String(localized: "Uses your fixed base interval.") }
+        let reason = UserDefaults.standard.string(forKey: adaptiveReasonKey) ?? ""
+        if reason.isEmpty || effectiveIntervalMinutes == intervalMinutes {
+            return String(localized: "Using your \(intervalMinutes)-minute base interval today.")
+        }
+        return String(localized: "Every \(effectiveIntervalMinutes) minutes today · \(reason)")
+    }
+
     /// Preserve an explicitly active legacy pair, but clear a dormant hidden wrist flag when the old
     /// master reminder was OFF. From this build onward each channel persists independently.
     static func migrateIndependentChannelsIfNeeded(defaults: UserDefaults = .standard) {
@@ -91,6 +184,7 @@ enum HydrationReminders {
         guard on else {
             UserDefaults.standard.set(false, forKey: enabledKey)
             removeScheduledRequests()
+            cancelMissedResponse()
             completion?(.off)
             return
         }
@@ -122,7 +216,108 @@ enum HydrationReminders {
 
     static func setIntervalMinutes(_ minutes: Int) {
         UserDefaults.standard.set(clampedInterval(minutes), forKey: intervalMinutesKey)
+        if adaptiveEnabled {
+            UserDefaults.standard.set(clampedInterval(minutes), forKey: adaptiveIntervalKey)
+            UserDefaults.standard.removeObject(forKey: adaptiveReasonKey)
+        }
         if isEnabled { schedule() }
+    }
+
+    static func setAdaptiveEnabled(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: adaptiveEnabledKey)
+        if !on {
+            UserDefaults.standard.removeObject(forKey: adaptiveIntervalKey)
+            UserDefaults.standard.removeObject(forKey: adaptiveReasonKey)
+            UserDefaults.standard.removeObject(forKey: adaptiveDayKey)
+        }
+        if isEnabled { schedule() }
+    }
+
+    static func updateAdaptiveContext(
+        temperatureC: Double?,
+        effort: Double?,
+        consumedML: Double?,
+        goalML: Int?,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) {
+        guard adaptiveEnabled else { return }
+        let parts = calendar.dateComponents([.hour, .minute], from: now)
+        let context = AdaptiveContext(
+            temperatureC: temperatureC,
+            effort: effort,
+            consumedML: consumedML,
+            goalML: goalML,
+            minuteOfDay: (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+        )
+        let plan = adaptivePlan(
+            baseInterval: intervalMinutes,
+            start: activeStartMinutes,
+            end: activeEndMinutes,
+            context: context
+        )
+        let defaults = UserDefaults.standard
+        let dayKey = Repository.localDayKey(now)
+        let previousDay = defaults.string(forKey: adaptiveDayKey)
+        let previous = effectiveIntervalMinutes
+        defaults.set(plan.intervalMinutes, forKey: adaptiveIntervalKey)
+        defaults.set(plan.reasons.joined(separator: " + "), forKey: adaptiveReasonKey)
+        defaults.set(dayKey, forKey: adaptiveDayKey)
+        if isEnabled, previousDay != dayKey || previous != plan.intervalMinutes { schedule() }
+    }
+
+    static func adaptivePlan(
+        baseInterval: Int,
+        start: Int,
+        end: Int,
+        context: AdaptiveContext
+    ) -> AdaptivePlan {
+        var adjustment = 0
+        var reasons: [String] = []
+
+        if let temperature = context.temperatureC, temperature.isFinite {
+            if temperature >= 30 {
+                adjustment -= 30
+                reasons.append(String(localized: "hot weather"))
+            } else if temperature >= 24 {
+                adjustment -= 15
+                reasons.append(String(localized: "warm weather"))
+            }
+        }
+        if let effort = context.effort, effort.isFinite {
+            if effort >= 70 {
+                adjustment -= 30
+                reasons.append(String(localized: "higher Effort"))
+            } else if effort >= 40 {
+                adjustment -= 15
+                reasons.append(String(localized: "active day"))
+            }
+        }
+
+        let start = DailyReviewNotifications.clampMinute(start)
+        let end = DailyReviewNotifications.clampMinute(end)
+        let span = (end - start + 24 * 60) % (24 * 60)
+        let duration = span == 0 ? 24 * 60 : span
+        let elapsed = (context.minuteOfDay - start + 24 * 60) % (24 * 60)
+        if elapsed < duration,
+           let consumed = context.consumedML,
+           let goal = context.goalML,
+           consumed.isFinite,
+           goal > 0 {
+            let expected = Double(elapsed) / Double(duration)
+            let actual = max(0, consumed) / Double(goal)
+            if expected >= 0.25, actual < expected - 0.20 {
+                adjustment -= 15
+                reasons.append(String(localized: "behind goal"))
+            } else if actual > expected + 0.25 {
+                adjustment += 15
+                reasons.append(String(localized: "ahead of goal"))
+            }
+        }
+
+        adjustment = min(30, max(-60, adjustment))
+        let stepped = Int((Double(clampedInterval(baseInterval) + adjustment) / 15.0).rounded()) * 15
+        return AdaptivePlan(intervalMinutes: clampedInterval(stepped), reasons: reasons)
     }
 
     static func setActiveStartMinutes(_ minutes: Int) {
@@ -137,7 +332,38 @@ enum HydrationReminders {
 
     static func setStrapBuzzEnabled(_ on: Bool) {
         UserDefaults.standard.set(on, forKey: strapBuzzEnabledKey)
-        if !on { UserDefaults.standard.removeObject(forKey: lastClaimedStrapSlotKey) }
+        if !on {
+            UserDefaults.standard.removeObject(forKey: lastClaimedStrapSlotKey)
+            UserDefaults.standard.set(false, forKey: bandFirstEnabledKey)
+            TapAutomationStore.clear(kind: .hydrationConfirm)
+            cancelMissedResponse()
+            if isEnabled { schedule() }
+        }
+    }
+
+    static func setDoubleTapConfirmEnabled(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: doubleTapConfirmEnabledKey)
+        if !on {
+            UserDefaults.standard.set(false, forKey: bandFirstEnabledKey)
+            TapAutomationStore.clear(kind: .hydrationConfirm)
+            cancelMissedResponse()
+            if isEnabled { schedule() }
+        }
+    }
+
+    static func setDoubleTapAmountML(_ amountML: Int) {
+        UserDefaults.standard.set(min(max(amountML, 50), 1_000), forKey: doubleTapAmountMLKey)
+    }
+
+    static func setDoubleTapWindowMinutes(_ minutes: Int) {
+        UserDefaults.standard.set(min(max(minutes, 5), 30), forKey: doubleTapWindowMinutesKey)
+    }
+
+    static func setBandFirstEnabled(_ on: Bool) {
+        let enabled = on && strapBuzzEnabled && doubleTapConfirmEnabled
+        UserDefaults.standard.set(enabled, forKey: bandFirstEnabledKey)
+        if !enabled { cancelMissedResponse() }
+        if isEnabled { schedule() }
     }
 
     /// Rebuild pending requests after an upgrade without ever prompting for permission on launch.
@@ -175,7 +401,7 @@ enum HydrationReminders {
                 minuteOfDay: minute,
                 title: String(localized: "Hydration check-in"),
                 body: String(localized: "Take a moment to drink some water if you need it."),
-                route: .today
+                route: .hydration
             )
         }
     }
@@ -223,33 +449,73 @@ enum HydrationReminders {
         )
     }
 
+    /// Adaptive intervals can realign wall-clock slots. Preserve each lane's own de-duplication while
+    /// preventing two strap cues inside the minimum supported interval after such a realignment.
+    static func strapOccurrenceIsSeparated(
+        previousToken: String?,
+        due: DueSlot,
+        calendar: Calendar = .current
+    ) -> Bool {
+        guard let previousToken else { return true }
+        guard previousToken != due.token else { return false }
+
+        func occurrence(from token: String) -> Date? {
+            let parts = token.split(separator: "-", omittingEmptySubsequences: false)
+            guard parts.count == 4,
+                  let year = Int(parts[0]),
+                  let month = Int(parts[1]),
+                  let day = Int(parts[2]),
+                  let minute = Int(parts[3]),
+                  (0..<(24 * 60)).contains(minute)
+            else { return nil }
+            return calendar.date(from: DateComponents(
+                year: year,
+                month: month,
+                day: day,
+                hour: minute / 60,
+                minute: minute % 60
+            ))
+        }
+
+        guard let previous = occurrence(from: previousToken),
+              let current = occurrence(from: due.token)
+        else {
+            return true
+        }
+        return current.timeIntervalSince(previous) >= TimeInterval(minimumIntervalMinutes * 60)
+    }
+
     /// Atomically claims one live WHOOP-buzz occurrence. `AppModel` still gates the actual command on
     /// bonded + encrypted live state. This preference gate keeps the automation opt-in and de-duplicated.
-    static func claimDueStrapBuzz(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+    static func claimDueStrapBuzz(now: Date = Date(), calendar: Calendar = .current) -> DueSlot? {
         let defaults = UserDefaults.standard
         guard strapBuzzEnabled,
               defaults.bool(forKey: masterWristAlertsKey)
-        else { return false }
+        else { return nil }
 
         if defaults.bool(forKey: quietHoursEnabledKey) {
             let parts = calendar.dateComponents([.hour, .minute], from: now)
             let nowMinute = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
             let quietStart = defaults.object(forKey: quietStartMinutesKey) as? Int ?? 22 * 60
             let quietEnd = defaults.object(forKey: quietEndMinutesKey) as? Int ?? 7 * 60
-            if windowContains(nowMinute, start: quietStart, end: quietEnd) { return false }
+            if windowContains(nowMinute, start: quietStart, end: quietEnd) { return nil }
         }
 
         let slots = reminderMinutes(
             start: activeStartMinutes,
             end: activeEndMinutes,
-            interval: intervalMinutes
+            interval: effectiveIntervalMinutes
         )
         guard let due = dueSlot(now: now, calendar: calendar, slots: slots),
-              defaults.string(forKey: lastClaimedStrapSlotKey) != due.token
-        else { return false }
+              strapOccurrenceIsSeparated(
+                  previousToken: defaults.string(forKey: lastClaimedStrapSlotKey),
+                  due: due,
+                  calendar: calendar
+              )
+        else { return nil }
 
         defaults.set(due.token, forKey: lastClaimedStrapSlotKey)
-        return true
+        return due
     }
 
     private static var storedRequestIDs: [String] {
@@ -273,8 +539,15 @@ enum HydrationReminders {
         let specs = reminderSpecs(
             start: activeStartMinutes,
             end: activeEndMinutes,
-            interval: intervalMinutes
+            interval: effectiveIntervalMinutes
         )
+        // In band-first mode the phone lane is occurrence-driven: an issued band cue schedules one delayed
+        // alert, and a confirmed tap cancels it. Keeping the repeating requests here would notify even
+        // after confirmation, which iOS cannot suppress per occurrence.
+        guard !bandFirstEnabled else {
+            UserDefaults.standard.removeObject(forKey: scheduledRequestIDsKey)
+            return
+        }
         UserDefaults.standard.set(specs.map(\.identifier), forKey: scheduledRequestIDsKey)
 
         for spec in specs {
@@ -297,5 +570,40 @@ enum HydrationReminders {
                 )
             )
         }
+    }
+
+    private static func scheduleMissedResponse(for slot: DueSlot) {
+        let defaults = UserDefaults.standard
+        guard defaults.string(forKey: lastConfirmedStrapSlotKey) != slot.token else { return }
+        defaults.set(slot.token, forKey: pendingEscalationSlotKey)
+
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [missedResponseRequestID])
+        DailyReviewNotifications.registerPrivacyCategory(on: center)
+
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "Hydration check-in")
+        content.body = String(localized: "No water was logged from the band cue. Open Hydration if you drank.")
+        content.sound = .default
+        content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+        content.threadIdentifier = "noop.hydration"
+        content.userInfo = [NotificationRouteBridge.userInfoKey: NoopNotificationRoute.hydration.rawValue]
+
+        center.add(
+            UNNotificationRequest(
+                identifier: missedResponseRequestID,
+                content: content,
+                trigger: UNTimeIntervalNotificationTrigger(
+                    timeInterval: TimeInterval(doubleTapWindowMinutes * 60),
+                    repeats: false
+                )
+            )
+        )
+    }
+
+    private static func cancelMissedResponse() {
+        UNUserNotificationCenter.current()
+            .removePendingNotificationRequests(withIdentifiers: [missedResponseRequestID])
+        UserDefaults.standard.removeObject(forKey: pendingEscalationSlotKey)
     }
 }

@@ -13,32 +13,11 @@ enum IPhonePrimaryTab: Int, CaseIterable, Equatable {
     case sleep
     case more
 
-    /// Compact glass-rail geometry. The formula is deliberately testable at a conservative 320pt
-    /// viewport so five visible destinations never shrink below Apple's 44pt touch-target guidance.
-    static let compactOuterHorizontalPadding: CGFloat = 38
-    static let compactInnerHorizontalPadding: CGFloat = 7
+    /// Shared shell geometry. The collapsed current-tab disclosure remains larger than Apple's 44pt
+    /// minimum touch target even though it visually recedes into the bottom-left corner.
     static let itemSpacing: CGFloat = 2
     static let minimumTouchDimension: CGFloat = 44
-    /// Compact buttons use their 44pt frame as the complete hit region. Adding padding outside that
-    /// frame would silently make a five-item rail wider than the narrow viewport this geometry protects.
-    static let compactItemHorizontalPadding: CGFloat = 0
-
-    static var compactMinimumViewportWidth: CGFloat {
-        let outer = compactOuterHorizontalPadding * 2
-        let inner = compactInnerHorizontalPadding * 2
-        let gaps = itemSpacing * CGFloat(max(allCases.count - 1, 0))
-        let items = CGFloat(allCases.count)
-            * (minimumTouchDimension + compactItemHorizontalPadding * 2)
-        return outer + inner + gaps + items
-    }
-
-    static func compactItemWidth(in viewportWidth: CGFloat) -> CGFloat {
-        let outer = compactOuterHorizontalPadding * 2
-        let inner = compactInnerHorizontalPadding * 2
-        let gaps = itemSpacing * CGFloat(max(allCases.count - 1, 0))
-        return (viewportWidth - outer - inner - gaps) / CGFloat(allCases.count)
-            - compactItemHorizontalPadding * 2
-    }
+    static let compactControlDimension: CGFloat = 48
 }
 
 // MARK: - NavRouter
@@ -46,7 +25,7 @@ enum IPhonePrimaryTab: Int, CaseIterable, Equatable {
 // A tiny shared navigation hook so a screen can ask the app shell to switch to another top-level
 // destination without knowing how that shell is built. The two shells navigate very differently —
 // macOS drives a `NavigationSplitView` sidebar selection (`RootView`), iOS uses a `TabView` whose
-// "everything else" screens live behind the More tab (`RootTabView`) — so neither exposes a shared
+// "everything else" screens live behind the More tab (`RootTabView`) - so neither exposes a shared
 // `selection` binding LiveView could reach. This object is the small, shared bridge between them.
 //
 // Usage: a screen calls `router.openDevices()`; the shell observes `requestedDestination` and routes

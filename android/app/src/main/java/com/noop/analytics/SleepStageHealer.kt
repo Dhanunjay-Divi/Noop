@@ -15,7 +15,7 @@ import kotlin.math.max
  *
  * THE BUG: when a user hand-corrects a night's wake (or bed) time via
  * [WhoopRepository.updateSleepSessionTimes], the stages are reshaped by [SleepWindowReclip] — which
- * FABRICATES a trailing "wake" block when no real per-second staging is available — and the row is
+ * FABRICATES a trailing "wake" block when no real per-second staging is available - and the row is
  * stamped `userEdited = true`. If the correction was made BEFORE the strap sync imported that night's
  * raw streams (or even after, but the reclip still only reshapes the stored summary), the post-sync
  * recompute PRESERVES the edit (correct) but NEVER re-derives the real stage breakdown from the

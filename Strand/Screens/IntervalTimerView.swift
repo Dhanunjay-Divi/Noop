@@ -100,7 +100,7 @@ struct IntervalTimerView: View {
 
     var body: some View {
         ScreenScaffold(title: "Interval Timer",
-                       subtitle: "Silent haptic HIIT: the strap buzzes the transitions") {
+                       subtitle: "Silent haptic HIIT: Noop Band vibrates at each transition") {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
                 let cards: [AnyView] = [
                     AnyView(statusRow),
@@ -148,7 +148,7 @@ struct IntervalTimerView: View {
             if live.bonded {
                 StatePill("Buzz cues on", tone: .positive)
             } else {
-                StatePill("Connect strap for buzz cues", tone: .warning)
+                StatePill("Connect Noop Band for haptic cues", tone: .warning)
             }
             Spacer()
             if running {
@@ -185,7 +185,7 @@ struct IntervalTimerView: View {
                 controls
 
                 if !live.bonded {
-                    Label("Bond your strap on the Live screen to feel the transitions hands-free.",
+                    Label("Pair Noop Band on the Live screen to feel the transitions hands-free.",
                           systemImage: "wave.3.right")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
@@ -246,7 +246,7 @@ struct IntervalTimerView: View {
             .overlay(Capsule(style: .continuous).strokeBorder(phaseColor.opacity(0.35), lineWidth: 1))
     }
 
-    /// Frosted round chip — "ROUND n / N".
+    /// Frosted round chip - "ROUND n / N".
     private var roundChip: some View {
         HStack(spacing: 6) {
             Text("ROUND").strandOverline()

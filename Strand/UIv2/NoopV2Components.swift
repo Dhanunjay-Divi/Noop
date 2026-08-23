@@ -1,6 +1,6 @@
 import SwiftUI
 
-// NoopV2Components.swift — the v2 component library (UI v2 "Aurora").
+// NoopV2Components.swift - the v2 component library (UI v2 "Aurora").
 //
 // Every component here is STATIC (no TimelineView / Canvas physics / CoreMotion): depth comes from
 // layered translucency, gradient strokes and soft shadows. That is deliberate — it is what makes v2 both
@@ -163,7 +163,7 @@ struct V2HeroArc: View {
                         .font(NoopV2.number(64, .bold))
                         .foregroundStyle(NoopV2.ink)
                 } else {
-                    Text("—")
+                    Text("-")
                         .font(NoopV2.number(52, .bold))
                         .foregroundStyle(NoopV2.inkTertiary)
                 }
@@ -218,6 +218,7 @@ struct V2SatelliteRing: View {
     let base: Color
     let tip: Color
     var size: CGFloat = 82
+    var decimals: Int = 0
 
     private var fraction: Double {
         guard let v = value, max > 0 else { return 0 }
@@ -235,11 +236,11 @@ struct V2SatelliteRing: View {
                     .rotationEffect(.degrees(-90))
                     .shadow(color: base.opacity(0.45), radius: 7)
                 if let v = value {
-                    Text("\(Int(v.rounded()))")
+                    Text(formatted(v))
                         .font(NoopV2.number(23, .bold))
                         .foregroundStyle(NoopV2.ink)
                 } else {
-                    Text("—")
+                    Text("-")
                         .font(NoopV2.number(20, .bold))
                         .foregroundStyle(NoopV2.inkTertiary)
                 }
@@ -252,13 +253,20 @@ struct V2SatelliteRing: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(label))
-        .accessibilityValue(Text(value.map { "\(Int($0.rounded())) out of \(Int(max))" } ?? "no data"))
+        .accessibilityValue(Text(value.map { "\(formatted($0)) out of \(formatted(max))" } ?? "no data"))
+    }
+
+    private func formatted(_ value: Double) -> String {
+        if decimals > 0 {
+            return String(format: "%.\(decimals)f", value)
+        }
+        return "\(Int(value.rounded()))"
     }
 }
 
 // MARK: - Range gauge (the best idea from the Bevel reference)
 
-/// "Where you sit inside YOUR OWN normal range" — the question a bare number never answers.
+/// "Where you sit inside YOUR OWN normal range" - the question a bare number never answers.
 /// The band is the personal range (e.g. p10…p90 of the user's own baseline), the dot is today.
 /// `value == nil` ⇒ muted track, em-dash, no dot. Never invents a position.
 struct V2RangeGauge: View {
@@ -302,7 +310,7 @@ struct V2RangeGauge: View {
                         .font(NoopV2.overline)
                         .foregroundStyle(NoopV2.inkTertiary)
                 } else {
-                    Text("—")
+                    Text("-")
                         .font(NoopV2.number(19, .bold))
                         .foregroundStyle(NoopV2.inkTertiary)
                 }
@@ -331,7 +339,7 @@ struct V2RangeGauge: View {
                             .frame(width: Swift.max(4, pos(hi, in: w) - x), height: 14)
                             .offset(x: x)
                     }
-                    // "You are here" caret — a downward triangle above the band. Deliberately NOT a circle.
+                    // "You are here" caret - a downward triangle above the band. Deliberately NOT a circle.
                     if let v = value, scale != nil {
                         V2Caret()
                             .fill(NoopV2.ink)
@@ -405,7 +413,7 @@ struct V2StatTile: View {
                 Spacer(minLength: 0)
             }
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(value ?? "—")
+                Text(value ?? "-")
                     .font(NoopV2.number(26, .bold))
                     .foregroundStyle(value == nil ? NoopV2.inkTertiary : NoopV2.ink)
                 if !unit.isEmpty, value != nil {
@@ -538,7 +546,7 @@ struct V2Heatmap: View {
         .accessibilityHidden(true)   // the words are already in the row/summary labels
     }
 
-    /// "3 PM: mid Monday to Friday, no data Sunday" — bucket words, never colour names.
+    /// "3 PM: mid Monday to Friday, no data Sunday" - bucket words, never colour names.
     private func rowSpoken(_ h: Int) -> String {
         var buckets: [String] = []
         for d in 0..<dayLabels.count {
@@ -574,7 +582,7 @@ struct V2Heatmap: View {
 
 // MARK: - Sparkline (static path, no animation)
 
-/// C7 FIX: the sparkline was decorative — no baseline, no "today", no scale, so it carried no information.
+/// C7 FIX: the sparkline was decorative - no baseline, no "today", no scale, so it carried no information.
 /// It now draws the personal mean as a dashed rule and marks the latest point, which is what makes a
 /// 14-day trace readable at a glance ("am I above or below my own normal, and where am I now?").
 struct V2Sparkline: View {

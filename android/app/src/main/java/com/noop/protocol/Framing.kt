@@ -220,7 +220,7 @@ object Framing {
         else -> PacketType.fromRaw(t)?.name ?: "type$t"
     }
 
-    /** "NAME(raw)" for a known enum value, else "0xHH(raw)" — matches Swift `Schema.enumName`. */
+    /** "NAME(raw)" for a known enum value, else "0xHH(raw)" - matches Swift `Schema.enumName`. */
     private fun eventLabel(v: Int): String =
         EventNumber.fromRaw(v)?.let { "${it.name}($v)" } ?: hexLabel(v)
 
@@ -365,7 +365,7 @@ object Framing {
     /**
      * CONSOLE_LOGS (type 50) for WHOOP 5.0/MG: 13-byte record header after the inner type byte,
      * then UTF-8 console text @21..size-4 with an optional NUL terminator. The strap's own
-     * diagnostics channel — it narrates history syncs ("BLE: PullStats: Data: N, Events: N…",
+     * diagnostics channel - it narrates history syncs ("BLE: PullStats: Data: N, Events: N…",
      * "RTC timestamp … is invalid; not saving data to flash"), which is how the clock-before-history
      * requirement was discovered. Capped at 2 KB (matches the Swift PostHooks console hardening).
      *

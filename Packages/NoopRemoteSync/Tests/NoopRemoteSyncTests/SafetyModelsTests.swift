@@ -35,6 +35,14 @@ final class SafetyModelsTests: XCTestCase {
             "source": "sms_link",
             "responded_at": "2026-08-22T12:01:00Z"
           }],
+          "latest_location": {
+            "sequence": 3,
+            "latitude": 40.7131,
+            "longitude": -74.0057,
+            "horizontal_accuracy_meters": 12.0,
+            "captured_at": "2026-08-22T12:00:45Z",
+            "received_at": "2026-08-22T12:00:46Z"
+          },
           "delivery_summary": {"retry_wait": 1}
         }
         """
@@ -51,6 +59,8 @@ final class SafetyModelsTests: XCTestCase {
         XCTAssertEqual(incident.deliveries.first?.attemptCount, 1)
         XCTAssertEqual(incident.responses?.first?.decision, .responding)
         XCTAssertEqual(incident.acknowledgedContactDisplayName, "Alex")
+        XCTAssertEqual(incident.latestLocation?.sequence, 3)
+        XCTAssertEqual(incident.latestLocation?.horizontalAccuracyMeters, 12)
     }
 
     func testLegacyDispatchStillDecodesWithoutIncidentMetadata() throws {
@@ -77,5 +87,6 @@ final class SafetyModelsTests: XCTestCase {
         XCTAssertEqual(dispatch.status, .submitted)
         XCTAssertNil(dispatch.expiresAt)
         XCTAssertNil(dispatch.responses)
+        XCTAssertNil(dispatch.latestLocation)
     }
 }

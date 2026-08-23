@@ -1,6 +1,6 @@
 import Foundation
 
-// HRVReadiness.swift — OPT-IN experimental "HRV readiness (Plews/Altini)" tier readout.
+// HRVReadiness.swift - OPT-IN experimental "HRV readiness (Plews/Altini)" tier readout.
 //
 // The Kotlin twin is android/.../analytics/HRVReadiness.kt. Cross-platform parity is the contract: every
 // constant, gate, and formula here must stay byte-identical to that source.

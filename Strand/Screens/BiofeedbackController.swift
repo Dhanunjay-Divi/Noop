@@ -27,7 +27,7 @@ final class BiofeedbackController: ObservableObject {
     /// Which biofeedback flow is currently running (or none). Drives the views' "session live" chrome.
     enum SessionKind: Equatable {
         case none
-        /// L1 resonance sweep — pacing one candidate of the "find my pace" flow.
+        /// L1 resonance sweep - pacing one candidate of the "find my pace" flow.
         case resonanceSweep(bpm: Double, paceIndex: Int, paceCount: Int)
         /// L1 paced breathing at the locked (or chosen) resonance pace.
         case resonanceSession(bpm: Double)
@@ -40,7 +40,7 @@ final class BiofeedbackController: ObservableObject {
     /// The flow running right now (`.none` when idle). A manual L1/L2 session sets this; the L3 detector
     /// must never fire over a non-`.none` session (the spec's "never nudge over a manual session" rule).
     @Published private(set) var session: SessionKind = .none
-    /// True while any biofeedback session is live — the single "is something running" flag.
+    /// True while any biofeedback session is live - the single "is something running" flag.
     @Published private(set) var running = false
     /// The current paced breath phase, for the orb/phase word when the screen is on.
     @Published private(set) var phase: BreathPhase = .inhale
@@ -49,7 +49,7 @@ final class BiofeedbackController: ObservableObject {
 
     // MARK: - L1 sweep progress
 
-    /// Human label for the pace under test, e.g. "Testing 5.5 br/min…" — nil when not sweeping.
+    /// Human label for the pace under test, e.g. "Testing 5.5 br/min…" - nil when not sweeping.
     @Published private(set) var sweepLabel: String? = nil
     /// 0…1 progress through the whole sweep (paces completed / total) — for a calm progress bar.
     @Published private(set) var sweepProgress: Double = 0
@@ -286,7 +286,7 @@ final class BiofeedbackController: ObservableObject {
         stop()
         guard canBuzz, let h0 = model.bpm, h0 >= 55, h0 <= 120 else {
             // Haptic-first: needs a bonded strap + a resting-band HR. Don't fake it.
-            calmOutcome = String(localized: "Couldn't start. Needs a connected strap and a resting heart rate.")
+            calmOutcome = String(localized: "Couldn't start. Noop Band must be connected and a resting heart rate must be available.")
             calmDidNotFall = false
             return
         }

@@ -354,7 +354,7 @@ struct DataSourcesView: View {
         case .failure(let error):
             // Surface the failure instead of swallowing it (#179) — a silent return read as
             // "import does nothing", with no clue why.
-            NSLog("Import: file picker failed for \(target) — \(error.localizedDescription)")
+            NSLog("Import: file picker failed for \(target) - \(error.localizedDescription)")
         }
     }
 
@@ -704,7 +704,7 @@ struct DataSourcesView: View {
     /// ah-delete (#616): purge every row stored under the "apple-health" source by calling
     /// `DeviceRegistryStore.deleteAllData(deviceId:)` (via the device registry's `deleteDeviceData`,
     /// which clears all `deviceId`-keyed tables in one transaction). The registry row itself is the
-    /// seeded WHOOP device — "apple-health" is a source, not a paired device — so nothing in the
+    /// seeded WHOOP device - "apple-health" is a source, not a paired device - so nothing in the
     /// Devices list changes; only the imported recordings go. Refresh so Today/Explore/Insights drop
     /// the now-empty source, and clear the import summary so the card reads as "nothing imported".
     private func deleteAppleHealthData() {
@@ -822,7 +822,7 @@ struct DataSourcesView: View {
         return card(title: String(localized: "Broadcast HR from this phone"), icon: "dot.radiowaves.up.forward",
              tint: DomainTheme.effort.color,
              status: status ?? StatePill("Off", tone: .neutral, showsDot: false),
-             subtitle: String(localized: "Re-share your live strap heart rate over Bluetooth as a standard heart-rate sensor, so a gym treadmill, bike, Zwift, Peloton or any fitness app nearby can read it. Local Bluetooth only. Nothing leaves \(Platform.deviceNounPhrase). Off by default.")) {
+             subtitle: String(localized: "Re-share live Noop Band heart rate over Bluetooth as a standard heart-rate sensor, so a gym treadmill, bike, Zwift, Peloton, or nearby fitness app can read it. Local Bluetooth only. Nothing leaves \(Platform.deviceNounPhrase). Off by default.")) {
             Toggle(isOn: $broadcastHrEnabled) {
                 Text("Broadcast HR from this phone")
                     .font(StrandFont.subhead)
@@ -866,7 +866,7 @@ struct DataSourcesView: View {
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                 } else {
-                    Text("No live heart rate yet. Open Live to pair your strap.")
+                    Text("No live heart rate yet. Open Live to pair Noop Band.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                 }
@@ -874,16 +874,16 @@ struct DataSourcesView: View {
         }
     }
 
-    /// FI-2 (#490) — a compact, honest "works with both strap generations" explainer under the broadcast
+    /// FI-2 (#490) - a compact, honest "works with both strap generations" explainer under the broadcast
     /// toggle. Two short lines (4.0 / 5.0·MG) frame WHERE the live HR comes from on each, so a WHOOP 4.0
     /// owner knows broadcast is for them and a 5/MG owner understands the PPG-derived source — without
     /// over-promising. Plain copy, no claim that either generation is "better".
     private var generationExplainer: some View {
         VStack(alignment: .leading, spacing: 6) {
-            generationRow(title: "WHOOP 4.0",
-                          detail: String(localized: "Broadcasts the strap's own live heart rate over Bluetooth."))
-            generationRow(title: "WHOOP 5.0 & MG",
-                          detail: String(localized: "Broadcasts the live heart rate NOOP derives from the strap once connected."))
+            generationRow(
+                title: "Noop Band",
+                detail: String(localized: "Broadcasts the best available live heart rate over Bluetooth.")
+            )
         }
         .padding(.top, 2)
         .padding(.horizontal, 10).padding(.vertical, 8)
@@ -921,10 +921,10 @@ struct DataSourcesView: View {
             live.bonded ? (.positive, "Bonded, streaming.")
             : live.connected ? (.warning, "Connected.")
             : (.critical, "Not connected. Open Live to pair.")
-        return card(title: String(localized: "WHOOP Strap (Live BLE)"), icon: "antenna.radiowaves.left.and.right",
+        return card(title: String(localized: "Noop Band (Live Bluetooth)"), icon: "antenna.radiowaves.left.and.right",
              tint: StrandPalette.accent,
              status: StatePill(label, tone: tone, pulsing: live.connected && !live.bonded),
-             subtitle: String(localized: "Pairs directly with your strap over Bluetooth: no WHOOP app, no cloud.")) {
+             subtitle: String(localized: "Pairs directly with Noop Band over Bluetooth without a separate band app or cloud account.")) {
             EmptyView()
         }
     }

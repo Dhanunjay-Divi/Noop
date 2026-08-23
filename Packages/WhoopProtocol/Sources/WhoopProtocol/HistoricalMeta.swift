@@ -24,7 +24,7 @@ public func classifyHistoricalMeta(_ p: ParsedFrame) -> HistoricalMeta {
     guard p.ok, p.crcOK != false else { return .other }
     guard p.typeName == "METADATA" else { return .other }
     guard case .string(let metaName)? = p.parsed["meta_type"] else { return .other }
-    // Schema.enumName() produces "NAME(rawValue)" — match by prefix so the classifier is
+    // Schema.enumName() produces "NAME(rawValue)" - match by prefix so the classifier is
     // insulated from raw-value changes.
     if metaName.hasPrefix("HISTORY_START") {
         return .start

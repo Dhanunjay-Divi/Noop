@@ -87,9 +87,10 @@ extension RecoveryScorer {
 
     /// Build the RELATIVE skin-temp marker from a signed deviation (°C from the personal
     /// baseline). Returns nil when no deviation is available (no baseline yet / not worn), so
-    /// the UI shows nothing rather than a fake absolute. The tier is a deviation band only.
+    /// the UI shows nothing rather than a fake absolute. Absolute imported temperatures and
+    /// implausible values are rejected. The tier is a deviation band only.
     public static func skinTempRelative(deviationC: Double?) -> SkinTempRelative? {
-        guard let dev = deviationC else { return nil }
+        guard let dev = VitalBands.skinTempDeviation(from: deviationC) else { return nil }
         let tier: SkinTempRelative.Tier
         if dev > skinTempTypicalBandC {
             tier = .warmer
@@ -127,13 +128,14 @@ extension RecoveryScorer {
                                      respBaseline: BaselineState?,
                                      sleepPerf: Double?,
                                      skinTempDev: Double? = nil) -> [ChargeDriver] {
+        let validSkinTempDev = VitalBands.skinTempDeviation(from: skinTempDev)
 
         // No score => no real contributions to attribute (cold-start). recovery(...) enforces
         // the usable gate; mirror it so a nil headline never yields fabricated driver rows.
         guard let full = recovery(hrv: hrv, rhr: rhr, resp: resp,
                                   hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
                                   respBaseline: respBaseline, sleepPerf: sleepPerf,
-                                  skinTempDev: skinTempDev) else {
+                                  skinTempDev: validSkinTempDev) else {
             return []
         }
 
@@ -161,7 +163,7 @@ extension RecoveryScorer {
             deltaPoints: points(recovery(hrv: hrvBaseline.baseline, rhr: rhr, resp: resp,
                                          hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
                                          respBaseline: respBaseline, sleepPerf: sleepPerf,
-                                         skinTempDev: skinTempDev)),
+                                         skinTempDev: validSkinTempDev)),
             valueText: "\(Int(hrv.rounded())) ms",
             baselineText: "\(Int(hrvBaseline.baseline.rounded())) ms baseline",
             verdict: hrvVerdict(value: hrv, baseline: hrvBaseline.baseline)))
@@ -174,7 +176,7 @@ extension RecoveryScorer {
                 deltaPoints: points(recovery(hrv: hrv, rhr: b.baseline, resp: resp,
                                              hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
                                              respBaseline: respBaseline, sleepPerf: sleepPerf,
-                                             skinTempDev: skinTempDev)),
+                                             skinTempDev: validSkinTempDev)),
                 valueText: "\(Int(rhr.rounded())) bpm",
                 baselineText: "\(Int(b.baseline.rounded())) bpm baseline",
                 verdict: rhrVerdict(value: rhr, baseline: b.baseline)))
@@ -187,7 +189,7 @@ extension RecoveryScorer {
                 deltaPoints: points(recovery(hrv: hrv, rhr: rhr, resp: resp,
                                              hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
                                              respBaseline: respBaseline, sleepPerf: sleepPerfCenter,
-                                             skinTempDev: skinTempDev)),
+                                             skinTempDev: validSkinTempDev)),
                 valueText: "\(Int((sp * 100).rounded()))%",
                 baselineText: "",   // centred on a fixed "good night", not a learned baseline
                 verdict: sleepVerdict(sleepPerf: sp)))
@@ -201,7 +203,7 @@ extension RecoveryScorer {
                 deltaPoints: points(recovery(hrv: hrv, rhr: rhr, resp: b.baseline,
                                              hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
                                              respBaseline: respBaseline, sleepPerf: sleepPerf,
-                                             skinTempDev: skinTempDev)),
+                                             skinTempDev: validSkinTempDev)),
                 valueText: String(format: "%.1f br/min", r),
                 baselineText: String(format: "%.1f br/min baseline", b.baseline),
                 verdict: respVerdict(value: r, baseline: b.baseline)))
@@ -209,7 +211,7 @@ extension RecoveryScorer {
 
         // ── Skin-temp deviation (symmetric penalty: any drift lowers Charge) ─────
         // Neutral = zero drift, so the delta is always <= 0 (a penalty removed).
-        if let dev = skinTempDev {
+        if let dev = validSkinTempDev {
             drivers.append(ChargeDriver(
                 label: "Skin temperature",
                 deltaPoints: points(recovery(hrv: hrv, rhr: rhr, resp: resp,

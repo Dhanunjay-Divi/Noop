@@ -209,7 +209,7 @@ struct NutritionLogView: View {
             Text(label)
                 .font(StrandFont.caption)
                 .foregroundStyle(StrandPalette.textTertiary)
-            Text(value.map { "\(formatted($0, maximumFractionDigits: 1)) g" } ?? "—")
+            Text(value.map { "\(formatted($0, maximumFractionDigits: 1)) g" } ?? "-")
                 .font(StrandFont.rounded(17, weight: .semibold))
                 .foregroundStyle(value == nil ? StrandPalette.textTertiary : tint)
                 .monospacedDigit()
@@ -638,7 +638,7 @@ struct NutritionLogView: View {
     }
 
     private func formatted(_ value: Double?, maximumFractionDigits: Int) -> String {
-        guard let value else { return "—" }
+        guard let value else { return "-" }
         return formatted(value, maximumFractionDigits: maximumFractionDigits)
     }
 
@@ -811,7 +811,7 @@ private struct NutritionEntryEditor: View {
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textSecondary)
             HStack(spacing: 6) {
-                TextField("—", text: text)
+                TextField("-", text: text)
                     .textFieldStyle(.roundedBorder)
                     #if os(iOS)
                     .keyboardType(.decimalPad)

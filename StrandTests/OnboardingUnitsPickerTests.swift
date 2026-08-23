@@ -54,9 +54,13 @@ final class OnboardingUnitsPickerTests: XCTestCase {
     func testOnboardingUsesDirectEntryAndContrastInk() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let source = try String(contentsOf: root.appendingPathComponent("Strand/Onboarding/OnboardingWizard.swift"))
-        XCTAssertTrue(source.contains("TextField(\"Weight\", value: displayedWeight"))
-        XCTAssertTrue(source.contains("TextField(\"Feet\", value: displayedFeet"))
-        XCTAssertTrue(source.contains("TextField(\"Inches\", value: displayedRemainingInches"))
+        XCTAssertTrue(source.contains("TextField(\"Weight\", text: weightDraftBinding)"))
+        XCTAssertTrue(source.contains("TextField(\"Feet\", text: heightFeetDraftBinding)"))
+        XCTAssertTrue(source.contains("TextField(\"Inches\", text: heightInchesDraftBinding)"))
+        XCTAssertTrue(source.contains(".accessibilityIdentifier(\"noop.profile.weight.clear\")"),
+                      "Weight entry must remain fully clearable before typing a replacement.")
+        XCTAssertTrue(source.contains(".accessibilityIdentifier(\"noop.profile.height.clear\")"),
+                      "Metric height entry must remain fully clearable before typing a replacement.")
         XCTAssertTrue(source.contains("foregroundStyle(StrandPalette.accentInk)"),
                       "The dark-mode near-white CTA must use dark contrast ink, not hard-coded white.")
     }

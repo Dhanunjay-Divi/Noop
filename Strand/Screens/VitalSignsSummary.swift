@@ -44,12 +44,12 @@ struct BodyVitalReading: Identifiable {
     }
 
     /// Colour communicates state: in-range = the metric's category colour,
-    /// out-of-range = warning amber, no data = tertiary.
+    /// out-of-range = critical red, no data = tertiary.
     var accent: Color {
         switch banding.band {
         case .noData:     return StrandPalette.textTertiary
         case .inRange:    return metricColor
-        case .outOfRange: return StrandPalette.statusWarning
+        case .outOfRange: return StrandPalette.statusCritical
         }
     }
 
@@ -146,7 +146,7 @@ enum BodyVitalSigns {
         }
 
         // Prefer the logical day's value; otherwise the most recent day that has one — so a vital still
-        // shows after a day with no wear instead of blanking to "—".
+        // shows after a day with no wear instead of blanking to "-".
         func latest(_ pts: [VitalPoint]) -> VitalPoint? {
             pts.last(where: { $0.day == logicalDay }) ?? pts.last
         }
@@ -326,7 +326,7 @@ enum BodyVitalSigns {
         ]
     }
 
-    /// The newest day any resolved reading was sourced from — drives the section's "Latest" trailing label.
+    /// The newest day any resolved reading was sourced from - drives the section's "Latest" trailing label.
     static func latestDayLabel(_ readings: [BodyVitalReading]) -> String? {
         readings.compactMap(\.day).max().map(BodyVitalReading.dayLabel)
     }

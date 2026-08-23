@@ -59,7 +59,7 @@ extension WhoopStore {
             // integer `startTs`. A FUTURE-dated row is always implausible (a future day/ts can only come
             // from a future-dated record), so drop it regardless of source. The far-PAST floor, though, is
             // applied ONLY to computed (`-noop`) rows: those can't legitimately predate NOOP, so a pre-2023
-            // one is bad-clock garbage — but a WHOOP CSV import (bare "my-whoop") carries REAL dates going
+            // one is bad-clock garbage - but a WHOOP CSV import (bare "my-whoop") carries REAL dates going
             // back years, and reusing the floor across all sources silently purged that imported history on
             // any heal (v8.2.1). String comparison is correct for the zero-padded yyyy-MM-dd format.
             let floorDayKey = WhoopStore.utcDayKey(MIN_PLAUSIBLE_UNIX)

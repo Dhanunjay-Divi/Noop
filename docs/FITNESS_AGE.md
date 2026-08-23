@@ -1,8 +1,8 @@
 # Fitness Age
 
-Last reviewed: **2026-08-11**
+Last reviewed: **2026-08-22**
 
-**Status:** shipped as an independent, non-clinical estimate. A weekly number you can read at a glance.
+**Status:** shipped as an independent, non-clinical estimate for broad fitness context.
 
 ## What it is
 
@@ -31,7 +31,8 @@ Women:  VO₂max =  74.74 − 0.247·age + 0.198·PA − 0.259·waist(cm) − 0.
 - **PA** is a physical-activity index (see below).
 - **waist** is waist circumference in cm, from the profile if the user enters it.
 - **SEE** is the model's standard error of estimate — roughly ±5.7 (men) / ±5.1 (women) ml/kg/min on the
-  VO₂max itself. This is large. The number is a useful trend, not a lab measurement.
+  VO₂max itself. This is large. The result is broad context, not a lab measurement or a reliable
+  week-to-week trend.
 
 These coefficients were reproduced independently in **JAHA / Ball State 2020 (PMC7428991)** and are
 corroborated by the **CERG/NTNU** group that authored the original work.
@@ -53,13 +54,21 @@ For this calculation, an active day has local Effort of at least 30. This preser
 numeric range without pretending that measured Effort is the same construct as a person's questionnaire
 answers. The mapping is a **custom reconstruction**, not a validated substitute for HUNT1 PA-Q, and it can
 systematically differ from the index the published model was trained on. The app therefore treats the
-result as a trend-level estimate and exposes the method rather than presenting it as a calibrated survey.
+result as a broad contextual estimate and exposes the method rather than presenting it as a calibrated
+survey or a validated longitudinal signal.
+
+**Scale note:** a 2020 BALL ST comparison paper labels its *crosswalk* from the BALL ST activity scale
+to the HUNT input as 0-45. Direct HUNT publications describing the source questions instead multiply
+frequency (maximum 5), intensity (maximum 3), and duration (maximum 1), which yields 0-15. NOOP follows
+that directly documented HUNT questionnaire product and does not import the later BALL ST crosswalk.
+This discrepancy is another reason not to market the wearable proxy as validated.
 
 ### The Fitness Age itself needs no body measurement
 
 The headline Fitness Age is computed by a **self-consistent inversion** of the same Nes equation. We
-solve for the age at which a *population-reference* person — fixed at **RHR = 65** and **PA-index = 5** —
-would have your estimated VO₂max. Because both the forward estimate and the inversion use the same
+solve for the age at which a fixed reference person — **RHR = 65** and **PA-index = 5** — would have
+your estimated VO₂max. These are transparent internal neutral anchors, not population-fitted means.
+Because both the forward estimate and the inversion use the same
 fixed reference body term, the **body/waist term cancels out** of the comparison. The result: the
 headline Fitness Age is driven by your **resting HR and reconstructed activity** alone, and is shown
 **without requiring any weight, height or waist entry**.
@@ -72,7 +81,8 @@ it under *"Unlocks your VO₂max"*, never under the age itself.
 ## Cadence and gating
 
 - **One Saturday-keyed point per weekly bucket.** An analytics refresh may refine the current weekly
-  point by upserting the same Saturday key; it does not create a new age point every day.
+  point by upserting the same Saturday key; it does not create a new age point every day. Weekly storage
+  cadence does not imply that week-to-week movement is scientifically reliable.
 - **Trailing seven-day inputs.** RHR uses the median of observed values. Activity uses the number of
   qualifying active days and the mean Effort across those days, as shown in the PA-proxy formula above.
 - **Two ≥4-of-7 coverage gates.** A week needs both resting-HR data and an observed activity value on at
@@ -91,20 +101,25 @@ The weekly results are stored in `metricSeries` under two keys, written to the c
 | `fitness_age`  | years      | the headline number (drives the UI)                 |
 | `vo2max_est`   | ml/kg/min  | the explicit VO₂max estimate (only when waist given) |
 
-The UI reads the latest `fitness_age` value only when its stored profile-provenance token still matches
+The UI reads the latest `fitness_age` value only when its strict v2 calibration/profile marker matches
 the current profile. Age and sex are stamped beside Fitness Age; age, sex, and waist are stamped beside
-the optional VO₂max estimate. Changing a stamped input marks older values stale, purges/recomputes the
-computed-source copies, and the read path hides any unmatched row rather than briefly showing a number
-calculated for the previous profile. Date of birth is the source of chronological age, so age advances
-automatically instead of depending on a manually updated age field.
+the optional VO₂max estimate. Missing markers and v1 markers are rejected because those rows may predate
+the four-observed-activity-days gate. Upgrade reconciliation removes the displayed computed row plus both
+the legacy and current marker before recalculating; imported/vendor namespaces are untouched. Changing a
+stamped input follows the same fail-closed path. Date of birth is the source of chronological age, so age
+advances automatically instead of depending on a manually updated age field.
 
 ## Honesty disclaimer
 
 - This is a **fitness comparison expressed in years**, not a biological age, a clinical assessment, or a
   diagnosis. It says nothing about disease, longevity, or how old your body "really" is.
-- The underlying VO₂max model has a **large standard error of estimate** (SEE ≈ 5 ml/kg/min). Treat the number
-  as a **direction of travel over weeks**, not a precise readout — which is why the app shows the broad
-  model-error translation and presents one Saturday-keyed point per weekly bucket.
+- The underlying VO₂max model has a **large standard error of estimate** (SEE ≈ 5 ml/kg/min), and NOOP's
+  Effort-to-PA mapping has not been validated against the source questionnaire. Treat the number as broad
+  context, not a precise readout or a dependable week-to-week direction of travel. The app therefore
+  shows the broad model-error translation and presents only one Saturday-keyed point per weekly bucket.
+- The **RHR 65 / PA 5 neutral anchor is an internal product choice**, not a fitted population average.
+  Changing it would shift the displayed age, so it must remain versioned and must be tested in the same
+  participant validation study as the wearable activity mapping.
 - It is a **non-exercise estimate**. A real graded exercise test on a treadmill or bike is the gold
   standard; this is a convenient proxy, nothing more.
 

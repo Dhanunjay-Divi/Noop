@@ -1,6 +1,6 @@
 import Foundation
 
-// RangeReport.swift — the data model for a shareable offline "trends report" over a
+// RangeReport.swift - the data model for a shareable offline "trends report" over a
 // date range. Pure aggregation ONLY — there is NO rendering here. The UI layer builds
 // the PDF/PNG view from this struct; this file just turns sparse day→value series into
 // a clean, explainable set of per-metric range statistics.

@@ -18,17 +18,18 @@ struct CaffeineLogCard: View {
     private let ticker = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     @State private var mgDraft = ""
-    /// "How long ago" quick options for logging — hours back from now.
+    /// "How long ago" quick options for logging - hours back from now.
     private let quickHoursAgo: [Int] = [0, 1, 2, 3]
 
     // PR#566 (mvanhorn) — caffeine cutoff window + late-intake nudge. OPT-IN (default OFF, manual-first):
     // when enabled, NOOP works back from the user's bedtime by the dose's decay lead and flags any logged
     // intake that lands past that cutoff, with a calm inline nudge. Keys MIRROR the Android prefs
     // (KEY_CAFFEINE_CUTOFF / KEY_CAFFEINE_BEDTIME_MIN, default 23:00) so a layout reads the same on both.
-    @AppStorage(Self.cutoffEnabledKey) private var cutoffEnabled = false
-    @AppStorage(Self.bedtimeMinutesKey) private var bedtimeMinutes = 23 * 60
-    static let cutoffEnabledKey = "noop.caffeine.cutoffNudge"
-    static let bedtimeMinutesKey = "noop.caffeine.bedtimeMinutes"
+    @AppStorage(CaffeineCutoffReminders.cutoffEnabledKey) private var cutoffEnabled = false
+    @AppStorage(CaffeineCutoffReminders.bedtimeMinutesKey) private var bedtimeMinutes = 23 * 60
+    @AppStorage(CaffeineCutoffReminders.notificationsEnabledKey)
+    private var cutoffNotifications = false
+    @State private var showNotificationPermissionAlert = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
@@ -60,7 +61,7 @@ struct CaffeineLogCard: View {
                             .foregroundStyle(StrandPalette.textTertiary)
                     }
 
-                    // Log "now" or a quick number of hours ago — mirrors the journal's day-pill row.
+                    // Log "now" or a quick number of hours ago - mirrors the journal's day-pill row.
                     HStack {
                         Text("Had it")
                             .font(StrandFont.footnote)
@@ -82,6 +83,17 @@ struct CaffeineLogCard: View {
             }
         }
         .onReceive(ticker) { tick = $0 }
+        .onAppear {
+            CaffeineCutoffReminders.restoreIfAuthorized(
+                intakes: store.intakes,
+                bedtimeMinutes: bedtimeMinutes
+            )
+        }
+        .alert("Notifications are off", isPresented: $showNotificationPermissionAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Allow notifications in Settings to receive the optional caffeine cutoff reminder. The inline timing guide still works without it.")
+        }
     }
 
     // MARK: - Cutoff window (PR#566) — bedtime + late-intake nudge
@@ -103,7 +115,7 @@ struct CaffeineLogCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
-                Toggle("", isOn: $cutoffEnabled)
+                Toggle("", isOn: cutoffEnabledBinding)
                     .labelsHidden().toggleStyle(.switch).tint(StrandPalette.accent)
                     .accessibilityLabel("Warn me about caffeine close to bedtime")
             }
@@ -121,6 +133,23 @@ struct CaffeineLogCard: View {
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Cutoff notification")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text("After you log caffeine, send one reminder when today's cutoff begins. A late log gets one immediate heads-up; exact repeats are suppressed.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    Toggle("", isOn: cutoffNotificationBinding)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(StrandPalette.accent)
+                        .accessibilityLabel("Caffeine cutoff notification")
+                }
             }
         }
     }
@@ -152,8 +181,11 @@ struct CaffeineLogCard: View {
     /// compared against the cutoff derived from the user's bedtime.
     private var latePastCutoffCount: Int {
         store.intakes.filter { intake in
-            CaffeineDecay.isPastCutoff(intakeMinutes: minutesSinceMidnight(intake.at),
-                                       bedtimeMinutes: bedtimeMinutes)
+            Calendar.current.isDate(intake.at, inSameDayAs: tick)
+                && CaffeineDecay.isPastCutoff(
+                    intakeMinutes: minutesSinceMidnight(intake.at),
+                    bedtimeMinutes: bedtimeMinutes
+                )
         }.count
     }
 
@@ -187,7 +219,62 @@ struct CaffeineLogCard: View {
             },
             set: { date in
                 let c = Calendar.current.dateComponents([.hour, .minute], from: date)
-                bedtimeMinutes = min(max((c.hour ?? 23) * 60 + (c.minute ?? 0), 0), 24 * 60 - 1)
+                let next = min(max((c.hour ?? 23) * 60 + (c.minute ?? 0), 0), 24 * 60 - 1)
+                bedtimeMinutes = next
+                CaffeineCutoffReminders.reconcile(
+                    intakes: store.intakes,
+                    bedtimeMinutes: next
+                )
+            }
+        )
+    }
+
+    private var cutoffEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { cutoffEnabled },
+            set: { on in
+                cutoffEnabled = on
+                if on {
+                    CaffeineCutoffReminders.reconcile(
+                        intakes: store.intakes,
+                        bedtimeMinutes: bedtimeMinutes
+                    )
+                } else {
+                    cutoffNotifications = false
+                    CaffeineCutoffReminders.setNotificationsEnabled(
+                        false,
+                        intakes: store.intakes,
+                        bedtimeMinutes: bedtimeMinutes
+                    )
+                }
+            }
+        )
+    }
+
+    private var cutoffNotificationBinding: Binding<Bool> {
+        Binding(
+            get: { cutoffNotifications },
+            set: { on in
+                if !on {
+                    cutoffNotifications = false
+                    CaffeineCutoffReminders.setNotificationsEnabled(
+                        false,
+                        intakes: store.intakes,
+                        bedtimeMinutes: bedtimeMinutes
+                    )
+                    return
+                }
+                cutoffNotifications = true
+                CaffeineCutoffReminders.setNotificationsEnabled(
+                    true,
+                    intakes: store.intakes,
+                    bedtimeMinutes: bedtimeMinutes
+                ) { outcome in
+                    cutoffNotifications = outcome == .enabled
+                    if outcome == .denied {
+                        showNotificationPermissionAlert = true
+                    }
+                }
             }
         )
     }
@@ -280,6 +367,10 @@ struct CaffeineLogCard: View {
                 Spacer()
                 Button {
                     store.remove(intake.id)
+                    CaffeineCutoffReminders.reconcile(
+                        intakes: store.intakes,
+                        bedtimeMinutes: bedtimeMinutes
+                    )
                 } label: {
                     Image(systemName: "minus.circle.fill")
                         .font(StrandFont.body)
@@ -307,6 +398,11 @@ struct CaffeineLogCard: View {
             let at = Calendar.current.date(byAdding: .hour, value: -hoursAgo, to: tick) ?? tick
             store.log(at: at, mg: mg)
             mgDraft = ""
+            CaffeineCutoffReminders.reconcile(
+                intakes: store.intakes,
+                bedtimeMinutes: bedtimeMinutes,
+                now: tick
+            )
         }
     }
 

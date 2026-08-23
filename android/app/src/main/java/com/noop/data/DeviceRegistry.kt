@@ -49,7 +49,7 @@ class DeviceRegistry(
 
     /**
      * Make [id] the single active device. The demote-old + promote-new pair is ONE transaction so the
-     * "exactly one active" invariant (I1) holds even across a crash mid-swap — mirrors the Swift
+     * "exactly one active" invariant (I1) holds even across a crash mid-swap - mirrors the Swift
      * store's single write transaction.
      */
     suspend fun setActive(id: String, now: Long = System.currentTimeMillis() / 1000) {

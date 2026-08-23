@@ -12,11 +12,11 @@ import ZIPFoundation
 //              daily readiness (RHR, temperature deviation, score), daily activity (steps/calories).
 //   • Fitbit — Google Takeout → Fitbit → JSON: per-day sleep-*.json, resting_heart_rate-*.json,
 //              steps-*.json, heart_rate-*.json.
-//   • Garmin — Garmin Connect "Export Your Data" (GDPR) ZIP: DI_Connect_Wellness *_sleepData.json,
+//   • Garmin - Garmin Connect "Export Your Data" (GDPR) ZIP: DI_Connect_Wellness *_sleepData.json,
 //              daily RHR / steps / stress JSON. (The FIT activity files in the same ZIP are wave-1's.)
 //
 // HONEST DATA: only fields the export actually carries are written; unknown stays nil. A brand's OWN
-// score (Oura "readiness", any "sleep score") is stored under a REFERENCE key only — it is NEVER
+// score (Oura "readiness", any "sleep score") is stored under a REFERENCE key only - it is NEVER
 // surfaced as NOOP's Charge/Effort/Rest. NOOP recomputes its own scores downstream from the raw
 // RHR/HRV/sleep inputs, exactly as for any imported source. Every imported row is tagged with the
 // brand's source id ("oura-import" / "fitbit-import" / "garmin-import").

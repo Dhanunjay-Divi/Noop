@@ -56,7 +56,7 @@ object CaffeineDecay {
     // Reframes [hoursUntilFraction] as a clock-friendly "stop drinking after" cutoff: given a bedtime and
     // an acceptable residual fraction at bedtime, the cutoff is [bedtime − hoursUntilFraction(target)]. A
     // dose taken at the cutoff decays to exactly [targetResidualFraction] by bedtime; anything later still
-    // has more than that on board. The math is the same decay model as the "still active" hint — only the
+    // has more than that on board. The math is the same decay model as the "still active" hint - only the
     // framing changes — so the honesty rules carry over (population-average half-life, a guide not a rule).
 
     /** Default acceptable residual at bedtime: a quarter of the dose. Two half-lives' worth (~11 h on the

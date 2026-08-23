@@ -17,7 +17,7 @@ import StrandAnalytics
 //                            body-clock phase + a jet-lag / shift plan that is LIGHT + SLEEP
 //                            TIMING only (never a supplement/drug).
 //   • HeadsUpCard          — IllnessSignalEngine.Result. The confounder-suppressed illness
-//                            "heads-up". On-device estimate — not a diagnosis.
+//                            "heads-up". On-device estimate - not a diagnosis.
 //
 // DESIGN-SYSTEM ONLY: NoopCard + DomainTheme/StrandPalette tokens, StrandFont, NoopMetrics,
 // ScoreStatePill, the house buttons. No raw hex, no ad-hoc cards. Privacy-forward copy:
@@ -132,7 +132,9 @@ struct CycleAwarenessCard: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Cycle awareness").strandOverline()
-                Text("From your nightly temperature")
+                Text(result.cycleDayLow == nil
+                     ? "From your nightly temperature"
+                     : "From your logs + nightly temperature")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
             }
@@ -199,7 +201,7 @@ struct CycleAwarenessCard: View {
         }
     }
 
-    /// "~day 18–22" — always a RANGE, never a single point.
+    /// "~day 18–22" - always a RANGE, never a single point.
     private var cycleDayText: String? {
         guard let lo = result.cycleDayLow, let hi = result.cycleDayHigh else { return nil }
         return lo == hi ? String(localized: "· ~day \(lo)") : String(localized: "· ~day \(lo)-\(hi)")
@@ -254,7 +256,7 @@ struct CycleAwarenessOptInCard: View {
                         .foregroundStyle(StrandPalette.textPrimary)
                     Spacer()
                 }
-                Text("NOOP can estimate a coarse menstrual-cycle phase from nightly skin temperature. On iPhone, turning this on can ask to read cycle-start dates from Apple Health; you can decline and log dates manually. Only start dates are kept locally—never flow intensity, symptoms, fertility or contraception data. Awareness only: not contraception, not a fertility predictor, not a medical service.")
+                Text("NOOP can estimate a coarse menstrual-cycle phase from nightly skin temperature. On iPhone, turning this on can ask to read cycle-start dates from Apple Health; you can decline and log dates manually. Optional flow and symptom details stay private and are used only as context. Awareness only: not contraception, not a fertility predictor, not a medical service.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -283,12 +285,19 @@ struct CycleTrackerView: View {
 
     @State private var selectedDate = Date()
     @State private var entries: [CycleTrackingStore.Entry] = []
+    @State private var dailyLogs: [CycleTrackingStore.DailyLog] = []
+    @State private var selectedFlow: CycleTrackingStore.Flow?
+    @State private var selectedSymptoms: Set<CycleTrackingStore.Symptom> = []
     @State private var confirmDeleteAll = false
+    @State private var confirmDeleteAllDetails = false
     @State private var operationFailed = false
 
     private var currentResult: CyclePhaseEngine.Result { model.cyclePhase ?? result }
     private var selectedDay: String { Repository.localDayKey(selectedDate) }
     private var alreadyLogged: Bool { entries.contains { $0.day == selectedDay } }
+    private var selectedLog: CycleTrackingStore.DailyLog? {
+        dailyLogs.first { $0.day == selectedDay }
+    }
 
     var body: some View {
         NavigationStack {
@@ -296,7 +305,11 @@ struct CycleTrackerView: View {
                 VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                     statusCard
                     logCard
+                    detailsCard
                     historyCard
+                    if !dailyLogs.isEmpty {
+                        dailyHistoryCard
+                    }
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text(CyclePhaseEngine.awarenessLine)
@@ -314,7 +327,8 @@ struct CycleTrackerView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .task(id: repo.cycleTrackingSeq) { entries = await repo.periodStartEntries() }
+            .task(id: repo.cycleTrackingSeq) { await reload() }
+            .onChange(of: selectedDate) { _ in loadSelectedDetails() }
             .confirmationDialog("Delete all manually logged period starts?",
                                 isPresented: $confirmDeleteAll,
                                 titleVisibility: .visible) {
@@ -324,6 +338,16 @@ struct CycleTrackerView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This permanently removes dates entered in NOOP. Apple Health-imported dates and sensor history are unchanged.")
+            }
+            .confirmationDialog("Delete all daily cycle details?",
+                                isPresented: $confirmDeleteAllDetails,
+                                titleVisibility: .visible) {
+                Button("Delete all details", role: .destructive) {
+                    Task { await deleteAllDetails() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently removes flow and symptom entries. Period-start dates and wearable history are unchanged.")
             }
             .alert("Couldn’t update cycle history", isPresented: $operationFailed) {
                 Button("OK", role: .cancel) {}
@@ -383,6 +407,86 @@ struct CycleTrackerView: View {
                 .buttonStyle(.noopSecondary)
                 .disabled(alreadyLogged)
                 Text("This optional date anchors cycle day 1 and is checked against your nightly temperature pattern.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var detailsCard: some View {
+        NoopCard(tint: StrandPalette.restColor) {
+            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                Text("Daily details").strandOverline()
+                Text(prettyDay(selectedDay))
+                    .font(StrandFont.bodyNumber)
+                    .foregroundStyle(StrandPalette.textPrimary)
+
+                Picker("Flow", selection: $selectedFlow) {
+                    Text("Not entered")
+                        .tag(Optional<CycleTrackingStore.Flow>.none)
+                    ForEach(CycleTrackingStore.Flow.allCases, id: \.self) { flow in
+                        Text(flowLabel(flow))
+                            .tag(Optional(flow))
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Text("Symptoms")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), alignment: .leading),
+                        GridItem(.flexible(), alignment: .leading),
+                    ],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    ForEach(CycleTrackingStore.Symptom.allCases, id: \.self) { symptom in
+                        Button {
+                            if selectedSymptoms.contains(symptom) {
+                                selectedSymptoms.remove(symptom)
+                            } else {
+                                selectedSymptoms.insert(symptom)
+                            }
+                        } label: {
+                            HStack(alignment: .top, spacing: 7) {
+                                Image(systemName: selectedSymptoms.contains(symptom)
+                                      ? "checkmark.square.fill" : "square")
+                                    .foregroundStyle(selectedSymptoms.contains(symptom)
+                                                     ? StrandPalette.restColor
+                                                     : StrandPalette.textTertiary)
+                                    .accessibilityHidden(true)
+                                Text(symptomLabel(symptom))
+                                    .font(StrandFont.subhead)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(symptomLabel(symptom))
+                        .accessibilityValue(selectedSymptoms.contains(symptom)
+                                            ? "Selected" : "Not selected")
+                    }
+                }
+
+                Button(selectedLog == nil ? "Save daily details" : "Update daily details") {
+                    Task { await saveDailyDetails() }
+                }
+                .buttonStyle(.noopSecondary)
+                .disabled(selectedFlow == nil && selectedSymptoms.isEmpty)
+
+                if selectedLog != nil {
+                    Button("Clear this day", role: .destructive) {
+                        Task { await deleteDailyDetails(selectedDay) }
+                    }
+                    .buttonStyle(.noopGhost)
+                }
+
+                Text("Optional context only. These entries do not diagnose a condition, predict safe or fertile days, or trigger an emergency alert.")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -450,6 +554,48 @@ struct CycleTrackerView: View {
         }
     }
 
+    private var dailyHistoryCard: some View {
+        NoopCard {
+            VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+                HStack {
+                    Text("Daily history").strandOverline()
+                    Spacer()
+                    Button("Delete all") { confirmDeleteAllDetails = true }
+                        .buttonStyle(.noopGhost)
+                        .foregroundStyle(StrandPalette.statusCritical)
+                }
+
+                ForEach(Array(dailyLogs.reversed().prefix(14)), id: \.day) { log in
+                    HStack(alignment: .top, spacing: 10) {
+                        Text(prettyDay(log.day))
+                            .font(StrandFont.bodyNumber)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(dailySummary(log))
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+    }
+
+    private func reload() async {
+        async let entryRead = repo.periodStartEntries()
+        async let detailRead = repo.cycleDailyLogs()
+        entries = await entryRead
+        dailyLogs = await detailRead
+        loadSelectedDetails()
+    }
+
+    private func loadSelectedDetails() {
+        let log = dailyLogs.first { $0.day == selectedDay }
+        selectedFlow = log?.flow
+        selectedSymptoms = log?.symptoms ?? []
+    }
+
     private func logSelectedDay() async {
         guard await repo.logPeriodStart(day: selectedDay) else { operationFailed = true; return }
         await model.refreshV5Signals()
@@ -463,6 +609,34 @@ struct CycleTrackerView: View {
     private func deleteAll() async {
         guard await repo.deleteAllPeriodStarts() else { operationFailed = true; return }
         await model.refreshV5Signals()
+    }
+
+    private func saveDailyDetails() async {
+        guard await repo.saveCycleDailyLog(
+            day: selectedDay,
+            flow: selectedFlow,
+            symptoms: selectedSymptoms
+        ) else {
+            operationFailed = true
+            return
+        }
+        await reload()
+    }
+
+    private func deleteDailyDetails(_ day: String) async {
+        guard await repo.deleteCycleDailyLog(day: day) else {
+            operationFailed = true
+            return
+        }
+        await reload()
+    }
+
+    private func deleteAllDetails() async {
+        guard await repo.deleteAllCycleDailyLogs() else {
+            operationFailed = true
+            return
+        }
+        await reload()
     }
 
     private func phaseTitle(_ phase: CyclePhaseEngine.Phase) -> String {
@@ -482,6 +656,44 @@ struct CycleTrackerView: View {
         formatter.dateFormat = "yyyy-MM-dd"
         guard let date = formatter.date(from: day) else { return day }
         return date.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private func flowLabel(_ flow: CycleTrackingStore.Flow) -> String {
+        switch flow {
+        case .none: return String(localized: "No bleeding")
+        case .spotting: return String(localized: "Spotting")
+        case .light: return String(localized: "Light")
+        case .medium: return String(localized: "Medium")
+        case .heavy: return String(localized: "Heavy")
+        }
+    }
+
+    private func symptomLabel(_ symptom: CycleTrackingStore.Symptom) -> String {
+        switch symptom {
+        case .cramps: return String(localized: "Cramps")
+        case .headache: return String(localized: "Headache")
+        case .fatigue: return String(localized: "Fatigue")
+        case .bloating: return String(localized: "Bloating")
+        case .moodChanges: return String(localized: "Mood changes")
+        case .breastTenderness: return String(localized: "Breast tenderness")
+        case .acne: return String(localized: "Acne")
+        case .nausea: return String(localized: "Nausea")
+        case .backPain: return String(localized: "Back pain")
+        case .cravings: return String(localized: "Cravings")
+        }
+    }
+
+    private func dailySummary(_ log: CycleTrackingStore.DailyLog) -> String {
+        var parts: [String] = []
+        if let flow = log.flow { parts.append(flowLabel(flow)) }
+        if !log.symptoms.isEmpty {
+            parts.append(
+                log.symptoms.sorted { $0.rawValue < $1.rawValue }
+                    .map(symptomLabel)
+                    .joined(separator: ", ")
+            )
+        }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -581,7 +793,7 @@ struct BodyClockCard: View {
 
     // MARK: derived copy
 
-    /// "About 25 min later than your schedule" — a plain, skimmable headline.
+    /// "About 25 min later than your schedule" - a plain, skimmable headline.
     private var offsetTitle: String {
         let mins = Int(abs(estimate.offsetVsScheduleMinutes).rounded())
         if estimate.confidence == .unreadable {
@@ -797,7 +1009,7 @@ private func prettyDay(_ key: String) -> String {
                     phase: .luteal, confidence: .solid,
                     cycleDayLow: 20, cycleDayHigh: 24, cycleLengthDays: 28,
                     nextPeriodWindow: .init(earliestDay: "2026-06-24", latestDay: "2026-06-28"),
-                    shiftMarkers: [], note: "Luteal range — temperature is running above your baseline."),
+                    shiftMarkers: [], note: "Luteal range - temperature is running above your baseline."),
                 curve: (0..<60).map { 0.1 * sin(Double($0) / 9) + 0.05 },
                 onLogPeriod: {}, onOpenDetail: {})
 
@@ -819,13 +1031,13 @@ private func prettyDay(_ key: String) -> String {
                 score: 64, level: .raised,
                 firedSignals: ["RHR +6", "HRV −22%", "skin temp +0.7 °C"],
                 suppressedBy: [], signalCount: 3,
-                copy: "Several signals shifted together — RHR +6, HRV −22%, skin temp +0.7 °C. Many things can cause this pattern; review how you feel and consider a gentler day."))
+                copy: "Several signals shifted together - RHR +6, HRV −22%, skin temp +0.7 °C. Many things can cause this pattern; review how you feel and consider a gentler day."))
 
             HeadsUpCard(result: IllnessSignalEngine.Result(
                 score: 28, level: .suppressed,
                 firedSignals: ["RHR +5", "skin temp +0.6 °C"],
                 suppressedBy: ["alcohol"], signalCount: 2,
-                copy: "Some signals are up (RHR +5, skin temp +0.6 °C), but you logged alcohol — likely that, not illness. On-device estimate — not a diagnosis."))
+                copy: "Some signals are up (RHR +5, skin temp +0.6 °C), but you logged alcohol - likely that, not illness. On-device estimate - not a diagnosis."))
         }
         .padding(NoopMetrics.screenPadding)
     }

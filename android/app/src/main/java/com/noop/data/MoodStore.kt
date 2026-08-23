@@ -16,7 +16,7 @@ import java.time.LocalDate
  *
  * Source isolation mirrors the journal's JOURNAL_DEVICE_ID convention: `metricSeries`
  * has no source column beyond deviceId, so native check-ins are written under a
- * dedicated "noop-mood" id, NEVER under "my-whoop"/"apple-health" — a CSV or Apple
+ * dedicated "noop-mood" id, NEVER under "my-whoop"/"apple-health" - a CSV or Apple
  * Health re-import can therefore never silently overwrite (or delete) in-app moods.
  *
  * The constructor takes the two storage functions rather than the repository class so

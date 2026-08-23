@@ -21,7 +21,7 @@ import com.noop.ui.appLaunchIntent
 // CLEAN-ROOM: this reimplements the BEHAVIOUR only. The copy is NOOP's own — NOT WHOOP's decompiled
 // strings — and the target is NOOP's own personal-history planner output, not another app's value.
 //
-// It is NOT "the instant" you cross the target — daily Effort is a per-analytics-pass rollup, so it fires
+// It is NOT "the instant" you cross the target - daily Effort is a per-analytics-pass rollup, so it fires
 // on the first pass at/after the crossing. Once-per-day dedupe via a persisted day flag, the same
 // crossing-dedupe idiom as ScheduledReportPolicy / BatteryAlertPolicy. Default OFF like every automation.
 
@@ -48,7 +48,7 @@ object StrainTargetPolicy {
      *  deliberately avoids "optimal", "earned", or permission-to-push claims. */
     fun copy(target: Int): Pair<String, String> {
         val title = "Effort marker reached"
-        val body = "You've reached today's Effort marker of $target. It is a planning cue, not a limit—" +
+        val body = "You've reached today's Effort marker of $target. It is a planning cue, not a limit-" +
             "check how you feel before adding more."
         return title to body
     }
@@ -117,7 +117,7 @@ object StrainTargetNotifier {
                     CHANNEL_ID, "Daily reports",
                     NotificationManager.IMPORTANCE_LOW,
                 ).apply {
-                    description = "A morning recap and post-workout summary, after your strap syncs."
+                    description = "A morning recap and post-workout summary after Noop Band syncs."
                 },
             )
         }

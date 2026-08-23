@@ -83,7 +83,7 @@ object RecoveryScorer {
     const val skinTempDevScale: Double = 1.0
 
     /**
-     * Recovery-Index weight (overnight resting-HR DECLINE slope — Oura's "Recovery Index"
+     * Recovery-Index weight (overnight resting-HR DECLINE slope - Oura's "Recovery Index"
      * contributor). Small and additive like [wSkinTemp]: folds in only when a slope is
      * supplied. Mirrors Swift `RecoveryScorer.wRecoveryIndex`.
      */
@@ -214,7 +214,7 @@ object RecoveryScorer {
     const val recoveryIndexMinBins: Int = 6
 
     /**
-     * Overnight resting-HR DECLINE slope (bpm/hour) across the in-bed window — the "Recovery
+     * Overnight resting-HR DECLINE slope (bpm/hour) across the in-bed window - the "Recovery
      * Index" component of Oura's Readiness that Charge lacked (it previously only read the
      * overnight FLOOR via [restingHR] above, never the trend that reaches it).
      *
@@ -366,8 +366,8 @@ object RecoveryScorer {
         }
         // Skin-temp term: SYMMETRIC penalty, no baseline arg (skinTempDev is already a
         // deviation). Further from baseline in either direction → more negative z.
-        if (skinTempDev != null) {
-            terms.add((-abs(skinTempDev) / skinTempDevScale) to wSkinTemp)
+        VitalBands.skinTempDeviation(skinTempDev)?.let { dev ->
+            terms.add((-abs(dev) / skinTempDevScale) to wSkinTemp)
         }
         // Recovery-Index term: overnight HR-DECLINE slope (bpm/hour). No baseline needed (a
         // fixed, documented scale, same style as sleepPerf/skin-temp). Negative (declining)

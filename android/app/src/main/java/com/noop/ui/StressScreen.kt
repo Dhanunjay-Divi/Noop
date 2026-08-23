@@ -710,7 +710,7 @@ private fun DaytimeStressLine(hours: List<DaytimeStress.HourPoint>) {
                 drawCircle(color = stressColor, radius = 5.dp.toPx(), center = Offset(scrubX, dotY))
                 drawCircle(color = Palette.tipCore, radius = 2.5.dp.toPx(), center = Offset(scrubX, dotY))
 
-                // Tooltip pill: "9 am · 1.4" — avoid String.format; use integer tenths.
+                // Tooltip pill: "9 am · 1.4" - avoid String.format; use integer tenths.
                 val tenths = (lvl * 10).roundToInt().coerceIn(0, 30)
                 val label = uiString(R.string.l10n_stress_screen_hourlabel_pt_hour_tenths_10_tenths_cd4c9c16, hourLabel(pt.hour), tenths / 10, tenths % 10)
                 val textW = tooltipPaint.measureText(label)
@@ -769,9 +769,9 @@ private fun StressTotalsBar(day: DaytimeStress.Result) {
 }
 
 private enum class StressTotalsBand(val title: String, val color: Color) {
-    Calm("Calm", StressRamp.CALM),         // blue — low stress
-    Moderate("Moderate", StressRamp.STEADY), // green — balanced
-    High("High", StressRamp.TENSE),        // amber — high
+    Calm("Calm", StressRamp.CALM),         // blue - low stress
+    Moderate("Moderate", StressRamp.STEADY), // green - balanced
+    High("High", StressRamp.TENSE),        // amber - high
 }
 
 /** One band's share of the scored waking hours as a liquid tube row: a swatch + label on the left, the
@@ -884,7 +884,7 @@ private fun StressTiles(model: StressModel) {
             MarkerTile(
                 modifier = m,
                 label = uiString(R.string.l10n_stress_screen_resting_hr_26677094),
-                value = model.rhrToday?.let { "$it bpm" } ?: "—",
+                value = model.rhrToday?.let { "$it bpm" } ?: "-",
                 delta = model.rhrDelta,
                 accent = Palette.metricRose,
                 higherIsStress = true,
@@ -895,7 +895,7 @@ private fun StressTiles(model: StressModel) {
             MarkerTile(
                 modifier = m,
                 label = "HRV",
-                value = model.hrvToday?.let { "${it.roundToInt()} ms" } ?: "—",
+                value = model.hrvToday?.let { "${it.roundToInt()} ms" } ?: "-",
                 delta = model.hrvDelta,
                 accent = Palette.metricPurple,
                 higherIsStress = false,
@@ -1278,7 +1278,7 @@ internal class StressModel private constructor(
             val calmValue: String
             val calmCaption: String
             if (recent.isEmpty()) {
-                calmValue = "—"
+                calmValue = "-"
                 calmCaption = "needs history"
             } else {
                 val calm = recent.count { it.value < 1.0 }

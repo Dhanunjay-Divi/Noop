@@ -4,7 +4,7 @@ import StrandDesign
 import StrandAnalytics
 import WhoopStore
 
-/// Manual HRV snapshot — "Take an HRV reading" (#127).
+/// Manual HRV snapshot - "Take an HRV reading" (#127).
 ///
 /// A short, deliberate seated capture: the user sits still and breathes normally while the strap's
 /// live R-R intervals (the reliable 0x2A37 stream) accumulate for ~60 s. We then run the full
@@ -104,7 +104,7 @@ struct HRVSnapshotView: View {
             }
 
             if bonded {
-                StatePill("Strap live", tone: .positive, showsDot: true)
+                StatePill("Noop Band live", tone: .positive, showsDot: true)
             } else {
                 StatePill("Not connected", tone: .warning, showsDot: true)
             }
@@ -205,11 +205,11 @@ struct HRVSnapshotView: View {
     private var dialValue: String {
         switch phase {
         case .idle:
-            return "—"
+            return "-"
         case .capturing:
             return runningRMSSD.map { String(format: "%.0f", $0) } ?? "…"
         case .done:
-            return result?.rmssd.map { String(format: "%.0f", $0) } ?? "—"
+            return result?.rmssd.map { String(format: "%.0f", $0) } ?? "-"
         }
     }
 
@@ -222,7 +222,7 @@ struct HRVSnapshotView: View {
         case .idle:
             return bonded
                 ? String(localized: "Sit still and breathe normally. Tap below to take a 60-second reading.")
-                : String(localized: "Connect your strap on the Live screen to take a reading.")
+                : String(localized: "Connect Noop Band on the Live screen to take a reading.")
         case .capturing:
             return String(localized: "Sit still, breathe normally. Keep your wrist relaxed and steady.")
         case .done:
@@ -348,7 +348,7 @@ struct HRVSnapshotView: View {
         StrandCard(tint: StrandPalette.restColor) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("How this is measured").strandOverline()
-                Text("A 60-second snapshot of your beat-to-beat (R-R) intervals from the strap, cleaned (range and ectopic-beat filtering) before computing RMSSD the same way your overnight HRV is computed.")
+                Text("A 60-second snapshot of beat-to-beat (R-R) intervals from Noop Band, cleaned with range and ectopic-beat filtering before computing RMSSD the same way your overnight HRV is computed.")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -367,7 +367,7 @@ struct HRVSnapshotView: View {
             Image(systemName: "applewatch.radiowaves.left.and.right")
                 .foregroundStyle(StrandPalette.statusWarning)
                 .accessibilityHidden(true)
-            Text("An HRV reading needs the live R-R stream. Open the Live screen and connect your strap, then come back.")
+            Text("An HRV reading needs the live R-R stream. Open the Live screen and connect Noop Band, then come back.")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -474,7 +474,7 @@ struct HRVSnapshotView: View {
     // MARK: - Pure formatting helpers (shared with the tests)
 
     static func format(_ value: Double?, _ fmt: String) -> String {
-        guard let value else { return "—" }
+        guard let value else { return "-" }
         return String(format: fmt, value)
     }
 

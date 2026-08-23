@@ -222,7 +222,7 @@ object AppleHealthImporter {
         } catch (e: Exception) {
             // TOLERANT PARSE: a hard, structural XML error can still slip past the byte sanitizer
             // (e.g. a truncated/garbled tag, not just a bad byte). The pull-parser may signal this as
-            // either an XmlPullParserException or an IOException (truncated stream) — both mean "the
+            // either an XmlPullParserException or an IOException (truncated stream) - both mean "the
             // parser cannot continue". If we already parsed at least one record, KEEP the partial
             // result rather than discarding a whole 15-year import over the tail; count the dropped
             // tail as one skipped span and surface it. If nothing was parsed yet, rethrow so a

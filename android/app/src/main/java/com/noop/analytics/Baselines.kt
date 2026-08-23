@@ -151,7 +151,7 @@ object Baselines {
 
     /** #612: calendar days since the newest night that carried a usable HRV reading (the baseline's input),
      *  or null when there is none / a key can't be parsed. DISTINCT from `calibrationNights` (which counts
-     *  progress TOWARD a usable baseline) — this measures staleness, so a surface can say "no new nights from
+     *  progress TOWARD a usable baseline) - this measures staleness, so a surface can say "no new nights from
      *  your strap for N days" when the baseline aged out silently instead of only "building your baseline".
      *  Pure and TZ-free (civil-day arithmetic); byte-identical mirror of the Swift twin. `dayKeys`/`nightlyHrv`
      *  are parallel (same night per index); `today` is an ISO `yyyy-MM-dd` key. */
@@ -355,9 +355,9 @@ object Baselines {
      * source-tagged nightly history, for feeding [foldHistory]'s `baselineEpoch` so a baseline can't
      * mix two brands' incompatible HRV scales (#459: an Oura→WHOOP switch has Oura RMSSD ~120–155 ms
      * vs WHOOP ~72–112 ms with no overlap nights, so a straddling 30-night window reads the first
-     * WHOOP nights as "suppressed" against an Oura-inflated mean — a device artifact, not physiology).
+     * WHOOP nights as "suppressed" against an Oura-inflated mean - a device artifact, not physiology).
      *
-     * CONTRACT: [sourceDays] is exactly ONE `(dayKey "yyyy-MM-dd", sourceId)` per night — the day's
+     * CONTRACT: [sourceDays] is exactly ONE `(dayKey "yyyy-MM-dd", sourceId)` per night - the day's
      * WINNING source (the same per-day merge winner whose value the fold uses), NOT one row per source.
      * The "current era" is read off the NEWEST day's brand, so an overlap day carrying two brands would,
      * under the deterministic (day, sourceId) sort, let the lexically-later source (e.g. "oura-import" >
@@ -499,7 +499,7 @@ object Baselines {
     /**
      * Recalibrate every baseline that feeds Charge: drop the anchor so the ~4-night build-up restarts
      * from [nowSeconds]. This is the single source of truth behind the Settings "Recalibrate Charge
-     * baseline" button — it writes [nowSeconds] (epoch SECONDS, whole) to BOTH the HRV epoch and the
+     * baseline" button - it writes [nowSeconds] (epoch SECONDS, whole) to BOTH the HRV epoch and the
      * recovery epoch, so HRV (the dominant driver, already wired) and the resting-HR / respiration /
      * skin-temp baselines re-anchor together. It does NOT delete any stored day: only the day from
      * which the baselines re-learn moves. After this the next foldHistory re-seeds from the first

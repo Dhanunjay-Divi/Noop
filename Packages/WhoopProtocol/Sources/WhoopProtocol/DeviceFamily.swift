@@ -8,7 +8,7 @@ import Foundation
 public enum DeviceFamily: String, Sendable, CaseIterable {
     /// Whoop 4.0 — 0x07 CRC8 header check.
     case whoop4
-    /// Whoop 5.0 / MG — CRC16-Modbus header check, "puffin" packet types.
+    /// Whoop 5.0 / MG - CRC16-Modbus header check, "puffin" packet types.
     case whoop5
 }
 

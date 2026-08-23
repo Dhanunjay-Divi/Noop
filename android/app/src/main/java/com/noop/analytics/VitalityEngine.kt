@@ -19,7 +19,14 @@ object VitalityEngine {
     private const val vitalityPerYear = 2.5
     const val minFactors = 3
     const val minDomains = 3
-    const val bandYears = 0.0 // no validated individual interval exists for this experimental composite
+    // This is an honesty range, not a statistical confidence interval. One Gompertz mortality-rate
+    // doubling (~8 years) is the natural uncertainty unit for this experimental conversion. It does
+    // not narrow with factor count because no fitted covariance/error model shows that another
+    // correlated wearable input improves individual precision.
+    const val bandYears = 8.0
+
+    @Suppress("UNUSED_PARAMETER")
+    fun bandYears(factorsUsed: Int): Double = bandYears
 
     data class Inputs(
         val chronoAge: Double,
@@ -120,6 +127,14 @@ object VitalityEngine {
         val bodyAge = (inputs.chronoAge + deltaAge).coerceIn(minBodyAge, maxBodyAge)
         val delta = inputs.chronoAge - bodyAge
         val vitality = (50 + delta * vitalityPerYear).coerceIn(0.0, 100.0)
-        return Result(vitality, bodyAge, inputs.chronoAge, delta, bandYears, contribs, contribs.size)
+        return Result(
+            vitality,
+            bodyAge,
+            inputs.chronoAge,
+            delta,
+            bandYears(contribs.size),
+            contribs,
+            contribs.size,
+        )
     }
 }

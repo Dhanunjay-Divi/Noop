@@ -214,7 +214,7 @@ sealed class ScoreState {
             is Scored -> ""
             is Calibrating -> "Calibrating"
             is CarriedLastNight -> if (stale) "Latest sleep · $dateLabel" else "Last night · $dateLabel"
-            NeedsStrap -> "Needs the strap"
+            NeedsStrap -> "Needs wearable data"
         }
 
     /** The one-line plain-English what-to-do. VERBATIM, mirror Swift exactly. The night(s) plural in
@@ -229,9 +229,9 @@ sealed class ScoreState {
             is CarriedLastNight ->
                 // A fresh post-rollover carry tells you tonight's score is on its way; a stale carry (an
                 // older import, #779) instead explains the number is from that earlier session, not today.
-                if (stale) "This is your last scored session. Wear the strap overnight for a fresh score."
-                else "Tonight's lands after you sleep with the strap on."
-            NeedsStrap -> "No data for today. Was your strap worn and connected overnight?"
+                if (stale) "This is your last scored session. Wear Noop Band overnight for a fresh score."
+                else "Tonight's lands after you sleep with Noop Band on."
+            NeedsStrap -> "No data for today. Was Noop Band worn and connected overnight?"
         }
 }
 
@@ -298,9 +298,9 @@ sealed class RecordingState {
     /** The chip's one-line detail. VERBATIM, mirror Swift exactly. */
     val detail: String
         get() = when (this) {
-            Recording -> "Your strap is connected and saving data."
+            Recording -> "Noop Band is connected and saving data."
             is LastSynced -> "Reconnect to pull the latest."
-            NotRecording -> "Strap not connected. Tap to connect."
+            NotRecording -> "Noop Band not connected. Tap to connect."
             HistoryExperimental -> "History sync is experimental on 5.0."
             ConnectedNoData -> "No live heart rate or synced history yet this session."
         }

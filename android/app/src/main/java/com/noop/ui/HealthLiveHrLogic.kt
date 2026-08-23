@@ -44,7 +44,7 @@ data class LiveHrSample(val timeMs: Long, val bpm: Double)
  *  (which moves over time); falls back to per-beat HR from R-R, then to a flat pair while the
  *  buffer fills. The old version derived ONLY from R-R, which is sparse on WHOOP 4, so it sat on a
  *  flat 2-point line even while HR was clearly changing (issue #18). The R-R / flat fallbacks have
- *  no real per-sample timestamps, so we synthesise a 1 Hz trailing window ending "now" — the x-axis
+ *  no real per-sample timestamps, so we synthesise a 1 Hz trailing window ending "now" - the x-axis
  *  still reads as clock time and scrolls, matching the live buffer (#198). */
 internal fun hrSeries(history: List<LiveHrSample>, live: LiveState, hr: Int?): List<LiveHrSample> {
     if (history.size > 1) return history

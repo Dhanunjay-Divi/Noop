@@ -156,6 +156,43 @@ public struct RemoteSafetyResponse: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID { contactId }
 }
 
+public struct RemoteSafetyLocation: Codable, Equatable, Sendable {
+    public let sequence: Int64
+    public let latitude: Double
+    public let longitude: Double
+    public let horizontalAccuracyMeters: Double?
+    public let capturedAt: String
+    public let receivedAt: String
+    public let idempotentReplay: Bool?
+}
+
+public struct RemoteSafetyLocationUpdate: Codable, Equatable, Sendable {
+    public let sequence: Int64
+    public let latitude: Double
+    public let longitude: Double
+    public let horizontalAccuracyMeters: Double?
+    public let capturedAt: String
+
+    public init(
+        sequence: Int64,
+        latitude: Double,
+        longitude: Double,
+        horizontalAccuracyMeters: Double?,
+        capturedAt: String
+    ) {
+        self.sequence = sequence
+        self.latitude = latitude
+        self.longitude = longitude
+        self.horizontalAccuracyMeters = horizontalAccuracyMeters
+        self.capturedAt = capturedAt
+    }
+}
+
+public struct RemoteSafetyLocationResponse: Codable, Equatable, Sendable {
+    public let location: RemoteSafetyLocation
+    public let retention: String
+}
+
 public struct RemoteSafetyDispatch: Codable, Equatable, Sendable {
     public let dispatchId: UUID
     public let idempotencyKey: UUID
@@ -175,6 +212,7 @@ public struct RemoteSafetyDispatch: Codable, Equatable, Sendable {
     public let deliveries: [RemoteSafetyDelivery]
     public let responses: [RemoteSafetyResponse]?
     public let deliverySummary: [String: Int]?
+    public let latestLocation: RemoteSafetyLocation?
 }
 
 public struct RemoteSafetyIncidentList: Codable, Equatable, Sendable {

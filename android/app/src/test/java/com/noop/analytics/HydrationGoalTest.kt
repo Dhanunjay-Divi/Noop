@@ -87,4 +87,11 @@ class HydrationGoalTest {
         assertEquals(237, HydrationGoal.CUP_ML)
         assertEquals(500, HydrationGoal.BOTTLE_ML)
     }
+
+    @Test fun heat_bump_rejects_absolute_and_implausible_skin_temperature() {
+        assertEquals(150, HydrationGoal.heatBumpMl(0.5))
+        assertEquals(0, HydrationGoal.heatBumpMl(34.2))
+        assertEquals(0, HydrationGoal.heatBumpMl(9.0))
+        assertEquals(0, HydrationGoal.heatBumpMl(Double.POSITIVE_INFINITY))
+    }
 }

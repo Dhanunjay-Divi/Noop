@@ -218,7 +218,7 @@ struct CoupledView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
             } else {
-                Text("—")
+                Text("-")
                     .font(StrandFont.number(48))
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
@@ -305,7 +305,7 @@ struct CoupledView: View {
                                             font: StrandFont.number(34),
                                             color: .white)
                             } else {
-                                Text("—").font(StrandFont.number(34)).foregroundStyle(.white)
+                                Text("-").font(StrandFont.number(34)).foregroundStyle(.white)
                             }
                         }
                         .shadow(color: .black.opacity(0.5), radius: 6, y: 1)
@@ -385,7 +385,7 @@ struct CoupledView: View {
     /// Active calories for the day from the stored whole-day estimate. Never fabricated, a day with no
     /// estimate reads a dash.
     private var caloriesText: String {
-        guard let k = day?.activeKcalEst else { return "—" }
+        guard let k = day?.activeKcalEst else { return "-" }
         return "\(Int(k.rounded())) kcal"
     }
 
@@ -478,7 +478,7 @@ struct CoupledView: View {
     /// Last night's bed → wake span, e.g. "23:41 – 07:23", from the day's bridged MAIN-night span
     /// (`SleepView.mainNightSpan`, the SAME resolver the Sleep tab hero and the daily total use), only
     /// when that night actually touches today's window (a days-old import is not "last night"). Was
-    /// previously the screen's own "freshest-ending session" pick, which could name a different block —
+    /// previously the screen's own "freshest-ending session" pick, which could name a different block -
     /// and so a different span — than the Sleep tab and Today's HR graph for a night stored as more than
     /// one block (#294).
     private var bedWakeSpanText: String? {
@@ -566,7 +566,7 @@ struct CoupledView: View {
                                     Text("No Recovery breakdown yet")
                                         .font(StrandFont.headline)
                                         .foregroundStyle(StrandPalette.textPrimary)
-                                    Text("Wear the strap overnight to score a night first.")
+                                    Text("Wear Noop Band overnight to score a night first.")
                                         .font(StrandFont.subhead)
                                         .foregroundStyle(StrandPalette.textSecondary)
                                         .fixedSize(horizontal: false, vertical: true)
@@ -712,9 +712,9 @@ struct CoupledView: View {
         }
     }
 
-    /// The optimal band as display text ("14 to 18" / "—"). Byte-identical formatting to Android.
+    /// The optimal band as display text ("14 to 18" / "-"). Byte-identical formatting to Android.
     static func optimalStrainRangeText(recovery: Double?) -> String {
-        guard let band = optimalStrainRange(recovery: recovery) else { return "—" }
+        guard let band = optimalStrainRange(recovery: recovery) else { return "-" }
         return String(localized: "\(band.lowerBound) to \(band.upperBound)")
     }
 }

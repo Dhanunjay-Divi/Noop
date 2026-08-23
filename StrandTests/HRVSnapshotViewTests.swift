@@ -26,7 +26,7 @@ final class HRVSnapshotViewTests: XCTestCase {
     // MARK: - format
 
     func testFormatRendersEmDashForNil() {
-        XCTAssertEqual(HRVSnapshotView.format(nil, "%.0f"), "—")
+        XCTAssertEqual(HRVSnapshotView.format(nil, "%.0f"), "-")
     }
 
     func testFormatRoundsToTheGivenPrecision() {

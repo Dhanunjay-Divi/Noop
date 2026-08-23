@@ -554,7 +554,7 @@ private fun NutritionTotalsCard(
                         }
                     )
                     Text(
-                        if (loading) "—" else formatNutritionNumber(totals.caloriesKcal, 0),
+                        if (loading) "-" else formatNutritionNumber(totals.caloriesKcal, 0),
                         style = NoopType.display(42f),
                         color = Palette.textPrimary,
                     )
@@ -702,7 +702,7 @@ private fun NutritionMacroCell(
                     R.string.appwide_unit_grams_format,
                     formatNutritionNumber(it, 1),
                 )
-            } ?: "—",
+            } ?: "-",
             style = NoopType.headline.copy(fontWeight = FontWeight.SemiBold),
             color = if (value == null) Palette.textTertiary else tint,
             maxLines = 1,
@@ -1420,7 +1420,7 @@ private fun nutritionFieldText(value: Double?): String =
     value?.let { formatNutritionNumber(it, 2) }.orEmpty()
 
 private fun formatNutritionNumber(value: Double?, maximumFractionDigits: Int): String =
-    value?.let { formatNutritionNumber(it, maximumFractionDigits) } ?: "—"
+    value?.let { formatNutritionNumber(it, maximumFractionDigits) } ?: "-"
 
 private fun formatNutritionNumber(value: Double, maximumFractionDigits: Int): String =
     NumberFormat.getNumberInstance().apply {

@@ -94,7 +94,7 @@
     <string name="nutrition_state_empty_title">Nothing logged for this day</string>
     <string name="nutrition_state_loading_body">Reading this day’s private nutrition entries from this device.</string>
     <string name="nutrition_state_loading_title">Loading nutrition</string>
-    <string name="nutrition_subtitle">Meals, macros, and imported totals—private on this device.</string>
+    <string name="nutrition_subtitle">Meals, macros, and imported totals. Private on this device.</string>
     <string name="nutrition_title">Nutrition</string>
     <string name="nutrition_totals_empty">Nothing has been counted for this day yet.</string>
     <string name="nutrition_totals_imported">Totals use the imported daily summary. Nutrients absent from the import stay blank, not zero.</string>

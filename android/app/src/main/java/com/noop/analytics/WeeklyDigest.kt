@@ -4,7 +4,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-// WeeklyDigest.kt — a deterministic, offline "week in review".
+// WeeklyDigest.kt - a deterministic, offline "week in review".
 //
 // Faithful Kotlin port of the Swift StrandAnalytics/WeeklyDigest.swift. Keep the two
 // in lockstep — cross-platform parity is required.
@@ -132,7 +132,7 @@ data class WeeklyMetricSummary(
      * True when the week-over-week comparison rests on a sparse side: both weeks carry at
      * least one reading, but either has fewer than [WeeklyDigestEngine.MIN_DAYS_FOR_FOCUS]
      * days. A rough comparison still shows its raw arrow + %, but the UI shouldn't dress it
-     * in a confident good/bad verdict — a 43% "drop" off 2 days isn't a trend (the #463
+     * in a confident good/bad verdict - a 43% "drop" off 2 days isn't a trend (the #463
      * chips-vs-summary contradiction). Mirrors Swift `isRoughComparison`.
      */
     val isRoughComparison: Boolean

@@ -138,6 +138,12 @@ final class HydrationGoalTests: XCTestCase {
         XCTAssertEqual(HydrationGoal.heatBumpML(skinTempDevC: 3.0), 600)  // capped
     }
 
+    func testHeatBumpRejectsAbsoluteAndImplausibleSkinTemperatures() {
+        XCTAssertEqual(HydrationGoal.heatBumpML(skinTempDevC: 34.2), 0)
+        XCTAssertEqual(HydrationGoal.heatBumpML(skinTempDevC: 9.0), 0)
+        XCTAssertEqual(HydrationGoal.heatBumpML(skinTempDevC: .infinity), 0)
+    }
+
     // MARK: - R3: metric-aware goal + back-compat
 
     func testMetricAwareGoalEqualsLegacyWhenNoWeightOrTemp() {

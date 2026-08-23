@@ -81,14 +81,14 @@ enum BatteryNotifier {
         if result.fireLow {
             post(identifier: "battery-low",
                  title: String(localized: "Low battery"),
-                 body: String(localized: "Recharge your WHOOP before tonight."))
+                 body: String(localized: "Recharge Noop Band before tonight."))
         }
         if result.fireFull {
             post(identifier: "battery-full",
-                 title: String(localized: "Strap fully charged"),
-                 body: String(localized: "Your WHOOP is at 100%."))
+                 title: String(localized: "Noop Band fully charged"),
+                 body: String(localized: "Noop Band is at 100%."))
         }
-        // #514: the strap has dropped below 100% — pull the stale "fully charged" note (delivered
+        // #514: the strap has dropped below 100% - pull the stale "fully charged" note (delivered
         // banner + any still-pending request) so it can't linger after the cell discharges.
         if result.clearFull {
             let center = UNUserNotificationCenter.current()
@@ -112,8 +112,8 @@ enum BatteryNotifier {
         d.set(result.newAlerted, forKey: runtimeAlertedKey)
         if result.fire {
             post(identifier: "battery-runtime",
-                 title: String(localized: "Strap battery low"),
-                 body: String(localized: "\(BatteryEstimator.label(hours: remainingHours)) left on your WHOOP — recharge tonight."))
+                 title: String(localized: "Noop Band battery low"),
+                 body: String(localized: "\(BatteryEstimator.label(hours: remainingHours)) left on Noop Band - recharge tonight."))
         }
     }
 

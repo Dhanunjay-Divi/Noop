@@ -612,6 +612,27 @@ object NoopPrefs {
         of(context).edit().putBoolean(KEY_ILLNESS_WATCH, enabled).apply()
     }
 
+    /** Optional review notifications for fresh oxygen and explicit body-temperature data. Off by
+     *  default: these are awareness prompts, never a diagnosis, severity score, or emergency trigger. */
+    const val KEY_CONTEXTUAL_VITAL_REVIEW = "noop.contextualVitalReview"
+
+    fun contextualVitalReview(context: Context): Boolean =
+        of(context).getBoolean(KEY_CONTEXTUAL_VITAL_REVIEW, false)
+
+    fun setContextualVitalReview(context: Context, enabled: Boolean) {
+        of(context).edit().putBoolean(KEY_CONTEXTUAL_VITAL_REVIEW, enabled).apply()
+    }
+
+    /** Optional slow-trend review for persistent measured or modelled VO2 max changes. Off by default. */
+    const val KEY_CONTEXTUAL_VO2_REVIEW = "noop.contextualVo2Review"
+
+    fun contextualVo2Review(context: Context): Boolean =
+        of(context).getBoolean(KEY_CONTEXTUAL_VO2_REVIEW, false)
+
+    fun setContextualVo2Review(context: Context, enabled: Boolean) {
+        of(context).edit().putBoolean(KEY_CONTEXTUAL_VO2_REVIEW, enabled).apply()
+    }
+
     /** Cycle awareness (v5): read a coarse menstrual-cycle PHASE from the nightly skin-temperature
      *  shift. OPT-IN, default OFF (manual-first ethos), the Health hub's Cycle card only renders once
      *  this is on. Awareness only; never contraception / fertility / diagnosis. */
@@ -652,7 +673,7 @@ object NoopPrefs {
     }
 
     /** Card-surface opacity as a PERCENT (0 = fully see-through, 100 = solid; default 100). Drives the
-     *  "Card transparency" setting — every frosted card (Heart Rate, Key Metrics, Recovery Vitals, …)
+     *  "Card transparency" setting - every frosted card (Heart Rate, Key Metrics, Recovery Vitals, …)
      *  reads it via [CardAppearance]. Only the glass surface fades; the card content stays readable. */
     const val KEY_CARD_OPACITY = "noop.cardOpacityPercent"
 

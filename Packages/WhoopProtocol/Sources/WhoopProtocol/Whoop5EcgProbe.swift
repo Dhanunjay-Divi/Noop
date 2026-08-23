@@ -1,6 +1,6 @@
 import Foundation
 
-/// Formats the WHOOP MG ECG ("Labrador") turn-on attempt into one readable, copyable report — the
+/// Formats the WHOOP MG ECG ("Labrador") turn-on attempt into one readable, copyable report - the
 /// per-command COMMAND_RESPONSE result codes, whether any ECG-shaped packet actually arrived, and a
 /// verdict that describes WHAT THE RUN OBSERVED rather than naming a mechanism behind it.
 ///
@@ -167,35 +167,35 @@ public enum Whoop5EcgProbe {
                     + "the triage is a shape heuristic and unrelated traffic can match it. Confirm against the "
                     + "raw bytes below before concluding anything about whether the feature is blocked."
             case .dataRequestRefused(let commands):
-                return "DATA REQUEST REFUSED — the firmware returned FAILURE for \(commands.joined(separator: ", ")), "
+                return "DATA REQUEST REFUSED - the firmware returned FAILURE for \(commands.joined(separator: ", ")), "
                     + "which asked it to produce ECG data: it knows the opcode and refused to run it. "
-                    + "The reply says THAT it refused, not WHY — no cause is carried on the wire."
+                    + "The reply says THAT it refused, not WHY - no cause is carried on the wire."
             case .commandRefused(let commands):
-                return "REFUSED — the firmware returned FAILURE for \(commands.joined(separator: ", ")). "
+                return "REFUSED - the firmware returned FAILURE for \(commands.joined(separator: ", ")). "
                     + "That command asks for no ECG data, so this is a fact about that write and NOT evidence "
                     + "that ECG generation is blocked. Nothing here speaks to the block question."
             case .acceptedButSilent(let windowSeconds):
-                return "Accepted but SILENT — a command that asks for realtime ECG data returned SUCCESS, every "
+                return "Accepted but SILENT - a command that asks for realtime ECG data returned SUCCESS, every "
                     + "other command did too, yet no ECG packet arrived in \(windowSeconds)s. "
                     + "That is the observation; it does not identify a cause. Data banked to flash rather than "
                     + "streamed, a wrong opcode mapping, no start verb among these commands, an entitlement gate "
                     + "and an open electrode circuit all produce this same silence."
             case .noDataRequested(let commands):
-                return "NOT A TEST of whether ECG is blocked — this run sent no command that could produce "
+                return "NOT A TEST of whether ECG is blocked - this run sent no command that could produce "
                     + "realtime ECG data (\(commands.joined(separator: ", "))), so zero packets is the EXPECTED "
                     + "outcome and says nothing either way. Run the turn-on sequence to test the block question."
             case .dataRequestNotAccepted(let commands):
-                return "INCONCLUSIVE — data was requested (\(commands.joined(separator: ", "))) but the strap never "
+                return "INCONCLUSIVE - data was requested (\(commands.joined(separator: ", "))) but the strap never "
                     + "returned SUCCESS for it, so the silence cannot be read as 'accepted, then not honoured'. "
                     + "Retry idle."
             case .opcodeUnsupported(let commands):
-                return "Opcode UNSUPPORTED on this firmware for \(commands.joined(separator: ", ")) — "
+                return "Opcode UNSUPPORTED on this firmware for \(commands.joined(separator: ", ")) - "
                     + "the command is not implemented, which is a different and more final answer than a refusal."
             case .noReplies:
-                return "No COMMAND_RESPONSE at all — the strap answered nothing. Silence is not evidence of a block "
+                return "No COMMAND_RESPONSE at all - the strap answered nothing. Silence is not evidence of a block "
                     + "(a mid-flight sync or a missed notification looks identical); retry idle."
             case .inconclusive:
-                return "INCONCLUSIVE — the result codes do not match a known pattern. The raw replies below are the record."
+                return "INCONCLUSIVE - the result codes do not match a known pattern. The raw replies below are the record."
             }
         }
     }
@@ -245,7 +245,7 @@ public enum Whoop5EcgProbe {
     /// The full report: verdict, per-command outcomes, the ECG-packet tally, and the raw replies.
     ///
     /// `candidateFrames` are the type/length lines for frames that passed the structural triage in
-    /// `Whoop5Ecg.plausibleFilteredPayload` — the empirical answer to "which packet type do these arrive
+    /// `Whoop5Ecg.plausibleFilteredPayload` - the empirical answer to "which packet type do these arrive
     /// under", which no table in this repo yet holds.
     public static func report(steps: [Step],
                               ecgPacketsSeen: Int,
@@ -261,7 +261,7 @@ public enum Whoop5EcgProbe {
             // Each step carries WHY it does or does not bear on the block question, so the verdict above
             // can be checked against its own inputs without reading the source.
             for step in steps {
-                sb += "  \(step.label): \(step.outcome.token) — \(step.roleNote)\n"
+                sb += "  \(step.label): \(step.outcome.token) - \(step.roleNote)\n"
             }
         }
         sb += "\nECG-shaped packets seen in \(windowSeconds)s: \(ecgPacketsSeen)\n"
@@ -278,11 +278,11 @@ public enum Whoop5EcgProbe {
             sb += "Were the leads closed? An MG measures across the wrist electrode AND the two indents on "
                 + "the clasp, held with the fingers of your OTHER hand for the whole window. Lead state is "
                 + "not on the wire, so this report cannot tell an open circuit from a strap that ignored "
-                + "the command — if the clasp was not held, re-run holding it before reading anything into "
+                + "the command - if the clasp was not held, re-run holding it before reading anything into "
                 + "the zero.\n"
         }
         if candidateFrames.isEmpty {
-            sb += "Candidate packet types: none — no frame passed the structural triage.\n"
+            sb += "Candidate packet types: none - no frame passed the structural triage.\n"
         } else {
             sb += "Candidate packet types (structural triage only, NOT a confirmed mapping):\n"
             for line in candidateFrames { sb += "  \(line)\n" }

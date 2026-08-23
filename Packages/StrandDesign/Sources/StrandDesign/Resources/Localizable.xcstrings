@@ -2207,7 +2207,7 @@
         }
       }
     },
-    "Body / Regular 15 — the thread of you, read in full.": {
+    "Body / Regular 15: the thread of you, read in full.": {
       "localizations": {
         "de": {
           "stringUnit": {
@@ -2218,19 +2218,19 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cuerpo / Regular 15 — el hilo de ustedes, leído en su totalidad."
+            "value": "Cuerpo / Regular 15: el hilo de ustedes, leído en su totalidad."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Corps / Régulier 15 — le fil de vous, lire en entier."
+            "value": "Corps / Régulier 15 : le fil de vous, lire en entier."
           }
         },
         "pt-PT": {
           "stringUnit": {
             "state": "translated",
-            "value": "Body / Regular 15 — o vosso tópico, leiam na íntegra."
+            "value": "Body / Regular 15: o vosso tópico, leiam na íntegra."
           }
         }
       }
@@ -2409,12 +2409,12 @@
         }
       }
     },
-    "HRV (ms) — 30 days": {
+    "HRV (ms) · 30 days": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "HRV (ms) — 30 Tage"
+            "value": "HRV (ms) · 30 Tage"
           }
         },
         "es": {
@@ -2426,7 +2426,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "HRV (ms) — 30 jours"
+            "value": "HRV (ms) · 30 jours"
           }
         },
         "pt-PT": {
@@ -2885,24 +2885,24 @@
         }
       }
     },
-    "Recovery — 30 days": {
+    "Recovery · 30 days": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Erholung — 30 Tage"
+            "value": "Erholung · 30 Tage"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Recuperación — 30 días"
+            "value": "Recuperación · 30 días"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Récupération — 30 jours"
+            "value": "Récupération · 30 jours"
           }
         },
         "pt-PT": {
@@ -2913,12 +2913,12 @@
         }
       }
     },
-    "Recovery — past year": {
+    "Recovery · past year": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Rückforderung — vergangenes Jahr"
+            "value": "Rückforderung · vergangenes Jahr"
           }
         },
         "es": {
@@ -2930,7 +2930,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Relèvement — année écoulée"
+            "value": "Relèvement · année écoulée"
           }
         },
         "pt-PT": {

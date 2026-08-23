@@ -1,6 +1,6 @@
 import SwiftUI
 
-// NoopV3Tokens.swift — "INSTRUMENT" (UI v3).
+// NoopV3Tokens.swift - "INSTRUMENT" (UI v3).
 //
 // WHY v3 (honest post-mortem of v2 "Aurora", which the owner judged worse than Bevel):
 //  1. v2's aurora radial bloom muddied the top of every screen. Bevel and WHOOP both use a FLAT near-black

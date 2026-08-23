@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MonitorHeart
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Timer
@@ -82,6 +83,8 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     // the rest of the alarm UI.
     // Illness watch is real + persisted (opt-OUT — the watch has always run on Android).
     val illnessWatch by viewModel.illnessWatchEnabled.collectAsStateWithLifecycle()
+    val contextualVitalReview by viewModel.contextualVitalReviewEnabled.collectAsStateWithLifecycle()
+    val contextualVo2Review by viewModel.contextualVo2ReviewEnabled.collectAsStateWithLifecycle()
     // Battery alerts are real + persisted (opt-OUT, default ON; #368, thanks @ujix).
     val batteryAlerts by viewModel.batteryAlertsEnabled.collectAsStateWithLifecycle()
     val predictiveBatteryAlerts by viewModel.predictiveBatteryAlertsEnabled.collectAsStateWithLifecycle()
@@ -120,13 +123,51 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     var hydrationInterval by remember { mutableStateOf(hydrationConfig.intervalMinutes) }
     var hydrationStart by remember { mutableStateOf(hydrationConfig.startMinutes) }
     var hydrationEnd by remember { mutableStateOf(hydrationConfig.endMinutes) }
+    var hydrationAdaptive by remember { mutableStateOf(hydrationConfig.adaptiveEnabled) }
+    var hydrationEffectiveInterval by remember {
+        mutableStateOf(hydrationConfig.effectiveIntervalMinutes)
+    }
     var hydrationStrapBuzz by remember { mutableStateOf(hydrationConfig.strapBuzzEnabled) }
+    var hydrationTapConfirm by remember { mutableStateOf(hydrationConfig.tapConfirmEnabled) }
+    var hydrationTapAmountMl by remember { mutableStateOf(hydrationConfig.tapAmountMl) }
+    var hydrationTapWindow by remember { mutableStateOf(hydrationConfig.tapWindowMinutes) }
+    var hydrationBandFirst by remember { mutableStateOf(hydrationConfig.bandFirst) }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         hydrationRemindersEnabled = granted
         HydrationReminderPrefs.setEnabled(ctx, granted)
         HydrationReminderScheduler.reconcile(ctx)
+    }
+    var pendingContextualPermission by remember { mutableStateOf<String?>(null) }
+    val contextualPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            when (pendingContextualPermission) {
+                "vitals" -> viewModel.setContextualVitalReviewEnabled(true)
+                "vo2" -> viewModel.setContextualVo2ReviewEnabled(true)
+            }
+        }
+        pendingContextualPermission = null
+    }
+
+    fun setContextualReview(target: String, enabled: Boolean) {
+        if (!enabled) {
+            if (target == "vitals") viewModel.setContextualVitalReviewEnabled(false)
+            else viewModel.setContextualVo2ReviewEnabled(false)
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingContextualPermission = target
+            contextualPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        if (target == "vitals") viewModel.setContextualVitalReviewEnabled(true)
+        else viewModel.setContextualVo2ReviewEnabled(true)
     }
 
     fun setHydrationReminderEnabled(enabled: Boolean) {
@@ -154,7 +195,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
     // accessibility-walked on scroll.
     LazyScreenScaffold(
         title = uiString(R.string.l10n_automations_screen_automations_82542d6d),
-        subtitle = "Make the strap do things: tap to act, walk away to lock, train by feel.",
+        subtitle = "Make Noop Band work for you: tap to act, walk away to lock, and train by feel.",
     ) {
         // Double-tap (parity since 4.2.8): a real, persisted action picker bound to the ViewModel, with a
         // Test action button. Mirrors AutomationsView.swift's Picker (Apple-applicable subset only; no
@@ -163,7 +204,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         SettingsSection(
             icon = Icons.Filled.TouchApp,
             title = uiString(R.string.l10n_automations_screen_double_tap_8d2f1646),
-            blurb = "Double-tap the strap to trigger an action on this device. (The strap exposes a single double-tap gesture.)",
+            blurb = "Double-tap Noop Band to trigger an action on this device. The band exposes one double-tap gesture.",
             active = doubleTapAction != DoubleTapAction.NONE,
         ) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -187,7 +228,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 }
                 Spacer(Modifier.weight(1f))
                 StatePill(
-                    if (live.bonded) "Strap bonded" else "Not connected",
+                    if (live.bonded) "Noop Band paired" else "Not connected",
                     tone = if (live.bonded) StrandTone.Positive else StrandTone.Warning,
                 )
             }
@@ -199,7 +240,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         SettingsSection(
             icon = Icons.Filled.Bolt,
             title = uiString(R.string.l10n_automations_screen_haptic_coaching_e2fab286),
-            blurb = "Train by feel. The strap buzzes so you don't have to watch a screen.",
+            blurb = "Train by feel. Noop Band vibrates so you don't have to watch a screen.",
             active = zoneCoaching,
         ) {
             ToggleRow(
@@ -240,8 +281,34 @@ fun AutomationsScreen(viewModel: AppViewModel) {
             )
             if (hydrationRemindersEnabled) {
                 RowDivider()
+                ToggleRow(
+                    label = stringResource(R.string.hydration_adaptive_timing_label),
+                    help = stringResource(R.string.hydration_adaptive_timing_help),
+                    checked = hydrationAdaptive,
+                    onChange = {
+                        hydrationAdaptive = it
+                        HydrationReminderPrefs.setAdaptiveEnabled(ctx, it)
+                        hydrationEffectiveInterval = hydrationInterval
+                        HydrationReminderScheduler.reconcile(ctx)
+                    },
+                )
+                if (hydrationAdaptive) {
+                    Text(
+                        stringResource(
+                            R.string.hydration_adaptive_timing_status,
+                            hydrationEffectiveInterval,
+                        ),
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                }
+                RowDivider()
                 StepperRow(
-                    label = stringResource(R.string.l10n_automations_screen_remind_every_8f5f4f63),
+                    label = if (hydrationAdaptive) {
+                        stringResource(R.string.hydration_base_interval_label)
+                    } else {
+                        stringResource(R.string.l10n_automations_screen_remind_every_8f5f4f63)
+                    },
                     help = stringResource(R.string.l10n_automations_screen_how_often_to_check_in_inside_68e143d2),
                     value = hydrationInterval,
                     suffix = stringResource(R.string.l10n_automations_screen_min_b6c935d4),
@@ -250,6 +317,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                     onChange = {
                         hydrationInterval = it
                         HydrationReminderPrefs.setIntervalMinutes(ctx, it)
+                        hydrationEffectiveInterval = it
                         HydrationReminderScheduler.reconcile(ctx)
                     },
                 )
@@ -295,18 +363,78 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 }
                 RowDivider()
                 ToggleRow(
-                    label = stringResource(R.string.l10n_automations_screen_also_buzz_whoop_6ea22671),
-                    help = stringResource(R.string.l10n_automations_screen_optional_and_off_by_default_buzzes_1753c0f2),
+                    label = "Also buzz Noop Band",
+                    help = "Optional and off by default. Buzzes once only when a worn Noop Band is connected, encrypted, and sending a fresh live sample.",
                     checked = hydrationStrapBuzz,
                     onChange = {
                         hydrationStrapBuzz = it
                         HydrationReminderPrefs.setStrapBuzzEnabled(ctx, it)
+                        if (!it) {
+                            hydrationBandFirst = false
+                            HydrationReminderScheduler.reconcile(ctx)
+                        }
                     },
                 )
+                if (hydrationStrapBuzz) {
+                    RowDivider()
+                    ToggleRow(
+                        label = stringResource(R.string.hydration_tap_confirm_label),
+                        help = stringResource(R.string.hydration_tap_confirm_help),
+                        checked = hydrationTapConfirm,
+                        onChange = {
+                            hydrationTapConfirm = it
+                            HydrationReminderPrefs.setTapConfirmEnabled(ctx, it)
+                            if (!it) {
+                                hydrationBandFirst = false
+                                HydrationReminderPrefs.setBandFirst(ctx, false)
+                                HydrationReminderScheduler.reconcile(ctx)
+                            }
+                        },
+                    )
+                    if (hydrationTapConfirm) {
+                        RowDivider()
+                        StepperRow(
+                            label = stringResource(R.string.hydration_tap_amount_label),
+                            help = stringResource(R.string.hydration_tap_amount_help),
+                            value = hydrationTapAmountMl,
+                            suffix = "ml",
+                            range = 50..1_000,
+                            step = 50,
+                            onChange = {
+                                hydrationTapAmountMl = it
+                                HydrationReminderPrefs.setTapAmountMl(ctx, it)
+                            },
+                        )
+                        RowDivider()
+                        StepperRow(
+                            label = stringResource(R.string.hydration_tap_window_label),
+                            help = stringResource(R.string.hydration_tap_window_help),
+                            value = hydrationTapWindow,
+                            suffix = "min",
+                            range = 5..30,
+                            step = 5,
+                            onChange = {
+                                hydrationTapWindow = it
+                                HydrationReminderPrefs.setTapWindowMinutes(ctx, it)
+                            },
+                        )
+                        RowDivider()
+                        ToggleRow(
+                            label = stringResource(R.string.hydration_tap_band_first_label),
+                            help = stringResource(R.string.hydration_tap_band_first_help),
+                            checked = hydrationBandFirst,
+                            onChange = {
+                                hydrationBandFirst = it
+                                HydrationReminderPrefs.setBandFirst(ctx, it)
+                                HydrationReminderScheduler.reconcile(ctx)
+                            },
+                        )
+                    }
+                }
                 if (hydrationStrapBuzz && !notifMasterOn) {
                     RowDivider()
                     Text(
-                        stringResource(R.string.l10n_automations_screen_wrist_alerts_are_off_turn_on_a1b97d2b),
+                        "Wrist alerts are off. Turn on the master switch in Settings, Notifications before Noop Band can buzz.",
                         style = NoopType.footnote,
                         color = Palette.statusWarning,
                     )
@@ -315,9 +443,9 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                     RowDivider()
                     Text(
                         if (live.connected && live.bonded && live.encryptedBond) {
-                            stringResource(R.string.l10n_automations_screen_whoop_is_ready_a_buzz_still_d887f71f)
+                            "Noop Band is ready. A buzz still needs a fresh live stream at the reminder time."
                         } else {
-                            stringResource(R.string.l10n_automations_screen_whoop_haptics_are_unavailable_until_the_6b2fe1c5)
+                            "Noop Band haptics are unavailable until it has a live encrypted bond. The phone reminder remains independent."
                         },
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
@@ -332,7 +460,7 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         SettingsSection(
             icon = Icons.Filled.Timer,
             title = uiString(R.string.l10n_automations_screen_inactivity_reminder_ca49b1ba),
-            blurb = "A gentle wrist buzz when you've been sitting too long, a nudge to get up and move. Inferred from the strap's motion on each history sync, so it lags real time by a sync or two.",
+            blurb = "A gentle wrist vibration when you've been sitting too long, a nudge to get up and move. Inferred from Noop Band motion on each history sync, so it can lag real time by a sync or two.",
             active = inactivityEnabled,
         ) {
             ToggleRow(
@@ -445,24 +573,51 @@ fun AutomationsScreen(viewModel: AppViewModel) {
         }
         }
 
+        item {
+        SettingsSection(
+            icon = Icons.Filled.NotificationsActive,
+            title = "Vital trend reviews",
+            blurb = "Optional private prompts for meaningful changes in fresh wearable or Health " +
+                "Connect data. These are review cues, never a diagnosis, all-clear, severity score, " +
+                "or emergency alert.",
+            active = contextualVitalReview || contextualVo2Review,
+        ) {
+            ToggleRow(
+                label = "Oxygen and body temperature",
+                help = "Blood oxygen needs two distinct fresh low days. Explicit body temperature " +
+                    "only prompts a thermometer recheck; wrist skin temperature is never substituted.",
+                checked = contextualVitalReview,
+                onChange = { setContextualReview("vitals", it) },
+            )
+            RowDivider()
+            ToggleRow(
+                label = "Longer-term VO2 max changes",
+                help = "Requires two persistent recent changes against a comparison at least three " +
+                    "weeks older. One shifted estimate never sends a prompt.",
+                checked = contextualVo2Review,
+                onChange = { setContextualReview("vo2", it) },
+            )
+        }
+        }
+
         // Battery alerts (real + persisted; opt-OUT, default ON — #368, thanks @ujix).
         item {
         SettingsSection(
             icon = Icons.Filled.BatteryStd,
             title = uiString(R.string.l10n_automations_screen_battery_alerts_f3679d60),
-            blurb = "A heads-up when the strap battery gets low so you can recharge before bed, and a note when it's finished charging.",
+            blurb = "A heads-up when Noop Band battery gets low so you can recharge before bed, and a note when it is fully charged.",
             active = batteryAlerts,
         ) {
             ToggleRow(
                 label = uiString(R.string.l10n_automations_screen_notify_on_low_and_full_battery_d1903bb8),
-                help = "Sends a notification when the strap drops to 15% or reaches a full charge, at most once per charge cycle.",
+                help = "Sends a notification when Noop Band drops to 15% or reaches a full charge, at most once per charge cycle.",
                 checked = batteryAlerts,
                 onChange = { viewModel.setBatteryAlertsEnabled(it) },
             )
             if (batteryAlerts) {
                 ToggleRow(
                     label = uiString(R.string.l10n_automations_screen_predictive_runtime_warning_4d85f5a6),
-                    help = "An early \"recharge tonight\" heads-up when the strap has about a day of estimated runtime left, at most once per discharge cycle. Turn off to keep only the 15% warning.",
+                    help = "An early \"recharge tonight\" heads-up when Noop Band has about a day of estimated runtime left, at most once per discharge cycle. Turn off to keep only the 15% warning.",
                     checked = predictiveBatteryAlerts,
                     onChange = { viewModel.setPredictiveBatteryAlertsEnabled(it) },
                 )
@@ -490,7 +645,7 @@ private fun NapDetectionSection(viewModel: AppViewModel) {
     SettingsSection(
         icon = Icons.Filled.Bedtime,
         title = uiString(R.string.l10n_automations_screen_nap_detection_ca2dedf5),
-        blurb = "Spots a likely daytime nap from the strap's motion and heart rate on each history sync, " +
+        blurb = "Spots a likely daytime nap from Noop Band motion and heart rate on each history sync, " +
             "then asks you to confirm it. Inferred and approximate: NOOP never adds a nap to your sleep " +
             "without your OK.",
         active = enabled,

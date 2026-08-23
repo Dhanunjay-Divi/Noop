@@ -1,6 +1,6 @@
 import Foundation
 
-// LiveSessionEngine.swift — the "silent guardian" coach for a Live Session. Pure, deterministic, DB-free.
+// LiveSessionEngine.swift - the "silent guardian" coach for a Live Session. Pure, deterministic, DB-free.
 //
 // It watches a live heart-rate stream against a recovery-gated target BAND and emits at most two kinds of
 // haptic cue: a gentle PUSH nudge when you drift too easy for today, and a firmer EASE-OFF when you push

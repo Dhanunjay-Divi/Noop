@@ -10,7 +10,7 @@
 /// The bug this exists to close is the dictionary vocabulary reaching a SEGMENT comparison. Imports do
 /// not pass through `SleepStagerV2`: Oura's phase table is `["deep","light","rem","awake"]`, and generic
 /// wearable JSON carries whatever the source app wrote. A consumer written `stage == "wake"` then
-/// silently misfiles those segments, and — worse — `stage != "wake"` counts them as SLEEP.
+/// silently misfiles those segments, and - worse - `stage != "wake"` counts them as SLEEP.
 ///
 /// Six sites already defended with `case "wake", "awake"` while five did not, which is what makes this
 /// a missing shared rule rather than a missing idea.

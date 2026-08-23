@@ -43,6 +43,15 @@ struct AutomationsView: View {
     @AppStorage(HydrationReminders.activeStartMinutesKey) private var hydrationStartMinutes = 8 * 60
     @AppStorage(HydrationReminders.activeEndMinutesKey) private var hydrationEndMinutes = 21 * 60
     @AppStorage(HydrationReminders.strapBuzzEnabledKey) private var hydrationStrapBuzzEnabled = false
+    @AppStorage(HydrationReminders.adaptiveEnabledKey) private var hydrationAdaptiveEnabled = true
+    @AppStorage(HydrationReminders.doubleTapConfirmEnabledKey) private var hydrationTapConfirm = false
+    @AppStorage(HydrationReminders.doubleTapAmountMLKey) private var hydrationTapAmountML = 250
+    @AppStorage(HydrationReminders.doubleTapWindowMinutesKey) private var hydrationTapWindowMinutes = 10
+    @AppStorage(HydrationReminders.bandFirstEnabledKey) private var hydrationBandFirstEnabled = false
+    @AppStorage(ContextualInterventionSettings.vitalReviewEnabledKey)
+    private var contextualVitalReviews = false
+    @AppStorage(ContextualInterventionSettings.vo2ReviewEnabledKey)
+    private var contextualVO2Reviews = false
     @State private var notificationPermissionDenied = false
     @State private var notificationsAuthorized = false
     @State private var showNotificationPermissionAlert = false
@@ -63,7 +72,7 @@ struct AutomationsView: View {
 
     var body: some View {
         ScreenScaffold(title: "Automations",
-                       subtitle: "Make the strap do things: tap to act, walk away to lock, train by feel.",
+                       subtitle: "Make Noop Band work for you: tap to act, walk away to lock, and train by feel.",
                        // PERF: the cards are direct children of the scaffold column, so the LazyVStack
                        // path (byte-identical layout) genuinely builds the off-screen cards on demand
                        // instead of constructing all eight/nine + their toggle subtrees up-front.
@@ -82,6 +91,7 @@ struct AutomationsView: View {
             // wake/wind-down control lives in one place. Automations is just inputs-to-actions now.
             inactivityCard
             illnessCard
+            contextualReviewCard
             healthInsightsCard
             batteryCard
             strainTargetCard
@@ -177,12 +187,24 @@ struct AutomationsView: View {
 
                 #if os(iOS)
                 rowDivider
-                Text(backgroundRefreshSummary)
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 6)
+                HStack(alignment: .top, spacing: 12) {
+                    Text(backgroundRefreshSummary)
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(
+                            backgroundRefreshNeedsSettings
+                                ? StrandPalette.statusWarning
+                                : StrandPalette.textTertiary
+                        )
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    if backgroundRefreshNeedsSettings {
+                        Button("Open Settings") { openNotificationSettings() }
+                            .buttonStyle(.bordered)
+                            .tint(StrandPalette.accent)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
                 #endif
 
                 if notificationPermissionDenied {
@@ -275,18 +297,22 @@ struct AutomationsView: View {
     private var backgroundRefreshSummary: String {
         switch UIApplication.shared.backgroundRefreshStatus {
         case .denied:
-            return String(localized: "Background App Refresh is off in iOS Settings. NOOP requests a catch-up when opened; Bluetooth events and Apple Health may still deliver separately when iOS permits.")
+            return String(localized: "Background App Refresh is off. Turn it on for best-effort maintenance, and avoid force-quitting NOOP if you want iOS to deliver Bluetooth and Apple Health background events. Opening NOOP always requests a fresh catch-up.")
         case .restricted:
-            return String(localized: "Background App Refresh is restricted on this iPhone. NOOP requests a catch-up when opened; Bluetooth events and Apple Health may still deliver separately when iOS permits.")
+            return String(localized: "Background App Refresh is restricted on this iPhone. Avoid force-quitting NOOP; Bluetooth and Apple Health may still deliver separately when iOS permits, and opening NOOP requests a catch-up.")
         case .available:
             break
         @unknown default:
             return String(localized: "Background refresh availability is unknown. NOOP requests a catch-up when opened.")
         }
         if let completed = BackgroundSyncScheduler.lastCompletedAt {
-            return String(localized: "Last background maintenance: \(relativeAgo(completed.timeIntervalSince1970)) ago. iOS controls future timing; opening NOOP requests a fresh catch-up.")
+            return String(localized: "Last background maintenance: \(relativeAgo(completed.timeIntervalSince1970)) ago. iOS controls future timing; you do not need to keep NOOP on screen, but force-quitting prevents background delivery until you reopen it.")
         }
-        return String(localized: "Background refresh is best-effort and scheduled by iOS. Bluetooth and Apple Health may also deliver updates separately; opening NOOP requests a fresh catch-up.")
+        return String(localized: "Background refresh is best-effort and scheduled by iOS. You do not need to keep NOOP on screen, but avoid force-quitting it if you want background delivery. Opening NOOP requests a fresh catch-up.")
+    }
+
+    private var backgroundRefreshNeedsSettings: Bool {
+        UIApplication.shared.backgroundRefreshStatus != .available
     }
     #endif
 
@@ -296,7 +322,7 @@ struct AutomationsView: View {
         Section2(
             icon: "drop.fill",
             title: String(localized: "Water reminders"),
-            blurb: String(localized: "Gentle, optional prompts during your chosen hours. iOS schedules the phone reminders; a WHOOP buzz needs a fresh, worn and encrypted live connection."),
+            blurb: String(localized: "Gentle, optional prompts during your chosen hours. iOS schedules the phone reminders; a band cue needs a fresh, worn and encrypted live connection."),
             active: hydrationReminderEnabled || hydrationStrapBuzzEnabled
         ) {
             VStack(spacing: 0) {
@@ -309,13 +335,27 @@ struct AutomationsView: View {
                 if hydrationReminderEnabled || hydrationStrapBuzzEnabled {
                     rowDivider
                     stepperRow(
-                        label: String(localized: "Remind every"),
-                        help: String(localized: "A practical interval during your active window."),
+                        label: String(localized: "Base interval"),
+                        help: String(localized: "Adaptive timing starts here and only moves in bounded 15-minute steps."),
                         value: hydrationIntervalBinding,
                         suffix: String(localized: "min"),
                         range: 60...240,
                         step: 30
                     )
+                    rowDivider
+                    ToggleRow(
+                        label: String(localized: "Adaptive timing"),
+                        help: String(localized: "Uses current weather, today's Effort, and logged progress. Never more often than hourly or outside your active hours."),
+                        isOn: hydrationAdaptiveToggle
+                    )
+                    if hydrationAdaptiveEnabled {
+                        Text(HydrationReminders.adaptiveSummary)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.chargeColor)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 6)
+                    }
                     rowDivider
                     reviewTimeRow(
                         label: String(localized: "Active from"),
@@ -328,7 +368,7 @@ struct AutomationsView: View {
                     )
                     if !hydrationReminderEnabled {
                         rowDivider
-                        Text("Strap-only reminders use the schedule below. They do not need notification permission, but iOS cannot guarantee a Bluetooth buzz while NOOP is suspended or terminated.")
+                        Text("Noop Band reminders use the schedule below. They do not need notification permission, but iOS cannot guarantee a Bluetooth vibration while NOOP is suspended or terminated.")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -344,7 +384,7 @@ struct AutomationsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 6)
                     #else
-                    Text("Reminder delivery follows your system notification settings. The WHOOP buzz is available only while NOOP is actively connected.")
+                    Text("Reminder delivery follows your system notification settings. The band cue is available only while NOOP is actively connected.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -360,13 +400,48 @@ struct AutomationsView: View {
                 }
                 rowDivider
                 ToggleRow(
-                    label: String(localized: "Buzz WHOOP"),
+                    label: String(localized: "Buzz Noop Band"),
                     help: String(localized: "A separate best-effort channel while NOOP has a fresh, worn, bonded and encrypted connection. One short buzz."),
                     isOn: hydrationStrapBuzzToggle
                 )
+                if hydrationStrapBuzzEnabled {
+                    rowDivider
+                    ToggleRow(
+                        label: String(localized: "Double-tap to confirm"),
+                        help: String(localized: "After NOOP issues the band cue, a timely double-tap logs the configured amount. No tap logs nothing."),
+                        isOn: hydrationTapConfirmToggle
+                    )
+                    if hydrationTapConfirm {
+                        rowDivider
+                        stepperRow(
+                            label: String(localized: "Confirmed amount"),
+                            help: String(localized: "The exact amount one valid tap records."),
+                            value: hydrationTapAmountBinding,
+                            suffix: String(localized: "ml"),
+                            range: 50...1_000,
+                            step: 50
+                        )
+                        rowDivider
+                        stepperRow(
+                            label: String(localized: "Tap window"),
+                            help: String(localized: "After this time the tap returns to its normal configured action."),
+                            value: hydrationTapWindowBinding,
+                            suffix: String(localized: "min"),
+                            range: 5...30,
+                            step: 5
+                        )
+                        rowDivider
+                        ToggleRow(
+                            label: String(localized: "Notify only after a missed tap"),
+                            help: String(localized: "After NOOP issues a band cue, wait for the tap window. If you do not confirm, send one phone notification. Alarms and safety alerts never wait."),
+                            isOn: hydrationBandFirstToggle
+                        )
+                        .disabled(!hydrationReminderEnabled)
+                    }
+                }
                 if hydrationStrapBuzzEnabled && !notifMasterOn {
                     rowDivider
-                    Text("Wrist alerts are off. Turn on the master switch below before WHOOP can buzz; phone reminders remain independent.")
+                    Text("Wrist alerts are off. Turn on the master switch below before the band can buzz; phone reminders remain independent.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.statusWarning)
                         .fixedSize(horizontal: false, vertical: true)
@@ -449,6 +524,59 @@ struct AutomationsView: View {
         )
     }
 
+    private var hydrationTapConfirmToggle: Binding<Bool> {
+        Binding(
+            get: { hydrationTapConfirm },
+            set: { on in
+                hydrationTapConfirm = on
+                HydrationReminders.setDoubleTapConfirmEnabled(on)
+            }
+        )
+    }
+
+    private var hydrationTapAmountBinding: Binding<Int> {
+        Binding(
+            get: { hydrationTapAmountML },
+            set: { value in
+                let clamped = min(max(value, 50), 1_000)
+                hydrationTapAmountML = clamped
+                HydrationReminders.setDoubleTapAmountML(clamped)
+            }
+        )
+    }
+
+    private var hydrationTapWindowBinding: Binding<Int> {
+        Binding(
+            get: { hydrationTapWindowMinutes },
+            set: { value in
+                let clamped = min(max(value, 5), 30)
+                hydrationTapWindowMinutes = clamped
+                HydrationReminders.setDoubleTapWindowMinutes(clamped)
+            }
+        )
+    }
+
+    private var hydrationBandFirstToggle: Binding<Bool> {
+        Binding(
+            get: { hydrationBandFirstEnabled },
+            set: { on in
+                let enabled = on && hydrationReminderEnabled
+                hydrationBandFirstEnabled = enabled
+                HydrationReminders.setBandFirstEnabled(enabled)
+            }
+        )
+    }
+
+    private var hydrationAdaptiveToggle: Binding<Bool> {
+        Binding(
+            get: { hydrationAdaptiveEnabled },
+            set: { on in
+                hydrationAdaptiveEnabled = on
+                HydrationReminders.setAdaptiveEnabled(on)
+            }
+        )
+    }
+
     private func refreshNotificationPermissionState() {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             Task { @MainActor in
@@ -491,7 +619,7 @@ struct AutomationsView: View {
                  active: wristAlertsMaster) {
             VStack(spacing: 0) {
                 ToggleRow(label: String(localized: "Enable wrist alerts"),
-                          help: String(localized: "The master switch for every wrist buzz (inactivity, stress, alerts). Off keeps the strap quiet no matter what else is on."),
+                          help: String(localized: "The master switch for every wrist vibration (inactivity, stress, alerts). Off keeps Noop Band quiet no matter what else is on."),
                           isOn: $wristAlertsMaster)
             }
         }
@@ -502,7 +630,7 @@ struct AutomationsView: View {
 
     private var doubleTapCard: some View {
         Section2(icon: "hand.tap.fill", title: String(localized: "Double-tap"),
-                 blurb: String(localized: "Double-tap the strap to trigger an action on \(Platform.deviceNounPhrase). (The strap exposes a single double-tap gesture.)"),
+                 blurb: String(localized: "Double-tap Noop Band to trigger an action on \(Platform.deviceNounPhrase). The band exposes one double-tap gesture."),
                  active: behavior.doubleTapAction != .none) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
@@ -571,8 +699,8 @@ struct AutomationsView: View {
                  active: wearActive) {
             VStack(spacing: 0) {
                 #if os(macOS)
-                ToggleRow(label: String(localized: "Lock the Mac when I take the strap off"),
-                          help: String(localized: "Fires the moment the strap leaves your wrist."),
+                ToggleRow(label: String(localized: "Lock the Mac when I take Noop Band off"),
+                          help: String(localized: "Fires the moment Noop Band leaves your wrist."),
                           isOn: $behavior.autoLockOnWristOff)
                 rowDivider
                 #endif
@@ -591,37 +719,55 @@ struct AutomationsView: View {
 
     private var coachingCard: some View {
         Section2(icon: "bolt.heart.fill", title: String(localized: "Haptic coaching"),
-                 blurb: String(localized: "Train by feel. The strap buzzes so you don't have to watch a screen."),
+                 blurb: String(localized: "Train by feel. Noop Band vibrates so you don't have to watch a screen."),
                  active: behavior.zoneCoaching || behavior.automaticStressNudgeEffective) {
             VStack(spacing: 0) {
                 ToggleRow(label: String(localized: "HR-zone coaching"),
                           help: String(localized: "Buzz when you hit your top zone (ease off) and again when you recover. Uses your max HR from Settings."),
                           isOn: $behavior.zoneCoaching)
                 rowDivider
-                // Do not expose an inert opt-in. The current live path has R-R intervals but no fresh,
-                // timestamp-matched WRIST motion, so it cannot establish stillness. Phone motion is not
-                // equivalent. BiofeedbackPrefs also applies this same capability as an engine-level gate.
-                HStack(alignment: .top, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Automatic stress check-ins")
-                            .font(StrandFont.body)
-                            .foregroundStyle(StrandPalette.textPrimary)
-                        Text("Unavailable for the current live source because NOOP does not receive fresh, timestamp-matched wrist motion. It will not infer wrist stillness from phone motion or buzz automatically.")
-                            .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.textTertiary)
-                            .fixedSize(horizontal: false, vertical: true)
+                ToggleRow(
+                    label: String(localized: "Stress check-ins"),
+                    help: String(localized: "Opt in to private breathing suggestions based on your own resting heart-timing baseline. This is a wellness signal, not a stress diagnosis."),
+                    isOn: $behavior.stressCheckIn
+                )
+                if behavior.stressCheckIn {
+                    rowDivider
+                    ToggleRow(
+                        label: String(localized: "Detect automatically"),
+                        help: String(localized: "Requires fresh R-R timing, fresh heart rate, a worn encrypted band, and dense timestamp-matched wrist motion. Missing or moving data never triggers a suggestion."),
+                        isOn: $behavior.stressAutoNudge
+                    )
+                    if behavior.stressAutoNudge {
+                        rowDivider
+                        ToggleRow(
+                            label: String(localized: "Phone notification"),
+                            help: String(localized: "Also sends one detail-free phone prompt when a qualified check-in appears. Off by default and rate-limited."),
+                            isOn: stressPhoneNudgeToggle
+                        )
+                        rowDivider
+                        ToggleRow(
+                            label: String(localized: "Respect quiet hours"),
+                            help: String(localized: "Suppress automatic check-ins from 10 PM to 7 AM. Manual Breathe stays available."),
+                            isOn: $behavior.stressQuietHours
+                        )
+                        if !notifMasterOn {
+                            rowDivider
+                            Text("Wrist alerts are off. A qualified event can still show an in-app check-in and, if enabled, a phone notification, but it will not buzz the band.")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.statusWarning)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 6)
+                        }
                     }
-                    Spacer(minLength: 12)
-                    StatePill("Manual only", tone: .neutral, showsDot: false)
                 }
-                .frame(minHeight: 42)
-                .padding(.vertical, 4)
                 rowDivider
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "wind")
                         .foregroundStyle(StrandPalette.restBright)
                         .accessibilityHidden(true)
-                    Text("Manual Breathe remains available from Today’s + menu and More. It stays user-started and can use screen, audio, or supported strap haptics.")
+                    Text("Manual Breathe remains available from Today’s + menu and More. Automatic checks never poll sensors more often; they evaluate fresh data already received during normal sync.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -633,11 +779,38 @@ struct AutomationsView: View {
         }
     }
 
+    private var stressPhoneNudgeToggle: Binding<Bool> {
+        Binding(
+            get: { behavior.stressPhoneNudge },
+            set: { on in
+                guard on else {
+                    behavior.stressPhoneNudge = false
+                    return
+                }
+                behavior.stressPhoneNudge = true
+                ContextualInterventionCenter.requestAuthorization { outcome in
+                    switch outcome {
+                    case .enabled:
+                        behavior.stressPhoneNudge = true
+                        notificationPermissionDenied = false
+                        refreshNotificationPermissionState()
+                    case .denied:
+                        behavior.stressPhoneNudge = false
+                        notificationPermissionDenied = true
+                        showNotificationPermissionAlert = true
+                    case .off:
+                        behavior.stressPhoneNudge = false
+                    }
+                }
+            }
+        )
+    }
+
     // MARK: - Inactivity reminder (#419)
 
     private var inactivityCard: some View {
         Section2(icon: "timer", title: String(localized: "Inactivity reminder"),
-                 blurb: String(localized: "A gentle wrist buzz when you've been sitting too long, a nudge to get up and move. Inferred from the strap's motion on each history sync, so it lags real time by a sync or two."),
+                 blurb: String(localized: "A gentle wrist vibration when you've been sitting too long, a nudge to get up and move. Inferred from Noop Band motion on each history sync, so it can lag real time by a sync or two."),
                  active: inactivity.enabled) {
             VStack(spacing: 0) {
                 ToggleRow(label: String(localized: "Enable inactivity reminder"),
@@ -732,6 +905,94 @@ struct AutomationsView: View {
         }
     }
 
+    // MARK: - Contextual vital reviews
+
+    private var contextualReviewCard: some View {
+        Section2(
+            icon: "waveform.path.ecg.rectangle",
+            title: String(localized: "Vital trend reviews"),
+            blurb: String(localized: "Optional, private prompts for meaningful changes in data already synced from your wearable or Apple Health. Never a diagnosis or an emergency alert."),
+            active: contextualVitalReviews || contextualVO2Reviews
+        ) {
+            VStack(spacing: 0) {
+                ToggleRow(
+                    label: String(localized: "Oxygen & body temperature"),
+                    help: String(localized: "Blood oxygen needs two agreeing recent low days. A fresh explicit body-temperature reading can prompt a recheck. Conflicts, stale data, wrist temperature and skin temperature never trigger this review."),
+                    isOn: contextualVitalReviewToggle
+                )
+                rowDivider
+                ToggleRow(
+                    label: String(localized: "VO₂ max trend"),
+                    help: String(localized: "Prompts only when two recent points persist in the same direction against a point at least three weeks earlier. One estimate never triggers it; this is not a live alert."),
+                    isOn: contextualVO2ReviewToggle
+                )
+                rowDivider
+                Text("Skin temperature stays inside the multi-signal check above and is never substituted for body temperature. These reviews are not diagnoses, severity assessments, or emergency alerts; notification text contains no values.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+            }
+        }
+    }
+
+    private var contextualVitalReviewToggle: Binding<Bool> {
+        Binding(
+            get: { contextualVitalReviews },
+            set: { on in
+                guard on else {
+                    contextualVitalReviews = false
+                    return
+                }
+                contextualVitalReviews = true
+                ContextualInterventionCenter.requestAuthorization { outcome in
+                    switch outcome {
+                    case .enabled:
+                        contextualVitalReviews = true
+                        notificationPermissionDenied = false
+                        refreshNotificationPermissionState()
+                        model.reevaluateContextualInterventions()
+                    case .denied:
+                        contextualVitalReviews = false
+                        notificationPermissionDenied = true
+                        showNotificationPermissionAlert = true
+                    case .off:
+                        contextualVitalReviews = false
+                    }
+                }
+            }
+        )
+    }
+
+    private var contextualVO2ReviewToggle: Binding<Bool> {
+        Binding(
+            get: { contextualVO2Reviews },
+            set: { on in
+                guard on else {
+                    contextualVO2Reviews = false
+                    return
+                }
+                contextualVO2Reviews = true
+                ContextualInterventionCenter.requestAuthorization { outcome in
+                    switch outcome {
+                    case .enabled:
+                        contextualVO2Reviews = true
+                        notificationPermissionDenied = false
+                        refreshNotificationPermissionState()
+                        model.reevaluateContextualInterventions()
+                    case .denied:
+                        contextualVO2Reviews = false
+                        notificationPermissionDenied = true
+                        showNotificationPermissionAlert = true
+                    case .off:
+                        contextualVO2Reviews = false
+                    }
+                }
+            }
+        )
+    }
+
     // MARK: - Health insights (v5: cycle awareness opt-in · experimental Rhythm)
 
     private var healthInsightsCard: some View {
@@ -785,17 +1046,17 @@ struct AutomationsView: View {
 
     private var batteryCard: some View {
         Section2(icon: "battery.25", title: String(localized: "Battery alerts"),
-                 blurb: String(localized: "Get a notification when the strap battery runs low (15%) so you can top it up before tonight, and when it finishes charging."),
+                 blurb: String(localized: "Get a notification when Noop Band battery runs low (15%) so you can top it up before tonight, and when it finishes charging."),
                  active: behavior.batteryAlerts) {
             ToggleRow(label: String(localized: "Notify on low and full battery"),
-                      help: String(localized: "A reminder to recharge before bed when the strap drops to 15%, and a heads-up when it reaches 100%, each at most once per charge cycle."),
+                      help: String(localized: "A reminder to recharge before bed when Noop Band drops to 15%, and a heads-up when it reaches 100%, each at most once per charge cycle."),
                       isOn: $behavior.batteryAlerts)
                 .onChangeCompat(of: behavior.batteryAlerts) { on in
                     if on { BatteryNotifier.requestAuthorization() }
                 }
             if behavior.batteryAlerts {
                 ToggleRow(label: String(localized: "Predictive runtime warning"),
-                          help: String(localized: "An early \"recharge tonight\" heads-up when the strap has about a day of estimated runtime left, at most once per discharge cycle. Turn off to keep only the 15% warning."),
+                          help: String(localized: "An early \"recharge tonight\" heads-up when Noop Band has about a day of estimated runtime left, at most once per discharge cycle. Turn off to keep only the 15% warning."),
                           isOn: $behavior.batteryPredictiveAlerts)
             }
         }
@@ -808,7 +1069,7 @@ struct AutomationsView: View {
                  blurb: String(localized: "A once-a-day nudge at a recovery-based Effort marker. It is a planning cue, not a limit or permission to keep pushing."),
                  active: behavior.strainTargetNudge) {
             ToggleRow(label: String(localized: "Notify when the Effort marker is reached"),
-                      help: String(localized: "Posts after your strap syncs and NOOP scores the day — not the exact second you cross it. At most once per day."),
+                      help: String(localized: "Posts after Noop Band syncs and NOOP scores the day, not the exact second you cross it. At most once per day."),
                       isOn: $behavior.strainTargetNudge)
                 .onChangeCompat(of: behavior.strainTargetNudge) { on in
                     if on {
@@ -851,7 +1112,7 @@ struct AutomationsView: View {
         #if os(macOS)
         String(localized: "React when the strap comes off or goes on. Note: macOS reserves true auto-UNLOCK for Apple Watch, so this can lock, not unlock.")
         #else
-        String(localized: "React when the strap comes off or goes on. Run a Shortcut to set a Focus, pause media, mark yourself away.")
+        String(localized: "React when Noop Band comes off or goes on. Run a Shortcut to set a Focus, pause media, or mark yourself away.")
         #endif
     }
 
@@ -899,7 +1160,7 @@ struct AutomationsView: View {
 private struct BondStatePill: View {
     @EnvironmentObject private var live: LiveState
     var body: some View {
-        StatePill(live.bonded ? "Strap bonded" : "Strap not connected",
+        StatePill(live.bonded ? "Noop Band paired" : "Noop Band not connected",
                   tone: live.bonded ? .positive : .warning, showsDot: true)
     }
 }

@@ -32,6 +32,7 @@ import com.noop.analytics.RangeReport
 import com.noop.analytics.RangeReportEngine
 import com.noop.analytics.ReportMetric
 import com.noop.analytics.ReportTrend
+import com.noop.analytics.VitalBands
 import com.noop.data.DailyMetric
 import java.io.File
 import java.time.LocalDate
@@ -98,7 +99,7 @@ object TrendsReportData {
             d.strain?.let { strain[d.day] = it }
             // In-sleep physiology (v7 columns). Absent on days the strap didn't measure them.
             d.respRateBpm?.let { respRate[d.day] = it }
-            d.skinTempDevC?.let { skinTempDev[d.day] = it }
+            VitalBands.skinTempDeviation(d.skinTempDevC)?.let { skinTempDev[d.day] = it }
         }
         // Daily stress score (#457), clamped to its 0–3 scale. Stored-only — the report never
         // re-derives a stress value (unlike the live Stress screen).

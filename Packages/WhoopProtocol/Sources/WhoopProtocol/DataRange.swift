@@ -43,7 +43,7 @@ public enum DataRange {
     /// *before* the true newest at offset 8) that would hijack the min and report a bogus deep backlog. The
     /// max is immune — the real newest dominates it — which is exactly why `newestUnix` can scan every offset.
     /// The aligned grid skips that straddle, so real frames with no distinct oldest word return nil here.
-    /// Do NOT "make this consistent with `newestUnix`" by scanning every offset without anchoring — see
+    /// Do NOT "make this consistent with `newestUnix`" by scanning every offset without anchoring - see
     /// `DataRangeTests.testOldestAlignedScanSkipsTheSpuriousOffset6Straddle`.
     public static func oldestUnix(from frame: [UInt8]) -> Int? {
         guard frame.count > 7 else { return nil }
@@ -57,7 +57,7 @@ public enum DataRange {
         return oldest
     }
 
-    /// #689: the ring-buffer page backlog ("pages behind") the strap reports in a GET_DATA_RANGE response —
+    /// #689: the ring-buffer page backlog ("pages behind") the strap reports in a GET_DATA_RANGE response -
     /// DIAGNOSTIC ONLY. RE'd from the WHOOP app (facts, not copied code; see ATTRIBUTION.md) and NOT yet
     /// confirmed against real 4.0 / 5-MG captures, so it NEVER gates sync or backfill — it only logs.
     ///

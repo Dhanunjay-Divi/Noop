@@ -17,7 +17,7 @@ import Security
 //
 // This probe captures all of it as a flat, copy-pasteable block of lines AND as typed fields, so the
 // strap log carries the real iOS context and Settings can set honest expectations. The whole UIKit
-// surface is iOS-only; the public API compiles on macOS (returning nils / "n/a") so shared callers —
+// surface is iOS-only; the public API compiles on macOS (returning nils / "n/a") so shared callers -
 // the strap-log header, the Settings panel — never need their own `#if`.
 
 /// A small, platform-safe snapshot of the iOS runtime environment. On macOS every optional is nil and
@@ -105,7 +105,7 @@ struct IOSDiagnostics {
         lines.append("Device: \(deviceModel ?? "unknown")")
         if let os = osVersionString { lines.append("iOS: \(os)") }
         if let p = isProtectedDataAvailable {
-            lines.append("Data Protection: \(p ? "unlocked (files readable)" : "LOCKED — unlock once after reboot so history can sync")")
+            lines.append("Data Protection: \(p ? "unlocked (files readable)" : "LOCKED - unlock once after reboot so history can sync")")
         }
         if let bg = backgroundRefresh { lines.append("Background refresh: \(bg)") }
         if let lpm = isLowPowerMode { lines.append("Low Power Mode: \(lpm ? "ON (throttles background BLE)" : "off")") }

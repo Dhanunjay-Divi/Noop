@@ -119,7 +119,7 @@ private final class GpxDelegate: NSObject, XMLParserDelegate {
         case "time":
             if inTrkpt { curTime = Self.parseTime(trimmed) }
         case "hr":
-            // Garmin gpxtpx:hr or Cluetrust gpxdata:hr — both end in local name "hr".
+            // Garmin gpxtpx:hr or Cluetrust gpxdata:hr - both end in local name "hr".
             if inTrkpt { curHr = ActivityFileImporter.validHr(Double(trimmed)) }
         case "heartrate":
             if inTrkpt, curHr == nil { curHr = ActivityFileImporter.validHr(Double(trimmed)) }

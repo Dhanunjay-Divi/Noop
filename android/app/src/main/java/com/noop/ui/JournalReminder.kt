@@ -44,7 +44,7 @@ private const val JOURNAL_STRIP_DAYS = 7
  * prompt today is the once-a-morning sleep sheet (PR #260) that a user skips whenever they don't open
  * Sleep. This surfaces, on Today where it can't be missed, a WHOOP-style strip of the last
  * [JOURNAL_STRIP_DAYS] days (filled = logged that day, today ringed) plus an always-present tap-through
- * to the journal — so it doubles as a reminder AND the "direct link to Insights" the report asked for.
+ * to the journal - so it doubles as a reminder AND the "direct link to Insights" the report asked for.
  *
  * Opt-out via [NoopPrefs.journalReminderEnabled] (default ON — the same toggle also gates the morning
  * sleep sheet, so one switch silences both). Renders only for today (the call site gates

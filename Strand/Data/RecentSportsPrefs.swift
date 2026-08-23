@@ -19,7 +19,7 @@ enum RecentSportsPrefs {
     /// UserDefaults key. The Android twin persists the same "workout.recentSports" name.
     static let key = "workout.recentSports"
 
-    /// Most-recent-first cap — the issue asks for "2-3"; three keeps the section one glance tall.
+    /// Most-recent-first cap - the issue asks for "2-3"; three keeps the section one glance tall.
     static let maxCount = 3
 
     /// Encode an ordered list of names into the stored comma-joined string.

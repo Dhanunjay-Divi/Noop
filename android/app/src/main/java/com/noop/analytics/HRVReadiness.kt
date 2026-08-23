@@ -5,7 +5,7 @@ import kotlin.math.ln
 import kotlin.math.max
 
 /*
- * HRVReadiness.kt — OPT-IN experimental "HRV readiness (Plews/Altini)" tier readout.
+ * HRVReadiness.kt - OPT-IN experimental "HRV readiness (Plews/Altini)" tier readout.
  *
  * Faithful Kotlin twin of StrandAnalytics/HRVReadiness.swift. Cross-platform parity is the contract:
  * every constant, gate, and formula here must stay byte-identical to the Swift source.

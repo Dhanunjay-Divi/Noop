@@ -196,7 +196,7 @@ public func parseFrame(_ frame: [UInt8], collectFields: Bool = false) -> ParsedF
 /// the redundant decode for the ~99% that aren't. Mirrors `parseFrame`'s family split EXACTLY — the inner
 /// type byte is at [4] on WHOOP4 and [8] on 5/MG, with the same lookup each uses (`schema.typeName` /
 /// `canonicalTypeName`). Returns nil for a frame too short / wrong SOF — which `parseFrame` would also mark
-/// INVALID (never "EVENT") — so a pre-filter guarded on `== "EVENT"` is byte-identical to the full-parse
+/// INVALID (never "EVENT") - so a pre-filter guarded on `== "EVENT"` is byte-identical to the full-parse
 /// guard.
 public func frameTypeName(_ frame: [UInt8], family: DeviceFamily) -> String? {
     guard frame.first == 0xAA else { return nil }
@@ -526,7 +526,7 @@ private func decodeWhoop5Historical(_ frame: [UInt8], fb: FieldBuilder, payloadE
         // feed a downstream gate (recovery/illness) until the cross-device contradiction is resolved.
         if (70...100).contains(v) {
             fb.add(82, 1, "spo2_candidate_82", "spo2", value: .int(v),
-                   note: "in-band (70–100) @82 reading; candidate strap-computed SpO2 % (#103) — instrumentation only, cross-device evidence still split, not a shipped metric")
+                   note: "in-band (70–100) @82 reading; candidate strap-computed SpO2 % (#103) - instrumentation only, cross-device evidence still split, not a shipped metric")
         }
     }
     // ── The @82–119 "optical/perfusion + tail" span, characterised over 18,602 real v18 records from a
@@ -829,7 +829,7 @@ private func decodeWhoop5Event(_ frame: [UInt8], fb: FieldBuilder, schema: Schem
 /// routinely splits mid-sentence across frames; consumers reassemble by `record_index` order before
 /// reading. Lines look like `19, 146552119: BLE: History burst success. Trim: …` (boot-count,
 /// firmware tick ms, tag, message) and narrate the history sync and the sensor pipeline
-/// ("SENSORS: AFE configuration changed", "SIGPROC: generated a valid SPO2 during sleep") — primary
+/// ("SENSORS: AFE configuration changed", "SIGPROC: generated a valid SPO2 during sleep") - primary
 /// raw material for the deep-data work (#103).
 ///
 /// Record header, verified across 3 257 real frames from two nights (all one shape: 76-byte frame,

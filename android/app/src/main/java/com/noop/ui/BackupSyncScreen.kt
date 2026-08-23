@@ -294,7 +294,7 @@ fun BackupSyncScreen() {
                                     )
                                     serverHasKey = true
                                     serverApiKey = ""
-                                    serverStatus = "Connected — authenticated server status: ${status.status}."
+                                    serverStatus = "Connected - authenticated server status: ${status.status}."
                                     Toast.makeText(
                                         context,
                                         "Connected to your self-hosted server.",
@@ -820,7 +820,7 @@ fun BackupSyncScreen() {
                                 serverApiKey = ""
                                 serverHasKey = false
                                 serverAuto = false
-                                serverStatus = "Disconnected — saved server credentials were removed."
+                                serverStatus = "Disconnected - saved server credentials were removed."
                                 serverLastSuccess = 0L
                                 Toast.makeText(
                                     context,

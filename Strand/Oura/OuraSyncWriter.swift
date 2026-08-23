@@ -7,7 +7,7 @@ import WhoopStore
 import WhoopProtocol
 import StrandImport
 
-/// Maps an assembled `OuraSyncResult` into the on-device WhoopStore under `deviceId = "oura-api"` — the
+/// Maps an assembled `OuraSyncResult` into the on-device WhoopStore under `deviceId = "oura-api"` - the
 /// cloud sibling of `Strand/Data/WearableImporter.swift`. HONEST DATA: Oura's own scores go only to
 /// ref_*/oura_* metricSeries keys; `DailyMetric.recovery`/`.strain` stay nil. The source registers as
 /// `.cloudImport`, which is structurally priority-2 in DayOwnerResolver, so it never seizes a WHOOP day.

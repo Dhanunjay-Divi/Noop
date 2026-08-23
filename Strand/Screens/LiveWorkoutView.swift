@@ -173,7 +173,7 @@ struct LiveWorkoutView: View {
                                 font: StrandFont.rounded(80, weight: .semibold),
                                 color: tint)
                 } else {
-                    Text("—")
+                    Text("-")
                         .font(StrandFont.rounded(80, weight: .semibold))
                         .foregroundStyle(tint)
                 }
@@ -245,9 +245,9 @@ struct LiveWorkoutView: View {
     private var statsGrid: some View {
         let w = model.activeWorkout
         return HStack(spacing: NoopMetrics.gap) {
-            stat(String(localized: "AVG"), (w?.avgHr ?? 0) > 0 ? "\(w!.avgHr)" : "—",
+            stat(String(localized: "AVG"), (w?.avgHr ?? 0) > 0 ? "\(w!.avgHr)" : "-",
                  tint: (w?.avgHr ?? 0) > 0 ? StrandPalette.metricRose : StrandPalette.textPrimary)
-            stat(String(localized: "PEAK"), (w?.peakHr ?? 0) > 0 ? "\(w!.peakHr)" : "—",
+            stat(String(localized: "PEAK"), (w?.peakHr ?? 0) > 0 ? "\(w!.peakHr)" : "-",
                  tint: (w?.peakHr ?? 0) > 0 ? StrandPalette.metricRose : StrandPalette.textPrimary)
             stat(String(localized: "EFFORT"), UnitFormatter.effortDisplay(w?.liveStrain ?? 0, scale: effortScale),
                  tint: StrandPalette.strainColor(w?.liveStrain ?? 0))

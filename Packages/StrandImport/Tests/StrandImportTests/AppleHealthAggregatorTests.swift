@@ -138,6 +138,73 @@ final class AppleHealthAggregatorTests: XCTestCase {
         XCTAssertEqual(a.steps!, 7500, accuracy: 1e-9)
     }
 
+    func testDietaryWaterNormalizesUnitsAndSumsWithinOneSource() {
+        let day = Fixtures.utc(2024, 3, 8, 10, 0, 0)
+        let samples = [
+            sample("DietaryWater", 0.5, at: day, unit: "L"),
+            sample("DietaryWater", 250, at: day, unit: "mL"),
+            sample("DietaryWater", 1, at: day, unit: "cup"),
+        ]
+
+        let result = try! XCTUnwrap(
+            agg(AppleHealthAggregator.daily(samples: samples), "2024-03-08")
+        )
+
+        XCTAssertEqual(result.hydrationML!, 986.588, accuracy: 0.001)
+        XCTAssertTrue(
+            AppleHealthAggregator.metricPoints([result]).contains {
+                $0.day == "2024-03-08"
+                    && $0.key == "hydration"
+                    && abs($0.value - 986.588) < 0.001
+            }
+        )
+    }
+
+    func testDietaryWaterUsesLargestSourceTotalInsteadOfDoubleCountingApps() {
+        let day = Fixtures.utc(2024, 3, 8, 10, 0, 0)
+        func water(_ value: Double, source: String) -> HealthSample {
+            HealthSample(
+                type: "DietaryWater",
+                value: value,
+                valueString: String(value),
+                unit: "mL",
+                start: day,
+                end: day,
+                tzOffsetMin: 0,
+                sourceName: source
+            )
+        }
+        let samples = [
+            water(500, source: "Water App"),
+            water(250, source: "Water App"),
+            water(700, source: "Bottle App"),
+        ]
+
+        let result = try! XCTUnwrap(
+            agg(AppleHealthAggregator.daily(samples: samples), "2024-03-08")
+        )
+
+        XCTAssertEqual(result.hydrationML!, 750, accuracy: 1e-9)
+    }
+
+    func testDietaryWaterRejectsUnknownUnitsAndInvalidValues() {
+        let day = Fixtures.utc(2024, 3, 8, 10, 0, 0)
+        let samples = [
+            sample("DietaryWater", 12, at: day, unit: "bottles"),
+            sample("DietaryWater", -10, at: day, unit: "mL"),
+            sample("DietaryWater", .nan, at: day, unit: "mL"),
+        ]
+
+        let result = try! XCTUnwrap(
+            agg(AppleHealthAggregator.daily(samples: samples), "2024-03-08")
+        )
+
+        XCTAssertNil(result.hydrationML)
+        XCTAssertFalse(
+            AppleHealthAggregator.metricPoints([result]).contains { $0.key == "hydration" }
+        )
+    }
+
     // MARK: - VO2Max latest
 
     func testVO2MaxLatestWins() {

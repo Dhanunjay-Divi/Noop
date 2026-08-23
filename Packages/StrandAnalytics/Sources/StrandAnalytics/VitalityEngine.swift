@@ -89,7 +89,7 @@ public enum VitalityEngine {
     /// duration-consistency are one sleep domain; they cannot manufacture readiness by themselves.
     public static let minFactors = 3
     public static let minDomains = 3
-    /// The ± presentation band (years) for Wellness Age.
+    /// The ± presentation range (years) for Wellness Age.
     ///
     /// HONESTY CORRECTION (2026-08-22, peer review): this was 0.0, which implied a point estimate and made
     /// Wellness Age look MORE precise than Fitness Age — even though Fitness Age honestly publishes a
@@ -97,25 +97,16 @@ public enum VitalityEngine {
     /// literature hazard ratios through a Gompertz conversion with an uncited overlap shrink).
     ///
     /// There is no published confidence interval for this composite, so the band is **explicitly a
-    /// model-level honesty floor, not a computed CI**: ±8 years at the minimum factor count, narrowing by
-    /// 1 year per extra independent factor, floored at ±5. Rationale for the scale: one Gompertz doubling
-    /// (~8 y of age-equivalent) is the natural unit of this model, so the band says "we cannot resolve
-    /// better than about one doubling." It NEVER claims statistical coverage; UI copy must read
-    /// "approximately ± N years", not "95% CI".
-    public static let bandYearsFloor: Double = 5.0
-    public static let bandYearsAtMinFactors: Double = 8.0
+    /// model-level honesty floor, not a computed CI**. One Gompertz doubling (~8 y of age-equivalent) is
+    /// the natural unit of this conversion, so the range says "this model cannot resolve better than
+    /// about one doubling." It does not narrow when more inputs are present: no fitted covariance/error
+    /// model proves that another correlated wearable signal improves individual precision. It NEVER
+    /// claims statistical coverage; UI copy must read "approximately ±8 years", not "95% CI".
+    public static let bandYears: Double = 8.0
 
-    /// Band for a given number of contributing factors (more independent signals ⇒ a tighter, but never
-    /// tight, band).
-    public static func bandYears(factorsUsed: Int) -> Double {
-        let extra = Double(max(0, factorsUsed - minFactors))
-        return max(bandYearsFloor, bandYearsAtMinFactors - extra)
-    }
-
-    /// Legacy zero-band constant retained ONLY so any existing caller keeps compiling; do not use it for
-    /// presentation — call `bandYears(factorsUsed:)` instead.
-    @available(*, deprecated, message: "Use bandYears(factorsUsed:) — a 0 band over-states precision.")
-    public static let bandYears = 0.0
+    /// Kept as a function so callers do not invent their own factor-count adjustment. `factorsUsed` is
+    /// intentionally ignored until external validation supplies a defensible uncertainty model.
+    public static func bandYears(factorsUsed _: Int) -> Double { bandYears }
 
     private static func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(hi, max(lo, v)) }
 

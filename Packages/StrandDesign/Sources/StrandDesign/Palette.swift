@@ -72,7 +72,7 @@ public enum StrandPalette {
     // Keep the tiny process-wide value synchronized just like `chartStyle` below; app scenes share the
     // same persisted preference, while widgets/watch run in their own processes.
     private static let appearanceModeLock = NSLock()
-    nonisolated(unsafe) private static var storedAppearanceMode: AppearanceMode = .system
+    nonisolated(unsafe) private static var storedAppearanceMode: AppearanceMode = .defaultMode
     public static var appearanceMode: AppearanceMode {
         get {
             appearanceModeLock.lock()
@@ -238,15 +238,15 @@ public enum StrandPalette {
         .init(color: Color(light: "#CB3A2F", dark: "#E5483B"), location: 1.0),
     ]
 
-    // MARK: Recovery / Charge gradient — the gold "Charge" colour world.
+    // MARK: Recovery / Charge gradient - the gold "Charge" colour world.
     // A single warm metal ramp: a deep bronze floor climbs through brand gold into a
     // bright champagne peak — no green anywhere; depleted reads as dim gold, not coral.
     // 0.00 bronze → 0.30 antique gold → 0.55 brand gold → 0.78 soft gold → 1.00 champagne.
-    public static let recovery000 = Color(light: "#C0392B", dark: "#E0463C") // depleted — WHOOP red
-    public static let recovery030 = Color(light: "#D9682A", dark: "#E8743C") // low — red-orange
-    public static let recovery055 = Color(light: "#C99A00", dark: "#F9DF4A") // moderate — WHOOP yellow
-    public static let recovery078 = Color(light: "#6FB23A", dark: "#8FD86A") // primed — yellow-green
-    public static let recovery100 = Color(light: "#0F9D62", dark: "#03E095") // peak — WHOOP green
+    public static let recovery000 = Color(light: "#C0392B", dark: "#E0463C") // depleted - WHOOP red
+    public static let recovery030 = Color(light: "#D9682A", dark: "#E8743C") // low - red-orange
+    public static let recovery055 = Color(light: "#C99A00", dark: "#F9DF4A") // moderate - WHOOP yellow
+    public static let recovery078 = Color(light: "#6FB23A", dark: "#8FD86A") // primed - yellow-green
+    public static let recovery100 = Color(light: "#0F9D62", dark: "#03E095") // peak - WHOOP green
 
     /// Ordered gradient stops for the recovery scale (Titanium gold ramp, or the Classic red→green).
     public static var recoveryStops: [Gradient.Stop] {
@@ -262,7 +262,7 @@ public enum StrandPalette {
     /// The signature recovery gradient (bronze → champagne, or Classic red→green).
     public static var recoveryGradient: Gradient { Gradient(stops: recoveryStops) }
 
-    // MARK: Strain / Effort ramp — the amber "Effort" colour world.
+    // MARK: Strain / Effort ramp - the amber "Effort" colour world.
     // Deep ember → warm amber → bright amber → soft amber peak: heat/output, all in the
     // Effort accent family rather than veering into magenta.
     public static let strain000 = Color(light: "#7E460E", dark: "#9C5A14") // deep ember
@@ -282,7 +282,7 @@ public enum StrandPalette {
     /// The strain gradient (output / heat, or the Classic blue ramp).
     public static var strainGradient: Gradient { Gradient(stops: strainStops) }
 
-    // MARK: Sleep stages — the blue "Rest" colour world (Titanium); Classic adds a purple REM.
+    // MARK: Sleep stages - the blue "Rest" colour world (Titanium); Classic adds a purple REM.
     // WHOOP sleep-stage palette (adopted from ryanAtriumAi #988): four distinct hues per stage —
     // Awake white-grey #CAC8CB, Light periwinkle #A7A4F4, SWS/Deep orchid-pink #FD96FD, REM purple
     // #AE5BEF — because the previous three near-identical blues made a fragmented on-device

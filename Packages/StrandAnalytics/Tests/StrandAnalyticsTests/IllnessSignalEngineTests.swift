@@ -24,34 +24,34 @@ final class IllnessSignalEngineTests: XCTestCase {
         XCTAssertEqual(r.level, .raised)
         XCTAssertGreaterThanOrEqual(r.score, IllnessSignalEngine.raiseThreshold)
         XCTAssertEqual(r.signalCount, 3)
+        XCTAssertEqual(r.trustedSignalCount, 3)
+        XCTAssertEqual(r.displayState, .alert)
         XCTAssertEqual(r.firedSignals, ["RHR +6", "skin temp +0.7 °C", "HRV −22%"])
         XCTAssertTrue(r.suppressedBy.isEmpty)
         XCTAssertTrue(r.copy.contains("not a diagnosis"))
     }
 
-    // MARK: - Same pattern + alcohol tag → suppressed (the core false-positive test)
+    // MARK: - Context is visible but never suppresses a corroborated shift
 
-    func testAlcoholTagSuppresses() {
+    func testAlcoholTagDoesNotSuppress() {
         let inputs = IllnessSignalEngine.Inputs(
             restingHR: reading(3.2), skinTemp: reading(3.0), hrv: reading(3.5))
         let raised = IllnessSignalEngine.evaluate(inputs, context: .init(), firedLabels: labels)
-        let suppressed = IllnessSignalEngine.evaluate(
+        let contextual = IllnessSignalEngine.evaluate(
             inputs, context: .init(alcohol: true), firedLabels: labels)
-        XCTAssertEqual(suppressed.level, .suppressed)
-        XCTAssertEqual(suppressed.suppressedBy, ["alcohol"])
-        // Dampened well below the raised score.
-        XCTAssertLessThan(suppressed.score, raised.score)
-        XCTAssertEqual(suppressed.score, raised.score * IllnessSignalEngine.confounderDampen, accuracy: 1e-9)
-        XCTAssertTrue(suppressed.copy.contains("alcohol"))
-        XCTAssertTrue(suppressed.copy.contains("can move the same signals"))
-        XCTAssertTrue(suppressed.copy.contains("not a diagnosis"))
+        XCTAssertEqual(contextual.level, .raised)
+        XCTAssertEqual(contextual.suppressedBy, ["alcohol"])
+        XCTAssertEqual(contextual.score, raised.score, accuracy: 1e-9)
+        XCTAssertTrue(contextual.copy.contains("alcohol"))
+        XCTAssertTrue(contextual.copy.contains("does not rule out"))
+        XCTAssertTrue(contextual.copy.contains("not a diagnosis"))
     }
 
-    func testStressSaunaTravelEachDowngradeWithReason() {
+    func testStressSaunaTravelRemainRaisedWithReason() {
         let inputs = IllnessSignalEngine.Inputs(
             restingHR: reading(3.2), skinTemp: reading(3.0), hrv: reading(3.5))
         let stress = IllnessSignalEngine.evaluate(inputs, context: .init(stress: true), firedLabels: labels)
-        XCTAssertEqual(stress.level, .suppressed)
+        XCTAssertEqual(stress.level, .raised)
         XCTAssertEqual(stress.suppressedBy, ["stress"])
 
         let sauna = IllnessSignalEngine.evaluate(inputs, context: .init(sauna: true), firedLabels: labels)
@@ -72,6 +72,23 @@ final class IllnessSignalEngineTests: XCTestCase {
         XCTAssertTrue(r.copy.contains("alcohol and stress"))
     }
 
+    func testRecentMedicationChangeIsContextOnly() {
+        let inputs = IllnessSignalEngine.Inputs(
+            restingHR: reading(3.2), skinTemp: reading(3.0), hrv: reading(3.5))
+        let raw = IllnessSignalEngine.evaluate(inputs, context: .init(), firedLabels: labels)
+        let contextual = IllnessSignalEngine.evaluate(
+            inputs,
+            context: .init(recentMedicationChange: true),
+            firedLabels: labels
+        )
+        XCTAssertEqual(contextual.level, raw.level)
+        XCTAssertEqual(contextual.score, raw.score, accuracy: 1e-9)
+        XCTAssertEqual(contextual.signalCount, raw.signalCount)
+        XCTAssertEqual(contextual.suppressedBy, ["a recent medication change"])
+        XCTAssertTrue(contextual.copy.contains("recent medication change"))
+        XCTAssertTrue(contextual.copy.contains("does not rule out"))
+    }
+
     // MARK: - Already-sick tag → "rest up" copy, not "early warning"
 
     func testAlreadyUnwellSwitchesCopy() {
@@ -80,8 +97,9 @@ final class IllnessSignalEngineTests: XCTestCase {
         let r = IllnessSignalEngine.evaluate(
             inputs, context: .init(alreadyUnwell: true), firedLabels: labels)
         XCTAssertEqual(r.level, .alreadyUnwell)
-        XCTAssertTrue(r.copy.contains("Rest up"))
+        XCTAssertTrue(r.copy.contains("feeling unwell"))
         XCTAssertTrue(r.copy.contains("signals also shifted"))
+        XCTAssertTrue(r.copy.contains("cannot assess severity"))
         XCTAssertFalse(r.copy.contains("Heads-up"))
     }
 
@@ -93,6 +111,8 @@ final class IllnessSignalEngineTests: XCTestCase {
         let r = IllnessSignalEngine.evaluate(inputs, context: .init(), firedLabels: labels)
         XCTAssertEqual(r.level, .quiet)
         XCTAssertEqual(r.signalCount, 1)
+        XCTAssertEqual(r.trustedSignalCount, 1)
+        XCTAssertEqual(r.displayState, .building)
     }
 
     func testUntrustedBaselineStaysSilent() {
@@ -101,7 +121,21 @@ final class IllnessSignalEngineTests: XCTestCase {
         let r = IllnessSignalEngine.evaluate(
             inputs, context: .init(baselineTrusted: false), firedLabels: labels)
         XCTAssertEqual(r.level, .quiet)
+        XCTAssertEqual(r.trustedSignalCount, 0)
+        XCTAssertEqual(r.displayState, .building)
         XCTAssertFalse(r.copy.contains("Heads-up"))
+        XCTAssertTrue(r.copy.contains("Missing data is not a healthy result"))
+    }
+
+    func testAlreadyUnwellOverridesUntrustedBaselineAndMissingSignals() {
+        let r = IllnessSignalEngine.evaluate(
+            .init(),
+            context: .init(alreadyUnwell: true, baselineTrusted: false),
+            firedLabels: labels
+        )
+        XCTAssertEqual(r.level, .alreadyUnwell)
+        XCTAssertTrue(r.copy.contains("cannot rule out"))
+        XCTAssertTrue(r.copy.contains("severe or worsening"))
     }
 
     func testBelowThresholdSignalsAreMildNotRaised() {
@@ -111,6 +145,7 @@ final class IllnessSignalEngineTests: XCTestCase {
         let r = IllnessSignalEngine.evaluate(inputs, context: .init(), firedLabels: labels)
         XCTAssertEqual(r.signalCount, 2)
         XCTAssertEqual(r.level, .mild)
+        XCTAssertEqual(r.displayState, .watch)
         XCTAssertLessThan(r.score, IllnessSignalEngine.raiseThreshold)
         XCTAssertGreaterThanOrEqual(r.score, IllnessSignalEngine.mildThreshold)
     }
@@ -124,6 +159,32 @@ final class IllnessSignalEngineTests: XCTestCase {
         // The absent skin-temp does not fire despite its huge z.
         XCTAssertEqual(r.signalCount, 2)
         XCTAssertFalse(r.firedSignals.contains("skin temp +0.7 °C"))
+    }
+
+    func testNonFiniteSignalsDoNotCountOrPoisonScore() {
+        let inputs = IllnessSignalEngine.Inputs(
+            restingHR: reading(.nan),
+            skinTemp: reading(.infinity),
+            hrv: reading(3.5),
+            respiration: reading(3.2)
+        )
+        let r = IllnessSignalEngine.evaluate(inputs, context: .init(), firedLabels: labels)
+        XCTAssertTrue(r.score.isFinite)
+        XCTAssertEqual(r.signalCount, 2)
+        XCTAssertEqual(r.firedSignals, ["HRV −22%", "respiration up"])
+    }
+
+    func testQuietCopyDoesNotClaimHealthOrNormality() {
+        let r = IllnessSignalEngine.evaluate(
+            .init(restingHR: reading(0), hrv: reading(0)),
+            context: .init(),
+            firedLabels: labels
+        )
+        XCTAssertEqual(r.level, .quiet)
+        XCTAssertEqual(r.trustedSignalCount, 2)
+        XCTAssertEqual(r.displayState, .steady)
+        XCTAssertTrue(r.copy.contains("does not assess overall health"))
+        XCTAssertFalse(r.copy.lowercased().contains("normal"))
     }
 
     // MARK: - Copy never names a condition
@@ -147,5 +208,43 @@ final class IllnessSignalEngineTests: XCTestCase {
         // RHR caps at perSignalCap (40) + skinTemp small contribution.
         let expectedSkin = IllnessSignalEngine.kZToScore * (2.5 - IllnessSignalEngine.signalZThreshold)
         XCTAssertEqual(r.score, IllnessSignalEngine.perSignalCap + expectedSkin, accuracy: 1e-9)
+    }
+
+    func testDailySignalStatusRequiresSolidCurrentEvidence() {
+        let aligned = ReadinessEngine.Readiness(
+            level: .primed,
+            headline: "Aligned",
+            summary: "Available signals are aligned.",
+            signals: [],
+            acwr: nil,
+            monotony: nil,
+            asOfDay: "2026-08-23",
+            confidence: .solid
+        )
+        let thin = ReadinessEngine.Readiness(
+            level: .primed,
+            headline: "Aligned",
+            summary: "Available signals are aligned.",
+            signals: [],
+            acwr: nil,
+            monotony: nil,
+            asOfDay: "2026-08-23",
+            confidence: .building
+        )
+        let quiet = IllnessSignalEngine.evaluate(
+            .init(restingHR: reading(0), hrv: reading(0)),
+            context: .init(),
+            firedLabels: labels
+        )
+        let raised = IllnessSignalEngine.evaluate(
+            .init(restingHR: reading(3.5), hrv: reading(3.5)),
+            context: .init(),
+            firedLabels: labels
+        )
+
+        XCTAssertEqual(DailySignalStatus.resolve(readiness: aligned, illness: quiet), .steady)
+        XCTAssertEqual(DailySignalStatus.resolve(readiness: thin, illness: quiet), .building)
+        XCTAssertEqual(DailySignalStatus.resolve(readiness: aligned, illness: raised), .alert)
+        XCTAssertEqual(DailySignalStatus.resolve(readiness: thin, illness: nil), .building)
     }
 }

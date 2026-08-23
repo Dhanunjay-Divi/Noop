@@ -76,7 +76,7 @@ class WeeklyDigestCardFormattingTest {
 
     @Test fun emptyWeekMeanIsADash() {
         val s = summary(WeeklyMetric.EFFORT, thisMean = 0.0, thisN = 0, prevMean = 40.0, prevN = 5)
-        assertEquals("—", meanText(s, EffortScale.HUNDRED))
+        assertEquals("-", meanText(s, EffortScale.HUNDRED))
     }
 
     // ── the engine's Effort display factor for focal sentences ──────────────────

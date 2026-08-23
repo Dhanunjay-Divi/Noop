@@ -32,7 +32,7 @@ class HrvSnapshotHelpersTest {
 
     @Test
     fun formatHrvRendersEmDashForNull() {
-        assertEquals("—", formatHrv(null, "%.0f"))
+        assertEquals("-", formatHrv(null, "%.0f"))
     }
 
     @Test

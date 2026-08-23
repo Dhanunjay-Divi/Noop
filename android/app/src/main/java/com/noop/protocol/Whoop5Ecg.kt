@@ -1,6 +1,6 @@
 package com.noop.protocol
 
-// WHOOP MG ECG ("Labrador") packet decode + command construction — the Kotlin twin of
+// WHOOP MG ECG ("Labrador") packet decode + command construction - the Kotlin twin of
 // Packages/WhoopProtocol/Sources/WhoopProtocol/Whoop5Ecg.swift. Keep the two byte-identical.
 //
 // The WHOOP MG carries ECG electrodes in its conductive clasp (a plain WHOOP 5.0 does not — see

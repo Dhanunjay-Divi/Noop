@@ -7,8 +7,8 @@ import Foundation
 /// 1-loop) — the same mechanism the Haptic Clock and Breath Pacer already use.
 ///
 /// The vocabulary is deliberately tiny and distinguishable by FEEL alone, mid-effort, no screen:
-///   • `push`    — two LIGHT taps  → "give a bit more"
-///   • `easeOff` — three HEAVY taps → "ease off, today can't pay for this"
+///   • `push`    - two LIGHT taps  → "give a bit more"
+///   • `easeOff` - three HEAVY taps → "ease off, today can't pay for this"
 ///
 /// Kotlin twin: `android/app/src/main/java/com/noop/protocol/LiveSessionHaptics.kt`; the two pulse lists are
 /// pinned identical by matching unit tests on both platforms. Design contract:

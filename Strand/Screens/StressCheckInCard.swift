@@ -2,7 +2,7 @@ import SwiftUI
 import Combine
 import StrandDesign
 
-// StressCheckInCard.swift — the L3 closed-loop JITAI surface (the "passive" layer), retained for a
+// StressCheckInCard.swift - the L3 closed-loop JITAI surface (the "passive" layer), retained for a
 // future live source that supplies timestamp-matched wrist motion. The current source is capability-
 // gated to manual Breathe, so it cannot present this card. When that evidence is eventually wired and
 // the unit-tested `StressOnsetDetector` fires, the central hook posts a pending nudge on

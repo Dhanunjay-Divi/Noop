@@ -383,7 +383,7 @@ struct CompareView: View {
                             referenceStat("MAE", decimal(stats.meanAbsoluteError))
                             referenceStat(
                                 "Correlation",
-                                stats.correlation.map { decimal($0) } ?? "—"
+                                stats.correlation.map { decimal($0) } ?? "-"
                             )
                         }
                         Text("\(stats.firstDay) to \(stats.lastDay) · error is Noop minus official · RMSE \(decimal(stats.rootMeanSquaredError))")
@@ -824,7 +824,7 @@ struct CompareView: View {
             ForEach(Array(series.enumerated()), id: \.element.id) { idx, s in
                 HStack(spacing: 10) {
                     // A small liquid vessel posed at this series' LATEST value within its own min–max
-                    // window (the same 0–1 position the overlay's "now" end-cap sits at) — the liquid
+                    // window (the same 0–1 position the overlay's "now" end-cap sits at) - the liquid
                     // accent tying the legend to the real series. Static, decorative (the min/max text
                     // + colour swatch carry the meaning for VoiceOver).
                     LiquidVessel(value: s.rows.last.map { s.normalized($0.value) },
@@ -1458,7 +1458,7 @@ private struct OverlayChart: View {
         modelCache = Model(series: series)
     }
 
-    /// The series colour for a metric title — drives the matching "now" end-cap glow.
+    /// The series colour for a metric title - drives the matching "now" end-cap glow.
     private func colorFor(_ title: String) -> Color? {
         series.first(where: { $0.metric.title == title })?.color
     }
@@ -1486,7 +1486,7 @@ private struct OverlayChart: View {
                 .foregroundStyle(by: .value("Metric", p.title))
             }
         }
-        // Bevel "now" end-caps — a soft halo + bright core on each series' latest point, drawn on top.
+        // Bevel "now" end-caps - a soft halo + bright core on each series' latest point, drawn on top.
         .chartOverlay { proxy in
             GeometryReader { geo in
                 let plot = proxy.plotRectCompat(in: geo)
@@ -1659,7 +1659,7 @@ private struct MultiTooltip: View {
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textSecondary)
                     Spacer(minLength: 12)
-                    Text(values[s.id].map { s.metric.format($0, effortScale: effortScale) } ?? "—")
+                    Text(values[s.id].map { s.metric.format($0, effortScale: effortScale) } ?? "-")
                         .font(StrandFont.captionNumber)
                         .foregroundStyle(StrandPalette.textPrimary)
                 }

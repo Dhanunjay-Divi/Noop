@@ -104,7 +104,7 @@ public enum HapticClock {
 
     /// Widen the trailing pulse's gap to at least `gapMs` (a group/block separator). If nothing has
     /// been emitted yet (a leading zero digit group, e.g. minute-tens of 0), there is no pulse to
-    /// widen — the missing pulse is itself the "0", and the surrounding gaps still bound the groups,
+    /// widen - the missing pulse is itself the "0", and the surrounding gaps still bound the groups,
     /// so this is a no-op. We take the MAX rather than overwrite so that when later groups are empty
     /// (e.g. 12:00 has no minute pulses) an earlier, wider block separator isn't clobbered by a
     /// narrower group separator that follows it on the same trailing pulse.

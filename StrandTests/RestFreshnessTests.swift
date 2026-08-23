@@ -62,6 +62,42 @@ final class RestFreshnessTests: XCTestCase {
 /// The multi-vital adapter has its own, stricter freshness gate: imported history is useful for trends,
 /// but a weeks-old last row must never become a current "signals shifted together" message.
 final class IllnessFreshnessTests: XCTestCase {
+    func testJournalDayKeysFollowCivilDaysAcrossDaylightSavingTime() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 3,
+            day: 9,
+            hour: 0,
+            minute: 30
+        )))
+
+        XCTAssertEqual(
+            AppModel.illnessJournalDayKeys(now: now, calendar: calendar),
+            Set(["2026-03-07", "2026-03-08", "2026-03-09"])
+        )
+    }
+
+    func testJournalDayKeysUseTheSuppliedTimeZoneAcrossYearBoundary() throws {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let instant = try XCTUnwrap(utc.date(from: DateComponents(
+            year: 2026,
+            month: 1,
+            day: 1,
+            hour: 2,
+            minute: 30
+        )))
+        var newYork = Calendar(identifier: .gregorian)
+        newYork.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+
+        XCTAssertEqual(
+            AppModel.illnessJournalDayKeys(now: instant, calendar: newYork),
+            Set(["2025-12-29", "2025-12-30", "2025-12-31"])
+        )
+    }
+
     func testCurrentAndRecentWakeDaysAreFresh() {
         XCTAssertTrue(AppModel.illnessHistoryIsFresh(
             dayKeys: ["2026-07-26"], todayKey: "2026-07-26"))

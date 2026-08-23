@@ -94,7 +94,7 @@
     <string name="nutrition_state_empty_title">За этот день нет записей</string>
     <string name="nutrition_state_loading_body">Чтение личных записей о питании за этот день с устройства.</string>
     <string name="nutrition_state_loading_title">Загрузка данных о питании</string>
-    <string name="nutrition_subtitle">Приёмы пищи, макронутриенты и импортированные итоги — конфиденциально на этом устройстве.</string>
+    <string name="nutrition_subtitle">Приёмы пищи, макронутриенты и импортированные итоги. Конфиденциально на этом устройстве.</string>
     <string name="nutrition_title">Питание</string>
     <string name="nutrition_totals_empty">За этот день пока ничего не учтено.</string>
     <string name="nutrition_totals_imported">Итоги берутся из импортированной дневной сводки. Отсутствующие нутриенты остаются пустыми, а не нулевыми.</string>

@@ -69,7 +69,7 @@ public enum RecoveryScorer {
     /// penalty before weighting. Symmetric — sign of the deviation does not matter.
     public static let skinTempScaleC: Double = 1.0
 
-    /// Recovery-Index weight (overnight resting-HR DECLINE slope — Oura's "Recovery Index"
+    /// Recovery-Index weight (overnight resting-HR DECLINE slope - Oura's "Recovery Index"
     /// contributor). Small and additive like wSkinTemp: folds in only when a slope is supplied.
     public static let wRecoveryIndex: Double = 0.05
 
@@ -185,7 +185,7 @@ public enum RecoveryScorer {
     /// routine nil.
     public static let recoveryIndexMinBins: Int = 6
 
-    /// Overnight resting-HR DECLINE slope (bpm/hour) across the in-bed window — the "Recovery
+    /// Overnight resting-HR DECLINE slope (bpm/hour) across the in-bed window - the "Recovery
     /// Index" component of Oura's Readiness that Charge lacked (it previously only read the
     /// overnight FLOOR via `restingHR` above, never the trend that reaches it).
     ///
@@ -242,7 +242,7 @@ public enum RecoveryScorer {
     // MARK: - Cold-start calibration progress
 
     /// The recovery baseline's real seed count while it still cold-starts — the honest
-    /// "Calibrating — N of <seed> nights" progress the dashboard shows in place of a bare empty state;
+    /// "Calibrating - N of <seed> nights" progress the dashboard shows in place of a bare empty state;
     /// nil once recovery exists or the baseline has crossed the seed gate. N is the HRV baseline's
     /// `nValid` from folding the SAME day-keyed, epoch-aware history the recovery engine folds
     /// (`Baselines.foldHistory(_:dayKeys:cfg:baselineEpoch:)`), NOT a looser per-night bounds count.
@@ -266,7 +266,7 @@ public enum RecoveryScorer {
         guard !hasRecovery else { return nil }
         let n = Baselines.foldHistory(nightlyHrv, dayKeys: dayKeys, cfg: cfg,
                                       baselineEpoch: baselineEpoch).nValid
-        // Include 0: a brand-new user (no banked nights yet) should read "Calibrating — 0 of N" on the
+        // Include 0: a brand-new user (no banked nights yet) should read "Calibrating - 0 of N" on the
         // Charge ring, not a bare "No data" that looks broken (#335). Past days are gated to nil by the
         // caller; >= seed (recovery should exist) still returns nil.
         return (0..<seed).contains(n) ? n : nil
@@ -361,7 +361,7 @@ public enum RecoveryScorer {
         }
         // Skin-temp term: SYMMETRIC penalty on |deviation| (illness/overreach). Any
         // drift from the personal baseline lowers Charge; added only when supplied.
-        if let dev = skinTempDev {
+        if let dev = VitalBands.skinTempDeviation(from: skinTempDev) {
             terms.append((-abs(dev) / skinTempScaleC, wSkinTemp))
         }
         // Recovery-Index term: overnight HR-DECLINE slope (bpm/hour). No baseline needed (a

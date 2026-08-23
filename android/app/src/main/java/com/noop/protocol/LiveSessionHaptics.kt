@@ -6,8 +6,8 @@ package com.noop.protocol
 // and fires each pulse through the EXISTING hardware buzz, weighting by Pulse.isLong (long = heavier 2-loop,
 // short = lighter 1-loop) — the same mechanism HapticClock/BreathPacer already use.
 //
-//   • PUSH     — two LIGHT taps  → "give a bit more"
-//   • EASE_OFF — three HEAVY taps → "ease off, today can't pay for this"
+//   • PUSH     - two LIGHT taps  → "give a bit more"
+//   • EASE_OFF - three HEAVY taps → "ease off, today can't pay for this"
 //
 // The two pulse lists are pinned identical to the Swift twin by matching unit tests. Design contract:
 // docs/superpowers/specs/2026-07-04-live-sessions-design.md.

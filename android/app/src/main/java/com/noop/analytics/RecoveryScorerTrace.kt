@@ -39,12 +39,13 @@ object RecoveryScorerTrace {
     ): Pair<Double?, List<String>> {
         val lines = ArrayList<String>()
         val nilTerms = ArrayList<String>()
+        val validSkinTempDev = VitalBands.skinTempDeviation(skinTempDev)
 
         // The score the dashboard reads, verbatim, so the trace cannot diverge from it.
         val score = RecoveryScorer.recovery(
             hrv = hrv, rhr = rhr, resp = resp,
             hrvBaseline = hrvBaseline, rhrBaseline = rhrBaseline,
-            respBaseline = respBaseline, sleepPerf = sleepPerf, skinTempDev = skinTempDev,
+            respBaseline = respBaseline, sleepPerf = sleepPerf, skinTempDev = validSkinTempDev,
         )
 
         // Cold-start gate: HRV baseline not usable -> recovery() returns null before any term is built.
@@ -117,12 +118,12 @@ object RecoveryScorerTrace {
         }
 
         // Skin-temp term: SYMMETRIC penalty on |deviation|, added only when supplied.
-        if (skinTempDev != null) {
-            val z = -abs(skinTempDev) / RecoveryScorer.skinTempDevScale
+        if (validSkinTempDev != null) {
+            val z = -abs(validSkinTempDev) / RecoveryScorer.skinTempDevScale
             terms.add(z to RecoveryScorer.wSkinTemp)
             lines.add(
                 "charge term skinTempDev z=${r2(z)} w=${r2(RecoveryScorer.wSkinTemp)} " +
-                    "(dev=${r2(skinTempDev)}C penalty=-|dev|/${r2(RecoveryScorer.skinTempDevScale)})",
+                    "(dev=${r2(validSkinTempDev)}C penalty=-|dev|/${r2(RecoveryScorer.skinTempDevScale)})",
             )
         } else {
             nilTerms.add("skinTempDev")

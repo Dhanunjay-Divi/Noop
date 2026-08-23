@@ -158,13 +158,13 @@ public final class FrameRouter {
                                   forKey: "alarm.rejectStreak")
                         }
                     } else if Self.readbackReportsNoAlarm(in: frame) {
-                        // #34 (issue comment 2026-07-12): the strap's "nothing armed" sentinel — the epoch
+                        // #34 (issue comment 2026-07-12): the strap's "nothing armed" sentinel - the epoch
                         // field decodes to 0. This is NOT an undocumented layout; it's the strap telling us
                         // it has no alarm stored, so an arm we just sent did NOT persist. Calling this
                         // "unrecognised payload" (the old branch) hid the single most diagnostic signal in a
                         // "didn't buzz" report: SET went out, strap kept nothing. Name it plainly. Log-only.
                         let raw = Self.commandResponsePayloadHex(in: frame) ?? "empty"
-                        state.append(log: "Alarm: strap reports NO alarm currently stored (epoch 0) — the arm did not persist on the strap (raw \(raw))")
+                        state.append(log: "Alarm: strap reports NO alarm currently stored (epoch 0) - the arm did not persist on the strap (raw \(raw))")
                     } else {
                         state.append(log: "Alarm: strap answered the alarm readback with an unrecognised payload (raw \(Self.commandResponsePayloadHex(in: frame) ?? "empty")) - layout undocumented, log-only")
                     }
@@ -180,14 +180,14 @@ public final class FrameRouter {
                     // 0=accepted), so this claims NO verdict — it surfaces the byte, nothing more.
                     let r = Self.commandResultByte(in: frame)
                     let rhex = r.map { String(format: "0x%02x", UInt8(truncatingIfNeeded: $0)) } ?? "none"
-                    state.append(log: "Alarm: strap answered the arm (SET_ALARM_TIME) with result=\(rhex) — log-only, 4.0 result-code meaning unverified")
+                    state.append(log: "Alarm: strap answered the arm (SET_ALARM_TIME) with result=\(rhex) - log-only, 4.0 result-code meaning unverified")
                 }
             }
 
         case "EVENT":
             if let ev = parsed.parsed["event"]?.stringValue {
                 // #92: don't surface the live-HR stream toggle (BLE_REALTIME_HR_ON/OFF) in "Last
-                // Event" — it's internal plumbing that fires on every connect and just confuses
+                // Event" - it's internal plumbing that fires on every connect and just confuses
                 // users. Every other event (wrist, double-tap, battery, bonded…) still shows.
                 if !ev.hasPrefix("BLE_REALTIME_HR") {
                     state.lastEvent = ev

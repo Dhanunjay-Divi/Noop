@@ -82,7 +82,7 @@ struct WorkoutDateWindow: Equatable, Sendable {
 //
 //  • a range pill (7D / 30D / 90D / 1Y / All) that filters the loaded sessions,
 //  • a LazyVGrid of summary StatTiles (count / time / calories / distance / most-active),
-//  • an "ACTIVITY BREAKDOWN" LazyVGrid of per-sport NoopCards — identical internal layout,
+//  • an "ACTIVITY BREAKDOWN" LazyVGrid of per-sport NoopCards - identical internal layout,
 //  • an "ALL SESSIONS" NoopCard containing fixed-height rows (date · sport · dur · HR · kcal · dist · source).
 //
 // No custom card heights, paddings, colours or surfaces — uniformity is the bar.
@@ -137,7 +137,7 @@ struct WorkoutsView: View {
     /// covers the 1Y range plus headroom.
     static let firstPaintWindowDays = 400
 
-    // iPhone (.compact) can't fit the labelled "Add workout" button beside the 5-segment range pill —
+    // iPhone (.compact) can't fit the labelled "Add workout" button beside the 5-segment range pill -
     // the button got crushed into a tall sliver (#234/#339). Stack them there; iPad/Mac keep one row.
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var hSizeClass
@@ -163,7 +163,7 @@ struct WorkoutsView: View {
     @State private var detail: WorkoutDetailTarget?
 
     /// A transient one-line note shown after a manual save / relabel for a sport that already has a
-    /// solid/building ActivityCost entry — "Sessions like this usually …" (#439). Auto-clears.
+    /// solid/building ActivityCost entry - "Sessions like this usually …" (#439). Auto-clears.
     @State private var postLogNote: String?
 
     /// #516: eligible workouts in the visible 7/30/90-day window, calculated from recorded HR. Wider
@@ -504,7 +504,7 @@ struct WorkoutsView: View {
 
     /// After a manual save / relabel, look up whether `sport` has a solid/building ActivityCost entry
     /// (n ≥ minSessions) and, if so, show its plain-English sentence as a transient caption that
-    /// auto-clears. Copy is "usually"/"personal pattern" framed (the engine's own wording) — never a
+    /// auto-clears. Copy is "usually"/"personal pattern" framed (the engine's own wording) - never a
     /// law. Computes off the freshly reloaded sessions + the merged daily Charge.
     private func showPostLogNote(forSport sport: String) async {
         let costs = InsightsView.computeActivityCosts(workouts: allRows, days: repo.days)
@@ -521,7 +521,7 @@ struct WorkoutsView: View {
         }
     }
 
-    /// The transient "personal pattern" caption — an Effort-tinted frosted strip with a chart glyph.
+    /// The transient "personal pattern" caption - an Effort-tinted frosted strip with a chart glyph.
     private func postLogBanner(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "chart.line.uptrend.xyaxis")
@@ -892,7 +892,7 @@ struct WorkoutsView: View {
     /// "N sessions · <exact range>" near the control. Appends "· filtered" (#64) when a filter narrows
     /// the list; zero stays zero so the UI never presents old history as part of a sparse selection.
     private func rangeCaption(rows: [WorkoutRow]) -> String {
-        guard loaded, !allRows.isEmpty else { return "—" }
+        guard loaded, !allRows.isEmpty else { return "-" }
         let n = rows.count
         let suffix = filter.isActive ? String(localized: " · filtered") : ""
         let dateLabel = rangeDisplayLabel(for: range)
@@ -1008,7 +1008,7 @@ struct WorkoutsView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(String(localized: "Typical effort \(UnitFormatter.effortDisplay(avgStrain, scale: effortScale))"))
             } else {
-                // No strain data in the window — an empty vessel (posed, no fill) with a centred "No data",
+                // No strain data in the window - an empty vessel (posed, no fill) with a centred "No data",
                 // the honest liquid analogue of the old empty ring.
                 ZStack {
                     LiquidVessel(value: 0, tint: StrandPalette.effortColor, animated: false)
@@ -1039,7 +1039,7 @@ struct WorkoutsView: View {
                 heroCountStat(String(localized: "Sessions"), value: Double(rows.count),
                               format: { "\(Int($0.rounded()))" }, tint: StrandPalette.effortColor)
                 heroStat(String(localized: "Active"), String(localized: "\(oneDecimal(totalTimeH))h"), tint: StrandPalette.textPrimary)
-                heroStat(String(localized: "Top sport"), modal.count > 0 ? "\(modal.count)×" : "—",
+                heroStat(String(localized: "Top sport"), modal.count > 0 ? "\(modal.count)×" : "-",
                          tint: StrandPalette.effortBright)
             }
             Text(modal.count > 0
@@ -1848,7 +1848,7 @@ struct WorkoutsView: View {
     }()
 
     // The "jmm" skeleton respects the device's 12-/24-hour setting (#337): "4:34 PM" where 12-hour is
-    // preferred, "16:34" where 24-hour is — instead of forcing 24-hour on everyone (matches TodayView).
+    // preferred, "16:34" where 24-hour is - instead of forcing 24-hour on everyone (matches TodayView).
     private static let timeFmt: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale.current
@@ -2041,7 +2041,7 @@ private func previewWorkoutRows() -> [WorkoutRow] {
         .preferredColorScheme(.dark)
 }
 
-#Preview("Workouts — empty") {
+#Preview("Workouts - empty") {
     WorkoutsView(previewRows: [])
         .environmentObject(Repository(deviceId: "preview"))
         .frame(width: 1040, height: 600)

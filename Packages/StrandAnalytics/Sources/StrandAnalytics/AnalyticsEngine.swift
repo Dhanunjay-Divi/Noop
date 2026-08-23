@@ -148,7 +148,7 @@ public enum AnalyticsEngine {
     /// The day key is the core aggregation key for daily metrics; the dashboard reads "today" by
     /// the device's LOCAL calendar day, so the bucket must be the LOCAL day too. A west-of-UTC
     /// user's evening (which crosses midnight UTC) would otherwise flow into the next UTC bucket
-    /// and the local "today" read would never find it — freezing the dashboard (Toronto/UTC-4
+    /// and the local "today" read would never find it - freezing the dashboard (Toronto/UTC-4
     /// report). `offsetSec` is seconds EAST of UTC (TimeZone.current.secondsFromGMT()). The local
     /// date is the UTC date of `(ts + offsetSec)`: shifting the instant by the offset turns the
     /// fixed-UTC formatter into a local-calendar formatter. `offsetSec == 0` is byte-identical to
@@ -273,7 +273,7 @@ public enum AnalyticsEngine {
                                   skinTempAnchorRaw: Double? = nil,
                                   // WHOOP 4.0 raw SpO2 PPG ADC samples (red/IR) for the night window
                                   // (#93). The nightly red/IR means over detected sleep are banked on the
-                                  // DailyMetric as RAW ADC — honest "the sensor decoded" data, NOT a
+                                  // DailyMetric as RAW ADC - honest "the sensor decoded" data, NOT a
                                   // calibrated blood-oxygen % (that needs WHOOP's proprietary curve).
                                   // Default empty keeps pure-function callers/tests + non-4.0 nights nil.
                                   spo2: [SpO2Sample] = [],
@@ -539,7 +539,7 @@ public enum AnalyticsEngine {
         // ── HRV & Autonomic nightly trace (#141) ──────────────────────────────
         // Per-5-min-window RMSSD tagged by the sleep stage at its center, then a night summary comparing
         // NOOP's whole-night mean (what it reports) against a deep-only mean and a WHOOP-style
-        // last-slow-wave-sleep value — so an "HRV reads ~2x higher than WHOOP" report shows WHICH stages
+        // last-slow-wave-sleep value - so an "HRV reads ~2x higher than WHOOP" report shows WHICH stages
         // lift it, and lets a deep-sleep-windowed fix be validated before it ships. Reuses the SAME
         // sessionHrvWindows the value is built from (can't diverge). Zero cost when the sink is nil.
         if let hrvTraceSink {
@@ -603,7 +603,7 @@ public enum AnalyticsEngine {
         // ── Raw SpO2 (WHOOP 4.0 v24 PPG ADC) ──────────────────────────────────
         // Nightly red/IR ADC means over the detected in-bed spans, or nil when the night carried no raw
         // SpO2 samples in any span. Baseline-independent (unlike skin temp): a RAW device reading, banked
-        // as-is for the Health "Raw SpO₂" tile — NOT a calibrated blood-oxygen %. (#93)
+        // as-is for the Health "Raw SpO₂" tile - NOT a calibrated blood-oxygen %. (#93)
         let nightlySpo2Raw = nightlySpo2RawMeans(matched, spo2: spo2)
 
         // ── Recovery / "Charge" ───────────────────────────────────────────────
@@ -940,7 +940,7 @@ public enum AnalyticsEngine {
     /// proprietary curve. Unlike skin temp there is deliberately no worn-HR / plausible-range gate: the
     /// value is surfaced honestly as raw ADC, never scored, so there's nothing to poison into a fake %.
     /// No wear gate (unlike skin temp): the strap streams SpO2 only on-wrist, so there's nothing to
-    /// exclude, and this name — matching the Kotlin `nightlySpo2RawMeans` twin — avoids the "worn"
+    /// exclude, and this name - matching the Kotlin `nightlySpo2RawMeans` twin - avoids the "worn"
     /// prefix's false implication of a gate. (#93)
     static func nightlySpo2RawMeans(_ sessions: [SleepSession], spo2: [SpO2Sample]) -> (red: Int, ir: Int)? {
         guard !sessions.isEmpty, !spo2.isEmpty else { return nil }

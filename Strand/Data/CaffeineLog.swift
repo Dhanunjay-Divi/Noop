@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Caffeine window (#526) — log an intake + a rough on-device "still active" estimate
+// MARK: - Caffeine window (#526) - log an intake + a rough on-device "still active" estimate
 //
 // OPT-IN, MANUAL-FIRST: the user logs a caffeine intake (a time, and OPTIONALLY an amount in mg). NOOP
 // then shows a plain "caffeine still active" hint on Today / Insights, computed entirely on-device from a
@@ -48,7 +48,7 @@ public enum CaffeineDecay {
                                              halfLifeHours: halfLifeHours) }
     }
 
-    /// Hours until a single dose decays to `fraction` of itself (default 25% — a common "mostly cleared"
+    /// Hours until a single dose decays to `fraction` of itself (default 25% - a common "mostly cleared"
     /// rule of thumb). Two half-lives ≈ 25% remaining, so this is ~2 × halfLife at the default.
     public static func hoursUntilFraction(_ fraction: Double,
                                           halfLifeHours: Double = defaultHalfLifeHours) -> Double {
@@ -57,7 +57,7 @@ public enum CaffeineDecay {
         return halfLifeHours * (log(fraction) / log(0.5))
     }
 
-    /// True when a dose is still meaningfully "active" `hoursElapsed` after intake — i.e. more than
+    /// True when a dose is still meaningfully "active" `hoursElapsed` after intake - i.e. more than
     /// `threshold` (default 25%) of it remains. Used for the dose-UNKNOWN case (we can't show mg, but we
     /// can honestly say it's likely still active for a typical window).
     public static func isStillActive(hoursElapsed: Double,
@@ -71,7 +71,7 @@ public enum CaffeineDecay {
     // Reframes `hoursUntilFraction` as a clock-friendly "stop drinking after" cutoff: given a bedtime and
     // an acceptable residual fraction at bedtime, the cutoff is `bedtime − hoursUntilFraction(target)`. A
     // dose at the cutoff decays to exactly `targetResidualFraction` by bedtime; anything later still has
-    // more than that on board. Same decay model as the "still active" hint — only the framing changes.
+    // more than that on board. Same decay model as the "still active" hint - only the framing changes.
 
     /// Default acceptable residual at bedtime: a quarter of the dose (two half-lives), matching the
     /// `isStillActive` threshold so "still active" and "past cutoff" agree.
@@ -114,7 +114,7 @@ public struct CaffeineIntake: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     /// When the caffeine was consumed (the user's logged time).
     public let at: Date
-    /// Amount in mg, if the user gave one. nil = "logged it, didn't say how much" — we never invent a number.
+    /// Amount in mg, if the user gave one. nil = "logged it, didn't say how much" - we never invent a number.
     public let mg: Double?
 
     public init(id: UUID = UUID(), at: Date, mg: Double? = nil) {
@@ -129,7 +129,7 @@ public struct CaffeineActiveEstimate: Equatable, Sendable {
     /// Total estimated mg still active, summed across intakes that HAD a known dose. nil when no active
     /// intake carried an amount (so the UI shows the dose-unknown phrasing rather than a fabricated mg).
     public let totalRemainingMg: Double?
-    /// Hours since the MOST RECENT still-active intake — for the "had one ~Nh ago" phrasing.
+    /// Hours since the MOST RECENT still-active intake - for the "had one ~Nh ago" phrasing.
     public let hoursSinceMostRecentActive: Double?
 
     /// True when at least one logged intake is still estimated to be active.
@@ -152,7 +152,7 @@ public struct CaffeineActiveEstimate: Equatable, Sendable {
 
         for intake in intakes {
             let hours = now.timeIntervalSince(intake.at) / 3600.0
-            // A future-dated intake (hours < 0) isn't "active yet" — don't count it.
+            // A future-dated intake (hours < 0) isn't "active yet" - don't count it.
             guard hours >= 0,
                   CaffeineDecay.isStillActive(hoursElapsed: hours, threshold: activeThreshold,
                                               halfLifeHours: halfLifeHours) else { continue }
@@ -173,7 +173,7 @@ public struct CaffeineActiveEstimate: Equatable, Sendable {
 
 /// UserDefaults-backed store of the user's logged caffeine intakes. Single user, on-device only, default
 /// empty. Mirrors the `JournalCatalogStore` persistence style (a `@Published` array with a `didSet` save).
-/// Old intakes are pruned on load so the blob stays small — anything past the "fully cleared" horizon is
+/// Old intakes are pruned on load so the blob stays small - anything past the "fully cleared" horizon is
 /// irrelevant to the estimate and to any same-day review.
 @MainActor
 public final class CaffeineLogStore: ObservableObject {
@@ -199,7 +199,7 @@ public final class CaffeineLogStore: ObservableObject {
             .sorted { $0.at > $1.at }
     }
 
-    /// Log a new intake. `mg` is optional — pass nil when the user only logged "I had caffeine".
+    /// Log a new intake. `mg` is optional - pass nil when the user only logged "I had caffeine".
     public func log(at date: Date, mg: Double? = nil) {
         // Guard a non-finite / negative mg so a fat-fingered field can't poison the estimate; nil it out
         // rather than store garbage (honest: unknown amount > wrong amount).

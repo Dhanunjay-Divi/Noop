@@ -35,15 +35,15 @@ public enum ExtendedBatteryProbe {
         }
         let verdict: String
         if resultCode == 3 {
-            verdict = "opcode 98 REJECTED by firmware (UNSUPPORTED) — evidence for the decompile's 87"
+            verdict = "opcode 98 REJECTED by firmware (UNSUPPORTED) - evidence for the decompile's 87"
         } else if hasPayload {
-            verdict = "opcode 98 ACCEPTED — \(pay.count)-byte payload"
+            verdict = "opcode 98 ACCEPTED - \(pay.count)-byte payload"
         } else {
-            verdict = "opcode 98 answered with a bare stub — ambiguous"
+            verdict = "opcode 98 answered with a bare stub - ambiguous"
         }
 
         var sb = ""
-        sb += "#592 EXTENDED-BATTERY PROBE — \(fam)\n"
+        sb += "#592 EXTENDED-BATTERY PROBE - \(fam)\n"
         sb += "Verdict: \(verdict)\n"
         if let resultLabel { sb += "Result code @12: \(resultLabel)(\(resultCode!))\n" }
         // Full raw hex on ONE line so it copies cleanly for sharing.
@@ -59,7 +59,7 @@ public enum ExtendedBatteryProbe {
             if !isWhoop5, pay.count >= 9 {
                 let mv = Int(pay[7]) | (Int(pay[8]) << 8)
                 sb += "\nVoltage: " + String(format: "%.2f V", Double(mv) / 1000.0)
-                sb += "  (mV=\(mv) @07) — the field NOOP already reads\n"
+                sb += "  (mV=\(mv) @07) - the field NOOP already reads\n"
             }
             // Per-byte diff vs the previous capture — the field-mapping signal.
             sb += "\n"
@@ -70,16 +70,16 @@ public enum ExtendedBatteryProbe {
                     deltas += String(format: " @%02d:%02x→%02x", i, prev[i], Int(pay[i]))
                 }
                 if deltas.isEmpty {
-                    sb += "Δ vs previous capture: identical — re-probe at a different % / after wear to expose the fields"
+                    sb += "Δ vs previous capture: identical - re-probe at a different % / after wear to expose the fields"
                 } else {
                     sb += "Δ vs previous capture:\(deltas)\n"
                     sb += "(a byte tracking battery % = SoC/capacity; drifting with wear = temperature; only ever climbing = cycle count)"
                 }
             } else {
-                sb += "Δ vs previous capture: first capture — probe again at another battery % to diff"
+                sb += "Δ vs previous capture: first capture - probe again at another battery % to diff"
             }
         } else {
-            sb += "\nNo payload beyond the command byte (bare stub) — no data over the battery event; "
+            sb += "\nNo payload beyond the command byte (bare stub) - no data over the battery event; "
             sb += "opcode 98 may be an unknown-command ack on this firmware"
         }
         return (sb, payloadHex)

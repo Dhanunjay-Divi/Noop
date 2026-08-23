@@ -122,6 +122,7 @@ fun HealthScreen(
     val v5Signals by vm.v5Signals.collectAsStateWithLifecycle()
     val cycleEnabled by vm.cycleTrackingEnabled.collectAsStateWithLifecycle()
     val periodStarts by vm.periodStarts.collectAsStateWithLifecycle()
+    val cycleDailyLogs by vm.cycleDailyLogs.collectAsStateWithLifecycle()
     var cycleTrackerPresented by remember { mutableStateOf(false) }
     val cycleScope = rememberCoroutineScope()
     val hrMax = profile.hrMax
@@ -132,7 +133,7 @@ fun HealthScreen(
 
     // PERF (#scroll-jank): the BLE live state + smoothed bpm tick ~1Hz. Reading them in this body to
     // compute the empty-state gate recomposed the WHOLE Health screen on every HR tick. The body only
-    // needs "is a live HR present" (null↔non-null), never the bpm number — so collapse the ticking
+    // needs "is a live HR present" (null↔non-null), never the bpm number - so collapse the ticking
     // value to a stable boolean via derivedStateOf: a 72→73 bpm tick produces an EQUAL boolean and the
     // body is NOT recomposed; it only recomposes when live-HR presence actually flips. The live bpm
     // number is rendered in HeartRateSection / SyncStatusSection, which now scope their own collection.
@@ -144,7 +145,7 @@ fun HealthScreen(
     // LIQUID SKY BACKDROP (the pilot pattern — LiquidScreenSky.kt): the time-of-day liquid sky settles into
     // the theme canvas behind this screen's top region, full-bleed up behind the status bar via the
     // scaffold's topBackground plumbing, replacing the classic scene backdrop. Static (LiquidSkyStatic,
-    // inside the helper) — never an animated sky behind a scrolling list. Gated on the shared "Day-cycle
+    // inside the helper) - never an animated sky behind a scrolling list. Gated on the shared "Day-cycle
     // background" pref (default ON) exactly like Today; OFF passes null so the scaffold paints the flat
     // surface canvas instead.
     val showDayCycleBackground = remember { NoopPrefs.showDayCycleBackground(context) }
@@ -152,7 +153,7 @@ fun HealthScreen(
 
     LazyScreenScaffold(
         title = uiString(R.string.l10n_health_screen_health_monitor_c4abc3fc),
-        subtitle = "Live vitals, streamed from the strap.",
+        subtitle = "Live vitals, streamed from Noop Band.",
         topBackground = if (showDayCycleBackground) { { LiquidScreenSky(fillHeight = skyBehindCards) } } else null,
         // Sky-behind-cards fills the viewport so the transparent cards reveal the sky the whole way
         // down (Today / Trends / Sleep / metric-detail parity - same two prefs, same two behaviours).
@@ -165,7 +166,7 @@ fun HealthScreen(
             item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
             item { HealthEmptyState() }
         } else {
-            // Manual "Sync now" + honest sync status (#364) — the first section so the strap-history
+            // Manual "Sync now" + honest sync status (#364) - the first section so the strap-history
             // control is reachable above the live hero. Mirrors HealthView.swift's top Sync section.
             item { SyncStatusSection(vm = vm, onSyncNow = { vm.syncNow() }) }
             item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
@@ -236,9 +237,15 @@ fun HealthScreen(
             CycleTrackerSheet(
                 result = cycle,
                 periodStarts = periodStarts,
+                dailyLogs = cycleDailyLogs,
                 onLogPeriodStart = { vm.logPeriodStart(it) },
                 onDeletePeriodStart = { vm.deletePeriodStart(it) },
                 onDeleteAllPeriodStarts = { vm.deleteAllPeriodStarts() },
+                onSaveDailyLog = { day, flow, symptoms ->
+                    vm.saveCycleDailyLog(day, flow, symptoms)
+                },
+                onDeleteDailyLog = { vm.deleteCycleDailyLog(it) },
+                onDeleteAllDailyLogs = { vm.deleteAllCycleDailyLogs() },
                 onDismiss = { cycleTrackerPresented = false },
             )
         }
@@ -268,7 +275,7 @@ private fun SyncStatusSection(vm: AppViewModel, onSyncNow: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         SectionHeader(
             "Sync",
-            overline = "Strap history",
+            overline = "Noop Band history",
             trailing = if (live.connected) (if (live.bonded) "Connected" else "Pairing…") else "Offline",
         )
 
@@ -302,7 +309,7 @@ private fun SyncStatusSection(vm: AppViewModel, onSyncNow: () -> Unit) {
                     )
                 }
 
-                // "Sync now" — routed through the unified NoopButton (Secondary, full-width) so the label
+                // "Sync now" - routed through the unified NoopButton (Secondary, full-width) so the label
                 // sits centred at the standard control height like every other primary control, matching
                 // HealthView.swift's `NoopButton(..., kind: .secondary, fullWidth: true)`. Disabled unless
                 // connected+bonded and not already syncing; the gated BLE entry point is a safe no-op
@@ -315,12 +322,12 @@ private fun SyncStatusSection(vm: AppViewModel, onSyncNow: () -> Unit) {
                     enabled = canSync,
                     modifier = Modifier.semantics {
                         contentDescription = if (canSync) {
-                            "Sync now. Pulls your strap's stored history immediately, without waiting " +
+                            "Sync now. Pulls Noop Band's stored history immediately, without waiting " +
                                 "for the next automatic sync."
                         } else if (live.backfilling) {
                             "Sync now. A sync is already in progress."
                         } else {
-                            "Sync now. Connect your strap first."
+                            "Sync now. Connect Noop Band first."
                         }
                     },
                     onClick = onSyncNow,
@@ -339,12 +346,12 @@ private fun SyncStatusSection(vm: AppViewModel, onSyncNow: () -> Unit) {
 /** The helper line below the Sync-now button: explains the current state (syncing / offline / pairing /
  *  ready), copy-matched to HealthView.swift's SyncStatusSection.helperText. */
 private fun syncHelperText(live: LiveState): String = when {
-    live.backfilling -> "Pulling your strap's stored history. This drains oldest-first; a deep backlog " +
+    live.backfilling -> "Pulling Noop Band's stored history. This drains oldest-first; a deep backlog " +
         "now continues automatically across passes instead of waiting between syncs."
-    !live.connected -> "Connect your strap to sync its stored history. Until then, only imported data " +
+    !live.connected -> "Connect Noop Band to sync its stored history. Until then, only imported data " +
         "shows here."
-    !live.bonded -> "Finishing the pairing handshake. Sync now becomes available once the strap is paired."
-    else -> "Syncs your strap's stored history right away, instead of waiting for the next automatic sync."
+    !live.bonded -> "Finishing the pairing handshake. Sync now becomes available once Noop Band is paired."
+    else -> "Syncs Noop Band's stored history right away instead of waiting for the next automatic sync."
 }
 
 // MARK: - Records & sources (Swift parity) — discoverable deep-links into the on-device records
@@ -502,7 +509,7 @@ private fun SkinTempSuiteSection(
 
 // MARK: - Contributors (README screen #5) — labelled progress bars on the health detail
 //
-// "CONTRIBUTORS" — the signals that drive recovery (HRV / Resting HR / Sleep / Respiratory), each as a
+// "CONTRIBUTORS" - the signals that drive recovery (HRV / Resting HR / Sleep / Respiratory), each as a
 // labelled progress bar in the shared stage/zone bar style (inset track, round-capped metric-hue fill,
 // right-aligned read-out). Per the Titanium & Gold recovery detail, HRV + Resting HR read on the gold
 // recovery world and Sleep + Respiratory on the blue sleep world. A SOLID/CALIBRATING pill states data
@@ -537,28 +544,28 @@ private fun HealthContributorsSection(day: DailyMetric?) {
                 // a staggered fade+rise, mirroring iOS `.staggeredAppear(index:)`.
                 ContributorBar(
                     label = "HRV",
-                    readout = hrv?.let { "${it.roundToInt()} ms" } ?: "—",
+                    readout = hrv?.let { "${it.roundToInt()} ms" } ?: "-",
                     fraction = hrv?.let { (it - 20.0) / 100.0 },
                     color = Palette.metricCyan,
                     modifier = Modifier.staggeredAppear(0),
                 )
                 ContributorBar(
                     label = uiString(R.string.l10n_health_screen_resting_hr_26677094),
-                    readout = rhr?.let { "${it.roundToInt()} bpm" } ?: "—",
+                    readout = rhr?.let { "${it.roundToInt()} bpm" } ?: "-",
                     fraction = rhr?.let { 1.0 - ((it - 40.0) / 40.0) },
                     color = Palette.chargeColor,
                     modifier = Modifier.staggeredAppear(1),
                 )
                 ContributorBar(
                     label = uiString(R.string.l10n_health_screen_sleep_3cac34e6),
-                    readout = sleepMin?.let { sleepHoursText(it) } ?: "—",
+                    readout = sleepMin?.let { sleepHoursText(it) } ?: "-",
                     fraction = sleepMin?.let { (it / 60.0) / 8.0 },
                     color = Palette.sleepLight,
                     modifier = Modifier.staggeredAppear(2),
                 )
                 ContributorBar(
                     label = uiString(R.string.l10n_health_screen_respiratory_1cd8c175),
-                    readout = resp?.let { String.format(Locale.US, "%.1f rpm", it) } ?: "—",
+                    readout = resp?.let { String.format(Locale.US, "%.1f rpm", it) } ?: "-",
                     fraction = resp?.let { 1.0 - ((it - 12.0) / 8.0) },
                     color = Palette.sleepLight,
                     modifier = Modifier.staggeredAppear(3),
@@ -612,23 +619,26 @@ private fun ContributorBar(
 // resting HR + recent activity against population norms for your age. The AUTHORITATIVE value is the
 // latest "fitness_age" the IntelligenceEngine writes into metricSeries under the computed "-noop"
 // source — this section only READS it; it never recomputes the headline. Honest framing throughout:
-// it's a fitness comparison (± 5 yr band), never a biological age, and weight/height/waist live under
+// it's a broad fitness comparison (roughly ±19–21 model years), never a biological age, and waist lives under
 // "Unlocks your VO₂max", never as if they sharpen the age. When no value exists yet we show the
 // readiness checklist instead, so the user knows exactly what's still needed.
 
 /** Fitness Age readiness from what a screen can see: RHR coverage over the last 7 merged daily rows
  *  (drives the "N more nights" countdown), a scored-strain day as the activity signal, and the profile
  *  basics. Shared by the Health hub's [FitnessAgeSection] and the Today card's [VitalDetailScreen]
- *  tap-through so ONE gate feeds both surfaces (no drift). Returns (rhrDays, readiness) — rhrDays also
- *  feeds the not-ready lead. Approximate by design; the weekly value is the authority, this explains gaps. */
+ *  tap-through so ONE gate feeds both surfaces (no drift). Both coverage counts feed the not-ready lead;
+ *  the weekly value remains the authority. */
 @Composable
-private fun rememberFitnessReadiness(days: List<DailyMetric>, profile: ProfileStore): Pair<Int, FitnessAgeReadiness> {
+private fun rememberFitnessReadiness(
+    days: List<DailyMetric>,
+    profile: ProfileStore,
+): Triple<Int, Int, FitnessAgeReadiness> {
     val rhrDays = remember(days) { days.takeLast(7).count { it.restingHr != null } }
+    val activityDays = remember(days) { days.takeLast(7).count { it.strain != null } }
     val readiness = remember(
         days, profile.age, profile.sex, profile.waistCm,
         profile.ageInputConfirmed, profile.sexInputConfirmed,
     ) {
-        val activityDays = days.takeLast(7).count { it.strain != null }
         FitnessAgeEngine.assessReadiness(
             hasAge = profile.ageInputConfirmed && FitnessAgeEngine.supportsAge(profile.age.toDouble()),
             hasSex = profile.sexInputConfirmed && FitnessAgeEngine.supportsSex(profile.sex),
@@ -637,7 +647,7 @@ private fun rememberFitnessReadiness(days: List<DailyMetric>, profile: ProfileSt
             hasWaist = profile.waistCm > 0,
         )
     }
-    return rhrDays to readiness
+    return Triple(rhrDays, activityDays, readiness)
 }
 
 @Composable
@@ -686,13 +696,9 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
         loadedProfileState = profileState
     }
 
-    // Readiness from what THIS screen can see: the last 7 merged daily rows. RHR coverage drives the
-    // age; activity (a scored strain day) is an enrichment signal; waist sits under the VO₂max role.
-    // Age/sex come from the profile. Approximate by design — the weekly value is the
-    // authority; this just explains the gaps.
-    // rhrDays drives BOTH the readiness verdict AND the not-ready countdown lead. Shared with the Today
-    // card's tap-through (VitalDetailScreen) via one helper so a single gate feeds both surfaces.
-    val (rhrDays, readiness) = rememberFitnessReadiness(days, profile)
+    // Readiness from the last 7 merged daily rows. Both RHR and observed activity coverage are required;
+    // waist remains optional and only unlocks VO₂max.
+    val (rhrDays, activityDays, readiness) = rememberFitnessReadiness(days, profile)
 
     var showChecklist by remember { mutableStateOf(false) }
 
@@ -720,6 +726,7 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
                 readiness = readiness, headed = true,
                 lead = fitnessReadyLead(
                     rhrDays,
+                    activityDays,
                     profile.ageInputConfirmed && FitnessAgeEngine.supportsAge(profile.age.toDouble()),
                     profile.sexInputConfirmed && FitnessAgeEngine.supportsSex(profile.sex),
                 ),
@@ -732,7 +739,7 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
                         Toast.makeText(
                             context,
                             if (wrote) "Fitness Age updated."
-                            else "Not enough wear yet — keep your strap on overnight.",
+                            else "Not enough wear yet - keep Noop Band on overnight.",
                             Toast.LENGTH_SHORT,
                         ).show()
                     }
@@ -804,6 +811,9 @@ private fun VitalityHero(
     val sorted = contributions.sortedBy { it.lnHazard }
     val best = sorted.firstOrNull()
     val worst = sorted.lastOrNull()
+    val modelBand = VitalityEngine.bandYears(
+        maxOf(VitalityEngine.minFactors, contributions.size),
+    ).roundToInt()
     // The frosted liquid hero-card wrapper floats the vessel + white count-up over the sky (the pilot).
     LiquidHeroCard {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -844,6 +854,10 @@ private fun VitalityHero(
             if (worst != null && worst.lnHazard > 0) {
                 Text(uiString(R.string.l10n_health_screen_holding_you_back_worst_label_863a1809, worst.label), style = NoopType.footnote, color = Palette.statusWarningText)
             }
+            Text(
+                uiString(R.string.wellness_age_model_range, modelBand),
+                style = NoopType.footnote, color = Palette.textTertiary,
+            )
             Text(
                 uiString(R.string.wellness_age_experimental_disclaimer),
                 style = NoopType.footnote, color = Palette.textTertiary,
@@ -936,7 +950,7 @@ private fun FitnessAgeHero(
         else -> "${kotlin.math.abs(deltaYears)} ${yearWord(deltaYears)} older than your age"
     }
     // Vessel fill: a bounded, honest reading of the SAME younger/older signal the card already states,
-    // mapped across the model-error band the section advertises — "about your age" is half-full,
+    // mapped across the model-error band the section advertises - "about your age" is half-full,
     // younger fills it up, older empties it. Presentation only; the shown number is unchanged.
     val youthFraction = if (chronoAge > 0) {
         (0.5 + (chronoAge - fitnessAge) / (2.0 * modelBandYears.coerceAtLeast(1))).coerceIn(0.0, 1.0)
@@ -983,7 +997,7 @@ private fun FitnessAgeHero(
                 color = Palette.textTertiary,
             )
 
-            // "How accurate is this?" affordance — toggles the readiness checklist below the hero.
+            // "How accurate is this?" affordance - toggles the readiness checklist below the hero.
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(Metrics.cornerSm))
@@ -1013,24 +1027,25 @@ private fun FitnessAgeHero(
     }
 }
 
-/** The not-ready card's lead: a concrete countdown of nights-of-wear still needed (from the shared
- *  [FitnessAgeEngine.nightsUntilReady]), noting the profile basics only when actually missing. Copy is kept
- *  WORD-FOR-WORD identical to the iOS `fitnessReadyLead` (HealthView) so the two platforms match. */
-private fun fitnessReadyLead(rhrDays: Int, hasAge: Boolean, hasSex: Boolean): String {
-    val remaining = FitnessAgeEngine.nightsUntilReady(rhrDays)
-    val needsBasics = !hasAge || !hasSex
-    if (needsBasics) {
-        return "Fitness Age is unavailable for this profile. The published model covers ages 20–80 " +
-            "and provides male/female coefficients only."
+/** Both RHR and activity need four observed days. Copy matches iOS `fitnessReadyLeadCopy`. */
+internal fun fitnessReadyLead(
+    rhrDays: Int,
+    activityDays: Int,
+    hasAge: Boolean,
+    hasSex: Boolean,
+): String {
+    if (!hasAge || !hasSex) {
+        return "Fitness Age needs a supported profile: age 20–80 and a male or female model coefficient."
     }
-    return when {
-        remaining == 0 && !needsBasics -> "A few more days and we can show your Fitness Age."
-        remaining == 0 && needsBasics  -> "Add your age and sex below and we can show your Fitness Age."
-        remaining == 1 && !needsBasics -> "1 more night of wear and we can show your Fitness Age."
-        remaining == 1 && needsBasics  -> "1 more night of wear, plus your age and sex below, and we can show your Fitness Age."
-        !needsBasics -> "$remaining more nights of wear and we can show your Fitness Age."
-        else         -> "$remaining more nights of wear, plus your age and sex below, and we can show your Fitness Age."
+    val rhrProgress = rhrDays.coerceIn(0, FitnessAgeEngine.minCoverageDays)
+    val activityProgress = activityDays.coerceIn(0, FitnessAgeEngine.minCoverageDays)
+    if (FitnessAgeEngine.coverageDaysUntilReady(rhrDays) == 0 &&
+        FitnessAgeEngine.coverageDaysUntilReady(activityDays) == 0
+    ) {
+        return "Resting heart rate and activity coverage are ready. Refresh to calculate your Fitness Age."
     }
+    return "Calibration progress: resting heart rate $rhrProgress of 4 nights; " +
+        "activity $activityProgress of 4 days."
 }
 
 /** The readiness checklist card: each input as a ✓ / ⚠ / ○ glyph + its detail, grouped by role into
@@ -1086,7 +1101,7 @@ private fun FitnessReadinessCard(
                     }
                     Text(
                         uiString(R.string.l10n_health_screen_it_compares_your_resting_heart_rate_e83e00f5) +
-                            "Wear your strap for a full week and it appears here.",
+                            "Wear Noop Band for a full week and it appears here.",
                         style = NoopType.subhead,
                         color = Palette.textSecondary,
                     )
@@ -1278,14 +1293,14 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
                             text = when {
                                 derived -> "Estimated from R-R interval"
                                 hasLiveHr -> "Streaming live"
-                                else -> "Awaiting strap"
+                                else -> "Awaiting Noop Band"
                             },
                             style = NoopType.footnote,
                             color = Palette.textSecondary,
                         )
                     }
                     Text(
-                        text = if (hasLiveHr) "$displayHr bpm" else "—",
+                        text = if (hasLiveHr) "$displayHr bpm" else "-",
                         style = NoopType.metricInline,
                         color = if (hasLiveHr) zoneColor else Palette.textTertiary,
                     )
@@ -1328,7 +1343,7 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
                                 )
                             } else {
                                 Text(
-                                    text = "—",
+                                    text = "-",
                                     style = NoopType.display(72f),
                                     color = Palette.textTertiary,
                                 )
@@ -1348,8 +1363,8 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
 
                 // Footer read-out row: Zone · % Max · Max HR · State.
                 HeartRateFooter(
-                    zone = if (hasLiveHr) "Z$zone" else "—",
-                    percentMax = if (hasLiveHr) "${(fraction * 100).roundToInt()}%" else "—",
+                    zone = if (hasLiveHr) "Z$zone" else "-",
+                    percentMax = if (hasLiveHr) "${(fraction * 100).roundToInt()}%" else "-",
                     maxHr = "$hrMax",
                     state = if (hasLiveHr) "STREAMING" else "IDLE",
                 )
@@ -1548,7 +1563,7 @@ private fun VitalsSection(
                             ) { onVitalClick(v.key) }
                             .semantics { contentDescription = v.accessibilityText },
                         vital = v,
-                        value = v.formattedValue ?: "—",
+                        value = v.formattedValue ?: "-",
                         caption = when (captionMode) {
                             VitalCaptionMode.AS_OF -> v.asOfLabel ?: v.stateCaption
                             VitalCaptionMode.RANGE -> v.rangeCaption ?: v.stateCaption
@@ -1580,7 +1595,7 @@ private fun VitalsSection(
 private fun VitalTile(
     vital: Vital,
     modifier: Modifier = Modifier,
-    value: String = vital.formattedValue ?: "—",
+    value: String = vital.formattedValue ?: "-",
     caption: String = vital.stateCaption,
     accent: Color = vital.accent,
 ) {
@@ -1777,7 +1792,7 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
         title = detail?.title ?: "Vital Signs",
         subtitle = when {
             key == "fitness_age" && loadedPoints == 0 -> "What your Fitness Age still needs."
-            loadedPoints == 1 -> "Your latest reading — trend to follow."
+            loadedPoints == 1 -> "Your latest reading - trend to follow."
             else -> "Historical trend from cached daily metrics."
         },
         topBackground = if (showDayCycleBackground) { { LiquidScreenSky(fillHeight = skyBehindCards) } } else null,
@@ -1794,15 +1809,16 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
         }
         if (detail == null || detail.points.size < 2) {
             // Fitness Age with NO value yet (zero points): show the readiness checklist + the "N more
-            // nights of wear" countdown — what it actually needs — instead of the generic "needs two
+            // nights of wear" countdown - what it actually needs - instead of the generic "needs two
             // readings to chart" note, which describes the trend line and left the Today card's tap-through
             // a dead end. (A single reading is handled below, generically, for every metric.)
             if (key == "fitness_age" && (detail?.points?.isEmpty() != false)) {
-                val (rhrDays, readiness) = rememberFitnessReadiness(days, profile)
+                val (rhrDays, activityDays, readiness) = rememberFitnessReadiness(days, profile)
                 FitnessReadinessCard(
                     readiness = readiness, headed = true,
                     lead = fitnessReadyLead(
                         rhrDays,
+                        activityDays,
                         profile.ageInputConfirmed && FitnessAgeEngine.supportsAge(profile.age.toDouble()),
                         profile.sexInputConfirmed && FitnessAgeEngine.supportsSex(profile.sex),
                     ),
@@ -1815,7 +1831,7 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
                             Toast.makeText(
                                 context,
                                 if (wrote) "Fitness Age updated."
-                                else "Not enough wear yet — keep your strap on overnight.",
+                                else "Not enough wear yet - keep Noop Band on overnight.",
                                 Toast.LENGTH_SHORT,
                             ).show()
                         }
@@ -1824,7 +1840,7 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
                 return@ScreenScaffold
             }
             // ANY metric with exactly ONE reading: the Today card already shows this value, so the generic
-            // "Not enough history yet" note read as a contradiction on tap-through — only the TREND CHART
+            // "Not enough history yet" note read as a contradiction on tap-through - only the TREND CHART
             // needs a second point. Show the value + when the chart fills in, never a no-data dead end.
             // Matches iOS, which renders the value hero at a single point. First hit on Fitness Age, then
             // Vitality — both weekly-ish computed scores that sit at one reading for a while.
@@ -1939,7 +1955,7 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
                         Column(modifier = Modifier.weight(1f)) {
                             Overline(label, color = Palette.textTertiary)
                             Text(
-                                text = metric?.let { "${detail.format(it)} ${detail.unit}".trim() } ?: "—",
+                                text = metric?.let { "${detail.format(it)} ${detail.unit}".trim() } ?: "-",
                                 style = NoopType.bodyNumber,
                                 color = Palette.textPrimary,
                             )
@@ -2169,7 +2185,7 @@ private suspend fun buildSeriesVitalDetail(vm: AppViewModel, key: String): Vital
         // instead of its direct motion estimate. Resolve per day with the SAME precedence so graph + Readings
         // match the card. iOS routes the @57 path through its explicitly motion-estimate descriptor.
         // Strap estimates live in DailyMetric.steps; imported measured steps in AppleDaily; the calibrated
-        // estimate in the "steps_est" series — three disjoint stores, so the
+        // estimate in the "steps_est" series - three disjoint stores, so the
         // per-day `?:` chain never double-counts.
         val motionDerived = vm.repo.resolvedSeries("steps", "my-whoop", "0000-00-00", "9999-99-99",
             strapDeviceId = vm.activeStrapId)

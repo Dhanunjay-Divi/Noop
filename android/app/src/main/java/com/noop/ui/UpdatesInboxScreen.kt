@@ -57,7 +57,7 @@ import androidx.compose.ui.unit.dp
 // The sheet behind the Today header's bell. A calm, newest-first log of what's new — release notes,
 // "new data arrived" readings, strap heads-ups, and the Today info-cards the user swiped away (which
 // can be restored from here). Tapping an actionable row routes via the app's nav; a dismissed-card
-// row offers "Restore to Today". Everything is on-device and non-clinical — informational, never a
+// row offers "Restore to Today". Everything is on-device and non-clinical - informational, never a
 // verdict.
 //
 // Kotlin port of Strand/Screens/UpdatesInboxView.swift, presented as the content of a ModalBottomSheet
@@ -89,7 +89,7 @@ fun UpdatesInboxScreen(
             .padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(Metrics.sectionGap),
     ) {
-        // Header — "INBOX" overline + "Updates" title + a live subtitle.
+        // Header - "INBOX" overline + "Updates" title + a live subtitle.
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Overline("Inbox", color = Palette.textTertiary)
             Text(uiString(R.string.l10n_updates_inbox_screen_updates_c76d1807), style = NoopType.title1, color = Palette.textPrimary)
@@ -202,7 +202,7 @@ private fun InboxSection(
 
 // MARK: - Swipe-to-mark-read
 //
-// Idea credit: contributor "A" (PR #65) — swipe an inbox card to mark it read. Reimplemented under
+// Idea credit: contributor "A" (PR #65) - swipe an inbox card to mark it read. Reimplemented under
 // the project: the original PR referenced a non-existent UpdateKind and gated its wash on the fragile
 // `state.progress` (anchor-relative in material3 1.2.1, ~1.0 at rest), so this is a from-scratch take.
 //

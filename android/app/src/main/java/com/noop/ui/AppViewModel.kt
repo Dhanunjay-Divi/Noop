@@ -11,7 +11,13 @@ import com.noop.alarm.WindDownScheduler
 import com.noop.alarm.WindDownStore
 import com.noop.analytics.Baselines
 import com.noop.analytics.HrZones
+import com.noop.analytics.HydrationGoal
+import com.noop.analytics.HydrationStore
 import com.noop.analytics.IllnessSignalEngine
+import com.noop.analytics.IllnessSignalPipeline
+import com.noop.automation.AlarmTapAutomationPrefs
+import com.noop.automation.TapAutomationRuntime
+import com.noop.automation.TapAutomationStore
 import com.noop.analytics.IllnessWatch
 import com.noop.analytics.IntelligenceEngine
 import com.noop.analytics.V5HealthSignals
@@ -21,6 +27,7 @@ import com.noop.analytics.SleepMark
 import com.noop.analytics.SleepMarkType
 import com.noop.analytics.Sport
 import com.noop.analytics.Calories
+import com.noop.analytics.ContextualVitalPolicy
 import com.noop.analytics.DailyActionPlanner
 import com.noop.analytics.ReadinessEngine
 import com.noop.analytics.StrainScorer
@@ -35,7 +42,9 @@ import com.noop.ble.WhoopConnectionService
 import com.noop.ble.WhoopModel
 import androidx.health.connect.client.HealthConnectClient
 import com.noop.data.DailyMetric
+import com.noop.data.CycleTrackingStore
 import com.noop.data.HrSample
+import com.noop.data.MedicationStore
 import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
 import com.noop.ingest.ActivityFileImporter
@@ -48,11 +57,16 @@ import com.noop.ble.ForegroundRealtimeLeasePolicy
 import com.noop.ingest.HealthConnectWriter
 import com.noop.ingest.LiftingImporter
 import com.noop.notif.AutoWorkoutCandidateNotifier
+import com.noop.notif.ContextualVitalNotifier
+import com.noop.notif.HydrationReminderPrefs
+import com.noop.notif.HydrationReminderScheduler
 import com.noop.notif.IllnessAlertNotifier
 import com.noop.notif.ScheduledReportNotifier
 import com.noop.notif.StrainTargetNotifier
 import com.noop.notif.ScheduledReportPolicy
 import com.noop.protocol.CommandNumber
+import com.noop.safety.SafetySosDispatcher
+import com.noop.safety.SafetySosGestureRuntime
 import com.noop.widget.WidgetSnapshotFactory
 import com.noop.widget.WidgetSnapshotStore
 import kotlinx.coroutines.Dispatchers
@@ -63,6 +77,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -387,6 +403,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Whether the illness early-warning runs (banner + notification). */
     val illnessWatchEnabled: StateFlow<Boolean> = _illnessWatchEnabled.asStateFlow()
 
+    // Fresh oxygen/body-temperature and slow VO2 reviews are separate, explicit opt-ins. Declared before
+    // init because the recentDays collector reads both on its synchronous first cached emission.
+    private val _contextualVitalReviewEnabled =
+        MutableStateFlow(NoopPrefs.contextualVitalReview(appContext))
+    val contextualVitalReviewEnabled: StateFlow<Boolean> =
+        _contextualVitalReviewEnabled.asStateFlow()
+    private val _contextualVo2ReviewEnabled =
+        MutableStateFlow(NoopPrefs.contextualVo2Review(appContext))
+    val contextualVo2ReviewEnabled: StateFlow<Boolean> =
+        _contextualVo2ReviewEnabled.asStateFlow()
+
     // Cycle awareness (v5 skin-temp suite) — OPT-IN, default OFF (manual-first). Declared BEFORE init for
     // the same reason as _illnessWatchEnabled: the recentDays collector reads it on its synchronous first
     // (cached) emission. Gates whether CyclePhaseEngine actually classifies in the v5 analytics pass.
@@ -400,6 +427,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _periodStarts = MutableStateFlow<List<String>>(emptyList())
     /** Logged period starts, oldest first. Dates only; local Room storage, no account or cloud. */
     val periodStarts: StateFlow<List<String>> = _periodStarts.asStateFlow()
+    private val _cycleDailyLogs =
+        MutableStateFlow<List<CycleTrackingStore.DailyLog>>(emptyList())
+    /** Optional flow/symptom details, oldest first and local to this device. */
+    val cycleDailyLogs: StateFlow<List<CycleTrackingStore.DailyLog>> =
+        _cycleDailyLogs.asStateFlow()
 
     // The v5 Health-hub skin-temp-suite engine snapshot (Cycle / Body clock / Illness heads-up), recomputed
     // from the cached merged days each analytics pass and published for HealthScreen's skin-temp section.
@@ -423,7 +455,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // Declared BEFORE the init block for the SAME reason as _illnessWatchEnabled above: the bond
     // collector launched from init runs synchronously on Main.immediate and reads _smartAlarmEnabled on
     // its first (cached) emission. A declaration after init is null there and NPEs the constructor on a
-    // cold start where the strap is already bonded — the #84 "crashes once, fine on the retry" race on
+    // cold start where the strap is already bonded - the #84 "crashes once, fine on the retry" race on
     // fast devices (S24+). Port of macOS BehaviorStore (Swift two-phase init makes this safe for free).
     private val _smartAlarmEnabled = MutableStateFlow(NoopPrefs.smartAlarmEnabled(appContext))
     val smartAlarmEnabled: StateFlow<Boolean> = _smartAlarmEnabled.asStateFlow()
@@ -468,7 +500,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  DOUBLE_TAP event. Mirrors the iOS AppModel debounce (lastDoubleTapAt). Seeded with whatever event
      *  is already current so a ViewModel recreated right after a double-tap (e.g. a screen rotation, the
      *  process-owned BLE client keeps the old lastEvent) treats it as already-handled, not a fresh tap. */
-    private var lastDispatchedEvent: String? = ble.state.value.lastEvent
+    private var lastDispatchedGestureSequence: Long = ble.state.value.gestureSequence
 
     // PHONE smart alarm (#207) — distinct from the strap-firmware buzz alarm above. The state lives in
     // its own [SmartAlarmStore]; the GUARANTEED wake is an exact OS alarm via [SmartAlarmScheduler],
@@ -596,6 +628,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // #386 self-heal: nudge the analyze loop so a night the killed overnight tick never scored is
             // caught up now. Gated + coalesced downstream, so a healthy resume costs one fingerprint read.
             analyzeKick.trySend(Unit)
+            viewModelScope.launch { refreshAdaptiveHydrationContext() }
         }
         override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {}
         override fun onActivityStarted(activity: android.app.Activity) {}
@@ -618,7 +651,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refreshActiveDeviceName()
         // #577 — surface the strap's smart-alarm wake as a local notification too (iOS AppModel.postSmartAlarm
         // twin), so a pocketed phone doesn't miss the wrist buzz. Self-gates on the wrist-alerts master.
-        ble.onSmartAlarmFired = { com.noop.notif.SmartAlarmNotifier.onFired(appContext) }
+        ble.onSmartAlarmFired = {
+            AlarmTapAutomationPrefs.armForActiveAlarm(appContext)
+            com.noop.notif.SmartAlarmNotifier.onFired(appContext)
+        }
         // Smooth HR from each LiveState emission, and re-arm the strap's firmware alarm whenever it
         // (re)bonds. A smart-alarm time changed while the strap was away never reached it — the send
         // is gated on bond — so the strap kept the OLD time and fired at it (#59). Gated on enabled so
@@ -641,7 +677,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 // #39 parity with iOS: clear the smoothed median on a true disconnect (no HR AND no R-R) so the
-                // Health hero falls to "—" rather than freezing on the last value; a transient gap with R-R
+                // Health hero falls to "-" rather than freezing on the last value; a transient gap with R-R
                 // still flowing keeps the median (matches AppModel.ingestHR's disconnect guard).
                 if (state.heartRate == null && state.rr.isEmpty()) resetSmoothing()
                 coachZone(state)
@@ -685,6 +721,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 reconcileStrapAlarm()  // #5/#59/#536: one reconcile covers both strap-alarm features
             }
         }
+        // Keep adaptive hydration timing current without polling. A scored Effort change or a confirmed
+        // NOOP hydration mutation triggers one local read; missing values remain null and therefore leave
+        // the user's base interval untouched. Health Connect changes are also refreshed on app resume and
+        // when the Hydration screen reads its merged total.
+        viewModelScope.launch {
+            combine(today, HydrationStore.mutationSeq) { todayRow, _ -> todayRow }
+                .collectLatest { refreshAdaptiveHydrationContext(it) }
+        }
         // Recompute the illness banner + today's row whenever cached days change.
         viewModelScope.launch {
             recentDays.collect { days ->
@@ -703,15 +747,33 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 // logical-day row, preserving the #144 anti-blank guard (no night yet ⇒ keep yesterday's).
                 val logicalKey = logicalDayKeyNow()       // ISO yyyy-MM-dd, local logical day
                 val localKey = java.time.LocalDate.now().toString()
+                val illnessTodayKey = maxOf(logicalKey, localKey)
                 _today.value = resolveTodayRow(days, logicalKey, localKey)
+                val illnessContext = runCatching {
+                    illnessJournalContext(days, illnessTodayKey)
+                }.getOrElse {
+                    illnessContextWithoutJournal(days, illnessTodayKey)
+                }
+                val illnessAssessment = IllnessWatch.assess(
+                    days = days,
+                    todayKey = illnessTodayKey,
+                    context = illnessContext,
+                )
                 val previousAlert = _healthAlert.value
                 _healthAlert.value =
-                    if (_illnessWatchEnabled.value) IllnessWatch.evaluate(days) else null
+                    if (_illnessWatchEnabled.value) {
+                        IllnessWatch.banner(illnessAssessment.result)
+                    } else {
+                        null
+                    }
                 // Banner transition (clear → raised) → real system notification; the notifier's
                 // persisted day gate dedupes against the background-service call site.
                 if (previousAlert == null) {
                     _healthAlert.value?.let { IllnessAlertNotifier.onEvaluated(appContext, it) }
                 }
+                // Optional contextual reviews are independent of the illness score. They consume only
+                // explicit, source-preserving data and have their own restart-safe cooldown gate.
+                runCatching { evaluateContextualVitalInterventions(illnessTodayKey) }
                 _today.value?.let { todayRow ->
                     // Morning recap delivery intentionally does not live in this generic database
                     // collector. An old/imported row can republish here on launch; the recap is posted
@@ -735,20 +797,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         targetEffort = dailyPlan.target?.lower,
                     )
                 }
-                // v5 skin-temp suite: run the Cycle / Body-clock / Illness-heads-up engines over the same
-                // cached history and publish their RESULTS for the Health hub. The richer IllnessSignalEngine
-                // here is the v5 replacement for AppModel.evaluateIllness's body (the macOS Result analogue);
-                // it COEXISTS with the legacy IllnessWatch banner string above (which the notifier consumes),
-                // so the contract the notification path relies on is untouched. Best-effort — never let a
-                // signals hiccup kill the collector.
+                // Cycle/body-clock and the already-computed shared illness assessment feed the Health hub.
+                // The banner above and this card therefore publish the exact same engine result.
                 runCatching {
                     val loggedPeriodStarts = repository.periodStarts()
                     _periodStarts.value = loggedPeriodStarts
+                    _cycleDailyLogs.value = repository.cycleDailyLogs()
                     _v5Signals.value = V5HealthSignals.evaluate(
                         days = days,
                         cycleOptedIn = _cycleTrackingEnabled.value,
                         loggedPeriodStarts = loggedPeriodStarts,
-                        journalContext = illnessJournalContext(days),
+                        journalContext = illnessContext,
+                        todayKey = illnessTodayKey,
+                        illnessAssessment = illnessAssessment,
                     )
                 }
                 // Keep the home-screen widget fresh while the app is open — covers users who turned
@@ -1007,6 +1068,28 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         autoReconnectOnLaunch()
     }
 
+    private suspend fun refreshAdaptiveHydrationContext(todayRow: DailyMetric? = _today.value) {
+        val config = HydrationReminderPrefs.config(appContext)
+        if (!config.adaptiveEnabled) return
+        val localDay = java.time.LocalDate.now().toString()
+        val currentRow = todayRow?.takeIf { it.day == localDay }
+        val reading = runCatching { HydrationStore.reading(repository) }.getOrNull()
+        val profile = ProfileStore.from(appContext)
+        val goalMl = HydrationGoal.dailyGoalMl(
+            sex = profile.sex,
+            weightKg = null,
+            effort = currentRow?.strain,
+            skinTempDevC = currentRow?.skinTempDevC,
+        )
+        val changed = HydrationReminderPrefs.updateAdaptiveContext(
+            context = appContext,
+            effort = currentRow?.strain,
+            consumedMl = reading?.valueMl,
+            goalMl = reading?.let { goalMl },
+        )
+        if (changed && config.enabled) HydrationReminderScheduler.reconcile(appContext)
+    }
+
     /** Push the persisted BLE-behaviour prefs to the client. The #477 Power-saving levers: the
      *  offload-cadence stretch uses the battery-% threshold (0 = off when the master is off); the HRV pause
      *  is its own Battery-Saver toggle. The riskier connection-priority idle throttle is deliberately NOT
@@ -1071,7 +1154,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The effective continuous-HRV want: the user's "Continuous HRV capture" preference AND
-     *  "Keep connected in the background" — the latter is what holds the link up for the stream to ride,
+     *  "Keep connected in the background" - the latter is what holds the link up for the stream to ride,
      *  so continuous capture is meaningless without it. */
     private fun continuousHrvEffective(): Boolean =
         NoopPrefs.continuousHrv(appContext) && NoopPrefs.backgroundConnection(appContext)
@@ -1589,7 +1672,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     //
     // The screen observes [workouts]; every mutation re-loads it so the list reflects the new state
     // immediately. Loads ALL sources — strap (imported + manual), Apple Health / Health Connect, and
-    // the on-device DETECTED bouts under "<deviceId>-noop" — then filters out dismissed detected bouts
+    // the on-device DETECTED bouts under "<deviceId>-noop" - then filters out dismissed detected bouts
     // so a duplicate the auto-detector created is visible but removable. Mirrors macOS
     // Repository.workoutRows.
 
@@ -1980,7 +2063,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Drop the smoothing window and blank the hero number so a resume / re-attach shows "—" until a
+     * Drop the smoothing window and blank the hero number so a resume / re-attach shows "-" until a
      * genuinely fresh sample arrives, instead of republishing the stale pre-gap median. Called on
      * explicit foreground Live/workout/reading/session arm (requestRealtimeHr 0->1), NOT on keep-alive re-arm, so steady-state
      * smoothing is untouched. Mirrors AppModel.resetSmoothing and the existing disconnect() clear.
@@ -2266,7 +2349,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** A screen that shows live HR appeared. Arms the realtime stream on the 0→1 transition, and
-     *  blanks the stale smoothing window so a resume shows "—" until a fresh sample lands (#46).
+     *  blanks the stale smoothing window so a resume shows "-" until a fresh sample lands (#46).
      *  Guarded on 0→1 so a second concurrent HR screen doesn't re-clear an already-live window. */
     fun requestRealtimeHr() {
         if (realtimeLeasePolicy.requestLease() == ForegroundRealtimeLeasePolicy.Transition.ARM) {
@@ -2460,7 +2543,159 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _illnessWatchEnabled.value = enabled
         NoopPrefs.setIllnessWatch(appContext, enabled)
         // Recompute now — the recentDays collector only fires on data changes.
-        _healthAlert.value = if (enabled) IllnessWatch.evaluate(recentDays.value) else null
+        if (!enabled) {
+            _healthAlert.value = null
+            return
+        }
+        viewModelScope.launch {
+            val days = recentDays.value
+            val todayKey = maxOf(logicalDayKeyNow(), java.time.LocalDate.now().toString())
+            val context = runCatching {
+                illnessJournalContext(days, todayKey)
+            }.getOrElse {
+                illnessContextWithoutJournal(days, todayKey)
+            }
+            val banner = IllnessWatch.evaluate(days, todayKey, context)
+            if (_illnessWatchEnabled.value) _healthAlert.value = banner
+        }
+    }
+
+    fun setContextualVitalReviewEnabled(enabled: Boolean) {
+        _contextualVitalReviewEnabled.value = enabled
+        NoopPrefs.setContextualVitalReview(appContext, enabled)
+        if (enabled) {
+            viewModelScope.launch {
+                evaluateContextualVitalInterventions(currentIllnessDayKey())
+            }
+        }
+    }
+
+    fun setContextualVo2ReviewEnabled(enabled: Boolean) {
+        _contextualVo2ReviewEnabled.value = enabled
+        NoopPrefs.setContextualVo2Review(appContext, enabled)
+        if (enabled) {
+            viewModelScope.launch {
+                evaluateContextualVitalInterventions(currentIllnessDayKey())
+            }
+        }
+    }
+
+    /**
+     * Source-preserving Android parity for Apple's contextual vital reviews. This never feeds the
+     * illness score, produces an all-clear, or pages contacts. Every candidate is independently fresh,
+     * conflict-aware, opt-in, and passed through a persisted delivery cooldown.
+     */
+    private suspend fun evaluateContextualVitalInterventions(todayKey: String) {
+        val today = runCatching { java.time.LocalDate.parse(todayKey) }.getOrNull() ?: return
+        val importedSources = repository.importedSourceIds(deviceId)
+        val computedSources = repository.computedSourceIds(deviceId)
+
+        if (_contextualVitalReviewEnabled.value) {
+            val from = today.minusDays(7).toString()
+            val dailySources = (
+                importedSources + computedSources +
+                    WhoopRepository.APPLE_HEALTH_SOURCE +
+                    WhoopRepository.HEALTH_CONNECT_SOURCE
+                ).distinct()
+            val oxygen = dailySources.flatMap { source ->
+                val priority = when (source) {
+                    WhoopRepository.APPLE_HEALTH_SOURCE -> 0
+                    WhoopRepository.HEALTH_CONNECT_SOURCE -> 1
+                    else -> if (source.endsWith("-noop")) 3 else 2
+                }
+                repository.daysInRange(source, from, todayKey).mapNotNull { row ->
+                    row.spo2Pct?.let {
+                        ContextualVitalPolicy.OxygenPoint(row.day, it, priority)
+                    }
+                }
+            }
+            ContextualVitalPolicy.oxygenCandidate(oxygen, todayKey)?.let {
+                ContextualVitalNotifier.onCandidate(appContext, it)
+            }
+
+            val bodyPoints = listOf(
+                WhoopRepository.APPLE_HEALTH_SOURCE to 0,
+                WhoopRepository.HEALTH_CONNECT_SOURCE to 1,
+            ).flatMap { (source, priority) ->
+                repository.metricSeries(source, "body_temp", from, todayKey).map { row ->
+                    ContextualVitalPolicy.BodyTemperaturePoint(
+                        day = row.day,
+                        valueC = row.value,
+                        source = source,
+                        sourcePriority = priority,
+                    )
+                }
+            }
+            ContextualVitalPolicy.bodyTemperatureCandidate(bodyPoints, todayKey)?.let {
+                ContextualVitalNotifier.onCandidate(appContext, it)
+            }
+        }
+
+        if (!_contextualVo2ReviewEnabled.value) return
+        val from = today.minusDays(400).toString()
+        val measuredByDay = LinkedHashMap<String, Double>()
+        for (source in importedSources) {
+            for (row in repository.metricSeries(source, "vo2max", from, todayKey)) {
+                measuredByDay[row.day] = row.value
+            }
+        }
+        // Health Connect wins a wearable collision; an explicit Apple Health VO2 type wins both.
+        for (source in listOf(
+            WhoopRepository.HEALTH_CONNECT_SOURCE,
+            WhoopRepository.APPLE_HEALTH_SOURCE,
+        )) {
+            for (row in repository.metricSeries(source, "vo2max", from, todayKey)) {
+                measuredByDay[row.day] = row.value
+            }
+            for (row in repository.appleDaily(source, from, todayKey)) {
+                row.vo2max?.let { measuredByDay[row.day] = it }
+            }
+        }
+        val measured = measuredByDay.map { (day, value) ->
+            ContextualVitalPolicy.Vo2Point(day, value)
+        }
+        val estimated = repository.metricSeriesComputedUnion(
+            deviceId,
+            "vo2max_est",
+            from,
+            todayKey,
+        ).map { ContextualVitalPolicy.Vo2Point(it.day, it.value) }
+        ContextualVitalPolicy.vo2Candidate(measured, estimated, todayKey)?.let {
+            ContextualVitalNotifier.onCandidate(appContext, it)
+        }
+    }
+
+    /** Re-publish the explanatory medication context after the private list changes. This cannot alter
+     *  the anomaly score or level; it only refreshes copy on the banner and Health detail card. */
+    fun medicationContextChanged() {
+        viewModelScope.launch {
+            val days = recentDays.value
+            val todayKey = currentIllnessDayKey()
+            val context = runCatching {
+                illnessJournalContext(days, todayKey)
+            }.getOrElse {
+                illnessContextWithoutJournal(days, todayKey)
+            }
+            val assessment = IllnessWatch.assess(days, todayKey, context)
+            _healthAlert.value = if (_illnessWatchEnabled.value) {
+                IllnessWatch.banner(assessment.result)
+            } else {
+                null
+            }
+            runCatching {
+                val starts = repository.periodStarts()
+                _periodStarts.value = starts
+                _cycleDailyLogs.value = repository.cycleDailyLogs()
+                _v5Signals.value = V5HealthSignals.evaluate(
+                    days = days,
+                    cycleOptedIn = _cycleTrackingEnabled.value,
+                    loggedPeriodStarts = starts,
+                    journalContext = context,
+                    todayKey = todayKey,
+                    illnessAssessment = assessment,
+                )
+            }
+        }
     }
 
     /** Flip cycle awareness (v5 skin-temp suite). Persists and recomputes the v5 signals immediately so
@@ -2473,11 +2708,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             runCatching {
                 val loggedPeriodStarts = repository.periodStarts()
                 _periodStarts.value = loggedPeriodStarts
+                _cycleDailyLogs.value = repository.cycleDailyLogs()
                 _v5Signals.value = V5HealthSignals.evaluate(
                     days = days,
                     cycleOptedIn = enabled,
                     loggedPeriodStarts = loggedPeriodStarts,
-                    journalContext = illnessJournalContext(days),
+                    journalContext = illnessJournalContext(days, currentIllnessDayKey()),
+                    todayKey = currentIllnessDayKey(),
                 )
             }
         }
@@ -2504,34 +2741,117 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return deleted
     }
 
+    suspend fun saveCycleDailyLog(
+        day: String,
+        flow: CycleTrackingStore.Flow?,
+        symptoms: Set<CycleTrackingStore.Symptom>,
+    ): Boolean {
+        val saved = repository.saveCycleDailyLog(day, flow, symptoms)
+        if (saved) refreshCycleTrackingAfterMutation()
+        return saved
+    }
+
+    suspend fun deleteCycleDailyLog(day: String): Boolean {
+        val deleted = repository.deleteCycleDailyLog(day)
+        if (deleted) refreshCycleTrackingAfterMutation()
+        return deleted
+    }
+
+    suspend fun deleteAllCycleDailyLogs(): Boolean {
+        val deleted = repository.deleteAllCycleDailyLogs()
+        if (deleted) refreshCycleTrackingAfterMutation()
+        return deleted
+    }
+
     /** A metricSeries mutation does not invalidate recentDays, so explicitly reload the isolated series
      *  and rerun the v5 adapter instead of waiting for unrelated daily data to change. */
     private suspend fun refreshCycleTrackingAfterMutation() {
         val starts = repository.periodStarts()
         _periodStarts.value = starts
+        _cycleDailyLogs.value = repository.cycleDailyLogs()
         val days = recentDays.value
         runCatching {
             _v5Signals.value = V5HealthSignals.evaluate(
                 days = days,
                 cycleOptedIn = _cycleTrackingEnabled.value,
                 loggedPeriodStarts = starts,
-                journalContext = illnessJournalContext(days),
+                journalContext = illnessJournalContext(days, currentIllnessDayKey()),
+                todayKey = currentIllnessDayKey(),
             )
         }
     }
 
+    /** Current civil day wins over the pre-04:00 logical day for signal freshness and journal context. */
+    private fun currentIllnessDayKey(): String =
+        maxOf(logicalDayKeyNow(), java.time.LocalDate.now().toString())
+
     /**
-     * Same-day confounder context for [IllnessSignalEngine] from the day's journal — alcohol / hard-or-late
-     * workout / "feeling unwell" suppress an anomaly so a hangover or a late session never reads as illness.
-     * Lightweight: derived from the latest day's exercise count + the cached "unwell" flag we can see here.
-     * (A fuller journal-tag read lands with the Mind pillar; this keeps the v5 pass honest without new I/O.)
+     * Exact current/prior-two-day journal context. These factors explain a shift but never suppress it;
+     * an explicit unwell entry remains visible even with no usable wearable rows.
      */
-    private fun illnessJournalContext(days: List<DailyMetric>): IllnessSignalEngine.Context {
-        val latest = days.lastOrNull()
-        val hardOrLate = (latest?.exerciseCount ?: 0) >= 2
+    private suspend fun illnessJournalContext(
+        days: List<DailyMetric>,
+        todayKey: String,
+    ): IllnessSignalEngine.Context {
+        val today = runCatching { java.time.LocalDate.parse(todayKey) }.getOrNull()
+            ?: return illnessContextWithoutJournal(days, todayKey)
+        val from = today.minusDays(IllnessSignalPipeline.MAXIMUM_SIGNAL_AGE_DAYS.toLong()).toString()
+        val entries = (
+            repository.journal(JOURNAL_DEVICE_ID, from, todayKey) +
+                repository.journal(deviceId, from, todayKey)
+            ).distinctBy { Triple(it.deviceId, it.day, it.question) }
+        val recentDays = (0L..IllnessSignalPipeline.MAXIMUM_SIGNAL_AGE_DAYS.toLong())
+            .mapTo(HashSet()) { today.minusDays(it).toString() }
+        var alcohol = false
+        var stress = false
+        var sauna = false
+        var hardOrLateWorkout = false
+        var travel = false
+        var alreadyUnwell = false
+        for (entry in entries) {
+            if (!entry.answeredYes || entry.day !in recentDays) continue
+            val question = entry.question.lowercase()
+            if ("alcohol" in question || "drink" in question) alcohol = true
+            if ("stress" in question) stress = true
+            if ("sauna" in question) sauna = true
+            if ("workout" in question || "train" in question || "exercise" in question) {
+                hardOrLateWorkout = true
+            }
+            if ("travel" in question || "jet lag" in question) travel = true
+            if (
+                "sick" in question || "ill" in question || "unwell" in question ||
+                "symptom" in question || "fever" in question
+            ) {
+                alreadyUnwell = true
+            }
+        }
+        val fallback = illnessContextWithoutJournal(days, todayKey)
+        return IllnessSignalEngine.Context(
+            alcohol = alcohol,
+            stress = stress,
+            sauna = sauna,
+            hardOrLateWorkout = hardOrLateWorkout || fallback.hardOrLateWorkout,
+            travelPhaseJump = travel,
+            alreadyUnwell = alreadyUnwell,
+            recentMedicationChange = MedicationStore.hasRecentChange(appContext),
+        )
+    }
+
+    private fun illnessContextWithoutJournal(
+        days: List<DailyMetric>,
+        todayKey: String,
+    ): IllnessSignalEngine.Context {
+        val today = runCatching { java.time.LocalDate.parse(todayKey) }.getOrNull()
+        val recentDays = today?.let { anchor ->
+            (0L..IllnessSignalPipeline.MAXIMUM_SIGNAL_AGE_DAYS.toLong())
+                .mapTo(HashSet()) { anchor.minusDays(it).toString() }
+        } ?: emptySet()
+        val hardOrLate = days.asSequence()
+            .filter { it.day in recentDays }
+            .any { (it.exerciseCount ?: 0) >= 2 }
         return IllnessSignalEngine.Context(
             hardOrLateWorkout = hardOrLate,
-            alreadyUnwell = false,
+            recentMedicationChange = MedicationStore.hasRecentChange(appContext),
         )
     }
 
@@ -2621,17 +2941,58 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Dispatch the double-tap action when the strap reports a FRESH double-tap. The BLE client already
-     * surfaces the gesture as [LiveState.lastEvent] = "DOUBLE_TAP(14)" (WhoopBleClient onInbound) — it
+     * surfaces the gesture as [LiveState.lastEvent] = "DOUBLE_TAP(14)" (WhoopBleClient onInbound) - it
      * does NOT change the decode; this just consumes the event it already publishes. Debounced on the
      * event identity: [lastEvent] keeps its last value across many LiveState emissions, so without the
      * [lastDispatchedEvent] guard a single tap would fire on every subsequent emission. Mirrors the iOS
      * AppModel.handleDoubleTap (which debounces on a 1.2s window over the same onDoubleTap closure).
      */
-    private fun dispatchDoubleTap(state: LiveState) {
+    private suspend fun dispatchDoubleTap(state: LiveState) {
+        val sequence = state.gestureSequence
+        if (sequence == lastDispatchedGestureSequence) return
+        lastDispatchedGestureSequence = sequence
         val ev = state.lastEvent
-        if (ev == lastDispatchedEvent) return       // not a fresh event since we last looked
-        lastDispatchedEvent = ev
         if (ev == null || !ev.startsWith("DOUBLE_TAP")) return
+
+        when (val result = TapAutomationStore.consumeForGesture(appContext, sequence)) {
+            is TapAutomationStore.GestureResult.Consumed -> {
+                val line = runCatching {
+                    TapAutomationRuntime.perform(appContext, result.action, repository, ble)
+                }.getOrElse { "Double-tap automation failed: ${it.javaClass.simpleName}" }
+                ble.externalLog(line)
+                return
+            }
+            TapAutomationStore.GestureResult.AlreadyConsumed -> return
+            TapAutomationStore.GestureResult.None -> Unit
+        }
+
+        when (val safety = SafetySosGestureRuntime.consume(appContext, sequence)) {
+            SafetySosGestureRuntime.Result.Ignored -> Unit
+            SafetySosGestureRuntime.Result.ReservedDuplicate -> return
+            is SafetySosGestureRuntime.Result.Progress -> {
+                ble.externalLog(
+                    "SOS gesture: repeated double-tap ${safety.count}/${safety.required}",
+                )
+                return
+            }
+            SafetySosGestureRuntime.Result.Triggered -> {
+                ble.externalLog("SOS gesture complete; opening a manual contact page")
+                ble.buzz(3)
+                val outcome = SafetySosDispatcher.trigger(appContext)
+                ble.externalLog(
+                    when (outcome) {
+                        SafetySosDispatcher.Outcome.Opened ->
+                            "SOS page opened; latest-location sharing started where permitted"
+                        SafetySosDispatcher.Outcome.AlreadyActive ->
+                            "SOS page already active; latest-location sharing resumed"
+                        is SafetySosDispatcher.Outcome.Unavailable ->
+                            "SOS page was not sent: ${outcome.reason}"
+                    },
+                )
+                return
+            }
+        }
+
         val action = _doubleTapAction.value
         if (action == DoubleTapAction.NONE) return
         ble.externalLog("Double-tap -> ${action.label}")

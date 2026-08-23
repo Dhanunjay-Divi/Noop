@@ -33,7 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
 
-// MARK: - NoopMotion — the "Design Reset" motion set (WHOOP design language, 2026-06-22)
+// MARK: - NoopMotion - the "Design Reset" motion set (WHOOP design language, 2026-06-22)
 //
 // Compose port of StrandDesign/NoopMotion.swift. The house motion language for the
 // WHOOP-flavoured redesign: smooth, snappy, almost no bounce. Beauty is in the restraint —

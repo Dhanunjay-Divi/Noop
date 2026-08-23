@@ -353,7 +353,7 @@ object NutritionCsvImporter {
      * Parse a nutrition CSV date cell into "YYYY-MM-DD".
      *
      *   - "2026-06-01", "2026/6/1", "2026-06-01 08:30" → ISO prefix wins.
-     *   - "06/02/2026" → month-first (US convention — MyFitnessPal et al), unless the first
+     *   - "06/02/2026" → month-first (US convention - MyFitnessPal et al), unless the first
      *     number is > 12 ("13/02/2026"), which forces day-first.
      *   - Full ISO-8601 datetimes (with Z / offsets) fall through to [WhoopTime] at UTC.
      */

@@ -279,7 +279,7 @@ public struct TrendChip: View {
         if t.hasPrefix("+") || t.hasPrefix("▲") || t.lowercased().hasPrefix("up") { return "arrow.up.right" }
         if t.hasPrefix("-") || t.hasPrefix("−") || t.hasPrefix("▼") || t.lowercased().hasPrefix("down") { return "arrow.down.right" }
         // No sign → a plain magnitude (e.g. a workout's "874 kcal"), not a trend: show NO direction
-        // glyph. Previously this fell to "minus", whose leading dash read as a negative ("-874 kcal" — #41).
+        // glyph. Previously this fell to "minus", whose leading dash read as a negative ("-874 kcal" - #41).
         return nil
     }
     public var body: some View {
@@ -655,7 +655,7 @@ public enum ScoreState: Sendable, Equatable {
 }
 
 /// The score-lifecycle chip: dot + hue@.12 fill + hue@.32 border + hue text. LIVE
-/// pulses its dot. `text` overrides the default state label (e.g. "Building — 2 of 4").
+/// pulses its dot. `text` overrides the default state label (e.g. "Building - 2 of 4").
 public struct ScoreStatePill: View {
     public var state: ScoreState
     public var text: LocalizedStringKey?

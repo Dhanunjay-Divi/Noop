@@ -9,7 +9,7 @@ import WhoopStore
 // Phase 1b of the mental-health track (design:
 // 2026-06-12-noop-mind-mental-health-design.md). Two pieces:
 //
-//  1. CHECK-IN — a one-tap "How's your mood today?" card with five faces (1–5).
+//  1. CHECK-IN - a one-tap "How's your mood today?" card with five faces (1–5).
 //     Shown until answered for the local day, then collapses to the chosen face
 //     + an "Edit" affordance. Storage via MoodStore (dedicated `noop-mood`
 //     source id, one row per local day, edits overwrite).

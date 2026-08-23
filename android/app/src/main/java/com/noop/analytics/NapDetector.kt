@@ -75,7 +75,7 @@ data class NapConfig(
     val minNapMinutes: Int = NapDetector.DEFAULT_MIN_NAP_MIN,
     /** Longest a daytime "nap" can be before it's really main sleep we shouldn't fold in (minutes). */
     val maxNapMinutes: Int = NapDetector.DEFAULT_MAX_NAP_MIN,
-    /** Smoothed wrist-motion at/under this (g) is "lying still" — quieter than the sedentary threshold,
+    /** Smoothed wrist-motion at/under this (g) is "lying still" - quieter than the sedentary threshold,
      *  because a nap needs genuine stillness, not just "not walking". */
     val stillThresholdG: Double = NapDetector.DEFAULT_STILL_THRESHOLD_G,
     /** HR must sit at/under (restingHr + this margin) bpm to read as asleep, not awake-but-still. */
@@ -102,7 +102,7 @@ object NapDetector {
     const val DEFAULT_MIN_GRAVITY_SAMPLES: Int = 20
 
     /** ...and only when their MEDIAN inter-sample gap is no larger than this (seconds). A sparse / gappy
-     *  window is INCONCLUSIVE, not NONE — we can't claim "awake" from data we don't have. */
+     *  window is INCONCLUSIVE, not NONE - we can't claim "awake" from data we don't have. */
     const val DEFAULT_MAX_MEDIAN_GAP_S: Long = 90
 
     /**
@@ -210,7 +210,7 @@ object NapDetector {
         val (start, end) = quiet
         val durationMin = (end - start) / 60.0
         if (durationMin < config.minNapMinutes) return NapDecision(NapVerdict.NONE, null)
-        // Too long to safely call a "nap" — could be main sleep; don't mislabel either way.
+        // Too long to safely call a "nap" - could be main sleep; don't mislabel either way.
         if (durationMin > config.maxNapMinutes) return NapDecision(NapVerdict.INCONCLUSIVE, null)
 
         val meanHr = meanHrIn(hr, start, end)

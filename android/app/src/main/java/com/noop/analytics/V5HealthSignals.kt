@@ -1,6 +1,7 @@
 package com.noop.analytics
 
 import com.noop.data.DailyMetric
+import java.time.LocalDate
 import kotlin.math.sqrt
 
 /**
@@ -49,7 +50,7 @@ object V5HealthSignals {
      * Run the three engines over [days] (oldest→newest). [cycleOptedIn] gates whether the cycle classifier
      * is run at all (it returns a cheap LEARNING result when off, so the caller can publish unconditionally
      * and the UI's opt-in card still shows). [loggedPeriodStarts] are optional "yyyy-MM-dd" period-start
-     * days. [journalContext] supplies the same-day confounder flags for illness suppression.
+     * days. [journalContext] supplies nearby explanatory context for the illness result.
      */
     fun evaluate(
         days: List<DailyMetric>,
@@ -57,8 +58,10 @@ object V5HealthSignals {
         loggedPeriodStarts: List<String> = emptyList(),
         journalContext: IllnessSignalEngine.Context = IllnessSignalEngine.Context(),
         habitualWakeHour: Double = 7.0,
+        todayKey: String = days.maxOfOrNull { it.day } ?: LocalDate.now().toString(),
+        illnessAssessment: IllnessWatch.Assessment? = null,
     ): Snapshot {
-        val baselineTrusted = days.count { hasAnyVital(it) } >= MIN_BASELINE_NIGHTS
+        val cycleBaselineTrusted = days.count { hasAnyVital(it) } >= MIN_BASELINE_NIGHTS
 
         // ── Per-night z-scores against each signal's trailing rolling baseline ──
         val nights = ArrayList<CyclePhaseEngine.Night>(days.size)
@@ -67,7 +70,7 @@ object V5HealthSignals {
             nights.add(
                 CyclePhaseEngine.Night(
                     day = d.day,
-                    tempZ = zAgainst(d.skinTempDevC, window) { it.skinTempDevC },
+                    tempZ = skinTempZAgainst(d.skinTempDevC, window),
                     rhrZ = zAgainst(d.restingHr?.toDouble(), window) { it.restingHr?.toDouble() },
                     hrvZ = zAgainst(d.avgHrv, window) { it.avgHrv },
                 )
@@ -76,7 +79,11 @@ object V5HealthSignals {
 
         // ── Cycle awareness (opt-in) ──
         val cycle = if (cycleOptedIn) {
-            CyclePhaseEngine.classify(nights, baselineUsable = baselineTrusted, loggedPeriodStarts = loggedPeriodStarts)
+            CyclePhaseEngine.classify(
+                nights,
+                baselineUsable = cycleBaselineTrusted,
+                loggedPeriodStarts = loggedPeriodStarts,
+            )
         } else {
             CyclePhaseEngine.Result(
                 phase = CyclePhaseEngine.Phase.LEARNING,
@@ -87,52 +94,24 @@ object V5HealthSignals {
             )
         }
 
-        // ── Illness heads-up (confounder-suppressed) ──
-        val latest = nights.lastOrNull()
-        val firedLabels = HashMap<String, String>()
-        latest?.rhrZ?.let { if (it >= IllnessSignalEngine.signalZThreshold) firedLabels["restingHR"] = "RHR up" }
-        latest?.tempZ?.let { if (it >= IllnessSignalEngine.signalZThreshold) firedLabels["skinTemp"] = "skin temp up" }
-        latest?.hrvZ?.let { if (-it >= IllnessSignalEngine.signalZThreshold) firedLabels["hrv"] = "HRV down" }
-        val respZ = days.lastOrNull()?.let { d ->
-            zAgainst(d.respRateBpm, days.subList(maxOf(0, days.size - 1 - BASELINE_WINDOW), maxOf(0, days.size - 1))) { it.respRateBpm }
-        }
-        respZ?.let { if (it >= IllnessSignalEngine.signalZThreshold) firedLabels["respiration"] = "respiration up" }
-
-        val illnessInputs = IllnessSignalEngine.Inputs(
-            restingHR = latest?.rhrZ?.let { IllnessSignalEngine.SignalReading(it) },
-            skinTemp = latest?.tempZ?.let { IllnessSignalEngine.SignalReading(it) },
-            // HRV must be oriented illness-ward: HRV ↓ is illness-like, so negate the raw z.
-            hrv = latest?.hrvZ?.let { IllnessSignalEngine.SignalReading(-it) },
-            respiration = respZ?.let { IllnessSignalEngine.SignalReading(it) },
-        )
-        val illness = IllnessSignalEngine.evaluate(
-            inputs = illnessInputs,
-            context = journalContext.copy(baselineTrusted = baselineTrusted),
-            firedLabels = firedLabels,
-        )
-
-        // PARALLEL Mahalanobis distance on the SAME illness-ward z-vector (RHR up, HRV negated, skin-temp
-        // up, respiration up). This NEVER gates the alert: the IllnessSignalEngine above remains the sole
-        // fire gate. Computed here only so the Heads-Up card can show a "how strong" confidence band when
-        // the engine has already raised. null where a z is absent (dropped from the distance). correlation
-        // = null (identity), validated to agree ~100% with the z-sum detector. Mirrors iOS exactly.
-        val illnessDistance = IllnessDistance.evaluate(
-            features = IllnessDistance.FeatureVector(
-                restingHR = latest?.rhrZ,
-                rmssd = latest?.hrvZ?.let { -it },   // orient illness-ward: HRV down is illness-like
-                skinTemp = latest?.tempZ,
-                respiration = respZ,
-            ),
-            correlation = null,
-        )
+        // ── Illness heads-up ──
+        // One adapter supplies the Health card, banner/notifier, and background service. Per-signal
+        // freshness and trust therefore cannot diverge from one surface to another.
+        val assessment = illnessAssessment
+            ?: IllnessWatch.assess(days, todayKey, journalContext)
 
         // ── Body clock: needs per-hour rest-activity bins we don't bank here; the planner is on-demand.
         //    Leave null so the BodyClockCard reads its honest "Calibrating" empty state until a future
         //    activity-bin source lands (the engine is wired + ready, the input pipe is the gap). ──
         val bodyClock: CircadianEngine.PhaseEstimate? = null
 
-        return Snapshot(cycle = cycle, bodyClock = bodyClock, illness = illness,
-            illnessDistance = illnessDistance, baselineTrusted = baselineTrusted)
+        return Snapshot(
+            cycle = cycle,
+            bodyClock = bodyClock,
+            illness = assessment.result,
+            illnessDistance = assessment.distance,
+            baselineTrusted = assessment.prepared.baselineTrusted,
+        )
     }
 
     /** A day is "usable" for the baseline if it carries at least one of the four illness/cycle vitals. */
@@ -156,5 +135,33 @@ object V5HealthSignals {
         val variance = xs.sumOf { (it - mean) * (it - mean) } / (xs.size - 1).coerceAtLeast(1)
         val sd = sqrt(variance).coerceAtLeast(1e-6)
         return (value - mean) / sd
+    }
+
+    /** Mixed-semantics skin-temperature z-score for cycle awareness. The current value only sees
+     *  trailing rows of its own kind, and both absolute/deviation paths retain a 0.3 C noise floor. */
+    private fun skinTempZAgainst(value: Double?, window: List<DailyMetric>): Double? {
+        if (value == null || !value.isFinite()) return null
+        val absolute = VitalBands.isAbsoluteSkinTemp(value)
+        val validValue = if (absolute) {
+            val cfg = Baselines.metricCfg.getValue("skin_temp")
+            value.takeIf { it in cfg.minVal..cfg.maxVal }
+        } else {
+            VitalBands.skinTempDeviation(value)
+        } ?: return null
+        val xs = window.mapNotNull { row ->
+            val candidate = row.skinTempDevC ?: return@mapNotNull null
+            if (VitalBands.isAbsoluteSkinTemp(candidate) != absolute) return@mapNotNull null
+            if (absolute) {
+                val cfg = Baselines.metricCfg.getValue("skin_temp")
+                candidate.takeIf { it.isFinite() && it in cfg.minVal..cfg.maxVal }
+            } else {
+                VitalBands.skinTempDeviation(candidate)
+            }
+        }
+        if (xs.size < MIN_BASELINE_NIGHTS) return null
+        val mean = xs.average()
+        val variance = xs.sumOf { (it - mean) * (it - mean) } / (xs.size - 1).coerceAtLeast(1)
+        val sd = sqrt(variance).coerceAtLeast(VitalBands.skinTempDeviationCfg.floorSpread)
+        return (validValue - mean) / sd
     }
 }

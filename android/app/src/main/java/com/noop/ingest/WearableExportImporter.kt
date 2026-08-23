@@ -35,7 +35,7 @@ import java.util.zip.ZipInputStream
  *              gracefully, since an unknown category/column is ignored, never an error.
  *   • Fitbit — Google Takeout → Fitbit JSON: per-day sleep-*.json / resting_heart_rate-*.json /
  *              steps-*.json.
- *   • Garmin — Garmin Connect "Export Your Data" (GDPR) ZIP wellness JSON: *_sleepData.json + daily
+ *   • Garmin - Garmin Connect "Export Your Data" (GDPR) ZIP wellness JSON: *_sleepData.json + daily
  *              RHR / steps / stress. (The FIT activity files in the same ZIP are wave-1's lane.)
  *
  * Maps onto NOOP's DAILY metrics + sleep sessions (NOT workouts). HONEST DATA: only fields the export
@@ -96,7 +96,7 @@ object WearableExportImporter {
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"),
     )
-    // dayKey patterns — the isDateOnly split is preserved exactly: "yyyy-MM-dd" parses as a bare
+    // dayKey patterns - the isDateOnly split is preserved exactly: "yyyy-MM-dd" parses as a bare
     // LocalDate, the date-time patterns parse as LocalDateTime then take .toLocalDate().
     private val DAYKEY_DATETIME_FMTS: List<DateTimeFormatter> = listOf(
         DateTimeFormatter.ofPattern("MM/dd/yy HH:mm:ss"),
@@ -141,7 +141,7 @@ object WearableExportImporter {
         // #70: never silently truncate. If the aggregate RAM budget tripped, the retained file set was
         // partial — surface it plainly rather than reporting a clean import over incomplete data.
         return if (truncated) {
-            summary.copy(message = summary.message + " (partial — export exceeded the ${MAX_TOTAL_BYTES shr 30} GB import memory budget)")
+            summary.copy(message = summary.message + " (partial - export exceeded the ${MAX_TOTAL_BYTES shr 30} GB import memory budget)")
         } else {
             summary
         }

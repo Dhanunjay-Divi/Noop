@@ -76,6 +76,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -110,6 +111,7 @@ import com.noop.ble.PuffinExperiment
 import com.noop.ble.WhoopModel
 import com.noop.data.BackupSettingsCodec
 import com.noop.data.DataBackup
+import com.noop.data.MedicationStore
 import com.noop.ingest.RawSensorExport
 import com.noop.ingest.WhoopCsvExporter
 import com.noop.update.UpdateCheck
@@ -152,7 +154,7 @@ import kotlin.math.roundToInt
  * and other screens (HealthScreen, Coach zones) can read the same source of truth.
  *
  * Mirrors the macOS `ProfileStore` fields and ranges exactly. `hrMaxOverride == 0`
- * means "auto" — fall back to the Tanaka estimate from [age].
+ * means "auto" - fall back to the Tanaka estimate from [age].
  */
 class ProfileStore(private val prefs: SharedPreferences) {
 
@@ -197,7 +199,7 @@ class ProfileStore(private val prefs: SharedPreferences) {
      *  both go through here, so age always flows from a DOB). Clamped to [AGE_MIN]..[AGE_MAX]. */
     fun setAge(years: Int) { dateOfBirthMillis = dobForAge(years.coerceIn(AGE_MIN, AGE_MAX)) }
 
-    /** "male" | "female" | "nonbinary" — matches the macOS tag values. */
+    /** "male" | "female" | "nonbinary" - matches the macOS tag values. */
     var sex: String
         get() = prefs.getString(KEY_SEX, "male") ?: "male"
         set(v) {
@@ -229,13 +231,11 @@ class ProfileStore(private val prefs: SharedPreferences) {
         get() = "$fitnessAgeProfileToken|$vo2maxProfileToken|$vitalityProfileToken|" +
             "$fitnessAgeProvenanceRequired|$vo2maxProvenanceRequired|$vitalityProvenanceRequired"
 
-    fun acceptsFitnessAge(provenance: Double?): Boolean = AgeMetricProfile.accepts(
-        provenance, fitnessAgeProfileToken, fitnessAgeProvenanceRequired,
-    )
+    fun acceptsFitnessAge(provenance: Double?): Boolean =
+        AgeMetricProfile.acceptsFitnessAge(provenance, fitnessAgeProfileToken)
 
-    fun acceptsVO2maxEstimate(provenance: Double?): Boolean = AgeMetricProfile.accepts(
-        provenance, vo2maxProfileToken, vo2maxProvenanceRequired,
-    )
+    fun acceptsVO2maxEstimate(provenance: Double?): Boolean =
+        AgeMetricProfile.acceptsVO2maxEstimate(provenance, vo2maxProfileToken)
 
     fun acceptsVitality(provenance: Double?): Boolean =
         AgeMetricProfile.acceptsVitality(provenance, vitalityProfileToken)
@@ -560,11 +560,6 @@ fun SettingsScreen(
     // Complete offline legal bundle: terms, source license, dependency notices and provenance.
     var showLegalDocuments by remember { mutableStateOf(false) }
 
-    // "WHOOP 4.0 vs 5.0/MG: what each can read and why" explainer (FI-2 / #490), reachable from the
-    // Strap section by BOTH model owners. Clears up which features each strap supports — e.g. why the
-    // strap-firmware broadcast-out is 5/MG-only while NOOP's own re-broadcast works on any strap.
-    var showModelComparison by remember { mutableStateOf(false) }
-
     // "Recalibrate Charge baseline" confirm dialog (Charge advanced). Writes now-seconds to BOTH the
     // noop.hrvBaselineEpoch and noop.recoveryBaselineEpoch prefs so foldHistory re-seeds every baseline
     // that feeds Charge from tonight onward; the standing analyze loop picks it up on its next pass.
@@ -575,6 +570,14 @@ fun SettingsScreen(
     // tap-through. Mirrors the macOS StepsCalibrationSheet: honest explainer + current fit + a recent
     // estimated-vs-phone table + a manual coefficient override. Full-screen Dialog like the guide above.
     var showStepsCalibration by remember { mutableStateOf(false) }
+
+    // Medication names/notes are loaded only when Settings opens and remain in encrypted preferences.
+    // The visible card carries a count, never a medication name.
+    var showMedicationSettings by remember { mutableStateOf(false) }
+    var medicationCount by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(Unit) {
+        medicationCount = withContext(Dispatchers.IO) { MedicationStore.active(context).size }
+    }
 
     // Whether the "Advanced" disclosure (experimental probes, diagnostics, raw-sensor export, Trends
     // report) is expanded. Default FALSE so a first-run user lands on the everyday sections instead of
@@ -592,10 +595,10 @@ fun SettingsScreen(
     var puffinCapture by remember { mutableStateOf(puffinExperiment.isCaptureEnabled) }
     var deepData by remember { mutableStateOf(puffinExperiment.isDeepDataEnabled) }
     var broadcastHr by remember { mutableStateOf(puffinExperiment.broadcastHr) }
-    // "Sleep staging (V2)" — V2 is the DEFAULT for every strap (WHOOP 4 and 5/MG); turn it OFF to fall back
+    // "Sleep staging (V2)" - V2 is the DEFAULT for every strap (WHOOP 4 and 5/MG); turn it OFF to fall back
     // to V1. Model-agnostic, so it lives outside the 5/MG-only card. 4.0 is unvalidated either way (#319/#347).
     var experimentalSleepV2 by remember { mutableStateOf(puffinExperiment.experimentalSleepV2) }
-    // "Motion-aware wake refinement" (#364 follow-up) — OFF by default. Self-gates on observed gravity +
+    // "Motion-aware wake refinement" (#364 follow-up) - OFF by default. Self-gates on observed gravity +
     // step density, so it is a no-op on a sparse (e.g. WHOOP 4.0) night regardless of this switch.
     var motionAwareWake by remember { mutableStateOf(puffinExperiment.motionAwareWake) }
 
@@ -613,13 +616,13 @@ fun SettingsScreen(
     }
     val showFiveMGControls = selectedModelName == WhoopModel.WHOOP5_MG.name || live.whoop5Detected
 
-    // "Keep connected in the background" — drives WhoopConnectionService (foreground service). Default
+    // "Keep connected in the background" - drives WhoopConnectionService (foreground service). Default
     // on. SharedPreferences isn't reactive, so the Switch mirrors into a local state.
     var backgroundConnection by remember { mutableStateOf(NoopPrefs.backgroundConnection(context)) }
     var fastHistorySync by remember { mutableStateOf(NoopPrefs.fastHistorySync(context)) }
     var fastLinkPhy by remember { mutableStateOf(NoopPrefs.fastLinkPhy(context)) }
 
-    // "Continuous HRV capture" — hold the dense realtime stream armed 24/7 (better overnight HRV) at the
+    // "Continuous HRV capture" - hold the dense realtime stream armed 24/7 (better overnight HRV) at the
     // cost of more battery. Default OFF; only does anything with background connection on. Local mirror.
     var continuousHrv by remember { mutableStateOf(NoopPrefs.continuousHrv(context)) }
 
@@ -649,7 +652,7 @@ fun SettingsScreen(
     var workoutKeepScreenOn by remember {
         mutableStateOf(NoopPrefs.of(context).getBoolean("workoutKeepScreenOn", false))
     }
-    // Live Sessions (beta) — gates the Today "Start session" entry. Unlike its section-mates this is a
+    // Live Sessions (beta) - gates the Today "Start session" entry. Unlike its section-mates this is a
     // BETA feature flag, default ON (`live_sessions_beta`, see LiveSessionPrefs); off hides the entry.
     var liveSessionsBeta by remember { mutableStateOf(LiveSessionPrefs.enabled(context)) }
 
@@ -665,7 +668,7 @@ fun SettingsScreen(
     // Display-only; the stored value never changes. Mirrors into local state like the toggles above.
     var effortScale by remember { mutableStateOf(UnitPrefs.effortScale(context)) }
 
-    // App icon (v3 "Titanium & Gold") — machined-titanium (.IconDefault) or blued-titanium (.IconNavy).
+    // App icon (v3 "Titanium & Gold") - machined-titanium (.IconDefault) or blued-titanium (.IconNavy).
     // SharedPreferences isn't reactive, so the segmented control drives this local mirror; flipping it
     // enables exactly one launcher alias via PackageManager (see setAppIcon below).
     var appIconNavy by remember { mutableStateOf(NoopPrefs.appIconNavy(context)) }
@@ -683,7 +686,7 @@ fun SettingsScreen(
     // Day-cycle background (#698) — the time-of-day scene behind Today. Default ON. SharedPreferences
     // isn't reactive, so the Switch mirrors into local state; TodayScreen reads the same pref on entry.
     var showDayCycleBackground by remember { mutableStateOf(NoopPrefs.showDayCycleBackground(context)) }
-    // "Sky behind cards" (opt-in, default OFF) — extend the day-cycle sky behind the whole Today scroll so
+    // "Sky behind cards" (opt-in, default OFF) - extend the day-cycle sky behind the whole Today scroll so
     // Card transparency reveals it under every card. Mirrors into local state; TodayScreen reads on entry.
     var skyBehindCards by remember { mutableStateOf(NoopPrefs.skyBehindCards(context)) }
     // Card-surface opacity (0f = clear, 1f = solid), for the "Card transparency" slider. Live-previews via
@@ -728,7 +731,7 @@ fun SettingsScreen(
         if (uri == null) { backupBusy = false; return@rememberLauncherForActivityResult }
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                // #458: thread the registry's ACTIVE strap id — the exporter's old "my-whoop" default
+                // #458: thread the registry's ACTIVE strap id - the exporter's old "my-whoop" default
                 // exported an empty zip on live-BLE installs (the engine banks under "<strapId>-noop").
                 runCatching { WhoopCsvExporter.exportZip(context, uri, vm.repo, vm.activeStrapId) }
             }
@@ -910,7 +913,7 @@ fun SettingsScreen(
 
     ScreenScaffold(
         title = uiString(R.string.l10n_settings_screen_settings_c7f73bb5),
-        subtitle = "Your numbers, your strap, and how NOOP works. All on this phone.",
+        subtitle = "Your numbers, Noop Band, and how NOOP works. All on this phone.",
         // LIQUID SKY BACKDROP (the pilot pattern — LiquidScreenSky.kt): the static time-of-day sky settles
         // into the theme canvas behind the top of the list, exactly like the liquid Today. This is a long,
         // scroll-heavy list with NO hero gauge, so the liquid finish here is just the sky + liquidPress on
@@ -1127,7 +1130,9 @@ fun SettingsScreen(
                     )
                 }
                 Text(
-                    uiString(R.string.l10n_settings_screen_counter_ticks_per_step_leave_at_3ce8c1d5),
+                    "Counter ticks per step. Leave at 1.0 unless your steps run high. Some Noop Band " +
+                        "firmware reports a much larger motion count, so this goes up to 30. Walk a known " +
+                        "1,000 steps and divide NOOP's count by the real count to get your value.",
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
                 )
@@ -1175,7 +1180,8 @@ fun SettingsScreen(
                     )
                 }
                 Text(
-                    uiString(R.string.l10n_settings_screen_for_a_whoop_4_0_which_df865854),
+                    "When Noop Band does not send a measured step count, NOOP estimates steps from motion " +
+                        "and calibrates the estimate to your phone. Tap to review or adjust it.",
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
                 )
@@ -1465,7 +1471,7 @@ fun SettingsScreen(
         SettingsSection(
             icon = Icons.Filled.Sensors,
             title = uiString(R.string.l10n_settings_screen_strap_02b88eeb),
-            blurb = "NOOP pairs directly with your WHOOP over Bluetooth: no WHOOP app, no cloud.",
+            blurb = "NOOP pairs directly with Noop Band over Bluetooth. No separate band app or cloud account.",
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Row(
@@ -1509,7 +1515,7 @@ fun SettingsScreen(
                     )
                 }
 
-                // Rename the strap's BLE advertising name (WHOOP 4.0 only). Writes the name to the strap
+                // Rename the compatible band's BLE advertising name. Writes the name to the strap
                 // firmware (cmd 77); it reboots to apply, so the new name shows on the next connect. Handy
                 // for a second-hand band stuck on the previous owner's name. Reversible.
                 if (live.connected && !live.whoop5Detected) {
@@ -1526,7 +1532,7 @@ fun SettingsScreen(
                             value = nameDraft,
                             onValueChange = { nameDraft = it.take(24) },
                             singleLine = true,
-                            placeholder = { Text(uiString(R.string.l10n_settings_screen_whoop_a3650379), style = NoopType.body, color = Palette.textTertiary) },
+                            placeholder = { Text(WhoopModel.CUSTOMER_NAME, style = NoopType.body, color = Palette.textTertiary) },
                             modifier = Modifier.fillMaxWidth(),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Palette.textPrimary,
@@ -1625,7 +1631,7 @@ fun SettingsScreen(
                     )
                 }
 
-                // "Faster Bluetooth link" (#533, EXPERIMENTAL): the other, orthogonal sync-speed lever —
+                // "Faster Bluetooth link" (#533, EXPERIMENTAL): the other, orthogonal sync-speed lever -
                 // prefer the LE 2M PHY around the offload. Same bytes in half the airtime, so unlike the
                 // interval lever above it should cost LESS strap radio energy, not more. Separate toggle so
                 // a field report can attribute which lever did what. Off by default: the strap may decline
@@ -1675,7 +1681,7 @@ fun SettingsScreen(
                 if (backgroundConnection) {
                     // Re-read the LIVE exempt state on every ON_RESUME so the toggle flips to on the moment
                     // the user returns from the system whitelist dialog. Reading it plainly in composition
-                    // wouldn't recompose on resume — it'd show a stale "off", look like it failed, and invite
+                    // wouldn't recompose on resume - it'd show a stale "off", look like it failed, and invite
                     // a SECOND (duplicate) popup, defeating the popup discipline.
                     val lifecycleOwner = LocalLifecycleOwner.current
                     var batteryExempt by remember {
@@ -1711,7 +1717,7 @@ fun SettingsScreen(
                             // `Text(if ...)` expression it slid past, so this whole warning shipped
                             // English-only to de/es/fr while the audit reported clean. Now resources.
                             // TWO "needed" strings rather than one with a %s subject fragment: verb
-                            // agreement differs once translated — German needs "Ihr Telefon … kann" but
+                            // agreement differs once translated - German needs "Ihr Telefon … kann" but
                             // "Manche Telefone … können", so a composed subject would be ungrammatical.
                             Text(
                                 if (batteryExempt) {
@@ -1903,46 +1909,6 @@ fun SettingsScreen(
                 )
                 if (strapLogBusy) NoopBusyRow()
 
-                // "WHOOP 4.0 vs 5.0/MG — what each can read and why" (FI-2 / #490). Shown to BOTH model
-                // owners, so a 4.0 user understands their strap is fully supported (and why the firmware
-                // broadcast-out is 5/MG-only while NOOP's own re-broadcast in Data Sources works on a 4.0).
-                val modelComparisonInteraction = remember { MutableInteractionSource() }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .liquidPress(modelComparisonInteraction)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Palette.surfaceInset)
-                        .border(1.dp, Palette.hairline, RoundedCornerShape(10.dp))
-                        .clickable(
-                            interactionSource = modelComparisonInteraction,
-                            indication = null,
-                        ) { showModelComparison = true }
-                        .padding(horizontal = 14.dp, vertical = 12.dp)
-                        .semantics { contentDescription = uiString(R.string.l10n_settings_screen_whoop_4_0_versus_5_0_a54c5504) },
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.Info,
-                            contentDescription = null,
-                            tint = Palette.accent,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(uiString(R.string.l10n_settings_screen_whoop_4_0_vs_5_0_2babb05a), style = NoopType.headline, color = Palette.textPrimary)
-                            Text(
-                                uiString(R.string.l10n_settings_screen_what_each_strap_can_read_and_51e7d3fc),
-                                style = NoopType.footnote,
-                                color = Palette.textSecondary,
-                            )
-                        }
-                        Text("›", style = NoopType.title2, color = Palette.accent)
-                    }
-                }
             }
         }
 
@@ -2051,12 +2017,12 @@ fun SettingsScreen(
             onToggle = { advancedOpen = !advancedOpen; SettingsDisclosurePrefs.write(NoopPrefs.of(context), advancedOpen) },
         ) {
         Column(verticalArrangement = Arrangement.spacedBy(Metrics.screenRowSpacing)) {
-        // --- Experimental · WHOOP 5 / MG --- (hidden when the user is confidently on a 4.0, #22)
+        // Advanced transport controls are shown only when compatible firmware is detected.
         if (showFiveMGControls) {
         SettingsSection(
             icon = Icons.Filled.Science,
-            title = uiString(R.string.l10n_settings_screen_experimental_whoop_5_mg_41ef7041),
-            blurb = "Live heart rate already works on a WHOOP 5/MG strap. These probes go further and try to coax more out of it. They are guesses, off by default, and only ever touch a 5/MG strap. WHOOP 4.0 is never affected.",
+            title = "Experimental band protocols",
+            blurb = "Live heart rate already works on Noop Band. These off-by-default controls test advanced capabilities on compatible firmware and may do nothing on some bands.",
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
@@ -2065,7 +2031,7 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     Text(
-                        uiString(R.string.l10n_settings_screen_try_whoop_5_mg_protocol_probes_1d584653),
+                        "Try advanced band protocol probes",
                         style = NoopType.subhead,
                         color = Palette.textPrimary,
                         modifier = Modifier.weight(1f),
@@ -2084,12 +2050,12 @@ fun SettingsScreen(
                             uncheckedBorderColor = Palette.hairline,
                         ),
                         modifier = Modifier.semantics {
-                            contentDescription = uiString(R.string.l10n_settings_screen_try_whoop_5_mg_protocol_probes_1d584653)
+                            contentDescription = "Try advanced band protocol probes"
                         },
                     )
                 }
                 Text(
-                    uiString(R.string.l10n_settings_screen_on_a_5_mg_connection_noop_4557c8f8),
+                    "On compatible Noop Band firmware, NOOP sends an advanced real-time stream request after the handshake and records the response for protocol validation.",
                     style = NoopType.caption,
                     color = Palette.textTertiary,
                 )
@@ -2126,7 +2092,7 @@ fun SettingsScreen(
                     )
                 }
                 Text(
-                    uiString(R.string.l10n_settings_screen_makes_your_whoop_5_0_mg_b26b94c7),
+                    "Makes compatible Noop Band hardware advertise heart rate as a standard Bluetooth sensor for Garmin, Zwift, or gym equipment. The reversible setting applies on the next connection.",
                     style = NoopType.caption,
                     color = Palette.textTertiary,
                 )
@@ -2138,7 +2104,7 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     Text(
-                        uiString(R.string.l10n_settings_screen_unlock_whoop_5_mg_deep_data_2f2bd226),
+                        "Unlock advanced band data (R22)",
                         style = NoopType.subhead,
                         color = Palette.textPrimary,
                         modifier = Modifier.weight(1f),
@@ -2157,12 +2123,12 @@ fun SettingsScreen(
                             uncheckedBorderColor = Palette.hairline,
                         ),
                         modifier = Modifier.semantics {
-                            contentDescription = uiString(R.string.l10n_settings_screen_unlock_whoop_5_mg_deep_data_70036ca8)
+                            contentDescription = "Unlock advanced band data"
                         },
                     )
                 }
                 Text(
-                    uiString(R.string.l10n_settings_screen_whoop_5_mg_straps_hand_a_b8b239e6),
+                    "Compatible Noop Band firmware may require feature flags before it emits high-rate heart rate, motion, and history. This reversible control writes that experimental enable sequence to the band and may do nothing on some firmware.",
                     style = NoopType.caption,
                     color = Palette.textTertiary,
                 )
@@ -2175,17 +2141,17 @@ fun SettingsScreen(
                         onClick = { vm.ble.enableWhoop5DeepData() },
                     )
                     Text(
-                        if (!live.encryptedBond) "Needs the full encrypted bond: close the official WHOOP app and pair the strap to NOOP first (a live-HR-only link can't carry the unlock)."
-                        else if (!live.worn) "Put the strap on first. The deep stream is on-wrist only."
-                        else "Wear the strap, tap once, then let it sync and share your strap log.",
+                        if (!live.encryptedBond) "Needs the full encrypted bond. Close any other app connected to Noop Band, then pair it to NOOP again."
+                        else if (!live.worn) "Put Noop Band on first. The deep stream is on-wrist only."
+                        else "Wear Noop Band, tap once, then let it sync and share your band log.",
                         style = NoopType.caption,
                         color = Palette.textTertiary,
                     )
                     // Live R22 telemetry (#174): proof of what the strap is doing right now.
                     if (live.r22FlagsAccepted > 0) {
                         Text(
-                            if (live.r22FlagsAccepted >= 15) "✓ Strap accepted all 15 R22 flags"
-                            else "Strap accepted ${live.r22FlagsAccepted}/15 R22 flags…",
+                            if (live.r22FlagsAccepted >= 15) "✓ Noop Band accepted all 15 R22 flags"
+                            else "Noop Band accepted ${live.r22FlagsAccepted}/15 R22 flags…",
                             style = NoopType.caption,
                             color = if (live.r22FlagsAccepted >= 15) Palette.statusPositive else Palette.textSecondary,
                         )
@@ -2366,8 +2332,8 @@ fun SettingsScreen(
                         "change in body position) instead of just a heart-rate rise. A wake block with no " +
                         "locomotion and a stable posture -- a hot night, a brief turn-over -- is folded back " +
                         "into light sleep; a real get-up is left alone. Self-checks how much motion detail " +
-                        "your strap actually recorded and stays off on a night that's too sparse to trust " +
-                        "(older WHOOP 4.0 firmware, mainly). Off by default; takes effect on the next nights staged.",
+                        "Noop Band actually recorded and stays off on a night that's too sparse to trust " +
+                        "(mainly firmware with sparse motion history). Off by default; takes effect on the next nights staged.",
                     style = NoopType.caption,
                     color = Palette.textTertiary,
                 )
@@ -2432,7 +2398,7 @@ fun SettingsScreen(
                     },
                 )
                 RowDivider()
-                // #801 — not offered on a male profile (it would just sit at "Learning your pattern"). Hidden
+                // #801 - not offered on a male profile (it would just sit at "Learning your pattern"). Hidden
                 // when off for a male profile so it can't be enabled here; still shown when already on so it
                 // can be turned off — mirroring HealthScreen's cycle opt-in gate (cycleOptInApplies). The
                 // sister surfaces (Health opt-in, the card's off-control) were sex-gated in v7.3.2; this
@@ -2449,6 +2415,46 @@ fun SettingsScreen(
                     )
                     RowDivider()
                 }
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { showMedicationSettings = true },
+                ) {
+                    Icon(
+                        Icons.Filled.Favorite,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.size(10.dp))
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.Start,
+                    ) {
+                        Text(
+                            uiString(R.string.medication_context_title),
+                            style = NoopType.subhead,
+                        )
+                        Text(
+                            when (val count = medicationCount) {
+                                null, 0 -> uiString(R.string.medication_context_settings_none)
+                                else -> uiString(R.string.medication_context_active_count, count)
+                            },
+                            style = NoopType.caption,
+                            color = Palette.textTertiary,
+                        )
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Text(
+                    uiString(R.string.medication_context_settings_detail),
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+                RowDivider()
                 ToggleRow(
                     title = uiString(R.string.l10n_settings_screen_hydration_tracking_579a2b32),
                     detail = "Adds a simple fluid log with a daily goal that adjusts to your effort. Tap to add a sip, cup or bottle and watch a progress ring fill. On this phone only. Nothing is synced.",
@@ -2508,7 +2514,7 @@ fun SettingsScreen(
                 // gates the Today entry so anyone can wave the beta away here with one flip.
                 ToggleRow(
                     title = uiString(R.string.l10n_settings_screen_live_sessions_beta_2ca3a97f),
-                    detail = "Silence-first strap coaching during workouts.",
+                    detail = "Silence-first Noop Band coaching during workouts.",
                     checked = liveSessionsBeta,
                     onCheckedChange = {
                         liveSessionsBeta = it
@@ -2915,7 +2921,7 @@ fun SettingsScreen(
                 }
 
                 Text(
-                    uiString(R.string.l10n_settings_screen_a_standalone_companion_for_your_whoop_7a132b5a),
+                    "The companion for Noop Band. Data stays on this phone by default and leaves only through a sync or sharing destination you explicitly enable.",
                     style = NoopType.subhead,
                     color = Palette.textSecondary,
                 )
@@ -3208,18 +3214,6 @@ fun SettingsScreen(
             }
         }
 
-        // "WHOOP 4.0 vs 5.0/MG" explainer sheet (FI-2 / #490), opened from the Strap section. Same idiom.
-        if (showModelComparison) {
-            Dialog(
-                onDismissRequest = { showModelComparison = false },
-                properties = DialogProperties(usePlatformDefaultWidth = false),
-            ) {
-                Surface(modifier = Modifier.fillMaxSize(), color = Palette.surfaceBase) {
-                    WhoopModelComparisonScreen(onClose = { showModelComparison = false })
-                }
-            }
-        }
-
         // Steps-estimate calibration, opened from the Profile card's "Steps estimate" row. Same
         // full-screen Dialog idiom; a manual-coefficient write bumps `rev` so the Profile summary
         // row reflects the new state on dismiss.
@@ -3237,6 +3231,16 @@ fun SettingsScreen(
                     )
                 }
             }
+        }
+
+        if (showMedicationSettings) {
+            MedicationSettingsDialog(
+                onDismiss = { showMedicationSettings = false },
+                onChanged = { count ->
+                    medicationCount = count
+                    vm.medicationContextChanged()
+                },
+            )
         }
     }
 }
@@ -3279,7 +3283,7 @@ private fun setAppIcon(context: Context, navy: Boolean) {
 // MARK: - Waist stepper (optional VO₂max input)
 
 /** A typical adult waist (cm) used as the first value when stepping up from "unset" (0), so the field
- *  jumps to a sensible starting point rather than 1 cm. ~34" — the rough population midpoint. */
+ *  jumps to a sensible starting point rather than 1 cm. ~34" - the rough population midpoint. */
 private const val WAIST_SEED_CM = 86.0
 
 /** Step the waist by one centimetre, seeding [WAIST_SEED_CM] when starting from unset (0). Stepping
@@ -3316,11 +3320,11 @@ private fun strapTone(bonded: Boolean, connected: Boolean): StrandTone = when {
 
 // `internal` (not private) so the unit test in the same package can assert the scanning branch.
 internal fun strapStatusDetail(bonded: Boolean, connected: Boolean, scanning: Boolean): String = when {
-    scanning -> "Searching for your WHOOP… make sure it's charged, on your wrist, and the official WHOOP app isn't connected to it."
-    bonded && connected -> "Your strap is paired and sending data. Open Live for a real-time heart rate."
+    scanning -> "Searching for Noop Band… make sure it is charged, on your wrist, and not connected to another app."
+    bonded && connected -> "Noop Band is paired and sending data. Open Live for a real-time heart rate."
     connected -> "Connected. Finishing the secure pairing handshake…"
     bonded -> "Previously paired but not currently connected. Re-scan to reconnect."
-    else -> "No strap connected. Put your WHOOP nearby and tap Re-scan to pair."
+    else -> "No band connected. Put Noop Band nearby and tap Re-scan to pair."
 }
 
 private fun batteryTone(pct: Double): StrandTone = when {

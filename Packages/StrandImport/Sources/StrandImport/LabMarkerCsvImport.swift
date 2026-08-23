@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Lab Book markers CSV import (source "lab-csv")
 //
-// LabMarkerCsvImport.swift — the Phase-2 bulk import for the Health Records "Lab Book"
+// LabMarkerCsvImport.swift - the Phase-2 bulk import for the Health Records "Lab Book"
 // pillar (spec 2026-06-19-v5-health-records-design.md §"Phasing"): a generic markers CSV
 // with (date, marker, value, unit) rows, exactly the shape the in-app import card
 // promises. Header names are matched tolerantly (Date/Day/Taken, Marker/Test/Name,
@@ -16,7 +16,7 @@ import Foundation
 // combined blood-pressure cell ("120/80") splits into the bp_systolic/bp_diastolic pair
 // (spec §"Blood pressure modelling") so diastolic is never silently dropped.
 //
-// NON-CLINICAL (spec §"Non-clinical / legal framing"): units are stored VERBATIM — this
+// NON-CLINICAL (spec §"Non-clinical / legal framing"): units are stored VERBATIM - this
 // importer never converts mg/dL to mmol/L or judges a value. Malformed rows are skipped
 // and counted, never fatal, and never guessed (mirrors NutritionCsvImporter's ethos).
 // Import-DoS bounds: a byte cap on the file and a row cap on the parse, like the other
@@ -349,7 +349,7 @@ public enum LabMarkerCsvImport {
 
     /// Parse a value cell as a number. Handles plain decimals, a European decimal comma
     /// ("5,2"), a thousands-grouped integer ("1,234"), and a trailing unit accidentally
-    /// left in the cell ("5.2 mmol/L"). Anything else — text results, empty cells, a
+    /// left in the cell ("5.2 mmol/L"). Anything else - text results, empty cells, a
     /// slash pair outside the BP path — is nil, so the row is SKIPPED and counted,
     /// never guessed.
     static func parseValue(_ raw: String) -> Double? {
@@ -426,7 +426,7 @@ public enum LabMarkerCsvImport {
     /// space or `T` is tolerated and ignored):
     ///   • ISO-first: "2026-06-15", "2026/6/1", "2026-06-15 08:30".
     ///   • Day/month-first with a 4-digit year: "15/01/2026" (day-first when the first
-    ///     number can only be a day), otherwise month-first ("01/15/2026" — the US
+    ///     number can only be a day), otherwise month-first ("01/15/2026" - the US
     ///     spreadsheet default, same rule as the Android nutrition importer).
     /// Anything else is nil, so the row is skipped and counted.
     static func canonicalDay(_ raw: String) -> String? {

@@ -564,6 +564,26 @@ public actor RemoteSyncClient: RemoteSyncUploading {
         )
     }
 
+    public func updateSafetyIncidentLocation(
+        _ dispatchId: UUID,
+        update: RemoteSafetyLocationUpdate,
+        authorization: RemoteSafetyAuthorization
+    ) async throws -> RemoteSafetyLocationResponse {
+        let request = try safetyJSONRequest(
+            path: (
+                "v1/safety/incidents/"
+                + "\(dispatchId.uuidString.lowercased())/location"
+            ),
+            method: "PUT",
+            authorization: authorization,
+            body: update
+        )
+        return try decode(
+            RemoteSafetyLocationResponse.self,
+            from: try await perform(request)
+        )
+    }
+
     public func resolveSafetyIncident(
         _ dispatchId: UUID,
         note: String? = nil,

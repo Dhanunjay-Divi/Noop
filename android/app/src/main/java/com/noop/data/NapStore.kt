@@ -32,7 +32,7 @@ object NapStore {
     /** Stable id for a candidate window: a re-detect of the same span maps to the same id (idempotent). */
     fun idFor(c: NapCandidate): String = "${c.start}|${c.end}"
 
-    /** End-ts parsed out of an id ("start|end"), or null if malformed — used only for retention pruning.
+    /** End-ts parsed out of an id ("start|end"), or null if malformed - used only for retention pruning.
      *  Public + pure so the retention/dedup logic is unit-testable without a Context. */
     fun endTsOf(id: String): Long? = id.substringAfter('|', "").toLongOrNull()
 

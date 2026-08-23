@@ -111,12 +111,12 @@ fun DevicesScreen(
 ) {
     val scope = rememberCoroutineScope()
     val live by viewModel.live.collectAsStateWithLifecycle()
-    // #592 extended-battery probe result — non-null (incl. the " waiting" sentinel) shows the result dialog.
+    // #592 extended-battery probe result - non-null (incl. the " waiting" sentinel) shows the result dialog.
     val batteryProbeResult by viewModel.extendedBatteryProbe.collectAsStateWithLifecycle()
     // #690 body-location probe result — same non-null-shows-the-dialog contract.
     val bodyLocationProbeResult by viewModel.bodyLocationProbe.collectAsStateWithLifecycle()
 
-    // Liquid sky backdrop gate — the SAME "Day-cycle background" preference the liquid Today honours (#698,
+    // Liquid sky backdrop gate - the SAME "Day-cycle background" preference the liquid Today honours (#698,
     // default ON). Off falls back to the flat dark canvas, so the setting governs every liquid screen alike.
     val context = LocalContext.current
     val showDayCycleBackground = remember { NoopPrefs.showDayCycleBackground(context) }
@@ -148,7 +148,7 @@ fun DevicesScreen(
     val removedDevices = all.filter { it.status == DeviceStatus.archived.name }
     val currentActiveName =
         all.firstOrNull { it.status == DeviceStatus.active.name }?.let { displayName(it) }
-            ?: "Your current strap"
+            ?: "Your current wearable"
 
     // PERF (#707): lazy scaffold — each device card is virtualized via `items(...)` (each was a direct
     // child of the eager `spacedBy(20.dp)` column, so the LazyColumn's matching spacing is identical) and
@@ -282,7 +282,7 @@ fun DevicesScreen(
     switchTarget?.let { device ->
         ConfirmDialog(
             title = uiString(R.string.l10n_devices_screen_make_this_your_active_strap_fea6bebd),
-            message = "Make ${displayName(device)} your active strap? From now on it provides your live data. " +
+            message = "Make ${displayName(device)} your active wearable? From now on it provides your live data. " +
                 "$currentActiveName's history stays exactly as it is. Only new days come from ${displayName(device)}.",
             confirmLabel = "Make active",
             onConfirm = {
@@ -361,7 +361,7 @@ fun DevicesScreen(
         )
     }
 
-    // #592: the probe reply (or the " waiting" sentinel while in flight) — readable + copyable in place,
+    // #592: the probe reply (or the " waiting" sentinel while in flight) - readable + copyable in place,
     // so a capture doesn't need a full strap-log export to read or share.
     batteryProbeResult?.let { result ->
         BatteryInfoProbeResultDialog(
@@ -734,7 +734,7 @@ private fun DeviceActionsMenu(
                 // Restart the strap — only for the live-connected WHOOP (the reboot travels over the active
                 // BLE link). Confirmation-gated by the parent. (#166)
                 if (isLiveConnected && SourceCoordinator.isWhoop(device) && onReboot != null) {
-                    MenuItem("Restart strap…", Icons.Filled.Refresh) { onOpenChange(false); onReboot() }
+                    MenuItem("Restart Noop Band…", Icons.Filled.Refresh) { onOpenChange(false); onReboot() }
                 }
                 // 4.0 reboot probe (RE): only present when the parent passed a closure (Test Centre →
                 // Connection on + a live WHOOP 4.0). Finds the real reboot frame the 4.0 accepts (#235).
@@ -807,9 +807,8 @@ private fun WhoopFirstFooter() {
             modifier = Modifier.size(16.dp),
         )
         Text(
-            uiString(R.string.l10n_devices_screen_whoop_is_noop_s_primary_fully_1c9e67fd) +
-                "in-development addition: they stream live heart rate and HRV, but not WHOOP's deeper " +
-                "sleep and recovery data.",
+            "Noop Band is NOOP's fully supported band. Other heart-rate straps can stream live heart " +
+                "rate and HRV, but they do not provide the deeper nightly signals available from Noop Band.",
             style = NoopType.footnote,
             color = Palette.textTertiary,
         )
@@ -867,9 +866,9 @@ private fun RebootProbeDialog(
                     uiString(R.string.l10n_devices_screen_the_whoop_4_0_reboot_frame_690a8ff2) +
                         "Send each candidate and watch BOTH the strap log and the strap itself. " +
                         "“no disconnect within 12s” means the strap ignored the frame. A “link dropped” line " +
-                        "means the frame reached the strap — but a dropped link alone isn't a reboot: a real " +
+                        "means the frame reached the strap - but a dropped link alone isn't a reboot: a real " +
                         "reboot also switches the strap's sensor light off for a few seconds, so if the light " +
-                        "stayed on it was just a dropped connection, not a reboot. Non-destructive — your data " +
+                        "stayed on it was just a dropped connection, not a reboot. Non-destructive - your data " +
                         "is kept. Please share the log so we can pin the real frame.",
                     style = NoopType.subhead,
                     color = Palette.textSecondary,
@@ -1172,6 +1171,7 @@ private fun devicesFieldColors() = OutlinedTextFieldDefaults.colors(
  */
 internal fun displayName(device: PairedDeviceRow): String {
     device.nickname?.takeIf { it.isNotBlank() }?.let { return it }
+    if (SourceCoordinator.isWhoop(device)) return "Noop Band"
     return if (device.model.contains(device.brand, ignoreCase = true)) device.model
     else "${device.brand} ${device.model}"
 }
@@ -1190,7 +1190,7 @@ private fun deviceIcon(device: PairedDeviceRow): ImageVector = when {
  * Honest, per-model capability + function summary for a device card — mirrors the Swift
  * `DeviceCapabilityProfile`. Derived from brand/model, NOT the generic stored capability set (which
  * would render an identical line for a 4.0 and a 5/MG and mislabel "Blood oxygen" when no SpO₂ % ever
- * comes off any WHOOP strap — raw red/IR only; a real % is import-only). "*" in a label = an on-device
+ * comes off any WHOOP strap - raw red/IR only; a real % is import-only). "*" in a label = an on-device
  * estimate, not a raw sensor. Source-verified against the decode + scoring paths (capability audit).
  */
 private data class DeviceCapabilityProfile(
@@ -1257,38 +1257,40 @@ private fun deviceProfile(device: PairedDeviceRow): DeviceCapabilityProfile {
             captures = "Heart rate · HRV (live)* · Strain",
             powers = "Powers the live console + Effort. No Recovery or Sleep Score",
             footnote = "Live HR + R-R only · no sleep, recovery, skin temp, SpO₂, steps or battery " +
-                "(those are WHOOP-only).",
+                "(those require Noop Band or another compatible source).",
         )
     }
     val whoopPowers = "Powers Recovery, Effort, Sleep Score, sleep data + Health Monitor"
     val model = device.model.lowercase()
-    // WHOOP 5.0 / MG — adds a (raw) step count the 4.0 can't read over BLE.
+    // Newer transport family adds a raw motion count that can support an estimated step series.
     if (model.contains("5") || model.contains("mg")) {
         return DeviceCapabilityProfile(
-            displayModel = "WHOOP 5.0 / MG",
+            displayModel = "Noop Band",
             captures = "Heart rate · HRV · Skin temp* · Resp rate* · Steps* · Sleep · Strain · Battery",
             powers = whoopPowers,
             footnote = "* on-device estimate: skin temp is a nightly ±°C deviation, steps are a raw " +
-                "motion count (#78). No SpO₂ % off the strap; import a WHOOP CSV for a real %.",
+                "motion count. No SpO₂ percentage comes directly from Noop Band; use Apple Health " +
+                "or a supported file import for that.",
         )
     }
-    // WHOOP 4.0 — NOOP's primary band; no steps over BLE.
+    // Older transport family does not expose a usable step stream.
     if (model.contains("4")) {
         return DeviceCapabilityProfile(
-            displayModel = "WHOOP 4.0",
+            displayModel = "Noop Band",
             captures = "Heart rate · HRV · Skin temp* · Resp rate* · Sleep · Strain · Battery",
             powers = whoopPowers,
             footnote = "* on-device estimate: skin temp is a nightly ±°C deviation (firmware-dependent); " +
-                "no steps over BLE on a 4.0. No SpO₂ % off the strap; import a WHOOP CSV for a real %.",
+                "steps are unavailable on this firmware. No SpO₂ percentage comes directly from " +
+                "Noop Band; use Apple Health or a supported file import for that.",
         )
     }
-    // Legacy / unknown WHOOP (the seeded device, model just "WHOOP") — show only the common-to-all set.
+    // Unknown family: show only the capability set common to supported Noop Band transports.
     return DeviceCapabilityProfile(
-        displayModel = "WHOOP",
+        displayModel = "Noop Band",
         captures = "Heart rate · HRV · Skin temp* · Resp rate* · Sleep · Strain · Battery",
         powers = whoopPowers,
-        footnote = "Exact model unknown. Shows what every WHOOP can do. * on-device estimate · " +
-            "no SpO₂ % off the strap (import a WHOOP CSV for that).",
+        footnote = "Hardware details are still being identified, so this shows only common signals. " +
+            "* indicates an on-device estimate. SpO₂ percentage requires another compatible source.",
     )
 }
 
@@ -1327,7 +1329,7 @@ private fun OuraLocalStateNote() {
 
 private fun lastSeenLine(device: PairedDeviceRow, isLiveConnected: Boolean, bondRefused: Boolean = false): String = when {
     device.status == DeviceStatus.archived.name -> "Removed · data kept"
-    // No "tap ⋯" pointer here (#221 review) — the full how-to-fix guidance is already inline on the card
+    // No "tap ⋯" pointer here (#221 review) - the full how-to-fix guidance is already inline on the card
     // just below, so pointing at the menu would send the user looking for help that's already on screen.
     bondRefused -> "Connected, but not paired"
     isLiveConnected -> "Connected now"

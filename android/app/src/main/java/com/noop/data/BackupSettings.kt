@@ -105,6 +105,7 @@ object BackupSettingsCodec {
         "hydrationReminders.intervalMinutes" to Kind.INT,
         "hydrationReminders.activeStartMinutes" to Kind.INT,
         "hydrationReminders.activeEndMinutes" to Kind.INT,
+        "hydrationReminders.adaptiveEnabled" to Kind.BOOL,
         "hydrationReminders.strapBuzzEnabled" to Kind.BOOL,
     )
 
@@ -127,7 +128,7 @@ object BackupSettingsCodec {
 
     /**
      * Decode a `settings.json` payload down to its whitelisted, correctly-typed subset. Malformed
-     * JSON, unknown keys and wrong-typed values all degrade to "fewer keys" — never an error, because
+     * JSON, unknown keys and wrong-typed values all degrade to "fewer keys" - never an error, because
      * a bad settings entry must not fail a restore whose DB half is fine.
      */
     fun decode(json: String): Map<String, Any> {
@@ -183,10 +184,14 @@ object BackupSettingsCodec {
                 allowedString(coerced, setOf("system", "light", "dark", "black"))
             "chart.style" -> allowedString(coerced, setOf("titanium", "classic"))
             "trend.chart.style" -> allowedString(coerced, setOf("line", "bar"))
-            "today.sectionOrder", "today.keyMetrics" -> (coerced as? String)?.takeIf {
+            "today.sectionOrder" -> (coerced as? String)?.takeIf {
                 it.toByteArray(Charsets.UTF_8).size <= 2_048 &&
                     it.all { char -> char.isLetterOrDigit() || char in ".,_- " }
             }
+            "today.keyMetrics" -> (coerced as? String)?.takeIf {
+                it.toByteArray(Charsets.UTF_8).size <= 2_048 &&
+                    it.all { char -> char.isLetterOrDigit() || char in ".,_- " }
+            }?.let(::normalizedKeyMetricSelection)
             "noop.cardOpacityPercent" -> boundedInt(coerced, 0..100)
             "today.keyMetricsWindowDays" ->
                 (coerced as? Int)?.takeIf { it in setOf(2, 7, 14) }
@@ -209,6 +214,25 @@ object BackupSettingsCodec {
 
     private fun allowedString(value: Any, allowed: Set<String>): String? =
         (value as? String)?.takeIf(allowed::contains)
+
+    /**
+     * Keep the portable dashboard preference inside the app's one-to-five pin contract. Older backups
+     * may contain all ten metrics; their first five valid unique ids survive in saved order.
+     */
+    private fun normalizedKeyMetricSelection(raw: String): String? {
+        val allowed = setOf(
+            "charge", "effort", "rest", "hrv", "restingHr",
+            "bloodOxygen", "respiratory", "steps", "weight", "calories",
+        )
+        return raw.split(",").asSequence()
+            .map(String::trim)
+            .filter(allowed::contains)
+            .distinct()
+            .take(5)
+            .toList()
+            .takeIf { it.isNotEmpty() }
+            ?.joinToString(",")
+    }
 
     private fun boundedInt(value: Any, range: IntRange): Int? =
         (value as? Int)?.takeIf(range::contains)
@@ -271,6 +295,7 @@ object BackupSettingsBridge {
         "hydrationReminders.intervalMinutes" to "hydration.reminders.intervalMinutes",
         "hydrationReminders.activeStartMinutes" to "hydration.reminders.startMinutes",
         "hydrationReminders.activeEndMinutes" to "hydration.reminders.endMinutes",
+        "hydrationReminders.adaptiveEnabled" to "hydration.reminders.adaptiveEnabled",
         "hydrationReminders.strapBuzzEnabled" to "hydration.reminders.strapBuzz",
     )
     private val WIND_DOWN_KEYS = linkedMapOf(

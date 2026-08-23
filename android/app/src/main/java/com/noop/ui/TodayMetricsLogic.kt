@@ -108,7 +108,7 @@ internal fun stepsSourceCaption(
     calibratedEstimate: Int?,
 ): String? = when {
     imported != null -> "Measured · Apple Health / Health Connect"
-    motionDerived != null -> "Motion-derived estimate · WHOOP 5/MG"
+    motionDerived != null -> "Motion-derived estimate · Noop Band"
     calibratedEstimate != null -> "Motion-derived estimate · calibrated"
     else -> null
 }

@@ -55,7 +55,7 @@ extension AnalyticsEngine {
     /// baseline; a real onset has already dipped. 10 min is long enough to average out beat noise.
     public static let onsetTraceWindowSec: Int = 600
 
-    /// Median of a bpm list — the deterministic "sorted, element at count/2" rule (upper-middle on an even
+    /// Median of a bpm list - the deterministic "sorted, element at count/2" rule (upper-middle on an even
     /// count) so Swift and Kotlin agree byte-for-byte. nil on an empty list. Used to build the #271 onset
     /// trace's baseline + at-onset HR from the SAME rule on both platforms.
     public static func medianBpm(_ bpms: [Int]) -> Int? {

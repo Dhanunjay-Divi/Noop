@@ -3,6 +3,7 @@ package com.noop.analytics
 import com.noop.data.DailyMetric
 import com.noop.data.RrInterval
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -117,17 +118,35 @@ class AnalyticsTest {
             day("2026-01-%02d".format(it + 1), restingHr = 50, avgHrv = 60.0, skinTempDevC = 0.0, respRateBpm = 14.0)
         }
         val recent = listOf(
-            // RHR +8, HRV -25% (45/60), skin temp +0.8 -> three flags
-            day("2026-02-01", restingHr = 58, avgHrv = 45.0, skinTempDevC = 0.8, respRateBpm = 14.0),
-            day("2026-02-02", restingHr = 58, avgHrv = 45.0, skinTempDevC = 0.8, respRateBpm = 14.0),
+            // RHR +9, HRV -25% (45/60), skin temp +0.8 -> three strong flags
+            day("2026-02-01", restingHr = 59, avgHrv = 45.0, skinTempDevC = 0.8, respRateBpm = 14.0),
+            day("2026-02-02", restingHr = 59, avgHrv = 45.0, skinTempDevC = 0.8, respRateBpm = 14.0),
         )
         val days = baseline + recent
         val msg = IllnessWatch.evaluate(days)
         assertNotNull(msg)
-        assertTrue(msg!!.contains("resting HR"))
+        assertTrue(msg!!.contains("RHR"))
         assertTrue(msg.contains("HRV"))
         assertTrue(msg.contains("skin temp"))
         assertTrue(msg.contains("Many things can cause this pattern"))
+    }
+
+    @Test
+    fun illness_absoluteSkinTemperatureUsesChangeFromPersonalBaseline() {
+        val baseline = (0 until 31).map {
+            day(
+                "2026-01-%02d".format(it + 1),
+                restingHr = 50, avgHrv = 60.0, skinTempDevC = 34.0, respRateBpm = 14.0,
+            )
+        }
+        val recent = listOf(
+            day("2026-02-01", restingHr = 60, avgHrv = 60.0, skinTempDevC = 35.0, respRateBpm = 14.0),
+            day("2026-02-02", restingHr = 60, avgHrv = 60.0, skinTempDevC = 35.0, respRateBpm = 14.0),
+        )
+        val message = IllnessWatch.evaluate(baseline + recent)
+        assertNotNull(message)
+        assertTrue(message!!.contains("skin temp +1.0 °C"))
+        assertFalse(message.contains("+35.0°C"))
     }
 
     @Test

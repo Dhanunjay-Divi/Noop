@@ -18,6 +18,14 @@ final class WorkoutSourceTests: XCTestCase {
         XCTAssertEqual(Repository.acceptedAutoDetectSport(.ski), "Skiing")
         XCTAssertEqual(Repository.acceptedAutoDetectSport(.other), "Workout")
         XCTAssertEqual(Repository.acceptedAutoDetectSport(nil), "Workout")
+        XCTAssertEqual(
+            Repository.acceptedAutoDetectSport(.other, requestedSport: "Basketball"),
+            "Basketball"
+        )
+        XCTAssertEqual(
+            Repository.acceptedAutoDetectSport(.run, requestedSport: "not-a-catalog-sport"),
+            "Running"
+        )
     }
 
     func testAutomaticActivityModeMigrationPreservesExistingChoiceAndDefaultsFreshToAsk() {

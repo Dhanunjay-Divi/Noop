@@ -13,7 +13,7 @@ import java.io.FileOutputStream
  * WHY this exists: the strap FREES history once the phone acks its trim cursor. If a chunk's records
  * can't be decoded (CRC failure, or an unmapped firmware layout the v24 plausibility gate rejects),
  * acking anyway permanently destroys the user's ONLY copy of those records while the UI says "History
- * synced". So the Backfiller archives the raw bytes HERE — durably — BEFORE acking. The archive then
+ * synced". So the Backfiller archives the raw bytes HERE - durably - BEFORE acking. The archive then
  * lets a later release that maps the layout recover the data, and is itself the corpus that mapping
  * needs. Frames carry sensor payloads, not identifiers (no serials/MACs).
  *
@@ -30,7 +30,7 @@ import java.io.FileOutputStream
  * skip them ([AppendResult.written] = false); the caller records those as unarchived so the sync status
  * never falsely claims they were preserved. (#344)
  *
- * A genuine WRITE FAILURE (I/O error) instead throws — the caller treats that as "do NOT ack", so the
+ * A genuine WRITE FAILURE (I/O error) instead throws - the caller treats that as "do NOT ack", so the
  * strap keeps the records and re-sends them on the next offload. No data is lost either way.
  */
 class RawHistoryArchive(
@@ -232,7 +232,7 @@ class RawHistoryArchive(
          * True when EVERY byte of [frame]'s payload region is zero — an informationless record.
          *
          * Deliberately the STRICT test: a single non-zero byte anywhere in the region makes the frame
-         * informative and gives it full retention priority. "Mostly zero" is NOT the test — a novel
+         * informative and gives it full retention priority. "Mostly zero" is NOT the test - a novel
          * record that carries one small populated block inside an otherwise-empty buffer is precisely the
          * thing this archive exists to catch. Twin of the Swift `RawHistoryArchive.hasZeroPayload`.
          */

@@ -1,6 +1,6 @@
 import SwiftUI
 
-// NoopV2Tokens.swift — the "AURORA" v2 design language (UI v2).
+// NoopV2Tokens.swift - the "AURORA" v2 design language (UI v2).
 //
 // WHY v2 EXISTS (see noop_WIP/rounds/ROUND-11-ui-v2.md):
 //  • v1 is good but information-dense on Today, inconsistent between tabs (rich Liquid gradient vs flat

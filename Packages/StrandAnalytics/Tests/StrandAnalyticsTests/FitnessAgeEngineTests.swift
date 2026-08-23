@@ -205,4 +205,11 @@ final class FitnessAgeEngineTests: XCTestCase {
         XCTAssertEqual(FitnessAgeEngine.nightsUntilReady(rhrDays: 4), 0)
         XCTAssertEqual(FitnessAgeEngine.nightsUntilReady(rhrDays: 7), 0)
     }
+
+    func testCoverageDaysUntilReadyAlsoTracksRequiredActivityDays() {
+        XCTAssertEqual(FitnessAgeEngine.coverageDaysUntilReady(observedDays: 0), 4)
+        XCTAssertEqual(FitnessAgeEngine.coverageDaysUntilReady(observedDays: 2), 2)
+        XCTAssertEqual(FitnessAgeEngine.coverageDaysUntilReady(observedDays: 4), 0)
+        XCTAssertEqual(FitnessAgeEngine.coverageDaysUntilReady(observedDays: 7), 0)
+    }
 }

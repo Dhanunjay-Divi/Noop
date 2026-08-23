@@ -150,34 +150,31 @@ final class StressModelCarryTests: XCTestCase {
     }
 }
 
-/// Pins the fail-closed contract between the Automations UI and the automatic stress detector. A
-/// remembered opt-in is data, not evidence: it cannot enable automatic haptics until the live source
-/// supplies fresh, timestamp-matched wrist motion.
+/// Pins the fail-closed contract between the Automations UI and the automatic stress detector. The
+/// source path is available, but every event still needs fresh timestamp-matched wrist evidence.
 final class BiofeedbackCapabilityTests: XCTestCase {
 
-    func testCurrentLiveSourceCannotEnableAutomaticStressNudges() {
-        XCTAssertFalse(BiofeedbackPrefs.automaticStressNudgesAvailable)
+    func testCurrentLiveSourceCanHonorExplicitAutomaticStressOptIn() {
+        XCTAssertTrue(BiofeedbackPrefs.automaticStressNudgesAvailable)
 
         let config = BiofeedbackPrefs.stressConfig(
             storedCheckInEnabled: true,
             storedAutoNudge: true,
             capability: BiofeedbackPrefs.automaticStressNudgeCapability)
 
-        XCTAssertFalse(config.enabled,
-                       "a stored master opt-in must not bypass missing wrist-motion evidence")
-        XCTAssertFalse(config.autoNudge,
-                       "a stored auto-nudge opt-in must remain ineffective on the current source")
+        XCTAssertTrue(config.enabled)
+        XCTAssertTrue(config.autoNudge)
     }
 
-    func testFutureVerifiedSourceCanHonorPreservedChoices() {
+    func testUnavailableSourceCannotHonorStoredChoices() {
         let config = BiofeedbackPrefs.stressConfig(
             storedCheckInEnabled: true,
             storedAutoNudge: true,
-            capability: .availableWithTimestampMatchedWristMotion,
+            capability: .unavailableNeedsTimestampMatchedWristMotion,
             quietHoursEnabled: false)
 
-        XCTAssertTrue(config.enabled)
-        XCTAssertTrue(config.autoNudge)
+        XCTAssertFalse(config.enabled)
+        XCTAssertFalse(config.autoNudge)
         XCTAssertFalse(config.quietHoursEnabled)
     }
 

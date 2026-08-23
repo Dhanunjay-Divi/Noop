@@ -270,7 +270,7 @@ struct WorkoutDetailView: View {
     // MARK: - GPS route (#524)
 
     /// The captured-route card: a MapKit map of the polyline with start/end markers, plus distance and
-    /// pace read off the route. Shown ONLY when ≥2 points were captured — honest "no map" otherwise (a
+    /// pace read off the route. Shown ONLY when ≥2 points were captured - honest "no map" otherwise (a
     /// Mac with no GPS, denied permission, or a non-distance sport never produce a route).
     @ViewBuilder private var routeCard: some View {
         if route.count >= 2 {
@@ -313,7 +313,7 @@ struct WorkoutDetailView: View {
     }
 
     /// Avg pace from the row's GPS distance + duration, in the user's unit system: "m:ss /km" (metric) or
-    /// "m:ss /mi" (imperial). "–" when distance or duration is missing/zero (pace undefined — honest).
+    /// "m:ss /mi" (imperial). "–" when distance or duration is missing/zero (pace undefined - honest).
     private var paceLabel: String {
         guard let m = row.distanceM, m > 0 else { return "–" }
         let secs = row.durationS ?? Double(row.endTs - row.startTs)

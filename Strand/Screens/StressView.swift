@@ -414,7 +414,7 @@ struct StressView: View {
             // Resting HR — an INCREASE is the stressful direction.
             markerTile(
                 label: "Resting HR",
-                value: model.rhrToday.map { String(localized: "\($0) bpm") } ?? "—",
+                value: model.rhrToday.map { String(localized: "\($0) bpm") } ?? "-",
                 systemImage: "heart.text.square.fill",
                 delta: model.rhrDelta,
                 accent: StrandPalette.metricRose,
@@ -423,7 +423,7 @@ struct StressView: View {
             // HRV — a DECREASE is the stressful direction.
             markerTile(
                 label: "HRV",
-                value: model.hrvToday.map { String(localized: "\(Int($0.rounded())) ms") } ?? "—",
+                value: model.hrvToday.map { String(localized: "\(Int($0.rounded())) ms") } ?? "-",
                 systemImage: "waveform.path.ecg",
                 delta: model.hrvDelta,
                 accent: StrandPalette.metricPurple,
@@ -894,7 +894,7 @@ struct StressModel {
         // Share of the last 30 independently scorable causal points in the LOW band.
         let recent = Array(pts.suffix(30))
         if recent.isEmpty {
-            self.calmTimeValue = "—"
+            self.calmTimeValue = "-"
             self.calmTimeCaption = String(localized: "needs history")
         } else {
             let calm = recent.filter { $0.value < 1.0 }.count
@@ -971,7 +971,7 @@ struct StressModel {
     private static func sourceMetadata(_ source: DailyMetricSource) -> (title: String, note: String?) {
         switch source {
         case .noopComputed:
-            return (String(localized: "NOOP strap"), nil)
+            return (String(localized: "Noop Band"), nil)
         case .whoopImport:
             return (String(localized: "WHOOP export reference"),
                     String(localized: "Derived by NOOP from a single WHOOP export series; not WHOOP score parity."))
@@ -1307,9 +1307,9 @@ struct StressTotalsBar: View {
         )
     }
 
-    /// "—" when a band had no scored hours, else "Nh" (each scored bucket is one hour).
+    /// "-" when a band had no scored hours, else "Nh" (each scored bucket is one hour).
     private func durationLabel(_ hours: Int) -> String {
-        hours <= 0 ? "—" : String(localized: "\(hours)h")
+        hours <= 0 ? "-" : String(localized: "\(hours)h")
     }
 }
 
@@ -1412,13 +1412,13 @@ private struct StressPreviewHarness: View {
     }
 }
 
-#Preview("Stress — HIGH") {
+#Preview("Stress - HIGH") {
     StressPreviewHarness(score: 2.4)
         .frame(width: 720, height: 1000)
         .preferredColorScheme(.dark)
 }
 
-#Preview("Stress — LOW") {
+#Preview("Stress - LOW") {
     StressPreviewHarness(score: 0.6)
         .frame(width: 720, height: 1000)
         .preferredColorScheme(.dark)

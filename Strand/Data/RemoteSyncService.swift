@@ -539,7 +539,7 @@ enum RemoteSyncService {
             RemoteSyncPreferences.lastSuccessMs = Int(Date().timeIntervalSince1970 * 1_000)
             RemoteSyncPreferences.lastStatus = hasMore
                 ? "Uploaded \(totalRows) raw rows; more history will continue next time."
-                : "Up to date — uploaded \(totalRows) pending raw rows."
+                : "Up to date - uploaded \(totalRows) pending raw rows."
             return RemoteSyncRunResult(
                 uploadedRawRows: totalRows,
                 uploadedBatches: totalBatches,

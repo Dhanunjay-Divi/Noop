@@ -184,7 +184,7 @@ private fun Modifier.SceneHeroBackgroundModifier(
 // MARK: - Scene SCREEN background (the scene as the PAGE backdrop — cards float OVER it)
 //
 // Compose port of the iOS `SceneScreenBackground`. The day-cycle scene anchored to the TOP of the SCREEN,
-// behind the header + the rings hero — so it "forms part of the background" and the cards sit OVER it
+// behind the header + the rings hero - so it "forms part of the background" and the cards sit OVER it
 // (the design direction). Full-WIDTH (aspect-fill), TOP-aligned so the sky shows, fading into the canvas
 // ([Palette.surfaceBase]) over its lower portion (~92% down) so it dissolves before the dashboard cards, at
 // a ~0.5 image alpha. A faint dark scrim under the VERY top keeps the white header text legible on a bright

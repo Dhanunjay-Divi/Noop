@@ -101,7 +101,7 @@ struct AddDeviceWizard: View {
 
     // The chosen strap, in whichever shape its path produces.
     /// A WHOOP picked from `discoveredWhoops` (uuid / advertised name / rssi).
-    @State private var pickedWhoop: (uuid: String, name: String, rssi: Int)?
+    @State private var pickedWhoop: (uuid: String, name: String, rssi: Int, model: WhoopModel)?
     /// A generic HR strap picked from the StandardHRSource scan.
     @State private var pickedStrap: StandardHRSource.DiscoveredStrap?
     /// An FTMS gym machine picked from the FTMSSource scan.
@@ -319,12 +319,9 @@ struct AddDeviceWizard: View {
 
     @ViewBuilder private var typeStep: some View {
         VStack(alignment: .leading, spacing: 10) {
-            typeRow(.whoop5mg, icon: "applewatch.side.right",
-                    title: "WHOOP 5.0 / MG",
-                    subtitle: String(localized: "Newer WHOOP band, experimental in NOOP"))
             typeRow(.whoop4, icon: "applewatch.side.right",
-                    title: "WHOOP 4.0",
-                    subtitle: String(localized: "NOOP's primary, fully-supported band"))
+                    title: "Noop Band",
+                    subtitle: String(localized: "Automatically detects compatible band hardware"))
             typeRow(.hrStrap, icon: "heart.circle",
                     title: String(localized: "Heart-rate strap"),
                     subtitle: String(localized: "Polar, Wahoo, Coospo, Garmin HRM, Amazfit Helio broadcast"))
@@ -460,20 +457,14 @@ struct AddDeviceWizard: View {
         }
     }
 
-    /// Type-specific "get it ready" guidance — the point of the branching wizard.
+    /// Type-specific "get it ready" guidance - the point of the branching wizard.
     private func prepInstructions(_ t: DeviceType) -> [String] {
         switch t {
-        case .whoop4:
+        case .whoop4, .whoop5mg:
             return [
-                String(localized: "Put your WHOOP 4.0 on your wrist and make sure it's awake."),
-                String(localized: "Make sure it's NOT connected to the official WHOOP app right now."),
-                String(localized: "NOOP will look for it nearby."),
-            ]
-        case .whoop5mg:
-            return [
-                String(localized: "WHOOP 5.0 / MG bonds to one device at a time. Unpair it from the official WHOOP app first."),
-                String(localized: "Put the band into pairing mode, on your wrist and awake."),
-                String(localized: "NOOP will look for it nearby."),
+                String(localized: "Put your Noop Band on your wrist and make sure it is awake."),
+                String(localized: "Close any other app currently connected to the band."),
+                String(localized: "NOOP detects the compatible hardware generation automatically."),
             ]
         case .hrStrap:
             return [
@@ -1052,11 +1043,11 @@ struct AddDeviceWizard: View {
                     pickedStrap = nil
                     pickedMachine = nil
                     pickedHuami = nil
-                    nameDraft = strap.name.isEmpty ? typeTitle(type) : strap.name
+                    nameDraft = String(localized: "Noop Band")
                     model.stopWhoopScan()
                     step = .confirm
                 } onRescan: {
-                    model.presentWhoopScan(model: type.whoopModel ?? .whoop4)
+                    model.presentWhoopScan(model: WhoopModel.persisted)
                 }
             } else if type == .gymEquipment, let ftmsScanner {
                 FTMSPickList(scanner: ftmsScanner) { machine in
@@ -1181,7 +1172,7 @@ struct AddDeviceWizard: View {
         return n.isEmpty ? confirmAdvertisedName : n
     }
     private var confirmAdvertisedName: String {
-        if let pickedWhoop { return pickedWhoop.name.isEmpty ? (type.map(typeTitle) ?? String(localized: "Device")) : pickedWhoop.name }
+        if pickedWhoop != nil { return String(localized: "Noop Band") }
         if let pickedStrap { return pickedStrap.name }
         if let pickedMachine { return pickedMachine.name }
         if let pickedHuami { return pickedHuami.name }
@@ -1189,7 +1180,7 @@ struct AddDeviceWizard: View {
         return type.map(typeTitle) ?? String(localized: "Device")
     }
     private var confirmBrand: String {
-        if type?.isWhoop == true { return "WHOOP" }
+        if type?.isWhoop == true { return "NOOP" }
         if type == .gymEquipment { return String(localized: "Gym equipment") }
         // Experimental non-Oura types (Amazfit / Mi Band / Garmin) take their stored brand string straight
         // from the catalog via the type→brand bridge. Oura falls through to its detected-generation label.
@@ -1321,8 +1312,9 @@ struct AddDeviceWizard: View {
         let name = confirmName
         let device: PairedDevice
 
-        if let pickedWhoop, let type, let wm = type.whoopModel {
+        if let pickedWhoop {
             // WHOOP: full capability set; id namespaced by uuid; model "4.0" / "5.0 MG".
+            let wm = pickedWhoop.model
             let modelLabel = (wm == .whoop4) ? "4.0" : "5.0 MG"
             device = PairedDevice(
                 id: "whoop-\(pickedWhoop.uuid)",
@@ -1462,8 +1454,7 @@ struct AddDeviceWizard: View {
 
     private func typeTitle(_ t: DeviceType) -> String {
         switch t {
-        case .whoop5mg:     return "WHOOP 5.0 / MG"
-        case .whoop4:       return "WHOOP 4.0"
+        case .whoop5mg, .whoop4: return String(localized: "Noop Band")
         case .hrStrap:      return String(localized: "Heart-rate strap")
         case .gymEquipment: return String(localized: "Gym equipment")
         case .amazfit:      return "Amazfit / Zepp"
@@ -1496,7 +1487,7 @@ struct AddDeviceWizard: View {
             Image(systemName: "flask")
                 .foregroundStyle(StrandPalette.statusWarning)
                 .accessibilityHidden(true)
-            Text("WHOOP 5.0 / MG support is newer and still experimental in NOOP.")
+            Text("Some Noop Band firmware features are still experimental in NOOP.")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.statusWarning)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1517,11 +1508,11 @@ struct AddDeviceWizard: View {
                 .foregroundStyle(StrandPalette.statusWarning)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Your WHOOP only talks to one phone at a time.")
+                Text("Your band uses one active app at a time.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.statusWarning)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Force-quit the official WHOOP app first, or pairing may fail.")
+                Text("Close any other band app first, or pairing may fail.")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.statusWarning)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1533,7 +1524,7 @@ struct AddDeviceWizard: View {
         .background(StrandPalette.statusWarning.opacity(0.10),
                     in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Heads-up. Your WHOOP only talks to one phone at a time. Force-quit the official WHOOP app first, or pairing may fail.")
+        .accessibilityLabel("Heads-up. Your band uses one active app at a time. Close any other band app first, or pairing may fail.")
     }
 
     private var whoopFirstNote: some View {
@@ -1541,7 +1532,7 @@ struct AddDeviceWizard: View {
             Image(systemName: "info.circle")
                 .foregroundStyle(StrandPalette.textTertiary)
                 .accessibilityHidden(true)
-            Text("WHOOP is NOOP's primary, fully-supported band. Other heart-rate straps stream live heart rate and HRV, but not WHOOP's deeper sleep and recovery data.")
+            Text("Noop Band provides the deepest on-device experience. Other supported straps, watches, rings, and machines can still contribute the signals they expose.")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1562,7 +1553,7 @@ struct AddDeviceWizard: View {
 /// surfaces straps in `discoveredWhoops`. Pure UI — selection + scan lifecycle live in the wizard.
 private struct WhoopPickList: View {
     @ObservedObject var ble: BLEManager
-    let onSelect: ((uuid: String, name: String, rssi: Int)) -> Void
+    let onSelect: ((uuid: String, name: String, rssi: Int, model: WhoopModel)) -> Void
     let onRescan: () -> Void
 
     var body: some View {
@@ -1573,8 +1564,8 @@ private struct WhoopPickList: View {
                 SearchingCard(whoopHint: true)
             } else {
                 ForEach(found, id: \.uuid) { strap in
-                    DiscoveredRow(name: strap.name.isEmpty ? "WHOOP" : strap.name,
-                                  subtitle: "WHOOP",
+                    DiscoveredRow(name: "Noop Band",
+                                  subtitle: String(localized: "Compatible band"),
                                   rssi: strap.rssi) {
                         onSelect(strap)
                     }
@@ -1755,7 +1746,7 @@ private struct SearchingCard: View {
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             if whoopHint {
-                Text("Not showing up? The official WHOOP app may still be holding it. Force-quit that app, then tap Rescan.")
+                Text("Not showing up? Another band app may still be holding the connection. Force-quit it, then tap Rescan.")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.statusWarning)
                     .fixedSize(horizontal: false, vertical: true)

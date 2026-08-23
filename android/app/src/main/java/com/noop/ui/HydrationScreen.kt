@@ -58,6 +58,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.analytics.HydrationGoal
 import com.noop.analytics.HydrationStore
+import com.noop.notif.HydrationReminderPrefs
+import com.noop.notif.HydrationReminderScheduler
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -100,8 +102,8 @@ internal fun parseCustomHydrationMl(text: String): Int? {
 /**
  * The Hydration detail screen. The goal's effort bump uses today's Effort/strain (0..100) read from the
  * view-model's `today` row (null leaves the bump at 0). The screen reads/writes via [viewModel].repo;
- * the SharedPreferences-backed profile sex is read once. A log tap appends to the local-only day total
- * and refreshes the vessel + history.
+ * the SharedPreferences-backed profile sex is read once. A log tap appends to NOOP's total; reads also
+ * include confirmed Health Connect hydration without summing potentially mirrored source totals.
  */
 @Composable
 fun HydrationScreen(viewModel: AppViewModel) {
@@ -109,13 +111,14 @@ fun HydrationScreen(viewModel: AppViewModel) {
     val scope = rememberCoroutineScope()
 
     val today by viewModel.today.collectAsStateWithLifecycle()
-    val strain = today?.strain
+    val currentRow = today?.takeIf { it.day == LocalDate.now().toString() }
+    val strain = currentRow?.strain
 
     val sex = remember { ProfileStore.from(context).sex }
     // R3: metric-aware goal — body weight personalises the baseline (~35 ml/kg) and an elevated skin
     // temperature adds a modest heat bump, on top of the Effort bump. Nulls fall back to the previous
     // sex-baseline behaviour, so a profile without a weight is unchanged. Mirrors the iOS wiring.
-    val skinTempDevC = today?.skinTempDevC
+    val skinTempDevC = currentRow?.skinTempDevC
     val goalMl = remember(sex, strain, skinTempDevC) {
         HydrationGoal.dailyGoalMl(sex, null, strain, skinTempDevC)
     }
@@ -127,12 +130,24 @@ fun HydrationScreen(viewModel: AppViewModel) {
 
     // Today's running total + the per-day history, loaded off the gesture path and refreshed after a log.
     var totalMl by remember { mutableStateOf(0.0) }
+    var reading by remember { mutableStateOf<HydrationStore.Reading?>(null) }
     var history by remember { mutableStateOf<List<Pair<String, Double>>>(emptyList()) }
     // A simple reload key the log taps bump so the LaunchedEffect re-reads the store.
     var reloadTick by remember { mutableStateOf(0) }
-    LaunchedEffect(reloadTick) {
-        totalMl = runCatching { HydrationStore.total(viewModel.repo) }.getOrDefault(0.0)
+    LaunchedEffect(reloadTick, strain, goalMl) {
+        reading = runCatching { HydrationStore.reading(viewModel.repo) }.getOrNull()
+        totalMl = reading?.valueMl ?: 0.0
         history = runCatching { HydrationStore.history(viewModel.repo, days = 7) }.getOrDefault(emptyList())
+        val reminders = HydrationReminderPrefs.config(context)
+        if (reminders.adaptiveEnabled) {
+            val changed = HydrationReminderPrefs.updateAdaptiveContext(
+                context = context,
+                effort = strain,
+                consumedMl = reading?.valueMl,
+                goalMl = reading?.let { goalMl },
+            )
+            if (changed && reminders.enabled) HydrationReminderScheduler.reconcile(context)
+        }
     }
 
     // #798 - the LAST amount logged this session, so the detail can offer a one-tap "Undo" that removes
@@ -186,7 +201,7 @@ fun HydrationScreen(viewModel: AppViewModel) {
     // opted-out user still gets the plain surface. Mirrors the liquid Today scaffold.
     LazyScreenScaffold(
         title = uiString(R.string.l10n_hydration_screen_hydration_bdfb040f),
-        subtitle = "Your fluid intake today, on this phone only.",
+        subtitle = "Confirmed NOOP and Health Connect intake today.",
         topBackground = if (showDayCycleBackground) { { LiquidScreenSky(fillHeight = skyBehindCards) } } else null,
         // Sky-behind-cards fills the viewport so the transparent cards reveal the sky the whole way
         // down (Today / Trends / Sleep / metric-detail parity - same two prefs, same two behaviours).
@@ -324,7 +339,7 @@ fun HydrationScreen(viewModel: AppViewModel) {
             }
         }
 
-        // TODAY'S TOTAL as a single read-out row (the MVP "logged entries" — the day total is the running
+        // TODAY'S TOTAL as a single read-out row (the MVP "logged entries" - the day total is the running
         // sum the store banks; per-tap rows aren't separately persisted, so we show the honest day figure).
         item {
             NoopCard(padding = 18.dp) {
@@ -373,12 +388,14 @@ fun HydrationScreen(viewModel: AppViewModel) {
                                     modifier = Modifier.weight(1f),
                                 ) { remove(last) }
                             }
-                            NoopButton(
-                                text = uiString(R.string.l10n_hydration_screen_clear_today_1be870ea),
-                                leadingIcon = Icons.Filled.Delete,
-                                kind = NoopButtonKind.Secondary,
-                                modifier = Modifier.weight(1f),
-                            ) { remove(totalMl.toInt()) }
+                            if ((reading?.noopMl ?: 0.0) > 0.0) {
+                                NoopButton(
+                                    text = uiString(R.string.l10n_hydration_screen_clear_today_1be870ea),
+                                    leadingIcon = Icons.Filled.Delete,
+                                    kind = NoopButtonKind.Secondary,
+                                    modifier = Modifier.weight(1f),
+                                ) { remove(reading?.noopMl?.toInt() ?: 0) }
+                            }
                         }
                     }
                 }

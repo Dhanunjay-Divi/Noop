@@ -54,7 +54,7 @@ import java.util.UUID
 // marker"). Pick a marker from MarkerCatalog (searchable) OR add a custom marker, then:
 // value (numeric, the canonical unit prefilled, a unit switcher where sensible — mmol/L↔
 // mg/dL, conversion shown), date taken, optional note, and an OPTIONAL "reference range
-// from my report" — NEVER a NOOP-shipped range. Blood pressure is a PAIRED marker
+// from my report" - NEVER a NOOP-shipped range. Blood pressure is a PAIRED marker
 // (systolic + diastolic entered together, stored as two keys).
 //
 // On save it hands the caller `List<LabMarkerRow>` (one row, or two for BP) under the

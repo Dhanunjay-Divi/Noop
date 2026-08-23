@@ -394,7 +394,7 @@ private fun JournalNumericField(
                 text = new
                 new.replace(',', '.').toDoubleOrNull()?.let { onCommit(it) }
             },
-            placeholder = { Text("—", style = NoopType.body, color = Palette.textTertiary) },
+            placeholder = { Text("-", style = NoopType.body, color = Palette.textTertiary) },
             singleLine = true,
             textStyle = NoopType.body,
             colors = journalFieldColors(),

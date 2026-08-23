@@ -165,7 +165,7 @@ private object CompareCatalog {
         CompareMetric("steps", "Steps", "Effort", "", "apple-health", 0),
         // On-device steps ESTIMATE for a WHOOP 4.0 (no real step count over BLE): the strap's daily
         // motion volume scaled by a personal calibration, stored under the computed "-noop" source.
-        // Distinct from the real "steps" above — labelled "(estimated)" so it never reads as measured.
+        // Distinct from the real "steps" above - labelled "(estimated)" so it never reads as measured.
         CompareMetric("steps_est", "Steps (estimated)", "Effort", "steps", "my-whoop", 0),
         CompareMetric("active_kcal", "Active Energy", "Effort", "kcal", "apple-health", 0),
         // Health / Body
@@ -950,7 +950,7 @@ private fun OverlayChart(series: List<CompareSeries>, modifier: Modifier) {
                             style = Stroke(width = 2.2f, cap = StrokeCap.Round, join = StrokeJoin.Round),
                         )
                     }
-                    // Bevel "now" end-cap on this series' latest point — soft halo + bright core + white centre.
+                    // Bevel "now" end-cap on this series' latest point - soft halo + bright core + white centre.
                     b.last?.let { last ->
                         drawCircle(color = b.color.copy(alpha = 0.30f), radius = 8f, center = last)
                         drawCircle(color = b.color.copy(alpha = 0.65f), radius = 5f, center = last)
@@ -1097,7 +1097,7 @@ private fun PairCard(p: PairResult) {
                 // Small liquid vessel accent for the headline single value: |r| fills the vessel in the
                 // relationship's own tint, with the signed r rolled up over it (white, tabular, hit-
                 // transparent so a tap falls through). Same r, same tint, same signedR formatting the plain
-                // "r = …" readout used — just visualised as a headline vessel. STATIC (animated = false):
+                // "r = …" readout used - just visualised as a headline vessel. STATIC (animated = false):
                 // up to six of these render in a scrolling list, so they pose once (the pilot's small-gauge
                 // static-raster rule) rather than each running a live clock.
                 Box(modifier = Modifier.size(38.dp), contentAlignment = Alignment.Center) {

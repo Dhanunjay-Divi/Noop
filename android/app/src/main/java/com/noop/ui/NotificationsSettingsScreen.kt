@@ -264,7 +264,7 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
 
     ScreenScaffold(
         title = uiString(R.string.l10n_notifications_settings_screen_notifications_753a22b2),
-        subtitle = "Buzz your strap when these apps notify you. Everything runs on this device.",
+        subtitle = "Vibrate Noop Band when these apps notify you. Everything runs on this device.",
     ) {
         // MARK: Master card
         AlertSection(
@@ -383,7 +383,7 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
         ) {
             FormToggleRow(
                 label = uiString(R.string.l10n_notifications_settings_screen_only_buzz_when_worn_6211cee3),
-                help = "Skip alerts when the strap is off your wrist.",
+                help = "Skip alerts when Noop Band is off your wrist.",
                 checked = onlyWhenWorn,
                 onChange = {
                     onlyWhenWorn = it
@@ -446,14 +446,14 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
         AlertSection(
             icon = Icons.Filled.NotificationsActive,
             title = uiString(R.string.l10n_notifications_settings_screen_daily_reports_c1a22a74),
-            blurb = "Optional phone notifications, off by default. These arrive after your strap syncs " +
+            blurb = "Optional phone notifications, off by default. These arrive after Noop Band syncs " +
                 "and NOOP scores the data, so they land soon after, not the exact second you wake or " +
                 "finish a workout. Everything is worked out on this phone.",
         ) {
             FormToggleRow(
                 label = uiString(R.string.l10n_notifications_settings_screen_morning_recap_45ec05c5),
                 help = "After last night is processed, a notification with your Recovery and Sleep Score. Posts " +
-                    "once a day, after your strap has synced the night.",
+                    "once a day, after Noop Band has synced the night.",
                 checked = morningReport,
                 onChange = {
                     morningReport = it
@@ -479,7 +479,7 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
             FormToggleRow(
                 label = uiString(R.string.l10n_notifications_settings_screen_optimal_strain_reached_2862ec2b),
                 help = "Once a day, a notification at a recovery-based Effort marker. It is a planning cue, " +
-                    "not a limit or permission to keep pushing. Posts after your strap syncs and NOOP scores the day.",
+                    "not a limit or permission to keep pushing. Posts after Noop Band syncs and NOOP scores the day.",
                 checked = strainTargetReport,
                 onChange = {
                     strainTargetReport = it
@@ -493,9 +493,9 @@ fun NotificationsSettingsScreen(vm: AppViewModel) {
 // MARK: - Strap status (mirrors the three-state mapping from the Mac screen)
 
 private fun strapPillTitle(live: com.noop.ble.LiveState): String = when {
-    live.connected -> "Strap connected"
-    live.bonded -> "Strap idle"
-    else -> "Strap not connected"
+    live.connected -> "Noop Band connected"
+    live.bonded -> "Noop Band idle"
+    else -> "Noop Band not connected"
 }
 
 private fun strapPillTone(live: com.noop.ble.LiveState): StrandTone = when {

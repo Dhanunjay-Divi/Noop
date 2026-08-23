@@ -135,11 +135,11 @@ struct FullDayChartView: View {
             Image(systemName: "dot.radiowaves.left.and.right")
                 .font(StrandFont.footnote.weight(.medium))
                 .foregroundStyle(StrandPalette.textTertiary)
-            Text("My WHOOP")
+            Text(WhoopModel.customerName)
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textSecondary)
             Spacer()
-            // #574 — owned-source scope. The strap is the owned source; "All sources" reveals the honest
+            // #574 - owned-source scope. The strap is the owned source; "All sources" reveals the honest
             // disclosure that other sources' raw per-second streams aren't offloaded on-device.
             SegmentedPillControl([true, false], selection: $ownedOnly) { $0 ? String(localized: "Owned") : String(localized: "All") }
                 .fixedSize()
@@ -303,10 +303,10 @@ struct FullDayChartView: View {
     /// FullDayChartScreen.EmptyTimelineState.
     private var emptyReason: String {
         if ownedOnly, metricUnsupported, metric == .spo2 {
-            return String(localized: "This strap doesn’t send SpO₂ over Bluetooth. Import a WHOOP export or Health Connect to see it.")
+            return String(localized: "Noop Band does not send SpO₂ over Bluetooth on this firmware. Import a WHOOP export or Health Connect to see it.")
         }
         if ownedOnly, metricUnsupported, metric == .respiration {
-            return String(localized: "This strap sends no raw respiration stream. Your estimated respiratory rate appears on the Health screen.")
+            return String(localized: "Noop Band sends no raw respiration stream on this firmware. Your estimated respiratory rate appears on the Health screen.")
         }
         return ownedOnly
             ? String(localized: "Nothing offloaded for this window yet.")
@@ -403,7 +403,7 @@ struct FullDayChartView: View {
         workoutSpans = OverviewHRChart.workouts(workoutCandidates, overlapping: dayBounds)
     }
 
-    /// "H:MM" for a duration in seconds (e.g. a 6h06m night → "6:06") — mirrors TodayView.hoursMinutes
+    /// "H:MM" for a duration in seconds (e.g. a 6h06m night → "6:06") - mirrors TodayView.hoursMinutes
     /// so the band label reads identically on both whole-day charts.
     private static func hoursMinutes(_ seconds: Int) -> String {
         let h = max(0, seconds) / 3600, m = (max(0, seconds) % 3600) / 60
@@ -413,7 +413,7 @@ struct FullDayChartView: View {
     // MARK: Presentation helpers
 
     private var resolutionSubtitle: String {
-        guard !series.points.isEmpty else { return "—" }
+        guard !series.points.isEmpty else { return "-" }
         if series.isRaw { return String(localized: "Raw · per second") }
         let m = series.bucketSeconds / 60
         return m >= 1 ? String(localized: "\(m)-minute average")

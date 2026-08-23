@@ -116,9 +116,9 @@ final class MoreListParityTests: XCTestCase {
     }
 
     /// The iPhone shell owns one custom bar outside the native TabView. Its clearance must come from
-    /// that bar's rendered height and constrain the whole TabView; relying on a safe-area inset through
-    /// TabView + NavigationStack, or adding per-screen magic spacers, regresses the final-card reachability
-    /// on custom roots such as LiquidToday.
+    /// that bar's rendered height and be applied once to the TabView itself. A safe-area inset does not
+    /// reliably propagate through nested NavigationStacks on iOS 26; direct root padding keeps every
+    /// shared and custom scroll view above the controls without per-screen magic spacers.
     func testCustomiPhoneTabBarHasOneMeasuredFullScreenReservation() throws {
         let shell = try sourceText("StrandiOS/App/RootTabView.swift")
         let scaffold = try sourceText("Strand/Screens/ScreenScaffold.swift")
@@ -128,10 +128,12 @@ final class MoreListParityTests: XCTestCase {
         XCTAssertTrue(shell.contains("value: geometry.size.height"))
         XCTAssertEqual(shell.components(separatedBy: ".padding(.bottom, visibleTabBarHeight)").count - 1, 1,
                        "The measured custom-bar clearance must be reserved exactly once at the TabView root.")
+        XCTAssertFalse(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"),
+                       "A nested safe-area inset can leave pushed-screen footers beneath the custom bar.")
+        XCTAssertTrue(shell.contains(".background(StrandPalette.surfaceBase.ignoresSafeArea())"),
+                      "The full-screen adaptive canvas must remain behind the translucent controls.")
         XCTAssertTrue(shell.contains(".frame(maxWidth: .infinity, maxHeight: .infinity)"),
                       "The overlay alignment needs a full-screen shell or the bar can settle mid-layout.")
-        XCTAssertFalse(shell.contains(".safeAreaInset(edge: .bottom"),
-                       "A keyboard-following safe-area inset can lift the custom bar into mid-screen.")
         XCTAssertFalse(shell.contains("DragGesture(minimumDistance: 24)"),
                        "The tab shell must not steal horizontal drags from Trends or the system Back gesture.")
 
@@ -188,9 +190,13 @@ final class MoreListParityTests: XCTestCase {
         XCTAssertTrue(shell.contains("--demo-compact-tab-bar"),
                       "The real compact state needs a deterministic visual-regression route.")
         XCTAssertTrue(shell.contains(".glassEffect(.clear.tint(tint)"))
-        XCTAssertTrue(shell.contains(".white.opacity(0.08)"),
-                      "Light mode must preserve a pearl-clear lens instead of a solid grey plate.")
-        XCTAssertTrue(shell.contains(".black.opacity(0.035)"),
+        XCTAssertTrue(shell.contains(".matchedGeometryEffect(\n                            id: \"selected-tab-indicator\""),
+                      "The selected capsule must morph between expanded tabs and the compact control.")
+        XCTAssertTrue(shell.contains("value: selection"),
+                      "Tab selection needs a local animation so the capsule moves instead of jumping.")
+        XCTAssertTrue(shell.contains("return .black.opacity(0.11)"),
+                      "Light mode needs a transparent smoke tint instead of a milk-white plate.")
+        XCTAssertTrue(shell.contains("return .black.opacity(0.025)"),
                       "Light mode may use only a restrained contrast scrim over the live page.")
         XCTAssertTrue(shell.contains("navigationInk(active: active)"),
                       "Navigation ink must adapt to light and dark glass.")
@@ -200,8 +206,13 @@ final class MoreListParityTests: XCTestCase {
                       "The glass island needs an opaque accessibility fallback.")
         XCTAssertTrue(shell.contains("compact && !dynamicTypeSize.isAccessibilitySize"),
                       "Accessibility Dynamic Type must retain visible labels.")
+        XCTAssertTrue(shell.contains(".font(.system(size: 11,"),
+                      "Tab labels need a native-sized fixed font so the longest title never ellipsizes.")
+        XCTAssertTrue(shell.contains(#"? "Train" : item.title"#),
+                      "The narrow rail needs a concise visible activity label while accessibility keeps Workouts.")
+        XCTAssertTrue(shell.contains(".accessibilityLabel(item.title)"),
+                      "The concise activity label must not replace the full spoken destination name.")
         XCTAssertTrue(shell.contains(".frame(minHeight: 44)"))
-        XCTAssertTrue(shell.contains(".accessibilityLabel(item.title)"))
     }
 
     func testiPhoneMoreHasBoundedQuickAccess() throws {
@@ -244,7 +255,7 @@ final class MoreListParityTests: XCTestCase {
                       "The photographic Today scene must retain its explicit dark-scrim contract.")
         XCTAssertFalse(liquidToday.contains("usesDarkSkyBehindCards"),
                        "Liquid Today cannot infer fixed-white ink from an adaptive scene preference.")
-        XCTAssertTrue(liquidToday.contains(".font(StrandFont.rounded(34))\n                        .foregroundStyle(StrandPalette.textPrimary)"),
+        XCTAssertTrue(liquidToday.contains(".font(StrandFont.rounded(36, weight: .bold))\n                            .foregroundStyle(StrandPalette.textPrimary)"),
                       "Liquid Today's day title must use adaptive ink on pearl/obsidian backgrounds.")
         XCTAssertTrue(liquidToday.contains("compact ? StrandPalette.textSecondary : StrandPalette.textTertiary"),
                       "The NOOP wordmark must remain visible in both Light and Dark appearances.")

@@ -23,7 +23,7 @@ import WhoopStore
 // Pearson idiom + restrained copy as CompareView's pairCard.
 //
 // NON-CLINICAL (load-bearing, spec §"Non-clinical / legal framing"): no word here
-// asserts a clinical judgement — never "abnormal/high/low/normal" as NOOP's own
+// asserts a clinical judgement - never "abnormal/high/low/normal" as NOOP's own
 // statement; any reference range shown is EXACTLY what the user typed from their own
 // report; correlation copy says "association, not a medical finding". The full
 // disclaimer shows on the screen and (Wave 3) links to the consolidated About & Legal.
@@ -428,9 +428,9 @@ struct LabBookView: View {
     }
 
     private func latestLabel(_ row: LabMarkerRow?, key: String) -> String {
-        guard let row else { return "—" }
+        guard let row else { return "-" }
         if let v = row.value { return "\(LabBookFormat.value(v, key: key)) \(row.unit)" }
-        return row.valueText ?? "—"
+        return row.valueText ?? "-"
     }
 
     private func lastTakenCaption(_ row: LabMarkerRow?) -> String {
@@ -651,7 +651,7 @@ private struct MarkerDetailView: View {
         }
     }
 
-    /// "Your last 3 LDL readings: 3.4 → 3.1 → 2.9 mmol/L, trending down." — descriptive only.
+    /// "Your last 3 LDL readings: 3.4 → 3.1 → 2.9 mmol/L, trending down." - descriptive only.
     /// Whole-phrase variants per direction so translators never see a stitched trend fragment.
     private var trendSentence: String {
         let nums = numericReadings
@@ -750,7 +750,7 @@ private struct MarkerDetailView: View {
             // Below the floor: show the points exist, withhold the conclusion sentence.
             // Whole-phrase variants per count (never a stitched plural).
             Text(n == 0
-                 ? "No overlap yet between this marker and \(signal?.title.lowercased() ?? String(localized: "that signal")). Log a few more readings (and keep wearing your strap)."
+                 ? "No overlap yet between this marker and \(signal?.title.lowercased() ?? String(localized: "that signal")). Log a few more readings and keep wearing Noop Band."
                  : (n == 1
                     ? "1 reading lines up so far, not enough to read a trend yet (NOOP waits for \(LabBookSignals.floor))."
                     : "\(n) readings line up so far, not enough to read a trend yet (NOOP waits for \(LabBookSignals.floor))."))
@@ -859,7 +859,7 @@ private struct MarkerDetailView: View {
 
     private func valueLabel(_ row: LabMarkerRow) -> String {
         if let v = row.value { return "\(LabBookFormat.value(v, key: markerKey)) \(row.unit)" }
-        return row.valueText ?? "—"
+        return row.valueText ?? "-"
     }
 
     // MARK: - Correlation compute (windowed-aggregate pairing → Pearson)
@@ -957,7 +957,7 @@ enum LabBookSignals {
         return r >= 0 ? String(localized: "positive") : String(localized: "negative")
     }
 
-    /// "When LDL is higher, HRV tends to be lower." — descriptive, no causal language.
+    /// "When LDL is higher, HRV tends to be lower." - descriptive, no causal language.
     /// Whole-phrase variants per direction so translators never see a stitched verb fragment.
     static func insightSentence(markerName: String, signalName: String, r: Double) -> String {
         guard abs(r) >= 0.3 else {

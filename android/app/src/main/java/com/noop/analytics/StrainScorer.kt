@@ -7,7 +7,7 @@ import kotlin.math.ln
 import kotlin.math.roundToLong
 
 /*
- * StrainScorer.kt — cardiovascular load (NOOP "Effort") on a 0–100 logarithmic scale.
+ * StrainScorer.kt - cardiovascular load (NOOP "Effort") on a 0–100 logarithmic scale.
  *
  * Faithful Kotlin port of StrandAnalytics/StrainScorer.swift (verified on macOS),
  * itself ported from server/ingest/app/analysis/strain.py. INDEPENDENT implementation
@@ -15,7 +15,7 @@ import kotlin.math.roundToLong
  * proprietary algorithm; not medical advice).
  *
  * SCALE: the internal metric key stays `strain`, but the published axis is now 0–100
- * ("Effort"). This is a pure RESCALE — `maxStrain` went 21.0 → 100.0 while the
+ * ("Effort"). This is a pure RESCALE - `maxStrain` went 21.0 → 100.0 while the
  * denominator D = 7201 is UNCHANGED, so the log curve and its saturation point
  * (TRIMP 7200 ≈ max) are preserved: a max-Effort day stays exactly as rare as a 21.0
  * day was. trimpToStrain now returns 0–100.
@@ -58,7 +58,7 @@ object StrainScorer {
      *  gate's ≈10 min of 600 × 1 Hz samples, so both cadences trust the number at the same age. */
     const val minSpanSeconds: Int = 600
 
-    /** Top of the Effort scale (was 21.0 — rescaled to 0–100 for "Effort"). */
+    /** Top of the Effort scale (was 21.0 - rescaled to 0–100 for "Effort"). */
     const val maxStrain: Double = 100.0
 
     /**
@@ -307,7 +307,7 @@ object StrainScorer {
      * @param maxHR HRmax (bpm). Defaults to 220 − defaultAge when null.
      * @param restingHR resting HR (bpm) for the HRR denominator (default 60).
      * @param method [Method.EDWARDS] (default) or [Method.BANISTER].
-     * @param sex "male"/"female" — selects the Banister coefficient (ignored by Edwards).
+     * @param sex "male"/"female" - selects the Banister coefficient (ignored by Edwards).
      * @param denominator log-map D (default [strainDenominator]).
      */
     fun strain(

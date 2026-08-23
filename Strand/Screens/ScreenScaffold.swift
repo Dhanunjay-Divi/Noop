@@ -1,5 +1,8 @@
 import SwiftUI
 import StrandDesign
+#if os(iOS)
+import UIKit
+#endif
 
 /// Standard scrollable screen container: title + dark surface + content column.
 struct ScreenScaffold<Content: View, Trailing: View>: View {
@@ -13,7 +16,7 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
     var onRefresh: (() async -> Void)? = nil
     /// Lazily materialise the content column. When `true` the inner stack is a `LazyVStack`,
     /// so a screen whose content ends in a long `ForEach` only builds the cards on screen
-    /// rather than all of them up-front — the fix for Intelligence "ALL" freezing on an
+    /// rather than all of them up-front - the fix for Intelligence "ALL" freezing on an
     /// 800+ day imported history (#345). Defaults to `false` so every existing caller keeps
     /// the eager `VStack` and its identical layout/scroll behaviour.
     var lazy: Bool = false
@@ -45,51 +48,56 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
     /// this ScrollView (including inertial deceleration); the default no-op keeps macOS, sheets and
     /// stand-alone previews behaviorally identical.
     @Environment(\.scrollPositionReporter) private var reportScrollPosition
-
     var body: some View {
         ScrollViewReader { proxy in
         ScrollView {
-            // Scroll-to-top anchor (#198 follow-up): a zero-height marker pinned above the content so an
-            // at-root tab re-tap can bring the screen back to the very top. Layout-neutral.
-            Color.clear.frame(height: 0).id(screenScaffoldTopAnchorID)
-            #if os(iOS)
-            GeometryReader { geometry in
-                Color.clear.preference(
-                    key: ScreenScrollOffsetPreferenceKey.self,
-                    value: geometry.frame(in: .named(screenScaffoldScrollSpace)).minY
-                )
+            // Keep the anchors and visible column in one explicit stack. The offset probe is attached to
+            // this full-height container below: iOS 26 collapses a zero-height GeometryReader's frame to
+            // zero, while the content container's top edge remains measurable throughout the scroll.
+            VStack(spacing: 0) {
+                // Scroll-to-top anchor (#198 follow-up): a zero-height marker pinned above the content so an
+                // at-root tab re-tap can bring the screen back to the very top. Layout-neutral.
+                Color.clear.frame(height: 0).id(screenScaffoldTopAnchorID)
+                column
+                #if os(iOS)
+                // Unified side margins matching the liquid home (16pt) so every page's cards + header line up
+                // to the same edges (2026-07-02); macOS keeps the classic 28 in the #else branch.
+                .padding(.horizontal, NoopMetrics.screenHPadding)
+                .padding(.top, 24)
+                .padding(.bottom, NoopMetrics.space4)
+                // A vertical ScrollView accepts a child's ideal horizontal size. Several full-width cards
+                // can therefore claim the whole viewport BEFORE this 16pt padding is added, making the
+                // padded column viewport+32pt wide; SwiftUI centres that overflow and crops the page's
+                // title/cards by 16pt on both sides. Size the complete padded column from the scroll
+                // container instead, so the gutter is included in (not added beyond) the viewport.
+                // Regular-width iPad keeps the existing 700pt readable-column cap.
+                .containerRelativeFrame(.horizontal, alignment: .center) { width, _ in
+                    hSizeClass == .regular ? min(width, 700) : width
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                #else
+                .padding(28)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                #endif
+                // A deterministic end marker is useful both to scroll-to-end accessibility actions and to
+                // DEBUG layout captures. It has no visual height; the tab shell's measured bottom reservation
+                // determines where this endpoint can settle relative to the floating bar.
+                Color.clear.frame(height: 0).id(screenScaffoldBottomAnchorID)
             }
-            .frame(height: 0)
-            #endif
-            column
             #if os(iOS)
-            // Unified side margins matching the liquid home (16pt) so every page's cards + header line up
-            // to the same edges (2026-07-02); macOS keeps the classic 28 in the #else branch.
-            .padding(.horizontal, NoopMetrics.screenHPadding)
-            .padding(.top, 24)
-            .padding(.bottom, NoopMetrics.space4)
-            // A vertical ScrollView accepts a child's ideal horizontal size. Several full-width cards
-            // can therefore claim the whole viewport BEFORE this 16pt padding is added, making the
-            // padded column viewport+32pt wide; SwiftUI centres that overflow and crops the page's
-            // title/cards by 16pt on both sides. Size the complete padded column from the scroll
-            // container instead, so the gutter is included in (not added beyond) the viewport.
-            // Regular-width iPad keeps the existing 700pt readable-column cap.
-            .containerRelativeFrame(.horizontal, alignment: .center) { width, _ in
-                hSizeClass == .regular ? min(width, 700) : width
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: ScreenScrollOffsetPreferenceKey.self,
+                        value: geometry.frame(in: .global).minY
+                    )
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .center)
-            #else
-            .padding(28)
-            .frame(maxWidth: .infinity, alignment: .leading)
             #endif
-            // A deterministic end marker is useful both to scroll-to-end accessibility actions and to
-            // DEBUG layout captures. It has no visual height; the tab shell's measured bottom reservation
-            // determines where this endpoint can settle relative to the floating bar.
-            Color.clear.frame(height: 0).id(screenScaffoldBottomAnchorID)
         }
         #if os(iOS)
-        .coordinateSpace(name: screenScaffoldScrollSpace)
-        .onPreferenceChange(ScreenScrollOffsetPreferenceKey.self) { reportScrollPosition($0) }
+        .modifier(DemoBottomScrollAnchor())
+        .modifier(ScreenScrollPositionReporter(report: reportScrollPosition))
         // #697: stop a vertical scroll from drifting/bouncing the screen left-right. `.basedOnSize` only
         // permits horizontal bounce when content genuinely overflows the width (it does not here, the column
         // is width-capped), so the spurious horizontal rubber-band that caused the sideways drift is gone.
@@ -106,6 +114,13 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
             }
             .ignoresSafeArea()
         }
+        #if os(iOS)
+        .overlay(alignment: .top) {
+            if topBackground == nil {
+                FlatStatusBarScrim()
+            }
+        }
+        #endif
         .modifier(RefreshableIfNeeded(onRefresh: onRefresh))
         #if DEBUG
         // Screenshot/layout QA only. Launching with `--demo-scroll-bottom` proves the REAL final item can
@@ -113,8 +128,14 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
         // TabView → NavigationStack → ScrollView layout chain on the simulator. Absent from Release.
         .task {
             if CommandLine.arguments.contains("--demo-scroll-bottom") {
-                try? await Task.sleep(nanoseconds: 650_000_000)
-                proxy.scrollTo(screenScaffoldBottomAnchorID, anchor: .bottom)
+                // Some pushed destinations derive cards from repository state after their first
+                // appearance. Re-assert the real end anchor after those late updates so the visual
+                // harness proves footer clearance instead of capturing an obsolete early content size.
+                for delay in [650_000_000, 900_000_000, 900_000_000] as [UInt64] {
+                    try? await Task.sleep(nanoseconds: delay)
+                    guard !Task.isCancelled else { return }
+                    proxy.scrollTo(screenScaffoldBottomAnchorID, anchor: .bottom)
+                }
             }
         }
         #endif
@@ -173,6 +194,35 @@ struct ScreenScaffold<Content: View, Trailing: View>: View {
         }
     }
 }
+
+#if os(iOS)
+/// Flat screens scroll beneath hidden navigation chrome in the custom iPhone shell. Keep text and
+/// controls from competing with the system clock and battery while preserving immersive sky-backed
+/// screens. The extra 6pt below the unsafe inset gives moving glyphs a clean hand-off to the canvas.
+private struct FlatStatusBarScrim: View {
+    var body: some View {
+        GeometryReader { geometry in
+            let measuredInset = max(geometry.safeAreaInsets.top, windowTopInset)
+            VStack(spacing: 0) {
+                StrandPalette.surfaceBase
+                    .frame(height: (measuredInset > 0 ? measuredInset : 44) + 6)
+                Spacer(minLength: 0)
+            }
+            .ignoresSafeArea(edges: .top)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var windowTopInset: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)?
+            .safeAreaInsets.top ?? 0
+    }
+}
+#endif
 
 extension ScreenScaffold where Trailing == EmptyView {
     /// Convenience init for the common case with no header trailing element — keeps every existing
@@ -329,7 +379,7 @@ struct SyncingHistoryNote: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            StatePill("Syncing strap history…", tone: .accent, pulsing: true)
+            StatePill("Syncing Noop Band history…", tone: .accent, pulsing: true)
             if chunks > 0 {
                 Text("\(chunks) chunks pulled")
                     .font(StrandFont.footnote)
@@ -339,7 +389,7 @@ struct SyncingHistoryNote: View {
     }
 }
 
-/// Coarse relative-time label for the "History synced N ago" sync-status line. Pure — `now` is
+/// Coarse relative-time label for the "History synced N ago" sync-status line. Pure - `now` is
 /// injectable so the bucket edges are unit-testable (RelativeAgoTests) — and deliberately the same
 /// buckets as the Android `relativeAgo` (LiveScreen.kt, ed6a31d) so the two apps read identically.
 /// Clamps future timestamps (strap-clock skew) to "just now", never negative.
@@ -381,6 +431,46 @@ private let screenScaffoldScrollSpace = "screenScaffold.scroll"
 private struct ScreenScrollOffsetPreferenceKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// iOS 18 exposes the actual scroll geometry, including programmatic jumps and inertial movement. Keep
+/// the preference probe only as the iOS 17 compatibility path; newer SwiftUI versions can collapse or
+/// virtualize its frame and report a constant zero even while content is visibly scrolled.
+private struct ScreenScrollPositionReporter: ViewModifier {
+    let report: (CGFloat) -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { geometry in
+                -geometry.contentOffset.y
+            } action: { _, offset in
+                report(offset)
+            }
+        } else {
+            content
+                .coordinateSpace(name: screenScaffoldScrollSpace)
+                .onPreferenceChange(ScreenScrollOffsetPreferenceKey.self) { report($0) }
+        }
+    }
+}
+
+/// Runtime visual QA needs a deterministic initial endpoint. A proxy jump can race a pushed
+/// NavigationStack destination before its scroll view has established content geometry; the native
+/// default anchor is applied at layout time and remains entirely absent from Release builds.
+private struct DemoBottomScrollAnchor: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if DEBUG
+        if CommandLine.arguments.contains("--demo-scroll-bottom") {
+            content.defaultScrollAnchor(.bottom)
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
+    }
 }
 #endif
 

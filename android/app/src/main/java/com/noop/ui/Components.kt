@@ -282,7 +282,7 @@ fun DataPendingNote(title: String, body: String, modifier: Modifier = Modifier) 
     ScreenStateCard(kind = ScreenStateKind.Partial, title = title, body = body, modifier = modifier)
 }
 
-// MARK: - SyncingHistoryNote — pulsing "history sync in progress" line (#77)
+// MARK: - SyncingHistoryNote - pulsing "history sync in progress" line (#77)
 //
 // Shown above a screen's empty state while the strap's historical offload runs, so a half-loaded
 // screen ("No nights here yet") reads as in-progress rather than final. Shows the honest live
@@ -296,7 +296,7 @@ fun SyncingHistoryNote(chunks: Int, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        StatePill("Syncing strap history…", tone = StrandTone.Accent, pulsing = true)
+        StatePill("Syncing Noop Band history…", tone = StrandTone.Accent, pulsing = true)
         if (chunks > 0) {
             Text(
                 uiString(R.string.l10n_components_chunks_chunks_pulled_cec186cf, chunks),
@@ -491,7 +491,7 @@ fun TrendChip(text: String, color: Color = Palette.textTertiary, modifier: Modif
         t.startsWith("+") || t.startsWith("▲") || t.lowercase().startsWith("up") -> "▲"
         t.startsWith("-") || t.startsWith("−") || t.startsWith("▼") || t.lowercase().startsWith("down") -> "▼"
         // No sign → a plain magnitude (e.g. a workout's "874 kcal"), not a trend: show NO direction
-        // glyph. Previously this fell to "–", whose leading dash read as a negative ("-874 kcal" — #41).
+        // glyph. Previously this fell to "–", whose leading dash read as a negative ("-874 kcal" - #41).
         else -> null
     }
     Row(
@@ -518,7 +518,7 @@ fun TrendChip(text: String, color: Color = Palette.textTertiary, modifier: Modif
 // MARK: - AutoSizeValue — a single-line value that SHRINKS to fit instead of truncating
 //
 // Compose (BOM 2024.06) has no `TextAutoSize`, and the metric/workout tiles are narrow with a
-// trailing sparkline or kcal chip — so a value like "1h 52m" or a tile number was ellipsizing to
+// trailing sparkline or kcal chip - so a value like "1h 52m" or a tile number was ellipsizing to
 // "1…" (#319/#332). This steps the font down (to a 0.6× floor, matching the Swift tile's
 // minimumScaleFactor) until the text fits one line, then holds. Resets when the text/style changes.
 @Composable
@@ -822,7 +822,7 @@ fun BevelGauge(
                     )
                     val rimStroke = Stroke(width = 1.dp.toPx())
                     onDrawBehind {
-                        // Frosted inner disc behind the arc — a glassy "well".
+                        // Frosted inner disc behind the arc - a glassy "well".
                         drawCircle(brush = discBrush, radius = discRadius, center = center)
                         // Faint hairline rim around the inner disc (iOS innerDisc strokeBorder hairline 0.5).
                         drawCircle(
@@ -861,7 +861,7 @@ fun BevelGauge(
                         )
                     }
 
-                    // Full-span track — the carved inset "well" the arc sits in (iOS: solid surfaceInset,
+                    // Full-span track - the carved inset "well" the arc sits in (iOS: solid surfaceInset,
                     // full opacity, same round cap), not a faint hairline. Stays here (over the bloom,
                     // under the fill arc) to preserve the exact original z-order.
                     drawArc(
@@ -974,7 +974,7 @@ fun BevelGauge(
 //
 // PUBLIC API is unchanged (score, supporting, diameter, lineWidth, showsLabel); it now
 // delegates its visuals to [BevelGauge]. An optional [valueFormat] was ADDED (defaulted)
-// so the Rest hero can show "Rest 87" while Charge keeps the bare number — same shape as
+// so the Rest hero can show "Rest 87" while Charge keeps the bare number - same shape as
 // the macOS RecoveryRing.valueFormat. The state word + tip colour sample the recovery (gold)
 // ramp. Unlike the Bevel 240° gauge it draws the BRAND GLYPH: an open ~80% ring starting at
 // −90° (12 o'clock) clockwise, a solid gold centre core dot and a micro "NOOP" wordmark.

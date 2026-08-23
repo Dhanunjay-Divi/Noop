@@ -288,6 +288,41 @@ class SafetyIncidentTransition(StrictModel):
         return compact or None
 
 
+class SafetyLocationUpdate(StrictModel):
+    """One latest-only location fix for an active, user-triggered incident."""
+
+    sequence: int = Field(ge=1, le=9_223_372_036_854_775_807)
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    horizontal_accuracy_meters: float | None = Field(
+        default=None,
+        ge=0,
+        le=10_000,
+    )
+    captured_at: datetime
+
+    @field_validator(
+        "latitude",
+        "longitude",
+        "horizontal_accuracy_meters",
+    )
+    @classmethod
+    def finite_number(cls, value: float | None) -> float | None:
+        if value is not None and not math.isfinite(value):
+            raise ValueError("location values must be finite")
+        return value
+
+    @field_validator("captured_at", mode="before")
+    @classmethod
+    def parse_captured_at(cls, value: Any) -> Any:
+        return _rfc3339_input(value)
+
+    @field_validator("captured_at")
+    @classmethod
+    def normalize_captured_at(cls, value: datetime) -> datetime:
+        return _normalise_datetime(value)
+
+
 class FriendVisibility(StrictModel):
     """Daily summary fields an owner exposes to one accepted friend.
 

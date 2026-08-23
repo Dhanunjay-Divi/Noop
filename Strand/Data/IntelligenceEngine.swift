@@ -58,8 +58,8 @@ final class IntelligenceEngine: ObservableObject {
     /// The `stages=` token of the per-day sleep diagnostic line (#386): `<deep>+<rem>+<light>=<sum>` in
     /// rounded minutes when the day carries a full banked stage split, `nil` when any component is
     /// absent (an unstaged night, or an imported day that only brought a total). The sum is printed
-    /// rather than left to the reader so a rollup-vs-stages divergence — the exact identity a "homepage
-    /// disagrees with the Sleep tab" report hinges on — is a one-line visual check against the
+    /// rather than left to the reader so a rollup-vs-stages divergence - the exact identity a "homepage
+    /// disagrees with the Sleep tab" report hinges on - is a one-line visual check against the
     /// `totalSleepMin=` field beside it. Pure; mirrors the Android `sleepStagesLogToken` byte-for-byte.
     static func sleepStagesLogToken(deep: Double?, rem: Double?, light: Double?) -> String {
         guard let deep, let rem, let light else { return "nil" }
@@ -380,8 +380,10 @@ final class IntelligenceEngine: ObservableObject {
         var ids = repo.computedReadIds
         let writeId = deviceId + "-noop"
         if !ids.contains(writeId) { ids.append(writeId) }
-        for id in ids {
-            for key in keys { _ = try? await store.deleteMetricSeries(deviceId: id, key: key) }
+        // Key-major ordering lets callers remove every acceptance marker before any displayed value.
+        // A partial storage failure therefore leaves readers closed instead of blessing a stale sibling.
+        for key in keys {
+            for id in ids { _ = try? await store.deleteMetricSeries(deviceId: id, key: key) }
         }
     }
 
@@ -502,17 +504,31 @@ final class IntelligenceEngine: ObservableObject {
         let oldestDay = AnalyticsEngine.dayString(nowLocalMidnight - (maxDays - 1) * 86_400, offsetSec: tzOffset)
         let gate7 = Array((await repo.dailyMetrics(fromDay: oldestDay, toDay: newestDay))
             .sorted { $0.day < $1.day }.suffix(7))
+        let storedLegacyFitnessToken = await latestComputedProfileToken(
+            store: store, key: AgeMetricProfile.legacyFitnessAgeKey)
         let storedFitnessToken = await latestComputedProfileToken(
             store: store, key: AgeMetricProfile.fitnessAgeKey)
+        let storedLegacyVO2Token = await latestComputedProfileToken(
+            store: store, key: AgeMetricProfile.legacyVO2maxEstimateKey)
         let storedVO2Token = await latestComputedProfileToken(
             store: store, key: AgeMetricProfile.vo2maxEstimateKey)
-        if !profile.acceptsFitnessAge(provenance: storedFitnessToken) {
+        if storedLegacyFitnessToken != nil
+            || !profile.acceptsFitnessAge(provenance: storedFitnessToken) {
             await purgeComputedMetricKeys(
-                store: store, keys: ["fitness_age", AgeMetricProfile.fitnessAgeKey])
+                store: store, keys: [
+                    AgeMetricProfile.fitnessAgeKey,
+                    AgeMetricProfile.legacyFitnessAgeKey,
+                    "fitness_age",
+                ])
         }
-        if !profile.acceptsVO2maxEstimate(provenance: storedVO2Token) {
+        if storedLegacyVO2Token != nil
+            || !profile.acceptsVO2maxEstimate(provenance: storedVO2Token) {
             await purgeComputedMetricKeys(
-                store: store, keys: ["vo2max_est", AgeMetricProfile.vo2maxEstimateKey])
+                store: store, keys: [
+                    AgeMetricProfile.vo2maxEstimateKey,
+                    AgeMetricProfile.legacyVO2maxEstimateKey,
+                    "vo2max_est",
+                ])
         }
 
         var rows = Self.fitnessAgeRows(
@@ -531,7 +547,11 @@ final class IntelligenceEngine: ObservableObject {
             // Upsert does not remove an omitted optional row. Clearing/invalidating waist must remove
             // the previous estimate immediately while leaving a measured `vo2max` import untouched.
             await purgeComputedMetricKeys(
-                store: store, keys: ["vo2max_est", AgeMetricProfile.vo2maxEstimateKey])
+                store: store, keys: [
+                    AgeMetricProfile.vo2maxEstimateKey,
+                    AgeMetricProfile.legacyVO2maxEstimateKey,
+                    "vo2max_est",
+                ])
         }
         if !rows.isEmpty { _ = try? await store.upsertMetricSeries(rows, deviceId: computedId) }
         if !profile.fitnessInputsConfirmed
@@ -539,8 +559,9 @@ final class IntelligenceEngine: ObservableObject {
             || !FitnessAgeEngine.supports(sex: profile.sex) {
             // Never let a score computed from an old/seed profile survive as the current headline.
             await purgeComputedMetricKeys(store: store, keys: [
-                "fitness_age", "vo2max_est", AgeMetricProfile.fitnessAgeKey,
-                AgeMetricProfile.vo2maxEstimateKey,
+                AgeMetricProfile.fitnessAgeKey, AgeMetricProfile.legacyFitnessAgeKey,
+                AgeMetricProfile.vo2maxEstimateKey, AgeMetricProfile.legacyVO2maxEstimateKey,
+                "fitness_age", "vo2max_est",
             ])
         }
         return rows.contains { $0.key == "fitness_age" }
@@ -670,7 +691,7 @@ final class IntelligenceEngine: ObservableObject {
         // because they can legitimately change scores without changing the HR fingerprint.
         if force, skipIfUnchanged, !wmKey.isEmpty,
            UserDefaults.standard.string(forKey: Self.analyzeWatermarkKey) == wmKey {
-            diagnosticSink?("re-score: trigger=post-offload newData=no — skipped (nothing changed since last run)", nil)
+            diagnosticSink?("re-score: trigger=post-offload newData=no - skipped (nothing changed since last run)", nil)
             return nil
         }
 
@@ -1286,7 +1307,7 @@ final class IntelligenceEngine: ObservableObject {
             // across days" question with data rather than a guess. Gated by the existing strap-log export.
             let tsmLog = daily.totalSleepMin.map { String(Int($0.rounded())) } ?? "nil"
             // #386: the banked stage split + efficiency ride beside the rollup, so a "homepage disagrees
-            // with the Sleep tab" report is self-diagnosing from the export alone — totalSleepMin vs the
+            // with the Sleep tab" report is self-diagnosing from the export alone - totalSleepMin vs the
             // deep+rem+light sum is the identity both screens must agree on, now verifiable per pass, per
             // day, without screenshots. Rounded minutes only (same privacy class as the rest of the line);
             // stages=nil when the day has no banked stage split (an unstaged or imported-total-only day).
@@ -1483,17 +1504,31 @@ final class IntelligenceEngine: ObservableObject {
         for d in faPriorDaily { faGateByDay[d.day] = d }
         for d in dailies { faGateByDay[d.day] = d }
         let faGate7 = Array(faGateByDay.values.sorted { $0.day < $1.day }.suffix(7))
+        let storedLegacyFitnessToken = await latestComputedProfileToken(
+            store: store, key: AgeMetricProfile.legacyFitnessAgeKey)
         let storedFitnessToken = await latestComputedProfileToken(
             store: store, key: AgeMetricProfile.fitnessAgeKey)
+        let storedLegacyVO2Token = await latestComputedProfileToken(
+            store: store, key: AgeMetricProfile.legacyVO2maxEstimateKey)
         let storedVO2Token = await latestComputedProfileToken(
             store: store, key: AgeMetricProfile.vo2maxEstimateKey)
-        if !profile.acceptsFitnessAge(provenance: storedFitnessToken) {
+        if storedLegacyFitnessToken != nil
+            || !profile.acceptsFitnessAge(provenance: storedFitnessToken) {
             await purgeComputedMetricKeys(
-                store: store, keys: ["fitness_age", AgeMetricProfile.fitnessAgeKey])
+                store: store, keys: [
+                    AgeMetricProfile.fitnessAgeKey,
+                    AgeMetricProfile.legacyFitnessAgeKey,
+                    "fitness_age",
+                ])
         }
-        if !profile.acceptsVO2maxEstimate(provenance: storedVO2Token) {
+        if storedLegacyVO2Token != nil
+            || !profile.acceptsVO2maxEstimate(provenance: storedVO2Token) {
             await purgeComputedMetricKeys(
-                store: store, keys: ["vo2max_est", AgeMetricProfile.vo2maxEstimateKey])
+                store: store, keys: [
+                    AgeMetricProfile.vo2maxEstimateKey,
+                    AgeMetricProfile.legacyVO2maxEstimateKey,
+                    "vo2max_est",
+                ])
         }
 
         let faSatKey = IntelligenceEngine.saturdayKey(onOrBefore: newestDay)
@@ -1509,7 +1544,11 @@ final class IntelligenceEngine: ObservableObject {
             faPts.append(MetricPoint(day: faSatKey, key: AgeMetricProfile.vo2maxEstimateKey, value: token))
         } else {
             await purgeComputedMetricKeys(
-                store: store, keys: ["vo2max_est", AgeMetricProfile.vo2maxEstimateKey])
+                store: store, keys: [
+                    AgeMetricProfile.vo2maxEstimateKey,
+                    AgeMetricProfile.legacyVO2maxEstimateKey,
+                    "vo2max_est",
+                ])
         }
         if !faPts.isEmpty { _ = try? await store.upsertMetricSeries(faPts, deviceId: computedId) }
 
@@ -1521,8 +1560,9 @@ final class IntelligenceEngine: ObservableObject {
             // reset/unsupported profile instead of showing an earlier value as if it still applied.
             // Measured `vo2max` imports remain a separate, untouched series.
             await purgeComputedMetricKeys(store: store, keys: [
-                "fitness_age", "vo2max_est", AgeMetricProfile.fitnessAgeKey,
-                AgeMetricProfile.vo2maxEstimateKey,
+                AgeMetricProfile.fitnessAgeKey, AgeMetricProfile.legacyFitnessAgeKey,
+                AgeMetricProfile.vo2maxEstimateKey, AgeMetricProfile.legacyVO2maxEstimateKey,
+                "fitness_age", "vo2max_est",
             ])
         }
 

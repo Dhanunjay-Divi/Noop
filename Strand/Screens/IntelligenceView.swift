@@ -13,7 +13,7 @@ struct IntelligenceView: View {
     @EnvironmentObject var intelligence: IntelligenceEngine
     // NOTE: IntelligenceView deliberately does NOT observe `LiveState`. A connected strap publishes at
     // ~1 Hz, which would re-evaluate this body (and its lazy By-Day list) on every tick. The only live
-    // dependency — the "Syncing strap history…" note shown over the empty state — owns its OWN
+    // dependency - the "Syncing strap history…" note shown over the empty state - owns its OWN
     // `@EnvironmentObject var live` in the `IntelSyncingNote` leaf below (mirrors the Today/Sleep
     // leaf-scoping pattern), so a tick refreshes only that note.
 
@@ -55,13 +55,13 @@ struct IntelligenceView: View {
                     }
                 }
             } else if intelligence.results.isEmpty {
-                // While the strap is mid-offload, say so — "no days" reads as final otherwise (#77). The
+                // While the strap is mid-offload, say so - "no days" reads as final otherwise (#77). The
                 // note owns the `LiveState` observation in its own leaf so the chunk count ticks without
                 // re-rendering Intelligence (identical output to the prior inline check).
                 IntelSyncingNote()
                 DataPendingNote(
-                    title: "Building from your strap",
-                    message: "This builds from the strap as it syncs. Effort and Sleep appear after you have worn it and slept a night. Recovery needs about four nights of sleep to learn your baseline (you'll see \"Calibrating\" until then), and keeps sharpening over your first couple of weeks. On a WHOOP 5 or MG the strap banks little history, so the night count can climb slowly or sit at 0 of 4 until you have worn it across a few nights. That's its sync limit, not a fault. Import your WHOOP export to skip the wait.",
+                    title: "Building from Noop Band",
+                    message: "This builds as Noop Band syncs. Effort and Sleep appear after you have worn the band and slept a night. Recovery needs about four nights of sleep to learn your baseline (you'll see \"Calibrating\" until then), and keeps sharpening over your first couple of weeks. Some band firmware syncs history less often, so the night count can climb slowly or stay at 0 of 4 until you have worn it across a few nights. That's a sync limit, not a fault. Import your WHOOP export to skip the wait.",
                     symbol: "brain.head.profile"
                 )
             } else {
@@ -205,7 +205,7 @@ struct IntelligenceView: View {
                         .accessibilityHidden(true)
                     Text("How this works").font(StrandFont.headline).foregroundStyle(StrandPalette.textPrimary)
                 }
-                Text("Recovery weighs your HRV against your personal baseline (~55%), resting heart rate (~20%), sleep quality (~15%), respiration (~5%) and skin-temperature deviation (~5%). Effort is a 0-\(UnitFormatter.effortScaleMax(effortScale)) cardiovascular load from time in heart-rate zones. Sleep is staged from movement and heart rate. Everything is computed here from the strap's raw data. It works for any day NOOP collected raw streams.")
+                Text("Recovery weighs your HRV against your personal baseline (~55%), resting heart rate (~20%), sleep quality (~15%), respiration (~5%) and skin-temperature deviation (~5%). Effort is a 0-\(UnitFormatter.effortScaleMax(effortScale)) cardiovascular load from time in heart-rate zones. Sleep is staged from movement and heart rate. Everything is computed here from Noop Band's raw data. It works for any day NOOP collected raw streams.")
                     .font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 // The Charge model made concrete — the five weighted inputs, each its own metric accent.
@@ -278,13 +278,13 @@ struct IntelligenceView: View {
                                 tint: d.source == .computed ? StrandPalette.chargeColor : StrandPalette.accent)
                 }
                 HStack(spacing: 0) {
-                    stat(String(localized: "Recovery"), d.recovery.map { "\(Int($0.rounded()))%" } ?? "—",
+                    stat(String(localized: "Recovery"), d.recovery.map { "\(Int($0.rounded()))%" } ?? "-",
                          d.recovery.map { StrandPalette.recoveryColor($0) } ?? StrandPalette.textSecondary)
-                    stat(String(localized: "Effort"), d.strain.map { UnitFormatter.effortDisplay($0, scale: effortScale) } ?? "—",
+                    stat(String(localized: "Effort"), d.strain.map { UnitFormatter.effortDisplay($0, scale: effortScale) } ?? "-",
                          d.strain.map { StrandPalette.strainColor($0) } ?? StrandPalette.textSecondary)
-                    stat(String(localized: "Sleep"), d.sleepMin.map { "\(Int($0 / 60))h \(Int($0.truncatingRemainder(dividingBy: 60)))m" } ?? "—", StrandPalette.restColor)
-                    stat(String(localized: "HRV"), d.hrv.map { "\(Int($0.rounded()))" } ?? "—", StrandPalette.metricPurple)
-                    stat(String(localized: "RHR"), d.rhr.map { "\($0)" } ?? "—", StrandPalette.metricRose)
+                    stat(String(localized: "Sleep"), d.sleepMin.map { "\(Int($0 / 60))h \(Int($0.truncatingRemainder(dividingBy: 60)))m" } ?? "-", StrandPalette.restColor)
+                    stat(String(localized: "HRV"), d.hrv.map { "\(Int($0.rounded()))" } ?? "-", StrandPalette.metricPurple)
+                    stat(String(localized: "RHR"), d.rhr.map { "\($0)" } ?? "-", StrandPalette.metricRose)
                 }
                 // Effort load meter (0–100) as a filling LiquidTube — the horizontal liquid vessel Today's
                 // Key Metrics + Sleep's stage bars use — tinted along the strain ramp so it reads as

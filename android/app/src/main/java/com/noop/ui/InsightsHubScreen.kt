@@ -64,7 +64,7 @@ import kotlin.math.roundToInt
 
 // MARK: - Insights Hub (v5)
 //
-// The headline n-of-1 "what actually moves YOUR recovery" surface — the Compose twin of
+// The headline n-of-1 "what actually moves YOUR recovery" surface - the Compose twin of
 // Strand/Screens/InsightsHubView.swift. Two halves, both pure association on the user's
 // own logged days, never advice / cause / diagnosis:
 //
@@ -76,8 +76,8 @@ import kotlin.math.roundToInt
 //  2. ALCOHOL / CAFFEINE DOSE-RESPONSE — the personal DoseResponseEngine curve that SHRINKS
 //     toward a documented population prior until enough nights accrue. Plots the shrunk curve,
 //     states "each extra drink ≈ −N for you" (honest when prior-dominated, or when YOUR data
-//     contradicts the prior), and an evening "damage forecast" — "a 2nd drink tonight ≈ −X
-//     Charge tomorrow" — driven by a small dose stepper on the latest Charge. Never a nudge
+//     contradicts the prior), and an evening "damage forecast" - "a 2nd drink tonight ≈ −X
+//     Charge tomorrow" - driven by a small dose stepper on the latest Charge. Never a nudge
 //     to drink or abstain.
 //
 // SELF-CONTAINED: owns its own InsightsHubViewModel (constructed from vm.repo + cached days);
@@ -385,7 +385,7 @@ private fun DamageForecast(
             StatTile(
                 modifier = Modifier.weight(1f),
                 label = uiString(R.string.l10n_insights_hub_screen_tomorrow_s_card_outcomename_ad70b7f9, card.outcomeName),
-                value = projected?.let { "${it.roundToInt()}${card.outcomeSuffix}" } ?: "—",
+                value = projected?.let { "${it.roundToInt()}${card.outcomeSuffix}" } ?: "-",
                 caption = if (projected != null) "projected · $stepLabel" else "needs a recent day",
                 accent = domain.color,
             )

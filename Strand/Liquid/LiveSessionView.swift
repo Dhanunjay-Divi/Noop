@@ -32,7 +32,7 @@ struct LiveSessionView: View {
     /// The one Charge sentence: shown for 6 s, then fades and stays gone.
     @State private var chargeLineVisible = true
     /// Caller-owned draw for BevelGauge: eases to each new smoothed position. HOLDS the last position
-    /// while stale — the grey tint says "no reading"; snapping to zero would invent a collapse.
+    /// while stale - the grey tint says "no reading"; snapping to zero would invent a collapse.
     @State private var ringFraction: Double = 0
     /// The thin outer "time held in band" arc, filling toward an hour.
     @State private var heldFraction: Double = 0
@@ -180,7 +180,7 @@ struct LiveSessionView: View {
     /// The engine's smoothed bpm, only when revealed and only when it exists — a stale stream shows a
     /// dash, never a held or guessed number.
     private var bpmText: String {
-        guard let s = runner.output?.smoothedBpm else { return "—" }
+        guard let s = runner.output?.smoothedBpm else { return "-" }
         return "\(Int(s.rounded()))"
     }
 
@@ -228,7 +228,7 @@ struct LiveSessionView: View {
     private var guardianLine: String {
         switch runner.output?.status {
         case .stale, .none:
-            return String(localized: "No live reading. Coaching is paused until the strap comes back.")
+            return String(localized: "No live reading. Coaching is paused until Noop Band comes back.")
         case .warmup:
             return String(localized: "Warming up. Cues stay quiet for the first minute.")
         case .active:
@@ -269,7 +269,7 @@ struct LiveSessionView: View {
         runner.end()   // finalRow lands via onChangeCompat → summary sheet
     }
 
-    /// "N sessions guarded" — completed sessions in the recent look-back, this one included (its final
+    /// "N sessions guarded" - completed sessions in the recent look-back, this one included (its final
     /// row is upserted before `finalRow` publishes).
     private func loadGuardedCount() {
         let deviceId = repo.deviceId
@@ -369,7 +369,7 @@ struct LiveSessionSummarySheet: View {
 
     private var cueLine: String {
         if row.pushCount == 0 && row.easeCount == 0 {
-            return String(localized: "None — silence, start to finish")
+            return String(localized: "None - silence, start to finish")
         }
         var parts: [String] = []
         if row.pushCount > 0 { parts.append(String(localized: "\(row.pushCount) push")) }
@@ -382,7 +382,7 @@ struct LiveSessionSummarySheet: View {
     static func verdict(row: LiveSessionRow) -> String {
         let total = row.inBandSec + row.belowSec + row.aboveSec
         guard total >= 300 else {
-            return String(localized: "Too short to judge — the band needs a few minutes to mean anything.")
+            return String(localized: "Too short to judge - the band needs a few minutes to mean anything.")
         }
         let inFrac = row.inBandSec / total
         if inFrac >= 0.7 {
@@ -392,8 +392,8 @@ struct LiveSessionSummarySheet: View {
             return String(localized: "In and out, but the band won more than it lost.")
         }
         return row.belowSec >= row.aboveSec
-            ? String(localized: "Mostly under the band — there was more in the tank today.")
-            : String(localized: "Mostly over the band — harder than today's Recovery supports.")
+            ? String(localized: "Mostly under the band - there was more in the tank today.")
+            : String(localized: "Mostly over the band - harder than today's Recovery supports.")
     }
 
     /// m:ss off the banked seconds (sessions are an hour-scale affair; no hour arithmetic needed).

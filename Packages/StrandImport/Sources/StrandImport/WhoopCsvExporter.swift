@@ -68,9 +68,9 @@ public enum WhoopCsvExporter {
     // MARK: - Tolerant decoders for the cache's polymorphic JSON columns
 
     /// Stage minutes recovered from any persisted stagesJSON shape NOOP has ever written:
-    ///   - {"light":min,…}            — macOS WHOOP import (WhoopImporter)
-    ///   - [{"stage","min"}]          — Android import / demo seeds
-    ///   - [{"start","end","stage"}]  — the on-device SleepStager ("wake" == awake)
+    ///   - {"light":min,…}            - macOS WHOOP import (WhoopImporter)
+    ///   - [{"stage","min"}]          - Android import / demo seeds
+    ///   - [{"start","end","stage"}]  - the on-device SleepStager ("wake" == awake)
     /// Unusable / empty input → all-nil, so the column exports blank rather than a bogus zero.
     struct StageMinutes {
         var light: Double?, deep: Double?, rem: Double?, awake: Double?
@@ -174,7 +174,7 @@ public enum WhoopCsvExporter {
 
     /// sleeps.csv. Stage durations come from the tolerant stagesJSON decoder; in-bed is derived
     /// from the session span when the row carries no explicit figure.
-    /// `cycleStart` returns the "Cycle start time" for a session — the LOCAL day-midnight of the cycle the
+    /// `cycleStart` returns the "Cycle start time" for a session - the LOCAL day-midnight of the cycle the
     /// sleep belongs to (the caller passes `Repository.localDayKey(endTs) + " 00:00:00"`, the same end-day
     /// key analyze/mergeSleep use), so it matches the corresponding physiological_cycles row's key and the
     /// two CSVs reconcile by cycle. The previous `utc(startTs)` put a non-UTC user's night on a different
@@ -228,7 +228,7 @@ public enum WhoopCsvExporter {
     }
 
     /// journal_entries.csv. The importer reads the answer as `lowercased() == "true"`, so the
-    /// answer column MUST be the literal "true"/"false" — never prettify it to Yes/No.
+    /// answer column MUST be the literal "true"/"false" - never prettify it to Yes/No.
     public static func journalCSV(_ rows: [JournalEntry]) -> String {
         var out = "Cycle start time,Cycle timezone,Question text,Answered yes/no,Notes\r\n"
         for e in rows.sorted(by: { ($0.day, $0.question) < ($1.day, $1.question) }) {

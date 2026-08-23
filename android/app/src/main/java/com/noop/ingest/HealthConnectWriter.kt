@@ -30,7 +30,7 @@ enum class WritebackFailure { PERMISSION_DENIED, REMOTE_ERROR }
 /**
  * Outcome of a writeback attempt (#660): how many records landed, plus any per-concern failure
  * categories. Lets callers/UI distinguish "wrote 0 because nothing to share" from "wrote 0 because
- * the write FAILED" — the silent-zero the previous `Int` return couldn't express.
+ * the write FAILED" - the silent-zero the previous `Int` return couldn't express.
  */
 data class WritebackResult(val written: Int, val failures: List<WritebackFailure>) {
     val ok: Boolean get() = failures.isEmpty()

@@ -2,6 +2,15 @@ import Foundation
 import Combine
 import StrandAnalytics
 
+enum SmartAlarmMode: String, CaseIterable, Identifiable, Sendable {
+    case wakeTime
+    case sleepDuration
+    case adaptiveSleep
+
+    var id: String { rawValue }
+    var usesDetectedSleep: Bool { self != .wakeTime }
+}
+
 /// Settings for the strap's physical inputs and the Mac/coaching automations built on top of the
 /// live event + biometric stream. UserDefaults-backed (single-user, on-device).
 @MainActor
@@ -24,12 +33,12 @@ final class BehaviorStore: ObservableObject {
 
     // MARK: Haptic biofeedback — Stress check-ins (L3)
     //
-    // Stored choices for a future live source that can provide timestamp-matched wrist motion. Defaults
-    // remain OFF (opt-in, manual-first). These MIRROR the keys `BiofeedbackPrefs` reads/writes. They are
-    // intentionally preserved across this fail-closed release, but are not exposed as working toggles:
-    // `BiofeedbackPrefs.stressConfig()` applies the single evidence-capability gate before the detector.
+    // Defaults remain OFF (opt-in, manual-first). These MIRROR the keys `BiofeedbackPrefs` reads/writes.
+    // The detector still fails closed unless the current event has fresh R-R, HR, worn/encrypted state,
+    // and dense timestamp-matched wrist motion from the wearable.
     @Published var stressCheckIn: Bool { didSet { d.set(stressCheckIn, forKey: K.stressCheckIn) } }
     @Published var stressAutoNudge: Bool { didSet { d.set(stressAutoNudge, forKey: K.stressAutoNudge) } }
+    @Published var stressPhoneNudge: Bool { didSet { d.set(stressPhoneNudge, forKey: K.stressPhoneNudge) } }
     @Published var stressQuietHours: Bool { didSet { d.set(stressQuietHours, forKey: K.stressQuietHours) } }
     @Published var stressUseResonancePace: Bool { didSet { d.set(stressUseResonancePace, forKey: K.stressUseResonance) } }
 
@@ -44,8 +53,27 @@ final class BehaviorStore: ObservableObject {
     /// Target wake time, minutes since local midnight.
     @Published var smartAlarmMinutes: Int { didSet { d.set(smartAlarmMinutes, forKey: K.alarmTime) } }
     /// Weekdays the alarm fires on (Calendar weekday numbers: 1 = Sun … 7 = Sat). An empty set means
-    /// "every day" — the backward-compatible default for anyone upgrading from before per-day scheduling.
+    /// "every day" - the backward-compatible default for anyone upgrading from before per-day scheduling.
     @Published var smartAlarmWeekdays: Set<Int> { didSet { d.set(Array(smartAlarmWeekdays).sorted(), forKey: K.alarmWeekdays) } }
+    /// Fixed local wake time or a target amount of detected sleep. Existing installs default to the
+    /// fixed-time behavior they already configured.
+    @Published var smartAlarmMode: SmartAlarmMode {
+        didSet { d.set(smartAlarmMode.rawValue, forKey: K.alarmMode) }
+    }
+    /// Target detected asleep time for duration mode. The UI and runtime clamp this to 4...12 hours.
+    @Published var smartAlarmDurationMinutes: Int {
+        didSet { d.set(smartAlarmDurationMinutes, forKey: K.alarmDuration) }
+    }
+    /// Durable one-fire guard for duration mode. A fresh detected session has a new onset and can fire;
+    /// repeated sync/analysis passes for the same session cannot buzz again.
+    @Published var smartAlarmLastFiredSessionStart: Int {
+        didSet { d.set(smartAlarmLastFiredSessionStart, forKey: K.alarmLastFiredSession) }
+    }
+    /// Session currently represented by the firmware's one-shot duration alarm. Persisting the onset
+    /// lets a later strap-fired callback close the same session without scheduling a second wake.
+    var smartAlarmArmedSessionStart: Int {
+        didSet { d.set(smartAlarmArmedSessionStart, forKey: K.alarmArmedSession) }
+    }
 
     // MARK: Illness early-warning
     @Published var illnessWatch: Bool { didSet { d.set(illnessWatch, forKey: K.illness) } }
@@ -78,11 +106,16 @@ final class BehaviorStore: ObservableObject {
         // Haptic biofeedback L3 — keys MATCH BiofeedbackPrefs (one source of truth, two readers).
         static let stressCheckIn = "biofeedback.stressCheckIn"
         static let stressAutoNudge = "biofeedback.stressAutoNudge"
+        static let stressPhoneNudge = "biofeedback.stressPhoneNudge"
         static let stressQuietHours = "biofeedback.stressQuietHours"
         static let stressUseResonance = "biofeedback.stressUseResonancePace"
         static let alarmOn = "behavior.smartAlarmEnabled"
         static let alarmTime = "behavior.smartAlarmMinutes"
         static let alarmWeekdays = "behavior.smartAlarmWeekdays"
+        static let alarmMode = "behavior.smartAlarmMode"
+        static let alarmDuration = "behavior.smartAlarmDurationMinutes"
+        static let alarmLastFiredSession = "behavior.smartAlarmLastFiredSessionStart"
+        static let alarmArmedSession = "behavior.smartAlarmArmedSessionStart"
         // "behavior.smartAlarmWindow" retired: it was stored but never read (no wake-window
         // watcher ever shipped). The defaults key is left orphaned on purpose — harmless, and
         // preserved should a real light-sleep watcher ever land.
@@ -101,6 +134,7 @@ final class BehaviorStore: ObservableObject {
         zoneCoaching = d.object(forKey: K.zoneCoaching) as? Bool ?? false
         stressCheckIn = d.object(forKey: K.stressCheckIn) as? Bool ?? false
         stressAutoNudge = d.object(forKey: K.stressAutoNudge) as? Bool ?? false
+        stressPhoneNudge = d.object(forKey: K.stressPhoneNudge) as? Bool ?? false
         stressQuietHours = d.object(forKey: K.stressQuietHours) as? Bool ?? true
         stressUseResonancePace = d.object(forKey: K.stressUseResonance) as? Bool ?? true
         smartAlarmEnabled = d.object(forKey: K.alarmOn) as? Bool ?? false
@@ -108,6 +142,19 @@ final class BehaviorStore: ObservableObject {
         // Stored as a plain [Int]; only valid weekday numbers (1…7) are kept so a corrupted defaults
         // entry can never schedule against a bogus day. Empty (or all 7) = every day.
         smartAlarmWeekdays = Set((d.array(forKey: K.alarmWeekdays) as? [Int] ?? []).filter { (1...7).contains($0) })
+        smartAlarmMode = SmartAlarmMode(rawValue: d.string(forKey: K.alarmMode) ?? "") ?? .wakeTime
+        smartAlarmDurationMinutes = min(
+            max(d.object(forKey: K.alarmDuration) as? Int ?? 8 * 60, 4 * 60),
+            12 * 60
+        )
+        smartAlarmLastFiredSessionStart = max(
+            d.object(forKey: K.alarmLastFiredSession) as? Int ?? 0,
+            0
+        )
+        smartAlarmArmedSessionStart = max(
+            d.object(forKey: K.alarmArmedSession) as? Int ?? 0,
+            0
+        )
         illnessWatch = d.object(forKey: K.illness) as? Bool ?? false
         batteryAlerts = d.object(forKey: K.batteryAlerts) as? Bool ?? true
         batteryPredictiveAlerts = d.object(forKey: K.batteryPredictiveAlerts) as? Bool ?? true
@@ -151,7 +198,7 @@ final class BehaviorStore: ObservableObject {
     var chargeBaselineEpoch: Double { Baselines.recoveryBaselineEpoch(d) }
 
     /// True once the user has manually recalibrated their Charge baseline. Lets a surface (e.g. the
-    /// Today "building" hint) explain WHY the score is calibrating again — an honest "you reset it",
+    /// Today "building" hint) explain WHY the score is calibrating again - an honest "you reset it",
     /// not a silent cold-start.
     var didRecalibrateCharge: Bool { chargeBaselineEpoch > 0 }
 

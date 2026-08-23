@@ -7,7 +7,7 @@ import WhoopProtocol
 /// firmware layout the Backfiller decodes those records to zero rows, yet still has to ack the trim
 /// (refusing would wedge the whole offload on a re-send loop). Without somewhere to put the raw
 /// bytes first, every undecodable record is gone forever while the UI shows a healthy "History
-/// synced". This archive is the user's only remaining copy — and the corpus a later layout mapping
+/// synced". This archive is the user's only remaining copy - and the corpus a later layout mapping
 /// re-ingests.
 ///
 /// Format: newline-delimited JSON, one object per line, fsynced before returning so the bytes are
@@ -68,7 +68,7 @@ struct RawHistoryArchive {
     /// True when EVERY byte of the frame's payload region is zero — an informationless record.
     ///
     /// Deliberately the strict test: a single non-zero byte anywhere in the region makes the frame
-    /// informative and gives it full retention priority. "Mostly zero" is NOT the test — a novel record
+    /// informative and gives it full retention priority. "Mostly zero" is NOT the test - a novel record
     /// that carries one small populated block inside an otherwise-empty buffer is precisely the thing
     /// this archive exists to catch.
     static func hasZeroPayload(_ frame: [UInt8], family: DeviceFamily) -> Bool {

@@ -313,7 +313,7 @@ enum UnitFormatter {
         oneDecimal(effortValue(value, scale: scale))
     }
 
-    /// The "out of" denominator label for the selected Effort scale — "100" or "21". Used by the tile
+    /// The "out of" denominator label for the selected Effort scale - "100" or "21". Used by the tile
     /// caption ("of 100"/"of 21"), the chart unit ("/ 100"/"/ 21") and the model-breakdown axis label.
     static func effortScaleMax(_ scale: EffortScale) -> String {
         scale == .whoop ? "21" : "100"

@@ -49,6 +49,7 @@ from app.models import (
     IDENTIFIER_PATTERN,
     SafetyContactCreate,
     SafetyIncidentTransition,
+    SafetyLocationUpdate,
     SafetyPageCreate,
     SafetyProfileBootstrap,
     STREAM_RANGES,
@@ -492,6 +493,44 @@ def _safety_response_page(
     action_url: str,
     outcome: str | None = None,
 ) -> str:
+    refresh = ""
+    location_block = ""
+    if preview is not None:
+        status_value = str(preview["status"])
+        if status_value in {"open", "acknowledged"}:
+            refresh = '<meta http-equiv="refresh" content="15">'
+        location = preview.get("latest_location")
+        if location is not None:
+            latitude = float(location["latitude"])
+            longitude = float(location["longitude"])
+            captured_at = location["captured_at"]
+            age_seconds = max(
+                int((datetime.now(UTC) - captured_at).total_seconds()),
+                0,
+            )
+            if age_seconds < 60:
+                age_label = f"{age_seconds} seconds ago"
+            else:
+                age_label = f"{age_seconds // 60} minutes ago"
+            accuracy = location.get("horizontal_accuracy_meters")
+            accuracy_label = (
+                f" · about {round(float(accuracy))} m accuracy"
+                if accuracy is not None
+                else ""
+            )
+            map_url = (
+                "https://www.openstreetmap.org/"
+                f"?mlat={latitude:.6f}&mlon={longitude:.6f}"
+                f"#map=17/{latitude:.6f}/{longitude:.6f}"
+            )
+            location_block = f"""
+              <section class="location">
+                <strong>Latest shared location</strong>
+                <span>Updated {html_lib.escape(age_label)}{html_lib.escape(accuracy_label)}</span>
+                <a href="{html_lib.escape(map_url, quote=True)}" target="_blank"
+                   rel="noopener noreferrer">Open map</a>
+              </section>
+            """
     if outcome is not None:
         title = "Safety response saved"
         body = html_lib.escape(outcome)
@@ -533,6 +572,7 @@ def _safety_response_page(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  {refresh}
   <title>{html_lib.escape(title)}</title>
   <style>
     :root {{ color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
@@ -542,6 +582,10 @@ def _safety_response_page(
     .mark {{ color: #9a6d00; font-size: 13px; font-weight: 700; letter-spacing: .08em; }}
     h1 {{ margin: 12px 0; font-size: 28px; line-height: 1.15; letter-spacing: 0; }}
     p {{ color: #4f5962; line-height: 1.55; }}
+    .location {{ display: grid; gap: 7px; margin: 20px 0; padding: 16px;
+                 border: 1px solid #dfe3e7; border-radius: 7px; }}
+    .location span {{ color: #4f5962; font-size: 14px; }}
+    .location a {{ color: #087e57; font-weight: 650; }}
     form {{ display: grid; gap: 10px; margin-top: 24px; }}
     button {{ min-height: 48px; border-radius: 7px; font: inherit; font-weight: 650; cursor: pointer; }}
     .accept {{ border: 0; background: #14171a; color: #fff; }}
@@ -551,6 +595,9 @@ def _safety_response_page(
       body {{ background: #090a0b; color: #f4f5f6; }}
       main {{ background: #151719; border-color: #303438; box-shadow: none; }}
       p, small {{ color: #abb2b8; }}
+      .location {{ border-color: #303438; }}
+      .location span {{ color: #abb2b8; }}
+      .location a {{ color: #43d6a3; }}
       .accept {{ background: #f4f5f6; color: #14171a; }}
       .decline {{ border-color: #4b5157; }}
     }}
@@ -561,6 +608,7 @@ def _safety_response_page(
     <div class="mark">NOOP SAFETY NETWORK</div>
     <h1>{html_lib.escape(title)}</h1>
     <p>{body}</p>
+    {location_block}
     {actions}
     <small>NOOP has not contacted emergency services. In immediate danger, call local emergency services directly.</small>
   </main>
@@ -2014,6 +2062,45 @@ def create_app(
             raise_safety_error(exc)
             raise AssertionError("unreachable")
         return _safety_dispatch_response(dispatch)
+
+    @safety_router.put(
+        "/incidents/{dispatch_id}/location",
+        tags=["safety"],
+    )
+    async def update_safety_incident_location(
+        dispatch_id: UUID,
+        body: SafetyLocationUpdate,
+        member: Annotated[dict[str, Any], Depends(require_safety_profile)],
+    ) -> dict[str, Any]:
+        now = datetime.now(UTC)
+        if body.captured_at < now - timedelta(minutes=5):
+            raise HTTPException(
+                status_code=422,
+                detail="location fix is too old",
+            )
+        if body.captured_at > now + timedelta(minutes=1):
+            raise HTTPException(
+                status_code=422,
+                detail="location fix is in the future",
+            )
+        try:
+            location = await runtime_safety_repository.update_incident_location(
+                profile_id=str(member["profile_id"]),
+                dispatch_id=str(dispatch_id),
+                sequence=body.sequence,
+                latitude=body.latitude,
+                longitude=body.longitude,
+                horizontal_accuracy_meters=body.horizontal_accuracy_meters,
+                captured_at=body.captured_at,
+                received_at=now,
+            )
+        except (SafetyNotFoundError, SafetyConflictError) as exc:
+            raise_safety_error(exc)
+            raise AssertionError("unreachable")
+        return {
+            "location": location,
+            "retention": "latest_only",
+        }
 
     async def transition_safety_incident(
         *,

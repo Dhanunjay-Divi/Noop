@@ -66,6 +66,6 @@ class Whoop5VariantTest {
     @Test fun labels() {
         assertEquals("MG", Whoop5Variant.MG.label)
         assertEquals("5.0", Whoop5Variant.FIVE_ZERO.label)
-        assertEquals("—", Whoop5Variant.UNKNOWN.label)
+        assertEquals("-", Whoop5Variant.UNKNOWN.label)
     }
 }

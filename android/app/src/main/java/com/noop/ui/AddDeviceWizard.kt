@@ -119,8 +119,7 @@ private enum class DeviceType {
 
     val title: String
         get() = when (this) {
-            Whoop5MG -> "WHOOP 5.0 / MG"
-            Whoop4 -> "WHOOP 4.0"
+            Whoop5MG, Whoop4 -> WhoopModel.CUSTOMER_NAME
             HrStrap -> "Heart-rate strap"
             GymEquipment -> "Gym equipment"
             Amazfit -> "Amazfit / Zepp"
@@ -251,7 +250,7 @@ fun AddDeviceWizard(
     }
 
     val confirmAdvertisedName = run {
-        pickedWhoop?.let { return@run it.name?.takeIf { n -> n.isNotBlank() } ?: (type?.title ?: "Device") }
+        pickedWhoop?.let { return@run WhoopModel.CUSTOMER_NAME }
         pickedStrap?.let { return@run it.name }
         pickedMachine?.let { return@run it.name }
         pickedHuami?.let { return@run it.name }
@@ -259,7 +258,7 @@ fun AddDeviceWizard(
     }
     val confirmName = nameDraft.trim().ifEmpty { confirmAdvertisedName }
     val confirmBrand = when {
-        type?.isWhoop == true -> "WHOOP"
+        type?.isWhoop == true -> "Noop"
         type == DeviceType.GymEquipment -> "Gym equipment"
         // Experimental non-Oura types (Amazfit / Mi Band / Garmin) take their stored brand string from the
         // catalog via the type->brand bridge. Oura confirms with its detected generation label elsewhere.
@@ -279,10 +278,11 @@ fun AddDeviceWizard(
         val ph = pickedHuami
         val isGarmin = type == DeviceType.Garmin
         val device: PairedDeviceRow? = when {
-            pw != null && type?.whoopModel != null -> {
-                // WHOOP: full capability set; id namespaced by address; model "4.0" / "5.0 MG".
-                val wm = type!!.whoopModel!!
-                val modelLabel = if (wm == WhoopModel.WHOOP4) "4.0" else "5.0 MG"
+            pw != null -> {
+                // The scan records the actual transport family while setup presents one Noop Band.
+                val wm = pw.model
+                val modelLabel = wm.registryModel
+                viewModel.setSelectedModel(wm)
                 PairedDeviceRow(
                     id = "whoop-${pw.address}",
                     brand = "WHOOP",
@@ -523,7 +523,7 @@ fun AddDeviceWizard(
                                 viewModel = viewModel,
                                 onSelect = { strap ->
                                     pickedWhoop = strap; pickedStrap = null; pickedMachine = null; pickedHuami = null
-                                    nameDraft = strap.name?.takeIf { it.isNotBlank() } ?: t.title
+                                    nameDraft = WhoopModel.CUSTOMER_NAME
                                     viewModel.stopWhoopScan()
                                     step = WizardStep.Confirm
                                 },
@@ -699,10 +699,7 @@ private fun ouraHeaderSubtitle(step: OuraStep, advanced: Boolean): String? = whe
 @Composable
 private fun TypeStep(onPick: (DeviceType) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        TypeRow(Icons.Filled.Watch, DeviceType.Whoop5MG.title, "Newer WHOOP band. Experimental in NOOP") {
-            onPick(DeviceType.Whoop5MG)
-        }
-        TypeRow(Icons.Filled.Watch, DeviceType.Whoop4.title, "NOOP's primary, fully-supported band") {
+        TypeRow(Icons.Filled.Watch, DeviceType.Whoop4.title, "Automatically detects compatible band hardware") {
             onPick(DeviceType.Whoop4)
         }
         TypeRow(Icons.Filled.FavoriteBorder, DeviceType.HrStrap.title, "Polar, Wahoo, Coospo, Garmin HRM, Amazfit Helio broadcast") {
@@ -791,7 +788,8 @@ private fun WhoopFirstNote() {
     ) {
         Icon(Icons.Filled.FavoriteBorder, contentDescription = null, tint = Palette.textTertiary, modifier = Modifier.size(16.dp))
         Text(
-            uiString(R.string.l10n_add_device_wizard_whoop_is_noop_s_primary_fully_ac6fa33b),
+            "Noop Band provides the deepest on-device experience. Other supported straps, watches, " +
+                "rings, and machines can still contribute the signals they expose.",
             style = NoopType.footnote,
             color = Palette.textTertiary,
         )
@@ -828,9 +826,8 @@ private fun OnePhoneWarningCard() {
                 color = Palette.statusWarning,
             )
             Text(
-                uiString(R.string.l10n_add_device_wizard_a_whoop_strap_bonds_to_a_d39bdf4a) +
-                    "to the official WHOOP app, and the other way round. It's reversible: pair it in the " +
-                    "other app whenever you want it back.",
+                "Noop Band uses one active app connection at a time. Close any other band app before " +
+                    "pairing. You can switch apps later by pairing the band again.",
                 style = NoopType.footnote,
                 color = Palette.statusWarning,
             )
@@ -859,24 +856,7 @@ private fun PrepStep(type: DeviceType, onScan: () -> Unit) {
             Text(type.title, style = NoopType.title2, color = Palette.textPrimary)
         }
 
-        if (type == DeviceType.Whoop5MG) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Palette.statusWarning.copy(alpha = 0.10f))
-                    .padding(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                Icon(Icons.Filled.Science, contentDescription = null, tint = Palette.statusWarning, modifier = Modifier.size(18.dp))
-                Text(
-                    uiString(R.string.l10n_add_device_wizard_whoop_5_0_mg_support_is_e452e686),
-                    style = NoopType.footnote,
-                    color = Palette.statusWarning,
-                )
-            }
-        } else if (type.isExperimental) {
+        if (type.isExperimental) {
             ExperimentalTierNote()
         }
 
@@ -918,15 +898,10 @@ private fun PrepStep(type: DeviceType, onScan: () -> Unit) {
 
 /** Type-specific "get it ready" guidance - the point of the branching wizard. US English copy. */
 private fun prepInstructions(type: DeviceType): List<String> = when (type) {
-    DeviceType.Whoop4 -> listOf(
-        "Put your WHOOP 4.0 on your wrist and make sure it's awake.",
-        "Make sure it's NOT connected to the official WHOOP app right now.",
-        "NOOP will look for it nearby.",
-    )
-    DeviceType.Whoop5MG -> listOf(
-        "WHOOP 5.0 / MG bonds to one device at a time, so unpair it from the official WHOOP app first.",
-        "Put the band into pairing mode, on your wrist and awake.",
-        "NOOP will look for it nearby.",
+    DeviceType.Whoop4, DeviceType.Whoop5MG -> listOf(
+        "Put your Noop Band on your wrist and make sure it is awake.",
+        "Close any other app currently connected to the band.",
+        "NOOP detects compatible band hardware automatically.",
     )
     DeviceType.HrStrap -> listOf(
         "Wake your strap. Put it on, or dampen the contacts.",
@@ -976,8 +951,8 @@ private fun WhoopPickStep(
     PickList(searching = true, isEmpty = found.isEmpty(), onRescan = onRescan) {
         found.sortedByDescending { it.rssi }.forEach { strap ->
             DiscoveredRow(
-                name = strap.name?.takeIf { it.isNotBlank() } ?: "WHOOP",
-                subtitle = "WHOOP",
+                name = WhoopModel.CUSTOMER_NAME,
+                subtitle = "Compatible band",
                 rssi = strap.rssi,
                 onTap = { onSelect(strap) },
             )

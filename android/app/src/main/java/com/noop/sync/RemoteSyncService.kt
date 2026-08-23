@@ -176,8 +176,8 @@ object RemoteSyncService {
                 val status = when {
                     hasMoreRaw || hasMoreDerived ->
                         "Uploaded $totalRows raw rows; more raw/derived history is queued."
-                    totalBatches == 0 -> "Up to date — no pending changes."
-                    else -> "Up to date — uploaded $totalRows pending raw rows and refreshed derived history."
+                    totalBatches == 0 -> "Up to date - no pending changes."
+                    else -> "Up to date - uploaded $totalRows pending raw rows and refreshed derived history."
                 }
                 RemoteSyncPrefs.recordSuccess(System.currentTimeMillis(), totalRows, status)
                 RemoteSyncRunResult(

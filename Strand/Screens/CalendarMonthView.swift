@@ -6,14 +6,14 @@ import StrandAnalytics
 // CalendarMonthView.swift — the month-at-a-glance screen (2026-08-22).
 //
 // WHY: NOOP could show today, and it could show trends, but it had no way to answer "how did this MONTH
-// go?" in one glance — the thing Bevel's calendar does well. This is that screen, built in NOOP's own
+// go?" in one glance - the thing Bevel's calendar does well. This is that screen, built in NOOP's own
 // language (ScreenScaffold, StrandPalette, MetricGlyph) rather than as a foreign component.
 //
 // DESIGN NOTES (learned the hard way from the v2 prototype):
-//   • Value is encoded as a FILLED cell with strong hue steps (low = red, mid = amber, high = green), NOT
-//     as a partial ring. At calendar size a 40% ring and a 70% ring look identical, which defeats the whole
-//     purpose of a month view. Bevel uses hue steps for exactly this reason.
-//   • A day with no data renders as an EMPTY OUTLINE — never a filled zero. Gaps must look like gaps.
+//   • The supplied Bevel reference uses compact progress rings. NOOP keeps that shape, but dual-encodes
+//     value with strong hue steps (low = red, mid = amber, high = the selected metric tint) so nearby
+//     arc lengths remain distinguishable at calendar size.
+//   • A day with no data renders as an EMPTY RING — never a zero-valued ring. Gaps must look like gaps.
 //   • Each day is a ≥44 pt tap target even though the swatch is smaller (HIG minimum).
 //   • The metric picker is a segmented row, so the same grid answers Recovery / Effort / Sleep questions.
 struct CalendarMonthView: View {
@@ -21,27 +21,30 @@ struct CalendarMonthView: View {
 
     /// Which metric colours the grid.
     private enum Metric: String, CaseIterable, Identifiable {
-        case recovery, effort, sleep
+        case recovery, sleep, effort, load
         var id: String { rawValue }
         var title: String {
             switch self {
             case .recovery: return String(localized: "Recovery")
-            case .effort:   return String(localized: "Effort")
             case .sleep:    return String(localized: "Sleep")
+            case .effort:   return String(localized: "Effort")
+            case .load:     return String(localized: "Load")
             }
         }
         var tint: Color {
             switch self {
             case .recovery: return StrandPalette.chargeColor
-            case .effort:   return StrandPalette.effortColor
             case .sleep:    return StrandPalette.restColor
+            case .effort:   return StrandPalette.effortColor
+            case .load:     return StrandPalette.metricPurple
             }
         }
         var glyph: String {
             switch self {
             case .recovery: return "bolt.heart.fill"
-            case .effort:   return "flame.fill"
             case .sleep:    return "moon.zzz.fill"
+            case .effort:   return "flame.fill"
+            case .load:     return "gauge.with.dots.needle.50percent"
             }
         }
     }
@@ -49,13 +52,18 @@ struct CalendarMonthView: View {
     @State private var metric: Metric = .recovery
     @State private var monthAnchor = Date()
     @State private var rows: [DailyMetric] = []
+    @State private var loadByDay: [String: Double] = [:]
     @State private var loading = true
 
     private let cal = Calendar.current
 
     var body: some View {
-        ScreenScaffold(title: "Calendar",
-                       subtitle: "Your month, one square per day") {
+        ScreenScaffold(
+            title: "Your month",
+            subtitle: "One ring per day",
+            topBackground: AnyView(calendarHeaderBackdrop),
+            topBackgroundUsesDarkHeader: true
+        ) {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 monthHeader
                 metricPicker
@@ -65,6 +73,24 @@ struct CalendarMonthView: View {
             }
         }
         .task(id: monthKey) { await load() }
+    }
+
+    /// A restrained, full-width green signal at the top that fades cleanly into the user's canvas.
+    /// It carries the reference's futuristic depth without tinting the data cards or turning every
+    /// state green; day rings remain red/amber when the underlying value calls for it.
+    private var calendarHeaderBackdrop: some View {
+        LinearGradient(
+            colors: [
+                Color(red: 0.015, green: 0.16, blue: 0.095),
+                Color.black.opacity(0.88),
+                Color.black.opacity(0.30),
+                .clear,
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .frame(height: 380)
+        .accessibilityHidden(true)
     }
 
     // MARK: Month navigation
@@ -82,6 +108,7 @@ struct CalendarMonthView: View {
             Text(monthAnchor.formatted(.dateTime.month(.wide).year()))
                 .font(StrandFont.headline)
                 .foregroundStyle(StrandPalette.textPrimary)
+                .accessibilityIdentifier("noop.calendar.month")
             Spacer()
 
             Button { step(1) } label: {
@@ -106,31 +133,38 @@ struct CalendarMonthView: View {
     // MARK: Metric picker
 
     private var metricPicker: some View {
-        HStack(spacing: 8) {
-            ForEach(Metric.allCases) { m in
-                let on = m == metric
-                HStack(spacing: 6) {
-                    MetricGlyph(m.glyph, size: 20)
-                    Text(m.title)
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(on ? StrandPalette.textPrimary : StrandPalette.textSecondary)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(Metric.allCases) { m in
+                    let on = m == metric
+                    Button {
+                        metric = m
+                    } label: {
+                        HStack(spacing: 6) {
+                            MetricGlyph(m.glyph, size: 18)
+                            Text(m.title)
+                                .font(StrandFont.subhead)
+                                .foregroundStyle(on ? StrandPalette.textPrimary : StrandPalette.textSecondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .background(
+                            Capsule()
+                                .fill(on ? m.tint.opacity(0.18) : StrandPalette.surfaceInset.opacity(0.72))
+                        )
+                        .overlay(
+                            Capsule()
+                                .stroke(on ? m.tint.opacity(0.50) : StrandPalette.hairline, lineWidth: 0.8)
+                        )
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                    .accessibilityLabel(Text(m.title))
+                    .accessibilityIdentifier("noop.calendar.metric.\(m.rawValue)")
                 }
-                .padding(.horizontal, 12)
-                .frame(minHeight: 44)                      // HIG tap target
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(on ? m.tint.opacity(0.18) : StrandPalette.surfaceInset)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(on ? m.tint.opacity(0.55) : .clear, lineWidth: 1)
-                )
-                .contentShape(RoundedRectangle(cornerRadius: 12))
-                .onTapGesture { metric = m }
-                .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
-                .accessibilityLabel(Text(m.title))
             }
-            Spacer(minLength: 0)
+            .padding(.horizontal, 1)
         }
     }
 
@@ -177,20 +211,24 @@ struct CalendarMonthView: View {
         let isToday = isToday(day)
         return VStack(spacing: 3) {
             ZStack {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(StrandPalette.hairline, lineWidth: 1)
-                    .frame(width: 32, height: 27)
+                Circle()
+                    .stroke(StrandPalette.hairlineStrong.opacity(0.48), lineWidth: 4)
                 if let v {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(Self.stepColor(v, tint: metric.tint))
-                        .frame(width: 32, height: 27)
+                    Circle()
+                        .trim(from: 0, to: max(0.025, min(v / 100, 1)))
+                        .stroke(
+                            Self.stepColor(v, tint: metric.tint),
+                            style: StrokeStyle(lineWidth: 4, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
                 }
                 if isToday {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .strokeBorder(StrandPalette.textPrimary, lineWidth: 2)
-                        .frame(width: 32, height: 27)
+                    Circle()
+                        .strokeBorder(StrandPalette.textPrimary.opacity(0.88), lineWidth: 1.4)
+                        .padding(-3)
                 }
             }
+            .frame(width: 28, height: 28)
             Text("\(day)")
                 .font(StrandFont.overline)
                 .foregroundStyle(isToday ? StrandPalette.textPrimary : StrandPalette.textTertiary)
@@ -202,7 +240,7 @@ struct CalendarMonthView: View {
         .accessibilityLabel(Text(spoken(day: day, value: v, isToday: isToday)))
     }
 
-    /// Strong hue steps so a low day is RED, not "slightly less green" — arc length is unreadable at this
+    /// Strong hue steps so a low day is RED, not "slightly less green" - arc length is unreadable at this
     /// size, hue is not. Ordered by lightness too, so the month still reads for colour-vision deficiency.
     static func stepColor(_ pct: Double, tint: Color) -> Color {
         let v = min(100, max(0, pct))
@@ -308,8 +346,9 @@ struct CalendarMonthView: View {
         guard let key = dayKey(day), let row = rows.first(where: { $0.day == key }) else { return nil }
         switch metric {
         case .recovery: return row.recovery
-        case .effort:   return row.strain
         case .sleep:    return AnalyticsEngineBridge.restScore(for: row)
+        case .effort:   return row.strain
+        case .load:     return loadByDay[key].map { min(max($0 / 3.0 * 100.0, 0), 100) }
         }
     }
 
@@ -329,8 +368,31 @@ struct CalendarMonthView: View {
               let last = cal.date(byAdding: DateComponents(month: 1, day: -1), to: first) else {
             rows = []; return
         }
-        rows = await model.repo.dailyMetrics(fromDay: Repository.localDayKey(first),
-                                             toDay: Repository.localDayKey(last))
+        let baselineStart = cal.date(
+            byAdding: .day,
+            value: -(DailyAutonomicLoad.baselineWindowDays + 7),
+            to: first
+        ) ?? first
+        let history = await model.repo.dailyMetrics(
+            fromDay: Repository.localDayKey(baselineStart),
+            toDay: Repository.localDayKey(last)
+        )
+        let firstKey = Repository.localDayKey(first)
+        rows = history.filter { $0.day >= firstKey }
+        loadByDay = Dictionary(
+            uniqueKeysWithValues: DailyAutonomicLoad.causalTrend(
+                days: history.map {
+                    DailyAutonomicLoad.Day(
+                        day: $0.day,
+                        restingHeartRate: $0.restingHr.map(Double.init),
+                        hrv: $0.avgHrv
+                    )
+                }
+            ).compactMap { readout in
+                guard let day = readout.asOf, let value = readout.value else { return nil }
+                return (day, value)
+            }
+        )
     }
 }
 

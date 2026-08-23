@@ -23,12 +23,21 @@ import com.noop.alarm.SmartAlarmScheduler
 import com.noop.alarm.SmartAlarmStore
 import com.noop.analytics.BatteryEstimator
 import com.noop.analytics.IllnessWatch
+import com.noop.automation.TapAutomationRuntime
+import com.noop.automation.TapAutomationStore
 import com.noop.data.DailyMetric
+import com.noop.data.MedicationStore
 import com.noop.location.GpsSession
 import com.noop.location.LocationTracker
 import com.noop.notif.BatteryAlertNotifier
 import com.noop.notif.HydrationReminderDelivery
 import com.noop.notif.IllnessAlertNotifier
+import com.noop.safety.SafetyIncidentLocationTracker
+import com.noop.safety.SafetyLiveLocationSession
+import com.noop.safety.SafetyPagingException
+import com.noop.safety.SafetySosDispatcher
+import com.noop.safety.SafetySosGestureRuntime
+import com.noop.safety.updateSafetyIncidentLocation
 import com.noop.ui.NoopPrefs
 import com.noop.ui.appLaunchIntent
 import com.noop.widget.WidgetSnapshotFactory
@@ -38,6 +47,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
@@ -100,6 +110,11 @@ class WhoopConnectionService : Service() {
     /** Platform-GPS wrapper (no Google Play Services). Lazily built — the service holds a Context. */
     private val locationTracker by lazy { LocationTracker(this) }
 
+    /** Latest-only location session for an explicitly opened Safety page. */
+    private var safetyLocationGateJob: Job? = null
+    private var safetyLocationJob: Job? = null
+    private val safetyLocationTracker by lazy { SafetyIncidentLocationTracker(this) }
+
     /** Last illness-watch evaluation seen by the collector — clear→raised is the notify edge.
      *  In-memory on purpose: the persisted once-a-day gate (NoopPrefs) handles dedupe across
      *  process restarts and the AppViewModel call site. */
@@ -114,6 +129,8 @@ class WhoopConnectionService : Service() {
      * slot de-dup; this sequence guard additionally proves the call came from a NEW packet rather than
      * a recompute of the combined day flow or a cached HR value. */
     private var lastHydrationLiveSequence: Long = 0L
+    /** Last physical event inspected for a pending tap action while no Activity may be alive. */
+    private var lastTapAutomationSequence: Long = Long.MIN_VALUE
 
     /** Smart-alarm light-sleep watcher (#207). Feeds the live HR while we're inside the wake window
      *  and, on a lighter-phase reading, advances the GUARANTEED alarm earlier. It can only ever move
@@ -132,7 +149,7 @@ class WhoopConnectionService : Service() {
     /**
      * Watches the OS Bluetooth radio so turning it off immediately tears down NOOP's orphaned GATT
      * link (#314). Without this there is no ACTION_STATE_CHANGED listener at all, so the radio going off
-     * never reaches [WhoopBleClient] — the link stays "connected", the UI keeps showing live HR/buzz/sync
+     * never reaches [WhoopBleClient] - the link stays "connected", the UI keeps showing live HR/buzz/sync
      * that isn't real, and the next write crashes on a dead binder (iOS/macOS are immune because
      * CoreBluetooth's send() is state-guarded). Registered while the FGS is alive (it is the long-lived
      * owner of the connection) and unregistered in [onDestroy]. STATE_TURNING_OFF/OFF → teardown +
@@ -202,6 +219,12 @@ class WhoopConnectionService : Service() {
         // Keep the ongoing notification in step with the live connection state AND today's recovery
         // (the 15-min IntelligenceEngine recompute), so it re-posts when either changes — a glanceable
         // poor-man's Live Activity (#42). daysMergedFlow is the same merged store the dashboard reads.
+        if (lastTapAutomationSequence == Long.MIN_VALUE) {
+            // A cached DOUBLE_TAP may still be the latest event when Android recreates the service.
+            // Seed at the current sequence so only a gesture observed after this service instance starts
+            // can consume a newly armed action.
+            lastTapAutomationSequence = ble.state.value.gestureSequence
+        }
         notifyJob?.cancel()
         notifyJob = scope.launch {
             combine(
@@ -240,8 +263,21 @@ class WhoopConnectionService : Service() {
                     vitalsRow = vitalsRow,
                     // Illness watch in the background (gated on the opt-out pref): the FGS is the
                     // only long-lived collector, so this is what makes the early-warning reach a
-                    // user who hasn't opened the app today.
-                    illness = if (NoopPrefs.illnessWatch(this@WhoopConnectionService)) IllnessWatch.evaluate(days) else null,
+                    // user who hasn't opened the app today. Pass the real civil anchor so an old
+                    // import cannot be reinterpreted as a current shift.
+                    illness = if (NoopPrefs.illnessWatch(this@WhoopConnectionService)) {
+                        IllnessWatch.evaluate(
+                            days,
+                            todayKey = maxOf(logicalKey, localKey),
+                            context = com.noop.analytics.IllnessSignalEngine.Context(
+                                recentMedicationChange = MedicationStore.hasRecentChange(
+                                    this@WhoopConnectionService,
+                                ),
+                            ),
+                        )
+                    } else {
+                        null
+                    },
                 )
             }.catch { /* belt-and-braces: a frozen notification beats a dead process */ }
                 // conflate + collect, NOT collectLatest (#82): the widget push suspends in Glance
@@ -259,6 +295,34 @@ class WhoopConnectionService : Service() {
                     IllnessAlertNotifier.onEvaluated(this@WhoopConnectionService, illness)
                 }
                 lastIllnessAlert = illness
+                if (state.gestureSequence > 0L &&
+                    state.gestureSequence != lastTapAutomationSequence &&
+                    state.lastEvent?.startsWith("DOUBLE_TAP") == true
+                ) {
+                    lastTapAutomationSequence = state.gestureSequence
+                    when (val result = TapAutomationStore.consumeForGesture(
+                        this@WhoopConnectionService,
+                        state.gestureSequence,
+                    )) {
+                        is TapAutomationStore.GestureResult.Consumed -> {
+                            val line = runCatching {
+                                TapAutomationRuntime.perform(
+                                    this@WhoopConnectionService,
+                                    result.action,
+                                    repo,
+                                    ble,
+                                )
+                            }.getOrElse {
+                                "Double-tap automation failed: ${it.javaClass.simpleName}"
+                            }
+                            ble.externalLog(line)
+                        }
+                        TapAutomationStore.GestureResult.AlreadyConsumed -> Unit
+                        TapAutomationStore.GestureResult.None -> {
+                            handleSafetyGesture(state.gestureSequence)
+                        }
+                    }
+                }
                 // Battery alerts — low (≤15%) and charge-complete (100%). The once-per-crossing
                 // dedupe is persisted in NoopPrefs (BatteryAlertPolicy), so no in-memory pct tracking.
                 BatteryAlertNotifier.onBatteryUpdate(
@@ -338,7 +402,10 @@ class WhoopConnectionService : Service() {
                         // permitted while tracking; on Android 14+ a service that reads location in the
                         // background must declare the location FGS type. Reverted to connectedDevice-only
                         // when the workout ends (active=false re-posts the base type).
-                        startForegroundCompat(buildNotification(ble.state.value, null), tracking = true)
+                        startForegroundCompat(
+                            buildNotification(ble.state.value, null),
+                            locationActive = true,
+                        )
                         // Workouts & GPS test mode (Test Centre): wire the GpsSession fix-progress sink to the
                         // .workouts-tagged strap log ONLY when the WORKOUTS mode is on (one SharedPreferences
                         // bool read here). When off, the sink stays null and the route fold is byte-identical.
@@ -359,7 +426,85 @@ class WhoopConnectionService : Service() {
                         }
                     } else {
                         GpsSession.workoutsLog = null   // route finished: drop the test-mode sink
-                        startForegroundCompat(buildNotification(ble.state.value, null), tracking = false)
+                        startForegroundCompat(
+                            buildNotification(ble.state.value, null),
+                            locationActive = SafetyLiveLocationSession.state.value.isActiveAt(
+                                System.currentTimeMillis() / 1_000L,
+                            ),
+                        )
+                    }
+                }
+        }
+
+        // Stream only the newest fix for an explicitly opened Safety page. Session identity/expiry is
+        // distinct from sequence so each uploaded fix does not restart the platform location listener.
+        SafetyLiveLocationSession.initialize(this)
+        safetyLocationGateJob?.cancel()
+        safetyLocationGateJob = scope.launch {
+            SafetyLiveLocationSession.state
+                .map { it.dispatchId to it.expiresAtUnix }
+                .distinctUntilChanged()
+                .collect { (dispatchId, expiresAtUnix) ->
+                    safetyLocationJob?.cancel()
+                    safetyLocationJob = null
+                    val nowUnix = System.currentTimeMillis() / 1_000L
+                    if (dispatchId.isNullOrBlank() ||
+                        expiresAtUnix == null ||
+                        expiresAtUnix <= nowUnix
+                    ) {
+                        if (!dispatchId.isNullOrBlank()) {
+                            SafetyLiveLocationSession.stop(
+                                this@WhoopConnectionService,
+                                expectedDispatchId = dispatchId,
+                            )
+                        }
+                        startForegroundCompat(
+                            buildNotification(ble.state.value, null),
+                            locationActive = GpsSession.state.value.active,
+                        )
+                        return@collect
+                    }
+
+                    startForegroundCompat(
+                        buildNotification(ble.state.value, null),
+                        locationActive = true,
+                    )
+                    safetyLocationJob = launch {
+                        val expiry = launch {
+                            delay((expiresAtUnix - nowUnix).coerceAtMost(3_600L) * 1_000L)
+                            SafetyLiveLocationSession.stop(
+                                this@WhoopConnectionService,
+                                expectedDispatchId = dispatchId,
+                            )
+                        }
+                        try {
+                            safetyLocationTracker.stream()
+                                .conflate()
+                                .collect locationCollect@ { location ->
+                                    val sequence = SafetyLiveLocationSession.nextSequence(
+                                        this@WhoopConnectionService,
+                                        dispatchId,
+                                    ) ?: return@locationCollect
+                                    runCatching {
+                                        updateSafetyIncidentLocation(
+                                            this@WhoopConnectionService,
+                                            dispatchId,
+                                            sequence,
+                                            location,
+                                        )
+                                    }.onFailure { error ->
+                                        val status = (error as? SafetyPagingException.Server)?.statusCode
+                                        if (status in setOf(404, 409, 410, 412)) {
+                                            SafetyLiveLocationSession.stop(
+                                                this@WhoopConnectionService,
+                                                expectedDispatchId = dispatchId,
+                                            )
+                                        }
+                                    }
+                                }
+                        } finally {
+                            expiry.cancel()
+                        }
                     }
                 }
         }
@@ -397,23 +542,54 @@ class WhoopConnectionService : Service() {
         // reconnect. No remembered strap / opted-out background link stays NOT_STICKY. GPS retains its
         // independent sticky guarantee. Neither branch leases the high-rate realtime stream.
         return if (GpsSession.state.value.active ||
+            SafetyLiveLocationSession.state.value.isActiveAt(System.currentTimeMillis() / 1_000L) ||
             BackgroundReconnectPolicy.runtimeDecision(this).reconnect
         ) START_STICKY else START_NOT_STICKY
     }
 
     /** Promote to the foreground. Returns false (rather than throwing) if the platform refuses. When
-     *  [tracking] a GPS workout we add the location FGS type — Android 14+ requires it for a service
-     *  that reads location in the background (the manifest declares `connectedDevice|location`). */
-    private fun startForegroundCompat(notification: Notification, tracking: Boolean = false): Boolean = runCatching {
+     *  [locationActive] we add the location FGS type for a GPS workout or explicit Safety page. */
+    private fun startForegroundCompat(
+        notification: Notification,
+        locationActive: Boolean = false,
+    ): Boolean = runCatching {
         val type =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val locationType = if (tracking) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
+                val locationType =
+                    if (locationActive) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or locationType
             } else {
                 0
             }
         ServiceCompat.startForeground(this, NOTIF_ID, notification, type)
     }.isSuccess
+
+    /** Returns true when SOS owns this event, so normal double-tap actions cannot also fire. */
+    private suspend fun handleSafetyGesture(gestureSequence: Long): Boolean =
+        when (val result = SafetySosGestureRuntime.consume(this, gestureSequence)) {
+            SafetySosGestureRuntime.Result.Ignored -> false
+            SafetySosGestureRuntime.Result.ReservedDuplicate -> true
+            is SafetySosGestureRuntime.Result.Progress -> {
+                ble.externalLog("SOS gesture: repeated double-tap ${result.count}/${result.required}")
+                true
+            }
+            SafetySosGestureRuntime.Result.Triggered -> {
+                ble.externalLog("SOS gesture complete; opening a manual contact page")
+                ble.buzz(3)
+                val outcome = SafetySosDispatcher.trigger(this)
+                ble.externalLog(
+                    when (outcome) {
+                        SafetySosDispatcher.Outcome.Opened ->
+                            "SOS page opened; latest-location sharing started where permitted"
+                        SafetySosDispatcher.Outcome.AlreadyActive ->
+                            "SOS page already active; latest-location sharing resumed"
+                        is SafetySosDispatcher.Outcome.Unavailable ->
+                            "SOS page was not sent: ${outcome.reason}"
+                    },
+                )
+                true
+            }
+        }
 
     /** Signature of the fields the notification actually renders (#216). The live HR stream emits ~1 Hz
      *  but the notification no longer shows BPM, so we only re-post when one of THESE changes — turning
@@ -443,9 +619,9 @@ class WhoopConnectionService : Service() {
         // battery cost for a number nobody reads off the lock screen. The title now reflects only the
         // connection / sync state, which changes rarely — see postNotification's dedup.
         val title = when {
-            !state.connected   -> "Reconnecting to your WHOOP…"
+            !state.connected   -> "Reconnecting to Noop Band…"
             state.backfilling  -> "Syncing strap history…"
-            else               -> "Connected to your WHOOP"
+            else               -> "Connected to Noop Band"
         }
         val detail = buildList {
             add(if (state.connected) "Streaming in the background" else "Keeping the link open")
@@ -490,10 +666,10 @@ class WhoopConnectionService : Service() {
             if (mgr.getNotificationChannel(CHANNEL_ID) != null) return
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Strap connection",
+                "Noop Band connection",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Shown while NOOP keeps your WHOOP connected in the background."
+                description = "Shown while NOOP keeps Noop Band connected in the background."
                 setShowBadge(false)
                 enableVibration(false)
                 setSound(null, null)

@@ -21,7 +21,7 @@ package com.noop.ble
  *     We decode both honestly and never guess beyond them.
  *
  * HONESTY: a 0 (no reading) or 255 (the common off-wrist / no-contact sentinel) returns null — the UI
- * shows "—", never a fabricated number.
+ * shows "-", never a fabricated number.
  *
  * SECURITY / ROBUSTNESS: the buffer is UNTRUSTED BLE input. Every read is bounds-checked; an empty or
  * implausible packet yields null, never a crash or a read past the end (mirrors [StandardHeartRate]).
@@ -49,7 +49,7 @@ object HuamiHeartRate {
         }
 
         // 0 = no/last-unknown reading; 255 = the common off-wrist / no-contact sentinel. Both honestly
-        // "unknown" -> null so the UI shows "—" rather than a fake 0 or 255.
+        // "unknown" -> null so the UI shows "-" rather than a fake 0 or 255.
         return if (hr in 1..254) hr else null
     }
 }

@@ -45,7 +45,7 @@ import com.noop.analytics.WorkoutSport
 import kotlinx.coroutines.delay
 
 /**
- * The shared "Start a workout" picker — sport search + GPS toggle, then [AppViewModel.startWorkout].
+ * The shared "Start a workout" picker - sport search + GPS toggle, then [AppViewModel.startWorkout].
  * Lives in one place so both the Live screen and the Workouts screen open the SAME sheet (#115).
  *
  * GPS needs ACCESS_FINE_LOCATION, which the BLE flow does NOT grant on Android 12+, so a GPS start

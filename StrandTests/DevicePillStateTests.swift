@@ -40,12 +40,19 @@ final class DevicePillStateTests: XCTestCase {
             "Removed")
     }
 
-    func testUnknownWhoopModelIsExplicitlyPending() {
+    func testUnknownBandModelUsesProductName() {
         let device = PairedDevice(id: "my-whoop", brand: "WHOOP", model: "WHOOP",
                                   nickname: nil, peripheralId: nil, sourceKind: .liveBLE,
                                   capabilities: [.hr, .hrv], status: .active,
                                   addedAt: 0, lastSeenAt: 0)
-        XCTAssertEqual(DeviceCapabilityProfile.make(for: device).displayModel, "WHOOP · model pending")
+        XCTAssertEqual(DeviceCapabilityProfile.make(for: device).displayModel, "Noop Band")
+    }
+
+    func testBandCustomerNameHidesGenerationButDiagnosticsPreserveIt() {
+        XCTAssertEqual(WhoopModel.whoop4.displayName, "Noop Band")
+        XCTAssertEqual(WhoopModel.whoop5mg.displayName, "Noop Band")
+        XCTAssertEqual(WhoopModel.whoop4.transportName, "WHOOP 4.0")
+        XCTAssertEqual(WhoopModel.whoop5mg.transportName, "WHOOP 5.0 / MG")
     }
 
     func testDevicesDefaultHierarchyKeepsDiagnosticsBehindDisclosure() throws {

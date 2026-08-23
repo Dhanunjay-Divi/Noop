@@ -161,7 +161,7 @@ enum FolderBackup {
     /// #52: on some iOS 26 builds the system folder picker's "Open" button never enables/fires, so users
     /// can't choose an external folder at all (three reports, works for one). This opt-in falls back to
     /// NOOP's OWN Documents/Backups folder — already exposed in Files (UIFileSharingEnabled +
-    /// LSSupportsOpeningDocumentsInPlace) under "On My iPhone → NOOP" — so Backup & Sync works with zero
+    /// LSSupportsOpeningDocumentsInPlace) under "On My iPhone → NOOP" - so Backup & Sync works with zero
     /// dependence on the picker. No security-scoped bookmark is involved (the folder is inside our own
     /// sandbox), so `resolveFolder`/`saveFolder`'s scoped-access brackets simply no-op for it. The user
     /// can drag that folder into iCloud Drive to read backups on the Mac; a first-class iCloud container
@@ -389,7 +389,7 @@ enum FolderBackup {
     #else
     /// Present a folder picker (`UIDocumentPicker`) and persist the bookmark. Returns the chosen URL.
     /// Starts in the previously-chosen folder when one resolves (else the picker falls back to our
-    /// Documents) — part of the #1000a "Select button never enables" mitigation; see
+    /// Documents) - part of the #1000a "Select button never enables" mitigation; see
     /// `DocumentPicker.pickFolder`.
     @MainActor
     static func pickFolder() async -> URL? {

@@ -18,7 +18,7 @@ import Foundation
 //   • `TrendsReportPage` — the laid-out SwiftUI page (the thing rendered to PDF),
 //     built ENTIRELY from the locked StrandDesign component system (NoopCard,
 //     SectionHeader, Sparkline, the colour worlds) so it matches every other surface.
-//   • `TrendsReportSheet` — the in-app range picker + "Export" CTA presented from Trends.
+//   • `TrendsReportSheet` - the in-app range picker + "Export" CTA presented from Trends.
 //
 // Honesty: an empty range (no metric carried a reading) renders a friendly
 // "not enough data in this range yet" state, never a blank or fabricated page.
@@ -93,7 +93,9 @@ enum TrendsReportData {
             if let v = d.strain { strain[d.day] = v }
             // In-sleep physiology (v7 columns). Absent on days the strap didn't measure them.
             if let v = d.respRateBpm { respRate[d.day] = v }
-            if let v = d.skinTempDevC { skinTempDev[d.day] = v }
+            if let v = VitalBands.skinTempDeviation(from: d.skinTempDevC) {
+                skinTempDev[d.day] = v
+            }
         }
         // Experimental daily autonomic-load estimate, clamped to its declared 0–3 scale.
         let stress = stressByDay.mapValues { Swift.min(Swift.max($0, 0), 3) }
@@ -397,7 +399,7 @@ struct TrendsReportPage: View {
     }
 
     /// "Jun 15" from "2026-06-15", via a pure ISO parse (no Calendar/locale). Reuses the
-    /// public WeeklyDigestEngine parser — both engines emit identical "yyyy-MM-dd" keys.
+    /// public WeeklyDigestEngine parser - both engines emit identical "yyyy-MM-dd" keys.
     private func prettyDate(_ ymd: String) -> String {
         guard let (_, m, d) = WeeklyDigestEngine.parseYMD(ymd) else { return ymd }
         let months = [String(localized: "Jan"), String(localized: "Feb"), String(localized: "Mar"),
@@ -565,7 +567,7 @@ private func previewDays() -> [DailyMetric] {
     return out
 }
 
-#Preview("Trends report — page") {
+#Preview("Trends report - page") {
     ScrollView {
         TrendsReportPage(
             report: TrendsReportData.report(for: .days90, days: previewDays(),
@@ -588,7 +590,7 @@ private func previewDays() -> [DailyMetric] {
     .preferredColorScheme(.dark)
 }
 
-#Preview("Trends report — sheet") {
+#Preview("Trends report - sheet") {
     TrendsReportSheet(days: previewDays())
         .environmentObject(Repository(deviceId: "preview"))
         .frame(width: 480, height: 640)

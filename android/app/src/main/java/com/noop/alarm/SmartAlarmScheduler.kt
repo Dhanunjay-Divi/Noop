@@ -24,7 +24,7 @@ import java.util.Calendar
  *    clamped to ≥ window-start and ≤ the original hard deadline. So if BLE drops, no light sleep is
  *    found, or the watcher never runs, the original deadline stands and the user is still woken.
  *
- *  • [cancel] is only reachable from an explicit user "disable" or after the alarm has fired — never
+ *  • [cancel] is only reachable from an explicit user "disable" or after the alarm has fired - never
  *    from the detection path.
  *
  * The single PendingIntent targets [SmartAlarmReceiver], which raises a full-screen high-priority
@@ -34,8 +34,10 @@ object SmartAlarmScheduler {
 
     /** Stable request code so every (re)schedule + cancel addresses the SAME alarm slot. */
     private const val REQUEST_CODE = 7307
+    private const val SNOOZE_REQUEST_CODE = 7309
 
     const val ACTION_FIRE = "com.noop.alarm.action.FIRE_SMART_ALARM"
+    const val ACTION_FIRE_SNOOZE = "com.noop.alarm.action.FIRE_SMART_ALARM_SNOOZE"
     /** Extras carried to the receiver so the fired notification can show the woken-at context. */
     const val EXTRA_SMART = "com.noop.alarm.extra.smart"
 
@@ -114,6 +116,24 @@ object SmartAlarmScheduler {
         store.scheduledWindowStartMs = 0L
     }
 
+    /** Schedule a user-requested snooze without replacing the already-armed next-day wake alarm. */
+    fun scheduleSnooze(context: Context, minutes: Int): Boolean {
+        if (!canScheduleExact(context)) return false
+        val triggerAtMs = System.currentTimeMillis() + minutes.coerceIn(5, 30) * 60_000L
+        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val show = PendingIntent.getActivity(
+            context,
+            SNOOZE_REQUEST_CODE + 1,
+            com.noop.ui.appLaunchIntent(context),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        am.setAlarmClock(
+            AlarmManager.AlarmClockInfo(triggerAtMs, show),
+            snoozePendingIntent(context),
+        )
+        return true
+    }
+
     /** True if the OS will honour an exact alarm right now (API 31+ gates this behind a permission). */
     fun canScheduleExact(context: Context): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
@@ -143,6 +163,17 @@ object SmartAlarmScheduler {
             .putExtra(EXTRA_SMART, smart)
         return PendingIntent.getBroadcast(
             context, REQUEST_CODE, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+    }
+
+    private fun snoozePendingIntent(context: Context): PendingIntent {
+        val intent = Intent(context, SmartAlarmReceiver::class.java)
+            .setAction(ACTION_FIRE_SNOOZE)
+        return PendingIntent.getBroadcast(
+            context,
+            SNOOZE_REQUEST_CODE,
+            intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
     }

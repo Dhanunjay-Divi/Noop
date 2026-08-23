@@ -29,15 +29,15 @@ class TodayChargeTapCollapseTest {
     @Test
     fun syncedFromSummary_listsOnlySourcesWithData() {
         assertEquals(
-            "Synced from: WHOOP, Apple Watch",
+            "Synced from: Noop Band, Apple Watch",
             syncedFromSummary(hasWhoop = true, hasApple = true, hasXiaomi = false),
         )
         assertEquals(
-            "Synced from: WHOOP",
+            "Synced from: Noop Band",
             syncedFromSummary(hasWhoop = true, hasApple = false, hasXiaomi = false),
         )
         assertEquals(
-            "Synced from: WHOOP, Apple Watch, Mi Band",
+            "Synced from: Noop Band, Apple Watch, Mi Band",
             syncedFromSummary(hasWhoop = true, hasApple = true, hasXiaomi = true),
         )
     }
@@ -58,11 +58,11 @@ class TodayChargeTapCollapseTest {
             syncedFromSummary(hasWhoop = false, hasApple = false, hasHealthConnect = true, hasXiaomi = false),
         )
         assertEquals(
-            "Synced from: WHOOP, Health Connect",
+            "Synced from: Noop Band, Health Connect",
             syncedFromSummary(hasWhoop = true, hasApple = false, hasHealthConnect = true, hasXiaomi = false),
         )
         assertEquals(
-            "Synced from: WHOOP, Apple Watch, Health Connect",
+            "Synced from: Noop Band, Apple Watch, Health Connect",
             syncedFromSummary(hasWhoop = true, hasApple = true, hasHealthConnect = true, hasXiaomi = false),
         )
     }

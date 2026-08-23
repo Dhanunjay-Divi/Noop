@@ -75,6 +75,7 @@ class BackupSettingsCodecTest {
             "hydrationReminders.intervalMinutes" to 120,
             "hydrationReminders.activeStartMinutes" to 480,
             "hydrationReminders.activeEndMinutes" to 1_260,
+            "hydrationReminders.adaptiveEnabled" to false,
             "hydrationReminders.strapBuzzEnabled" to false,
         )
         assertEquals(
@@ -104,6 +105,7 @@ class BackupSettingsCodecTest {
         assertEquals("extraOpportunity", back["windDown.goalMode"])
         assertEquals(390, back["sleepPlanner.wakeMinutes"])
         assertEquals(120, back["hydrationReminders.intervalMinutes"])
+        assertEquals(false, back["hydrationReminders.adaptiveEnabled"])
         assertEquals(values.size + 1, back.size)
     }
 
@@ -189,6 +191,27 @@ class BackupSettingsCodecTest {
         assertNull(back["sleepPlanner.wakeMinutes"])
         assertNull(back["inactivity.buzzLoops"])
         assertNull(back["hydrationReminders.intervalMinutes"])
+    }
+
+    @Test fun keyMetricSelectionIsDeduplicatedFilteredAndCappedAtFive() {
+        val json = requireNotNull(
+            BackupSettingsCodec.encode(
+                mapOf(
+                    "today.keyMetrics" to
+                        "charge,charge,removedMetric,hrv,restingHr,bloodOxygen,respiratory,steps",
+                ),
+            ),
+        )
+        val back = BackupSettingsCodec.decode(json)
+        assertEquals(
+            "charge,hrv,restingHr,bloodOxygen,respiratory",
+            back["today.keyMetrics"],
+        )
+
+        val invalid = BackupSettingsCodec.decode(
+            """{"today.keyMetrics":"removedMetric,unknown"}""",
+        )
+        assertNull(invalid["today.keyMetrics"])
     }
 
     @Test fun garbageDecodesToEmptyAndEmptyEncodesToNull() {

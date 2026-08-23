@@ -295,7 +295,7 @@ private fun shortDate(ymd: String): String {
 }
 
 internal fun meanText(s: WeeklyMetricSummary, effortScale: EffortScale): String {
-    if (s.thisWeek.n == 0) return "—"
+    if (s.thisWeek.n == 0) return "-"
     // #463: Effort is STORED 0-100; render it on the user's chosen display scale WITH the denominator
     // ("4.6 / 21", "21.6 / 100") so the card can't read as a different number than the Trends chart.
     if (s.metric == WeeklyMetric.EFFORT) {

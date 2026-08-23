@@ -121,7 +121,7 @@ internal fun selectNight(
 }
 
 /**
- * The day's MAIN sleep block — the night people mean by "last night" — resolved by the SINGLE shared
+ * The day's MAIN sleep block - the night people mean by "last night" - resolved by the SINGLE shared
  * selector ([SleepStageTotals.mainNightIndex]) the analytics rollup uses: the LEARNED-TIMING score
  * (asleep span + alignment bonus on each block's EFFECTIVE onset) rather than a re-derived overnight
  * gate, so the hero, the edit affordance, the analytics total, and the Sleep tab ALL resolve to the

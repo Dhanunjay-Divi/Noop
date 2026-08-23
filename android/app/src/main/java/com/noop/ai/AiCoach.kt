@@ -5,6 +5,7 @@ import com.noop.analytics.EffectRanker
 import com.noop.analytics.LabMarkerCategory
 import com.noop.analytics.MarkerCatalog
 import com.noop.analytics.StressIndex
+import com.noop.analytics.VitalBands
 import com.noop.data.DailyMetric
 import com.noop.data.JournalEntry
 import com.noop.data.LabMarkerRow
@@ -262,7 +263,7 @@ class AiCoach(private val repo: WhoopRepository) {
         // can be an @57 motion-derived estimate. The coach must not present it as a factual step count.
         sb.append("  SpO₂ ${avgInt(last30) { it.spo2Pct }}%, ")
         sb.append("respiration ${avg1(last30) { it.respRateBpm }}/min, ")
-        sb.append("skin-temp deviation ${avg1(last30) { it.skinTempDevC }}°C, ")
+        sb.append("skin-temp change vs baseline ${skinTempChangeSummary(last30)}, ")
         sb.append("active energy ${avgInt(last30) { it.activeKcalEst }}kcal/day\n")
 
         // --- Recent workouts (derived from logged exercise counts + day strain) ---
@@ -307,7 +308,7 @@ class AiCoach(private val repo: WhoopRepository) {
                 .getOrDefault(emptyList())
                 .take(3)
             if (ranked.isNotEmpty()) {
-                sb.append("ON-DEVICE PATTERNS (associations in the user's own logged days — not causes, ")
+                sb.append("ON-DEVICE PATTERNS (associations in the user's own logged days - not causes, ")
                 sb.append("not diagnoses; weaker confidence means fewer days so far):\n")
                 for (r in ranked) {
                     sb.append("  • ${r.behavior}: ${r.sentence()} [${r.confidence.name.lowercase()}]\n")
@@ -320,11 +321,11 @@ class AiCoach(private val repo: WhoopRepository) {
         if (latestByMarker.isNotEmpty()) {
             if (sb.isNotEmpty()) sb.append("\n")
             sb.append("LAB BOOK (numbers the user entered themselves from their own reports; NOOP does not ")
-            sb.append("test or interpret them — never assert whether a value is normal/high/low):\n")
+            sb.append("test or interpret them - never assert whether a value is normal/high/low):\n")
             for (row in latestByMarker) {
                 val name = MarkerCatalog.definition(row.markerKey)?.displayName
                     ?: row.markerKey.replace("_", " ").replaceFirstChar { it.uppercase() }
-                val value = row.value?.let { fmt1(it) + " " + row.unit } ?: (row.valueText ?: "—")
+                val value = row.value?.let { fmt1(it) + " " + row.unit } ?: (row.valueText ?: "-")
                 sb.append("  • $name: $value\n")
             }
         }
@@ -667,6 +668,16 @@ class AiCoach(private val repo: WhoopRepository) {
     private inline fun avg1(days: List<DailyMetric>, sel: (DailyMetric) -> Double?): String {
         val vals = days.mapNotNull(sel)
         return if (vals.isEmpty()) "-" else fmt1(vals.average())
+    }
+
+    /** Summarize a real baseline change across the mixed absolute/deviation daily column. */
+    private fun skinTempChangeSummary(days: List<DailyMetric>): String {
+        val assessment = VitalBands.skinTempIllnessAssessment(
+            recent = days.takeLast(2).map { it.skinTempDevC },
+            baseline = days.takeLast(31).dropLast(3).map { it.skinTempDevC },
+        )
+        val delta = assessment?.deltaFromBaselineC ?: return "n/a"
+        return String.format(java.util.Locale.US, "%+.1f°C", delta)
     }
 
     companion object {

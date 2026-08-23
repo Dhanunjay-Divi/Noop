@@ -26,7 +26,7 @@ public enum CircadianEngine {
     public static let minDaysForFit: Int = 7
     /// Days at/above which the fit reads as full-confidence.
     public static let goodDaysForFit: Int = 14
-    /// A cosinor fit with amplitude below this fraction of the mesor is "arrhythmic" — too flat to phase.
+    /// A cosinor fit with amplitude below this fraction of the mesor is "arrhythmic" - too flat to phase.
     public static let minRelativeAmplitude: Double = 0.10
     /// Max clock-shift the planner steps per day (hours) — the well-established ~1 h/day re-entrainment rate.
     public static let maxShiftPerDayHours: Double = 1.0
@@ -121,7 +121,7 @@ public enum CircadianEngine {
     // MARK: - Phase estimate
 
     public enum PhaseConfidence: String, Equatable, Sendable, Codable {
-        case unreadable     // too few days / arrhythmic — "hard to read right now"
+        case unreadable     // too few days / arrhythmic - "hard to read right now"
         case wide           // a fit, but thin data → wide band
         case solid          // a stable fit over enough days
     }

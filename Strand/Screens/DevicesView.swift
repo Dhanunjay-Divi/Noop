@@ -185,7 +185,7 @@ private struct DevicesContent: View {
                 .environmentObject(live)
         }
         // Switch confirm
-        .alert("Make this your active strap?",
+        .alert("Make this your active wearable?",
                isPresented: Binding(get: { switchTarget != nil },
                                     set: { if !$0 { switchTarget = nil } }),
                presenting: switchTarget) { device in
@@ -195,7 +195,7 @@ private struct DevicesContent: View {
                 switchTarget = nil
             }
         } message: { device in
-            Text("Make \(device.displayName) your active strap? From now on it provides your live data. \(currentActiveName)'s history stays exactly as it is. Only new days come from \(device.displayName).")
+            Text("Make \(device.displayName) your active wearable? From now on it provides your live data. \(currentActiveName)'s history stays exactly as it is. Only new days come from \(device.displayName).")
         }
         // Rename
         .alert("Rename device",
@@ -222,7 +222,7 @@ private struct DevicesContent: View {
             Text("Remove \(device.displayName)? NOOP will stop connecting to it. Its recorded data is kept and you can re-add it any time.")
         }
         // Restart strap confirm (#166)
-        .alert("Restart this strap?",
+        .alert("Restart Noop Band?",
                isPresented: Binding(get: { rebootTarget != nil },
                                     set: { if !$0 { rebootTarget = nil } }),
                presenting: rebootTarget) { _ in
@@ -243,7 +243,7 @@ private struct DevicesContent: View {
             }
             Button("Cancel", role: .cancel) { probeTarget = nil }
         } message: { _ in
-            Text("The WHOOP 4.0 reboot frame isn't confirmed — a normal Restart is ignored (#235). Send each candidate and watch BOTH the strap log and the strap itself. “no disconnect within 12s” means the strap ignored the frame. A “link dropped” line means the frame reached the strap — but a dropped link alone isn't a reboot: a real reboot also switches the strap's sensor light off for a few seconds, so if the light stayed on it was just a dropped connection, not a reboot. Non-destructive — your data is kept. Please share the log so we can pin the real frame.")
+            Text("The WHOOP 4.0 reboot frame isn't confirmed - a normal Restart is ignored (#235). Send each candidate and watch BOTH the strap log and the strap itself. “no disconnect within 12s” means the strap ignored the frame. A “link dropped” line means the frame reached the strap - but a dropped link alone isn't a reboot: a real reboot also switches the strap's sensor light off for a few seconds, so if the light stayed on it was just a dropped connection, not a reboot. Non-destructive - your data is kept. Please share the log so we can pin the real frame.")
         }
         // #592 extended-battery opcode probe: read-only, dumps the strap's full raw reply so a capture
         // settles the disputed GET_EXTENDED_BATTERY_INFO number (98 vs an APK decompile's 87).
@@ -291,7 +291,7 @@ private struct DevicesContent: View {
             Text("This permanently deletes all data recorded from \(device.displayName). This can't be undone.")
         }
         // After removing the active device, offer to pick a new active one (if any remain).
-        .confirmationDialog("Pick a new active strap",
+        .confirmationDialog("Pick a new active wearable",
                             isPresented: $pickNewActive,
                             titleVisibility: .visible) {
             // I-1: import sources (Oura cloud import, file imports) are excluded — they're data
@@ -301,7 +301,7 @@ private struct DevicesContent: View {
             }
             Button("Leave none active", role: .cancel) { }
         } message: {
-            Text("You removed your active strap. Choose which paired band provides your live data, or leave none active and pair one later.")
+            Text("You removed your active wearable. Choose which paired device provides your live data, or leave none active and pair one later.")
         }
     }
 
@@ -334,7 +334,7 @@ private struct DevicesContent: View {
                         .font(StrandFont.title2)
                         .foregroundStyle(StrandPalette.textPrimary)
                         .multilineTextAlignment(.center)
-                    Text("Connect a WHOOP, Apple Watch, heart-rate strap, ring, or supported gym machine. NOOP will show only the signals that device actually provides.")
+                    Text("Connect a Noop Band, Apple Watch, heart-rate strap, ring, or supported gym machine. NOOP will show only the signals that device actually provides.")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .multilineTextAlignment(.center)
@@ -375,7 +375,7 @@ private struct DevicesContent: View {
             Image(systemName: "info.circle")
                 .foregroundStyle(StrandPalette.textSecondary)
                 .accessibilityHidden(true)
-            Text("WHOOP is NOOP's primary, fully-supported band. Other heart-rate straps are an early, in-development addition: they stream live heart rate and HRV, but not WHOOP's deeper sleep and recovery data.")
+            Text("Noop Band is NOOP's fully supported band. Other heart-rate straps can stream live heart rate and HRV, but they do not provide the deeper nightly signals available from Noop Band.")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -398,7 +398,7 @@ private struct DevicesContent: View {
     // MARK: Logic
 
     private var currentActiveName: String {
-        registry.devices.first(where: { $0.status == .active })?.displayName ?? String(localized: "Your current strap")
+        registry.devices.first(where: { $0.status == .active })?.displayName ?? String(localized: "Your current wearable")
     }
 
     /// Archive the device, then — if it was the active one and other non-archived devices remain —
@@ -696,7 +696,7 @@ private struct DeviceCard: View {
     }
 
     /// The pure `DevicePillState.resolve` priority (#221): reboot's "Reconnecting…" beats a bond refusal's
-    /// "Connected · not paired", which beats "Active · Live" — pinned by `DevicePillStateTests` instead of
+    /// "Connected · not paired", which beats "Active · Live" - pinned by `DevicePillStateTests` instead of
     /// only verified visually.
     private var pillState: DevicePillState {
         DevicePillState.resolve(isArchived: device.status == .archived, isActive: isActive,
@@ -714,7 +714,7 @@ private struct DeviceCard: View {
         Menu {
             if device.status == .archived {
                 // I-1: a removed import source (e.g. Oura cloud import, archived on Disconnect) never
-                // offers "Make active" reactivation — it's a data partition, not a live device.
+                // offers "Make active" reactivation - it's a data partition, not a live device.
                 if let onReAdd, !device.isImportSource {
                     Button { onReAdd() } label: { Label("Make active", systemImage: "bolt.fill") }
                 }
@@ -733,7 +733,7 @@ private struct DeviceCard: View {
                 // Restart the strap — only for the live-connected WHOOP (the reboot travels over the active
                 // BLE link). Confirmation-gated by the parent. (#166)
                 if isLiveConnected, SourceCoordinator.isWhoop(device), let onReboot {
-                    Button { onReboot() } label: { Label("Restart strap…", systemImage: "arrow.clockwise") }
+                    Button { onReboot() } label: { Label("Restart Noop Band…", systemImage: "arrow.clockwise") }
                 }
                 // 4.0 reboot probe (RE): only present when the parent passed a closure (Test Centre →
                 // Connection on + a live WHOOP 4.0). Finds the real reboot frame the 4.0 accepts (#235).
@@ -750,7 +750,7 @@ private struct DeviceCard: View {
                 }
                 if let onEcgProbe {
                     Button { onEcgProbe() } label: {
-                        Label("ECG capture (MG, experimental)…", systemImage: "waveform.path.ecg")
+                        Label("ECG spot recording (experimental)…", systemImage: "waveform.path.ecg")
                     }
                 }
                 if let onRemove {
@@ -800,7 +800,7 @@ private struct DeviceCard: View {
 
     private var lastSeenLine: String {
         if device.status == .archived { return String(localized: "Removed · data kept") }
-        // No "tap ⋯" pointer here (#221 review) — the full how-to-fix guidance is already inline on the
+        // No "tap ⋯" pointer here (#221 review) - the full how-to-fix guidance is already inline on the
         // card just below, so pointing at the menu would send the user looking for help that's already
         // on screen.
         if bondRefused { return String(localized: "Connected, but not paired") }
@@ -920,32 +920,32 @@ struct DeviceCapabilityProfile {
                 displayModel: String(localized: "Heart-rate strap"),
                 captures: String(localized: "Heart rate · HRV (live)* · Strain"),
                 powers: String(localized: "Powers the live console + Effort. No Recovery or Sleep Score"),
-                footnote: String(localized: "Live HR + R-R only · no sleep, recovery, skin temp, SpO₂, steps or battery (those are WHOOP-only)."))
+                footnote: String(localized: "Live HR + R-R only · no sleep, recovery, skin temp, SpO₂, steps or battery (those require Noop Band or another compatible source)."))
         }
         let whoopPowers = String(localized: "Powers Recovery, Effort, Sleep Score, sleep details + Health Monitor")
         let model = d.model.lowercased()
-        // WHOOP 5.0 / MG — adds a (raw) step count the 4.0 can't read over BLE.
+        // Newer transport family adds a raw motion count that can support an estimated step series.
         if model.contains("5") || model.contains("mg") {
             return DeviceCapabilityProfile(
-                displayModel: "WHOOP 5.0 / MG",
+                displayModel: "Noop Band",
                 captures: String(localized: "Heart rate · HRV · Skin temp* · Resp rate* · Steps* · Sleep · Strain · Battery"),
                 powers: whoopPowers,
-                footnote: String(localized: "* on-device estimate: skin temp is a nightly ±°C deviation, steps are a raw motion count (#78). No SpO₂ % off the strap; import a WHOOP CSV for a real %."))
+                footnote: String(localized: "* on-device estimate: skin temp is a nightly ±°C deviation, steps are a raw motion count. No SpO₂ percentage comes directly from Noop Band; use Apple Health or a supported file import for that."))
         }
-        // WHOOP 4.0 — NOOP's primary band; no steps over BLE.
+        // Older transport family does not expose a usable step stream.
         if model.contains("4") {
             return DeviceCapabilityProfile(
-                displayModel: "WHOOP 4.0",
+                displayModel: "Noop Band",
                 captures: String(localized: "Heart rate · HRV · Skin temp* · Resp rate* · Sleep · Strain · Battery"),
                 powers: whoopPowers,
-                footnote: String(localized: "* on-device estimate: skin temp is a nightly ±°C deviation (firmware-dependent); no steps over BLE on a 4.0. No SpO₂ % off the strap; import a WHOOP CSV for a real %."))
+                footnote: String(localized: "* on-device estimate: skin temp is a nightly ±°C deviation (firmware-dependent); steps are unavailable on this firmware. No SpO₂ percentage comes directly from Noop Band; use Apple Health or a supported file import for that."))
         }
-        // Legacy / unknown WHOOP (the seeded device, model just "WHOOP") — show only the common-to-all set.
+        // Unknown family: show only the capability set common to supported Noop Band transports.
         return DeviceCapabilityProfile(
-            displayModel: String(localized: "WHOOP · model pending"),
+            displayModel: "Noop Band",
             captures: String(localized: "Heart rate · HRV · Skin temp* · Resp rate* · Sleep · Strain · Battery"),
             powers: whoopPowers,
-            footnote: String(localized: "NOOP has not identified the exact WHOOP model yet, so this lists only signals common to supported WHOOP bands. * on-device estimate · no SpO₂ % off the strap (import a WHOOP CSV for that)."))
+            footnote: String(localized: "Hardware details are still being identified, so this shows only common signals. * indicates an on-device estimate. SpO₂ percentage requires another compatible source."))
     }
 }
 
@@ -1092,7 +1092,7 @@ private struct BodyLocationProbeResultView: View {
     }
 }
 
-// MARK: - WHOOP MG ECG research probe
+// MARK: - ECG spot-recording research probe
 
 /// Keeps the multi-step, explicitly user-started MG protocol probe isolated from the already-heavy
 /// Devices view modifier chain. The BLE layer repeats every gate before it writes a byte.
@@ -1105,16 +1105,16 @@ private struct EcgProbeSheets: ViewModifier {
     func body(content: Content) -> some View {
         content
             .confirmationDialog(
-                "WHOOP MG ECG capture (experimental)",
+                "Noop Band ECG spot recording (experimental)",
                 isPresented: Binding(get: { target != nil }, set: { if !$0 { target = nil } }),
                 titleVisibility: .visible,
                 presenting: target
             ) { device in
-                Button("Start 30-second protocol capture") {
+                Button("Start 30-second spot recording") {
                     model.ecgStartCapture()
                     target = nil
                 }
-                Button("Stop ECG capture") {
+                Button("Stop spot recording") {
                     model.ecgStopCapture()
                     target = nil
                 }
@@ -1124,7 +1124,7 @@ private struct EcgProbeSheets: ViewModifier {
                 }
                 Button("Cancel", role: .cancel) { target = nil }
             } message: { _ in
-                Text("Research instrumentation only — not a medical ECG, measurement, or diagnosis. Hold the two clasp indents with the opposite hand during capture. The commands are unvalidated on real MG hardware and may do nothing; Stop reverses the stream controls.")
+                Text("Research instrumentation only, not a diagnostic ECG or continuous monitor. Keep the opposite hand touching both clasp electrodes for the full 30 seconds. Signal units, scale, and any band-provided rhythm classification are unvalidated and are not shown as health results. The commands may do nothing; Stop reverses the stream controls.")
             }
             .sheet(isPresented: Binding(get: { wristTarget != nil },
                                         set: { if !$0 { wristTarget = nil } })) {
@@ -1178,10 +1178,10 @@ private struct EcgProbeResultView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("ECG protocol probe")
+            Text("ECG spot-recording probe")
                 .font(StrandFont.title2)
                 .foregroundStyle(StrandPalette.textPrimary)
-            Text("Unvalidated research instrumentation — not a medical measurement or diagnosis.")
+            Text("Unvalidated research instrumentation - not a medical measurement or diagnosis.")
                 .font(StrandFont.caption)
                 .foregroundStyle(StrandPalette.statusWarning)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1258,7 +1258,7 @@ struct DeviceCardCatalog: View {
                 DeviceCard(device: Self.dev("whoop-5-refused", "WHOOP", "5.0 MG",
                                             Self.whoopCaps.union([.steps])),
                            isActive: true, isLiveConnected: true, bondRefused: true,
-                           pairingHint: "NOOP can see your strap but it's refusing to pair - it's likely still bonded to the official WHOOP app, or your phone is holding an old pairing. To fix it: (1) fully close the WHOOP app, (2) on a 5.0/MG, tap the band repeatedly until the LEDs flash blue (pairing mode), (3) if your strap is listed under iPhone Settings → Bluetooth, tap it and choose Forget This Device, then reconnect in NOOP.",
+                           pairingHint: "Noop Band will not pair because another app or an old phone pairing still holds its secure connection. Close other band apps, put Noop Band in pairing mode, then open Settings → Bluetooth and choose Forget This Device if the band is listed. Return to NOOP and reconnect.",
                            onMakeActive: {}, onRename: {}, onRemove: {})
                 DeviceCard(device: Self.dev("strap-d", "Polar", "H10", [.hr, .hrv]),
                            isActive: false, isLiveConnected: false,
@@ -1307,14 +1307,14 @@ struct OuraDeviceDemoScreen: View {
 struct BondRefusedDemoScreen: View {
     var body: some View {
         ScreenScaffold(title: "Devices",
-                       subtitle: "A WHOOP 5/MG whose encrypted bond was refused (#78).",
+                       subtitle: "A Noop Band whose secure connection was refused.",
                        topBackground: liquidScaffoldSky()) {
             DeviceCard(device: PairedDevice(id: "whoop-5-refused-solo", brand: "WHOOP", model: "5.0 MG",
                                             nickname: nil, peripheralId: nil, sourceKind: .liveBLE,
                                             capabilities: [.hr, .hrv, .spo2, .skinTemp, .sleep, .strainLoad, .steps],
                                             status: .active, addedAt: 0, lastSeenAt: 0),
                        isActive: true, isLiveConnected: true, bondRefused: true,
-                       pairingHint: "NOOP can see your strap but it's refusing to pair - it's likely still bonded to the official WHOOP app, or your phone is holding an old pairing. To fix it: (1) fully close the WHOOP app, (2) on a 5.0/MG, tap the band repeatedly until the LEDs flash blue (pairing mode), (3) if your strap is listed under iPhone Settings → Bluetooth, tap it and choose Forget This Device, then reconnect in NOOP.",
+                       pairingHint: "Noop Band will not pair because another app or an old phone pairing still holds its secure connection. Close other band apps, put Noop Band in pairing mode, then open Settings → Bluetooth and choose Forget This Device if the band is listed. Return to NOOP and reconnect.",
                        onMakeActive: {}, onRename: {}, onRemove: {})
         }
     }

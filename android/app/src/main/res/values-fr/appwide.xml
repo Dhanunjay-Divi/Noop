@@ -11,6 +11,16 @@
     <string name="appwide_calendar_summary_overline">CE MOIS-CI</string>
     <string name="appwide_calendar_summary_scored_format">%1$d jours calculés · moyenne %2$d</string>
     <string name="appwide_calendar_your_month">Votre mois</string>
+    <string name="appwide_daily_signal_a11y_hint">Ouvre le suivi de santé et les signaux à l’origine de cet état.</string>
+    <string name="appwide_daily_signal_alert_a11y_hint">Ouvre le suivi de santé et les signaux à l’origine de cette vérification.</string>
+    <string name="appwide_daily_signal_alert_review">Voir les détails</string>
+    <string name="appwide_daily_signal_alert_title">Des signaux ont changé</string>
+    <string name="appwide_daily_signal_alert_unwell_title">Vérifiez maintenant</string>
+    <string name="appwide_daily_signal_label">Signal du jour</string>
+    <string name="appwide_daily_signal_status_aligned">Aligné</string>
+    <string name="appwide_daily_signal_status_building">En cours</string>
+    <string name="appwide_daily_signal_status_check_in">Vérifier</string>
+    <string name="appwide_daily_signal_status_recheck">Revérifier</string>
     <string name="appwide_disclaimer_estimates">Calculé sur cet appareil à partir de vos propres signaux. Des estimations, pas un dispositif médical.</string>
     <string name="appwide_disclaimer_estimates_advice">Estimations calculées sur cet appareil à partir de vos propres signaux. Ce n’est ni un dispositif médical ni un avis médical.</string>
     <string name="appwide_field_label_unit_format">%1$s (%2$s)</string>

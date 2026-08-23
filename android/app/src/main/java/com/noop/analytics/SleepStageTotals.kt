@@ -13,7 +13,7 @@ import org.json.JSONObject
  *   - on-device COMPUTED (what the IntelligenceEngine writes via [AnalyticsEngine.encodeStages]):
  *     `[{start,end,stage}]` — per-segment unix SECONDS spans;
  *   - IMPORTED (WhoopCsvImporter.stagesJson): `[{stage,min}]` — per-stage MINUTE totals.
- * The on-device stager calls awake "wake"; the importer "awake" — both map to `awake`.
+ * The on-device stager calls awake "wake"; the importer "awake" - both map to `awake`.
  *
  * The edit/recompute path only ever feeds the COMPUTED (`-noop`) source's `[{start,end,stage}]` stages
  * here (the daily override is computed-source-only, mirroring iOS scope), but [minutes] handles both
@@ -338,7 +338,7 @@ object SleepStageTotals {
      *  and no overnight gate: a short main sleep or a nap-only day still resolves, and a genuine long
      *  daytime sleep can win on score. Highest score wins; exact ties break toward the EARLIER onset
      *  (stable across platforms). Null only for an empty list. This `NightBlock` overload has no decoded
-     *  stages, so "asleep minutes" is the clock span — preserving the prior duration semantics for callers
+     *  stages, so "asleep minutes" is the clock span - preserving the prior duration semantics for callers
      *  that rank by span (`analyzeDay`). Mirrors Swift `mainNightIndex`. (#525 / #547) */
     fun mainNightIndex(blocks: List<NightBlock>, offsetSec: Long, habitualMidsleepSec: Long? = null): Int? {
         if (blocks.isEmpty()) return null

@@ -98,7 +98,7 @@ public enum HydrationGoal {
     /// Litres (ml / 1000) for the litre read-outs.
     public static func litres(fromML ml: Double) -> Double { ml / 1000.0 }
 
-    /// "<total> / <goal> L" in litres to 1 dp, e.g. "1.2 / 3.2 L" — the dashboard card value, fixed-locale
+    /// "<total> / <goal> L" in litres to 1 dp, e.g. "1.2 / 3.2 L" - the dashboard card value, fixed-locale
     /// so the string is byte-identical to the Android twin (`String.format(Locale.US, "%.1f / %.1f L")`).
     public static func cardValueString(totalML: Double, goalML: Int) -> String {
         String(format: "%.1f / %.1f L", litres(fromML: totalML), litres(fromML: Double(goalML)))
@@ -139,9 +139,10 @@ public enum HydrationGoal {
     }
 
     /// Heat bump (ml) from skin-temperature deviation in °C above baseline: `round(devC·300)` clamped to
-    /// 0…600. `nil`/non-finite or a non-positive deviation (at/below baseline) ⇒ 0.
+    /// 0…600. `nil`/non-finite, an absolute imported skin temperature, an implausible deviation, or a
+    /// non-positive deviation (at/below baseline) ⇒ 0.
     public static func heatBumpML(skinTempDevC: Double?) -> Int {
-        guard let dev = skinTempDevC, dev.isFinite, dev > 0 else { return 0 }
+        guard let dev = VitalBands.skinTempDeviation(from: skinTempDevC), dev > 0 else { return 0 }
         let raw = Int((dev * Double(heatBumpPerDegML)).rounded())
         return min(maxHeatBumpML, max(0, raw))
     }

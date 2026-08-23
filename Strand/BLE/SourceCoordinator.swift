@@ -63,7 +63,7 @@ final class SourceCoordinator: ObservableObject {
     /// Wraps `BLEManager.setPreferredPeripheral`. Called only on a WHOOP transition.
     private let setWhoopPreferredPeripheral: (String?) -> Void
     /// Re-point which device id live WHOOP samples store under. Wraps `BLEManager.setActiveDeviceId`.
-    /// Called only when the active WHOOP is NOT the seeded "my-whoop" — the legacy path never invokes it.
+    /// Called only when the active WHOOP is NOT the seeded "my-whoop" - the legacy path never invokes it.
     private let setWhoopActiveDeviceId: (String) -> Void
     /// The most-recently-connected WHOOP peripheral's uuid, from `BLEManager.$connectedPeripheralUUID`.
     private let connectedPeripheralUUID: AnyPublisher<String?, Never>
@@ -249,7 +249,7 @@ final class SourceCoordinator: ObservableObject {
 
     /// Apply the WHOOP targeting for the now-active WHOOP `id`. Always sets the preferred peripheral
     /// (nil for the legacy "my-whoop" → connect to any WHOOP, unchanged). Re-points the sample deviceId
-    /// ONLY for a non-legacy WHOOP — the seeded "my-whoop" keeps the bootstrap-set id, so the single-
+    /// ONLY for a non-legacy WHOOP - the seeded "my-whoop" keeps the bootstrap-set id, so the single-
     /// WHOOP path never calls `setActiveDeviceId`. Records `activeWhoopId` for future change detection.
     private func pointWhoop(at id: String, peripheralId: String?) {
         setWhoopPreferredPeripheral(peripheralId)
@@ -339,7 +339,7 @@ final class SourceCoordinator: ObservableObject {
     /// Build the EXPERIMENTAL Huami source (Amazfit / Zepp / Mi Band) for `id`. HR (standard 0x180D when
     /// exposed, else the documented Huami custom characteristic) rides the SAME `LiveState` channel as the
     /// other sources, so the existing live UI + recorder handle it — no new scoring loop, no fabricated
-    /// data (the source stays at "—" when it can't read a real HR).
+    /// data (the source stays at "-" when it can't read a real HR).
     private func makeHuamiSource(id: String) -> any LiveHRSource {
         HuamiHRSource(
             live: live,
@@ -451,7 +451,7 @@ final class SourceCoordinator: ObservableObject {
     // MARK: - Identity adoption
 
     /// The BLE engine connected to a WHOOP peripheral (`uuid`). Persist that stable identity onto the
-    /// CURRENTLY ACTIVE device when it's a WHOOP and hasn't adopted one yet — so the legacy "my-whoop"
+    /// CURRENTLY ACTIVE device when it's a WHOOP and hasn't adopted one yet - so the legacy "my-whoop"
     /// learns its strap's id on first connect, and a freshly-paired WHOOP confirms its identity.
     ///
     /// Guards (so this never corrupts the registry):
@@ -496,10 +496,10 @@ final class SourceCoordinator: ObservableObject {
             // pre-bond `didConnect` publish always carries `encryptedBond == false`, so the protective
             // "don't clobber" path below is preserved for every normal/transient different-strap connect.
             if live.encryptedBond {
-                live.append(log: "Multi-WHOOP (#52): active device \(activeId) was pinned to strap \(existing) which refused to bond — re-adopting the working strap \(uuid).")
+                live.append(log: "Multi-WHOOP (#52): active device \(activeId) was pinned to strap \(existing) which refused to bond - re-adopting the working strap \(uuid).")
                 registry.setPeripheralId(activeId, peripheralId: uuid)
             } else {
-                live.append(log: "Multi-WHOOP: active device \(activeId) is registered to strap \(existing) but \(uuid) connected — not overwriting.")
+                live.append(log: "Multi-WHOOP: active device \(activeId) is registered to strap \(existing) but \(uuid) connected - not overwriting.")
             }
         }
     }

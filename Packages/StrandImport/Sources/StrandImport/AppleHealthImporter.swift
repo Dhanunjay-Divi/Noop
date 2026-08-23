@@ -43,6 +43,7 @@ public struct AppleHealthImporter {
         "ActiveEnergyBurned",
         "BasalEnergyBurned",
         "VO2Max",
+        "DietaryWater",
         "StepCount",
         "SleepAnalysis",
         // Body composition

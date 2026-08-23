@@ -3,7 +3,7 @@ import StrandDesign
 
 // MARK: - Scoring guide
 //
-// "How your scores work" — the one honest explainer for NOOP's three daily scores
+// "How your scores work" - the one honest explainer for NOOP's three daily scores
 // (Charge, Effort, Rest) and the confidence labels. Presented as a sheet, mirroring
 // WhatsNewView's presentation + dismiss + layout idiom: a fixed header with a close
 // button, a scrollable column of cards, and a "Got it" footer. Reachable from
@@ -195,8 +195,8 @@ struct ScoringGuideView: View {
 
     /// One colour-accented score section: a FLAT WHOOP-grey card (faintly washed with the section's Reset
     /// accent) carrying a clean sample ring of that score beside an accent-tinted headline, the body, and
-    /// an italic "vs WHOOP" line set off by a hairline rule. The ring is illustrative — a "what a strong
-    /// day reads like" preview in the section's own colour — so a glance maps a card to its Today ring.
+    /// an italic "vs WHOOP" line set off by a hairline rule. The ring is illustrative - a "what a strong
+    /// day reads like" preview in the section's own colour - so a glance maps a card to its Today ring.
     /// Design Reset: a flat GlowRing (no bloom) replaces the old BevelGauge; the accent is a Reset score
     /// token, never gold / strain / sleep-purple.
     private func scoreCard(_ section: ScoreSection, headline: String, body: String, vsWhoop: String) -> some View {

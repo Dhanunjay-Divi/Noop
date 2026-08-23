@@ -1,5 +1,6 @@
 #if os(iOS)
 import SwiftUI
+import StrandAnalytics
 import StrandDesign
 import UserNotifications
 import WidgetKit
@@ -25,9 +26,8 @@ struct StrandiOSApp: App {
     @StateObject private var router = NavRouter()
     @State private var liveActivity = LiveActivityController()
     @Environment(\.scenePhase) private var scenePhase
-    /// Appearance preference (System/Pearl/Graphite/OLED Black). Default follows the OS; Settings and
-    /// the More-header shortcut write the same persisted value.
-    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
+    /// Appearance preference (OLED Black by default; Settings and More write the same persisted value).
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.defaultMode.rawValue
     /// Chart data-colour style (Titanium / Classic throwback). Re-colours gauges + charts.
     @AppStorage(ChartStyle.storageKey) private var chartStyleRaw = ChartStyle.titanium.rawValue
     @AppStorage("noop.acceptedTermsVersion") private var acceptedTermsVersion = ""
@@ -491,7 +491,7 @@ private struct iOSRootView: View {
                 showWhatsNew = false
             })
         }
-        // The Terms gate must stay "over everything" — don't pop What's New on top of it after a
+        // The Terms gate must stay "over everything" - don't pop What's New on top of it after a
         // combined terms+version update. Gate on terms being current, and re-check when they're
         // accepted (onAppear already fired before acceptance), so What's New shows right after.
         .onAppear {
@@ -549,13 +549,14 @@ enum DemoScreens {
         // to have diverged from. Without this, the default Today was the one screen the harness could not
         // capture.
         case "liquidtoday": return AnyView(LiquidTodayView())
-        // UI v2 ("Aurora") — the redesigned Today. Renders from TodayV2Model.demo so the harness can
+        // UI v2 ("Aurora") - the redesigned Today. Renders from TodayV2Model.demo so the harness can
         // capture it deterministically; the live wiring reads the same model shape.
         case "todayv2":  return AnyView(TodayV2View(model: .demo))
         case "v2calendar": return AnyView(V2MonthCalendarDemo())
-        // UI v3 "Instrument" — dense, flat-field, status-word instrument language.
+        case "calendar": return AnyView(CalendarMonthView())
+        // UI v3 "Instrument" - dense, flat-field, status-word instrument language.
         case "todayv3":  return AnyView(TodayV3View(model: .demo))
-        // UI v4 "Useful" — NOOP 3D glyphs + BevelGauge, every block answers one real question.
+        // UI v4 "Useful" - NOOP 3D glyphs + BevelGauge, every block answers one real question.
         case "todayv4":  return AnyView(TodayV4View(model: .demo))
         case "trends":   return AnyView(TrendsView())
         case "sleep":    return AnyView(SleepView())
@@ -564,6 +565,7 @@ enum DemoScreens {
         case "workouts": return AnyView(WorkoutsView())
         case "startworkout": return AnyView(StartWorkoutSheet { _ in })
         case "health":   return AnyView(HealthView())
+        case "cycletracker": return AnyView(CycleTrackerDemoHost())
         case "insights": return AnyView(InsightsView())
         case "explore":  return AnyView(MetricExplorerView())
         case "metricdetail":
@@ -587,6 +589,10 @@ enum DemoScreens {
             return AnyView(MetricDetailView(metric: metric))
         case "compare":  return AnyView(CompareView())
         case "settings": return AnyView(SettingsView())
+        case "automations": return AnyView(AutomationsView())
+        case "terms": return AnyView(TermsGateView(onAccept: {}))
+        case "hydration": return AnyView(HydrationView())
+        case "smartalarm", "sleepplanner": return AnyView(SmartAlarmView())
         case "widgets": return AnyView(WidgetSettingsView())
         case "onboarding": return AnyView(OnboardingWizard(onFinished: {}))
         case "chargebreakdown": return AnyView(ChargeBreakdownDemoHost())
@@ -603,7 +609,7 @@ enum DemoScreens {
         // Oura device card: the locally-adopted Oura ring card (Beta chip + per-gen honest capability copy
         // + battery + local-state note), rendered with mock data, no ring required.
         case "ouradevice": return AnyView(OuraDeviceDemoScreen())
-        // #221: a WHOOP 5/MG whose encrypted bond was refused (#78) — the "Connected · not paired" pill
+        // #221: a WHOOP 5/MG whose encrypted bond was refused (#78) - the "Connected · not paired" pill
         // + self-service pairing guidance, screenshot-able WITHOUT reproducing the bond refusal on real
         // hardware.
         case "bondrefused": return AnyView(BondRefusedDemoScreen())
@@ -621,6 +627,47 @@ enum DemoScreens {
 private struct AddWizardDemoHost: View {
     @EnvironmentObject var live: LiveState
     var body: some View { AddDeviceWizard(live: live, onClose: {}) }
+}
+
+private struct CycleTrackerDemoHost: View {
+    @EnvironmentObject private var repo: Repository
+
+    private let result = CyclePhaseEngine.Result(
+        phase: .luteal,
+        confidence: .building,
+        cycleDayLow: 20,
+        cycleDayHigh: 24,
+        cycleLengthDays: 29,
+        nextPeriodWindow: .init(
+            earliestDay: "2026-08-27",
+            latestDay: "2026-08-31"
+        ),
+        shiftMarkers: [],
+        note: "Your logged dates and nightly temperature suggest a luteal-range pattern."
+    )
+
+    var body: some View {
+        CycleTrackerView(
+            result: result,
+            curve: [-0.2, -0.1, 0.0, 0.1, 0.3, 0.5, 0.6]
+        )
+        .task {
+            let today = Repository.localDayKey(Date())
+            _ = await repo.logPeriodStart(day: today)
+            _ = await repo.saveCycleDailyLog(
+                day: today,
+                flow: .medium,
+                symptoms: [.cramps, .fatigue, .bloating]
+            )
+            if let prior = Calendar.current.date(byAdding: .day, value: -1, to: Date()) {
+                _ = await repo.saveCycleDailyLog(
+                    day: Repository.localDayKey(prior),
+                    flow: .light,
+                    symptoms: [.headache]
+                )
+            }
+        }
+    }
 }
 
 /// DEBUG-only host so `--demo-screen ouraonboarding` renders the Add-device wizard deep-linked to the

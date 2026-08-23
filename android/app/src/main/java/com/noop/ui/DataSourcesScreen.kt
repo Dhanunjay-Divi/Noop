@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
+import com.noop.ble.WhoopModel
 import com.noop.data.DataBackup
 import com.noop.data.DeviceStatus
 import com.noop.data.ImportSummary
@@ -89,10 +90,10 @@ import kotlinx.coroutines.withContext
  * picks). So this screen keeps the macOS structure but maps each card to what Android
  * actually has:
  *
- *   - WHOOP data    — live counts of the cached "my-whoop" history, plus a working import
+ *   - WHOOP data    - live counts of the cached "my-whoop" history, plus a working import
  *                     of a WHOOP .zip/.csv export (app.whoop.com → Data Management) via
  *                     [com.noop.ingest.WhoopCsvImporter].
- *   - Apple Health  — live counts of cached "apple-health" data, plus a working streaming
+ *   - Apple Health  - live counts of cached "apple-health" data, plus a working streaming
  *                     import of an Apple Health export.zip/export.xml via
  *                     [com.noop.ingest.AppleHealthImporter].
  *   - Health Connect— native Android import (steps/HR/HRV/sleep/SpO₂/temperature/weight/workouts) via
@@ -405,7 +406,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
                 showsDot = true,
             )
             CountLine(
-                primary = whoopDays?.let { "$it days" } ?: "—",
+                primary = whoopDays?.let { "$it days" } ?: "-",
                 secondary = whoopWorkouts?.let { "$it workouts stored" } ?: "Counting…",
             )
             BackupButton(
@@ -434,7 +435,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
                 showsDot = true,
             )
             CountLine(
-                primary = appleDays?.let { "$it days" } ?: "—",
+                primary = appleDays?.let { "$it days" } ?: "-",
                 secondary = appleWorkouts?.let { "$it workouts" } ?: "Counting…",
             )
             BackupButton(
@@ -466,13 +467,13 @@ fun DataSourcesScreen(vm: AppViewModel) {
             icon = Icons.Filled.MonitorHeart,
             subtitle = "Pull steps, heart rate, HRV, sleep, SpO₂, body and basal temperature, weight and workouts straight from " +
                 "Android's Health Connect. No file needed. On-device; it never overwrites richer " +
-                "WHOOP data, and writes nothing unless you opt in to sharing back below.",
+                "imported data, and writes nothing unless you opt in to sharing back below.",
         ) {
             val hasHc = (hcDays ?: 0) > 0 || (hcWorkouts ?: 0) > 0 || (hcTemperaturePoints ?: 0) > 0
             if (hasHc) {
                 StatePill(title = uiString(R.string.l10n_data_sources_screen_imported_434eb26f), tone = StrandTone.Accent, showsDot = true)
                 CountLine(
-                    primary = hcDays?.let { "$it days" } ?: "—",
+                    primary = hcDays?.let { "$it days" } ?: "-",
                     secondary = if (hcWorkouts != null && hcTemperaturePoints != null) {
                         "${hcWorkouts} workouts · ${hcTemperaturePoints} temperature records"
                     } else "Counting…",
@@ -656,7 +657,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
                 showsDot = true,
             )
             CountLine(
-                primary = nutritionDays?.let { "$it days logged" } ?: "—",
+                primary = nutritionDays?.let { "$it days logged" } ?: "-",
                 secondary = nutritionWeighIns?.let { "$it weigh-ins" } ?: "Counting…",
             )
             BackupButton(
@@ -686,7 +687,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
                 showsDot = true,
             )
             CountLine(
-                primary = xiaomiDays?.let { "$it days imported" } ?: "—",
+                primary = xiaomiDays?.let { "$it days imported" } ?: "-",
                 secondary = if (xiaomiDays == null) "Counting…" else "Mi Band / Smart Band 8 · 9 · 10",
             )
             BackupButton(
@@ -716,7 +717,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
                 showsDot = true,
             )
             CountLine(
-                primary = liftingWorkouts?.let { "$it workouts" } ?: "—",
+                primary = liftingWorkouts?.let { "$it workouts" } ?: "-",
                 secondary = "volume load shown per session",
             )
             BackupButton(
@@ -745,7 +746,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
                 showsDot = true,
             )
             CountLine(
-                primary = activityFiles?.let { "$it workouts" } ?: "—",
+                primary = activityFiles?.let { "$it workouts" } ?: "-",
                 secondary = "GPX · TCX · FIT (one workout per file)",
             )
             BackupButton(
@@ -776,7 +777,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
                 showsDot = true,
             )
             CountLine(
-                primary = wearableDays?.let { "$it day metrics" } ?: "—",
+                primary = wearableDays?.let { "$it day metrics" } ?: "-",
                 secondary = "Oura JSON · Fitbit Takeout · Garmin GDPR (daily metrics + sleep)",
             )
             BackupButton(
@@ -794,9 +795,9 @@ fun DataSourcesScreen(vm: AppViewModel) {
             title = uiString(R.string.l10n_data_sources_screen_broadcast_hr_from_this_phone_10e5605c),
             icon = Icons.Filled.MonitorHeart,
             tint = DomainTheme.Effort.color,
-            subtitle = "Re-share your live strap heart rate over Bluetooth as a standard heart-rate " +
+            subtitle = "Re-share live Noop Band heart rate over Bluetooth as a standard heart-rate " +
                 "sensor, so a gym treadmill, bike, Zwift, Peloton or any fitness app nearby can read " +
-                "it. Works on any WHOOP (4.0 or 5.0/MG) because your phone does the broadcasting. " +
+                "it. Works with Noop Band because your phone does the broadcasting. " +
                 "Local Bluetooth only. Nothing leaves your phone. Off by default.",
         ) {
             if (hrBroadcast) {
@@ -805,12 +806,12 @@ fun DataSourcesScreen(vm: AppViewModel) {
                     else "Starting…" to StrandTone.Warning
                 StatePill(title = label, tone = tone, showsDot = true, pulsing = !hrBroadcastAdvertising)
                 CountLine(
-                    primary = if (hrBroadcastAdvertising) "Standard HR sensor (0x180D)" else "—",
+                    primary = if (hrBroadcastAdvertising) "Standard HR sensor (0x180D)" else "-",
                     secondary = when {
                         hrBroadcastSubscribers > 0 ->
                             "$hrBroadcastSubscribers ${if (hrBroadcastSubscribers == 1) "device" else "devices"} reading"
                         live.heartRate != null -> "Sharing ${live.heartRate} bpm · waiting for a device"
-                        else -> "No live heart rate yet · open Live to pair your strap"
+                        else -> "No live heart rate yet · open Live to pair Noop Band"
                     },
                 )
             } else {
@@ -830,7 +831,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
                     Text(uiString(R.string.l10n_data_sources_screen_broadcast_hr_from_this_phone_10e5605c), style = NoopType.subhead, color = Palette.textPrimary)
                     Text(
                         uiString(R.string.l10n_data_sources_screen_acts_as_a_standard_bluetooth_heart_f8d13439) +
-                            "bike or app to see your strap's heart rate there.",
+                            "bike or app to see Noop Band heart rate there.",
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
                     )
@@ -883,12 +884,12 @@ fun DataSourcesScreen(vm: AppViewModel) {
         }
         }
 
-        // --- Live WHOOP strap over BLE ---
+        // --- Live Noop Band over Bluetooth ---
         item {
         SourceCard(
-            title = uiString(R.string.l10n_data_sources_screen_whoop_strap_live_ble_217f7df6),
+            title = "${WhoopModel.CUSTOMER_NAME} (Live Bluetooth)",
             icon = Icons.Filled.Bluetooth,
-            subtitle = "Pairs directly with your strap over Bluetooth: no WHOOP app, no cloud.",
+            subtitle = "Pairs directly with Noop Band without a separate band app or cloud account.",
         ) {
             val (label, tone) = when {
                 live.bonded -> "Bonded, streaming." to StrandTone.Positive
@@ -914,7 +915,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
             text = {
                 Text(
                     uiString(R.string.l10n_data_sources_screen_this_permanently_deletes_everything_imported_from_f42e760e) +
-                        "sleep, steps, workouts and more. Your live strap data is untouched. This can't be undone.",
+                        "sleep, steps, workouts and more. Your live Noop Band data is untouched. This can't be undone.",
                     style = NoopType.subhead,
                     color = Palette.textSecondary,
                 )

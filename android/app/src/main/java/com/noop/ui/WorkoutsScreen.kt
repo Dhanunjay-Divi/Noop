@@ -120,8 +120,8 @@ import kotlin.math.roundToInt
  *   - an "All Sessions" NoopCard of fixed-height rows (date · sport · dur · HR · kcal ·
  *     dist · source).
  *
- * Sessions are loaded by the ViewModel from EVERY cached source — strap ("my-whoop": imported +
- * manual), Apple Health / Health Connect, and the on-device DETECTED bouts under "my-whoop-noop" —
+ * Sessions are loaded by the ViewModel from EVERY cached source - strap ("my-whoop": imported +
+ * manual), Apple Health / Health Connect, and the on-device DETECTED bouts under "my-whoop-noop" -
  * merged newest first, with dismissed detected bouts filtered out (#107). Each row carries a source
  * badge (Whoop / Apple / HC / Detected / Manual) and an overflow menu to edit, re-label, dismiss or
  * delete. The windowing is anchored to the LATEST session (not "now"), so an old log still resolves;
@@ -168,7 +168,7 @@ fun WorkoutsScreen(vm: AppViewModel) {
     }
 
     // A transient one-line note shown after a manual save / relabel for a sport that already has a
-    // solid/building ActivityCost entry — "Sessions like this usually …" (#439). Auto-clears.
+    // solid/building ActivityCost entry - "Sessions like this usually …" (#439). Auto-clears.
     var postLogNote by remember { mutableStateOf<String?>(null) }
     var recoveryTrend by remember { mutableStateOf<List<WorkoutRecoveryTrendPoint>>(emptyList()) }
     // The sport whose recovery-cost note to surface once the reloaded sessions land. saveManualWorkout
@@ -397,7 +397,7 @@ private fun EmptyWorkouts(loaded: Boolean, onAdd: () -> Unit) {
 }
 
 /**
- * The transient "personal pattern" caption shown after a manual save / relabel (#439) — an
+ * The transient "personal pattern" caption shown after a manual save / relabel (#439) - an
  * Effort-tinted frosted strip with a chart glyph and the engine's "Sessions like this usually …"
  * sentence. Mirrors the macOS WorkoutsView.postLogBanner. Auto-dismisses (the caller clears it).
  */
@@ -425,7 +425,7 @@ private fun PostLogNoteBanner(text: String) {
     }
 }
 
-/** The "Add workout" pill — opens the manual add dialog. Shown on both the populated screen
+/** The "Add workout" pill - opens the manual add dialog. Shown on both the populated screen
  *  (in the range bar) and the empty state, so a user with no imports can still log a session. */
 @Composable
 private fun AddWorkoutButton(onAdd: () -> Unit) {
@@ -1074,7 +1074,7 @@ private fun SessionsSection(
     }
 }
 
-/** #64: the "Select" pill in the All-Sessions header — toggles multi-select mode. */
+/** #64: the "Select" pill in the All-Sessions header - toggles multi-select mode. */
 @Composable
 private fun SelectPill(selectionMode: Boolean, onToggle: () -> Unit) {
     Row(
@@ -1822,7 +1822,7 @@ private fun ManualWorkoutDialog(
         val dur = durationMin.trim().toIntOrNull()
         val hrText = avgHr.trim()
         val kText = kcal.trim()
-        // A typed-but-unparseable number is invalid (e.g. "abc" in Avg HR) — reject before building.
+        // A typed-but-unparseable number is invalid (e.g. "abc" in Avg HR) - reject before building.
         val hr: Int? = if (hrText.isEmpty()) null else hrText.toIntOrNull()
         val k: Double? = if (kText.isEmpty()) null else kText.toDoubleOrNull()
         if (dur == null) return@run null
@@ -2165,7 +2165,7 @@ private fun sportGroups(rows: List<WorkoutRow>): List<SportGroup> =
 
 /**
  * The Src-column badge (label + tint) for a session. Sessions are loaded by their source's
- * deviceId — "my-whoop" / "apple-health" / "health-connect" — and each row also carries a `source`
+ * deviceId - "my-whoop" / "apple-health" / "health-connect" - and each row also carries a `source`
  * label ("my-whoop" / "Apple Health" / "health-connect"), so we classify on both. This used to be a
  * binary `isWhoop ? "Whoop" : "Apple"`, which mislabelled EVERY Health Connect workout as "Apple"
  * (#53). "HC" is abbreviated to fit the narrow column (Apple is likewise short for "Apple Health");
@@ -2191,7 +2191,7 @@ internal fun workoutSourceLabel(deviceId: String, source: String): String {
 
 // MARK: - Zone parsing/aggregation (internal + Compose-free so the unit test can pin them,
 // same pattern as workoutSourceLabel). zonesJSON is a flat one-level numeric object in BOTH
-// stored shapes — "zone1".."zone5" (WhoopCsvImporter.zonesJson) and "z1".."z5" (the macOS
+// stored shapes - "zone1".."zone5" (WhoopCsvImporter.zonesJson) and "z1".."z5" (the macOS
 // importer's rows) — so an anchored regex is safe, and it keeps org.json (an unmocked
 // Android stub in plain-JVM unit tests) out of test-reachable code.
 

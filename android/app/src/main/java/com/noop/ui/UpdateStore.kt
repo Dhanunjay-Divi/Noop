@@ -12,7 +12,7 @@ import java.util.UUID
 
 // MARK: - UpdateItem
 //
-// Kotlin mirror of Strand/Data/UpdateStore.swift's `UpdateItem`. One entry in the "Updates inbox" —
+// Kotlin mirror of Strand/Data/UpdateStore.swift's `UpdateItem`. One entry in the "Updates inbox" -
 // the bell in the Today header collects these. An item is either purely informational (a What's New
 // note, a "new data" reading) or actionable (a deep link to a screen, or a dismissed Today card the
 // user can restore). Everything stays on-device; nothing here is medical, identifying, or a verdict
@@ -27,7 +27,7 @@ enum class UpdateKind(val storageValue: String) {
     /** a release note (seeded from AppChangelog on first run after an update) */
     WHATS_NEW("whatsNew"),
 
-    /** new data arrived (e.g. "N days backfilled") — links to Trends */
+    /** new data arrived (e.g. "N days backfilled") - links to Trends */
     READING("reading"),
 
     /** a strap-side heads-up (low battery, sync) — informational */
@@ -268,7 +268,7 @@ class UpdateStore private constructor(private val prefs: SharedPreferences) {
             UpdateItem(
                 kind = UpdateKind.WHATS_NEW,
                 title = if (title.isEmpty()) "What's new in NOOP $version" else title,
-                message = "NOOP $version is here — tap to read what's new.",
+                message = "NOOP $version is here - tap to read what's new.",
             ),
         )
     }

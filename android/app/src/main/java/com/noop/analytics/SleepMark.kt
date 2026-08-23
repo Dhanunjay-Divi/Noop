@@ -8,7 +8,7 @@ import java.util.Locale
 import java.util.TimeZone
 
 /*
- * SleepMark.kt — tap-to-mark "going to sleep" / "awake" (#461 Phase 1).
+ * SleepMark.kt - tap-to-mark "going to sleep" / "awake" (#461 Phase 1).
  *
  * Faithful Kotlin mirror of Strand/Data/SleepMark.swift. A user-tapped sleep boundary, captured for
  * the record only — it does NOT feed the sleep detector (that stays the strap's job). Phase 1 is pure
@@ -22,7 +22,7 @@ import java.util.TimeZone
  *
  * Pure + DB-free so it unit-tests without a UI: encode -> MetricSeriesRow, decode <- MetricSeriesRow,
  * and the formatted log line. The screen is the only place that does I/O. Keep the value encoding and
- * the "sleep_mark" key byte-identical to Swift — both clients read the same series.
+ * the "sleep_mark" key byte-identical to Swift - both clients read the same series.
  */
 
 /** One sleep boundary the user tapped. */

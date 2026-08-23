@@ -192,7 +192,7 @@ private fun Header(onClose: () -> Unit) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Overline("Steps estimate", color = Palette.textTertiary)
             Text(uiString(R.string.l10n_steps_calibration_screen_calibrate_your_steps_38b4e814), style = NoopType.display(26f), color = Palette.textPrimary)
-            Text(uiString(R.string.l10n_steps_calibration_screen_whoop_4_0_motion_steps_a63239dc), style = NoopType.caption, color = Palette.textSecondary)
+            Text("Noop Band · motion to steps", style = NoopType.caption, color = Palette.textSecondary)
         }
         IconButton(onClick = onClose, modifier = Modifier.size(36.dp)) {
             Icon(Icons.Filled.Close, contentDescription = uiString(R.string.l10n_steps_calibration_screen_close_bbfa773e), tint = Palette.textTertiary, modifier = Modifier.size(22.dp))
@@ -224,7 +224,7 @@ private fun Hairline() {
 
 // MARK: - Cards
 
-/** The honest "it's an estimate, not a step counter" framing — reused verbatim from the engine doc. */
+/** The honest "it's an estimate, not a step counter" framing - reused verbatim from the engine doc. */
 @Composable
 private fun ExplainerCard() {
     NoopCard(padding = 20.dp) {
@@ -234,14 +234,14 @@ private fun ExplainerCard() {
                 Text(uiString(R.string.l10n_steps_calibration_screen_how_this_works_b895a8c3), style = NoopType.headline, color = Palette.textPrimary)
             }
             Text(
-                uiString(R.string.l10n_steps_calibration_screen_noop_estimates_your_steps_from_your_d569bc31) +
-                    "count. It's an estimate, not a step counter. A WHOOP 4.0 doesn't transmit steps.",
+                "NOOP estimates steps from Noop Band motion and calibrates the estimate to your phone's " +
+                    "step count. It is an estimate, not a measured step count.",
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
             )
             Text(
                 uiString(R.string.l10n_steps_calibration_screen_on_the_days_your_phone_also_2f65a14c) +
-                    "steps, then applies that to the strap-only days. The more matching days it has, the " +
+                    "steps, then applies that to Noop Band-only days. The more matching days it has, the " +
                     "more it trusts the estimate.",
                 style = NoopType.footnote,
                 color = Palette.textTertiary,
@@ -263,7 +263,7 @@ private fun NoMotionNote() {
             }
             Text(
                 uiString(R.string.l10n_steps_calibration_screen_we_re_not_seeing_any_motion_6ac8e092) +
-                    "banked motion history, so your strap needs to sync that history before NOOP has " +
+                    "banked motion history, so Noop Band needs to sync that history before NOOP has " +
                     "anything to count.",
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
@@ -339,7 +339,7 @@ private fun ComparisonCard(rows: List<StepsComparisonRow>) {
             if (rows.isEmpty()) {
                 Text(
                     uiString(R.string.l10n_steps_calibration_screen_no_days_yet_where_both_noop_71d6005b) +
-                        "few days alongside the strap, they'll appear here so you can see how close the " +
+                        "few days alongside Noop Band, they'll appear here so you can see how close the " +
                         "estimate is.",
                     style = NoopType.footnote,
                     color = Palette.textTertiary,

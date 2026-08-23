@@ -11,7 +11,7 @@ struct NotificationSettingsView: View {
 
     var body: some View {
         ScreenScaffold(title: "Notifications",
-                       subtitle: "Buzz your strap when these apps notify you. Everything runs on \(Platform.deviceNounPhrase).") {
+                       subtitle: "Vibrate Noop Band when these apps notify you. Everything runs on \(Platform.deviceNounPhrase).") {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionSpacing) {
                 masterCard
                     .staggeredAppear(index: 0)
@@ -88,9 +88,9 @@ struct NotificationSettingsView: View {
     /// Strap status — mirrors SettingsView's three-state mapping so the pill, its tone and its
     /// pulse always agree (and never reads "connected" while the strap is offline).
     private var strapPillTitle: String {
-        if live.connected { return String(localized: "Strap connected") }
-        if live.bonded { return String(localized: "Strap idle") }          // paired but offline — won't deliver
-        return String(localized: "Strap not connected")
+        if live.connected { return String(localized: "Noop Band connected") }
+        if live.bonded { return String(localized: "Noop Band idle") }          // paired but offline - won't deliver
+        return String(localized: "Noop Band not connected")
     }
     private var strapPillTone: StrandTone {
         if live.connected { return .positive }
@@ -227,7 +227,7 @@ struct NotificationSettingsView: View {
                      blurb: String(localized: "Fine-tune when alerts reach your wrist.")) {
             VStack(spacing: 0) {
                 FormToggleRow(label: String(localized: "Only buzz when worn"),
-                              help: String(localized: "Skip alerts when the strap is off your wrist."),
+                              help: String(localized: "Skip alerts when Noop Band is off your wrist."),
                               isOn: $store.onlyWhenWorn)
                 rowDivider
                 FormToggleRow(label: String(localized: "Quiet hours"),

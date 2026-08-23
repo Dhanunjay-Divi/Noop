@@ -14,14 +14,14 @@ import WhoopStore
 //     ({0,+1,+2} days), so each row reads "shows up the next morning" rather than
 //     pretending everything is same-day. Each card carries the sign-aware sentence,
 //     with/without means, a lead/lag chip, the effect-size word, and a Solid /
-//     Building / Calibrating confidence pill — NOT a bare "significant" stamp.
+//     Building / Calibrating confidence pill - NOT a bare "significant" stamp.
 //
 //  2. ALCOHOL / CAFFEINE DOSE-RESPONSE — the personal DoseResponseEngine curve. A
 //     per-user slope that SHRINKS toward a documented population prior until enough
 //     nights accrue. The card plots the shrunk curve, states "each extra drink ≈ −N
 //     for you" (honest when still prior-dominated, or when YOUR data contradicts the
-//     prior), and an evening "damage forecast" preview — "a 2nd drink tonight ≈ −X
-//     Recovery tomorrow" — composed from the curve's per-unit Δ on the latest Recovery.
+//     prior), and an evening "damage forecast" preview - "a 2nd drink tonight ≈ −X
+//     Recovery tomorrow" - composed from the curve's per-unit Δ on the latest Recovery.
 //
 // SELF-CONTAINED: this screen owns its own load/derive (InsightsHubViewModel) and takes
 // the Repository via @EnvironmentObject — it does NOT edit AppModel / the central nav.
@@ -249,8 +249,8 @@ private extension ScoreState {
 // The headline alcohol/caffeine surface: the prior-shrunk curve, the per-unit read,
 // the confidence pill, the honesty banner, and an evening "damage forecast" preview
 // driven by a tiny dose stepper. The forecast is a what-if on the user's own latest
-// Recovery — "a 2nd drink tonight tends to line up with about −7 on tomorrow's Recovery
-// for you" — never a recommendation to drink or abstain.
+// Recovery - "a 2nd drink tonight tends to line up with about −7 on tomorrow's Recovery
+// for you" - never a recommendation to drink or abstain.
 
 private struct DoseResponseCardView: View {
     let card: InsightsHubViewModel.DoseCard
@@ -350,7 +350,7 @@ private struct DoseResponseCardView: View {
                          caption: r.priorDominated ? String(localized: "typical") : String(localized: "your data"),
                          accent: r.perUnit < 0 ? StrandPalette.statusCritical : StrandPalette.statusPositive)
                 StatTile(label: "Tomorrow\u{2019}s \(card.outcomeName)",
-                         value: projected.map { "\(Int($0.rounded()))\(card.outcomeSuffix)" } ?? "—",
+                         value: projected.map { "\(Int($0.rounded()))\(card.outcomeSuffix)" } ?? "-",
                          caption: projected != nil ? String(localized: "projected · \(stepLabel)") : String(localized: "needs a recent day"),
                          accent: domain.color)
             }

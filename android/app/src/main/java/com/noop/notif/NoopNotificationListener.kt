@@ -10,7 +10,7 @@ import com.noop.ui.NotifPrefs
  * Wrist alerts — mirror selected app notifications to a strap buzz.
  *
  * Declaring this service (with BIND_NOTIFICATION_LISTENER_SERVICE in the manifest) is what makes NOOP
- * appear in Android's **Notification Access** list at all (issue #52 — before this, the "Open
+ * appear in Android's **Notification Access** list at all (issue #52 - before this, the "Open
  * Notification Access" button opened a list NOOP wasn't in). When the user grants access, Android binds
  * this service and delivers [onNotificationPosted]; we gate on the persisted [NotifPrefs] settings the
  * Notifications screen already writes (master toggle, per-app opt-in, quiet hours, only-when-worn) and

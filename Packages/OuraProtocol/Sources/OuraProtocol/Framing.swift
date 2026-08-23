@@ -54,7 +54,7 @@ public enum OuraFraming {
     ///
     /// #91 (was re-broken on main; observed on-device 2026-07-11): bytes[2..5] were decoded as a
     /// `last_ring_timestamp` cursor and body[0] as a "more data" status. Both are wrong: body[0] is
-    /// `events_received` (a batch COUNT — treating 0 as "done" stopped a drain with 400,873 bytes still
+    /// `events_received` (a batch COUNT - treating 0 as "done" stopped a drain with 400,873 bytes still
     /// left, losing the newest data), and bytes[2..5] is `bytes_left` (a remaining-BYTE count — persisting
     /// it and comparing across sessions as clocks minted a phantom "ring-time regression" → reset-to-0 →
     /// full history re-dump on every connect).
@@ -160,7 +160,7 @@ public extension OuraFraming {
 
 /// Turn each BLE notification into (at most) one TLV inner record, matching open_oura's `Packet::parse`
 /// (protocol.rs): ONE packet per notification, parsed leniently, with NO cross-notification buffering,
-/// NO multi-record loop, and NO byte-drop "resync". The ring emits each event as its own notification —
+/// NO multi-record loop, and NO byte-drop "resync". The ring emits each event as its own notification -
 /// `get_events` streams up to `max_events` separate event notifications, then a `0x11` summary reporting
 /// `events_received` (OURA_PROTOCOL.md s5.2); records are neither packed several-to-a-notification nor
 /// split across notifications.

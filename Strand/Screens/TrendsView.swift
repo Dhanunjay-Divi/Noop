@@ -199,7 +199,7 @@ struct TrendsView: View {
         }
     }
 
-    /// "Trailing 90 days" / "All history" — used as a card subtitle.
+    /// "Trailing 90 days" / "All history" - used as a card subtitle.
     private var rangeSubtitle: String {
         guard let n = range.days else { return String(localized: "All history") }
         return String(localized: "Trailing \(n) days")
@@ -493,7 +493,7 @@ struct TrendsView: View {
     // MARK: Export trends report (#436)
 
     /// A footer entry that opens the shareable-report sheet. Flat WHOOP card with a blue accent
-    /// action — the icon, label and "Export" CTA all read in the accent (blue) world, no gold.
+    /// action - the icon, label and "Export" CTA all read in the accent (blue) world, no gold.
     private var exportReportRow: some View {
         NoopCard(tint: StrandPalette.accent) {
             HStack(spacing: NoopMetrics.space3) {
@@ -572,9 +572,9 @@ struct TrendsView: View {
                 VStack(alignment: .leading, spacing: NoopMetrics.space2) {
                     HStack {
                         ChartFooter([
-                            ("Avg", avg.map { "\(Int($0.rounded()))" } ?? "—"),
-                            ("Peak", pts.map(\.value).max().map { "\(Int($0.rounded()))" } ?? "—"),
-                            ("Low", pts.map(\.value).min().map { "\(Int($0.rounded()))" } ?? "—"),
+                            ("Avg", avg.map { "\(Int($0.rounded()))" } ?? "-"),
+                            ("Peak", pts.map(\.value).max().map { "\(Int($0.rounded()))" } ?? "-"),
+                            ("Low", pts.map(\.value).min().map { "\(Int($0.rounded()))" } ?? "-"),
                             ("Days", "\(pts.count)"),
                         ])
                         changeChip(pts, higherIsBetter: true, fmt: { "\(Int($0.rounded()))" })
@@ -686,9 +686,9 @@ struct TrendsView: View {
                     ChartFooter([
                         // Plain "MEAN" to match the bare MIN/MAX columns; the unit moves into
                         // the value (e.g. "58 ms") so uppercasing can't render a shouty "MEAN MS".
-                        ("Mean", avg.map { "\(fmt($0)) \(unit)" } ?? "—"),
-                        ("Min", pts.map(\.value).min().map(fmt) ?? "—"),
-                        ("Max", pts.map(\.value).max().map(fmt) ?? "—"),
+                        ("Mean", avg.map { "\(fmt($0)) \(unit)" } ?? "-"),
+                        ("Min", pts.map(\.value).min().map(fmt) ?? "-"),
+                        ("Max", pts.map(\.value).max().map(fmt) ?? "-"),
                     ])
                     changeChip(pts, higherIsBetter: higherIsBetter, fmt: fmt)
                 }

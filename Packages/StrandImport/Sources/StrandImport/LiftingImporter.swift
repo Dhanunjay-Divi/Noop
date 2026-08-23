@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Lifting import (Hevy CSV / Liftosaur JSON) — source "lifting"
+// MARK: - Lifting import (Hevy CSV / Liftosaur JSON) - source "lifting"
 //
 // Strength-training history from a lifting tracker, mapped onto the existing workout/Sport model
 // as one "Strength Training" session per workout. The headline figure is a TRANSPARENT volume-load

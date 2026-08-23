@@ -114,6 +114,19 @@ class AiCoachContextTest {
     }
 
     @Test
+    fun absoluteSkinTemperatureIsSummarizedAsBaselineChange() {
+        val days = (1..20).map { index ->
+            computedRow(june(index)).copy(skinTempDevC = if (index <= 18) 34.0 else 35.0)
+        }
+
+        val ctx = coach().buildContext(days)
+
+        assertTrue(ctx.contains("skin-temp change vs baseline +1.0°C"))
+        assertFalse(ctx.contains("skin-temp deviation"))
+        assertFalse(ctx.contains("+35.0°C"))
+    }
+
+    @Test
     fun defaultPromptUsesCurrentScoreNames() {
         val prompt = AiCoach.DEFAULT_SYSTEM_PROMPT
         assertTrue(prompt.contains("Recovery"))

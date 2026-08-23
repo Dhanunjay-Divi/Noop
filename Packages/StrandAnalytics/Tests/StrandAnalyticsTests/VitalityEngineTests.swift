@@ -12,6 +12,7 @@ final class VitalityEngineTests: XCTestCase {
         XCTAssertEqual(r.vitality, 50, accuracy: 0.01)
         XCTAssertEqual(r.deltaYears, 0, accuracy: 0.01)
         XCTAssertEqual(r.factorsUsed, 6)
+        XCTAssertEqual(r.bandYears, 8, accuracy: 0.01)
     }
 
     /// A clearly healthy person reads younger + higher vitality (hand-computed Δage ≈ −7.58).
@@ -80,5 +81,13 @@ final class VitalityEngineTests: XCTestCase {
         let highRHR = VitalityEngine.contributions(.init(chronoAge: 40, restingHR: 85))
             .first { $0.key == "rhr" }!
         XCTAssertGreaterThan(highRHR.lnHazard, 0)
+    }
+
+    /// Factor count cannot manufacture precision without a fitted covariance/error model.
+    func testApproximateModelRange() {
+        XCTAssertEqual(VitalityEngine.bandYears(factorsUsed: 3), 8)
+        XCTAssertEqual(VitalityEngine.bandYears(factorsUsed: 4), 8)
+        XCTAssertEqual(VitalityEngine.bandYears(factorsUsed: 6), 8)
+        XCTAssertEqual(VitalityEngine.bandYears(factorsUsed: 12), 8)
     }
 }

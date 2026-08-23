@@ -52,7 +52,7 @@ internal data class Vital(
         // Nothing resolved: say WHY this tile is empty rather than a bare "No data", which reads as a
         // bug for metrics NOOP cannot derive from a strap at all (the calibrated SpO₂ % is import-only:
         // AnalyticsEngine writes spo2Pct = null on purpose, see Spo2ReTrace). Ports the Apple behaviour
-        // (`guard let day else { return missingCaption }`) — Android showed "No data" for every case.
+        // (`guard let day else { return missingCaption }`) - Android showed "No data" for every case.
         banding.band == VitalBands.Band.NO_DATA -> missingCaption
         banding.basis == VitalBands.Basis.PERSONAL ->
             if (banding.band == VitalBands.Band.IN_RANGE) "In your range" else "Off your baseline"

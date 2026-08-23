@@ -12,11 +12,10 @@ final class IPhonePrimaryTabTests: XCTestCase {
         XCTAssertEqual(IPhonePrimaryTab.more.rawValue, 4)
     }
 
-    func testFiveTabCompactRailRetainsMinimumTouchWidth() {
+    func testCompactNavigationDisclosureRetainsMinimumTouchSize() {
         XCTAssertEqual(IPhonePrimaryTab.allCases.count, 5)
-        XCTAssertLessThanOrEqual(IPhonePrimaryTab.compactMinimumViewportWidth, 320)
         XCTAssertGreaterThanOrEqual(
-            IPhonePrimaryTab.compactItemWidth(in: 320),
+            IPhonePrimaryTab.compactControlDimension,
             IPhonePrimaryTab.minimumTouchDimension
         )
     }

@@ -173,21 +173,84 @@ data class DataFreshness(
 /**
  * Isolated, local-only menstrual-cycle anchors. Each user-logged cycle day 1 is represented by one
  * value-1 [MetricSeriesRow], under a source that cannot collide with a strap, import, or computed score.
- * This stores dates only: never flow, symptoms, fertility, contraception, or a diagnosis.
+ * Period starts anchor the awareness engine. Optional daily flow and symptoms are stored in a separate
+ * context-only key and never become fertility, contraception, or diagnosis data.
  */
 object CycleTrackingStore {
     const val SOURCE_ID = "noop-cycle"
     const val PERIOD_START_KEY = "period_start"
+    const val DAILY_LOG_KEY = "daily_log_v1"
     const val LOGGED_VALUE = 1.0
     const val EARLIEST_DAY = "0000-01-01"
     const val LATEST_DAY = "9999-12-31"
 
     private val LOCAL_DAY_PATTERN = Regex("\\d{4}-\\d{2}-\\d{2}")
 
+    enum class Flow {
+        NONE,
+        SPOTTING,
+        LIGHT,
+        MEDIUM,
+        HEAVY,
+    }
+
+    enum class Symptom {
+        CRAMPS,
+        HEADACHE,
+        FATIGUE,
+        BLOATING,
+        MOOD_CHANGES,
+        BREAST_TENDERNESS,
+        ACNE,
+        NAUSEA,
+        BACK_PAIN,
+        CRAVINGS,
+    }
+
+    data class DailyLog(
+        val day: String,
+        val flow: Flow?,
+        val symptoms: Set<Symptom>,
+    )
+
     /** Strict ISO local-day validation keeps malformed/path-like values out of lexicographic ranges. */
     fun isValidLocalDayKey(day: String): Boolean {
         if (!LOCAL_DAY_PATTERN.matches(day)) return false
         return runCatching { java.time.LocalDate.parse(day).toString() == day }.getOrDefault(false)
+    }
+
+    /**
+     * One exact integer in the existing REAL metric cell. Bits 0..2 encode flow plus one (`0` means
+     * not entered); symptom flags start at bit 3. An explicit NONE therefore remains distinct from
+     * missing data, and one atomic row owns the complete daily entry.
+     */
+    fun encode(log: DailyLog): Double? {
+        if (!isValidLocalDayKey(log.day)) return null
+        val flowCode = log.flow?.ordinal?.plus(1) ?: 0
+        var symptomMask = 0
+        log.symptoms.forEach { symptomMask = symptomMask or (1 shl it.ordinal) }
+        val encoded = flowCode or (symptomMask shl 3)
+        return encoded.takeIf { it != 0 }?.toDouble()
+    }
+
+    fun decode(day: String, value: Double): DailyLog? {
+        if (!isValidLocalDayKey(day) || !value.isFinite() || value < 0.0 ||
+            value % 1.0 != 0.0 || value > Int.MAX_VALUE.toDouble()
+        ) return null
+        val encoded = value.toInt()
+        val flowCode = encoded and 0b111
+        if (flowCode > Flow.HEAVY.ordinal + 1) return null
+        val symptomMask = encoded ushr 3
+        val knownMask = Symptom.entries.fold(0) { mask, symptom ->
+            mask or (1 shl symptom.ordinal)
+        }
+        if (symptomMask and knownMask.inv() != 0) return null
+        val flow = if (flowCode == 0) null else Flow.entries.getOrNull(flowCode - 1)
+        val symptoms = Symptom.entries.filterTo(linkedSetOf()) {
+            symptomMask and (1 shl it.ordinal) != 0
+        }
+        if (flow == null && symptoms.isEmpty()) return null
+        return DailyLog(day, flow, symptoms)
     }
 }
 
@@ -335,7 +398,7 @@ class WhoopRepository private constructor(
         )
     }
 
-    /** #836 — cheap whole-history raw-HR change fingerprint `"count:maxTs"`. The idle 15-min rescore (the
+    /** #836 - cheap whole-history raw-HR change fingerprint `"count:maxTs"`. The idle 15-min rescore (the
      *  AppViewModel backstop) skips when this is unchanged since the last completed run. Any HR insert/delete
      *  moves it (count or maxTs), so a real change always rescores; mirrors Swift WhoopStore.hrFingerprint. */
     suspend fun hrFingerprint(): String = "${dao.countHr()}:${dao.maxHrTs()}"
@@ -1347,6 +1410,68 @@ class WhoopRepository private constructor(
         true
     }.getOrDefault(false)
 
+    /** Private per-day flow and symptom logs, oldest first. Unknown/corrupt rows fail closed. */
+    suspend fun cycleDailyLogs(
+        from: String = CycleTrackingStore.EARLIEST_DAY,
+        to: String = CycleTrackingStore.LATEST_DAY,
+    ): List<CycleTrackingStore.DailyLog> = runCatching {
+        dao.metricSeries(CycleTrackingStore.SOURCE_ID, CycleTrackingStore.DAILY_LOG_KEY, from, to)
+            .mapNotNull { CycleTrackingStore.decode(it.day, it.value) }
+    }.getOrDefault(emptyList())
+
+    /**
+     * Save one complete daily entry. Empty input physically deletes the point, leaving no sensitive
+     * tombstone in the local database.
+     */
+    suspend fun saveCycleDailyLog(
+        day: String,
+        flow: CycleTrackingStore.Flow?,
+        symptoms: Set<CycleTrackingStore.Symptom>,
+    ): Boolean {
+        if (!CycleTrackingStore.isValidLocalDayKey(day)) return false
+        return runCatching {
+            val value = CycleTrackingStore.encode(
+                CycleTrackingStore.DailyLog(day, flow, symptoms),
+            )
+            if (value == null) {
+                dao.deleteMetricSeriesPoint(
+                    CycleTrackingStore.SOURCE_ID,
+                    day,
+                    CycleTrackingStore.DAILY_LOG_KEY,
+                )
+            } else {
+                dao.upsertMetricSeries(
+                    listOf(
+                        MetricSeriesRow(
+                            deviceId = CycleTrackingStore.SOURCE_ID,
+                            day = day,
+                            key = CycleTrackingStore.DAILY_LOG_KEY,
+                            value = value,
+                        )
+                    )
+                )
+            }
+            true
+        }.getOrDefault(false)
+    }
+
+    suspend fun deleteCycleDailyLog(day: String): Boolean {
+        if (!CycleTrackingStore.isValidLocalDayKey(day)) return false
+        return runCatching {
+            dao.deleteMetricSeriesPoint(
+                CycleTrackingStore.SOURCE_ID,
+                day,
+                CycleTrackingStore.DAILY_LOG_KEY,
+            )
+            true
+        }.getOrDefault(false)
+    }
+
+    suspend fun deleteAllCycleDailyLogs(): Boolean = runCatching {
+        dao.deleteMetricSeries(CycleTrackingStore.SOURCE_ID, CycleTrackingStore.DAILY_LOG_KEY)
+        true
+    }.getOrDefault(false)
+
     /** Remove one computed/source metric series when its required profile inputs become invalid. */
     suspend fun deleteMetricSeries(deviceId: String, key: String): Int =
         dao.deleteMetricSeries(deviceId, key)
@@ -1372,7 +1497,7 @@ class WhoopRepository private constructor(
     }
 
     /**
-     * The LATEST computed ("-noop") [key] row across the active-strap union, or null — the LIMIT-1
+     * The LATEST computed ("-noop") [key] row across the active-strap union, or null - the LIMIT-1
      * twin of [metricSeriesComputedUnion] for "latest value" tiles (Today pinned cards, the Health
      * hub heroes), which were materializing the FULL series just to take `.lastOrNull()`. Reads one
      * indexed row per source id; the newest day wins, and on a shared newest day the ACTIVE strap
@@ -1433,6 +1558,10 @@ class WhoopRepository private constructor(
 
     /** All cached daily metrics for a device, oldest first. Feeds com.noop.analytics.IllnessWatch. */
     suspend fun days(deviceId: String): List<DailyMetric> = dao.days(deviceId)
+
+    /** Bounded source-specific daily metrics, oldest first. */
+    suspend fun daysInRange(deviceId: String, from: String, to: String): List<DailyMetric> =
+        dao.daysInRange(deviceId, from, to)
 
     /** Scalar COUNT twin of [days] for count badges. */
     suspend fun daysCount(deviceId: String): Int = dao.daysCount(deviceId)
@@ -1701,7 +1830,7 @@ class WhoopRepository private constructor(
     /** Workouts over the read-side UNION of the active strap id AND the canonical "my-whoop" (#814 twin of
      *  [hrSamplesUnion] / [sleepSessionsUnion]): a re-added / newly-paired strap owns "whoop-<uuid>" while
      *  imports + prior data live under "my-whoop", so a read pinned to a SINGLE id strands the other's
-     *  workouts — the Workouts screen then reads empty while Data Sources (which queries "my-whoop") shows
+     *  workouts - the Workouts screen then reads empty while Data Sources (which queries "my-whoop") shows
      *  them (#28). Exact-duplicate rows are dropped on the (startTs, sport) natural key, active-strap-first. */
     suspend fun workoutsUnion(deviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT): List<WorkoutRow> =
         dedupWorkoutsByKey(importedSourceIds(deviceId).flatMap { dao.workouts(it, from, to, limit) })

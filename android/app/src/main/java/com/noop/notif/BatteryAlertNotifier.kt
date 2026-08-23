@@ -9,6 +9,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.noop.R
+import com.noop.ble.WhoopModel
 import com.noop.ui.NoopPrefs
 import com.noop.ui.appLaunchIntent
 
@@ -110,8 +111,8 @@ object BatteryAlertNotifier {
             val label = com.noop.analytics.BatteryEstimator.label(remainingHours)
             val n = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_heart)
-                .setContentTitle("Strap battery low")
-                .setContentText("$label left on your WHOOP — recharge tonight.")
+                .setContentTitle("Noop Band battery low")
+                .setContentText("$label left on your ${WhoopModel.CUSTOMER_NAME} - recharge tonight.")
                 .setContentIntent(openAppIntent(context))
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
@@ -139,7 +140,7 @@ object BatteryAlertNotifier {
                 val n = NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_stat_heart)
                     .setContentTitle("Low battery")
-                    .setContentText("Recharge your WHOOP before tonight.")
+                    .setContentText("Recharge your ${WhoopModel.CUSTOMER_NAME} before tonight.")
                     .setContentIntent(openAppIntent(context))
                     .setAutoCancel(true)
                     .setCategory(NotificationCompat.CATEGORY_STATUS)
@@ -150,8 +151,8 @@ object BatteryAlertNotifier {
             if (decision.fireFull) {
                 val n = NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_stat_heart)
-                    .setContentTitle("Strap fully charged")
-                    .setContentText("Your WHOOP is at 100%.")
+                    .setContentTitle("Noop Band fully charged")
+                    .setContentText("Your ${WhoopModel.CUSTOMER_NAME} is at 100%.")
                     .setContentIntent(openAppIntent(context))
                     .setAutoCancel(true)
                     .setCategory(NotificationCompat.CATEGORY_STATUS)
@@ -159,7 +160,7 @@ object BatteryAlertNotifier {
                     .build()
                 NotificationManagerCompat.from(context).notify(NOTIF_ID_FULL, n)
             }
-            // #514: the strap has dropped below 100% — pull the stale "fully charged" note so it
+            // #514: the strap has dropped below 100% - pull the stale "fully charged" note so it
             // can't linger after the cell discharges. cancel() covers a posted notification; a
             // not-yet-shown one simply no-ops.
             if (decision.clearFull) {
@@ -188,7 +189,7 @@ object BatteryAlertNotifier {
                     CHANNEL_ID, "Battery alerts",
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
-                    description = "Alerts when the strap battery is low or fully charged."
+                    description = "Alerts when Noop Band battery is low or fully charged."
                 },
             )
         }

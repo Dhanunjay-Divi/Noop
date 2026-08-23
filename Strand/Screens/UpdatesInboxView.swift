@@ -6,7 +6,7 @@ import StrandDesign
 // The sheet behind the Today header's bell. A calm, newest-first log of what's new — release notes,
 // "new data arrived" readings, strap heads-ups, and the Today info-cards the user swiped away (which
 // can be restored from here). Tapping an actionable row routes via NavRouter; a dismissed-card row
-// offers "Restore to Today". Everything is on-device and non-clinical — informational, never a verdict.
+// offers "Restore to Today". Everything is on-device and non-clinical - informational, never a verdict.
 //
 // Sheet idiom matches WhatsNewView: a FIXED macOS frame (a macOS sheet hosting a ScrollView collapses
 // without one) and iOS presentationDetents via `noopSheetPresentation`.

@@ -362,7 +362,7 @@ object UnitFormatter {
     fun effortDisplay(value: Double, scale: EffortScale): String =
         oneDecimal(effortValue(value, scale))
 
-    /** The "out of" denominator label for the selected Effort scale — "100" or "21". */
+    /** The "out of" denominator label for the selected Effort scale - "100" or "21". */
     fun effortScaleMax(scale: EffortScale): String =
         if (scale == EffortScale.WHOOP) "21" else "100"
 

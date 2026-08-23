@@ -88,9 +88,9 @@ object WhoopCsvExporter {
 
     /**
      * Stage minutes recovered from any persisted stagesJSON shape NOOP has ever written:
-     *   {"light":min,…}            — macOS WHOOP import
-     *   [{"stage","min"}]          — Android import / demo seeds
-     *   [{"start","end","stage"}]  — the on-device sleep stager ("wake" == awake)
+     *   {"light":min,…}            - macOS WHOOP import
+     *   [{"stage","min"}]          - Android import / demo seeds
+     *   [{"start","end","stage"}]  - the on-device sleep stager ("wake" == awake)
      * Unusable / empty input → all-null, so the column exports blank rather than a bogus zero.
      */
     internal fun stageMinutes(stagesJSON: String?): StageMinutes {
@@ -185,12 +185,12 @@ object WhoopCsvExporter {
                     // Divide by the SAME 100.0/21.0 constant the importer multiplies by (and that Swift's
                     // whoopDayStrainFromEffort uses) so the byte output matches macOS/iOS exactly.
                     num(d.spo2Pct), num(d.strain?.let { it / (100.0 / 21.0) }),
-                    "", "", "",            // energy / max HR / avg HR — not on the Android daily row
+                    "", "", "",            // energy / max HR / avg HR - not on the Android daily row
                     "", "",                // sleep/wake onset live in sleeps.csv
                     num(s["sleep_performance"]), num(d.respRateBpm), num(d.totalSleepMin),
                     "",                    // in-bed not stored on the Android daily row
                     num(d.lightMin), num(d.deepMin), num(d.remMin),
-                    // "Awake duration (min)" is MINUTES — the daily row doesn't carry it, so leave
+                    // "Awake duration (min)" is MINUTES - the daily row doesn't carry it, so leave
                     // the cell empty. (Writing the disturbance COUNT here exported a wrong unit
                     // that round-tripped on reimport — PR #97 review, tigercraft4. Swift parity.)
                     "",
@@ -210,7 +210,7 @@ object WhoopCsvExporter {
     /**
      * sleeps.csv. Stage durations from the tolerant decoder; in-bed derived from the span.
      *
-     * [cycleStart] returns the "Cycle start time" for a session — the LOCAL day-midnight of the cycle the
+     * [cycleStart] returns the "Cycle start time" for a session - the LOCAL day-midnight of the cycle the
      * sleep belongs to (the caller passes `AnalyticsEngine.dayString(endTs, offset) + " 00:00:00"`, the same
      * end-day key analyze/mergeSleep use). It MUST match the corresponding physiological_cycles row's
      * "Cycle start time" so the two CSVs reconcile by cycle; the previous `utc(startTs)` put a non-UTC user's
@@ -273,7 +273,7 @@ object WhoopCsvExporter {
     }
 
     /** journal_entries.csv. The importer reads the answer as a yes/no parse where "true" → true,
-     *  so the answer column MUST be the literal "true"/"false" — never prettify it to Yes/No. */
+     *  so the answer column MUST be the literal "true"/"false" - never prettify it to Yes/No. */
     internal fun journalCsv(rows: List<JournalEntry>): String {
         val sb = StringBuilder()
         sb.append("Cycle start time,Cycle timezone,Question text,Answered yes/no,Notes\r\n")
@@ -325,8 +325,8 @@ object WhoopCsvExporter {
      * the toast.
      *
      * [deviceId] is the registry's ACTIVE strap id (SPINE / #814) and has NO default on purpose
-     * (#458): the old `= "my-whoop"` default meant a live-BLE install — whose engine banks computed
-     * scores under `"<strapId>-noop"` — exported `0 days, 0 sleeps, 0 journal entries` while the app
+     * (#458): the old `= "my-whoop"` default meant a live-BLE install - whose engine banks computed
+     * scores under `"<strapId>-noop"` - exported `0 days, 0 sleeps, 0 journal entries` while the app
      * displayed months of history. It survived the #359 sweep because that grep targeted the
      * hardcoded `"my-whoop-noop"` string, not default parameters. Every read below goes through the
      * active∪canonical union resolvers ([WhoopRepository.importedSourceIds] /
@@ -342,7 +342,7 @@ object WhoopCsvExporter {
     ): String {
         val hi = System.currentTimeMillis() / 1000 + 86_400
         // physiological_cycles keys each row by the LOCAL calendar day (analyze, #277); the sleeps
-        // "Cycle start time" must use the SAME local end-day so the two CSVs reconcile by cycle — else a
+        // "Cycle start time" must use the SAME local end-day so the two CSVs reconcile by cycle - else a
         // non-UTC user's night lands on a different date in each file (#715). Current device offset,
         // matching how analyze bucketed the stored days.
         val tzOffsetSec = java.time.ZoneId.systemDefault().rules.getOffset(java.time.Instant.now()).totalSeconds.toLong()

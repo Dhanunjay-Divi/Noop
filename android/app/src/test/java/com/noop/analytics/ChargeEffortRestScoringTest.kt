@@ -178,6 +178,13 @@ class ChargeEffortRestScoringTest {
     }
 
     @Test
+    fun charge_absoluteAndImplausibleSkinTemperatureDoNotAffectCharge() {
+        assertEquals(chargeAt(null)!!, chargeAt(34.2)!!, EPS)
+        assertEquals(chargeAt(null)!!, chargeAt(9.0)!!, EPS)
+        assertTrue(chargeAt(1.0)!! < chargeAt(null)!!)
+    }
+
+    @Test
     fun charge_coldStartGateUnaffectedBySkinTemp() {
         // An unusable HRV baseline still refuses to score even with a skin-temp value present.
         val score = RecoveryScorer.recovery(

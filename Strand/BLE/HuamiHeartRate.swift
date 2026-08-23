@@ -19,8 +19,8 @@ import Foundation
 ///       - a 1-byte `[hr]` form.
 ///     We decode both honestly and never guess beyond them.
 ///
-/// HONESTY: a value of 0 (or 255, the common "no reading"/off-wrist sentinel) is returned as `nil` — we
-/// surface "—", never a fabricated number. Out-of-physiological-range values are rejected by the caller's
+/// HONESTY: a value of 0 (or 255, the common "no reading"/off-wrist sentinel) is returned as `nil` - we
+/// surface "-", never a fabricated number. Out-of-physiological-range values are rejected by the caller's
 /// gate (the same 30–220 bpm gate the standard path uses), so this parser only owns the byte extraction.
 ///
 /// SECURITY / ROBUSTNESS: the buffer is UNTRUSTED BLE input. Every read is bounds-checked; an empty or
@@ -47,7 +47,7 @@ public enum HuamiHeartRate {
         }
 
         // 0 = no/last-unknown reading; 255 (0xFF) = the common off-wrist / no-contact sentinel. Both are
-        // honestly "unknown" → nil so the UI shows "—" rather than a fake 0 or 255.
+        // honestly "unknown" → nil so the UI shows "-" rather than a fake 0 or 255.
         guard hr > 0, hr < 255 else { return nil }
         return hr
     }

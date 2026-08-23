@@ -84,6 +84,16 @@ object VitalBands {
      *  real deviation reaches ±20 °C. */
     fun isAbsoluteSkinTemp(v: Double): Boolean = v >= 20.0
 
+    /** Return a usable signed deviation, or null when the overloaded daily column contains an
+     *  absolute temperature or an implausible/non-finite value. Deviation-only formulas must
+     *  pass `skinTempDevC` through this gate. */
+    fun skinTempDeviation(value: Double?): Double? {
+        if (value == null || !value.isFinite() || isAbsoluteSkinTemp(value) ||
+            value < skinTempDeviationCfg.minVal || value > skinTempDeviationCfg.maxVal
+        ) return null
+        return value
+    }
+
     /** Keep only history entries of the SAME kind (absolute vs deviation) as the displayed
      *  [value]; entries of the other kind become null (missing nights) so the baseline isn't
      *  folded across two incompatible scales. */
@@ -100,6 +110,83 @@ object VitalBands {
     val skinTempDeviationCfg = MetricCfg(
         minVal = -8.0, maxVal = 8.0, floorSpread = 0.3, halfLifeB = 14.0, halfLifeS = 21.0,
     )
+
+    enum class SkinTempKind { ABSOLUTE, DEVIATION }
+
+    /** Skin-temperature input prepared for the illness engine. `deltaFromBaselineC` is always
+     *  a real change, never an absolute temperature presented with a plus sign. */
+    data class SkinTempIllnessAssessment(
+        val reading: IllnessSignalEngine.SignalReading,
+        val baselineTrusted: Boolean,
+        val deltaFromBaselineC: Double?,
+        val kind: SkinTempKind,
+    )
+
+    /**
+     * Prepare a recent skin-temperature signal without mixing absolute WHOOP imports and signed
+     * on-device deviations. Absolute readings use the learned absolute `skin_temp` baseline;
+     * deviations use their documented 0.3 C scale after the +/-8 C plausibility gate.
+     */
+    fun skinTempIllnessAssessment(
+        recent: List<Double?>,
+        baseline: List<Double?>,
+    ): SkinTempIllnessAssessment? {
+        val latest = recent.asReversed().firstOrNull { it != null } ?: return null
+        if (!latest.isFinite()) return null
+        val kind = if (isAbsoluteSkinTemp(latest)) SkinTempKind.ABSOLUTE else SkinTempKind.DEVIATION
+
+        fun matching(value: Double?): Double? {
+            if (value == null || !value.isFinite()) return null
+            return when (kind) {
+                SkinTempKind.ABSOLUTE -> {
+                    val cfg = Baselines.metricCfg.getValue("skin_temp")
+                    value.takeIf { isAbsoluteSkinTemp(it) && it in cfg.minVal..cfg.maxVal }
+                }
+                SkinTempKind.DEVIATION -> skinTempDeviation(value)
+            }
+        }
+
+        // If the newest observation is implausible, fail closed instead of silently reusing an
+        // older value from the recent window.
+        if (matching(latest) == null) return null
+        val recentValues = recent.mapNotNull(::matching)
+        if (recentValues.isEmpty()) return null
+        val recentMean = recentValues.average()
+
+        return when (kind) {
+            SkinTempKind.ABSOLUTE -> {
+                val cfg = Baselines.metricCfg.getValue("skin_temp")
+                val state = Baselines.foldHistory(baseline.map(::matching), cfg)
+                if (!state.usable) {
+                    SkinTempIllnessAssessment(
+                        reading = IllnessSignalEngine.SignalReading(0.0, present = false),
+                        baselineTrusted = false,
+                        deltaFromBaselineC = null,
+                        kind = kind,
+                    )
+                } else {
+                    val deviation = Baselines.deviation(recentMean, state)
+                    SkinTempIllnessAssessment(
+                        reading = IllnessSignalEngine.SignalReading(deviation.z),
+                        baselineTrusted = state.trusted,
+                        deltaFromBaselineC = deviation.delta,
+                        kind = kind,
+                    )
+                }
+            }
+            SkinTempKind.DEVIATION -> {
+                val state = Baselines.foldHistory(baseline.map(::matching), skinTempDeviationCfg)
+                SkinTempIllnessAssessment(
+                    reading = IllnessSignalEngine.SignalReading(
+                        recentMean / skinTempDeviationCfg.floorSpread,
+                    ),
+                    baselineTrusted = state.trusted,
+                    deltaFromBaselineC = recentMean,
+                    kind = kind,
+                )
+            }
+        }
+    }
 
     // ── Calendar padding ────────────────────────────────────────────────────────────────────
 

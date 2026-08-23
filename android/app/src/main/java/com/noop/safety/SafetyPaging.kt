@@ -5,11 +5,13 @@ import android.util.Base64
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.noop.ble.WhoopConnectionService
 import com.noop.data.SecurePrefs
 import com.noop.sync.RemoteEndpointPolicy
 import com.noop.sync.RemoteSyncPrefs
 import java.io.IOException
 import java.security.SecureRandom
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
@@ -79,14 +81,26 @@ data class SafetyPagingResponse(
     val source: String,
 )
 
+data class SafetyPagingLocation(
+    val sequence: Long,
+    val latitude: Double,
+    val longitude: Double,
+    val horizontalAccuracyMeters: Double?,
+    val capturedAt: String,
+    val receivedAt: String,
+    val idempotentReplay: Boolean?,
+)
+
 data class SafetyPagingDispatch(
     val dispatchId: String,
     val status: SafetyIncidentStatus,
+    val expiresAt: String?,
     val idempotentReplay: Boolean,
     val acknowledgedContactDisplayName: String?,
     val resolutionNote: String?,
     val deliveries: List<SafetyPagingDelivery>,
     val responses: List<SafetyPagingResponse>,
+    val latestLocation: SafetyPagingLocation?,
 )
 
 private data class SafetyPagingSnapshot(
@@ -306,6 +320,12 @@ class SafetyPagingController(context: Context) {
                 SafetyPagingPrefs.setPendingPageKey(appContext, null)
                 lastDispatch = dispatch
                 merge(dispatch)
+                SafetyLiveLocationSession.start(
+                    appContext,
+                    dispatch.dispatchId,
+                    expiresAtUnix = dispatch.expiresAt?.let(::parseIsoInstantUnix),
+                )
+                WhoopConnectionService.start(appContext)
                 statusMessage =
                     "Safety page opened. SMS is sending now; voice follows if nobody acknowledges."
                 submitted = dispatch.status != SafetyIncidentStatus.FAILED
@@ -329,6 +349,12 @@ class SafetyPagingController(context: Context) {
                 val refreshed = client.incident(current.dispatchId)
                 lastDispatch = refreshed
                 merge(refreshed)
+                if (refreshed.status !in ACTIVE_INCIDENT_STATES) {
+                    SafetyLiveLocationSession.stop(
+                        appContext,
+                        expectedDispatchId = refreshed.dispatchId,
+                    )
+                }
             } else {
                 recentIncidents = client.incidents()
                 lastDispatch = recentIncidents.firstOrNull()
@@ -352,6 +378,10 @@ class SafetyPagingController(context: Context) {
             val updated = memberClient().transition(incident.dispatchId, action)
             lastDispatch = updated
             merge(updated)
+            SafetyLiveLocationSession.stop(
+                appContext,
+                expectedDispatchId = incident.dispatchId,
+            )
             statusMessage = if (action == "resolve") {
                 "Safety page marked resolved."
             } else {
@@ -501,6 +531,29 @@ private class SafetyPagingClient(
         ),
     )
 
+    suspend fun updateLocation(
+        dispatchId: String,
+        sequence: Long,
+        location: SafetyLocation,
+    ): SafetyPagingLocation {
+        val body = JSONObject()
+            .put("sequence", sequence)
+            .put("latitude", location.latitude)
+            .put("longitude", location.longitude)
+            .put("captured_at", Instant.ofEpochSecond(location.capturedAtUnix).toString())
+        location.horizontalAccuracyMeters?.let {
+            body.put("horizontal_accuracy_meters", it)
+        }
+        val response = requestJson(
+            "PUT",
+            "v1/safety/incidents/$dispatchId/location",
+            body,
+        )
+        return response.optJSONObject("location")
+            ?.let(::decodeLocation)
+            ?: throw SafetyPagingException.InvalidResponse()
+    }
+
     suspend fun requestNoContent(method: String, path: String) {
         execute(method, path, null, null)
     }
@@ -534,6 +587,7 @@ private class SafetyPagingClient(
         when (method) {
             "GET" -> builder.get()
             "POST" -> builder.post(requestBody ?: "{}".toRequestBody(JSON))
+            "PUT" -> builder.put(requestBody ?: "{}".toRequestBody(JSON))
             "DELETE" -> builder.delete()
             else -> error("Unsupported safety request method")
         }
@@ -624,12 +678,57 @@ internal fun decodeDispatch(json: JSONObject): SafetyPagingDispatch {
             json.optString("status"),
             SafetyIncidentStatus.FAILED,
         ),
+        expiresAt = json.nullableString("expires_at"),
         idempotentReplay = json.optBoolean("idempotent_replay", false),
         acknowledgedContactDisplayName =
             json.nullableString("acknowledged_contact_display_name"),
         resolutionNote = json.nullableString("resolution_note"),
         deliveries = deliveries,
         responses = responses,
+        latestLocation = json.optJSONObject("latest_location")?.let(::decodeLocation),
+    )
+}
+
+internal fun parseIsoInstantUnix(raw: String): Long? =
+    runCatching { Instant.parse(raw).epochSecond }.getOrNull()
+
+private fun decodeLocation(json: JSONObject): SafetyPagingLocation =
+    SafetyPagingLocation(
+        sequence = json.optLong("sequence"),
+        latitude = json.optDouble("latitude"),
+        longitude = json.optDouble("longitude"),
+        horizontalAccuracyMeters = json
+            .takeIf { it.has("horizontal_accuracy_meters") && !it.isNull("horizontal_accuracy_meters") }
+            ?.optDouble("horizontal_accuracy_meters"),
+        capturedAt = json.optString("captured_at"),
+        receivedAt = json.optString("received_at"),
+        idempotentReplay = json
+            .takeIf { it.has("idempotent_replay") }
+            ?.optBoolean("idempotent_replay"),
+    )
+
+internal suspend fun updateSafetyIncidentLocation(
+    context: Context,
+    dispatchId: String,
+    sequence: Long,
+    location: SafetyLocation,
+): SafetyPagingLocation {
+    val endpoint = SafetyPagingPrefs.endpoint(context)
+    val token = SafetyPagingPrefs.token(context)
+        ?: throw SafetyPagingException.Server(
+            401,
+            "Finish Safety setup before sharing location.",
+        )
+    if (endpoint.isBlank()) {
+        throw SafetyPagingException.Server(
+            401,
+            "Finish Safety setup before sharing location.",
+        )
+    }
+    return SafetyPagingClient(endpoint, token).updateLocation(
+        dispatchId = dispatchId,
+        sequence = sequence,
+        location = location,
     )
 }
 

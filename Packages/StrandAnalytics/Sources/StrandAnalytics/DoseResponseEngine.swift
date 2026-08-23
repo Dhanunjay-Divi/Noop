@@ -26,11 +26,11 @@ import Foundation
 //   - Once the user has enough data, the PERSON overrides the population: if the personal slope
 //     contradicts the prior (e.g. your drink-nights show no dip), β follows the user, and
 //     `contradictsPrior` flags the "in your data so far, this doesn't move your Recovery" copy.
-//   - Caffeine "dose" is a TIMING proxy (later = stronger), never mg — the priors table & UI say so.
+//   - Caffeine "dose" is a TIMING proxy (later = stronger), never mg - the priors table & UI say so.
 // Nothing here is a causal/clinical claim; it is association on the user's own logged days.
 //
 // Mirrors the Kotlin DoseResponseEngine twin byte-for-byte. (Spec:
-// 2026-06-19-v5-insights-correlation-engine-design.md — "Personal dose-response with
+// 2026-06-19-v5-insights-correlation-engine-design.md - "Personal dose-response with
 // population-prior shrinkage".)
 
 // MARK: - Result

@@ -408,7 +408,7 @@ extension View {
     }
 }
 
-/// The "this card was pressed" response for any tappable liquid card — a small settle inward plus a
+/// The "this card was pressed" response for any tappable liquid card - a small settle inward plus a
 /// touch of dimming. Cheap (a transform), so it's free on static cards and makes every tap feel physical.
 struct LiquidPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {

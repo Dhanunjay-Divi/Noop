@@ -24,7 +24,7 @@ public struct OuraActivityEstimate: Equatable, Sendable {
     public let maxMET: Double
     /// Σ metᵢ × epochMinutes — standard MET-minutes of activity.
     public let metMinutes: Double
-    /// Minutes whose MET ≥ `moderateThresholdMET` (default 3.0 = moderate) — a "how long were you active"
+    /// Minutes whose MET ≥ `moderateThresholdMET` (default 3.0 = moderate) - a "how long were you active"
     /// figure, = (count of qualifying samples) × epochMinutes.
     public let activeMinutes: Double
     /// Estimated ABOVE-RESTING energy: Σ max(metᵢ − 1, 0) × massKg × epochHours (kcal). This is the

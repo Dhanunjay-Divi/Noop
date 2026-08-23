@@ -22,7 +22,7 @@ enum class Whoop5Variant(val label: String) {
     /** WHOOP 5.0 — no ECG electrodes. */
     FIVE_ZERO("5.0"),
     /** Not identified yet, contradictory evidence, or a non-WHOOP strap. NEVER a guess. */
-    UNKNOWN("—");
+    UNKNOWN("-");
 
     /** True only for a POSITIVELY identified MG, so an MG-only feature stays gated off otherwise. */
     val isMG: Boolean get() = this == MG

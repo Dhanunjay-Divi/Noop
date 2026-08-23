@@ -3,10 +3,13 @@ import Foundation
 import StrandDesign
 import StrandAnalytics
 import WhoopStore
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - Explore (Metric Explorer + Detail)
 //
-// The catalog-driven "Explore" surface. The root is a grouped list — one
+// The catalog-driven "Explore" surface. The root is a grouped list - one
 // SectionHeader per MetricCatalog.category, then a row per metric — pushing a
 // MetricDetailView. The detail is a uniform analytic dossier built ONLY from the
 // locked StrandDesign components (NoopCard / ChartCard / StatTile / InsightCard /
@@ -14,7 +17,7 @@ import WhoopStore
 //
 // Sparse-metric rule (owner saw "no data" on metrics that HAVE data): a series may
 // be sampled weekly (weight / body fat). The window is taken RELATIVE TO THE LATEST
-// data point — not "now" — so a stale-but-present series still resolves. If the
+// data point - not "now" - so a stale-but-present series still resolves. If the
 // selected window holds ≥1 point we SHOW THAT WINDOW (so W/M/3M stay visibly
 // distinct); only when it holds ZERO points do we auto-expand to the smallest larger
 // range that does. The hero always shows the latest available point + "as of <date>".
@@ -54,7 +57,7 @@ enum MetricEmptyStateCopy {
     }
 }
 
-/// "9 Jun 2026" — long, locale-stable date for the hero "as of" line.
+/// "9 Jun 2026" - long, locale-stable date for the hero "as of" line.
 private func longDate(_ d: Date) -> String {
     let f = DateFormatter()
     f.locale = Locale(identifier: "en_US_POSIX")
@@ -273,7 +276,7 @@ private let readingShortDateFormatter: DateFormatter = {
 
 // MARK: - Root: categorized list
 
-/// The "Explore" picker — categories as sections, metrics as rows, each pushing a
+/// The "Explore" picker - categories as sections, metrics as rows, each pushing a
 /// MetricDetailView. A faint trailing "•" marks metrics whose series is empty.
 struct MetricExplorerView: View {
     @EnvironmentObject var repo: Repository
@@ -566,7 +569,7 @@ struct MetricDetailView: View {
     // MARK: Derived
 
     /// The trailing-N-days slice for a given range, taken RELATIVE TO THE LATEST data
-    /// point (not "now") — `.all` returns everything.
+    /// point (not "now") - `.all` returns everything.
     private func slice(for r: ExploreRange) -> [(day: String, value: Double)] {
         guard let days = r.days else { return series }
         guard let lastDay = series.last?.day, let last = parseDay(lastDay) else { return [] }
@@ -678,11 +681,19 @@ struct MetricDetailView: View {
         )
     }
     private var latestIsCurrentDay: Bool { currentReadState == .today }
+    private var isLongTermEstimate: Bool {
+        ["fitness_age", "body_age", "vitality"].contains(metric.key)
+    }
 
     /// The top-level section remains "Today" even when today's packet is not available. The trailing
     /// state prevents a stale source reading from being presented as current while still keeping the
     /// latest honest value visible below it.
     private var todaySectionStatus: String {
+        if isLongTermEstimate {
+            return latest == nil
+                ? String(localized: "Waiting for data")
+                : String(localized: "Updated periodically")
+        }
         switch currentReadState {
         case .today:           return String(localized: "Current")
         case .latestAvailable: return String(localized: "No reading today")
@@ -760,6 +771,7 @@ struct MetricDetailView: View {
                     // the explanation/setup state, so an empty range cannot look like the headline.
                     metricDetailSectionHeader(.today, trailing: todaySectionStatus)
                     metricMeaningCard
+                    MetricReminderCard(metric: metric)
                     if metric.key == "fitness_age" {
                         // Fitness Age is COMPUTED on-device from resting HR + activity — not imported — so
                         // the generic "import your history" copy was wrong (and a dead end) here. Lead with
@@ -770,6 +782,7 @@ struct MetricDetailView: View {
                         VStack(alignment: .leading, spacing: NoopMetrics.space2) {
                             ComingSoon(what: LocalizedStringKey(fitnessReadyLeadCopy(
                                 rhrDays: repo.days.suffix(7).compactMap { $0.restingHr }.count,
+                                activityDays: repo.days.suffix(7).compactMap { $0.strain }.count,
                                 hasAge: profile.ageInputConfirmed
                                     && FitnessAgeEngine.supports(age: Double(profile.age)),
                                 hasSex: profile.sexInputConfirmed
@@ -809,6 +822,7 @@ struct MetricDetailView: View {
                     // labels the current hero, so a monthly chart cannot look like a monthly headline.
                     metricDetailSectionHeader(.today, trailing: todaySectionStatus)
                     heroHeader
+                    MetricReminderCard(metric: metric)
                     if isEnergyMetric { energyBreakdownCard }
 
                     metricDetailSectionHeader(.compareHistory, trailing: effRange.name)
@@ -867,8 +881,18 @@ struct MetricDetailView: View {
                                            trailing: String?) -> some View {
         switch section {
         case .today:
-            SectionHeader("Today", overline: "Your daily reading", trailing: trailing)
-                .accessibilityAddTraits(.isHeader)
+            Group {
+                if isLongTermEstimate {
+                    SectionHeader(
+                        "Latest estimate",
+                        overline: "Long-term trend",
+                        trailing: trailing
+                    )
+                } else {
+                    SectionHeader("Today", overline: "Your daily reading", trailing: trailing)
+                }
+            }
+            .accessibilityAddTraits(.isHeader)
         case .compareHistory:
             SectionHeader("Compare & history", overline: "Your baseline and change over time",
                           trailing: trailing)
@@ -1046,9 +1070,9 @@ struct MetricDetailView: View {
     private var heroHeader: some View {
         let domain = metricDomain(metric)
         let value = latest?.value
-        let heroValue = latest.map { fmt($0.value) } ?? "—"
+        let heroValue = latest.map { fmt($0.value) } ?? "-"
         let asOf: String = {
-            guard let day = latest?.day, let d = parseDay(day) else { return "—" }
+            guard let day = latest?.day, let d = parseDay(day) else { return "-" }
             return String(localized: "as of \(longDate(d))")
         }()
         let fraction = value.flatMap { metricGaugeFraction(metric, value: $0) }
@@ -1062,7 +1086,13 @@ struct MetricDetailView: View {
                 // is never crushed into a letter-per-line column by the range pill (2026-07-02).
                 HStack(alignment: .top, spacing: NoopMetrics.space3) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(latestIsCurrentDay ? String(localized: "TODAY") : String(localized: "LATEST AVAILABLE"))
+                        Text(
+                            isLongTermEstimate
+                                ? String(localized: "LATEST ESTIMATE")
+                                : (latestIsCurrentDay
+                                    ? String(localized: "TODAY")
+                                    : String(localized: "LATEST AVAILABLE"))
+                        )
                             .strandOverline()
                         Text(metric.title)
                             .font(StrandFont.title2)
@@ -1246,7 +1276,7 @@ struct MetricDetailView: View {
     }
 
     private func energyNumber(_ value: Double?) -> String {
-        guard let value else { return "—" }
+        guard let value else { return "-" }
         return value.formatted(.number.grouping(.automatic).precision(.fractionLength(0)))
     }
 
@@ -1395,7 +1425,7 @@ struct MetricDetailView: View {
                             .foregroundStyle(StrandPalette.textSecondary)
                     }
 
-                    Text("Common possibilities — general education")
+                    Text("Common possibilities - general education")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .padding(.top, NoopMetrics.space1)
@@ -1572,7 +1602,7 @@ struct MetricDetailView: View {
     private func rangeCaption(effectiveRange: ExploreRange,
                               windowed: [(day: String, value: Double)],
                               windowFellBack: Bool) -> String {
-        guard loaded, !series.isEmpty else { return "—" }
+        guard loaded, !series.isEmpty else { return "-" }
         let n = windowed.count
         if windowFellBack {
             return n == 1
@@ -1590,10 +1620,10 @@ struct MetricDetailView: View {
                            windowed: [(day: String, value: Double)],
                            windowFellBack: Bool) -> some View {
         let asOf: String = {
-            guard let day = latest?.day, let d = parseDay(day) else { return "—" }
+            guard let day = latest?.day, let d = parseDay(day) else { return "-" }
             return String(localized: "as of \(longDate(d))")
         }()
-        let heroValue = latest.map { fmt($0.value) } ?? "—"
+        let heroValue = latest.map { fmt($0.value) } ?? "-"
         let subtitle = windowFellBack
             ? String(localized: "Sparse, widened to \(effectiveRange.name) · \(windowed.count) readings")
             : String(localized: "\(windowed.count) readings · \(range.name)")
@@ -1664,11 +1694,11 @@ struct MetricDetailView: View {
                          accent: StrandPalette.textPrimary)
                 StatTile(label: "Max", value: fmt(s.max),
                          accent: StrandPalette.textPrimary)
-                StatTile(label: "Δ vs prev", value: deltaText ?? "—",
+                StatTile(label: "Δ vs prev", value: deltaText ?? "-",
                          caption: deltaCaption, accent: StrandPalette.textPrimary,
                          delta: cmp.pctChange.map { "\($0 >= 0 ? "+" : "")\(String(format: "%.1f", $0))%" },
                          deltaColor: deltaColor)
-                StatTile(label: "Latest", value: latest.map { fmt($0.value) } ?? "—",
+                StatTile(label: "Latest", value: latest.map { fmt($0.value) } ?? "-",
                          caption: latestCaption, accent: accent)
             }
         }
@@ -1690,9 +1720,9 @@ struct MetricDetailView: View {
                      accent: StrandPalette.textPrimary)
             StatTile(label: "Max", value: fmt(s.max),
                      accent: StrandPalette.textPrimary)
-            StatTile(label: "Latest", value: latest.map { fmt($0.value) } ?? "—",
+            StatTile(label: "Latest", value: latest.map { fmt($0.value) } ?? "-",
                      caption: latestCaption, accent: accent)
-            StatTile(label: "Δ vs prev", value: deltaText ?? "—",
+            StatTile(label: "Δ vs prev", value: deltaText ?? "-",
                      caption: deltaCaption, accent: StrandPalette.textPrimary,
                      delta: cmp.pctChange.map { "\($0 >= 0 ? "+" : "")\(String(format: "%.1f", $0))%" },
                      deltaColor: deltaColor)
@@ -1709,7 +1739,7 @@ struct MetricDetailView: View {
 
     /// The per-reading breakdown below the stats, so the provenance behind the trend is visible — whether
     /// each reading came from the WHOOP strap, a Health Connect / Apple Health import, or the on-device
-    /// pipeline — not just the "N readings" caption. Rows derive from the SAME `windowed` slice the caption
+    /// pipeline - not just the "N readings" caption. Rows derive from the SAME `windowed` slice the caption
     /// counts (so the two never disagree), NEWEST FIRST, and reuse `TodayView.provenanceDisplayLabel` for
     /// the source words. Swift twin of Android's `VitalReadingsTable`.
     @ViewBuilder
@@ -1910,6 +1940,148 @@ struct MetricDetailView: View {
     private func correlationColor(_ r: Double) -> Color {
         let base = r >= 0 ? StrandPalette.statusPositive : StrandPalette.statusCritical
         return base.opacity(0.55 + 0.45 * min(abs(r), 1.0))
+    }
+}
+
+/// Contextual entry point shared by every metric dossier. It edits the same single coalesced schedule,
+/// so selecting several signals produces one calm review rather than a notification storm.
+private struct MetricReminderCard: View {
+    let metric: MetricDescriptor
+
+    @State private var enabled = false
+    @State private var cadence: MetricReviewReminders.Cadence = .daily
+    @State private var showPermissionAlert = false
+    @AppStorage(MetricReviewReminders.minuteOfDayKey) private var minuteOfDay = 18 * 60
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        NoopCard(tint: enabled ? metricAccent(metric) : nil) {
+            VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                HStack(alignment: .center, spacing: NoopMetrics.space3) {
+                    Image(systemName: "bell.badge.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(enabled ? metricAccent(metric) : StrandPalette.textTertiary)
+                        .frame(width: 28)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Metric review")
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text("Remind me to review \(metric.title)")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                    }
+                    Spacer(minLength: NoopMetrics.space2)
+                    Toggle("", isOn: reminderToggle)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(metricAccent(metric))
+                        .accessibilityLabel("\(metric.title) review reminder")
+                        .accessibilityIdentifier("noop.metric.reminder.\(metric.id)")
+                }
+
+                if enabled {
+                    Divider().overlay(StrandPalette.hairline)
+                    HStack(spacing: NoopMetrics.space3) {
+                        Label("Review cadence", systemImage: "calendar")
+                            .font(StrandFont.body)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Spacer()
+                        Picker("Review cadence", selection: cadenceBinding) {
+                            ForEach(MetricReviewReminders.Cadence.allCases) { option in
+                                Text(option.label).tag(option)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+
+                    HStack(spacing: NoopMetrics.space3) {
+                        Label("Review at", systemImage: "clock")
+                            .font(StrandFont.body)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Spacer()
+                        DatePicker("", selection: timeBinding, displayedComponents: .hourAndMinute)
+                            .labelsHidden()
+                            .datePickerStyle(.compact)
+                            .accessibilityLabel("Metric review time")
+                    }
+                }
+
+                Text("Collection stays automatic. This private reminder only opens Trends; it does not trigger a reading or judge whether movement is good or bad.")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onAppear {
+            enabled = MetricReviewReminders.isEnabled(metricID: metric.id)
+            cadence = MetricReviewReminders.cadence(metricID: metric.id)
+        }
+        .alert("Notifications are off", isPresented: $showPermissionAlert) {
+            Button("Open Settings") {
+                #if os(iOS)
+                if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                #elseif os(macOS)
+                if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+                    openURL(url)
+                }
+                #endif
+            }
+            Button("Not now", role: .cancel) {}
+        } message: {
+            Text("Allow notifications in Settings to use optional metric reviews.")
+        }
+    }
+
+    private var reminderToggle: Binding<Bool> {
+        Binding(
+            get: { enabled },
+            set: { on in
+                if !on {
+                    MetricReviewReminders.setMetric(id: metric.id, enabled: false)
+                    enabled = false
+                    return
+                }
+                MetricReviewReminders.setMetric(id: metric.id, enabled: true) { outcome in
+                    switch outcome {
+                    case .scheduled:
+                        enabled = true
+                    case .denied:
+                        enabled = false
+                        showPermissionAlert = true
+                    case .off:
+                        enabled = false
+                    }
+                }
+            }
+        )
+    }
+
+    private var timeBinding: Binding<Date> {
+        Binding(
+            get: {
+                var components = DateComponents()
+                components.hour = minuteOfDay / 60
+                components.minute = minuteOfDay % 60
+                return Calendar.current.date(from: components) ?? Date()
+            },
+            set: { date in
+                let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+                let minutes = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+                minuteOfDay = minutes
+                MetricReviewReminders.setMinuteOfDay(minutes)
+            }
+        )
+    }
+
+    private var cadenceBinding: Binding<MetricReviewReminders.Cadence> {
+        Binding(
+            get: { cadence },
+            set: { value in
+                cadence = value
+                MetricReviewReminders.setCadence(metricID: metric.id, cadence: value)
+            }
+        )
     }
 }
 

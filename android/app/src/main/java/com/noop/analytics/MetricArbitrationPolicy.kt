@@ -16,7 +16,7 @@ package com.noop.analytics
  *   2 — Phone aggregate (Apple Health / Health Connect) of a declared-compatible quantity.
  *   3 — Estimate / proxy (a strap's STEP estimate; a calories estimate).
  *
- * "Best signal" is always backed by a NAMED, VISIBLE reason — never "accurate"/"correct"/"clinical".
+ * "Best signal" is always backed by a NAMED, VISIBLE reason - never "accurate"/"correct"/"clinical".
  * This is wellness transparency, not a diagnosis.
  */
 object MetricArbitrationPolicy {

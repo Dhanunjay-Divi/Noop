@@ -112,11 +112,15 @@ typeset -a scenario_names
 scenario_names=(
     nutrition-expanded
     nutrition-bottom
+    today-top
+    today-alert
     today-bottom
     trends-bottom
     workouts-bottom
     workouts-accessibility
     sleep-bottom
+    alarm-top
+    alarm-bottom
     more-bottom
     more-compact
     more-accessibility
@@ -388,6 +392,10 @@ run_device_matrix() {
         --demo-nutrition --demo-more-route nutrition
     capture_scenario nutrition-bottom light large disabled 4 \
         --demo-nutrition --demo-more-route nutrition --demo-scroll-bottom
+    capture_scenario today-top dark large disabled 5 \
+        --demo-tab today
+    capture_scenario today-alert dark large disabled 5 \
+        --demo-tab today --demo-daily-signal alert
     capture_scenario today-bottom light large disabled 5 \
         --demo-tab today --demo-scroll-bottom
     capture_scenario trends-bottom light large disabled 4 \
@@ -398,6 +406,10 @@ run_device_matrix() {
         --demo-tab workouts --demo-compact-tab-bar
     capture_scenario sleep-bottom light large disabled 4 \
         --demo-tab sleep --demo-scroll-bottom
+    capture_scenario alarm-top dark large disabled 4 \
+        --demo-more-route alarms
+    capture_scenario alarm-bottom dark large disabled 4 \
+        --demo-more-route alarms --demo-scroll-bottom --demo-compact-tab-bar
     capture_scenario more-bottom light large disabled 4 \
         --demo-tab more --demo-scroll-bottom
     capture_scenario more-compact light large disabled 3 \

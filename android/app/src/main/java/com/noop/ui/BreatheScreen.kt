@@ -85,7 +85,7 @@ private enum class Pace(val label: String) {
     Relax("Relax 4-6"),
     Coherence("Coherence 5.5"),
     Box("Box 4-4"),
-    Resonance("Resonance");   // the user's locked pace (br/min) — only offered once a pace is locked
+    Resonance("Resonance");   // the user's locked pace (br/min) - only offered once a pace is locked
 
     /** Inhale seconds — for [Resonance] it derives from the locked bpm at a 40:60 inhale:exhale split
      *  (mirrors macOS Pace.inhale(lockedBpm:)). */
@@ -199,7 +199,7 @@ fun BreatheScreen(viewModel: AppViewModel) {
     }
 
     // Bank the just-ended session's outcome (mirrors BreathingView.captureOutcome):
-    // null below the 2-minute floor; "—" stays display-only, never persisted.
+    // null below the 2-minute floor; "-" stays display-only, never persisted.
     fun endSession() {
         val core = breatheOutcomeCore(
             baseline = baselineRmssd,
@@ -209,7 +209,7 @@ fun BreatheScreen(viewModel: AppViewModel) {
             seconds = sessionSeconds,
         )
         endedOutcome = core
-        if (core != null && core != "—") {
+        if (core != null && core != "-") {
             lastStoredOutcome = core
             NoopPrefs.of(context).edit().putString(KEY_BREATHE_LAST_OUTCOME, core).apply()
         }
@@ -424,7 +424,7 @@ fun BreatheScreen(viewModel: AppViewModel) {
                         modifier = Modifier.clearAndSetSemantics {},
                     ) {
                         Text(
-                            bpm?.toString() ?: "—",
+                            bpm?.toString() ?: "-",
                             style = NoopType.number(40f, weight = FontWeight.Bold)
                                 .copy(shadow = Shadow(color = Color.Black.copy(alpha = 0.5f), offset = Offset(0f, 1f), blurRadius = 6f)),
                             color = Color.White,
@@ -515,7 +515,7 @@ fun BreatheScreen(viewModel: AppViewModel) {
         // Hidden while running and when there is nothing honest to show.
         val outcomeLine = when {
             running -> null
-            endedOutcome == "—" -> "RMSSD - · not enough R-R data"
+            endedOutcome == "-" -> "RMSSD - · not enough R-R data"
             endedOutcome != null -> "RMSSD $endedOutcome"
             lastStoredOutcome.isNotEmpty() -> "Last session: $lastStoredOutcome"
             else -> null
@@ -524,7 +524,7 @@ fun BreatheScreen(viewModel: AppViewModel) {
             // The session's HRV outcome as a frosted Rest-tinted card with a TrendChip for the
             // vs-start RMSSD change. Presentation-only — the same outcome String + chip source.
             val chipSource = endedOutcome ?: lastStoredOutcome.takeIf { it.isNotEmpty() }
-            val trend = chipSource?.takeIf { it != "—" }?.let { leadingSignedPercent(it) }
+            val trend = chipSource?.takeIf { it != "-" }?.let { leadingSignedPercent(it) }
             NoopCard(padding = 14.dp, tint = Palette.restColor) {
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Icon(
@@ -555,15 +555,15 @@ fun BreatheScreen(viewModel: AppViewModel) {
             ReadoutTile(
                 modifier = Modifier.weight(1f),
                 label = uiString(R.string.l10n_breathe_screen_heart_rate_410aa15c),
-                value = bpm?.toString() ?: "—",
+                value = bpm?.toString() ?: "-",
                 unit = "bpm",
                 accent = Palette.metricRose,
-                caption = if (live.worn) "Live" else "Strap not worn",
+                caption = if (live.worn) "Live" else "Noop Band not worn",
             )
             ReadoutTile(
                 modifier = Modifier.weight(1f),
                 label = uiString(R.string.l10n_breathe_screen_hrv_rmssd_51014f87),
-                value = rmssd?.let { String.format(Locale.US, "%.0f", it) } ?: "—",
+                value = rmssd?.let { String.format(Locale.US, "%.0f", it) } ?: "-",
                 unit = "ms",
                 accent = Palette.metricPurple,
                 caption = if (rrBuffer.value.isEmpty()) "Waiting for R-R" else "Last ${rrBuffer.value.size} beats",
@@ -687,13 +687,13 @@ private fun coherenceState(rmssd: Double?): Pair<String, StrandTone> = when {
 // MARK: - Session outcome
 
 /** NoopPrefs key for the last completed session's outcome core (mirrors macOS
- *  `@AppStorage("breathe.lastOutcome")`). Display-only persistence — no Room table. */
+ *  `@AppStorage("breathe.lastOutcome")`). Display-only persistence - no Room table. */
 private const val KEY_BREATHE_LAST_OUTCOME = "breathe.lastOutcome"
 
 /**
- * End-of-session outcome core: "+18% vs start · peak 64 ms" — the session MEAN
+ * End-of-session outcome core: "+18% vs start · peak 64 ms" - the session MEAN
  * rolling RMSSD vs the start baseline. Null below the 2-minute floor (abandoned —
- * show nothing); "—" when the session ran long enough but there was no usable
+ * show nothing); "-" when the session ran long enough but there was no usable
  * baseline or no R-R data (never invent a number). Mirrors
  * BreathingView.captureOutcome case-for-case.
  */
@@ -705,15 +705,15 @@ internal fun breatheOutcomeCore(
     seconds: Int,
 ): String? {
     if (seconds < 120) return null
-    if (baseline == null || baseline <= 0 || count == 0) return "—"
+    if (baseline == null || baseline <= 0 || count == 0) return "-"
     val mean = sum / count
     val pct = ((mean - baseline) / baseline * 100).roundToInt()
     return String.format(Locale.US, "%+d%% vs start · peak %.0f ms", pct, peak)
 }
 
 /**
- * Parse a leading "+18%"/"-7%" from an outcome core, returning the integer percent — the signed
- * RMSSD-vs-start change shown as a TrendChip. Null when no signed % leads (abandoned / "—" line).
+ * Parse a leading "+18%"/"-7%" from an outcome core, returning the integer percent - the signed
+ * RMSSD-vs-start change shown as a TrendChip. Null when no signed % leads (abandoned / "-" line).
  * Display-only: it reads the same String the outcome line already shows, never new data.
  */
 internal fun leadingSignedPercent(s: String): Int? {
@@ -817,7 +817,7 @@ private fun honestNudgeLine(n: StressNudgeCenter.Nudge): String? {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// L1 — Resonance mode (the "find my pace" sweep + result)
+// L1 - Resonance mode (the "find my pace" sweep + result)
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
@@ -1020,7 +1020,7 @@ private fun LockedPaceCard(bpm: Double, context: android.content.Context) {
     }
 }
 
-/** A compact RSA-amplitude-by-pace summary (the resonance curve). Unscored paces read "—". */
+/** A compact RSA-amplitude-by-pace summary (the resonance curve). Unscored paces read "-". */
 @Composable
 private fun RsaCurve(scores: List<ResonanceEngine.PaceScore>) {
     val maxRsa = scores.mapNotNull { it.rsaAmplitude }.maxOrNull() ?: 1.0
@@ -1047,7 +1047,7 @@ private fun RsaCurve(scores: List<ResonanceEngine.PaceScore>) {
                             .background(Palette.restBright.copy(alpha = if (s.scored) 0.9f else 0.25f)),
                     )
                 }
-                Text(s.rsaAmplitude?.let { String.format(Locale.US, "%.1f", it) } ?: "—",
+                Text(s.rsaAmplitude?.let { String.format(Locale.US, "%.1f", it) } ?: "-",
                     style = NoopType.captionNumber,
                     color = if (s.scored) Palette.textSecondary else Palette.textTertiary,
                     modifier = Modifier.width(34.dp), textAlign = TextAlign.End)
@@ -1057,11 +1057,11 @@ private fun RsaCurve(scores: List<ResonanceEngine.PaceScore>) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// L2 — "Calm me" mode (below-HR relaxation metronome)
+// L2 - "Calm me" mode (below-HR relaxation metronome)
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
- * The L2 surface — Kotlin twin of CalmModeView. A "Calm me · 3 min" button runs [HrDownPacer] (one light
+ * The L2 surface - Kotlin twin of CalmModeView. A "Calm me · 3 min" button runs [HrDownPacer] (one light
  * pulse per target beat at a bounded Δ below live HR, recomputed each step so the cue trails the heart
  * down), a minimal live "HR 78 → settling" readout, a stop control, and an honest outcome (settled vs
  * held steady — no fabricated win). Haptic-first → disabled when the encrypted channel isn't up.
@@ -1111,7 +1111,7 @@ private fun CalmMode(viewModel: AppViewModel, live: com.noop.ble.LiveState, bpm:
                 Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Overline("Calm me")
                     Spacer(Modifier.weight(1f))
-                    StatePill(if (canRun) "Ready" else "Strap needed",
+                    StatePill(if (canRun) "Ready" else "Noop Band needed",
                         tone = if (canRun) StrandTone.Neutral else StrandTone.Warning)
                 }
                 Text(
@@ -1135,12 +1135,12 @@ private fun CalmMode(viewModel: AppViewModel, live: com.noop.ble.LiveState, bpm:
                     }
                     Row(verticalAlignment = Alignment.Bottom,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(bpm?.toString() ?: "—", style = NoopType.number(48f), color = Palette.metricRose)
+                        Text(bpm?.toString() ?: "-", style = NoopType.number(48f), color = Palette.metricRose)
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null,
                             tint = Palette.textTertiary, modifier = Modifier.padding(bottom = 8.dp))
                         Column {
                             Text("target", style = NoopType.footnote, color = Palette.textTertiary)
-                            Text(targetBpm?.let { String.format(Locale.US, "%.0f", it) } ?: "—",
+                            Text(targetBpm?.let { String.format(Locale.US, "%.0f", it) } ?: "-",
                                 style = NoopType.number(22f), color = Palette.restBright)
                         }
                     }

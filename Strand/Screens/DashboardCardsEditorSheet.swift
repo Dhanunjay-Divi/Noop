@@ -6,7 +6,7 @@ import StrandDesign
 // A Today-local sheet (no new nav destination) for choosing WHICH "Your cards" dashboard cards show and in
 // what order. Display-only: it edits the persisted `today.dashboardCards` selection string, never any
 // stored metric. Enabled cards render in the list's order; a toggle hides/shows a card and a drag handle
-// (List .onMove under EditMode) reorders it — the WHOOP "My Dashboard" customise flow.
+// (List .onMove under EditMode) reorders it - the WHOOP "My Dashboard" customise flow.
 //
 // The enabled cards come first in their saved order, then the disabled remainder in canonical order, so
 // toggling one on drops it at the end of the visible set and the editor always lists every card exactly

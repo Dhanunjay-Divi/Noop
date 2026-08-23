@@ -11,6 +11,16 @@
     <string name="appwide_calendar_summary_overline">DIESER MONAT</string>
     <string name="appwide_calendar_summary_scored_format">%1$d Tage bewertet · Durchschnitt %2$d</string>
     <string name="appwide_calendar_your_month">Dein Monat</string>
+    <string name="appwide_daily_signal_a11y_hint">Öffnet den Gesundheitsmonitor und die Signale hinter diesem Status.</string>
+    <string name="appwide_daily_signal_alert_a11y_hint">Öffnet den Gesundheitsmonitor und die Signale hinter dieser Überprüfung.</string>
+    <string name="appwide_daily_signal_alert_review">Details ansehen</string>
+    <string name="appwide_daily_signal_alert_title">Signale verändert</string>
+    <string name="appwide_daily_signal_alert_unwell_title">Jetzt prüfen</string>
+    <string name="appwide_daily_signal_label">Tagessignal</string>
+    <string name="appwide_daily_signal_status_aligned">Abgestimmt</string>
+    <string name="appwide_daily_signal_status_building">Lernt</string>
+    <string name="appwide_daily_signal_status_check_in">Prüfen</string>
+    <string name="appwide_daily_signal_status_recheck">Erneut prüfen</string>
     <string name="appwide_disclaimer_estimates">Auf diesem Gerät aus deinen eigenen Signalen berechnet. Schätzungen, kein Medizinprodukt.</string>
     <string name="appwide_disclaimer_estimates_advice">Schätzungen werden auf diesem Gerät aus deinen eigenen Signalen berechnet. Kein Medizinprodukt und keine medizinische Beratung.</string>
     <string name="appwide_field_label_unit_format">%1$s (%2$s)</string>

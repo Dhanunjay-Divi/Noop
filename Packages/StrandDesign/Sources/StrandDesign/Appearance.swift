@@ -37,9 +37,9 @@ public extension View {
 }
 
 /// The user's appearance preference for the whole app. Persisted via
-/// `@AppStorage(AppearanceMode.storageKey)`. `.system` follows the OS (the default), `.light`
-/// uses NOOP's pearl finish, `.dark` uses dimensional graphite, and `.black` uses a true-black
-/// OLED canvas with quieter relief.
+/// `@AppStorage(AppearanceMode.storageKey)`. `.black` is the first-run default and uses a true-black
+/// OLED canvas with quieter relief. `.system` follows the OS, `.light` uses NOOP's pearl finish, and
+/// `.dark` uses dimensional graphite.
 ///
 /// Apply it once at each app root with `.noopAppearance(rawValue)`. Dark and Black both request
 /// the system dark colour scheme, while the full mode is also carried through the environment so
@@ -54,6 +54,8 @@ public enum AppearanceMode: String, CaseIterable, Identifiable, Sendable {
 
     /// The @AppStorage key shared by the app roots and the Settings picker.
     public static let storageKey = "theme.appearance"
+    /// New installs start in NOOP's signature OLED finish. A stored user choice always wins.
+    public static let defaultMode = AppearanceMode.black
 
     /// Human label for the Settings control.
     public var label: String {
@@ -94,14 +96,14 @@ public enum AppearanceMode: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Resolve a stored raw value (tolerant of an unknown/missing value → `.system`).
+    /// Resolve a stored raw value (tolerant of an unknown/missing value → the first-run default).
     public static func resolve(_ raw: String) -> AppearanceMode {
-        AppearanceMode(rawValue: raw) ?? .system
+        AppearanceMode(rawValue: raw) ?? defaultMode
     }
 }
 
 private struct NoopAppearanceEnvironmentKey: EnvironmentKey {
-    static let defaultValue = AppearanceMode.system
+    static let defaultValue = AppearanceMode.defaultMode
 }
 
 public extension EnvironmentValues {

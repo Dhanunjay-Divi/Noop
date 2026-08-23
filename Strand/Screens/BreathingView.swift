@@ -16,7 +16,7 @@ import StrandAnalytics
 ///
 /// Mode switch:
 ///  • **Breathe** — the shipped fixed-pace trainer (presets + the locked resonance pill), unchanged.
-///  • **Resonance** — the one-time "find your pace" sweep + the dated result card.
+///  • **Resonance** - the one-time "find your pace" sweep + the dated result card.
 ///  • **Calm me** — the L2 below-HR relaxation metronome.
 ///
 /// Public entry point keeps its zero-arg init (every existing call site — RootView, RootTabView,
@@ -371,7 +371,7 @@ private struct BreathingContent: View {
                                     font: StrandFont.number(40),
                                     color: StrandPalette.onDarkPrimary)
                     } else {
-                        Text("—")
+                        Text("-")
                             .font(StrandFont.number(40))
                             .foregroundStyle(StrandPalette.onDarkPrimary)
                     }
@@ -410,7 +410,7 @@ private struct BreathingContent: View {
     private var outcomeLine: String? {
         if running { return nil }
         if let endedOutcome {
-            return endedOutcome == "—" ? String(localized: "No RMSSD · not enough R-R data")
+            return endedOutcome == "-" ? String(localized: "No RMSSD · not enough R-R data")
                                        : String(localized: "RMSSD \(endedOutcome)")
         }
         if !lastStoredOutcome.isEmpty { return String(localized: "Last session: \(lastStoredOutcome)") }
@@ -439,7 +439,7 @@ private struct BreathingContent: View {
 
     private var outcomeTrend: (text: String, color: Color)? {
         guard let source = endedOutcome ?? (lastStoredOutcome.isEmpty ? nil : lastStoredOutcome),
-              source != "—",
+              source != "-",
               let pct = Self.leadingSignedPercent(source) else { return nil }
         let sign = pct >= 0 ? "+" : "−"
         let color = pct >= 0 ? StrandPalette.statusPositive : StrandPalette.textTertiary
@@ -459,13 +459,13 @@ private struct BreathingContent: View {
     private var readoutRow: some View {
         HStack(spacing: NoopMetrics.gap) {
             readoutTile(label: String(localized: "Heart rate"),
-                        value: model.bpm.map { "\($0)" } ?? "—",
+                        value: model.bpm.map { "\($0)" } ?? "-",
                         unit: "bpm",
                         accent: StrandPalette.metricRose,
-                        caption: live.worn ? String(localized: "Live") : String(localized: "Strap not worn"))
+                        caption: live.worn ? String(localized: "Live") : String(localized: "Noop Band not worn"))
 
             readoutTile(label: String(localized: "HRV (RMSSD)"),
-                        value: rmssd.map { String(format: "%.0f", $0) } ?? "—",
+                        value: rmssd.map { String(format: "%.0f", $0) } ?? "-",
                         unit: "ms",
                         accent: StrandPalette.metricPurple,
                         caption: rrBuffer.isEmpty ? String(localized: "Waiting for R-R") : String(localized: "Last \(rrBuffer.count) beats"))
@@ -562,7 +562,7 @@ private struct BreathingContent: View {
         HStack(spacing: 10) {
             Image(systemName: "applewatch.radiowaves.left.and.right")
                 .foregroundStyle(StrandPalette.statusWarning)
-            Text("Connect your strap for haptic guidance. You'll feel one pulse on the inhale, two on the exhale, so you can breathe with your eyes closed.")
+            Text("Connect Noop Band for haptic guidance. You'll feel one pulse on the inhale and two on the exhale, so you can breathe with your eyes closed.")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -625,7 +625,7 @@ private struct BreathingContent: View {
     private func captureOutcome() {
         guard sessionSeconds >= 120 else { return }
         guard let base = baselineRmssd, base > 0, sessionRmssdCount > 0 else {
-            endedOutcome = "—"
+            endedOutcome = "-"
             return
         }
         let mean = sessionRmssdSum / Double(sessionRmssdCount)
@@ -850,7 +850,7 @@ extension EnvironmentValues {
 
 /// The L1 surface: an explainer, the full/quick sweep start, a live "Testing 5.5 br/min…" label + RSA
 /// progress while sweeping, and the dated result card (locked pace + per-pace RSA curve, or the honest
-/// "couldn't lock today" fallback). Self-contained — drives the shared `BiofeedbackController`.
+/// "couldn't lock today" fallback). Self-contained - drives the shared `BiofeedbackController`.
 private struct ResonanceModeView: View {
     @ObservedObject var controller: BiofeedbackController
     @ObservedObject var live: LiveState
@@ -958,7 +958,7 @@ private struct ResonanceModeView: View {
                 }
 
                 if !result.didLock {
-                    Text("Not enough clean beat data to lock a pace today. Try again rested, sitting still with the strap snug. For now we'll pace you at 5.5 br/min (coherence).")
+                    Text("Not enough clean beat data to lock a pace today. Try again rested, sitting still with Noop Band snug. For now we'll pace you at 5.5 br/min (coherence).")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1003,7 +1003,7 @@ private struct ResonanceModeView: View {
     }
 
     /// A compact text + bar summary of the RSA-amplitude per pace (the resonance curve). The text summary
-    /// is the a11y win; the bars are decorative. Unscored paces read "—".
+    /// is the a11y win; the bars are decorative. Unscored paces read "-".
     private func rsaCurve(_ scores: [ResonanceEngine.PaceScore]) -> some View {
         let maxRsa = scores.compactMap(\.rsaAmplitude).max() ?? 1
         return VStack(alignment: .leading, spacing: 6) {
@@ -1019,7 +1019,7 @@ private struct ResonanceModeView: View {
                     LiquidTube(frac: (s.rsaAmplitude ?? 0) / max(maxRsa, 0.0001),
                                tint: StrandPalette.restBright.opacity(s.scored ? 1 : 0.35),
                                height: 8, animated: false)
-                    Text(s.rsaAmplitude.map { String(format: "%.1f", $0) } ?? "—")
+                    Text(s.rsaAmplitude.map { String(format: "%.1f", $0) } ?? "-")
                         .font(StrandFont.captionNumber)
                         .foregroundStyle(s.scored ? StrandPalette.textSecondary : StrandPalette.textTertiary)
                         .frame(width: 34, alignment: .trailing)
@@ -1042,7 +1042,7 @@ private struct ResonanceModeView: View {
         HStack(spacing: 10) {
             Image(systemName: "applewatch.radiowaves.left.and.right")
                 .foregroundStyle(StrandPalette.statusWarning)
-            Text("Connect your strap for the felt cue. The sweep paces you with one buzz on the inhale, two on the exhale.")
+            Text("Connect Noop Band for the felt cue. The sweep paces you with one vibration on the inhale and two on the exhale.")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1083,10 +1083,10 @@ private struct CalmModeView: View {
                 HStack {
                     Text("Calm me").strandOverline()
                     Spacer()
-                    StatePill(canRun ? "Ready" : "Strap needed",
+                    StatePill(canRun ? "Ready" : "Noop Band needed",
                               tone: canRun ? .neutral : .warning, showsDot: true)
                 }
-                Text("The strap buzzes a gentle rhythm just below your current heart rate, a felt metronome to relax toward. It trails your heart down rather than yanking it, and stops on its own.")
+                Text("Noop Band vibrates a gentle rhythm just below your current heart rate, a felt metronome to relax toward. It trails your heart down rather than yanking it and stops on its own.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1111,7 +1111,7 @@ private struct CalmModeView: View {
                 .disabled(!canRun)
 
                 if !controller.canBuzz {
-                    Text("Connect your strap. Calm me is a felt rhythm on the wrist, so it needs a bonded connection.")
+                    Text("Connect Noop Band. Calm me is a felt rhythm on the wrist, so it needs a bonded connection.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1141,7 +1141,7 @@ private struct CalmModeView: View {
                                     font: StrandFont.number(48),
                                     color: StrandPalette.metricRose)
                     } else {
-                        Text("—")
+                        Text("-")
                             .font(StrandFont.number(48))
                             .foregroundStyle(StrandPalette.metricRose)
                     }
@@ -1152,7 +1152,7 @@ private struct CalmModeView: View {
                         Text("target")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
-                        Text(controller.calmTargetBpm.map { String(format: "%.0f", $0) } ?? "—")
+                        Text(controller.calmTargetBpm.map { String(format: "%.0f", $0) } ?? "-")
                             .font(StrandFont.number(22))
                             .foregroundStyle(StrandPalette.restBright)
                     }

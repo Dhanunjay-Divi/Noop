@@ -13,7 +13,7 @@ package com.noop.alarm
  * HONEST signal, no over-claiming: during deep sleep heart rate sits near its nightly trough and is
  * steady; in lighter sleep / on an arousal it lifts above that trough. We track the lowest smoothed
  * HR seen overnight (the trough proxy) and fire when the current HR rises a meaningful margin above
- * it AND is itself not at the floor. This is a coarse "you're stirring" heuristic — it is NOT a sleep
+ * it AND is itself not at the floor. This is a coarse "you're stirring" heuristic - it is NOT a sleep
  * stage classifier and makes no clinical claim. If the strap streams nothing (BLE down, not worn),
  * the detector simply never fires and the hard deadline wakes the user.
  */

@@ -72,6 +72,8 @@ final class AppModel: ObservableObject {
     let profile: ProfileStore
     /// Behaviour settings: double-tap action, wear automation, zone coaching, smart alarm, illness watch.
     let behavior: BehaviorStore
+    /// Current delivery state for the unified fixed-time / detected-duration alarm surface.
+    @Published private(set) var smartAlarmRuntimeState: SmartAlarmRuntimeState = .off
     /// On-device WHOOP-style recovery/strain/sleep computation from raw strap streams.
     let intelligence: IntelligenceEngine
 
@@ -178,6 +180,7 @@ final class AppModel: ObservableObject {
     let stressNudgeCenter = StressNudgeCenter()
 
     private var lastDoubleTapAt: Date = .distantPast
+    private var safetySOSGestureAccumulator = SafetySOSGestureAccumulator()
     private var lastCoachZone: Int = -1
     // L3 stress-onset detector state: a rolling R-R buffer + the replay-safe detector state (persisted
     // via BiofeedbackPrefs so a relaunch can't re-fire), carried verbatim between evaluations.
@@ -226,7 +229,11 @@ final class AppModel: ObservableObject {
     /// Every screen should show THIS, not the raw per-beat value (which swings with HRV).
     @Published var bpm: Int?
     private var hrWindow: [(t: Date, v: Double)] = []
+    private var stressRRBufferReceivedAt: Date?
     private var hrCancellables = Set<AnyCancellable>()
+    /// Coalesces a burst of repository publications into one contextual-vitals read. A newer refresh
+    /// cancels the pending pass; delivery itself remains deduplicated by ContextualInterventionPolicy.
+    private var contextualEvaluationTask: Task<Void, Never>?
     /// Manual workouts consume the live sensor EVENT stream, never repeated reads of cached display HR.
     private var workoutHeartRateCursor = WorkoutHeartRateCursor(consumedSequence: 0)
     /// Drives the READ spine off the registry's active device (#814 HIGH-1). A Devices-screen
@@ -325,8 +332,17 @@ final class AppModel: ObservableObject {
         live.$heartRate.sink { [weak self] _ in
             self?.ingestHR(shouldEvaluateStress: false)
         }.store(in: &hrCancellables)
-        live.$rr.sink { [weak self] _ in
-            self?.ingestHR(shouldEvaluateStress: true)
+        live.$rr.sink { [weak self] intervals in
+            self?.ingestHR(shouldEvaluateStress: true, rrPacket: intervals)
+        }.store(in: &hrCancellables)
+        // A natural history sync can publish the missing half of the stress evidence after the latest
+        // R-R packet. Re-evaluate the already-buffered R-R window without appending that packet again.
+        live.$recentWristMotionEvidence.dropFirst().sink { [weak self] _ in
+            // @Published emits before its backing value is committed. Defer one main-queue turn so the
+            // evaluator reads the newly-published evidence rather than the previous window.
+            DispatchQueue.main.async {
+                self?.evaluateStress()
+            }
         }.store(in: &hrCancellables)
         // Capture a workout point only for a genuine accepted HR packet. The LiveState event carries a
         // monotonic identity + receipt timestamp, unlike @Published display state, so an R-R republish,
@@ -338,14 +354,36 @@ final class AppModel: ObservableObject {
         // Physical-input + wear hooks (fired live by FrameRouter).
         live.onDoubleTap = { [weak self] in self?.handleDoubleTap() }
         live.onWristChange = { [weak self] worn in self?.handleWristChange(worn) }
+        Task { @MainActor in
+            await SafetySOSRuntime.shared.restoreLocationSharingIfNeeded()
+        }
         // Re-arm the next day's firmware alarm the moment the strap reports it fired (if/when the
         // firmware pushes STRAP_DRIVEN_ALARM_EXECUTED). Gated on enabled inside applySmartAlarm.
         live.onSmartAlarmFired = { [weak self] in
             guard let self, self.behavior.smartAlarmEnabled else { return }
+            TapAutomationPreferences.armAlarmDismiss()
             // PR #577 (iOS): mirror the strap's wake buzz to a local notification so a phone-in-pocket
             // user still gets woken; no-op on macOS / when wrist alerts are off.
             AppModel.postSmartAlarm()
-            self.applySmartAlarm()
+            if self.behavior.smartAlarmMode.usesDetectedSleep {
+                let target = Self.smartAlarmTargetMinutes(
+                    mode: self.behavior.smartAlarmMode,
+                    fixedMinutes: self.behavior.smartAlarmDurationMinutes,
+                    adaptiveMinutes: WindDownNudge.targetSleepMinutes
+                )
+                if self.behavior.smartAlarmArmedSessionStart > 0 {
+                    self.behavior.smartAlarmLastFiredSessionStart =
+                        self.behavior.smartAlarmArmedSessionStart
+                }
+                self.behavior.smartAlarmArmedSessionStart = 0
+                Self.cancelSmartAlarmBackupNotification()
+                self.smartAlarmRuntimeState = .durationReached(
+                    asleepMinutes: target,
+                    targetMinutes: target
+                )
+            } else {
+                self.applySmartAlarm()
+            }
         }
         // Strap battery alerts (#368): low-battery warning + full-charge note. The notifier self-gates
         // on the user's setting and the OS authorization, and carries its own persisted once-per-
@@ -369,6 +407,17 @@ final class AppModel: ObservableObject {
         repo.$days.sink { [weak self] days in
             self?.evaluateIllness(days)
             self?.evaluateStrainTarget()
+        }.store(in: &hrCancellables)
+        repo.$refreshSeq.dropFirst().sink { [weak self] _ in
+            self?.scheduleContextualInterventionEvaluation()
+        }.store(in: &hrCancellables)
+        // A newly-published detected session is the authoritative duration-alarm input. Reconcile after
+        // every real sleep-cache change; repeated analysis of the same session is deduplicated by onset.
+        repo.$sleeps.dropFirst().sink { [weak self] sessions in
+            guard let self,
+                  self.behavior.smartAlarmEnabled,
+                  self.behavior.smartAlarmMode == .sleepDuration else { return }
+            self.reconcileSleepDurationAlarm(sessions: sessions)
         }.store(in: &hrCancellables)
         // Re-arm the strap's firmware alarm once the connection has SETTLED — not the instant it (re)bonds.
         // A smart-alarm time changed while the strap was away never reached it , the send is gated on bond
@@ -469,7 +518,10 @@ final class AppModel: ObservableObject {
             // screenshots). No-op in Release (whole seeder is #if DEBUG) and once data already exists.
             if AppleDemoSeeder.requested, let store = await self.repo.storeHandle() {
                 await AppleDemoSeeder.seedIfRequested(
-                    into: store, vitalityProfileAge: self.profile.age)
+                    into: store,
+                    profileAge: self.profile.age,
+                    profileSex: self.profile.sex
+                )
                 // Give the demo a plausible strap battery so the Today header badge renders (the live
                 // battery is runtime-only and nil without a connected strap).
                 self.live.batteryPct = 68
@@ -477,6 +529,10 @@ final class AppModel: ObservableObject {
                 // the production truth gate (a stale percentage is never shown while disconnected).
                 if CommandLine.arguments.contains("--demo-band-connected") {
                     self.live.connected = true
+                }
+                if CommandLine.arguments.contains("--demo-band-charging") {
+                    self.live.connected = true
+                    self.live.charging = true
                 }
             }
             #endif
@@ -664,7 +720,7 @@ final class AppModel: ObservableObject {
             AutoWorkoutNotifications.clear()
             return
         }
-        guard let candidate = await repo.autoDetectCandidate() else {
+        guard let candidate = await repo.autoDetectCandidate(forceRefresh: true) else {
             AutoWorkoutNotifications.clear()
             return
         }
@@ -752,7 +808,7 @@ final class AppModel: ObservableObject {
     /// Fold a fresh reading into the smoothing window and republish a stable bpm.
     /// Prefers the strap's reported HR; falls back to 60000/R-R. Clamps to a plausible
     /// 30–220 range (rejects 0 / garbage spikes) and publishes the window MEDIAN.
-    private func ingestHR(shouldEvaluateStress: Bool) {
+    private func ingestHR(shouldEvaluateStress: Bool, rrPacket: [Int]? = nil) {
         var inst: Double?
         if let hr = live.heartRate, hr >= 30, hr <= 220 {
             inst = Double(hr)
@@ -778,15 +834,16 @@ final class AppModel: ObservableObject {
         // unconditional assign re-renders every bpm observer (Live, menu bar, widgets) for nothing.
         let smoothed = vals.isEmpty ? nil : Int(vals[vals.count / 2].rounded())
         if bpm != smoothed { bpm = smoothed }
-        if shouldEvaluateStress { evaluateStress() }
+        if shouldEvaluateStress { evaluateStress(rrPacket: rrPacket) }
         // Hydration's durable lane is the scheduled OS notification. The optional strap lane is
         // deliberately evaluated only while fresh HR packets are flowing, then additionally gated by
         // connected + worn + bonded + encrypted state. This makes the one-buzz behavior useful without
         // pretending iOS can guarantee a background BLE command after NOOP is suspended.
         if live.connected, live.worn, canBuzz,
-           HydrationReminders.claimDueStrapBuzz(now: now) {
+           let slot = HydrationReminders.claimDueStrapBuzz(now: now) {
             buzz(loops: 1)
-            live.append(log: "Water reminder · WHOOP buzz")
+            HydrationReminders.armDoubleTapConfirmation(for: slot, now: now)
+            live.append(log: "Water reminder · band cue issued")
         }
     }
 
@@ -1099,20 +1156,42 @@ final class AppModel: ObservableObject {
     /// passive nudge to `stressNudgeCenter`. The detector carries replay-safe state (de-dup + slow
     /// baseline + rate limit), persisted via `BiofeedbackPrefs` so a relaunch can't re-fire. Honest /
     /// non-clinical: "stress" is an autonomic proxy vs the user's own baseline, never a diagnosis.
-    private func evaluateStress() {
-        let fresh = live.rr.filter { $0 > 300 && $0 < 2000 }   // plausible R-R (30–200 bpm)
-        guard !fresh.isEmpty else { return }
-        rrBuf.append(contentsOf: fresh)
-        if rrBuf.count > 120 { rrBuf.removeFirst(rrBuf.count - 120) }
+    private func evaluateStress(rrPacket: [Int]? = nil) {
+        let now = Date()
+        if let rrPacket {
+            let fresh = rrPacket.filter { $0 > 300 && $0 < 2000 }   // plausible R-R (30–200 bpm)
+            guard !fresh.isEmpty, let receivedAt = live.rrReceivedAt else {
+                rrBuf.removeAll()
+                stressRRBufferReceivedAt = nil
+                return
+            }
+            if StressEvidencePolicy.shouldResetRRBuffer(
+                previousReceivedAt: stressRRBufferReceivedAt,
+                currentReceivedAt: receivedAt
+            ) {
+                rrBuf.removeAll()
+            }
+            rrBuf.append(contentsOf: fresh)
+            if rrBuf.count > 120 { rrBuf.removeFirst(rrBuf.count - 120) }
+            stressRRBufferReceivedAt = receivedAt
+        }
+        guard !rrBuf.isEmpty,
+              let rrAt = live.rrReceivedAt,
+              let recentMotionG = StressEvidencePolicy.qualifiedMotion(
+                now: now,
+                rrReceivedAt: rrAt,
+                heartRateReceivedAt: live.heartRateSample?.receivedAt,
+                motion: live.recentWristMotionEvidence,
+                connected: live.connected,
+                bonded: live.bonded,
+                encryptedBond: live.encryptedBond,
+                worn: live.worn
+              ) else { return }
 
         // Inert unless the master toggle is on; the engine owns every gate (auto-nudge, exercise gate,
         // motion evidence, baseline warm-up, quiet hours, rate limit, edge).
         let cfg = BiofeedbackPrefs.stressConfig()
-        guard cfg.enabled, live.bonded, live.worn else { return }
-        // The current live transport does not provide a trustworthy contemporaneous motion sample here.
-        // Pass nil explicitly; the detector fails closed rather than claiming the wearer was still.
-        // A future source may wire a real, timestamp-validated activity value into this seam.
-        let recentMotionG: Double? = nil
+        guard cfg.enabled else { return }
         let decision = StressOnsetDetector.evaluate(
             rrBuffer: rrBuf,
             currentHR: bpm.map(Double.init),
@@ -1121,13 +1200,29 @@ final class AppModel: ObservableObject {
                 || stressNudgeCenter.pending != nil,
             state: stressState,
             config: cfg,
-            nowSec: Int(Date().timeIntervalSince1970),
+            nowSec: Int(now.timeIntervalSince1970),
             tzOffsetSec: TimeZone.current.secondsFromGMT())
         stressState = decision.nextState
         BiofeedbackPrefs.saveStressState(decision.nextState)
         guard decision.shouldNudge else { return }
-        if canBuzz { buzz(loops: UInt8(clamping: decision.buzzLoops)) }
+        if canBuzz, UserDefaults.standard.bool(forKey: Self.wristAlertsMasterKey) {
+            buzz(loops: UInt8(clamping: decision.buzzLoops))
+        }
         stressNudgeCenter.present(fastRMSSD: decision.fastRMSSD, baselineRMSSD: decision.baselineRMSSD)
+        if BiofeedbackPrefs.phoneNudge {
+            ContextualInterventionCenter.post(
+                ContextualInterventionCandidate(
+                    kind: .stressBreathing,
+                    observedAt: rrAt,
+                    maximumAge: 5 * 60,
+                    fingerprint: String(decision.nextState.lastFireAt),
+                    title: String(localized: "Take a quiet minute"),
+                    body: String(localized: "A fresh wrist signal suggests a short breathing check-in may be useful. Open NOOP when you are ready."),
+                    route: .today
+                ),
+                now: now
+            )
+        }
         live.append(log: "Stress check-in · short-window HRV moved below recent baseline")
     }
 
@@ -1194,7 +1289,9 @@ final class AppModel: ObservableObject {
 
     /// The straps surfaced by the WHOOP present-scan (`scanForWhoops`), for the wizard's live list.
     /// Empty until a present-scan has discovered something; refreshed in place as RSSI updates.
-    var discoveredWhoops: [(uuid: String, name: String, rssi: Int)] { ble.discoveredWhoops }
+    var discoveredWhoops: [(uuid: String, name: String, rssi: Int, model: WhoopModel)] {
+        ble.discoveredWhoops
+    }
 
     /// True when the selected/connected strap is a WHOOP 5/MG. A thin window onto `BLEManager.isWhoop5`
     /// (its `selectedModel` is private) so a view can branch on the strap generation without reaching into
@@ -1501,8 +1598,10 @@ final class AppModel: ObservableObject {
     /// and never stacks. Kept separate from "smart-alarm-wake" (the strap-confirmed mirror) so the two
     /// never collide.
     private static let smartAlarmBackupId = "smart-alarm-wake-backup"
+    private static let smartAlarmDurationBackupId = "smart-alarm-duration-backup"
     private static var smartAlarmBackupIds: [String] {
-        [smartAlarmBackupId] + (1...7).map { "\(smartAlarmBackupId)-d\($0)" }
+        [smartAlarmBackupId, smartAlarmDurationBackupId]
+            + (1...7).map { "\(smartAlarmBackupId)-d\($0)" }
     }
 
     /// Schedule a BEST-EFFORT repeating daily backup wake notification for the smart alarm (#4 + #6).
@@ -1604,6 +1703,58 @@ final class AppModel: ObservableObject {
     }
     #endif
 
+    /// Schedule one best-effort OS fallback at the currently projected detected-sleep target. Every
+    /// fresh sync replaces this request, so accumulated awake time can move the wake later without
+    /// leaving an older notification behind.
+    static func scheduleSmartAlarmDurationBackupNotification(
+        at fireDate: Date,
+        log: (@MainActor @Sendable (String) -> Void)? = nil
+    ) {
+        #if os(iOS)
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: smartAlarmBackupIds)
+        guard fireDate.timeIntervalSinceNow > 1 else { return }
+
+        Task { @MainActor in
+            let initialStatus = await center.notificationSettings().authorizationStatus
+            switch initialStatus {
+            case .authorized:
+                addSmartAlarmDurationBackupRequest(center: center, fireDate: fireDate)
+            case .notDetermined:
+                let granted = (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+                let finalStatus = await center.notificationSettings().authorizationStatus
+                if granted, finalStatus == .authorized {
+                    addSmartAlarmDurationBackupRequest(center: center, fireDate: fireDate)
+                } else {
+                    log?("Sleep-duration alarm: backup notification NOT scheduled (notifications not authorized)")
+                }
+            default:
+                log?("Sleep-duration alarm: backup notification NOT scheduled (notifications not authorized)")
+            }
+        }
+        #endif
+    }
+
+    #if os(iOS)
+    private static func addSmartAlarmDurationBackupRequest(
+        center: UNUserNotificationCenter,
+        fireDate: Date
+    ) {
+        let delay = max(fireDate.timeIntervalSinceNow, 1)
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "Sleep goal")
+        content.body = String(localized: "Your detected-sleep target is due. This is a best-effort backup for the Noop Band vibration.")
+        content.sound = .default
+        center.add(
+            UNNotificationRequest(
+                identifier: smartAlarmDurationBackupId,
+                content: content,
+                trigger: UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false)
+            )
+        )
+    }
+    #endif
+
     /// Cancel the smart-alarm backup wake notification(s). Called on disarm. No-op on macOS.
     static func cancelSmartAlarmBackupNotification() {
         #if os(iOS)
@@ -1622,17 +1773,26 @@ final class AppModel: ObservableObject {
         guard behavior.smartAlarmEnabled else {
             ble.disableStrapAlarm()
             Self.cancelSmartAlarmBackupNotification()
+            behavior.smartAlarmArmedSessionStart = 0
+            smartAlarmRuntimeState = .off
             return
         }
+        if behavior.smartAlarmMode.usesDetectedSleep {
+            reconcileSleepDurationAlarm(sessions: repo.sleeps)
+            return
+        }
+        behavior.smartAlarmArmedSessionStart = 0
         guard let next = Self.nextSmartAlarmDate(minutes: behavior.smartAlarmMinutes,
                                                  weekdays: behavior.smartAlarmWeekdays) else {
             // No enabled weekday in the next week (only possible from a corrupted set) , disarm rather
             // than arm a misleading time the user never asked for.
             ble.disableStrapAlarm()
             Self.cancelSmartAlarmBackupNotification()
+            smartAlarmRuntimeState = .off
             return
         }
         ble.armStrapAlarm(at: next)
+        smartAlarmRuntimeState = .fixed(next)
         // Replace (remove + re-add by stable identifier) on every re-arm so the backup never stacks.
         // The log sink hops to the main actor because the auth check completes off-main and LiveState is
         // @MainActor - the same Task hop the importTraceSink uses.
@@ -1641,6 +1801,73 @@ final class AppModel: ObservableObject {
                                                   log: { [weak self] line in
                                                       self?.live.append(log: line)
                                                   })
+    }
+
+    private func reconcileSleepDurationAlarm(sessions: [CachedSleepSession]) {
+        let activeTarget = Self.smartAlarmTargetMinutes(
+            mode: behavior.smartAlarmMode,
+            fixedMinutes: behavior.smartAlarmDurationMinutes,
+            adaptiveMinutes: WindDownNudge.targetSleepMinutes
+        )
+        let decision = SleepDurationAlarmPolicy.decision(
+            sessions: sessions,
+            targetMinutes: activeTarget,
+            weekdays: behavior.smartAlarmWeekdays,
+            lastFiredSessionStart: behavior.smartAlarmLastFiredSessionStart
+        )
+        switch decision {
+        case .waiting:
+            ble.disableStrapAlarm()
+            Self.cancelSmartAlarmBackupNotification()
+            behavior.smartAlarmArmedSessionStart = 0
+            smartAlarmRuntimeState = .waitingForSleep
+
+        case .schedule(let fireDate, let observation, let targetMinutes):
+            ble.armStrapAlarm(at: fireDate)
+            behavior.smartAlarmArmedSessionStart = observation.sessionStart
+            smartAlarmRuntimeState = .durationScheduled(
+                fireDate: fireDate,
+                asleepMinutes: observation.asleepMinutes,
+                targetMinutes: targetMinutes
+            )
+            Self.scheduleSmartAlarmDurationBackupNotification(
+                at: fireDate,
+                log: { [weak self] line in self?.live.append(log: line) }
+            )
+
+        case .fire(let observation, let targetMinutes):
+            // Persist the guard before sending either wake path. A reconnect, refresh, or app crash after
+            // the command cannot make this same detected session buzz twice.
+            behavior.smartAlarmLastFiredSessionStart = observation.sessionStart
+            behavior.smartAlarmArmedSessionStart = 0
+            Self.cancelSmartAlarmBackupNotification()
+            TapAutomationPreferences.armAlarmDismiss()
+            ble.buzzStrapOnce()
+            AppModel.postSmartAlarm()
+            smartAlarmRuntimeState = .durationReached(
+                asleepMinutes: observation.asleepMinutes,
+                targetMinutes: targetMinutes
+            )
+
+        case .alreadyFired(let observation, let targetMinutes):
+            ble.disableStrapAlarm()
+            Self.cancelSmartAlarmBackupNotification()
+            behavior.smartAlarmArmedSessionStart = 0
+            smartAlarmRuntimeState = .durationReached(
+                asleepMinutes: observation.asleepMinutes,
+                targetMinutes: targetMinutes
+            )
+        }
+    }
+
+    nonisolated static func smartAlarmTargetMinutes(
+        mode: SmartAlarmMode,
+        fixedMinutes: Int,
+        adaptiveMinutes: Int
+    ) -> Int {
+        SleepDurationAlarmPolicy.normalizedTargetMinutes(
+            mode == .adaptiveSleep ? adaptiveMinutes : fixedMinutes
+        )
     }
 
     /// Compute the next fire date for the smart alarm, honouring the weekday selection.
@@ -1698,6 +1925,48 @@ final class AppModel: ObservableObject {
         let now = Date()
         guard now.timeIntervalSince(lastDoubleTapAt) > 1.2 else { return }   // debounce repeats
         lastDoubleTapAt = now
+
+        if let pending = TapAutomationStore.consume(now: now) {
+            switch pending.kind {
+            case .alarmDismiss:
+                stopHaptics()
+                live.append(log: "Double-tap → stopped active band alarm haptics")
+            case .hydrationConfirm:
+                let amountML = min(max(pending.value, 50), 1_000)
+                live.append(log: "Double-tap → confirmed \(amountML) ml water")
+                Task { [weak self] in
+                    guard let self else { return }
+                    _ = await self.repo.logHydration(amountMl: amountML)
+                    HydrationReminders.markDoubleTapConfirmed(contextKey: pending.contextKey)
+                    self.buzz(loops: 1)
+                }
+            case .reminderAcknowledge:
+                live.append(log: "Double-tap → acknowledged reminder")
+            }
+            return
+        }
+
+        if SafetySOSGesturePreferences.isEnabled {
+            let required = SafetySOSGesturePreferences.requiredEvents
+            switch safetySOSGestureAccumulator.record(
+                eventUptime: ProcessInfo.processInfo.systemUptime,
+                requiredEvents: required
+            ) {
+            case .progress(let count):
+                live.append(
+                    log: "SOS gesture: repeated double-tap \(count)/\(required)"
+                )
+            case .triggered:
+                live.append(log: "SOS gesture complete; opening a manual contact page")
+                buzz(loops: 3)
+                SafetySOSRuntime.shared.trigger { [weak self] outcome in
+                    self?.live.append(log: outcome.logLine)
+                }
+            }
+            return
+        }
+
+        safetySOSGestureAccumulator.reset()
         live.append(log: "Double-tap → \(behavior.doubleTapAction.label)")
         runMacAction(behavior.doubleTapAction, shortcut: behavior.doubleTapShortcut)
     }
@@ -1797,26 +2066,23 @@ final class AppModel: ObservableObject {
         else if zone <= 1, lastCoachZone > 1 { buzz(loops: 1) }     // recovered
     }
 
-    /// Illness/strain early-warning (v5): the confounder-suppressed `IllnessSignalEngine`. For the last
-    /// ~2 days vs a ~28-day personal baseline it z-scores resting HR, skin-temp deviation, HRV (negated)
-    /// and respiration ORIENTED illness-ward, then the engine applies its minimum-corroboration gate,
-    /// composite score, and , the differentiating part , same-day journal confounder suppression
-    /// (alcohol / a hard-or-late workout / etc.) so a night out doesn't cry wolf. The journal context is
-    /// read asynchronously, so this kicks a Task; the published `illnessSignal` + the `healthAlert`
-    /// banner both come from the engine's single decision. On-device only, APPROXIMATE , not a diagnosis.
+    /// Illness/strain early-warning (v5). Each signal gets its own calendar freshness and trusted
+    /// personal baseline through `IllnessSignalPipeline`; nearby journal context is explanatory and can
+    /// never hide a corroborated shift. An explicit feeling-unwell entry remains visible even when the
+    /// wearable is absent because missing sensor data cannot assess symptom severity.
     private func evaluateIllness(_ days: [DailyMetric]) {
         let ordered = days.sorted { $0.day < $1.day }
         let currentKey = max(Repository.logicalDayKey(Date()), Repository.localDayKey(Date()))
-        guard behavior.illnessWatch, ordered.count >= 14,
-              Self.illnessHistoryIsFresh(dayKeys: ordered.map(\.day), todayKey: currentKey) else {
+        guard behavior.illnessWatch else {
             healthAlert = nil; illnessSignal = nil; illnessDistance = nil; return
         }
         Task { [weak self] in
             guard let self else { return }
-            // Confounder tags from the recent journal (within the last ~2 days). Read once, off the
-            // engine's hot path , the engine only needs presence flags, not the rows.
-            let recentDays = Set(ordered.suffix(2).map(\.day))
+            // Journal context uses exact civil days rather than whichever wearable rows happen to be
+            // last. This keeps symptom-first behavior available through data gaps and sparse histories.
+            let recentDays = Self.illnessJournalDayKeys()
             let journal = await self.repo.journalEntries(days: 7)
+            guard self.behavior.illnessWatch else { return }
             var ctxAlcohol = false, ctxHardWorkout = false, ctxAlreadyUnwell = false
             for e in journal where e.answeredYes && recentDays.contains(e.day) {
                 let q = e.question.lowercased()
@@ -1825,8 +2091,34 @@ final class AppModel: ObservableObject {
                 if q.contains("sick") || q.contains("ill") || q.contains("unwell") { ctxAlreadyUnwell = true }
             }
             self.applyIllnessSignal(ordered, alcohol: ctxAlcohol, hardOrLateWorkout: ctxHardWorkout,
-                                    alreadyUnwell: ctxAlreadyUnwell)
+                                    alreadyUnwell: ctxAlreadyUnwell, todayKey: currentKey)
         }
+    }
+
+    /// Current civil day plus the prior two, matching the engine's maximum per-signal age without
+    /// borrowing dates from available sensor rows.
+    nonisolated static func illnessJournalDayKeys(
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> Set<String> {
+        Set((0...IllnessSignalPipeline.maximumSignalAgeDays).compactMap { offset in
+            guard let date = calendar.date(byAdding: .day, value: -offset, to: now) else {
+                return nil
+            }
+            let components = calendar.dateComponents([.year, .month, .day], from: date)
+            guard let year = components.year,
+                  let month = components.month,
+                  let day = components.day else {
+                return nil
+            }
+            return String(
+                format: "%04d-%02d-%02d",
+                locale: Locale(identifier: "en_US_POSIX"),
+                year,
+                month,
+                day
+            )
+        })
     }
 
     /// Pure freshness seam for the illness adapter. A historical import must never be presented as a
@@ -1848,90 +2140,24 @@ final class AppModel: ObservableObject {
     /// Run the `IllnessSignalEngine` from the day history + the journal-derived confounder context, then
     /// publish the result + the legacy `healthAlert` banner string (kept for the existing banner surface).
     private func applyIllnessSignal(_ days: [DailyMetric], alcohol: Bool,
-                                    hardOrLateWorkout: Bool, alreadyUnwell: Bool) {
+                                    hardOrLateWorkout: Bool, alreadyUnwell: Bool,
+                                    todayKey: String) {
         let previous = healthAlert
-        let recent = Array(days.suffix(2))
-        let base = Array(days.suffix(31).dropLast(3))    // ~28 days ending 3 days ago
-        func mean(_ vals: [Double]) -> Double? { vals.isEmpty ? nil : vals.reduce(0, +) / Double(vals.count) }
-        func rm(_ kp: (DailyMetric) -> Double?) -> Double? { mean(recent.compactMap(kp)) }
-
-        // Build each signal's illness-ward z against the personal baseline (Baselines.deviation). The
-        // baseline is folded over the full pre-recent history; a trusted baseline (≥14 nights) is the
-        // engine's gate for actually raising. Skin-temp is already a stored DEVIATION (°C), so it's
-        // z-scored against a zero-centred personal spread; the others z-score the raw column.
-        func signal(_ kp: (DailyMetric) -> Double?, cfgKey: String, illnessUp: Bool) -> (IllnessSignalEngine.SignalReading, Bool)? {
-            guard let cfg = Baselines.metricCfg[cfgKey], let recentMean = rm(kp) else { return nil }
-            let state = Baselines.foldHistory(base.map(kp), cfg: cfg)
-            guard state.usable else { return (IllnessSignalEngine.SignalReading(zIllnessward: 0, present: false), false) }
-            let dev = Baselines.deviation(recentMean, state: state)
-            let z = illnessUp ? dev.z : -dev.z   // HRV drop is illness-ward → negate
-            return (IllnessSignalEngine.SignalReading(zIllnessward: z), state.trusted)
-        }
-
-        let rhr = signal({ $0.restingHr.map(Double.init) }, cfgKey: "resting_hr", illnessUp: true)
-        let hrv = signal({ $0.avgHrv }, cfgKey: "hrv", illnessUp: false)
-        let resp = signal({ $0.respRateBpm }, cfgKey: "resp", illnessUp: true)
-        // Skin-temp deviation: a stored °C delta. Build a small zero-centred state from its own recent
-        // spread so a +0.6 °C reads as a meaningful z without needing a separate baseline column.
-        var skin: (IllnessSignalEngine.SignalReading, Bool)? = nil
-        if let recentSkin = rm({ $0.skinTempDevC }) {
-            let z = recentSkin / 0.3     // ~0.3 °C ≈ one personal spread (matches skin_temp floorSpread)
-            // Skin temperature is a deviation, but it still needs enough same-stream history before it
-            // may count as a trusted corroborator. It can remain visible in detail during calibration.
-            let trusted = base.compactMap(\.skinTempDevC).count >= 14
-            skin = (IllnessSignalEngine.SignalReading(zIllnessward: z), trusted)
-        }
-
-        let inputs = IllnessSignalEngine.Inputs(
-            restingHR: rhr?.0, skinTemp: skin?.0, hrv: hrv?.0, respiration: resp?.0)
-
-        // PARALLEL Mahalanobis distance on the SAME illness-ward z-vector (RHR up, HRV negated, skin-temp
-        // up, respiration up). This NEVER gates the alert: the IllnessSignalEngine above remains the sole
-        // fire gate. We compute it here only so the Heads-Up card can show a "how strong" confidence band
-        // when the engine has already raised. nil where a reading is absent / not present (dropped from the
-        // distance). correlation: nil = identity, validated to agree ~100% with the z-sum detector.
-        func zIfPresent(_ r: (IllnessSignalEngine.SignalReading, Bool)?) -> Double? {
-            guard let reading = r?.0, reading.present else { return nil }
-            return reading.zIllnessward
-        }
-        let distanceFeatures = IllnessDistance.FeatureVector(
-            restingHR: zIfPresent(rhr),
-            rmssd: zIfPresent(hrv),       // hrv.zIllnessward is already the NEGATED HRV z
-            skinTemp: zIfPresent(skin),
-            respiration: zIfPresent(resp))
-        illnessDistance = IllnessDistance.evaluate(features: distanceFeatures, correlation: nil)
-
-        // A raised multi-vital message requires TWO firing readings with trusted personal baselines.
-        // The previous `(RHR trusted) || (HRV trusted)` gate let one trusted metric lend certainty to an
-        // unrelated untrusted signal (and skin temperature was hard-coded trusted).
-        let trustedFiringCount = [rhr, skin, hrv, resp]
-            .compactMap { $0 }
-            .filter { reading, baselineTrusted in
-                baselineTrusted && reading.present
-                    && reading.zIllnessward > IllnessSignalEngine.signalZThreshold
-            }
-            .count
-        let trusted = trustedFiringCount >= IllnessSignalEngine.minCorroboratingSignals
-        let context = IllnessSignalEngine.Context(
-            alcohol: alcohol, hardOrLateWorkout: hardOrLateWorkout,
-            alreadyUnwell: alreadyUnwell, baselineTrusted: trusted)
-
-        // Caller-rendered phrases for the signals that fire (the engine surfaces only the firing ones).
-        var labels: [String: String] = [:]
-        if let r = rm({ $0.restingHr.map(Double.init) }), let b = mean(base.compactMap { $0.restingHr.map(Double.init) }), r > b {
-            labels["restingHR"] = "RHR +\(Int((r - b).rounded()))"
-        }
-        if let r = rm({ $0.avgHrv }), let b = mean(base.compactMap { $0.avgHrv }), b > 0, r < b {
-            labels["hrv"] = "HRV −\(Int(((1 - r / b) * 100).rounded()))%"
-        }
-        if let r = rm({ $0.skinTempDevC }), r > 0 {
-            labels["skinTemp"] = "skin temp +\(String(format: "%.1f", r)) °C"
-        }
-        if let r = rm({ $0.respRateBpm }), let b = mean(base.compactMap { $0.respRateBpm }), r > b {
-            labels["respiration"] = "respiration up"
-        }
-
-        let result = IllnessSignalEngine.evaluate(inputs, context: context, firedLabels: labels)
+        let prepared = IllnessSignalPipeline.prepare(days: days, todayKey: todayKey)
+        let result = IllnessSignalEngine.evaluate(
+            prepared.inputs,
+            context: .init(
+                alcohol: alcohol, hardOrLateWorkout: hardOrLateWorkout,
+                alreadyUnwell: alreadyUnwell,
+                recentMedicationChange: MedicationStore.hasRecentChange,
+                baselineTrusted: prepared.baselineTrusted
+            ),
+            firedLabels: prepared.firedLabels
+        )
+        illnessDistance = IllnessDistance.evaluate(
+            features: prepared.distanceFeatures,
+            correlation: nil
+        )
         illnessSignal = result
         // The amber banner string reflects the raised / already-unwell levels only (the calmer levels
         // surface in the Health hub's Heads-Up card, never as a scary banner).
@@ -1970,6 +2196,113 @@ final class AppModel: ObservableObject {
         evaluateIllness(repo.days)
     }
 
+    /// Re-run opt-in contextual checks after a settings change. Repository refreshes call the same
+    /// coalesced path automatically when new wearable or HealthKit data lands.
+    func reevaluateContextualInterventions() {
+        scheduleContextualInterventionEvaluation()
+    }
+
+    private func scheduleContextualInterventionEvaluation() {
+        contextualEvaluationTask?.cancel()
+        contextualEvaluationTask = Task { [weak self] in
+            await Task.yield()
+            guard !Task.isCancelled, let self else { return }
+            await self.evaluateContextualInterventions()
+        }
+    }
+
+    /// Event-driven wellness delivery over data that has already been validated and stored. Oxygen needs
+    /// two fresh low days; explicit body temperature gets a recheck-only review; VO2 needs two persistent
+    /// recent points against an older reference. Skin temperature stays in the corroborated multi-vital
+    /// rule and is never treated as body temperature.
+    private func evaluateContextualInterventions() async {
+        if ContextualInterventionSettings.vitalReviewEnabled {
+            if let oxygen = ContextualVitalPolicy.oxygenCandidate(sourceRows: repo.vitalRows) {
+                ContextualInterventionCenter.post(oxygen)
+            }
+
+            async let appleBodyRows = repo.exploreSeries(
+                key: "body_temp", source: Repository.appleHealthSource, days: 7
+            )
+            async let healthConnectBodyRows = repo.exploreSeries(
+                key: "body_temp", source: Repository.healthConnectSource, days: 7
+            )
+            async let wearableBodyRows = repo.exploreSeries(
+                key: "body_temp", source: repo.deviceId, days: 7
+            )
+            let (appleBody, healthConnectBody, wearableBody) = await (
+                appleBodyRows, healthConnectBodyRows, wearableBodyRows
+            )
+            guard !Task.isCancelled else { return }
+            let bodyPoints =
+                appleBody.map {
+                    ContextualVitalPolicy.BodyTemperaturePoint(
+                        day: $0.day, valueC: $0.value,
+                        source: Repository.appleHealthSource, sourcePriority: 0
+                    )
+                } +
+                healthConnectBody.map {
+                    ContextualVitalPolicy.BodyTemperaturePoint(
+                        day: $0.day, valueC: $0.value,
+                        source: Repository.healthConnectSource, sourcePriority: 1
+                    )
+                } +
+                wearableBody.map {
+                    ContextualVitalPolicy.BodyTemperaturePoint(
+                        day: $0.day, valueC: $0.value,
+                        source: repo.deviceId, sourcePriority: 2
+                    )
+                }
+            if let bodyTemperature = ContextualVitalPolicy.bodyTemperatureCandidate(
+                points: bodyPoints
+            ) {
+                ContextualInterventionCenter.post(bodyTemperature)
+            }
+        }
+
+        guard ContextualInterventionSettings.vo2ReviewEnabled,
+              !Task.isCancelled else { return }
+        async let appleMeasuredRows = repo.exploreSeries(
+            key: "vo2max",
+            source: Repository.appleHealthSource,
+            days: 400
+        )
+        async let wearableMeasuredRows = repo.exploreSeries(
+            key: "vo2max",
+            source: "my-whoop",
+            days: 400
+        )
+        async let estimatedRows = repo.exploreSeries(
+            key: "vo2max_est",
+            source: "my-whoop",
+            days: 400
+        )
+        let (appleMeasured, wearableMeasured, estimated) = await (
+            appleMeasuredRows,
+            wearableMeasuredRows,
+            estimatedRows
+        )
+        guard !Task.isCancelled else { return }
+
+        // Apple Health wins a same-day collision because it carries an explicit measured VO2 type;
+        // wearable imports fill days Apple does not have. Estimated model points remain a separate lane.
+        var measuredByDay: [String: Double] = [:]
+        for row in wearableMeasured { measuredByDay[row.day] = row.value }
+        for row in appleMeasured { measuredByDay[row.day] = row.value }
+        let measured = measuredByDay
+            .map { ContextualVitalPolicy.VO2Point(day: $0.key, value: $0.value) }
+            .sorted { $0.day < $1.day }
+        let modelled = estimated.map {
+            ContextualVitalPolicy.VO2Point(day: $0.day, value: $0.value)
+        }
+        if let candidate = ContextualVitalPolicy.vo2Candidate(
+            measured: measured,
+            estimated: modelled
+        ) {
+            ContextualInterventionCenter.post(candidate)
+        }
+    }
+
     // MARK: - v5 skin-temp suite engines (cycle phase + body clock)
     //
     // Run in the analytics pass (IntelligenceEngine calls this after it persists the night's scores) so
@@ -1999,22 +2332,29 @@ final class AppModel: ObservableObject {
     private func computeCyclePhase() async {
         guard cycleAwarenessEnabled else { cyclePhase = nil; cycleCurve = []; return }
         let days = repo.days
-        guard let tempCfg = Baselines.metricCfg["skin_temp"],
-              let rhrCfg = Baselines.metricCfg["resting_hr"],
+        guard let rhrCfg = Baselines.metricCfg["resting_hr"],
               let hrvCfg = Baselines.metricCfg["hrv"] else { return }
 
-        // The nightly absolute skin-temp mean isn't in repo.days (only the °C DEVIATION is), so z-score
-        // the deviation against its own folded spread , a zero-centred personal baseline. RHR + HRV
-        // z-score their raw columns. Oldest→newest.
+        // The daily skin-temp column is mixed: imported WHOOP rows are absolute °C and local rows are
+        // signed deviations. Each night is therefore evaluated only against PRIOR rows of its own kind;
+        // RHR + HRV continue to z-score their raw columns. Oldest→newest.
         let sorted = days.sorted { $0.day < $1.day }
-        let skinState = Baselines.foldHistory(sorted.map { $0.skinTempDevC }, cfg: tempCfg)
         let rhrState = Baselines.foldHistory(sorted.map { $0.restingHr.map(Double.init) }, cfg: rhrCfg)
         let hrvState = Baselines.foldHistory(sorted.map { $0.avgHrv }, cfg: hrvCfg)
 
         var nights: [CyclePhaseEngine.Night] = []
         var curve: [Double] = []
-        for d in sorted {
-            let tempZ = d.skinTempDevC.map { skinState.usable ? Baselines.deviation($0, state: skinState).z : $0 / 0.3 }
+        var latestSkinAssessment: VitalBands.SkinTempIllnessAssessment?
+        for (index, d) in sorted.enumerated() {
+            let priorSkin = sorted[..<index].map(\.skinTempDevC)
+            let skinAssessment = VitalBands.skinTempIllnessAssessment(
+                recent: [d.skinTempDevC],
+                baseline: Array(priorSkin)
+            )
+            latestSkinAssessment = skinAssessment ?? latestSkinAssessment
+            let tempZ = skinAssessment?.reading.present == true
+                ? skinAssessment?.reading.zIllnessward
+                : nil
             let rhrZ = (rhrState.usable ? d.restingHr.map { Baselines.deviation(Double($0), state: rhrState).z } : nil)
             let hrvZ = (hrvState.usable ? d.avgHrv.map { Baselines.deviation($0, state: hrvState).z } : nil)
             nights.append(CyclePhaseEngine.Night(day: d.day, tempZ: tempZ, rhrZ: rhrZ, hrvZ: hrvZ))
@@ -2025,7 +2365,7 @@ final class AppModel: ObservableObject {
         // than silently overriding the sensor evidence.
         let loggedPeriodStarts = await repo.periodStarts()
         cyclePhase = CyclePhaseEngine.classify(nights,
-                                               baselineUsable: skinState.usable,
+                                               baselineUsable: latestSkinAssessment?.baselineTrusted == true,
                                                loggedPeriodStarts: loggedPeriodStarts)
         cycleCurve = curve
     }

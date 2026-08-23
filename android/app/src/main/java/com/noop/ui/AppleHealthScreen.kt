@@ -327,7 +327,7 @@ private fun MetricTile(
     val caption: String?
     when {
         empty -> {
-            value = "—"
+            value = "-"
             caption = null
         }
         aggregate == Aggregate.Latest -> {
@@ -441,7 +441,7 @@ private fun MetricChartCard(
     val values = rows.map { it.value }
     val n = values.size
     val mean = if (n > 0) values.average() else null
-    val trailing = mean?.let { fmt(it) } ?: "—"
+    val trailing = mean?.let { fmt(it) } ?: "-"
 
     val subtitle = run {
         val unit = if (n == 1) "reading" else "readings"
@@ -483,7 +483,7 @@ private fun MetricChartCard(
                         "Points" to "$n",
                     )
                 } else {
-                    listOf("Avg" to "—", "Min" to "—", "Max" to "—", "Points" to "0")
+                    listOf("Avg" to "-", "Min" to "-", "Max" to "-", "Points" to "0")
                 },
             )
         }

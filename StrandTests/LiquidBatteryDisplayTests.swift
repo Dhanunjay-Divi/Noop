@@ -58,6 +58,14 @@ final class LiquidBatteryDisplayTests: XCTestCase {
                        .charge(pct: 87.4, charging: false))
     }
 
+    func testChargingUsesBoltInsideBatteryWithOrWithoutPercentage() {
+        XCTAssertEqual(Display.pending(charging: true).symbolName, "battery.100.bolt")
+        XCTAssertEqual(Display.charge(pct: 42, charging: true).symbolName, "battery.100.bolt")
+        XCTAssertEqual(Display.charge(pct: 42, charging: false).symbolName, "battery.50percent")
+        XCTAssertEqual(Display.charge(pct: 42, charging: true).levelSymbolName, "battery.50percent")
+        XCTAssertTrue(Display.charge(pct: 42, charging: true).isCharging)
+    }
+
     /// `charging` is `Bool?` — nil means "the strap hasn't said" (no BATTERY_LEVEL event this session),
     /// which must read as not-charging, never as charging. Same `== true` posture as the rest of the app.
     func testUnknownChargingReadsAsNotCharging() {

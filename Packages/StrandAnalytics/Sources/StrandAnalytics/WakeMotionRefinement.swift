@@ -1,7 +1,7 @@
 import Foundation
 import WhoopProtocol
 
-// WakeMotionRefinement.swift — motion-aware wake refinement (#364 "Proposal 2", a follow-up to the
+// WakeMotionRefinement.swift - motion-aware wake refinement (#364 "Proposal 2", a follow-up to the
 // sleep-presentation work in #364; density-gate precedent from #345).
 //
 // THE PROBLEM. Both stagers (`SleepStager` V1, `SleepStagerV2`) call "wake" primarily from HR / HR
@@ -27,12 +27,12 @@ import WhoopProtocol
 // wake time, it never invents wake the incumbent stager didn't already call.
 //
 // THE DENSITY SELF-GATE (#345). `SleepStagerV2`'s own header notes the WHOOP 4.0 gravity stream is often
-// too sparse to tell "restless in bed" from "out of bed" — the same limitation applies here even harder,
+// too sparse to tell "restless in bed" from "out of bed" - the same limitation applies here even harder,
 // because a per-minute posture VARIANCE needs multiple samples inside each minute to mean anything (a
 // single sample has zero variance by construction, which would silently read as "stable" and rubber-stamp
 // every wake block on a sparse night). And a WHOOP 4.0 never emits `StepSample` at all — `steps` is
 // permanently empty on that model, so a naive "zero ticks = no locomotion" read would ALWAYS pass. Rather
-// than branch on strap family/model (which the maintainer flagged in #345 as too coarse — a "4.0" string
+// than branch on strap family/model (which the maintainer flagged in #345 as too coarse - a "4.0" string
 // tells you nothing about how dense THIS night's data actually is), `isMotionDense` measures the OBSERVED
 // stream directly: at least `minDenseMinuteCoverageFraction` of the night's minutes must carry
 // `>= minGravitySamplesPerMinuteForVariance` gravity samples AND `>= minStepSamplesPerMinuteForDensity`
@@ -63,7 +63,7 @@ public enum WakeMotionRefinement {
     /// and the sustained rule; this constant exists for a single very busy minute with a quiet neighbour.
     public static let singleMinuteWalkTicks: Int = 40
 
-    /// Per-minute gravity posture variance (g², see `postureVariance`) below this reads as "stable" — the
+    /// Per-minute gravity posture variance (g², see `postureVariance`) below this reads as "stable" - the
     /// reference night's motionless stretches measured < 0.01; 0.05 leaves headroom above strap/decode
     /// noise while still well below the reference night's turn-over spikes.
     public static let stablePostureVarianceG2: Double = 0.05

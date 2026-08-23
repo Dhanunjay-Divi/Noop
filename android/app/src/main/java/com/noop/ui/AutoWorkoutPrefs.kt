@@ -2,6 +2,8 @@ package com.noop.ui
 
 import android.content.Context
 import com.noop.analytics.AutoWorkoutDetector
+import com.noop.analytics.CoarseWorkoutClass
+import com.noop.analytics.WorkoutSport
 import com.noop.data.WorkoutRow
 
 /**
@@ -27,6 +29,7 @@ object AutoWorkoutPrefs {
     private const val KEY_REVIEW_SOURCE = "autoWorkout.review.source"
     private const val KEY_REVIEW_AVG = "autoWorkout.review.avg"
     private const val KEY_REVIEW_PEAK = "autoWorkout.review.peak"
+    private const val KEY_PREFERRED_SPORT_PREFIX = "workouts.autoDetectPreferredSport."
 
     data class Review(
         val startSec: Long,
@@ -131,6 +134,35 @@ object AutoWorkoutPrefs {
                 durationMin = maxOf(1, ((row.endTs - row.startTs) / 60L).toInt()),
             ),
         )
+    }
+
+    /** Last exact catalog choice for this broad detector hint. No free text or private notes are stored. */
+    fun preferredSport(
+        ctx: Context,
+        candidate: AutoWorkoutDetector.DetectedWorkout,
+    ): String {
+        val key = KEY_PREFERRED_SPORT_PREFIX + (candidate.suggestedClass?.raw ?: "generic")
+        prefs(ctx).getString(key, null)?.let { stored ->
+            WorkoutSport.all.firstOrNull { it.name.equals(stored, ignoreCase = true) }?.let {
+                return it.name
+            }
+        }
+        return when (candidate.suggestedClass) {
+            CoarseWorkoutClass.WALK -> "Walking"
+            CoarseWorkoutClass.RUN -> "Running"
+            CoarseWorkoutClass.STRENGTH -> "Strength"
+            CoarseWorkoutClass.CYCLE -> "Cycling"
+            CoarseWorkoutClass.SKI -> "Skiing"
+            CoarseWorkoutClass.OTHER, null -> WorkoutSport.default.name
+        }
+    }
+
+    fun rememberSport(ctx: Context, sportName: String, hint: CoarseWorkoutClass?) {
+        val sport = WorkoutSport.all.firstOrNull {
+            it.name.equals(sportName.trim(), ignoreCase = true)
+        } ?: return
+        val key = KEY_PREFERRED_SPORT_PREFIX + (hint?.raw ?: "generic")
+        prefs(ctx).edit().putString(key, sport.name).apply()
     }
 
     fun recordReview(ctx: Context, review: Review) {

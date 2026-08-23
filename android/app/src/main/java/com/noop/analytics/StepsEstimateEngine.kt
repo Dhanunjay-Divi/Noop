@@ -198,7 +198,7 @@ object StepsEstimateEngine {
 
     /**
      * Estimated steps for a day from its motion volume and the personal calibration. null below
-     * MIN_MOTION_FOR_FIT (too little to say) — the UI then shows "—", never a fake 0.
+     * MIN_MOTION_FOR_FIT (too little to say) - the UI then shows "-", never a fake 0.
      */
     fun estimate(motion: Double, calibration: Calibration): Int? {
         if (motion < MIN_MOTION_FOR_FIT || calibration.coefficient <= 0) return null

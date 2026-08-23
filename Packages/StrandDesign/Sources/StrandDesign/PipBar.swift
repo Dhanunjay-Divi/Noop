@@ -110,7 +110,7 @@ public struct PipBar: View {
     /// Each pip owns the sub-range `[index/N, (index+1)/N]`. As `animatedFraction` sweeps up it crosses
     /// these edges left→right, so segments fill in sequence. Within a pip the fill ramps over its own
     /// span (so the *leading* pip fades in smoothly rather than snapping), then we add a small brightness
-    /// lift to whichever pip currently holds the lead edge — the "last filled segment is a touch brighter".
+    /// lift to whichever pip currently holds the lead edge - the "last filled segment is a touch brighter".
     private func fillStyle(for index: Int, track: Color, leadBase: Color) -> Color {
         let n = Double(pipCount)
         let segStart = Double(index) / n

@@ -107,7 +107,7 @@ public final class FTMSSource: NSObject, ObservableObject {
         scanning = true
         log("FTMS: scanning for gym equipment (0x1826)…")
         guard central.state == .poweredOn else {
-            log("FTMS: Bluetooth not powered on (state=\(central.state.rawValue)) — scan deferred until ready")
+            log("FTMS: Bluetooth not powered on (state=\(central.state.rawValue)) - scan deferred until ready")
             return
         }
         central.scanForPeripherals(withServices: [Self.fitnessMachineService],
@@ -128,7 +128,7 @@ public final class FTMSSource: NSObject, ObservableObject {
         let p = seenPeripherals[id] ?? central.retrievePeripherals(withIdentifiers: [id]).first
         guard let p else {
             pendingConnectID = id
-            log("FTMS: machine \(id) not cached yet — scanning to find it")
+            log("FTMS: machine \(id) not cached yet - scanning to find it")
             scan()
             return
         }
@@ -137,7 +137,7 @@ public final class FTMSSource: NSObject, ObservableObject {
         p.delegate = self
         guard central.state == .poweredOn else {
             pendingConnectID = id
-            log("FTMS: Bluetooth not powered on — connect to \(id) deferred until ready")
+            log("FTMS: Bluetooth not powered on - connect to \(id) deferred until ready")
             return
         }
         log("FTMS: connecting to \(id)")
@@ -214,21 +214,21 @@ extension FTMSSource: @preconcurrency CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        log("FTMS: connected — discovering services")
+        log("FTMS: connected - discovering services")
         peripheral.delegate = self
         peripheral.discoverServices([Self.fitnessMachineService, Self.batteryService])
     }
 
     public func centralManager(_ central: CBCentralManager,
                                didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        log("FTMS: WARNING failed to connect — \(error?.localizedDescription ?? "unknown error")")
+        log("FTMS: WARNING failed to connect - \(error?.localizedDescription ?? "unknown error")")
         if feedsLive { live.connected = false }
     }
 
     public func centralManager(_ central: CBCentralManager,
                                didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         if let error = error {
-            log("FTMS: disconnected — \(error.localizedDescription)")
+            log("FTMS: disconnected - \(error.localizedDescription)")
         } else {
             log("FTMS: disconnected (clean)")
         }
@@ -245,7 +245,7 @@ extension FTMSSource: @preconcurrency CBCentralManagerDelegate {
 extension FTMSSource: @preconcurrency CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error = error {
-            log("FTMS: WARNING service discovery failed — \(error.localizedDescription)")
+            log("FTMS: WARNING service discovery failed - \(error.localizedDescription)")
             return
         }
         guard let services = peripheral.services else {
@@ -253,28 +253,28 @@ extension FTMSSource: @preconcurrency CBPeripheralDelegate {
             return
         }
         for svc in services where svc.uuid == Self.fitnessMachineService {
-            log("FTMS: 0x1826 fitness machine service FOUND — discovering machine-data characteristics")
+            log("FTMS: 0x1826 fitness machine service FOUND - discovering machine-data characteristics")
             peripheral.discoverCharacteristics(Self.machineChars, for: svc)
         }
         for svc in services where svc.uuid == Self.batteryService {
             peripheral.discoverCharacteristics([Self.batteryLevel], for: svc)
         }
         if !services.contains(where: { $0.uuid == Self.fitnessMachineService }) {
-            log("FTMS: 0x1826 service NOT FOUND — this device isn't a fitness machine")
+            log("FTMS: 0x1826 service NOT FOUND - this device isn't a fitness machine")
         }
     }
 
     public func peripheral(_ peripheral: CBPeripheral,
                            didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         if let error = error {
-            log("FTMS: WARNING characteristic discovery failed — \(error.localizedDescription)")
+            log("FTMS: WARNING characteristic discovery failed - \(error.localizedDescription)")
             return
         }
         guard let chars = service.characteristics else { return }
         // Subscribe to whichever machine-data characteristic this machine exposes (notify-only).
         for ch in chars {
             guard let kind = Self.machineKind(for: ch.uuid) else { continue }
-            log("FTMS: \(kind.displayName) data characteristic found — enabling notifications")
+            log("FTMS: \(kind.displayName) data characteristic found - enabling notifications")
             peripheral.setNotifyValue(true, for: ch)
         }
         // Battery (0x2A19): read once, subscribe if it notifies.
@@ -302,7 +302,7 @@ extension FTMSSource: @preconcurrency CBPeripheralDelegate {
               let reading = FTMSDecode.decode(uuid16: kind.characteristicUUID16, [UInt8](value)) else { return }
         if !loggedFirstReading {
             loggedFirstReading = true
-            log("FTMS: receiving \(reading.kind.displayName) data — first reading\(reading.heartRate.map { " HR \($0) bpm" } ?? "")")
+            log("FTMS: receiving \(reading.kind.displayName) data - first reading\(reading.heartRate.map { " HR \($0) bpm" } ?? "")")
         }
         ingest(reading)
     }

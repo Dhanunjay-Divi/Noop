@@ -1,12 +1,12 @@
 import SwiftUI
 
-// TodayV3View.swift — "INSTRUMENT" Today (UI v3).
+// TodayV3View.swift - "INSTRUMENT" Today (UI v3).
 //
 // Layout logic, corrected from v2:
 //   1. HEADER: date + provenance, one line. No wasted vertical space.
 //   2. SCORE ROW: three COMPACT rings (Recovery / Effort / Sleep) side by side — the reference pattern.
 //      A viewport should show scores AND content, not one giant arc.
-//   3. READ: one plain-language line. Not a boxed "alert" — just typography, like a lab note.
+//   3. READ: one plain-language line. Not a boxed "alert" - just typography, like a lab note.
 //   4. VITALS: a 2×2 grid where every tile carries value + unit + a VERTICAL range gauge + a STATUS word.
 //      This is the single thing that makes Bevel feel like a measuring device, and v2 lacked it.
 //   5. LOAD: hour×day grid, sequential ramp, honest empty cells.
@@ -159,7 +159,7 @@ struct TodayV3View: View {
                             .font(V3.body)
                             .foregroundStyle(V3.inkSecondary)
                         Spacer(minLength: 8)
-                        Text(r.value ?? "—")
+                        Text(r.value ?? "-")
                             .font(V3.figure(17, .semibold))
                             .foregroundStyle(r.value == nil ? V3.inkTertiary : V3.ink)
                         if r.value != nil, !r.unit.isEmpty {
@@ -234,7 +234,7 @@ struct V3ScoreRing: View {
                     .trim(from: 0, to: frac)
                     .stroke(tint, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                Text(value.map { "\(Int($0.rounded()))" } ?? "—")
+                Text(value.map { "\(Int($0.rounded()))" } ?? "-")
                     .font(V3.figure(21, .semibold))
                     .foregroundStyle(value == nil ? V3.inkTertiary : V3.ink)
             }
@@ -282,7 +282,7 @@ struct V3VitalTile: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text(vital.name.uppercased()).v3MicroLabel()
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(vital.value.map { $0 < 10 ? String(format: "%.1f", $0) : String(Int($0.rounded())) } ?? "—")
+                    Text(vital.value.map { $0 < 10 ? String(format: "%.1f", $0) : String(Int($0.rounded())) } ?? "-")
                         .font(V3.figure(24, .semibold))
                         .foregroundStyle(vital.value == nil ? V3.inkTertiary : V3.ink)
                     Text(vital.unit).font(V3.unit).foregroundStyle(V3.inkTertiary)

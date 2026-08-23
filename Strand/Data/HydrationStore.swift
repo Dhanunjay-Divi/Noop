@@ -2,7 +2,7 @@ import Foundation
 import WhoopStore
 import StrandAnalytics
 
-// MARK: - Hydration tracker (MVP) — opt-in, local-only water logging
+// MARK: - Hydration tracker — opt-in confirmed water logging
 //
 // The user logs water with three quick taps (Sip 30 ml / Cup 237 ml / Bottle 500 ml). The day TOTAL is
 // banked in the generic metric-series tall table under a dedicated source/key — the SAME `metricSeries`
@@ -12,9 +12,9 @@ import StrandAnalytics
 //
 // This is the BYTE-PARITY twin of the Android `com.noop.analytics.HydrationStore`: identical source id
 // ("hydration"), identical key ("hydration"), identical additive-accumulation logic, identical 7-day
-// history projection (one row per local calendar day, 0 for empty days, oldest first). Per-tap timestamps
-// are intentionally NOT persisted on either platform — the day total is the source of truth and the MVP
-// detail shows the honest day figure. Everything stays on-device; nothing is synced.
+// history projection (one row per local calendar day, 0 for empty days, oldest first). Apple Health water
+// stays in its own source partition and is merged conservatively at read time so mirrored logs are not
+// blindly added. NOOP per-tap entries remain editable and local to this device.
 
 enum HydrationStore {
     /// Source/device id the hydration total is written under — its own local-only source so it is never
@@ -39,6 +39,19 @@ enum HydrationStore {
     static let customSizeKey = "noop.hydrationCustomSizeML"
 
     static func entriesKey(forDay dayKey: String) -> String { entriesKeyPrefix + dayKey }
+}
+
+enum HydrationReadingSource: Equatable, Sendable {
+    case noop
+    case appleHealth
+    case both
+}
+
+struct HydrationReading: Equatable, Sendable {
+    let valueML: Double
+    let source: HydrationReadingSource
+    let noopML: Double
+    let appleHealthML: Double
 }
 
 // MARK: - Per-entry model (#798) - individual logged drinks for edit/delete
@@ -91,14 +104,53 @@ enum HydrationEntries {
 
 extension Repository {
 
-    /// The total fluid (ml) logged for a local day (yyyy-MM-dd), or 0 when nothing has been logged that
-    /// day. The single row's value IS the day total (additive upsert). Mirrors Android `HydrationStore.total`.
+    /// Source-aware observed total. NOOP and Apple Health can contain duplicate logs for the same drink,
+    /// so they are never added blindly; the higher source total is the conservative observed lower bound.
+    func hydrationReading(day: String) async -> HydrationReading? {
+        guard let store = await storeHandle() else { return nil }
+        async let noopRead = store.metricSeries(
+            deviceId: HydrationStore.sourceId,
+            key: HydrationStore.key,
+            from: day,
+            to: day
+        )
+        async let healthRead = store.metricSeries(
+            deviceId: Self.appleHealthSource,
+            key: HydrationStore.key,
+            from: day,
+            to: day
+        )
+        let noop = ((try? await noopRead) ?? []).first?.value
+        let health = ((try? await healthRead) ?? []).first?.value
+        let noopML = max(0, noop?.isFinite == true ? (noop ?? 0) : 0)
+        let healthML = max(0, health?.isFinite == true ? (health ?? 0) : 0)
+        guard noop != nil || health != nil else { return nil }
+        let source: HydrationReadingSource
+        if noop != nil, health != nil {
+            source = .both
+        } else {
+            source = noop != nil ? .noop : .appleHealth
+        }
+        return HydrationReading(
+            valueML: max(noopML, healthML),
+            source: source,
+            noopML: noopML,
+            appleHealthML: healthML
+        )
+    }
+
     func hydrationTotal(day: String) async -> Double {
-        guard let store = await storeHandle() else { return 0 }
-        let pts = (try? await store.metricSeries(deviceId: HydrationStore.sourceId,
-                                                 key: HydrationStore.key,
-                                                 from: day, to: day)) ?? []
-        return pts.first?.value ?? 0
+        await hydrationReading(day: day)?.valueML ?? 0
+    }
+
+    private func noopHydrationTotal(day: String, store: WhoopStore) async -> Double {
+        let points = (try? await store.metricSeries(
+            deviceId: HydrationStore.sourceId,
+            key: HydrationStore.key,
+            from: day,
+            to: day
+        )) ?? []
+        return points.first?.value ?? 0
     }
 
     /// Log `amountMl` of fluid for `day` (defaults to today's local day). Reads the day's current total
@@ -109,7 +161,7 @@ extension Repository {
     func logHydration(amountMl: Int, day: String? = nil) async -> Double {
         let dayKey = day ?? Repository.localDayKey(Date())
         guard amountMl > 0, let store = await storeHandle() else { return await hydrationTotal(day: dayKey) }
-        let current = await hydrationTotal(day: dayKey)
+        let current = await noopHydrationTotal(day: dayKey, store: store)
         let next = current + Double(amountMl)
         _ = try? await store.upsertMetricSeries(
             [MetricPoint(day: dayKey, key: HydrationStore.key, value: next)],
@@ -194,10 +246,27 @@ extension Repository {
         let toKey = Repository.localDayKey(now)
         let byDay: [String: Double]
         if let store = await storeHandle() {
-            let pts = (try? await store.metricSeries(deviceId: HydrationStore.sourceId,
-                                                     key: HydrationStore.key,
-                                                     from: fromKey, to: toKey)) ?? []
-            byDay = Dictionary(pts.map { ($0.day, $0.value) }, uniquingKeysWith: { _, last in last })
+            async let noopRead = store.metricSeries(
+                deviceId: HydrationStore.sourceId,
+                key: HydrationStore.key,
+                from: fromKey,
+                to: toKey
+            )
+            async let healthRead = store.metricSeries(
+                deviceId: Self.appleHealthSource,
+                key: HydrationStore.key,
+                from: fromKey,
+                to: toKey
+            )
+            let noop = Dictionary(
+                ((try? await noopRead) ?? []).map { ($0.day, $0.value) },
+                uniquingKeysWith: { _, last in last }
+            )
+            let health = Dictionary(
+                ((try? await healthRead) ?? []).map { ($0.day, $0.value) },
+                uniquingKeysWith: { _, last in last }
+            )
+            byDay = noop.merging(health) { max($0, $1) }
         } else {
             byDay = [:]
         }
@@ -215,7 +284,7 @@ extension Repository {
     func hydrationGoalML(profileSex: String, weightKg: Double? = nil) -> Int {
         HydrationGoal.dailyGoalML(sex: profileSex,
                                   weightKg: weightKg,
-                                  effort: today?.strain,
-                                  skinTempDevC: today?.skinTempDevC)
+                                  effort: localCalendarToday?.strain,
+                                  skinTempDevC: localCalendarToday?.skinTempDevC)
     }
 }

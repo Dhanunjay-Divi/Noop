@@ -4,7 +4,7 @@ package com.noop.oura
 // indicator for the UI ("On wrist" / "Off wrist").
 //
 // Kotlin twin of Packages/OuraProtocol/Sources/OuraProtocol/OuraWear.swift. The ring emits no dedicated
-// "worn" event in NOOP's captures (the documented aohr_event 0x86 has NEVER appeared — 0 records), so
+// "worn" event in NOOP's captures (the documented aohr_event 0x86 has NEVER appeared - 0 records), so
 // wear is inferred from signals that ARE present and validated by real data:
 //   - a LIVE-HR push (0x2F) exists only while the ring measures on a finger -> WORN;
 //   - a live-HR stream that goes silent while we keep re-engaging it -> the ring came off -> NOT WORN;
@@ -26,7 +26,7 @@ object OuraWear {
     // MARK: - STATE-string semantics (clean-room: the ring's own words)
 
     /** True when a STATE (0x45/0x53) string reports the charger being CONNECTED (observed: "chg.
-     *  detected"). Matched on the decoded text — the honest signal, the ring literally says it — never a
+     *  detected"). Matched on the decoded text - the honest signal, the ring literally says it - never a
      *  guessed numeric code (the state codes are ambiguous: code 5 appears as both "hr enable" and
      *  "motion det"). Twin of OuraWear.isChargerStart (Swift). */
     fun isChargerStart(state: OuraState): Boolean {

@@ -83,7 +83,7 @@ object AnalyticsEngine {
      * The day key is the core aggregation key for daily metrics; the dashboard reads "today" by the
      * device's LOCAL calendar day, so the bucket must be the LOCAL day too. A west-of-UTC user's
      * evening (which crosses midnight UTC) would otherwise flow into the next UTC bucket and the local
-     * "today" read would never find it — freezing the dashboard (Toronto/UTC-4 report). [offsetSec] is
+     * "today" read would never find it - freezing the dashboard (Toronto/UTC-4 report). [offsetSec] is
      * seconds EAST of UTC (TimeZone.getDefault().getOffset(...)/1000). The local date is the UTC date
      * of `(ts + offsetSec)`: shifting the instant by the offset turns the fixed-UTC formatter into a
      * local-calendar formatter. [offsetSec] == 0 is byte-identical to the UTC [dayString] above, so
@@ -178,7 +178,7 @@ object AnalyticsEngine {
         // so every 5/MG + pure-function caller stays byte-identical (WHOOP5 ignores the anchor entirely).
         skinTempAnchorRaw: Double? = null,
         // WHOOP 4.0 raw SpO2 PPG ADC samples (red/IR) for the night window (#93). The nightly red/IR
-        // means over detected sleep are banked on the DailyMetric as RAW ADC — honest "the sensor
+        // means over detected sleep are banked on the DailyMetric as RAW ADC - honest "the sensor
         // decoded" data, NOT a calibrated blood-oxygen % (that needs WHOOP's proprietary curve). Default
         // empty keeps pure-function callers/tests + non-4.0 nights null.
         spo2: List<Spo2Sample> = emptyList(),
@@ -368,7 +368,7 @@ object AnalyticsEngine {
         // ── HRV & Autonomic nightly trace (#141) ──────────────────────────────
         // Per-5-min-window RMSSD tagged by the sleep stage at its center, then a night summary comparing
         // NOOP's whole-night mean (what it reports) against a deep-only mean and a WHOOP-style
-        // last-slow-wave-sleep value — so an "HRV reads ~2x higher than WHOOP" report shows WHICH stages
+        // last-slow-wave-sleep value - so an "HRV reads ~2x higher than WHOOP" report shows WHICH stages
         // lift it, and lets a deep-sleep-windowed fix be validated before it ships. Reuses the SAME
         // sessionHrvWindows the value is built from (can't diverge). Zero cost when the sink is null.
         if (hrvTraceSink != null) {
@@ -436,7 +436,7 @@ object AnalyticsEngine {
         // ── Raw SpO2 (WHOOP 4.0 v24 PPG ADC) ──────────────────────────────────
         // Nightly red/IR ADC means over the detected in-bed spans, or null when the night carried no raw
         // SpO2 samples in any span. Baseline-independent (unlike skin temp): a RAW device reading banked
-        // as-is for the Health "Raw SpO2" tile — NOT a calibrated blood-oxygen %. (#93)
+        // as-is for the Health "Raw SpO2" tile - NOT a calibrated blood-oxygen %. (#93)
         val nightlySpo2Raw = nightlySpo2RawMeans(matched, spo2)
 
         // ── Rest (sleep_performance composite, 0–100) ─────────────────────────
@@ -505,7 +505,7 @@ object AnalyticsEngine {
             )
         }
 
-        // ── Strain ("Effort") — cardiovascular load over the full CALENDAR day ──
+        // ── Strain ("Effort") - cardiovascular load over the full CALENDAR day ──
         // Integrate dayHr ([localMidnight, +24h), clamped to now for today) when supplied so Effort
         // covers the WHOLE day — an afternoon/evening workout lands in today's Effort same-day instead
         // of being cut off at the night window's ≈ noon bound, and the prior evening's HR no longer
@@ -874,7 +874,7 @@ object AnalyticsEngine {
 }
 
 /*
- * RestScorer — NOOP "Rest" (sleep_performance) composite, 0–100.
+ * RestScorer - NOOP "Rest" (sleep_performance) composite, 0–100.
  *
  * Faithful Kotlin mirror of the Swift Rest composite (AnalyticsEngine / RestScorer). Keep every
  * constant and the weight set byte-identical to Swift — parity tests enforce it.
@@ -1005,7 +1005,7 @@ object RestScorer {
     const val onsetTraceWindowSec: Long = 600L
 
     /**
-     * Median of a bpm list — the deterministic "sorted, element at size/2" rule (upper-middle on an even
+     * Median of a bpm list - the deterministic "sorted, element at size/2" rule (upper-middle on an even
      * count) so Swift and Kotlin agree byte-for-byte. null on an empty list. Byte-identical to Swift
      * `AnalyticsEngine.medianBpm`.
      */

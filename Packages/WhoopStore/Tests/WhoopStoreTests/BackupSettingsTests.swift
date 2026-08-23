@@ -57,6 +57,7 @@ final class BackupSettingsTests: XCTestCase {
             "hydrationReminders.intervalMinutes": 120,
             "hydrationReminders.activeStartMinutes": 480,
             "hydrationReminders.activeEndMinutes": 1_260,
+            "hydrationReminders.adaptiveEnabled": false,
             "hydrationReminders.strapBuzzEnabled": false,
         ]
         XCTAssertEqual(
@@ -86,6 +87,7 @@ final class BackupSettingsTests: XCTestCase {
         XCTAssertEqual(back["windDown.goalMode"] as? String, "extraOpportunity")
         XCTAssertEqual(back["sleepPlanner.wakeMinutes"] as? Int, 390)
         XCTAssertEqual(back["hydrationReminders.intervalMinutes"] as? Int, 120)
+        XCTAssertEqual(back["hydrationReminders.adaptiveEnabled"] as? Bool, false)
         XCTAssertEqual(back.count, values.count + 1, "Only the v3 schema stamp should be added")
     }
 
@@ -166,6 +168,21 @@ final class BackupSettingsTests: XCTestCase {
         XCTAssertNil(back["hydrationReminders.intervalMinutes"])
     }
 
+    func testKeyMetricSelectionIsDeduplicatedFilteredAndCappedAtFive() throws {
+        let data = try XCTUnwrap(BackupSettings.encode([
+            "today.keyMetrics":
+                "charge,charge,removedMetric,hrv,restingHr,bloodOxygen,respiratory,steps",
+        ]))
+        let back = BackupSettings.decode(data)
+        XCTAssertEqual(
+            back["today.keyMetrics"] as? String,
+            "charge,hrv,restingHr,bloodOxygen,respiratory"
+        )
+
+        let invalid = Data(#"{"today.keyMetrics":"removedMetric,unknown"}"#.utf8)
+        XCTAssertNil(BackupSettings.decode(invalid)["today.keyMetrics"])
+    }
+
     // MARK: - Degradation
 
     func testGarbageAndNonObjectJsonDecodeToEmpty() {
@@ -232,6 +249,7 @@ final class BackupSettingsTests: XCTestCase {
         source.set(true, forKey: "windDown.enabled")
         source.set(6 * 60 + 45, forKey: "windDown.wakeMinutes")
         source.set(120, forKey: "hydrationReminders.intervalMinutes")
+        source.set(false, forKey: "hydrationReminders.adaptiveEnabled")
 
         let snapshot = BackupSettings.snapshot(from: source)
         XCTAssertEqual(snapshot["hrv.window"] as? String, "deep")
@@ -252,6 +270,7 @@ final class BackupSettingsTests: XCTestCase {
         XCTAssertEqual(target.object(forKey: "windDown.enabled") as? Bool, true)
         XCTAssertEqual(target.object(forKey: "windDown.wakeMinutes") as? Int, 405)
         XCTAssertEqual(target.object(forKey: "hydrationReminders.intervalMinutes") as? Int, 120)
+        XCTAssertEqual(target.object(forKey: "hydrationReminders.adaptiveEnabled") as? Bool, false)
     }
 
     /// #146: applying a restored age must clear a pre-existing `profile.dateOfBirth`, so the target's

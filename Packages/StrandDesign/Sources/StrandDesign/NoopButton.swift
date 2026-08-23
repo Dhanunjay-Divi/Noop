@@ -7,8 +7,8 @@ import SwiftUI
 // Every colour is a token from `StrandPalette`; every dimension reads off `NoopMetrics`.
 //
 // Two front doors:
-//   • `NoopButton("Save", kind: .primary) { … }`     — the convenience view.
-//   • `Button("Save") { … }.buttonStyle(NoopButtonStyle(.primary))`  — adopt on an
+//   • `NoopButton("Save", kind: .primary) { … }`     - the convenience view.
+//   • `Button("Save") { … }.buttonStyle(NoopButtonStyle(.primary))`  - adopt on an
 //     existing Button (e.g. a Menu/role button) without rewriting it.
 //
 // Labels are sentence-case (never ALL CAPS), single line, optical-centred with the

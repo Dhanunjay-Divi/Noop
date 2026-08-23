@@ -113,6 +113,17 @@ final class ChargeDriversTests: XCTestCase {
         XCTAssertTrue(coldRow.valueText.contains("-0.8"))
     }
 
+    func testAbsoluteSkinTemperatureDoesNotCreateDeviationDriverOrRelativeMarker() {
+        let drivers = RecoveryScorer.chargeDrivers(
+            hrv: 55, rhr: 52, resp: nil,
+            hrvBaseline: baseline(mean: 50, sigma: 6),
+            rhrBaseline: baseline(mean: 55, sigma: 3),
+            respBaseline: nil, sleepPerf: 0.85, skinTempDev: 34.2
+        )
+        XCTAssertFalse(drivers.contains { $0.label == "Skin temperature" })
+        XCTAssertNil(RecoveryScorer.skinTempRelative(deviationC: 34.2))
+    }
+
     // MARK: - Ordering, value text, baseline text
 
     func testOrderedByMagnitudeBiggestMoverFirst() {

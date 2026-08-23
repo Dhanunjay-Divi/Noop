@@ -618,6 +618,14 @@ interface WhoopDao : DeviceRegistryDao {
     @Query("SELECT * FROM dailyMetric WHERE deviceId = :deviceId ORDER BY day ASC")
     suspend fun days(deviceId: String): List<DailyMetric>
 
+    /** Bounded daily-metric read for event-driven policies that need source fidelity without loading
+     *  years of history on every fresh observation. ISO day keys preserve chronological ordering. */
+    @Query(
+        "SELECT * FROM dailyMetric WHERE deviceId = :deviceId " +
+            "AND day >= :from AND day <= :to ORDER BY day ASC"
+    )
+    suspend fun daysInRange(deviceId: String, from: String, to: String): List<DailyMetric>
+
     /** Scalar COUNT twin of [days], for count badges that were materializing every row for `.size`. */
     @Query("SELECT COUNT(*) FROM dailyMetric WHERE deviceId = :deviceId")
     suspend fun daysCount(deviceId: String): Int
@@ -630,7 +638,7 @@ interface WhoopDao : DeviceRegistryDao {
      * Every distinct source id with at least one cached daily row. The Health Connect backfill's
      * covered-days gate filters these to the strap-native ids
      * (HealthConnectImporter.isStrapNativeSourceId), so its #112 skip-set also covers an actively
-     * paired strap's "whoop-<mac>" / "whoop-<mac>-noop" rows — not just the canonical
+     * paired strap's "whoop-<mac>" / "whoop-<mac>-noop" rows - not just the canonical
      * "my-whoop" / "my-whoop-noop" pair.
      */
     @Query("SELECT DISTINCT deviceId FROM dailyMetric")

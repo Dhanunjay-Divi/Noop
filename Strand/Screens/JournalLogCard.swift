@@ -193,7 +193,7 @@ struct JournalLogCard: View {
             stepperButton("minus", q: item.canonical, current: current)
             NumericLogField(
                 value: current,
-                placeholder: "—",
+                placeholder: "-",
                 onCommit: { v in commitNumeric(item.canonical, value: v) })
             .frame(width: 64)
             if let unit = item.kind.unitLabel, !unit.isEmpty {

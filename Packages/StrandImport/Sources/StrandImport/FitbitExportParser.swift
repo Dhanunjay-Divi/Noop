@@ -76,7 +76,7 @@ enum FitbitExportParser {
               let end = fitbitTime(WearableJSON.str(log, "endTime")),
               end > start else { return nil }
 
-        // levels.summary.{deep,light,rem,wake}.minutes — the modern "stages" log. Falls back to the
+        // levels.summary.{deep,light,rem,wake}.minutes - the modern "stages" log. Falls back to the
         // legacy "asleep/restless/awake" summary when stages are absent (older Fitbit devices).
         var deep: Double?, light: Double?, rem: Double?, wake: Double?
         var stages: [WearableSleepStageInterval] = []

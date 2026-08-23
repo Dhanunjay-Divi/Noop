@@ -17,8 +17,9 @@ final class AppearanceModeTests: XCTestCase {
         XCTAssertEqual(AppearanceMode.resolve("black"), .black)
     }
 
-    func testUnknownStoredValueFallsBackToSystem() {
-        XCTAssertEqual(AppearanceMode.resolve("future-theme"), .system)
+    func testUnknownStoredValueFallsBackToFirstRunDefault() {
+        XCTAssertEqual(AppearanceMode.defaultMode, .black)
+        XCTAssertEqual(AppearanceMode.resolve("future-theme"), .black)
     }
 
     func testAppearanceStorageKeyMatchesWidgetBridgeContract() {

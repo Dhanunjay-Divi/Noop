@@ -138,6 +138,14 @@ class AutoWorkoutSuggestionPolicyTest {
         assertEquals("Skiing", acceptedAutoDetectSport(CoarseWorkoutClass.SKI))
         assertEquals("Workout", acceptedAutoDetectSport(CoarseWorkoutClass.OTHER))
         assertEquals("Workout", acceptedAutoDetectSport(null))
+        assertEquals(
+            "Basketball",
+            acceptedAutoDetectSport(CoarseWorkoutClass.OTHER, requestedSport = "Basketball"),
+        )
+        assertEquals(
+            "Running",
+            acceptedAutoDetectSport(CoarseWorkoutClass.RUN, requestedSport = "not-a-catalog-sport"),
+        )
     }
 
     @Test

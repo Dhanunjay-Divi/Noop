@@ -56,7 +56,7 @@ public struct PolarPmdFrameHeader: Equatable, Sendable {
 
 /// One decoded PPI (peak-to-peak interval) sample.
 public struct PolarPpiSample: Equatable, Sendable {
-    /// Heart rate in bpm as the sensor reported it. `0` means "no valid beat right now" — surfaced as-is
+    /// Heart rate in bpm as the sensor reported it. `0` means "no valid beat right now" - surfaced as-is
     /// (honest-data invariant: never substituted with a fabricated value).
     public let heartRate: Int
     /// The peak-to-peak / inter-beat interval in milliseconds — NOOP's HRV input (≈ an R-R interval).

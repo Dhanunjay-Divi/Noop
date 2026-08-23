@@ -11,6 +11,16 @@
     <string name="appwide_calendar_summary_overline">QUESTO MESE</string>
     <string name="appwide_calendar_summary_scored_format">%1$d giorni calcolati · media %2$d</string>
     <string name="appwide_calendar_your_month">Il tuo mese</string>
+    <string name="appwide_daily_signal_a11y_hint">Apre il monitor salute e i segnali alla base di questo stato.</string>
+    <string name="appwide_daily_signal_alert_a11y_hint">Apre il monitor salute e i segnali alla base di questo controllo.</string>
+    <string name="appwide_daily_signal_alert_review">Vedi dettagli</string>
+    <string name="appwide_daily_signal_alert_title">Segnali variati</string>
+    <string name="appwide_daily_signal_alert_unwell_title">Controlla ora</string>
+    <string name="appwide_daily_signal_label">Segnale giornaliero</string>
+    <string name="appwide_daily_signal_status_aligned">Allineato</string>
+    <string name="appwide_daily_signal_status_building">In corso</string>
+    <string name="appwide_daily_signal_status_check_in">Controlla</string>
+    <string name="appwide_daily_signal_status_recheck">Ricontrolla</string>
     <string name="appwide_disclaimer_estimates">Calcolato su questo dispositivo dai tuoi segnali. Sono stime, non un dispositivo medico.</string>
     <string name="appwide_disclaimer_estimates_advice">Stime calcolate su questo dispositivo dai tuoi segnali. Non è un dispositivo medico né un consulto medico.</string>
     <string name="appwide_field_label_unit_format">%1$s (%2$s)</string>

@@ -122,7 +122,7 @@ struct BackupSyncView: View {
                     .disabled(serverBusy)
                     .accessibilityLabel("Noop server URL")
                 SecureField(
-                    RemoteSyncKeyStore.hasKey ? "API key saved — leave blank to keep it" : "Server API key",
+                    RemoteSyncKeyStore.hasKey ? "API key saved - leave blank to keep it" : "Server API key",
                     text: $serverKey
                 )
                 .textFieldStyle(.roundedBorder)
@@ -382,7 +382,7 @@ struct BackupSyncView: View {
                 // active, a cancelled picker changed nothing — and the button the message points at is
                 // hidden, so alerting here would send the user chasing a control that isn't shown.
                 alertTitle = String(localized: "No folder selected")
-                alertMessage = String(localized: "NOOP didn't get a folder back from the picker. If the Open button won't do anything, tap \"Use NOOP's own folder\" below to back up inside NOOP instead — you can read those backups from the Files app.")
+                alertMessage = String(localized: "NOOP didn't get a folder back from the picker. If the Open button won't do anything, tap \"Use NOOP's own folder\" below to back up inside NOOP instead - you can read those backups from the Files app.")
                 showAlert = true
             }
         }

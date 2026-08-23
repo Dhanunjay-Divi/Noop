@@ -73,14 +73,14 @@ class SourceCoordinator(
     private val setWhoopPreferredAddress: (String?) -> Unit = {},
     /**
      * Re-point which device id live WHOOP samples store under. Wraps [WhoopBleClient.setActiveDeviceId].
-     * Called ONLY when the active WHOOP is NOT the seeded "my-whoop" — the single-WHOOP path never invokes
+     * Called ONLY when the active WHOOP is NOT the seeded "my-whoop" - the single-WHOOP path never invokes
      * it, so the id stays "my-whoop". Default no-op keeps existing call sites compiling unchanged. (MW-3)
      */
     private val setWhoopActiveDeviceId: (String) -> Unit = {},
     /** Background scope for the suspend registry reads + persist. SupervisorJob keeps one failure from
      *  cancelling the others; IO keeps DB work off the main thread. */
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-    /** Diagnostic sink for the multi-WHOOP identity-adoption "different strap connected" notice — the
+    /** Diagnostic sink for the multi-WHOOP identity-adoption "different strap connected" notice - the
      *  Android analogue of Swift's `live.append(log:)`. Defaults to logcat; tests inject a capturing
      *  closure to assert the wording. Inert on the single-WHOOP path (the message only fires on a
      *  registered-but-mismatched strap). */
@@ -235,7 +235,7 @@ class SourceCoordinator(
                     // mis-map another physical strap's samples onto this device. Log and leave the stored id.
                     log(
                         "Multi-WHOOP: active device $activeId is registered to strap $existing but " +
-                            "$address connected — not overwriting.",
+                            "$address connected - not overwriting.",
                     )
             }
         }
@@ -288,7 +288,7 @@ class SourceCoordinator(
             }
             activeWhoopId == null -> {
                 // First WHOOP activation of the session (the normal launch path). Set the targeting so the
-                // existing WHOOP flow — kicked off elsewhere on launch — uses it. For the seeded "my-whoop"
+                // existing WHOOP flow - kicked off elsewhere on launch - uses it. For the seeded "my-whoop"
                 // (peripheralId null, id "my-whoop") this is setWhoopPreferredAddress(null) and NO
                 // setActiveDeviceId / NO scan / NO disconnect: byte-for-byte today's behaviour.
                 pointWhoop(id, peripheralId)
@@ -312,7 +312,7 @@ class SourceCoordinator(
     /**
      * Apply the WHOOP targeting for the now-active WHOOP [id]. Always sets the preferred address (null for
      * the legacy "my-whoop" → connect to any WHOOP, unchanged). Re-points the sample deviceId ONLY for a
-     * non-legacy WHOOP — the seeded "my-whoop" keeps the bootstrap-set id, so the single-WHOOP path never
+     * non-legacy WHOOP - the seeded "my-whoop" keeps the bootstrap-set id, so the single-WHOOP path never
      * calls setActiveDeviceId. Records [activeWhoopId] for future change detection. Mirrors macOS
      * `pointWhoop`.
      */
@@ -341,7 +341,7 @@ class SourceCoordinator(
         // source; nothing else in the coordinator changes.
         val source = makeSource(id, row)
         // CONNECT to the active strap's known BLE address, don't just scan. A bare scan discovers + lists
-        // the strap but never connects — so a Polar H10 etc. showed up as "found" yet never streamed
+        // the strap but never connects - so a Polar H10 etc. showed up as "found" yet never streamed
         // (#421). connect(address) connects directly via getRemoteDevice; a bare scan is the fallback only
         // when the registry row has no address.
         if (!address.isNullOrEmpty()) source.connect(address) else source.scan()
@@ -494,7 +494,7 @@ class SourceCoordinator(
     companion object {
         /**
          * Classify a device id as WHOOP vs a generic strap. WHOOP if the id is the canonical "my-whoop",
-         * the registry row's `brand` is "WHOOP" (case-insensitive), OR the id is unknown — unknown ids
+         * the registry row's `brand` is "WHOOP" (case-insensitive), OR the id is unknown - unknown ids
          * default to WHOOP so the coordinator stays dormant rather than ever stealing the WHOOP's BLE.
          * Mirrors Swift `SourceCoordinator.isWhoop`.
          */

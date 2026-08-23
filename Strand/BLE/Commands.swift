@@ -265,7 +265,7 @@ public enum RebootProbeVariant: String, CaseIterable, Sendable {
     /// disconnect, not a reboot (#275). So the sub-command byte reaches the strap; D/E try it on the
     /// harder power-cycle opcode and a different byte on reboot.
     case reboot29Payload1
-    /// D — opcode 32 POWER_CYCLE_STRAP, payload [0x01]: the "harder restart" opcode with the sub-command
+    /// D - opcode 32 POWER_CYCLE_STRAP, payload [0x01]: the "harder restart" opcode with the sub-command
     /// byte that made 29 react (#275). Best remaining safe candidate for a genuine power-cycle.
     case powerCycle32Payload1
     /// E — opcode 29 REBOOT_STRAP, payload [0x00]: the zero-byte sub-command (vs empty vs 0x01).

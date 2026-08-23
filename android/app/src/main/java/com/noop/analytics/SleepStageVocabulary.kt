@@ -12,7 +12,7 @@ package com.noop.analytics
  * The bug this closes is the dictionary vocabulary reaching a SEGMENT comparison. Imports do not pass
  * through [SleepStagerV2]: Oura's phase table is `["deep","light","rem","awake"]`, and generic wearable
  * JSON carries whatever the source app wrote. A consumer written `stage == "wake"` then silently
- * misfiles those segments, and — worse — `stage != "wake"` counts them as SLEEP.
+ * misfiles those segments, and - worse - `stage != "wake"` counts them as SLEEP.
  *
  * A PREDICATE, deliberately, not a canonicaliser: it fixes the comparisons without rewriting any stored
  * string, so no persisted hypnogram changes meaning and neither vocabulary above moves.

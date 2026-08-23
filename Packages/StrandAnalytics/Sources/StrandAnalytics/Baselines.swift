@@ -189,7 +189,7 @@ public enum Baselines {
 
     /// #612: calendar days since the newest night that carried a usable HRV reading (the baseline's input),
     /// or nil when there is none / a key can't be parsed. This is DISTINCT from `calibrationNights` (which
-    /// counts progress TOWARD a usable baseline) — it measures staleness, so a surface can say "no new nights
+    /// counts progress TOWARD a usable baseline) - it measures staleness, so a surface can say "no new nights
     /// from your strap for N days" when the baseline aged out silently instead of only "building your
     /// baseline". Pure and TZ-free (civil-day arithmetic); mirror EXACTLY in the Kotlin twin.
     /// `dayKeys`/`nightlyHrv` are parallel (same night per index); `today` is an ISO `yyyy-MM-dd` key.
@@ -386,9 +386,9 @@ public enum Baselines {
     /// source-tagged nightly history, for feeding `foldHistory`'s `baselineEpoch` so a baseline can't
     /// mix two brands' incompatible HRV scales (#459: an Oura→WHOOP switch has Oura RMSSD ~120–155 ms
     /// vs WHOOP ~72–112 ms with no overlap nights, so a straddling 30-night window reads the first
-    /// WHOOP nights as "suppressed" against an Oura-inflated mean — a device artifact, not physiology).
+    /// WHOOP nights as "suppressed" against an Oura-inflated mean - a device artifact, not physiology).
     ///
-    /// CONTRACT: `sourceDays` is exactly ONE `(dayKey "yyyy-MM-dd", sourceId)` per night — the day's
+    /// CONTRACT: `sourceDays` is exactly ONE `(dayKey "yyyy-MM-dd", sourceId)` per night - the day's
     /// WINNING source (the same per-day merge winner whose value the fold uses), NOT one row per source.
     /// The "current era" is read off the NEWEST day's brand, so an overlap day carrying two brands would,
     /// under the deterministic (day, sourceId) sort, let the lexically-later source (e.g. "oura-import" >

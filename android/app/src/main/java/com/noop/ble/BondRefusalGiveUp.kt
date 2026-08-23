@@ -73,10 +73,10 @@ class BondRefusalGiveUp(
          * how to get going again. Pure; no em-dash. Byte-identical to the Swift `BondRefusalGiveUp.pausedHint`.
          */
         fun pausedHint(): String =
-            "NOOP stopped retrying because your strap keeps refusing to pair. It is likely still held by the " +
-                "official WHOOP app, or your phone is holding an old pairing. Close the WHOOP app, put the " +
-                "strap in pairing mode (tap until the LEDs flash blue), and if it is listed in your Bluetooth " +
-                "settings choose Forget This Device. Then tap Connect to try again."
+            "NOOP stopped retrying because Noop Band keeps refusing to pair. Another band app or an old " +
+                "phone pairing may still hold its secure connection. Close other band apps, put Noop Band " +
+                "in pairing mode, and if it is listed in Bluetooth settings choose Forget This Device. " +
+                "Then tap Connect to try again."
 
         /**
          * #750: a short OPAQUE token for the epitaph, derived from the strap's device id.

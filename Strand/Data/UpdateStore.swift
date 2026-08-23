@@ -3,7 +3,7 @@ import Combine
 
 // MARK: - UpdateItem
 //
-// One entry in the "Updates inbox" — the bell in the Today header collects these. An item is either
+// One entry in the "Updates inbox" - the bell in the Today header collects these. An item is either
 // purely informational (a What's New note, a "new data" reading) or actionable (a deep link to a
 // screen, or a dismissed Today card the user can restore). Everything stays on-device; nothing here
 // is medical, identifying, or a verdict — just a calm log of what's new in the app and the data.
@@ -13,7 +13,7 @@ struct UpdateItem: Identifiable, Codable, Equatable {
     enum Kind: String, Codable {
         case dismissedCard   // a Today info-card the user swiped into the inbox (restorable)
         case whatsNew        // a release note (seeded from AppChangelog on first run after an update)
-        case reading         // new data arrived (e.g. "N days backfilled") — links to Trends
+        case reading         // new data arrived (e.g. "N days backfilled") - links to Trends
         case strapAlert      // a strap-side heads-up (low battery, sync) — informational
     }
 

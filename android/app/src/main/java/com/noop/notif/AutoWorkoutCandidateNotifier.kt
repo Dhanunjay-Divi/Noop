@@ -103,6 +103,7 @@ object AutoWorkoutCandidateNotifier {
                 days = days,
                 dismissedTokens = AutoWorkoutPrefs.dismissed(appContext),
                 traceSink = traceSink,
+                forceRefresh = true,
             )
         } catch (t: Throwable) {
             if (t is CancellationException) throw t

@@ -361,7 +361,7 @@ struct XiaomiBandView: View {
         let value: String
         let caption: String?
         if values.isEmpty {
-            value = "—"; caption = nil
+            value = "-"; caption = nil
         } else {
             switch aggregate {
             case .latest:
@@ -395,7 +395,7 @@ struct XiaomiBandView: View {
         let trailing = mean(vals).map { fmt($0) }
         let footerItems: [(LocalizedStringKey, String)] = {
             guard let avg = mean(vals), let lo = vals.min(), let hi = vals.max() else {
-                return [("Avg", "—"), ("Min", "—"), ("Max", "—"), ("Points", "0")]
+                return [("Avg", "-"), ("Min", "-"), ("Max", "-"), ("Points", "0")]
             }
             return [("Avg", fmt(avg)), ("Min", fmt(lo)), ("Max", fmt(hi)), ("Points", "\(vals.count)")]
         }()

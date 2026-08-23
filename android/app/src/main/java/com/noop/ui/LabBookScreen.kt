@@ -128,7 +128,7 @@ fun LabBookScreen(vm: AppViewModel) {
 
     LaunchedEffect(reloadSeq) { reload() }
 
-    // SAF picker for the markers CSV — the same OpenDocument + "*/*" idiom as the Data
+    // SAF picker for the markers CSV - the same OpenDocument + "*/*" idiom as the Data
     // Sources importers (csv mime filtering through SAF is unreliable across providers).
     val csvImportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -503,7 +503,7 @@ private fun CorrelationResult(
         n < LAB_FLOOR -> Text(
             if (n == 0) {
                 "No overlap yet between this marker and ${signal.title.lowercase()}. Log a few more readings " +
-                    "(and keep wearing your strap)."
+                    "and keep wearing Noop Band."
             } else {
                 "$n reading${if (n == 1) "" else "s"} line up so far, not enough to read a trend yet " +
                     "(NOOP waits for $LAB_FLOOR)."
@@ -684,11 +684,11 @@ private fun markerKeys(markers: List<LabMarkerRow>, category: LabMarkerCategory)
     markers.filter { it.category == category.raw }.map { it.markerKey }.toSet().sortedBy { displayName(it) }
 
 private fun valueLabel(key: String, row: LabMarkerRow): String =
-    row.value?.let { "${formatValue(it, key)} ${row.unit}" } ?: (row.valueText ?: "—")
+    row.value?.let { "${formatValue(it, key)} ${row.unit}" } ?: (row.valueText ?: "-")
 
 private fun latestLabel(row: LabMarkerRow?, key: String): String {
-    if (row == null) return "—"
-    return row.value?.let { "${formatValue(it, key)} ${row.unit}" } ?: (row.valueText ?: "—")
+    if (row == null) return "-"
+    return row.value?.let { "${formatValue(it, key)} ${row.unit}" } ?: (row.valueText ?: "-")
 }
 
 private fun lastTakenCaption(row: LabMarkerRow?): String =
@@ -702,7 +702,7 @@ private fun formatValue(v: Double, key: String): String {
 private fun latestReferenceText(readings: List<LabMarkerRow>): String? =
     readings.lastOrNull { !it.referenceText.isNullOrEmpty() }?.referenceText
 
-/** "Your last 3 readings: 3.4 → 3.1 → 2.9 mmol/L, trending down." — descriptive only. */
+/** "Your last 3 readings: 3.4 → 3.1 → 2.9 mmol/L, trending down." - descriptive only. */
 private fun trendSentence(key: String, numeric: List<LabMarkerRow>, unit: String): String {
     val last = numeric.lastOrNull()?.value
         ?: return numeric.lastOrNull()?.valueText?.let { "Latest entry: $it." } ?: "No numeric readings yet."

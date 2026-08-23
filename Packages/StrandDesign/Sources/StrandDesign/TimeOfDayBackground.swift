@@ -341,7 +341,7 @@ public extension View {
 // MARK: - Preview
 
 #if DEBUG
-#Preview("Time of Day — all four parts") {
+#Preview("Time of Day - all four parts") {
     VStack(spacing: 0) {
         ForEach(DayPart.allCases, id: \.self) { part in
             ZStack {

@@ -531,9 +531,9 @@ public actor RemoteSyncCoordinator {
     /// Convert every `stagesJSON` shape written by Noop into stage totals in integer seconds.
     ///
     /// Historical/cache representations:
-    /// - `{"light": 245, ...}` — imported aggregate durations in minutes.
-    /// - `[{"stage":"deep","min":62}, ...]` — older imports/demo data in minutes.
-    /// - `[{"start":..., "end":..., "stage":"rem"}, ...]` — timestamped local hypnograms.
+    /// - `{"light": 245, ...}` - imported aggregate durations in minutes.
+    /// - `[{"stage":"deep","min":62}, ...]` - older imports/demo data in minutes.
+    /// - `[{"start":..., "end":..., "stage":"rem"}, ...]` - timestamped local hypnograms.
     static func canonicalSleepStages(_ stagesJSON: String?) -> [String: Int]? {
         guard let stagesJSON,
               let data = stagesJSON.data(using: .utf8),

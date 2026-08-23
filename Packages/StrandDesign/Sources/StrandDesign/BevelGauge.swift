@@ -95,7 +95,7 @@ public struct BevelGauge: View {
     private var staticBackdrop: some View {
         ZStack {
             innerDisc
-            // Faint full-span track — the inset "well" the score arc sits in.
+            // Faint full-span track - the inset "well" the score arc sits in.
             arcShape(to: 1.0)
                 .stroke(StrandPalette.surfaceInset,
                         style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
@@ -118,7 +118,7 @@ public struct BevelGauge: View {
         }
     }
 
-    // Frosted inner disc behind the arc — gives the gauge a glassy "well".
+    // Frosted inner disc behind the arc - gives the gauge a glassy "well".
     private var innerDisc: some View {
         Circle()
             .fill(

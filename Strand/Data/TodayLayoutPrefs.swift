@@ -26,11 +26,11 @@ enum TodaySection: String, CaseIterable, Identifiable {
     // Added as reorderable sections so NOTHING existing is removed or displaced — a user who never
     // opens the Arrange sheet simply gets them in the default order below, and every previously saved
     // order keeps working (decodeOrder appends unknown/new cases rather than dropping them).
-    /// "Why is my score that number?" — the drivers, each read against the user's OWN baseline.
+    /// "Why is my score that number?" - the drivers, each read against the user's OWN baseline.
     case why
-    /// "What should I actually do today?" — a concrete effort target range + one action line.
+    /// "What should I actually do today?" - a concrete effort target range + one action line.
     case target
-    /// "Is anything off?" — deviations worth watching; silent when everything is normal.
+    /// "Is anything off?" - deviations worth watching; silent when everything is normal.
     case watch
     case keyMetrics
     case workouts

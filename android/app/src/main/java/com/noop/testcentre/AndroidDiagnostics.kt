@@ -43,7 +43,7 @@ object AndroidDiagnostics {
             val syncSec = com.noop.ui.NoopPrefs.lastSyncAt(context)
             add("Last sync:   ${if (syncSec > 0L) relTime(System.currentTimeMillis() - syncSec * 1000L) else "never"}")
             // #57: write-health. "Last sync" fires even on an empty/failed offload, so distinguish "rows
-            // actually landed" from "an offload STALLED on a persist failure" (history won't persist —
+            // actually landed" from "an offload STALLED on a persist failure" (history won't persist -
             // usually a backup restored without an app restart, the closed-DB class).
             val p = com.noop.ui.NoopPrefs.of(context)
             val okAt = p.getLong("sync.lastWriteOkAt", 0L)
@@ -52,8 +52,8 @@ object AndroidDiagnostics {
             val now = System.currentTimeMillis()
             add("Data write:  ${if (okAt > 0L) "rows last landed ${relTime(now - okAt * 1000L)}" else "no rows ever persisted"}")
             if (stalledAt > 0L && stalledAt >= okAt) {
-                add("             ⚠ history NOT persisting — last offload STALLED ${relTime(now - stalledAt * 1000L)} " +
-                    "(if you restored a backup, fully restart the app — #57)")
+                add("             ⚠ history NOT persisting - last offload STALLED ${relTime(now - stalledAt * 1000L)} " +
+                    "(if you restored a backup, fully restart the app - #57)")
             }
             if (restoreAt > 0L) add("Last restore: ${relTime(now - restoreAt * 1000L)}")
             add("Timezone:    ${tzLine()}")
@@ -67,7 +67,7 @@ object AndroidDiagnostics {
 
     /**
      * Analytics-funnel lines: recompute the REM + skin-temp funnels for the most recent night so a "0% REM"
-     * / "skin temp absent" report arrives with the funnel breakdown. BEST-EFFORT and self-reporting — it
+     * / "skin temp absent" report arrives with the funnel breakdown. BEST-EFFORT and self-reporting - it
      * prints the sample counts it read and says plainly when it can't compute (e.g. a freshly re-added strap
      * whose raw samples aren't yet under the canonical id), so it never fabricates a misleading verdict.
      */
@@ -100,7 +100,7 @@ object AndroidDiagnostics {
             val resp = repo.respSamples(id, session.startTs, session.endTs, Int.MAX_VALUE)
             add("Night ${dayStamp(session.startTs)}: grav=${grav.size} hr=${hr.size} rr=${rr.size} resp=${resp.size} skin=${skin.size}")
             if (grav.isEmpty() && hr.isEmpty()) {
-                add("(no raw biometric samples under '$id' for this night — expected on a freshly re-added strap; reconnect + let a history sync run, then re-export)")
+                add("(no raw biometric samples under '$id' for this night - expected on a freshly re-added strap; reconnect + let a history sync run, then re-export)")
                 return@runCatching
             }
             com.noop.analytics.SleepStager.remFunnelDiagnostic(session.startTs, session.endTs, grav, hr, rr, resp)
@@ -202,8 +202,8 @@ object AndroidDiagnostics {
             if (newest > 0L) {
                 val behind = System.currentTimeMillis() / 1000L - newest
                 add(when {
-                    behind > 3 * 86400L -> "Strap clock: ${behind / 86400L}d behind wall (reset/stale — alarm unreliable)"
-                    behind < -3 * 86400L -> "Strap clock: ${-behind / 86400L}d AHEAD of wall (future-dated — alarm unreliable)"
+                    behind > 3 * 86400L -> "Strap clock: ${behind / 86400L}d behind wall (reset/stale - alarm unreliable)"
+                    behind < -3 * 86400L -> "Strap clock: ${-behind / 86400L}d AHEAD of wall (future-dated - alarm unreliable)"
                     else -> "Strap clock: OK"
                 })
             }
@@ -221,7 +221,7 @@ object AndroidDiagnostics {
                 if (reported > 0L) {
                     val mismatch = kotlin.math.abs(reported - sent) > 120
                     add("Strap reports: ${alarmStamp(reported)}" +
-                        if (mismatch) "  ⚠️ MISMATCH — strap didn't accept the time" else "  ✓ matches")
+                        if (mismatch) "  ⚠️ MISMATCH - strap didn't accept the time" else "  ✓ matches")
                 } else add("Strap reports: (no readback)")
             } else add("Last arm: never")
             // #1: did the strap actually fire? (STRAP_DRIVEN_ALARM_EXECUTED)

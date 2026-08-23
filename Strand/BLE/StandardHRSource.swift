@@ -138,7 +138,7 @@ public final class StandardHRSource: NSObject, ObservableObject {
         scanning = true
         log("HR-strap: scanning for standard heart-rate straps (0x180D)…")
         guard central.state == .poweredOn else {
-            log("HR-strap: Bluetooth not powered on (state=\(central.state.rawValue)) — scan deferred until ready")
+            log("HR-strap: Bluetooth not powered on (state=\(central.state.rawValue)) - scan deferred until ready")
             return   // deferred until poweredOn
         }
         central.scanForPeripherals(withServices: [Self.heartRateService],
@@ -164,7 +164,7 @@ public final class StandardHRSource: NSObject, ObservableObject {
         guard let p else {
             // Never seen by this Mac/iPhone yet → remember it and scan; didDiscover connects it on sight.
             pendingConnectID = id
-            log("HR-strap: strap \(id) not cached yet — scanning to find it")
+            log("HR-strap: strap \(id) not cached yet - scanning to find it")
             scan()
             return
         }
@@ -173,7 +173,7 @@ public final class StandardHRSource: NSObject, ObservableObject {
         p.delegate = self
         guard central.state == .poweredOn else {
             pendingConnectID = id
-            log("HR-strap: Bluetooth not powered on — connect to \(id) deferred until ready")
+            log("HR-strap: Bluetooth not powered on - connect to \(id) deferred until ready")
             return
         }
         log("HR-strap: connecting to \(id)")
@@ -226,7 +226,7 @@ public final class StandardHRSource: NSObject, ObservableObject {
         guard let reading = FitnessSensorDecode.decode(uuid16: uuid16, bytes) else { return }
         if !loggedFirstSensor {
             loggedFirstSensor = true
-            log("HR-strap: receiving \(reading.kind.displayName) data — first reading")
+            log("HR-strap: receiving \(reading.kind.displayName) data - first reading")
         }
         // RSC: direct instantaneous speed + cadence.
         if let kmh = reading.speedKmh { live.sensorSpeedKmh = kmh }
@@ -289,7 +289,7 @@ extension StandardHRSource: @preconcurrency CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        log("HR-strap: connected — discovering services")
+        log("HR-strap: connected - discovering services")
         peripheral.delegate = self
         // Discover the HR service (unchanged) AND, additively, the standard Battery Service + the three
         // fitness-sensor services (RSC/CSC/CPS) so a generic strap's charge AND a connected footpod / bike
@@ -301,14 +301,14 @@ extension StandardHRSource: @preconcurrency CBCentralManagerDelegate {
 
     public func centralManager(_ central: CBCentralManager,
                                didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        log("HR-strap: WARNING failed to connect — \(error?.localizedDescription ?? "unknown error")")
+        log("HR-strap: WARNING failed to connect - \(error?.localizedDescription ?? "unknown error")")
         live.connected = false
     }
 
     public func centralManager(_ central: CBCentralManager,
                                didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         if let error = error {
-            log("HR-strap: disconnected — \(error.localizedDescription)")
+            log("HR-strap: disconnected - \(error.localizedDescription)")
         } else {
             log("HR-strap: disconnected (clean)")
         }
@@ -330,7 +330,7 @@ extension StandardHRSource: @preconcurrency CBCentralManagerDelegate {
 extension StandardHRSource: @preconcurrency CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error = error {
-            log("HR-strap: WARNING service discovery failed — \(error.localizedDescription)")
+            log("HR-strap: WARNING service discovery failed - \(error.localizedDescription)")
             return
         }
         guard let services = peripheral.services else {
@@ -341,14 +341,14 @@ extension StandardHRSource: @preconcurrency CBPeripheralDelegate {
         if services.contains(where: { $0.uuid == Self.heartRateService }) {
             log("HR-strap: 0x180D heart-rate service FOUND")
         } else {
-            log("HR-strap: 0x180D heart-rate service NOT FOUND — this strap may not expose standard HR")
+            log("HR-strap: 0x180D heart-rate service NOT FOUND - this strap may not expose standard HR")
         }
         for svc in services where svc.uuid == Self.heartRateService {
             peripheral.discoverCharacteristics([Self.heartRateMeasurement], for: svc)
         }
         // Additively read the battery level off 0x180F if the strap exposes it (low-risk, separate svc).
         for svc in services where svc.uuid == Self.batteryService {
-            log("HR-strap: 0x180F battery service found — reading level")
+            log("HR-strap: 0x180F battery service found - reading level")
             peripheral.discoverCharacteristics([Self.batteryLevel], for: svc)
         }
         // Additively discover the fitness-sensor measurement characteristics (RSC/CSC/CPS). Separate
@@ -370,7 +370,7 @@ extension StandardHRSource: @preconcurrency CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral,
                            didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         if let error = error {
-            log("HR-strap: WARNING characteristic discovery failed — \(error.localizedDescription)")
+            log("HR-strap: WARNING characteristic discovery failed - \(error.localizedDescription)")
             return
         }
         guard let chars = service.characteristics else {
@@ -384,9 +384,9 @@ extension StandardHRSource: @preconcurrency CBPeripheralDelegate {
             if ch.properties.contains(.notify) { peripheral.setNotifyValue(true, for: ch) }
         }
         if chars.contains(where: { $0.uuid == Self.heartRateMeasurement }) {
-            log("HR-strap: 0x2A37 measurement characteristic found — enabling notifications on 0x2A37")
+            log("HR-strap: 0x2A37 measurement characteristic found - enabling notifications on 0x2A37")
         } else if service.uuid == Self.heartRateService {
-            log("HR-strap: 0x2A37 measurement characteristic NOT FOUND — cannot read HR from this strap")
+            log("HR-strap: 0x2A37 measurement characteristic NOT FOUND - cannot read HR from this strap")
         }
         for ch in chars where ch.uuid == Self.heartRateMeasurement {
             peripheral.setNotifyValue(true, for: ch)
@@ -394,7 +394,7 @@ extension StandardHRSource: @preconcurrency CBPeripheralDelegate {
         // Additively subscribe to any fitness-sensor measurement characteristic (RSC/CSC/CPS) this device
         // exposes. Notify-only, entirely separate from the HR enablement above.
         for ch in chars where Self.fitnessSensorUUID16(for: ch.uuid) != nil {
-            log("HR-strap: fitness-sensor characteristic \(ch.uuid) found — enabling notifications")
+            log("HR-strap: fitness-sensor characteristic \(ch.uuid) found - enabling notifications")
             peripheral.setNotifyValue(true, for: ch)
         }
     }
@@ -404,7 +404,7 @@ extension StandardHRSource: @preconcurrency CBPeripheralDelegate {
                            error: Error?) {
         guard characteristic.uuid == Self.heartRateMeasurement else { return }
         if let error = error {
-            log("HR-strap: WARNING enabling notifications FAILED — \(error.localizedDescription) — strap will send no HR data")
+            log("HR-strap: WARNING enabling notifications FAILED - \(error.localizedDescription) - strap will send no HR data")
         } else {
             log("HR-strap: notifications enabled (isNotifying=\(characteristic.isNotifying))")
         }
@@ -433,7 +433,7 @@ extension StandardHRSource: @preconcurrency CBPeripheralDelegate {
         // Log the FIRST sample of a connection only — proof that data is flowing — never every sample.
         if !loggedFirstHR {
             loggedFirstHR = true
-            log("HR-strap: receiving data — first sample \(parsed.hr) bpm (rr beats: \(parsed.rr.count))")
+            log("HR-strap: receiving data - first sample \(parsed.hr) bpm (rr beats: \(parsed.rr.count))")
         }
         live.setHeartRate(parsed.hr)
         live.setRRIntervals(parsed.rr)

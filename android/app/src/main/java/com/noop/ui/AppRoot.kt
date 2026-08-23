@@ -116,7 +116,7 @@ import androidx.compose.ui.window.DialogProperties
 //
 // The macOS app's sidebar holds many sections; on Android (mirroring the iOS RootTabView) we surface
 // them through a unified floating "glass" bottom bar (Today · Trends · Workouts · Sleep · More) for the everyday
-// screens, with a "More" sheet that lists the full grouped set — so every destination is one tap away
+// screens, with a "More" sheet that lists the full grouped set - so every destination is one tap away
 // without a global hamburger/drawer. Destinations are grouped exactly as the sidebar groups them.
 // Routes whose screens belong to later waves point at a ComingSoon placeholder so the app compiles today.
 
@@ -267,7 +267,7 @@ internal object MoreSectionPrefs {
 /**
  * App shell: a single [Scaffold] with a floating [GlassBottomBar] (Today · Trends · Workouts · Sleep · More)
  * driving one [NavHost], mirroring the iOS RootTabView. There is NO global toolbar and no nav drawer
- * — every screen self-titles via [ScreenScaffold], and the "More" sheet (opened from the bar) reaches
+ * - every screen self-titles via [ScreenScaffold], and the "More" sheet (opened from the bar) reaches
  * every destination in [drawerGroups], so nothing is lost. A single [AppViewModel] is created here and
  * shared with every screen, so the BLE connection and cached metrics stay app-wide singletons.
  */
@@ -331,7 +331,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 composable(Destination.Today.route) {
                     TodayScreen(
                         viewModel = viewModel,
-                        // The Updates "ringer" — the bell sits before the +, and opens the inbox
+                        // The Updates "ringer" - the bell sits before the +, and opens the inbox
                         // sheet AppRoot presents (it owns the nav for deep-links).
                         updateStore = updateStore,
                         onOpenUpdates = { showUpdatesInbox = true },
@@ -461,7 +461,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     )
                 }
                 composable(Destination.TestCentre.route) { TestCentreScreen(viewModel) }
-                // The "More" page — the iOS More tab's twin: a navigated ScreenScaffold page hosting the
+                // The "More" page - the iOS More tab's twin: a navigated ScreenScaffold page hosting the
                 // full grouped destination list (was a pull-up sheet). A row navigates top-level.
                 composable(Destination.More.route) {
                     MoreScreen(onNavigate = { nav.navigateTopLevel(it) })
@@ -525,7 +525,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
         }
 
         // The Updates inbox (opened by the Today header bell). Presented here so it has the nav for
-        // deep-links — a row's "trends" key switches the bottom tab, mirroring the iOS NavRouter route.
+        // deep-links - a row's "trends" key switches the bottom tab, mirroring the iOS NavRouter route.
         if (showUpdatesInbox) {
             ModalBottomSheet(
                 onDismissRequest = { showUpdatesInbox = false },
@@ -562,7 +562,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
 
 // MARK: - More page
 //
-// The "More" tab's destination — a full navigated page (mirroring the iOS More tab's NavigationStack
+// The "More" tab's destination - a full navigated page (mirroring the iOS More tab's NavigationStack
 // List), replacing the old pull-up ModalBottomSheet. It hosts the SAME grouped destinations
 // ([drawerGroups]) inside a [ScreenScaffold], with the exact section-header + row styling the sheet
 // used (uppercase [Overline] group labels, icon + label [NavigationDrawerItem] rows) — now with a
@@ -1083,7 +1083,7 @@ private fun UpdatesLauncherButton(unreadUpdates: Int, onClick: () -> Unit) {
 /** The calm global easing curve from the handoff (cubic-bezier 0.22, 1, 0.36, 1). */
 private val NavEasing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
 
-/** ~240ms crossfade on the calm easing — the README "Tab crossfade" between roots. */
+/** ~240ms crossfade on the calm easing - the README "Tab crossfade" between roots. */
 private val navFadeSpec = tween<Float>(durationMillis = 240, easing = NavEasing)
 
 /**
@@ -1120,7 +1120,7 @@ internal fun BrandMark(size: Dp = 22.dp) {
             size = arcSize,
             style = capStroke,
         )
-        // Solid WHITE "on-device core" dot at the centre (green ring + white core — iOS parity, no gold).
+        // Solid WHITE "on-device core" dot at the centre (green ring + white core - iOS parity, no gold).
         drawCircle(color = Color.White, radius = stroke * 0.62f, center = center)
     }
 }

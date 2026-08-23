@@ -412,7 +412,7 @@ object LiftingImporter {
      * Parse a lifting date string into UTC epoch seconds, interpreting it in [zone].
      *
      * A timestamp carrying its own ISO-8601 offset ("…Z" / "…+01:00") is authoritative and ignores
-     * [zone]. Everything else — Hevy's English "d MMM yyyy, HH:mm" and plain "yyyy-MM-dd HH:mm:ss"
+     * [zone]. Everything else - Hevy's English "d MMM yyyy, HH:mm" and plain "yyyy-MM-dd HH:mm:ss"
      * forms — is **zoneless local wall-clock**, so it is resolved against [zone] (the device timezone),
      * not UTC (#649). `atZone` is DST-correct, unlike a fixed offset.
      */

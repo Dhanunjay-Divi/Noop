@@ -46,11 +46,11 @@ struct HowNoopWorksView: View {
             case .sleepSorting:
                 return String(localized: "NOOP picks your main sleep as your longest real block, and (once it has learned your usual hours) the one nearest your normal sleep time. Everything else that day is a nap. You can always edit bed and wake times.")
             case .scores:
-                return String(localized: "Recovery, Effort and Sleep Score are calculated on your own device from your wearable data. Recovery needs about four nights of sleep to learn your baseline (that's \"Calibrating\", counted as nights of 4 on the ring), and keeps sharpening over your first couple of weeks. On a WHOOP 5 or MG the strap banks little history, so that count can sit at 0 of 4 until you have worn it across a few nights. That's the strap's sync limit, not a fault. Before there's a number, NOOP shows what it can without faking one.")
+                return String(localized: "Recovery, Effort and Sleep Score are calculated on your own device from your wearable data. Recovery needs about four nights of sleep to learn your baseline (that's \"Calibrating\", counted as nights of 4 on the ring), and keeps sharpening over your first couple of weeks. Some Noop Band firmware syncs history less often, so that count can stay at 0 of 4 until you have worn the band across a few nights. That's a sync limit, not a fault. Before there's a number, NOOP shows what it can without faking one.")
             case .recording:
-                return String(localized: "When your strap is connected NOOP is saving data live. \"Last synced\" tells you how fresh it is. If it says \"Not recording\", reconnect.")
+                return String(localized: "When Noop Band is connected, NOOP saves data live. \"Last synced\" tells you how fresh it is. If it says \"Not recording\", reconnect.")
             case .provenance:
-                return String(localized: "A badge shows whether a number was scored on-device by NOOP, or imported from Whoop or Apple Health.")
+                return String(localized: "A badge shows whether a number was scored on-device by NOOP, or imported from WHOOP or Apple Health.")
             }
         }
 
@@ -165,7 +165,7 @@ struct HowNoopWorksView: View {
                 Text("THE ONE RULE").font(StrandFont.overline)
                     .tracking(StrandFont.overlineTracking)
                     .foregroundStyle(StrandPalette.textSecondary)
-                Text("NOOP never shows you a number it had to make up. If a score isn't ready, it tells you why and what to do next. Everything here runs on your device, from your strap.")
+                Text("NOOP never shows you a number it had to make up. If a score isn't ready, it tells you why and what to do next. Everything here runs on your device, from Noop Band.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -232,7 +232,7 @@ struct HowNoopWorksView: View {
         var method: String {
             switch self {
             case .charge:
-                return String(localized: "A baseline-normalized recovery score: your resting heart rate, sleep quality and night-to-night consistency, weighted against your own baseline, with heart-rate variability (rMSSD) leading wherever the strap gives us a clean reading.")
+                return String(localized: "A baseline-normalized recovery score: your resting heart rate, sleep quality and night-to-night consistency, weighted against your own baseline, with heart-rate variability (rMSSD) leading wherever Noop Band gives us a clean reading.")
             case .effort:
                 return String(localized: "A cardiovascular load in the Banister TRIMP family: time spent in each heart-rate zone, weighted so harder zones count for more, summed into one daily figure.")
             case .rest:

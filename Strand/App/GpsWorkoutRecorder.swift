@@ -13,7 +13,7 @@ import StrandAnalytics   // WorkoutsTrace + TestCentre: the GPS-fix line for the
 // It splits into four pure-or-thin pieces so the geo math and the persist round-trip are unit-testable
 // off any platform location stack:
 //
-//   • `RouteMath`   — pure Haversine distance, pace, and the Google "Encoded Polyline Algorithm Format"
+//   • `RouteMath`   - pure Haversine distance, pace, and the Google "Encoded Polyline Algorithm Format"
 //                     (precision 5). A byte-for-byte Swift port of Android `com.noop.analytics.RouteMath`
 //                     so a route encoded on one platform decodes identically on the other (the polyline
 //                     round-trips through the same local stores / exports as every other workout value).
@@ -287,7 +287,7 @@ enum RouteStore {
     }
 
     /// Persist `route` for a workout, evicting the oldest entries if the cap is exceeded. A no-op when the
-    /// route has no usable polyline (so we never store an empty placeholder — honest "no route").
+    /// route has no usable polyline (so we never store an empty placeholder - honest "no route").
     @discardableResult
     static func store(_ route: WorkoutRoute, startTs: Int, sport: String,
                       into defaults: UserDefaults = .standard) -> Bool {

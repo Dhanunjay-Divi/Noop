@@ -1,6 +1,6 @@
 import Foundation
 
-// FitnessAgeEngine.swift — on-device "Fitness Age" from resting HR + activity + profile.
+// FitnessAgeEngine.swift - on-device "Fitness Age" from resting HR + activity + profile.
 //
 // INDEPENDENT implementation of published, peer-reviewed methods (NOT medical advice; a fitness
 // comparison, never a "biological age"):
@@ -11,15 +11,16 @@ import Foundation
 //     reliably confirmable against the original and are deliberately NOT used here.)
 //   • Physical-activity index: HUNT1 PA-Q (Kurtze 2008), frequency×intensity×duration ∈ [0, 15];
 //     NOOP has no questionnaire, so it RECONSTRUCTS each factor from measured weekly signals.
-//   • Fitness Age: invert the SAME Nes equation self-consistently — the normative curve is the Nes
-//     model at population-reference resting HR and PA-index. The body term (waist) appears in both the
+//   • Fitness Age: invert the SAME Nes equation self-consistently — the comparison curve is the Nes
+//     model at NOOP's explicit neutral resting-HR and PA-index anchors. The body term (waist) appears in both the
 //     user's estimate and the normative curve, so it CANCELS: Fitness Age depends only on how the
 //     user's resting HR and activity compare to a reference-fit peer of their age. This means the
-//     headline number needs no body measurement at all, and an average-fitness person maps to their
+//     headline number needs no body measurement at all, and a person at the neutral anchors maps to their
 //     own chronological age by construction. (We do NOT mix in a different population's reference
 //     curve — e.g. the US FRIEND equation — because the scale offset would bias everyone by ~15 yr.)
 //
-// All numbers below are literal published coefficients. Do not change without re-verifying the source.
+// Equation coefficients and SEE values below are published. The two neutral reference anchors are
+// explicit internal product choices and are not population-fitted constants.
 public enum FitnessAgeEngine {
 
     // MARK: - Nes 2011 waist-circumference coefficients (JAHA PMC7428991, confirmed vs CERG)
@@ -28,11 +29,12 @@ public enum FitnessAgeEngine {
     static let womenIntercept = 74.74, womenAge = 0.247, womenWC = 0.259, womenRHR = 0.114, womenPAI = 0.198
     public static let seeMen = 5.70, seeWomen = 5.14
 
-    // MARK: - Normative reference point (the "average peer" the Fitness Age compares against)
-    /// Population-reference resting HR (bpm): an average healthy adult. At this RHR + paiReference a
-    /// person's Fitness Age equals their chronological age by construction.
+    // MARK: - Internal neutral reference point
+    /// Neutral resting-HR anchor (bpm). At this RHR + `paiReference`, a person's Fitness Age equals
+    /// chronological age by construction. This is an explicit product anchor, not a fitted population mean.
     public static let restingHRReference = 65.0
-    /// Population-reference PA-index (0–15): ≈ "moderately active, a few sessions a week".
+    /// Neutral PA-index anchor (0–15): approximately moderately active, a few sessions a week. This is
+    /// paired with the custom wearable proxy and has not been calibrated against HUNT questionnaire data.
     public static let paiReference = 5.0
 
     public static let minAge = 20.0, maxAge = 80.0
@@ -218,11 +220,16 @@ extension FitnessAgeEngine {
     /// Coverage at/above which an input reads as fully satisfied (a "confident" week).
     public static let goodCoverageDays = 6
 
-    /// Nights of resting-HR still needed before the headline can compute AT ALL — the countdown the
-    /// not-ready card shows ("N more nights of wear…"). 0 once `minCoverageDays` is met. Assumes continued
-    /// nightly wear (a skipped night just doesn't advance the count). Shared with the Android engine so both
-    /// platforms show the same number.
-    public static func nightsUntilReady(rhrDays: Int) -> Int { max(0, minCoverageDays - rhrDays) }
+    /// Observed days still needed for either required coverage gate. Shared by resting-HR and activity
+    /// progress so presentation cannot accidentally report one gate while the engine enforces both.
+    public static func coverageDaysUntilReady(observedDays: Int) -> Int {
+        max(0, minCoverageDays - observedDays)
+    }
+
+    /// Resting-HR compatibility wrapper retained for callers that specifically present overnight wear.
+    public static func nightsUntilReady(rhrDays: Int) -> Int {
+        coverageDaysUntilReady(observedDays: rhrDays)
+    }
 
     private static func coverageStatus(_ days: Int, floor: Int) -> FitnessReadinessStatus {
         if days >= goodCoverageDays { return .satisfied }

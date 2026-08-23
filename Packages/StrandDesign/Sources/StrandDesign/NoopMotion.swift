@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - NoopMotion — the "Design Reset" motion set (WHOOP design language, 2026-06-22)
+// MARK: - NoopMotion - the "Design Reset" motion set (WHOOP design language, 2026-06-22)
 //
 // The house motion language for the WHOOP-flavoured redesign: smooth, snappy, almost no
 // bounce. Beauty is in the restraint — type, spacing and a single confident settle, NOT

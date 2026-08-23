@@ -47,7 +47,7 @@ import com.noop.analytics.MetricArbitrationPolicy
 import java.text.NumberFormat
 import kotlin.math.roundToInt
 
-// MARK: - FusedRecordScreen — "Your Data, Fused" (v5 — Local Multi-Device Fusion)
+// MARK: - FusedRecordScreen - "Your Data, Fused" (v5 - Local Multi-Device Fusion)
 //
 // Value-for-value Compose twin of Strand/Screens/FusedRecordView.swift
 // (docs/superpowers/specs/2026-06-19-v5-local-multi-device-fusion-design.md §UX). For each core metric
@@ -148,7 +148,7 @@ fun FusedRecordScreen(
     }
 }
 
-/** "Today's scores owned by WHOOP" — the scores' single-owner, made honest. */
+/** "Today's scores owned by WHOOP" - the scores' single-owner, made honest. */
 @Composable
 private fun DayBadgeRow(owner: FusionSource?) {
     val text = if (owner != null) {
@@ -341,7 +341,7 @@ private fun conflictSummary(point: FusedMetricPoint): String {
 
 /**
  * A small read-only dialog: every source's value for the metric, side by side, with the one NOOP is
- * using marked and its trust reason named. NOOP never adjudicates which is "correct" — it shows the
+ * using marked and its trust reason named. NOOP never adjudicates which is "correct" - it shows the
  * spread and explains its best-signal pick. Transparency, not diagnosis.
  */
 @Composable
@@ -471,7 +471,7 @@ object FusionFormat {
                 if (v == Math.floor(v)) v.toInt().toString() else String.format("%.1f", v)
         }
 
-    /** "8,420" — grouped integer. */
+    /** "8,420" - grouped integer. */
     private fun integerGrouped(v: Double): String =
         NumberFormat.getIntegerInstance().format(v.roundToInt())
 

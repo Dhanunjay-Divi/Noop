@@ -61,7 +61,7 @@ public enum AgreementState: String, Equatable, Sendable, CaseIterable, Codable {
 
 /// One source's value for a `(metric, day)`, with the trust tier the policy assigned it. The winner
 /// is the lowest `tier` (most trusted), ties broken by `sourcePriority` (stable). `reason` is the
-/// published, plain-English evidence description ("WHOOP import", "computed stages") — the honesty contract.
+/// published, plain-English evidence description ("WHOOP import", "computed stages") - the honesty contract.
 public struct ContributingSource: Equatable, Sendable {
     public let source: FusionSource
     public let value: Double

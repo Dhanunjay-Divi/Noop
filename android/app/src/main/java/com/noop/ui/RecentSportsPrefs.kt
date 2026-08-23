@@ -24,7 +24,7 @@ object RecentSportsPrefs {
     /** SharedPreferences key. The macOS/iOS twin persists the same "workout.recentSports" name. */
     const val KEY = "workout.recentSports"
 
-    /** Most-recent-first cap — the issue asks for "2-3"; three keeps the section one glance tall. */
+    /** Most-recent-first cap - the issue asks for "2-3"; three keeps the section one glance tall. */
     const val MAX_COUNT = 3
 
     /** Encode an ordered list of names into the stored comma-joined string. */

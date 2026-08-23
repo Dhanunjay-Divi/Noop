@@ -21,7 +21,7 @@ class BodyLocationProbeFormatTest {
     @Test fun whoop4AcceptedDecodesTheFourFields() {
         val (text, payHex) = WhoopBleClient.formatBodyLocationProbe(hexToBytes(wristFrame), 6, false, null)
         assertTrue(text.contains("WHOOP 4.0"))
-        assertTrue(text.contains("opcode 84 ACCEPTED — 4-byte payload"))
+        assertTrue(text.contains("opcode 84 ACCEPTED - 4-byte payload"))
         assertTrue(text.contains(wristFrame))
         assertTrue(text.contains("  @00  01 01 5a 00"))
         assertTrue(text.contains("revision:   1"))
@@ -69,8 +69,8 @@ class BodyLocationProbeFormatTest {
     @Test fun fullOutputGoldenParityLock() {
         val (text, _) = WhoopBleClient.formatBodyLocationProbe(hexToBytes(wristFrame), 6, false, null)
         val golden = listOf(
-            "#690 BODY-LOCATION PROBE — WHOOP 4.0",
-            "Verdict: opcode 84 ACCEPTED — 4-byte payload",
+            "#690 BODY-LOCATION PROBE - WHOOP 4.0",
+            "Verdict: opcode 84 ACCEPTED - 4-byte payload",
             "",
             "Raw frame (15 B):",
             "aa09000024005401015a00deadbeef",
@@ -84,7 +84,7 @@ class BodyLocationProbeFormatTest {
             "  confidence: 90  (raw)",
             "  status:     0  (raw)",
             "",
-            "Δ vs previous capture: first capture — probe again in another position to diff",
+            "Δ vs previous capture: first capture - probe again in another position to diff",
         ).joinToString("\n")
         assertEquals(golden, text)
     }

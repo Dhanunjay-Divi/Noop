@@ -387,8 +387,10 @@ struct RootView: View {
             }
         }
         .onAppear {
+            WindDownNudge.refreshPersonalization(from: repo.vitalRows)
             DailyReviewNotifications.restoreScheduleIfAuthorized()
             HydrationReminders.restoreScheduleIfAuthorized()
+            MetricReviewReminders.restoreScheduleIfAuthorized()
             WindDownNudge.restoreScheduleIfAuthorized()
             // Defer one turn so NavigationSplitView has installed its initial selection before a
             // cold-launch reminder replaces it.
@@ -400,6 +402,9 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: NotificationRouteBridge.routeRequested)) { _ in
             consumePendingNotificationRoute()
         }
+        .onChangeCompat(of: repo.refreshSeq) { _ in
+            WindDownNudge.refreshPersonalization(from: repo.vitalRows)
+        }
     }
 
     /// Cold and warm notification taps converge here. `consumePending` removes the route before the
@@ -408,7 +413,9 @@ struct RootView: View {
         guard let route = NotificationRouteBridge.consumePending() else { return }
         switch route {
         case .sleep: selection = .sleep
+        case .hydration: selection = .today
         case .today: selection = .today
+        case .trends: selection = .trends
         case .devices: selection = .devices
         case .safety: selection = .safety
         case .coach: selection = .coach
@@ -556,7 +563,7 @@ private struct SidebarStatus: View {
                 Text(statusText)
                     .font(StrandFont.rounded(12, weight: .medium))
                     .foregroundStyle(StrandPalette.textPrimary)
-                Text(live.batteryPct.map { String(localized: "Battery \(Int($0))%") } ?? String(localized: "Strap not connected"))
+                Text(live.batteryPct.map { String(localized: "Battery \(Int($0))%") } ?? String(localized: "Noop Band not connected"))
                     .font(StrandFont.rounded(11))
                     .foregroundStyle(StrandPalette.textTertiary)
             }

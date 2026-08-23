@@ -1542,7 +1542,7 @@ public final class OuraLiveSource: NSObject, ObservableObject {
         }
         // A gated/unavailable feature reports ALL-ZERO (mode/status/state); the streaming daytime-HR, by
         // contrast, reads mode=1 status=0x11 state=2. Flag the all-zero case as the honest "cloud never
-        // enabled it" — NOT `subscription==0` alone, since daytime-HR is subscription=0 yet active.
+        // enabled it" - NOT `subscription==0` alone, since daytime-HR is subscription=0 yet active.
         let off = st.mode == 0 && st.status == 0 && st.state == 0
         let gate = off ? " - INACTIVE (server-gated off; the cloud never enabled it, not emitted offline)" : ""
         // Name the enum fields so the log reads plainly (OURA_PROTOCOL.md s7.1 [ring4-ble]) — e.g. a gated

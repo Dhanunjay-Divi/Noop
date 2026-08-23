@@ -808,7 +808,7 @@ private fun ChartWithAxes(
                     if (chartStyle == TrendChartStyle.BAR) {
                         // Bar mode: value-ramp bars from the baseline. No GlowEndCap (the "now" halo is a
                         // line idiom). selectionEnabled is OFF so BarChart mean-bins a dense window (the
-                        // multi-year "ALL" span) down to the pixel width — a clean silhouette instead of a
+                        // multi-year "ALL" span) down to the pixel width - a clean silhouette instead of a
                         // 1000-bar sub-pixel smear. The max/avg/min axis column + footer carry the numbers.
                         BarChart(
                             values = values,

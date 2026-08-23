@@ -13,7 +13,7 @@ enum PuffinExperiment {
 
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: defaultsKey) }
 
-    /// Separate, more-deliberate opt-in for the WHOOP 5/MG "R22" deep-data unlock — the one probe
+    /// Separate, more-deliberate opt-in for the WHOOP 5/MG "R22" deep-data unlock - the one probe
     /// that WRITES a persistent feature flag to the strap (the `enable_r22_*` SET_CONFIG sequence the
     /// official app sends; documented by judes.club + Asherlc/dofek). Kept distinct from the read-only
     /// probes above because it changes strap state, so it must be turned on explicitly and is still
@@ -81,12 +81,12 @@ enum PuffinExperiment {
         return v == 0 ? 20 : v
     }
 
-    /// "Pause HRV capture under Low Power Mode" — a sub-option of power saving, default ON when the master
+    /// "Pause HRV capture under Low Power Mode" - a sub-option of power saving, default ON when the master
     /// is on. Stored inverted (`…Disabled`) so the default-true reads correctly from a zero-value store.
     static let pauseHrvDisabledKey = "noopPowerSavingPauseHrvDisabled"
     static var pauseHrvOnPowerSaveEnabled: Bool { !UserDefaults.standard.bool(forKey: pauseHrvDisabledKey) }
 
-    /// "Experimental sleep staging (V2)": re-stage each detected night with `SleepStagerV2` — a transparent
+    /// "Experimental sleep staging (V2)": re-stage each detected night with `SleepStagerV2` - a transparent
     /// cardiorespiratory recipe (reimplemented from contributor PR #600) — instead of the older V1 stager.
     /// Pure analysis switch: it changes ONLY which staging engine runs over an already-detected sleep window;
     /// sleep DETECTION, scoring and the V1 path are all untouched. Model-agnostic (WHOOP 4 and 5). **Default

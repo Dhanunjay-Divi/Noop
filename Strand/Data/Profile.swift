@@ -6,8 +6,12 @@ import SwiftUI
 /// exactly in a SQLite `REAL` and let every read reject a value produced from a different profile
 /// without adding columns or changing the backup schema.
 enum AgeMetricProfile {
-    static let fitnessAgeKey = "fitness_age_profile_v1"
-    static let vo2maxEstimateKey = "vo2max_est_profile_v1"
+    /// v1 values may have been computed before activity required four observed days. Keep the old
+    /// markers only for computed-source cleanup; readers require the exact v2 marker.
+    static let legacyFitnessAgeKey = "fitness_age_profile_v1"
+    static let fitnessAgeKey = "fitness_age_profile_v2"
+    static let legacyVO2maxEstimateKey = "vo2max_est_profile_v1"
+    static let vo2maxEstimateKey = "vo2max_est_profile_v2"
     /// The v2 marker identifies the provenance-safe Vitality model, which no longer treats the legacy
     /// `DailyMetric.steps` column as measured activity. Keep the old key only so the computed-row cleanup
     /// can remove it during upgrade; raw/imported/vendor namespaces are never part of that cleanup.
@@ -31,6 +35,20 @@ enum AgeMetricProfile {
         guard let current else { return false }
         if let stored { return stored == current }
         return !provenanceRequired
+    }
+
+    /// Fitness Age v2 is a calibration-version boundary as well as a profile boundary. Missing markers
+    /// can describe rows produced with the old activity gate, so there is no legacy grace period.
+    static func acceptsFitnessAgeV2(stored: Double?, current: Double?) -> Bool {
+        guard let current else { return false }
+        return stored == current
+    }
+
+    /// The optional VO2 estimate is produced by the same gated calculation and follows the same
+    /// fail-closed version boundary.
+    static func acceptsVO2maxEstimateV2(stored: Double?, current: Double?) -> Bool {
+        guard let current else { return false }
+        return stored == current
     }
 
     /// Vitality v2 is a model-version boundary, not only a profile-edit boundary. A missing v2 marker
@@ -411,13 +429,13 @@ final class ProfileStore: ObservableObject {
     }
 
     func acceptsFitnessAge(provenance: Double?) -> Bool {
-        AgeMetricProfile.accepts(stored: provenance, current: fitnessAgeProfileToken,
-                                 provenanceRequired: fitnessAgeProvenanceRequired)
+        AgeMetricProfile.acceptsFitnessAgeV2(
+            stored: provenance, current: fitnessAgeProfileToken)
     }
 
     func acceptsVO2maxEstimate(provenance: Double?) -> Bool {
-        AgeMetricProfile.accepts(stored: provenance, current: vo2maxProfileToken,
-                                 provenanceRequired: vo2maxProvenanceRequired)
+        AgeMetricProfile.acceptsVO2maxEstimateV2(
+            stored: provenance, current: vo2maxProfileToken)
     }
 
     func acceptsVitality(provenance: Double?) -> Bool {

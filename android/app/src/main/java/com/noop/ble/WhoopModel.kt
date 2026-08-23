@@ -3,16 +3,29 @@ package com.noop.ble
 import java.util.UUID
 
 /**
- * Which strap the user is pairing. They pick this before scanning so we look for
- * exactly one device family instead of guessing — a WHOOP 4.0 scan no longer
- * waits forever on a WHOOP 5/MG wrist, and vice versa.
- *
- * This is the user-facing choice; it is deliberately separate from the
- * protocol-layer DeviceFamily (which carries CRC/characteristic detail).
+ * Internal transport family for compatible band hardware. Customer UI always says [CUSTOMER_NAME];
+ * this enum remains separate from the protocol-layer DeviceFamily, which carries framing details.
  */
-enum class WhoopModel(val displayName: String, val service: UUID) {
-    WHOOP4("WHOOP 4.0", WhoopBleClient.WHOOP4_SERVICE),
-    WHOOP5_MG("WHOOP 5.0 / MG", WhoopBleClient.WHOOP5_SERVICE);
+enum class WhoopModel(val service: UUID) {
+    WHOOP4(WhoopBleClient.WHOOP4_SERVICE),
+    WHOOP5_MG(WhoopBleClient.WHOOP5_SERVICE);
+
+    /** Hardware generation stays internal; the product name is stable across compatible transports. */
+    val displayName: String get() = CUSTOMER_NAME
+
+    /** Diagnostic-only transport identity. Never use this on ordinary customer setup or status screens. */
+    val transportName: String
+        get() = when (this) {
+            WHOOP4 -> "WHOOP 4.0"
+            WHOOP5_MG -> "WHOOP 5.0 / MG"
+        }
+
+    /** Existing registry schema value. Kept stable so upgrades do not orphan paired hardware or data. */
+    val registryModel: String
+        get() = when (this) {
+            WHOOP4 -> "4.0"
+            WHOOP5_MG -> "5.0 MG"
+        }
 
     /**
      * The OTHER WHOOP family to try when a service-filtered scan for this model finds nothing. A
@@ -26,4 +39,18 @@ enum class WhoopModel(val displayName: String, val service: UUID) {
             WHOOP4 -> WHOOP5_MG
             WHOOP5_MG -> WHOOP4
         }
+
+    companion object {
+        const val CUSTOMER_NAME = "Noop Band"
+
+        /** Every compatible service used by the generation-agnostic setup scan. */
+        val compatibleServices: List<UUID>
+            get() = entries.map { it.service }
+
+        /** Resolve the actual transport family from advertisement evidence, never from a stale preference. */
+        fun fromAdvertisedServiceUuids(serviceUuids: Iterable<String>): WhoopModel? =
+            serviceUuids.firstNotNullOfOrNull { advertised ->
+                entries.firstOrNull { it.service.toString().equals(advertised, ignoreCase = true) }
+            }
+    }
 }

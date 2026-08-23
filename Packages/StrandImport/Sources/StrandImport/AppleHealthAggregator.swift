@@ -31,6 +31,9 @@ public struct AppleDailyAggregate: Equatable, Sendable {
     public let activeKcal: Double?
     public let basalKcal: Double?
     public let vo2max: Double?
+    /// Observed dietary-water total in millilitres. Cross-source reducers use a conservative maximum
+    /// rather than summing potentially duplicated logs from multiple apps.
+    public let hydrationML: Double?
 
     // Body composition (daily latest)
     public let weightKg: Double?
@@ -63,6 +66,7 @@ public struct AppleDailyAggregate: Equatable, Sendable {
         activeKcal: Double? = nil,
         basalKcal: Double? = nil,
         vo2max: Double? = nil,
+        hydrationML: Double? = nil,
         weightKg: Double? = nil,
         bodyFatPct: Double? = nil,
         leanMassKg: Double? = nil,
@@ -88,6 +92,7 @@ public struct AppleDailyAggregate: Equatable, Sendable {
         self.activeKcal = activeKcal
         self.basalKcal = basalKcal
         self.vo2max = vo2max
+        self.hydrationML = hydrationML
         self.weightKg = weightKg
         self.bodyFatPct = bodyFatPct
         self.leanMassKg = leanMassKg
@@ -125,6 +130,7 @@ public enum AppleHealthAggregator {
     static let activeEnergy = "ActiveEnergyBurned"
     static let basalEnergy = "BasalEnergyBurned"
     static let vo2max = "VO2Max"
+    static let dietaryWater = "DietaryWater"
     static let bodyMass = "BodyMass"
     static let bodyFat = "BodyFatPercentage"
     static let leanMass = "LeanBodyMass"
@@ -168,6 +174,21 @@ public enum AppleHealthAggregator {
         case "degf", "fahrenheit": return (value - 32.0) * 5.0 / 9.0
         case "k", "kelvin":        return value - 273.15
         default:                     return value
+        }
+    }
+
+    static func waterMillilitres(_ value: Double, unit: String?) -> Double? {
+        guard value.isFinite, value >= 0 else { return nil }
+        let normalized = (unit ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+        switch normalized {
+        case "ml", "milliliter", "milliliters": return value
+        case "l", "liter", "liters": return value * 1_000
+        case "floz", "fl_oz_us", "fluidounce", "fluidounces": return value * 29.5735
+        case "cup", "cup_us", "cups": return value * 236.588
+        default: return nil
         }
     }
 
@@ -278,6 +299,7 @@ public enum AppleHealthAggregator {
                 activeKcal: base?.activeKcal,
                 basalKcal: base?.basalKcal,
                 vo2max: base?.vo2max,
+                hydrationML: base?.hydrationML,
                 weightKg: base?.weightKg,
                 bodyFatPct: base?.bodyFatPct,
                 leanMassKg: base?.leanMassKg,
@@ -317,6 +339,7 @@ public enum AppleHealthAggregator {
             add("active_kcal", d.activeKcal)
             add("basal_kcal", d.basalKcal)
             add("vo2max", d.vo2max)
+            add("hydration", d.hydrationML)
             add("weight", d.weightKg)
             add("body_fat", d.bodyFatPct)
             add("lean_mass", d.leanMassKg)
@@ -378,6 +401,7 @@ public struct AppleDailySampleAccumulator {
         var basal = 0.0;  var hasBasal = false
         // Latest-by-end values.
         var vo2: Double?;     var vo2At: Date?
+        var hydrationBySource: [String: Double] = [:]
         var weight: Double?;  var weightAt: Date?
         var bodyFat: Double?; var bodyFatAt: Date?
         var lean: Double?;    var leanAt: Date?
@@ -440,6 +464,11 @@ public struct AppleDailySampleAccumulator {
                     byDay[day]!.vo2 = v
                     byDay[day]!.vo2At = s.end
                 }
+            }
+        case AppleHealthAggregator.dietaryWater:
+            if let value = s.value,
+               let ml = AppleHealthAggregator.waterMillilitres(value, unit: s.unit) {
+                byDay[day]!.hydrationBySource[s.sourceName ?? "", default: 0] += ml
             }
         case AppleHealthAggregator.bodyMass:
             if let v = s.value {
@@ -524,6 +553,7 @@ public struct AppleDailySampleAccumulator {
                 activeKcal: a.hasActive ? a.active : nil,
                 basalKcal: a.hasBasal ? a.basal : nil,
                 vo2max: a.vo2,
+                hydrationML: a.hydrationBySource.values.max(),
                 weightKg: a.weight,
                 bodyFatPct: a.bodyFat,
                 leanMassKg: a.lean,

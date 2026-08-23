@@ -63,7 +63,7 @@ final class HealthKitBridge: ObservableObject {
     /// Keeping this at the commit boundary covers foreground, manual, and observer-triggered syncs.
     var dataProjectionChanged: (() async -> Void)?
     /// NOOP's on-device COMPUTED daily scores (recovery/HRV/RHR/SpO₂/resp) live under the sibling
-    /// `deviceId + "-noop"` id — mirrors `Repository.computedDeviceId` / `IntelligenceEngine.computedId`.
+    /// `deviceId + "-noop"` id - mirrors `Repository.computedDeviceId` / `IntelligenceEngine.computedId`.
     /// `writeBack` must read this, not the raw import id: a Bluetooth-only WHOOP user has no imported
     /// `noopDeviceId` daily row, so those metrics exist ONLY here.
     private var computedDeviceId: String { noopDeviceId + "-noop" }
@@ -151,7 +151,7 @@ final class HealthKitBridge: ObservableObject {
         .heartRate, .restingHeartRate, .heartRateVariabilitySDNN, .oxygenSaturation,
         .respiratoryRate, .bodyTemperature, .appleSleepingWristTemperature,
         .stepCount, .activeEnergyBurned,
-        .basalEnergyBurned, .vo2Max
+        .basalEnergyBurned, .vo2Max, .dietaryWater
     ]
     private static let bodyCompositionReadIds: [HKQuantityTypeIdentifier] = [
         .bodyMass, .bodyFatPercentage, .leanBodyMass, .bodyMassIndex
@@ -181,7 +181,7 @@ final class HealthKitBridge: ObservableObject {
         // A free-signed build (no `com.apple.developer.healthkit` entitlement) can NEVER reach Health:
         // `requestAuthorization` either throws "Missing application-identifier"/"missing entitlement"
         // or returns without ever presenting the sheet and leaves every type `.notDetermined`. Either
-        // way the honest answer is "this build can't use Apple Health directly", NOT "you denied it" —
+        // way the honest answer is "this build can't use Apple Health directly", NOT "you denied it" -
         // so never fall through to `.denied` (which tells the user to fix it in Settings, where the app
         // can never appear). Detect via the embedded provisioning profile up front (#348).
         guard HealthKitBridge.hasHealthKitEntitlement else { auth = .entitlementMissing; return }
@@ -199,7 +199,7 @@ final class HealthKitBridge: ObservableObject {
             UserDefaults.standard.set(true, forKey: HealthKitBridge.authorizationRequestedKey)
         } catch {
             // A thrown error here is on a build that carries the entitlement (guarded above), so it's a
-            // genuine denial / request failure — keep the normal `.denied` "enable in Settings" path,
+            // genuine denial / request failure - keep the normal `.denied` "enable in Settings" path,
             // never the entitlement-missing reroute.
             auth = .denied
         }
@@ -306,7 +306,7 @@ final class HealthKitBridge: ObservableObject {
         .heartRate, .restingHeartRate, .heartRateVariabilitySDNN, .oxygenSaturation,
         .respiratoryRate, .bodyTemperature, .appleSleepingWristTemperature,
         .stepCount, .activeEnergyBurned,
-        .basalEnergyBurned, .vo2Max
+        .basalEnergyBurned, .vo2Max, .dietaryWater
     ]
 
     /// Long-lived observer queries, retained so HealthKit doesn't tear them down. Keyed by the sample
@@ -702,6 +702,7 @@ final class HealthKitBridge: ObservableObject {
         case HKQuantityTypeIdentifier.activeEnergyBurned.rawValue: return .activeEnergy
         case HKQuantityTypeIdentifier.basalEnergyBurned.rawValue: return .basalEnergy
         case HKQuantityTypeIdentifier.vo2Max.rawValue: return .vo2Max
+        case HKQuantityTypeIdentifier.dietaryWater.rawValue: return .hydration
         case HKQuantityTypeIdentifier.bodyMass.rawValue: return .bodyMass
         case HKQuantityTypeIdentifier.bodyFatPercentage.rawValue: return .bodyFat
         case HKQuantityTypeIdentifier.leanBodyMass.rawValue: return .leanBodyMass
@@ -816,6 +817,11 @@ final class HealthKitBridge: ObservableObject {
                           end: queryEnd, op: .discreteAverage) { day, value in
                 var row = agg(day); row.vo2max = value; byDay[day] = row
             }
+        case .hydration:
+            await collect(.dietaryWater, unit: .literUnit(with: .milli),
+                          start: queryStart, end: queryEnd, op: .cumulativeSum) { day, value in
+                var row = agg(day); row.hydrationML = value; byDay[day] = row
+            }
         case .bodyMass:
             await collect(.bodyMass, unit: .gramUnit(with: .kilo), start: queryStart,
                           end: queryEnd, op: .mostRecent) { day, value in
@@ -898,6 +904,7 @@ final class HealthKitBridge: ObservableObject {
                 activeKcal: row.activeKcal,
                 basalKcal: row.basalKcal,
                 vo2max: row.vo2max,
+                hydrationML: row.hydrationML,
                 weightKg: row.weightKg,
                 bodyFatPct: row.bodyFatPct,
                 leanMassKg: row.leanMassKg,
@@ -1053,6 +1060,10 @@ final class HealthKitBridge: ObservableObject {
         await collect(.vo2Max, unit: HKUnit(from: "ml/kg*min"), start: start, end: end, op: .discreteAverage) { day, v in
             var a = agg(day); a.vo2max = v; byDay[day] = a
         }
+        await collect(.dietaryWater, unit: .literUnit(with: .milli), start: start, end: end,
+                      op: .cumulativeSum) { day, v in
+            var a = agg(day); a.hydrationML = v; byDay[day] = a
+        }
 
         // Body composition is a separate, optional consent stage. Do not even query these types until
         // the user taps the dedicated action; permission denial is intentionally indistinguishable
@@ -1128,8 +1139,8 @@ final class HealthKitBridge: ObservableObject {
                         steps: a.steps.map { Int($0.rounded()) })
         }
         // Flatten to the generic metricSeries the shared Apple Health screen, the Today apple-health
-        // sparklines, and the Metric Explorer read from — repo.series(key:source:"apple-health")
-        // queries ONLY metricSeries, so without this every tile/chart renders "—" after a successful
+        // sparklines, and the Metric Explorer read from - repo.series(key:source:"apple-health")
+        // queries ONLY metricSeries, so without this every tile/chart renders "-" after a successful
         // sync. Reuse the importer's canonical key mapping so the keys match the macOS path exactly.
         // Once its separate consent stage has been requested, body composition
         // (weight/body_fat/lean_mass/bmi) flows through the same metricPoints keys as the file
@@ -1148,6 +1159,7 @@ final class HealthKitBridge: ObservableObject {
                 activeKcal: a.activeKcal,
                 basalKcal: a.basalKcal,
                 vo2max: a.vo2max,
+                hydrationML: a.hydrationML,
                 weightKg: a.weightKg,
                 bodyFatPct: a.bodyFatPct,
                 leanMassKg: a.leanMassKg,
@@ -1218,7 +1230,7 @@ final class HealthKitBridge: ObservableObject {
         // Persist all the apple-health rows AND write back, advancing lastSync only when the WHOLE
         // round-trip succeeds. The three read-side upserts used to be swallowed by `try?`, so a failed
         // import (e.g. a disk-full GRDB write) dropped rows yet still cleared lastError and advanced
-        // lastSync — a false "success", and the next delta sync skipped the window. (Reimplemented
+        // lastSync - a false "success", and the next delta sync skipped the window. (Reimplemented
         // from @vulnix0x4's PR #375.)
         do {
             try await store.upsertAppleDaily(appleRows, deviceId: appleDeviceId)
@@ -1292,7 +1304,7 @@ final class HealthKitBridge: ObservableObject {
         let nowTs = Int(now.timeIntervalSince1970)
 
         // Sleep sessions drive both the sleep write and the vitals' wake-time stamps: computed
-        // sessions (deviceId + "-noop") first, imported rows override on startTs collision — the
+        // sessions (deviceId + "-noop") first, imported rows override on startTs collision - the
         // same source precedence as the dailies union below and IntelligenceEngine's sleep reads.
         let computedSleeps = try await whoopStore.sleepSessions(
             deviceId: computedDeviceId, from: fromTs, to: nowTs, limit: 200)
@@ -1651,6 +1663,7 @@ final class HealthKitBridge: ObservableObject {
         var restingHr: Double?; var avgHr: Double?; var maxHr: Double?; var hrv: Double?
         var spo2: Double?; var respRate: Double?; var steps: Double?
         var activeKcal: Double?; var basalKcal: Double?; var vo2max: Double?
+        var hydrationML: Double?
         var weightKg: Double?; var bodyFatPct: Double?; var leanMassKg: Double?; var bmi: Double?
         var bodyTemperatureC: Double?; var wristTemperatureC: Double?
         var asleepMin: Double?; var deepMin: Double?; var remMin: Double?; var coreMin: Double?
@@ -1702,7 +1715,7 @@ final class HealthKitBridge: ObservableObject {
     }
 
     /// Excludes NOOP's own write-back samples from reads, so the two-way sync never reads its own
-    /// output back in as "apple-health" data — which would make the strap and "Apple Health" plot the
+    /// output back in as "apple-health" data - which would make the strap and "Apple Health" plot the
     /// same line for a strap-only user, and bias the apple-health average for someone who also has a
     /// watch. `HKSource.default()` is this app's own source. (Reimplemented from @vulnix0x4's PR #375.)
     private static var notNoopAuthored: NSPredicate {

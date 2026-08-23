@@ -28,6 +28,36 @@ final class MetricEducationTests: XCTestCase {
         XCTAssertEqual(education.cadence, "Updated weekly")
     }
 
+    func testFitnessAgeCalibrationCopyIncludesBothRequiredCoverageGates() {
+        XCTAssertEqual(
+            fitnessReadyLeadCopy(
+                rhrDays: 4, activityDays: 1, hasAge: true, hasSex: true
+            ),
+            "Calibration progress: resting heart rate 4 of 4 nights; activity 1 of 4 days."
+        )
+        XCTAssertEqual(
+            fitnessCalibrationCompactCopy(
+                rhrDays: 2, activityDays: 3, hasAge: true, hasSex: true
+            ),
+            "RHR 2/4 · Activity 3/4"
+        )
+    }
+
+    func testFitnessAgeCalibrationCopyReportsReadyAndUnsupportedProfileStates() {
+        XCTAssertEqual(
+            fitnessReadyLeadCopy(
+                rhrDays: 7, activityDays: 7, hasAge: true, hasSex: true
+            ),
+            "Resting heart rate and activity coverage are ready. Refresh to calculate your Fitness Age."
+        )
+        XCTAssertEqual(
+            fitnessReadyLeadCopy(
+                rhrDays: 7, activityDays: 7, hasAge: false, hasSex: true
+            ),
+            "Fitness Age needs a supported profile: age 20–80 and a male or female model coefficient."
+        )
+    }
+
     func testVitalityAndWellnessAgeDoNotClaimBodyCompositionInputs() {
         for key in ["vitality", "body_age"] {
             let metric = try! XCTUnwrap(MetricCatalog.all.first { $0.key == key })
@@ -83,6 +113,20 @@ final class MetricEducationTests: XCTestCase {
         XCTAssertNotEqual(original, AgeMetricProfile.fitnessAgeToken(age: 40, sex: "male"))
         XCTAssertNotNil(AgeMetricProfile.vo2maxEstimateToken(age: 40, sex: "female", waistCm: 82))
         XCTAssertNil(AgeMetricProfile.vo2maxEstimateToken(age: 40, sex: "female", waistCm: 0))
+    }
+
+    func testFitnessAgeV2NeverAcceptsMissingOrLegacyCalibrationMarkers() {
+        let fitness = AgeMetricProfile.fitnessAgeToken(age: 40, sex: "female")
+        let vo2 = AgeMetricProfile.vo2maxEstimateToken(age: 40, sex: "female", waistCm: 82)
+
+        XCTAssertFalse(AgeMetricProfile.acceptsFitnessAgeV2(stored: nil, current: fitness))
+        XCTAssertFalse(AgeMetricProfile.acceptsFitnessAgeV2(stored: 391, current: fitness))
+        XCTAssertTrue(AgeMetricProfile.acceptsFitnessAgeV2(stored: fitness, current: fitness))
+        XCTAssertFalse(AgeMetricProfile.acceptsVO2maxEstimateV2(stored: nil, current: vo2))
+        XCTAssertTrue(AgeMetricProfile.acceptsVO2maxEstimateV2(stored: vo2, current: vo2))
+        XCTAssertNotEqual(AgeMetricProfile.legacyFitnessAgeKey, AgeMetricProfile.fitnessAgeKey)
+        XCTAssertNotEqual(
+            AgeMetricProfile.legacyVO2maxEstimateKey, AgeMetricProfile.vo2maxEstimateKey)
     }
 
     func testSleepEfficiencyFormatsStoredFractionAsPercent() {

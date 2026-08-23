@@ -100,6 +100,66 @@ final class HealthKitProjectionStoreTests: XCTestCase {
         XCTAssertTrue(remaining.isEmpty)
     }
 
+    func testHydrationDeletionRebuildsOnlyAppleHealthWaterAndCommitsAnchor() async throws {
+        let store = try await WhoopStore.inMemory()
+        let source = "apple-health"
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-01-01", key: "hydration", value: 1_400),
+            MetricPoint(day: "2026-01-02", key: "hydration", value: 900),
+            MetricPoint(day: "2026-01-01", key: "active_kcal", value: 420),
+        ], deviceId: source)
+        try await store.upsertMetricSeries([
+            MetricPoint(day: "2026-01-01", key: "hydration", value: 1_100),
+        ], deviceId: "hydration")
+
+        let anchor = Data([0x48, 0x32, 0x4F])
+        try await store.reconcileHealthKitProjection(
+            kind: .hydration,
+            sampleType: "HKQuantityTypeIdentifierDietaryWater",
+            anchor: anchor,
+            deviceId: source,
+            fromDay: "2026-01-01",
+            toDay: "2026-01-02",
+            fromTs: 0,
+            toTs: Int.max,
+            appleRows: [],
+            dailyRows: [],
+            metricPoints: [
+                MetricPoint(day: "2026-01-02", key: "hydration", value: 650),
+            ],
+            workouts: []
+        )
+
+        let appleWater = try await store.metricSeries(
+            deviceId: source,
+            key: "hydration",
+            from: "2026-01-01",
+            to: "2026-01-02"
+        )
+        XCTAssertEqual(
+            appleWater,
+            [MetricPoint(day: "2026-01-02", key: "hydration", value: 650)]
+        )
+        let appleEnergy = try await store.metricSeries(
+            deviceId: source,
+            key: "active_kcal",
+            from: "2026-01-01",
+            to: "2026-01-02"
+        )
+        XCTAssertEqual(appleEnergy.count, 1)
+        let noopWater = try await store.metricSeries(
+            deviceId: "hydration",
+            key: "hydration",
+            from: "2026-01-01",
+            to: "2026-01-02"
+        )
+        XCTAssertEqual(noopWater.first?.value, 1_100)
+        let storedAnchor = try await store.healthKitAnchor(
+            sampleType: "HKQuantityTypeIdentifierDietaryWater"
+        )
+        XCTAssertEqual(storedAnchor, anchor)
+    }
+
     func testWorkoutReconcileRemovesDeletedSessionAndKeepsOtherSources() async throws {
         let store = try await WhoopStore.inMemory()
         let deleted = WorkoutRow(startTs: 100, endTs: 200, sport: "running", source: "apple-health",

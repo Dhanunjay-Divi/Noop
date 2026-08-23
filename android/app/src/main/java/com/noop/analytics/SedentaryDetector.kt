@@ -3,7 +3,7 @@ package com.noop.analytics
 import com.noop.data.GravitySample
 
 /*
- * SedentaryDetector.kt — the pure core of the "inactivity reminder" (wrist buzz after sitting too long).
+ * SedentaryDetector.kt - the pure core of the "inactivity reminder" (wrist buzz after sitting too long).
  *
  * Faithful Kotlin mirror of StrandAnalytics/SedentaryDetector.swift. Keep the detector tunables, the
  * active/quiet-hours window math, and the de-dup decision byte-identical to Swift — cross-platform
@@ -51,7 +51,7 @@ data class SedentaryState(
     val lastProcessedGravityTs: Long = 0L,
     /** Unix-seconds of the last buzz (0 = never) — drives the re-nudge cadence. */
     val lastBuzzAt: Long = 0L,
-    /** Start of the last buzzed bout (0 = none) — distinguishes "same bout, re-nudge" from "new bout". */
+    /** Start of the last buzzed bout (0 = none) - distinguishes "same bout, re-nudge" from "new bout". */
     val lastBuzzedBoutStart: Long = 0L,
     /** End of the last buzzed bout (0 = none). */
     val lastBuzzedBoutEnd: Long = 0L,

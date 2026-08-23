@@ -112,7 +112,7 @@ import kotlin.math.roundToInt
  *   2. A uniform grid of fixed StatTiles, each with a sparkline + "vs typical" caption:
  *      Rest, Efficiency, Consistency, Hours vs Needed, Restorative,
  *      Respiratory, Sleep Debt.
- *   3. "Stages vs typical" — Deep / REM / Light horizontal bars showing last-night
+ *   3. "Stages vs typical" - Deep / REM / Light horizontal bars showing last-night
  *      minutes with a marker at the personal typical (mean).
  *   4. A 14-day asleep-hours trend LineChart.
  *
@@ -484,7 +484,7 @@ fun SleepScreen(
         // to merge (the phantom-edit shape) keeps the hero (night != null) and the full-history
         // tiles (tilesModel != null), so intact older nights are never hidden behind "no nights".
         if (tilesModel == null && night == null) {
-            // While the strap is mid-offload, say so — "No nights" reads as final otherwise (#77).
+            // While the strap is mid-offload, say so - "No nights" reads as final otherwise (#77).
             item {
                 if (backfillNote != null) SyncingHistoryNote(chunks = backfillNote!!)
                 SleepEmptyState()
@@ -509,7 +509,7 @@ fun SleepScreen(
                 )
             }
             item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
-            // SLEEP MARKS — tap to log "going to sleep" / "I'm awake" (#461, Phase 1). LOGGING ONLY:
+            // SLEEP MARKS - tap to log "going to sleep" / "I'm awake" (#461, Phase 1). LOGGING ONLY:
             // a mark is persisted to the `sleep_mark` series + the shareable strap log; it never
             // changes the detected sleep. Mirrors macOS SleepView.sleepMarkCard.
             item {
@@ -653,7 +653,7 @@ fun SleepScreen(
     }
 }
 
-// MARK: - 0b. SLEEP MARKS — tap to log "going to sleep" / "I'm awake" (#461, Phase 1)
+// MARK: - 0b. SLEEP MARKS - tap to log "going to sleep" / "I'm awake" (#461, Phase 1)
 //
 // A compact additive card with two buttons. Tapping reports the chosen mark up to [onMark], which the
 // screen persists to the `sleep_mark` metric series AND appends to the shareable strap log, then
@@ -955,7 +955,7 @@ private fun Hero(
     onPickNightDate: ((LocalDate) -> Unit)? = null,
     napBlocks: List<SleepSession> = emptyList(),
     // The LEARNED habitual midsleep the engine threaded into the daily total, passed to the main-night
-    // selector so the "why this is your main sleep" reason matches the block the hero shows — for a
+    // selector so the "why this is your main sleep" reason matches the block the hero shows - for a
     // shift/late sleeper too. null = cold-start band. Mirrors iOS SleepView.habitualMidsleepSec. (C1)
     habitualMidsleepSec: Long? = null,
     // Per-epoch MOTION for the main-night GROUP (#407), laid in group order by `selectNight`. Empty → honest
@@ -1150,7 +1150,7 @@ private fun MainSleepFooter(
     habitualMidsleepSec: Long?,
 ) {
     val reason = mainSleepReasonText(listOf(main) + naps, habitualMidsleepSec)
-    // C4 — the real merge winner, the SAME wording the By-Day badge uses ("On-device" / "Whoop" /
+    // C4 - the real merge winner, the SAME wording the By-Day badge uses ("On-device" / "Whoop" /
     // "Apple Health"), keyed on the main block's source. Mirrors iOS SleepView.nightSource.
     val (sourceText, sourceTint) = daySourceBadge(main.deviceId)
     var showWhy by remember(main.startTs) { mutableStateOf(false) }
@@ -1234,7 +1234,7 @@ private fun NapRow(
     var editingStart by remember(nap.startTs) { mutableStateOf(false) }
     var editingEnd by remember(nap.startTs) { mutableStateOf(false) }
     var pendingStart by remember(nap.startTs) { mutableStateOf(0L) }
-    // C1 — "why this is a nap" explainer: everything other than the chosen main block is logged as a nap,
+    // C1 - "why this is a nap" explainer: everything other than the chosen main block is logged as a nap,
     // with the Edit next-step. Inline disclosure (Compose has no anchored popover here); the COPY matches
     // iOS SleepView.whyPopover(napSuffix:) exactly. (spec 2026-06-20)
     var showWhy by remember(nap.startTs) { mutableStateOf(false) }
@@ -1745,7 +1745,7 @@ private fun StageInsight(selectedStage: String?, s: Stages) {
 
 private fun stageInsightLine(label: String, minutes: Double, total: Double): String {
     val percent = if (total > 0.0) (minutes / total * 100.0).roundToInt() else 0
-    return "$label tonight: ${durationText(minutes)} — $percent% of the night."
+    return "$label tonight: ${durationText(minutes)} - $percent% of the night."
 }
 
 /**
@@ -1818,7 +1818,7 @@ private fun stageColorFor(name: String): Color = when (name.trim().lowercase()) 
 }
 
 /**
- * "Asleep / Woke" — the fell-asleep and woke clock times for the navigated night, read off the
+ * "Asleep / Woke" - the fell-asleep and woke clock times for the navigated night, read off the
  * session's onset (startTs) and wake (endTs) timestamps, each with a moon / sun glyph. Sits in the
  * hero between the night-nav header and the stage card so the two times people glance for first are
  * always visible, not truncated in the header caption. On-brand (surfaceRaised block, tokens) and
@@ -2251,7 +2251,7 @@ private fun NightNavHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                timeLabel ?: clock ?: "—",
+                timeLabel ?: clock ?: "-",
                 style = NoopType.captionNumber,
                 color = Palette.accent,
                 maxLines = 1,
@@ -2396,7 +2396,7 @@ private fun MetricGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
         { mod ->
             SparkTile(
                 mod, "Respiratory",
-                value = m.respiratory.latest?.let { String.format(Locale.US, "%.1f", it) } ?: "—",
+                value = m.respiratory.latest?.let { String.format(Locale.US, "%.1f", it) } ?: "-",
                 caption = vsTypical(m.respiratory.latest, m.respiratory.typical, " rpm", decimals = 1),
                 accent = Palette.metricPurple,
                 spark = m.respiratory.series, sparkColor = Palette.metricPurple,
@@ -2412,7 +2412,7 @@ private fun MetricGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
         // two-column width. The remaining six peer metrics keep the established 2 × 3 grid.
         SparkTile(
             Modifier.fillMaxWidth(), "Sleep Debt",
-            value = m.sleepDebt.latest?.let { durationText(it) } ?: "—",
+            value = m.sleepDebt.latest?.let { durationText(it) } ?: "-",
             caption = debtCaption(m.sleepDebt.latest),
             accent = debtColor(m.sleepDebt.latest),
             spark = m.sleepDebt.series, sparkColor = Palette.metricRose,
@@ -2648,9 +2648,9 @@ private fun DurationTrend(m: SleepModel) {
             footer = {
                 ChartFooter(
                     listOf(
-                        "Avg" to (avg?.let { String.format(Locale.US, "%.1f h", it) } ?: "—"),
-                        "Min" to (pts.minOrNull()?.let { String.format(Locale.US, "%.1f h", it) } ?: "—"),
-                        "Max" to (pts.maxOrNull()?.let { String.format(Locale.US, "%.1f h", it) } ?: "—"),
+                        "Avg" to (avg?.let { String.format(Locale.US, "%.1f h", it) } ?: "-"),
+                        "Min" to (pts.minOrNull()?.let { String.format(Locale.US, "%.1f h", it) } ?: "-"),
+                        "Max" to (pts.maxOrNull()?.let { String.format(Locale.US, "%.1f h", it) } ?: "-"),
                         "Nights" to "${pts.size}",
                     ),
                 )
@@ -2681,7 +2681,7 @@ private fun DurationTrend(m: SleepModel) {
         ChartCard(
             title = uiString(R.string.l10n_sleep_screen_sleep_debt_3aec7d9c),
             subtitle = "Sleep debt per day",
-            // #691: sleep debt is usually well under an hour, so decimal hours ("0.6h") reads badly —
+            // #691: sleep debt is usually well under an hour, so decimal hours ("0.6h") reads badly -
             // show hours+minutes. trendDebtHours is in hours; durationText takes minutes.
             trailing = m.trendDebtHours.lastOrNull()?.let { durationText(it * 60.0) },
             tint = Palette.restColor,

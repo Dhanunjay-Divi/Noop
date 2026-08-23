@@ -524,6 +524,13 @@ final class Repository: ObservableObject {
                                        localKey: Repository.localDayKey(now))
     }
 
+    /// Strict civil-calendar today. Local-day trackers such as hydration must not inherit the dashboard's
+    /// deliberate pre-04:00 carry-over row, because that would apply yesterday's Effort to today's goal.
+    var localCalendarToday: DailyMetric? {
+        let key = Repository.localDayKey(Date())
+        return days.last(where: { $0.day == key })
+    }
+
     /// Pure resolver behind `today` (extracted so the #304 boundary is testable without a live clock):
     /// prefer the LOCAL-calendar-day row when it differs from the logical day AND has a banked night
     /// (`totalSleepMin != nil`); otherwise the logical-day row (preserving the #144 anti-blank guard).
@@ -1620,7 +1627,7 @@ final class Repository: ObservableObject {
             case .motion: return String(localized: "Motion")
             // #175: the strap's OWN band sleep_state track (0 wake/1 still/2 asleep/3 up), shown as a
             // distinct stepped track alongside the derived hypnogram. This is the band's reported state,
-            // NOT a stage NOOP trusts as truth — the pill names it "Band Sleep State" so it can't be
+            // NOT a stage NOOP trusts as truth - the pill names it "Band Sleep State" so it can't be
             // mistaken for the derived stages.
             case .bandSleepState: return String(localized: "Band Sleep State")
             }
@@ -1821,7 +1828,7 @@ final class Repository: ObservableObject {
             // #175: the strap's OWN band sleep_state (0 wake/1 still/2 asleep/3 up) as a stepped track. Read
             // the raw per-record stream (far sparser than 1 Hz HR, safe to load a day) and plot the 0-3 code
             // VERBATIM. Empty when the strap never reported it (a WHOOP 4.0, or a not-yet-offloaded window),
-            // which the view renders as its honest "nothing here" state — never a fabricated flat line.
+            // which the view renders as its honest "nothing here" state - never a fabricated flat line.
             let s = (try? await store.sleepStateSamples(deviceId: source, from: from, to: to)) ?? []
             return await Task.detached(priority: .utility) {
                 s.map { Self.timelinePoint($0.ts, Double($0.state)) }
@@ -2185,7 +2192,7 @@ final class Repository: ObservableObject {
     }
 
     /// Distinct local-day keys (yyyy-MM-dd) in the inclusive range [from, to] that carry at least one
-    /// NATIVE journal entry (the "noop-journal" device id only — matching the Android widget's
+    /// NATIVE journal entry (the "noop-journal" device id only - matching the Android widget's
     /// `repo.journal(JOURNAL_DEVICE_ID, from, to)`). Backs the #627 Today journal widget's completion
     /// strip. Read-only.
     func nativeJournalDays(from: String, to: String) async -> Set<String> {
@@ -2264,7 +2271,7 @@ final class Repository: ObservableObject {
         rows += (try? await store.workouts(deviceId: "apple-health", from: lo, to: hi, limit: 5000)) ?? []
         // Imported lifting sessions (Hevy / Liftosaur) live under their own "lifting" source.
         rows += (try? await store.workouts(deviceId: "lifting", from: lo, to: hi, limit: 5000)) ?? []
-        // #29: imported activity FILES (FIT / GPX / TCX) live under their own "activity-file" source — read
+        // #29: imported activity FILES (FIT / GPX / TCX) live under their own "activity-file" source - read
         // them too, or a successful file import never appears in the Workouts list (Data Sources counts it,
         // the load didn't). HR is reconciled from the strap trace at the end like every other row.
         rows += (try? await store.workouts(deviceId: "activity-file", from: lo, to: hi, limit: 5000)) ?? []
@@ -2438,7 +2445,7 @@ final class Repository: ObservableObject {
 
     /// #510 (Kotlin twin: `WhoopRepository.workoutHrDeviceId`). The device id whose `hrSample` rows back a
     /// workout's Avg HR / Effort reconcile. A DETECTED row's own `source` IS its computed strap id
-    /// ("<base>-noop"), so strip the suffix to read HR under the raw "<base>" — a bout auto-detected on a
+    /// ("<base>-noop"), so strip the suffix to read HR under the raw "<base>" - a bout auto-detected on a
     /// SECOND WHOOP no longer reads the active strap's empty window (which blanked its reconcile). MANUAL and
     /// IMPORTED rows carry no strap id in `source`, so they reconcile against the active strap [activeStrapId]
     /// as before; on a single-device install a detected "<base>-noop" strips to the active id, so the read is
@@ -2664,6 +2671,28 @@ final class Repository: ObservableObject {
     /// the last ~2 days), so we drop them. 30 days, matching the Android twin byte-for-byte.
     private static let autoDetectDismissedMaxAgeSec = 30 * 86_400
 
+    /// Result cache shared by the background post-sync pass and Today's card. A sync pass can force one
+    /// fresh read, then every visible surface reuses that exact answer instead of rescanning two days of
+    /// raw HR/motion. The one-minute bucket bounds clock-only staleness; refreshSeq and decisionSeq
+    /// invalidate immediately for real dashboard data or a user dismissal.
+    private struct AutoDetectCandidateCacheKey: Equatable {
+        let refreshSeq: Int
+        let decisionSeq: Int
+        let daysBack: Int
+        let minuteBucket: Int
+    }
+
+    private struct AutoDetectCandidateCache {
+        let key: AutoDetectCandidateCacheKey
+        let candidate: DetectedWorkout?
+    }
+
+    private var autoDetectDecisionSeq = 0
+    private var autoDetectCandidateCache: AutoDetectCandidateCache?
+    private var autoDetectScanTask: Task<DetectedWorkout?, Never>?
+    private var autoDetectScanTaskKey: AutoDetectCandidateCacheKey?
+    private var autoDetectScanGeneration = 0
+
     /// Prune the dismissed list: drop identities whose reference time is older than ~30 days (they can never be
     /// re-suggested anyway), then hard-cap to the `autoDetectDismissedMax` most-recent (by END) as a
     /// backstop. Malformed tokens are kept (treated as newest) so we never silently lose data on a
@@ -2713,9 +2742,43 @@ final class Repository: ObservableObject {
     /// candidate to suggest , newest first , that is NOT already saved and NOT previously dismissed.
     /// Returns nil when the toggle is off, there's nothing to suggest, or detection finds nothing.
     /// PURE READ: never writes a workout. The window scans from `daysBack` days ago to now.
-    func autoDetectCandidate(daysBack: Int = 2) async -> DetectedWorkout? {
+    func autoDetectCandidate(daysBack: Int = 2,
+                             forceRefresh: Bool = false) async -> DetectedWorkout? {
         guard PuffinExperiment.autoDetectWorkoutsEnabled else { return nil }
         let now = Int(Date().timeIntervalSince1970)
+        let key = AutoDetectCandidateCacheKey(
+            refreshSeq: refreshSeq,
+            decisionSeq: autoDetectDecisionSeq,
+            daysBack: daysBack,
+            minuteBucket: now / 60
+        )
+        if !forceRefresh,
+           let cached = autoDetectCandidateCache,
+           cached.key == key {
+            return cached.candidate
+        }
+        if autoDetectScanTaskKey == key, let task = autoDetectScanTask {
+            return await task.value
+        }
+
+        autoDetectScanGeneration &+= 1
+        let generation = autoDetectScanGeneration
+        let task = Task<DetectedWorkout?, Never> { @MainActor [weak self] in
+            guard let self else { return nil }
+            return await self.computeAutoDetectCandidate(daysBack: daysBack, now: now)
+        }
+        autoDetectScanTask = task
+        autoDetectScanTaskKey = key
+        let candidate = await task.value
+        if autoDetectScanGeneration == generation {
+            autoDetectCandidateCache = AutoDetectCandidateCache(key: key, candidate: candidate)
+            autoDetectScanTask = nil
+            autoDetectScanTaskKey = nil
+        }
+        return candidate
+    }
+
+    private func computeAutoDetectCandidate(daysBack: Int, now: Int) async -> DetectedWorkout? {
         let from = now - daysBack * 86_400
         let samples = await hrSamples(from: from, to: now, limit: 200_000)
         guard samples.count >= 2 else { return nil }
@@ -2733,20 +2796,26 @@ final class Repository: ObservableObject {
         // detect(...) does (it reuses detect verbatim) plus the inputs / thresholds / per-window why trace,
         // tagged `.workouts`. Zero-cost when off: the gate is one UserDefaults bool read inside emitWorkouts,
         // and detectTrace is only called on that branch, so the default path runs the untraced detect.
-        let candidates: [DetectedWorkout]
-        if TestCentre.active(.workouts), workoutsLog != nil {
-            let (results, trace) = AutoWorkoutDetector.detectTrace(
-                hr: hr, restingBpm: restingBpm, motion: motion,
-                savedSpans: savedSpans, path: "autoDetect")
-            for line in trace { emitWorkouts(line) }
-            candidates = results
-        } else {
-            candidates = AutoWorkoutDetector.detect(hr: hr, restingBpm: restingBpm,
-                                                    motion: motion, savedSpans: savedSpans)
-        }
+        let shouldTrace = TestCentre.active(.workouts) && workoutsLog != nil
+        let detection = await Task.detached(priority: .utility) {
+            if shouldTrace {
+                let (results, trace) = AutoWorkoutDetector.detectTrace(
+                    hr: hr, restingBpm: restingBpm, motion: motion,
+                    savedSpans: savedSpans, path: "autoDetect")
+                return (candidates: results, trace: trace)
+            }
+            return (
+                candidates: AutoWorkoutDetector.detect(
+                    hr: hr, restingBpm: restingBpm,
+                    motion: motion, savedSpans: savedSpans
+                ),
+                trace: []
+            )
+        }.value
+        for line in detection.trace { emitWorkouts(line) }
         // Drop anything the user already dismissed, then take the most recent.
         let dismissed = autoDetectDismissedSpans
-        let visibleCandidates = candidates.filter { candidate in
+        let visibleCandidates = detection.candidates.filter { candidate in
             !dismissed.contains {
                 AutoWorkoutSuggestionIdentity.matches($0, startSec: candidate.startSec)
             }
@@ -2758,14 +2827,22 @@ final class Repository: ObservableObject {
         // its confidence floor; otherwise the candidate remains the honest generic "Workout". It is still
         // advisory: the card names it experimental and saving is an explicit acceptance.
         let steps = await stepSamplesUnion(from: candidate.startSec, to: candidate.endSec)
-        guard let features = WorkoutTypeFeatureExtractor.extract(
-            hr: samples, gravity: gravity, steps: steps,
-            start: candidate.startSec, end: candidate.endSec,
-            restingHR: restingBpm.map(Double.init)),
-              features.tickCoverage >= WorkoutTypeClassifier.minTickCoverage else { return candidate }
-        let prediction = WorkoutTypeClassifier.classify(features)
-        guard prediction.predictedClass != .other,
-              prediction.confidence >= WorkoutTypeClassifier.minAdvisoryConfidence else { return candidate }
+        let prediction: WorkoutClassPrediction? = await Task.detached(priority: .utility) {
+            guard let features = WorkoutTypeFeatureExtractor.extract(
+                hr: samples, gravity: gravity, steps: steps,
+                start: candidate.startSec, end: candidate.endSec,
+                restingHR: restingBpm.map(Double.init)
+            ), features.tickCoverage >= WorkoutTypeClassifier.minTickCoverage else {
+                return nil
+            }
+            let prediction = WorkoutTypeClassifier.classify(features)
+            guard prediction.predictedClass != .other,
+                  prediction.confidence >= WorkoutTypeClassifier.minAdvisoryConfidence else {
+                return nil
+            }
+            return prediction
+        }.value
+        guard let prediction else { return candidate }
         return DetectedWorkout(
             startSec: candidate.startSec, endSec: candidate.endSec,
             avgBpm: candidate.avgBpm, peakBpm: candidate.peakBpm,
@@ -2782,9 +2859,13 @@ final class Repository: ObservableObject {
     /// classified as Detected rather than Manual. Both an explicitly accepted suggestion and an
     /// unattended confidence-gated save use this path; the latter also leaves a durable Today review.
     @discardableResult
-    func saveDetectedWorkout(_ w: DetectedWorkout, markForReview: Bool = false) async -> Bool {
+    func saveDetectedWorkout(_ w: DetectedWorkout, markForReview: Bool = false,
+                             sportOverride: String? = nil) async -> Bool {
         guard let store = await ensureStore() else { return false }
-        let sport = Self.acceptedAutoDetectSport(w.suggestedClass)
+        let sport = Self.acceptedAutoDetectSport(
+            w.suggestedClass,
+            requestedSport: sportOverride
+        )
         guard let row = WorkoutSource.buildDetectedSuggestionRow(
             startSec: w.startSec,
             endSec: w.endSec,
@@ -2817,7 +2898,12 @@ final class Repository: ObservableObject {
         return review
     }
 
-    nonisolated static func acceptedAutoDetectSport(_ hint: CoarseWorkoutClass?) -> String {
+    nonisolated static func acceptedAutoDetectSport(_ hint: CoarseWorkoutClass?,
+                                                    requestedSport: String? = nil) -> String {
+        if let requestedSport,
+           let catalogSport = WorkoutCatalog.sport(named: requestedSport) {
+            return catalogSport.name
+        }
         switch hint {
         case .walk: return "Walking"
         case .run: return "Running"
@@ -2839,6 +2925,8 @@ final class Repository: ObservableObject {
         }) else { return }
         spans.append(token)
         autoDetectDismissedSpans = prunedAutoDetectSpans(spans, now: Int(Date().timeIntervalSince1970))
+        autoDetectDecisionSeq &+= 1
+        autoDetectCandidateCache = nil
     }
 
     // MARK: - Workout detail (read-only helpers, additive) , #410

@@ -11,7 +11,7 @@ struct ShortcutExportSettingsView: View {
 
     var body: some View {
         ScreenScaffold(title: "Shortcuts Export",
-                       subtitle: "Strap data into Apple Health without HealthKit, for sideloaded installs.") {
+                       subtitle: "Noop Band data into Apple Health without HealthKit, for sideloaded installs.") {
             exportCard
         }
     }
@@ -46,7 +46,7 @@ struct ShortcutExportSettingsView: View {
                 }
                 .font(StrandFont.caption)
                 .foregroundStyle(StrandPalette.textTertiary)
-                Text("Estimated from your WHOOP's motion, calibrated to your phone. Not a measured step count.")
+                Text("Estimated from Noop Band motion, calibrated to your phone. Not a measured step count.")
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

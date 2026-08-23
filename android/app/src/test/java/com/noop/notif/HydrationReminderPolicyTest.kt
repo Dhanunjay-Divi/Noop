@@ -15,6 +15,56 @@ class HydrationReminderPolicyTest {
         assertEquals(240, HydrationReminderPolicy.clampIntervalMinutes(999))
     }
 
+    @Test fun adaptiveTimingUsesOnlyAvailableEffortAndConfirmedIntake() {
+        val plan = HydrationReminderPolicy.adaptivePlan(
+            baseIntervalMinutes = 120,
+            startMinutes = 8 * 60,
+            endMinutes = 21 * 60,
+            context = HydrationAdaptiveContext(
+                effort = 80.0,
+                consumedMl = 300.0,
+                goalMl = 2_500,
+                minuteOfDay = 14 * 60 + 30,
+            ),
+        )
+        assertEquals(75, plan.intervalMinutes)
+        assertEquals(
+            listOf(
+                HydrationAdaptiveReason.HIGHER_EFFORT,
+                HydrationAdaptiveReason.BEHIND_GOAL,
+            ),
+            plan.reasons,
+        )
+    }
+
+    @Test fun adaptiveTimingCanEaseWhenConfirmedIntakeIsAhead() {
+        val plan = HydrationReminderPolicy.adaptivePlan(
+            baseIntervalMinutes = 120,
+            startMinutes = 8 * 60,
+            endMinutes = 21 * 60,
+            context = HydrationAdaptiveContext(
+                effort = null,
+                consumedMl = 2_000.0,
+                goalMl = 2_500,
+                minuteOfDay = 12 * 60,
+            ),
+        )
+        assertEquals(135, plan.intervalMinutes)
+        assertEquals(listOf(HydrationAdaptiveReason.AHEAD_OF_GOAL), plan.reasons)
+    }
+
+    @Test fun adaptiveTimingFallsBackToBaseWhenEvidenceIsMissingOrInvalid() {
+        listOf(
+            HydrationAdaptiveContext(null, null, null, 12 * 60),
+            HydrationAdaptiveContext(Double.NaN, Double.NaN, 0, 12 * 60),
+        ).forEach { context ->
+            assertEquals(
+                HydrationAdaptivePlan(120, emptyList()),
+                HydrationReminderPolicy.adaptivePlan(120, 8 * 60, 21 * 60, context),
+            )
+        }
+    }
+
     @Test fun daytimeSlotsAreStartInclusiveAndEndExclusive() {
         assertEquals(
             listOf(8 * 60, 10 * 60, 12 * 60, 14 * 60, 16 * 60, 18 * 60, 20 * 60),
@@ -67,6 +117,11 @@ class HydrationReminderPolicyTest {
         assertTrue(HydrationReminderPolicy.shouldNotify(true, "10:480", null))
         assertFalse(HydrationReminderPolicy.shouldNotify(true, "10:480", "10:480"))
         assertFalse(HydrationReminderPolicy.shouldNotify(false, "10:480", null))
+        assertFalse(
+            "An adaptive slot realignment must not double-notify inside one hour",
+            HydrationReminderPolicy.shouldNotify(true, "10:510", "10:480"),
+        )
+        assertTrue(HydrationReminderPolicy.shouldNotify(true, "10:540", "10:480"))
 
         val allowed = HydrationReminderPolicy.shouldBuzzStrap(
             enabled = true,
@@ -86,6 +141,33 @@ class HydrationReminderPolicyTest {
             HydrationReminderPolicy.shouldBuzzStrap(
                 true, true, true, true, true, true, true, true, false,
                 "10:480", "10:480",
+            ),
+        )
+    }
+
+    @Test fun bandFirstEscalatesOnlyWhenTheTapWindowWasMissed() {
+        assertTrue(
+            HydrationReminderPolicy.shouldEscalateAfterTapWindow(
+                enabled = true,
+                bandFirst = true,
+                currentSlotKey = "10:480",
+                lastConfirmedSlotKey = null,
+                lastNotifiedSlotKey = null,
+            ),
+        )
+        assertFalse(
+            HydrationReminderPolicy.shouldEscalateAfterTapWindow(
+                true, true, "10:480", "10:480", null,
+            ),
+        )
+        assertFalse(
+            HydrationReminderPolicy.shouldEscalateAfterTapWindow(
+                true, true, "10:480", null, "10:480",
+            ),
+        )
+        assertFalse(
+            HydrationReminderPolicy.shouldEscalateAfterTapWindow(
+                true, false, "10:480", null, null,
             ),
         )
     }

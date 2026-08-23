@@ -217,7 +217,7 @@ struct AppleHealthView: View {
                 // manual .zip export.
                 VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                     liveSyncCard
-                    // #348 — when the build can't carry the HealthKit entitlement there's no "Enable"
+                    // #348 - when the build can't carry the HealthKit entitlement there's no "Enable"
                     // button to tap, so the empty-state copy must point at the file/Shortcuts path
                     // instead of telling the user to tap a control that isn't shown.
                     ComingSoon(what: health.auth == .entitlementMissing
@@ -371,7 +371,7 @@ struct AppleHealthView: View {
     // MARK: - Automatic Apple Health sync (iOS only)
     //
     // The opt-in entry point for the two-way HealthKitBridge. macOS has no HealthKit, so this whole
-    // card — and every `health.*` reference — is `#if os(iOS)`-gated. Tapping "Enable Apple Health"
+    // card - and every `health.*` reference - is `#if os(iOS)`-gated. Tapping "Enable Apple Health"
     // shows the system permission sheet (rationale strings ship in the iOS target's Info.plist), then
     // runs the first read + write-back and refreshes this screen. Once authorized, a "Sync now"
     // control and last-synced/status line take its place.
@@ -621,7 +621,7 @@ struct AppleHealthView: View {
         let value: String
         let caption: String?
         if values.isEmpty {
-            value = "—"
+            value = "-"
             caption = nil
         } else {
             switch aggregate {
@@ -738,7 +738,7 @@ struct AppleHealthView: View {
         // min / max / point-count, with dashes only in the defensive no-data case.
         let footerItems: [(LocalizedStringKey, String)] = {
             guard let avg = mean(vals), let lo = vals.min(), let hi = vals.max() else {
-                return [("Avg", "—"), ("Min", "—"), ("Max", "—"), ("Points", "0")]
+                return [("Avg", "-"), ("Min", "-"), ("Max", "-"), ("Points", "0")]
             }
             return [("Avg", fmt(avg)), ("Min", fmt(lo)), ("Max", fmt(hi)), ("Points", "\(vals.count)")]
         }()
@@ -991,14 +991,14 @@ private func appleHealthPreviewData() -> AppleHealthView.PreviewData {
     return .init(rows: rows, workoutCount: 124, series: series)
 }
 
-#Preview("Apple Health — seeded") {
+#Preview("Apple Health - seeded") {
     AppleHealthView(previewData: appleHealthPreviewData())
         .environmentObject(Repository(deviceId: "preview"))
         .frame(width: 920, height: 980)
         .preferredColorScheme(.dark)
 }
 
-#Preview("Apple Health — empty") {
+#Preview("Apple Health - empty") {
     AppleHealthView(previewData: .init(rows: [], workoutCount: 0, series: [:]))
         .environmentObject(Repository(deviceId: "preview"))
         .frame(width: 920, height: 600)

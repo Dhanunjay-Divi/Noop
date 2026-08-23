@@ -25,11 +25,16 @@ public struct PairedDevice: Equatable, Sendable, Identifiable {
         self.addedAt = addedAt; self.lastSeenAt = lastSeenAt
     }
 
-    /// A user nickname wins; otherwise "Brand Model" — but collapse to just the model when it already
+    /// A user nickname wins; otherwise "Brand Model" - but collapse to just the model when it already
     /// carries the brand (so a WHOOP whose model is also "WHOOP" reads "WHOOP", not "WHOOP WHOOP", and a
     /// future "WHOOP 4.0" model reads "WHOOP 4.0").
     public var displayName: String {
         if let nickname { return nickname }
+        if id == "my-whoop"
+            || id.hasPrefix("whoop-")
+            || brand.caseInsensitiveCompare("WHOOP") == .orderedSame {
+            return "Noop Band"
+        }
         if model.isEmpty || model == brand { return brand }
         if model.localizedCaseInsensitiveContains(brand) { return model }
         return "\(brand) \(model)"

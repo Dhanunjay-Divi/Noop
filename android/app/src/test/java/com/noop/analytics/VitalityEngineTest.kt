@@ -17,6 +17,7 @@ class VitalityEngineTest {
         assertEquals(50.0, r.vitality, 0.01)
         assertEquals(0.0, r.deltaYears, 0.01)
         assertEquals(6, r.factorsUsed)
+        assertEquals(8.0, r.bandYears, 0.01)
     }
 
     @Test fun healthyIsYounger() {
@@ -80,5 +81,12 @@ class VitalityEngineTest {
         val high = VitalityEngine.contributions(VitalityEngine.Inputs(chronoAge = 40.0, restingHR = 85.0))
             .first { it.key == "rhr" }
         assertTrue(high.lnHazard > 0)
+    }
+
+    @Test fun approximateModelRange() {
+        assertEquals(8.0, VitalityEngine.bandYears(3), 0.0)
+        assertEquals(8.0, VitalityEngine.bandYears(4), 0.0)
+        assertEquals(8.0, VitalityEngine.bandYears(6), 0.0)
+        assertEquals(8.0, VitalityEngine.bandYears(12), 0.0)
     }
 }

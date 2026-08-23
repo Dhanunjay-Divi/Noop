@@ -318,7 +318,7 @@ public enum DaytimeStress {
     }
 
     /// Whether a local hour-bucket start falls inside the waking window the timeline scores
-    /// (06:00–22:00). The single source of truth for "waking" — used both to build the calm
+    /// (06:00–22:00). The single source of truth for "waking" - used both to build the calm
     /// reference and to pick the hours to score, so the two can never drift apart.
     static func isWakingHour(_ bucket: Int) -> Bool {
         let hourOfDay = floorDiv(bucket, bucketSeconds) % 24

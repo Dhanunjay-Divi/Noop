@@ -113,4 +113,59 @@ class CycleTrackingStoreTest {
         }
         assertTrue(f.rows.isEmpty())
     }
+
+    @Test
+    fun dailyDetailsRoundTripAndKeepExplicitNoFlowDistinctFromMissing() = runBlocking {
+        val f = fixture()
+        val symptoms = setOf(
+            CycleTrackingStore.Symptom.CRAMPS,
+            CycleTrackingStore.Symptom.FATIGUE,
+            CycleTrackingStore.Symptom.BACK_PAIN,
+        )
+        assertTrue(
+            f.repo.saveCycleDailyLog(
+                "2026-08-23",
+                CycleTrackingStore.Flow.NONE,
+                symptoms,
+            )
+        )
+        assertEquals(
+            listOf(
+                CycleTrackingStore.DailyLog(
+                    "2026-08-23",
+                    CycleTrackingStore.Flow.NONE,
+                    symptoms,
+                )
+            ),
+            f.repo.cycleDailyLogs(),
+        )
+    }
+
+    @Test
+    fun clearingDailyDetailsPhysicallyDeletesOnlyTheDetailRow() = runBlocking {
+        val f = fixture()
+        assertTrue(f.repo.logPeriodStart("2026-08-23"))
+        assertTrue(
+            f.repo.saveCycleDailyLog(
+                "2026-08-23",
+                CycleTrackingStore.Flow.MEDIUM,
+                setOf(CycleTrackingStore.Symptom.BLOATING),
+            )
+        )
+        assertTrue(f.repo.saveCycleDailyLog("2026-08-23", null, emptySet()))
+
+        assertTrue(f.repo.cycleDailyLogs().isEmpty())
+        assertEquals(listOf("2026-08-23"), f.repo.periodStarts())
+    }
+
+    @Test
+    fun dailyDetailDecoderRejectsMalformedAndUnknownBits() {
+        assertEquals(null, CycleTrackingStore.decode("not-a-day", 1.0))
+        assertEquals(null, CycleTrackingStore.decode("2026-08-23", Double.NaN))
+        assertEquals(null, CycleTrackingStore.decode("2026-08-23", 1.5))
+        assertEquals(
+            null,
+            CycleTrackingStore.decode("2026-08-23", ((1 shl 30) or 1).toDouble()),
+        )
+    }
 }

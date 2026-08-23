@@ -248,7 +248,7 @@ object DaytimeStress {
 
     /**
      * Whether a local hour-bucket start falls inside the waking window the timeline scores
-     * (06:00–22:00). The single source of truth for "waking" — used both to build the calm
+     * (06:00–22:00). The single source of truth for "waking" - used both to build the calm
      * reference and to pick the hours to score, so the two can never drift apart.
      */
     private fun isWakingHour(bucket: Long): Boolean {

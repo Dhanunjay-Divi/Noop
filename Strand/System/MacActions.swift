@@ -41,7 +41,7 @@ enum MacActionKind: String, Codable, CaseIterable, Identifiable {
 /// Mac-side side effects. Sandbox-friendly: Shortcuts run via the URL scheme (Shortcuts.app does the
 /// privileged work), and screen lock uses login.framework's lock entry point.
 enum MacActions {
-    /// Lock the screen immediately — the same call the Apple-menu "Lock Screen" uses
+    /// Lock the screen immediately - the same call the Apple-menu "Lock Screen" uses
     /// (login.framework `SACLockScreenImmediate`, resolved at runtime). Returns false if unavailable,
     /// so callers can fall back to a "Lock Screen" Shortcut.
     @discardableResult

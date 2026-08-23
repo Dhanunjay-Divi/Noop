@@ -1,6 +1,6 @@
 import Foundation
 
-// HapticClockEncoder.swift — turn a wall-clock time into a sequence of strap buzzes you can "read"
+// HapticClockEncoder.swift - turn a wall-clock time into a sequence of strap buzzes you can "read"
 // on your wrist without looking (#460, @jiale1029). PURE + unit-tested; the BLE layer maps each
 // `HapticPulse` onto the strap's actual haptic command and schedules the gaps. No I/O here.
 //

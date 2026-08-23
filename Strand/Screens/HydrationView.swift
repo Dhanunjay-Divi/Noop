@@ -1,8 +1,11 @@
 import SwiftUI
 import StrandDesign
 import StrandAnalytics
+#if os(iOS)
+import UIKit
+#endif
 
-// MARK: - Hydration detail (MVP, opt-in, local-only)
+// MARK: - Hydration detail (opt-in, confirmed NOOP + Apple Health records)
 //
 // Liquid finish: water in a vessel is the literal metaphor, so the hero is the canonical `LiquidVessel`
 // tinted the action blue, filling to today's fraction of goal with the litre figure counting up over it.
@@ -10,10 +13,9 @@ import StrandAnalytics
 // quick-log buttons (Sip / Cup / Bottle) stay in the secondary NoopButton style, and the 7-day mini bars
 // remain. Shared `card {}` surfaces, the day-of-sky backdrop, and
 // `LiquidPressStyle` on the tappable drink rows line the screen up with the liquid Today + batch-1 tabs.
-// BYTE-PARITY twin of the Android `HydrationScreen`: the day total + history come from the local-only
-// `HydrationStore` series (additive day total), and the goal is the pure `HydrationGoal` engine (profile
-// sex + today's Effort bump). Per-tap rows aren't separately persisted on either platform — the day total
-// is the source of truth, so the screen shows the honest day figure.
+// BYTE-PARITY twin of Android: manual logs remain source-addressable while Apple Health hydration can
+// fill the observed total. Source totals use max rather than sum because the same drink may be mirrored.
+// The goal is the pure `HydrationGoal` engine (profile + today's Effort and temperature context).
 struct HydrationView: View {
     @EnvironmentObject var repo: Repository
     @EnvironmentObject var profile: ProfileStore
@@ -33,6 +35,21 @@ struct HydrationView: View {
     /// #798 - the user's custom container size (ml), editable from the custom-size sheet. Persisted local-only.
     @AppStorage(HydrationStore.customSizeKey) private var customSizeML = HydrationGoal.cupML
     @State private var showCustomSizeSheet = false
+    /// Contextual mirror of Automations' water-reminder controls. Both surfaces write the same scheduler
+    /// keys and APIs, so there is one schedule and one source of truth.
+    @State private var reminderEnabled = HydrationReminders.isEnabled
+    @AppStorage(HydrationReminders.intervalMinutesKey) private var reminderInterval = 120
+    @AppStorage(HydrationReminders.activeStartMinutesKey) private var reminderStart = 8 * 60
+    @AppStorage(HydrationReminders.activeEndMinutesKey) private var reminderEnd = 21 * 60
+    @AppStorage(HydrationReminders.adaptiveEnabledKey) private var adaptiveReminders = true
+    @AppStorage(HydrationReminders.strapBuzzEnabledKey) private var strapReminder = false
+    @AppStorage(HydrationReminders.doubleTapConfirmEnabledKey) private var doubleTapConfirm = false
+    @AppStorage(HydrationReminders.doubleTapAmountMLKey) private var doubleTapAmountML = 250
+    @AppStorage(HydrationReminders.doubleTapWindowMinutesKey) private var doubleTapWindowMinutes = 10
+    @AppStorage(HydrationReminders.bandFirstEnabledKey) private var bandFirstReminders = false
+    @AppStorage("notif.masterEnabled") private var wristAlertsEnabled = false
+    @State private var showNotificationPermissionAlert = false
+    @Environment(\.openURL) private var openURL
 
     private var goalML: Int { repo.hydrationGoalML(profileSex: profile.sex) }
     private var fraction: Double { HydrationGoal.fraction(totalML: totalML, goalML: goalML) }
@@ -40,7 +57,7 @@ struct HydrationView: View {
 
     var body: some View {
         ScreenScaffold(title: "Hydration",
-                       subtitle: "Your fluid intake today, on \(Platform.deviceNounPhrase) only.",
+                       subtitle: "Your available NOOP and Apple Health fluid intake today.",
                        onRefresh: { await reload() },
                        // Liquid finish: the same full-bleed day-of-sky backdrop Today + the other liquid
                        // tabs carry, so Hydration sits in one atmosphere.
@@ -48,6 +65,7 @@ struct HydrationView: View {
             VStack(alignment: .leading, spacing: NoopMetrics.sectionGap) {
                 ringSection
                 logSection
+                reminderSection
                 entriesSection
                 historySection
                 todayTotalSection
@@ -66,6 +84,21 @@ struct HydrationView: View {
             }
         }
         .task(id: reloadTick) { await reload() }
+        .onAppear { reminderEnabled = HydrationReminders.isEnabled }
+        .alert("Notifications are off", isPresented: $showNotificationPermissionAlert) {
+            Button("Open Settings") {
+                #if os(iOS)
+                if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+                #elseif os(macOS)
+                if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+                    openURL(url)
+                }
+                #endif
+            }
+            Button("Not now", role: .cancel) {}
+        } message: {
+            Text("Allow notifications in Settings to use optional water reminders.")
+        }
         // #798 - edit a logged drink's amount.
         .sheet(item: $editingEntry) { entry in
             HydrationAmountSheet(title: "Edit drink", initialML: entry.amountMl) { newML in
@@ -167,6 +200,291 @@ struct HydrationView: View {
             Task { await add(ml: ml) }
         }
         .accessibilityLabel(Text("Log") + Text(verbatim: " ") + Text(title))
+    }
+
+    // MARK: - Contextual water reminders
+
+    private var reminderSection: some View {
+        card(padding: 18) {
+            VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                HStack(alignment: .center, spacing: NoopMetrics.space3) {
+                    Image(systemName: "bell.and.waves.left.and.right.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(reminderEnabled || strapReminder
+                                         ? StrandPalette.metricCyan : StrandPalette.textTertiary)
+                        .frame(width: 28)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Water reminders")
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text("Dynamic prompts during your active hours")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                    }
+                    Spacer(minLength: NoopMetrics.space2)
+                    Toggle("", isOn: phoneReminderToggle)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(StrandPalette.metricCyan)
+                        .accessibilityLabel("Phone water reminders")
+                        .accessibilityIdentifier("noop.hydration.reminders")
+                }
+
+                if reminderEnabled || strapReminder {
+                    Divider().overlay(StrandPalette.hairline)
+                    Toggle(isOn: adaptiveReminderToggle) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Adaptive timing")
+                                .font(StrandFont.body)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Text("Adjusts for weather, Effort, and today’s logged water.")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .tint(StrandPalette.metricCyan)
+
+                    if adaptiveReminders {
+                        Text(HydrationReminders.adaptiveSummary)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.metricCyan)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Divider().overlay(StrandPalette.hairline)
+                    Stepper(value: reminderIntervalBinding, in: 60...240, step: 30) {
+                        HStack {
+                            Text("Base interval")
+                                .font(StrandFont.body)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Spacer()
+                            Text("\(reminderInterval) min")
+                                .font(StrandFont.captionNumber)
+                                .foregroundStyle(StrandPalette.textSecondary)
+                                .monospacedDigit()
+                        }
+                    }
+
+                    reminderTimeRow("Active from", minutes: reminderStartBinding)
+                    reminderTimeRow("Active until", minutes: reminderEndBinding)
+                }
+
+                Divider().overlay(StrandPalette.hairline)
+                Toggle(isOn: strapReminderToggle) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Band cue")
+                            .font(StrandFont.body)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text("Best effort while the band has a fresh, worn connection.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                }
+                .toggleStyle(.switch)
+                .tint(StrandPalette.metricCyan)
+
+                if strapReminder {
+                    Divider().overlay(StrandPalette.hairline)
+                    Toggle(isOn: doubleTapConfirmToggle) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Double-tap to confirm")
+                                .font(StrandFont.body)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Text("After a water buzz, a timely double-tap logs your chosen amount. No tap logs nothing.")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .tint(StrandPalette.metricCyan)
+
+                    if doubleTapConfirm {
+                        Stepper(value: doubleTapAmountBinding, in: 50...1_000, step: 50) {
+                            reminderValueRow("Confirmed amount", value: "\(doubleTapAmountML) ml")
+                        }
+                        Stepper(value: doubleTapWindowBinding, in: 5...30, step: 5) {
+                            reminderValueRow("Tap window", value: "\(doubleTapWindowMinutes) min")
+                        }
+                        Toggle(isOn: bandFirstToggle) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Notify only after a missed tap")
+                                    .font(StrandFont.body)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                Text("After NOOP issues a band cue, wait \(doubleTapWindowMinutes) minutes. One phone notification follows only if you do not confirm.")
+                                    .font(StrandFont.footnote)
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                        }
+                        .toggleStyle(.switch)
+                        .tint(StrandPalette.metricCyan)
+                        .disabled(!reminderEnabled)
+                    }
+                }
+
+                if strapReminder && !wristAlertsEnabled {
+                    Text("Wrist alerts are off in Automations. Turn on their master switch for band reminders to buzz.")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.statusWarning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func reminderValueRow(_ title: LocalizedStringKey, value: String) -> some View {
+        HStack {
+            Text(title)
+                .font(StrandFont.body)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Spacer()
+            Text(value)
+                .font(StrandFont.captionNumber)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .monospacedDigit()
+        }
+    }
+
+    private var phoneReminderToggle: Binding<Bool> {
+        Binding(
+            get: { reminderEnabled },
+            set: { on in
+                if !on {
+                    reminderEnabled = false
+                    HydrationReminders.setEnabled(false)
+                    return
+                }
+                HydrationReminders.setEnabled(true) { outcome in
+                    switch outcome {
+                    case .scheduled:
+                        reminderEnabled = true
+                    case .denied:
+                        reminderEnabled = false
+                        showNotificationPermissionAlert = true
+                    case .off:
+                        reminderEnabled = false
+                    }
+                }
+            }
+        )
+    }
+
+    private var reminderIntervalBinding: Binding<Int> {
+        Binding(
+            get: { reminderInterval },
+            set: {
+                let value = HydrationReminders.clampedInterval($0)
+                reminderInterval = value
+                HydrationReminders.setIntervalMinutes(value)
+            }
+        )
+    }
+
+    private var adaptiveReminderToggle: Binding<Bool> {
+        Binding(
+            get: { adaptiveReminders },
+            set: {
+                adaptiveReminders = $0
+                HydrationReminders.setAdaptiveEnabled($0)
+            }
+        )
+    }
+
+    private var strapReminderToggle: Binding<Bool> {
+        Binding(
+            get: { strapReminder },
+            set: {
+                strapReminder = $0
+                HydrationReminders.setStrapBuzzEnabled($0)
+            }
+        )
+    }
+
+    private var doubleTapConfirmToggle: Binding<Bool> {
+        Binding(
+            get: { doubleTapConfirm },
+            set: {
+                doubleTapConfirm = $0
+                HydrationReminders.setDoubleTapConfirmEnabled($0)
+            }
+        )
+    }
+
+    private var doubleTapAmountBinding: Binding<Int> {
+        Binding(
+            get: { doubleTapAmountML },
+            set: {
+                let value = min(max($0, 50), 1_000)
+                doubleTapAmountML = value
+                HydrationReminders.setDoubleTapAmountML(value)
+            }
+        )
+    }
+
+    private var doubleTapWindowBinding: Binding<Int> {
+        Binding(
+            get: { doubleTapWindowMinutes },
+            set: {
+                let value = min(max($0, 5), 30)
+                doubleTapWindowMinutes = value
+                HydrationReminders.setDoubleTapWindowMinutes(value)
+            }
+        )
+    }
+
+    private var bandFirstToggle: Binding<Bool> {
+        Binding(
+            get: { bandFirstReminders },
+            set: {
+                let enabled = $0 && reminderEnabled
+                bandFirstReminders = enabled
+                HydrationReminders.setBandFirstEnabled(enabled)
+            }
+        )
+    }
+
+    private var reminderStartBinding: Binding<Date> {
+        reminderDateBinding(value: reminderStart) {
+            reminderStart = $0
+            HydrationReminders.setActiveStartMinutes($0)
+        }
+    }
+
+    private var reminderEndBinding: Binding<Date> {
+        reminderDateBinding(value: reminderEnd) {
+            reminderEnd = $0
+            HydrationReminders.setActiveEndMinutes($0)
+        }
+    }
+
+    private func reminderDateBinding(value: Int, onSet: @escaping (Int) -> Void) -> Binding<Date> {
+        Binding(
+            get: {
+                var components = DateComponents()
+                components.hour = value / 60
+                components.minute = value % 60
+                return Calendar.current.date(from: components) ?? Date()
+            },
+            set: { date in
+                let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+                onSet((parts.hour ?? 0) * 60 + (parts.minute ?? 0))
+            }
+        )
+    }
+
+    private func reminderTimeRow(_ label: LocalizedStringKey, minutes: Binding<Date>) -> some View {
+        HStack(spacing: NoopMetrics.space3) {
+            Text(label)
+                .font(StrandFont.body)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Spacer()
+            DatePicker("", selection: minutes, displayedComponents: .hourAndMinute)
+                .labelsHidden()
+                .datePickerStyle(.compact)
+                .accessibilityLabel(label)
+        }
+        .frame(minHeight: 42)
     }
 
     // MARK: - Today's logged drinks (#798) - swipe to delete, tap to edit

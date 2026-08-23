@@ -113,7 +113,7 @@ enum DocumentPicker {
     }
 
     /// #52 instrumentation: persist the last picker delegate outcome so a debug export can distinguish
-    /// "the picker never called back / user cancelled" (its Open button never fired — an iOS picker
+    /// "the picker never called back / user cancelled" (its Open button never fired - an iOS picker
     /// issue the internal-folder fallback sidesteps) from "it returned a URL we then failed to bookmark"
     /// (our bug, see `FolderBackup.saveFolder`'s scoped/bookmark flags). Shared by all three pickers, so
     /// the export labels it "last picker event"; the folder pick is the one under investigation.

@@ -233,7 +233,7 @@ public enum StepsEstimateEngine {
     // MARK: - Estimate
 
     /// Estimated steps for a day from its motion volume and the personal calibration. nil below
-    /// `minMotionForFit` (too little movement to say anything) — the UI then shows "—", never a fake 0.
+    /// `minMotionForFit` (too little movement to say anything) - the UI then shows "-", never a fake 0.
     public static func estimate(motion: Double, calibration: Calibration) -> Int? {
         guard motion >= minMotionForFit, calibration.coefficient > 0 else { return nil }
         let raw = motion * calibration.coefficient

@@ -20,6 +20,7 @@ data class HealthConnectProjectionScope(
     val leanBodyMass: Boolean = false,
     val bodyTemperature: Boolean = false,
     val basalBodyTemperature: Boolean = false,
+    val hydration: Boolean = false,
     val exercise: Boolean = false,
     val distance: Boolean = false,
 ) {
@@ -30,6 +31,7 @@ data class HealthConnectProjectionScope(
             if (leanBodyMass) add("lean_mass")
             if (bodyTemperature) add("body_temp")
             if (basalBodyTemperature) add("basal_body_temp")
+            if (hydration) add("hydration")
         }
 }
 

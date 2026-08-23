@@ -20,7 +20,7 @@ import SwiftUI
 
 // MARK: - Diagonal hatch shape
 
-/// A field of parallel 45° diagonal lines clipped to the shape's rect — the "typical range" texture.
+/// A field of parallel 45° diagonal lines clipped to the shape's rect - the "typical range" texture.
 /// Spacing/inset are in points so the hatch density stays constant regardless of bar width.
 public struct DiagonalHatch: Shape {
     /// Gap between hatch lines, in points.
@@ -90,7 +90,7 @@ public struct TypicalRangeBar: View {
             let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
 
             ZStack(alignment: .leading) {
-                // Base track — the inset "well" the bar sits in.
+                // Base track - the inset "well" the bar sits in.
                 shape.fill(StrandPalette.surfaceInset)
 
                 // Diagonal-hatch "typical range" segment (only over the range span).
@@ -105,7 +105,7 @@ public struct TypicalRangeBar: View {
                         .accessibilityHidden(true)
                 }
 
-                // Solid value fill — "you". Flat + crisp, no glow.
+                // Solid value fill - "you". Flat + crisp, no glow.
                 shape
                     .fill(color)
                     .frame(width: max(h, w * CGFloat(clampedValue)))
@@ -126,6 +126,90 @@ public struct TypicalRangeBar: View {
             return "\(pct) percent, \(placement) the typical range of \(lo) to \(hi) percent"
         }
         return "\(pct) percent"
+    }
+}
+
+// MARK: - PersonalRangeGauge
+
+/// A read-only "you are here" gauge. The thicker segment is the exact personal/population range used
+/// by analytics and the caret is today's value. It deliberately avoids a circular thumb so it cannot
+/// be mistaken for an adjustable slider.
+public struct PersonalRangeGauge: View {
+    public var value: Double
+    public var range: ClosedRange<Double>
+    public var color: Color
+
+    public init(value: Double, range: ClosedRange<Double>, color: Color) {
+        self.value = value
+        self.range = range
+        self.color = color
+    }
+
+    public var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let scale = scaleBounds
+            let rangeStart = position(range.lowerBound, width: width, scale: scale)
+            let rangeEnd = position(range.upperBound, width: width, scale: scale)
+            let valueX = position(value, width: width, scale: scale)
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(StrandPalette.hairlineStrong.opacity(0.48))
+                    .frame(height: 3)
+                    .offset(y: 8)
+
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(color.opacity(0.30))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .strokeBorder(color.opacity(0.72), lineWidth: 0.8)
+                    )
+                    .frame(width: max(4, rangeEnd - rangeStart), height: 12)
+                    .offset(x: rangeStart, y: 4)
+
+                PersonalRangeCaret()
+                    .fill(StrandPalette.textPrimary)
+                    .frame(width: 9, height: 6)
+                    .offset(
+                        x: max(0, min(width - 9, valueX - 4.5)),
+                        y: -3
+                    )
+            }
+            .frame(height: 24)
+        }
+        .frame(height: 24)
+        .accessibilityHidden(true)
+    }
+
+    private var scaleBounds: ClosedRange<Double> {
+        let low = min(value, range.lowerBound)
+        let high = max(value, range.upperBound)
+        let rangeSpan = max(range.upperBound - range.lowerBound, 0.0001)
+        let occupiedSpan = max(high - low, rangeSpan)
+        let padding = max(occupiedSpan * 0.45, abs((low + high) / 2) * 0.05, 0.5)
+        return (low - padding)...(high + padding)
+    }
+
+    private func position(
+        _ value: Double,
+        width: CGFloat,
+        scale: ClosedRange<Double>
+    ) -> CGFloat {
+        let span = max(scale.upperBound - scale.lowerBound, 0.0001)
+        let fraction = min(max((value - scale.lowerBound) / span, 0), 1)
+        return width * CGFloat(fraction)
+    }
+}
+
+private struct PersonalRangeCaret: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.midX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.closeSubpath()
+        return path
     }
 }
 

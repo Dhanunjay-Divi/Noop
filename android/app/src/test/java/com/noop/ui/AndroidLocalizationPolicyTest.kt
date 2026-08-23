@@ -16,6 +16,12 @@ class AndroidLocalizationPolicyTest {
         File(root(), "android/app/src/main/res/$folder/strings.xml"),
     ).firstOrNull(File::isFile)
 
+    private fun resourceRoot(): File? = listOf(
+        File(root(), "src/main/res"),
+        File(root(), "app/src/main/res"),
+        File(root(), "android/app/src/main/res"),
+    ).firstOrNull(File::isDirectory)
+
     private data class ResourceValue(
         val value: String,
         val placeholders: List<String>,
@@ -82,7 +88,7 @@ class AndroidLocalizationPolicyTest {
         val partial = partialFiles.mapValues { resources(it.value!!) }
         val expectedKeys = partial.getValue("values-it").keys
         val allowed = Regex(
-            """string:(wind_down_|sleep_planner_|strength_).*|string:nav_alarms""",
+            """string:(wind_down_|sleep_planner_|strength_|key_metrics_selection_|hydration_(adaptive_timing_|base_interval_label)).*|string:nav_alarms""",
         )
 
         assertTrue(
@@ -101,5 +107,34 @@ class AndroidLocalizationPolicyTest {
                 )
             }
         }
+    }
+
+    @Test
+    fun userVisibleResourcesContainNoEmDash() {
+        val resources = resourceRoot()
+        assumeTrue("Android resources unavailable", resources != null)
+        val forbidden = '\u2014'
+        val offenders = resources!!
+            .walkTopDown()
+            .filter { file ->
+                file.isFile &&
+                    file.extension == "xml" &&
+                    file.parentFile?.name?.startsWith("values") == true
+            }
+            .flatMap { file ->
+                file.readLines().mapIndexedNotNull { index, line ->
+                    if (forbidden in line) {
+                        "${file.relativeTo(resources).path}:${index + 1}"
+                    } else {
+                        null
+                    }
+                }
+            }
+            .toList()
+
+        assertTrue(
+            "User-visible Android resources contain em dashes: $offenders",
+            offenders.isEmpty(),
+        )
     }
 }

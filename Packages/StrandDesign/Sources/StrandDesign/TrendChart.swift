@@ -51,7 +51,7 @@ public struct TrendChart: View {
     /// Optional human-readable series name for VoiceOver (e.g. "HRV trend"). When nil the
     /// element falls back to a generic "Trend" label so it's never unlabeled.
     public var accessibilityLabel: String?
-    /// When set, draws a glowing "now" end-cap on the most-recent point — IN the chart's own
+    /// When set, draws a glowing "now" end-cap on the most-recent point - IN the chart's own
     /// coordinate space (via the overlay proxy), so it sits exactly on the line. nil = no cap.
     /// (#458: an earlier sibling-overlay cap guessed the plot insets and floated off the line.)
     public var nowCapColor: Color?
@@ -330,7 +330,7 @@ public struct TrendChart: View {
         // NOTE: no outer `.clipped()` here. The PLOT is already clipped to its own bounds by
         // `.chartPlotStyle { plotArea.clipped() }` above (that's what contains the catmullRom overshoot +
         // the unclipped AreaMark bleed). An additional clip on the WHOLE chart also cropped the axis-label
-        // gutter — cutting the top y-axis value (e.g. "90") in half and clipping the first/last x-axis
+        // gutter - cutting the top y-axis value (e.g. "90") in half and clipping the first/last x-axis
         // labels ("Apr 19"…"May") at the frame edges (#1019). Dropping it lets Swift Charts render the
         // reserved label regions in full; the marks stay contained by the plot clip, so nothing bleeds.
         // Collapse the Charts marks (line/area/points) into ONE meaningful VoiceOver element instead
@@ -434,9 +434,9 @@ private func sampleTrend(days: Int, base: Double, swing: Double) -> [TrendPoint]
     }
 }
 
-#Preview("TrendChart — recovery") {
+#Preview("TrendChart - recovery") {
     VStack(alignment: .leading, spacing: 12) {
-        Text("Recovery — 30 days").strandOverline()
+        Text("Recovery - 30 days").strandOverline()
         Text("Hover the line: crosshair + dot + date/value tooltip.")
             .font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
         TrendChart(points: sampleTrend(days: 30, base: 62, swing: 22))
@@ -447,9 +447,9 @@ private func sampleTrend(days: Int, base: Double, swing: Double) -> [TrendPoint]
     .preferredColorScheme(.dark)
 }
 
-#Preview("TrendChart — HRV") {
+#Preview("TrendChart - HRV") {
     VStack(alignment: .leading, spacing: 12) {
-        Text("HRV (ms) — 30 days").strandOverline()
+        Text("HRV (ms) - 30 days").strandOverline()
         Text("Hover to read each day's HRV in ms.")
             .font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
         TrendChart(

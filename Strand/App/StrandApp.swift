@@ -26,8 +26,8 @@ struct StrandApp: App {
     /// #267: drives a foreground sync kick when the window becomes active (no scenePhase hook
     /// existed on macOS before this).
     @Environment(\.scenePhase) private var scenePhase
-    /// Appearance preference (System/Pearl/Graphite/OLED Black). Default follows the OS; Settings writes it.
-    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
+    /// Appearance preference (OLED Black by default; System/Pearl/Graphite remain user-selectable).
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.defaultMode.rawValue
     /// Chart data-colour style (Titanium / Classic throwback). Re-colours gauges + charts.
     @AppStorage(ChartStyle.storageKey) private var chartStyleRaw = ChartStyle.titanium.rawValue
     @AppStorage("noop.acceptedTermsVersion") private var acceptedTermsVersion = ""

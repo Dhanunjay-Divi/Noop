@@ -5,9 +5,9 @@ import StrandDesign
 //
 // A Today-local sheet (no new nav destination — another lane owns the nav graph) for choosing which
 // Key-Metric tiles show on the Control Center and in what order. Display-only: it edits the persisted
-// `today.keyMetrics` layout string, never any stored metric. Enabled tiles render in the list's order;
-// a toggle hides/shows a tile and the up/down chevrons reorder it. Reorder uses explicit chevrons rather
-// than drag so it behaves identically on macOS and iOS without depending on List EditMode.
+// `today.keyMetrics` layout string, never any stored metric. One to five selected tiles render in the
+// list's order; the up/down chevrons reorder them. Explicit controls behave identically on macOS and iOS
+// without depending on List EditMode.
 
 struct KeyMetricsEditorSheet: View {
     /// The persisted layout string (comma-joined enabled `KeyMetric` rawValues, in order). Bound straight
@@ -26,6 +26,8 @@ struct KeyMetricsEditorSheet: View {
         var enabled: Bool
         var id: String { metric.rawValue }
     }
+
+    private var selectedCount: Int { items.lazy.filter(\.enabled).count }
 
     init(layoutRaw: Binding<String>) {
         _layoutRaw = layoutRaw
@@ -86,7 +88,9 @@ struct KeyMetricsEditorSheet: View {
                 }
                 .toggleStyle(.switch)
                 .tint(StrandPalette.accent)
+                .disabled(toggleIsLocked(item))
                 .accessibilityLabel("Show \(item.metric.title)")
+                .accessibilityHint(toggleHint(item))
 
                 Spacer(minLength: 0)
 
@@ -147,10 +151,17 @@ struct KeyMetricsEditorSheet: View {
             Text("Edit Key Metrics")
                 .font(StrandFont.rounded(24, weight: .bold))
                 .foregroundStyle(StrandPalette.textPrimary)
-            Text("Choose which tiles show on your Control Center and reorder them with the arrows.")
+            Text("Choose up to five metrics for your Control Center and put the most important first.")
                 .font(StrandFont.subhead)
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Text("\(selectedCount) of \(KeyMetricPrefs.maximumSelectionCount) selected")
+                .font(StrandFont.captionNumber)
+                .foregroundStyle(
+                    selectedCount == KeyMetricPrefs.maximumSelectionCount
+                        ? StrandPalette.accent
+                        : StrandPalette.textTertiary
+                )
         }
     }
 
@@ -168,8 +179,6 @@ struct KeyMetricsEditorSheet: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(StrandPalette.accent)
-            // At least one tile must stay visible — an empty grid reads as a bug, not a choice.
-            .disabled(!items.contains { $0.enabled })
             .accessibilityLabel("Done editing Key Metrics")
         }
     }
@@ -179,8 +188,34 @@ struct KeyMetricsEditorSheet: View {
     private func enabledBinding(at index: Int) -> Binding<Bool> {
         Binding(
             get: { items[index].enabled },
-            set: { items[index].enabled = $0 }
+            set: { newValue in
+                let current = items[index].enabled
+                guard newValue != current else { return }
+                if newValue {
+                    guard selectedCount < KeyMetricPrefs.maximumSelectionCount else { return }
+                } else {
+                    guard selectedCount > KeyMetricPrefs.minimumSelectionCount else { return }
+                }
+                items[index].enabled = newValue
+            }
         )
+    }
+
+    private func toggleIsLocked(_ item: Item) -> Bool {
+        if item.enabled {
+            return selectedCount <= KeyMetricPrefs.minimumSelectionCount
+        }
+        return selectedCount >= KeyMetricPrefs.maximumSelectionCount
+    }
+
+    private func toggleHint(_ item: Item) -> String {
+        if item.enabled, selectedCount <= KeyMetricPrefs.minimumSelectionCount {
+            return String(localized: "At least one metric must stay selected.")
+        }
+        if !item.enabled, selectedCount >= KeyMetricPrefs.maximumSelectionCount {
+            return String(localized: "Five metrics are already selected.")
+        }
+        return String(localized: "Select or hide this metric.")
     }
 
     private func move(from: Int, to: Int) {
@@ -190,7 +225,8 @@ struct KeyMetricsEditorSheet: View {
     }
 
     private func resetToDefault() {
-        items = KeyMetric.defaultOrder.map { Item(metric: $0, enabled: true) }
+        let defaults = Set(KeyMetric.defaultSelection)
+        items = KeyMetric.defaultOrder.map { Item(metric: $0, enabled: defaults.contains($0)) }
     }
 
     /// Persist the enabled tiles in their current order. Disabled tiles are simply omitted from the

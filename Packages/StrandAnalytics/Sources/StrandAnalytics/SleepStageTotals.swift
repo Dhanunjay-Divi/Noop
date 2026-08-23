@@ -16,7 +16,7 @@ public enum SleepStageTotals {
     }
 
     /// Stage minutes for one session's `stagesJSON`, or nil if it decodes to nothing usable. The on-device
-    /// stager calls awake "wake"; the importer "awake" — both map to `awake`.
+    /// stager calls awake "wake"; the importer "awake" - both map to `awake`.
     public static func minutes(fromStagesJSON json: String?) -> Minutes? {
         guard let json, let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) else { return nil }
@@ -410,7 +410,7 @@ public enum SleepStageTotals {
     /// short main sleep or a nap-only day still resolves to a main block, and a genuine long daytime sleep
     /// can win on score. The highest score wins; exact ties break toward the EARLIER onset (stable across
     /// platforms). Returns nil only for an empty list. This `NightBlock` overload has no decoded stages,
-    /// so "asleep minutes" is the block's clock span — preserving the prior duration semantics for callers
+    /// so "asleep minutes" is the block's clock span - preserving the prior duration semantics for callers
     /// that rank by span (`analyzeDay`). Pass `habitualMidsleepSec` from `habitualMidsleepSec(...)` once
     /// enough history exists; leave nil for the cold-start band. (#525 / #547)
     public static func mainNightIndex(_ blocks: [NightBlock], offsetSec: Int,

@@ -6,7 +6,7 @@ import WhoopStore
 // MARK: - Menu-Bar Extra (NOOP)
 //
 // A glanceable presence in the macOS menu bar. The label shows a tiny heart-dot
-// tinted by the current HR zone plus the live HR (or "—" when not streaming).
+// tinted by the current HR zone plus the live HR (or "-" when not streaming).
 // The popover gives a compact recovery ring, the live HR, the strap battery, and
 // a small action area to start/stop the live feed or reconnect.
 //
@@ -59,11 +59,11 @@ public struct MenuBarLabel: View {
             Image(systemName: live.connected ? "heart.fill" : "heart")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(dotColor)
-            Text(displayHR.map(String.init) ?? "—")
+            Text(displayHR.map(String.init) ?? "-")
                 .font(StrandFont.rounded(12, weight: .semibold))
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(displayHR.map { "Heart rate \($0) beats per minute" } ?? "Strap not connected")
+        .accessibilityLabel(displayHR.map { "Heart rate \($0) beats per minute" } ?? "Noop Band not connected")
     }
 }
 
@@ -76,7 +76,7 @@ public struct MenuBarContent: View {
     @EnvironmentObject private var model: AppModel
     /// The menu-bar popover is a SEPARATE scene from the main window, so it doesn't inherit the
     /// window's appearance — drive it from the same setting directly.
-    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.defaultMode.rawValue
 
     public init() {}
 
@@ -175,7 +175,7 @@ public struct MenuBarContent: View {
                     .tracking(StrandFont.overlineTracking)
                     .foregroundStyle(StrandPalette.textTertiary)
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(displayHR.map(String.init) ?? "—")
+                    Text(displayHR.map(String.init) ?? "-")
                         .font(StrandFont.number(40))
                         .foregroundStyle(displayHR == nil ? StrandPalette.textTertiary : StrandPalette.textPrimary)
                         .contentTransition(.numericText())
@@ -194,7 +194,7 @@ public struct MenuBarContent: View {
                 .stroke(StrandPalette.hairline.opacity(0.55), style: StrokeStyle(lineWidth: 9, lineCap: .round))
                 .frame(width: 96, height: 96)
             VStack(spacing: 2) {
-                Text("—")
+                Text("-")
                     .font(StrandFont.number(28))
                     .foregroundStyle(StrandPalette.textTertiary)
                 Text("NO DATA")
@@ -212,19 +212,19 @@ public struct MenuBarContent: View {
         HStack(spacing: 0) {
             statCell(
                 "BATTERY",
-                live.batteryPct.map { "\(Int($0.rounded()))%" } ?? "—",
+                live.batteryPct.map { "\(Int($0.rounded()))%" } ?? "-",
                 tint: live.batteryPct == nil ? StrandPalette.textPrimary : toneColor(batteryTone)
             )
             cellDivider
             statCell(
                 "RESTING HR",
-                repo.today?.restingHr.map { "\($0)" } ?? "—",
+                repo.today?.restingHr.map { "\($0)" } ?? "-",
                 tint: StrandPalette.textPrimary
             )
             cellDivider
             statCell(
                 "HRV",
-                repo.today?.avgHrv.map { "\(Int($0.rounded()))" } ?? "—",
+                repo.today?.avgHrv.map { "\(Int($0.rounded()))" } ?? "-",
                 tint: StrandPalette.textPrimary
             )
         }
@@ -267,7 +267,7 @@ public struct MenuBarContent: View {
     private var syncLine: some View {
         ZStack(alignment: .leading) {
             if live.backfilling {
-                StatePill("Syncing strap history…", tone: .accent, pulsing: true)
+                StatePill("Syncing Noop Band history…", tone: .accent, pulsing: true)
             } else if let error = live.lastSyncError {
                 Text(error)
                     .font(StrandFont.footnote)
@@ -382,7 +382,7 @@ private func previewEnv(
     return (repo, live, model)
 }
 
-#Preview("Label — zones") {
+#Preview("Label - zones") {
     let (repo, live, model) = previewEnv(
         connected: true, bonded: true, hr: 148, battery: 78,
         metric: .sample(recovery: 71, restingHr: 51, hrv: 62)
@@ -399,7 +399,7 @@ private func previewEnv(
     .preferredColorScheme(.dark)
 }
 
-#Preview("Popover — streaming") {
+#Preview("Popover - streaming") {
     let (repo, live, model) = previewEnv(
         connected: true, bonded: true, hr: 132, battery: 78,
         metric: .sample(recovery: 71, restingHr: 51, hrv: 62)
@@ -410,7 +410,7 @@ private func previewEnv(
         .environmentObject(model)
 }
 
-#Preview("Popover — offline / no data") {
+#Preview("Popover - offline / no data") {
     let (repo, live, model) = previewEnv(
         connected: false, bonded: false, hr: nil, battery: nil, metric: nil
     )

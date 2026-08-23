@@ -110,10 +110,12 @@ object HydrationGoal {
     }
 
     /** Heat bump (ml) from skin-temp deviation in °C above baseline: round(devC*300) clamped 0..600.
-     *  Null/non-finite or a non-positive deviation -> 0. */
+     *  Null/non-finite, absolute imported temperatures, implausible deviations, or non-positive
+     *  deviations -> 0. */
     fun heatBumpMl(skinTempDevC: Double?): Int {
-        if (skinTempDevC == null || !skinTempDevC.isFinite() || skinTempDevC <= 0.0) return 0
-        val raw = (skinTempDevC * HEAT_BUMP_PER_DEG).roundToInt()
+        val dev = VitalBands.skinTempDeviation(skinTempDevC) ?: return 0
+        if (dev <= 0.0) return 0
+        val raw = (dev * HEAT_BUMP_PER_DEG).roundToInt()
         return raw.coerceIn(0, MAX_HEAT_BUMP)
     }
 

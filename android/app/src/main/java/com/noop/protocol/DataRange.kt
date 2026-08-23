@@ -47,7 +47,7 @@ object DataRange {
      * the true newest at offset 8) that would hijack the min and report a bogus deep backlog. The max is
      * immune — the real newest dominates it — which is why [newestUnix] can scan every offset. The aligned
      * grid skips that straddle, so real frames with no distinct oldest word return null here. Do NOT "make
-     * this consistent with newestUnix" by scanning every offset without anchoring — see DataRangeScanTest.
+     * this consistent with newestUnix" by scanning every offset without anchoring - see DataRangeScanTest.
      * Mirrors Swift `DataRange.oldestUnix`.
      */
     fun oldestUnix(frame: ByteArray): Long? {
@@ -66,7 +66,7 @@ object DataRange {
     }
 
     /**
-     * #689: the ring-buffer page backlog ("pages behind") the strap reports in a GET_DATA_RANGE response —
+     * #689: the ring-buffer page backlog ("pages behind") the strap reports in a GET_DATA_RANGE response -
      * DIAGNOSTIC ONLY. RE'd from the WHOOP app (facts, not copied code; see ATTRIBUTION.md), NOT yet
      * confirmed against real 4.0 / 5-MG captures, so it NEVER gates sync or backfill — only logged.
      * Mirrors Swift `DataRange.pagesBehind`.

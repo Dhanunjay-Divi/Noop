@@ -65,7 +65,15 @@ class SafetyPagingPolicyTest {
                     "contact_display_name": "Alex",
                     "decision": "responding",
                     "source": "voice_dtmf"
-                  }]
+                  }],
+                  "latest_location": {
+                    "sequence": 3,
+                    "latitude": 40.7131,
+                    "longitude": -74.0057,
+                    "horizontal_accuracy_meters": 12.0,
+                    "captured_at": "2026-08-22T12:00:45Z",
+                    "received_at": "2026-08-22T12:00:46Z"
+                  }
                 }
                 """.trimIndent(),
             ),
@@ -76,5 +84,7 @@ class SafetyPagingPolicyTest {
         assertEquals(SafetyDeliveryStatus.RETRY_WAIT, incident.deliveries.single().status)
         assertEquals(2, incident.deliveries.single().attemptCount)
         assertEquals(SafetyResponseDecision.RESPONDING, incident.responses.single().decision)
+        assertEquals(3L, incident.latestLocation?.sequence)
+        assertEquals(12.0, incident.latestLocation?.horizontalAccuracyMeters)
     }
 }

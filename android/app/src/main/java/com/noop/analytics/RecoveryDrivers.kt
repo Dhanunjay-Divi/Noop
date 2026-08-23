@@ -78,6 +78,7 @@ object RecoveryDrivers {
     ): List<ChargeDriver> {
         // Cold-start gate: no usable HRV baseline -> no score -> no drivers (honest empty, not faked rows).
         if (!hrvBaseline.usable) return emptyList()
+        val validSkinTempDev = VitalBands.skinTempDeviation(skinTempDev)
 
         // Build the SAME (z, weight) term set recovery(...) builds, in the SAME append order, capturing
         // each term's identity so a single term can be neutralized to compute its marginal point swing.
@@ -116,8 +117,8 @@ object RecoveryDrivers {
 
         // Skin-temp term: SYMMETRIC penalty on |deviation|, added only when supplied.
         var skinIdx = -1
-        if (skinTempDev != null) {
-            val z = -abs(skinTempDev) / RecoveryScorer.skinTempDevScale
+        if (validSkinTempDev != null) {
+            val z = -abs(validSkinTempDev) / RecoveryScorer.skinTempDevScale
             skinIdx = terms.size
             terms.add(Term(z, RecoveryScorer.wSkinTemp))
         }
@@ -188,16 +189,16 @@ object RecoveryDrivers {
                 ),
             )
         }
-        if (skinIdx >= 0 && skinTempDev != null) {
+        if (skinIdx >= 0 && validSkinTempDev != null) {
             // Skin temp is a SYMMETRIC penalty: only |deviation| matters. Surface it as a RELATIVE
             // deviation (signed +/- C from baseline), never an absolute temperature.
             drivers.add(
                 ChargeDriver(
                     label = "Skin temperature",
                     deltaPoints = delta(skinIdx),
-                    valueText = String.format(java.util.Locale.US, "%+.1f C vs baseline", skinTempDev),
+                    valueText = String.format(java.util.Locale.US, "%+.1f C vs baseline", validSkinTempDev),
                     baselineText = "",   // a deviation already; the reference is the personal baseline (0)
-                    verdict = skinTempVerdict(skinTempDev),
+                    verdict = skinTempVerdict(validSkinTempDev),
                 ),
             )
         }

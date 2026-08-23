@@ -1,6 +1,6 @@
 package com.noop.protocol
 
-// WHOOP 5.0 / MG "R22" feature-flag config (deep-stream unlock) — direct port of the macOS/iOS
+// WHOOP 5.0 / MG "R22" feature-flag config (deep-stream unlock) - direct port of the macOS/iOS
 // `Whoop5Config` (Packages/WhoopProtocol/Sources/WhoopProtocol/Whoop5Config.swift).
 //
 // WHOOP 5/MG straps withhold their deep biometric streams (the high-rate "R22" optical/HR/motion

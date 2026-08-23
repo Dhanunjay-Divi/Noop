@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -419,7 +420,7 @@ private fun WhatItDoesStep() {
                 icon = Icons.Filled.MonitorHeart,
                 tint = Palette.accent,
                 title = uiString(R.string.l10n_onboarding_screen_watch_your_heart_live_8c9c1267),
-                body = "Connect a WHOOP, a heart-rate strap or a gym machine and watch each beat in real time, with zones that match your profile. Already have history elsewhere? Import it from WHOOP, Apple Health, Oura, Fitbit or Garmin.",
+                body = "Connect a Noop Band, heart-rate strap, watch, ring, or gym machine and watch each beat in real time, with zones that match your profile. Already have history elsewhere? Import it from WHOOP, Apple Health, Oura, Fitbit or Garmin.",
             )
             FeatureRow(
                 icon = Icons.Filled.Lock,
@@ -449,7 +450,7 @@ private fun ExpectationsStep() {
 private fun BluetoothStep() {
     StepShell(
         title = uiString(R.string.l10n_onboarding_screen_a_quick_word_before_you_connect_5a29015a),
-        subtitle = "NOOP uses Bluetooth to find your strap. When you continue, allow the permission so it can scan.",
+        subtitle = "NOOP uses Bluetooth to find Noop Band. When you continue, allow the permission so it can scan.",
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -461,10 +462,10 @@ private fun BluetoothStep() {
                 icon = Icons.Filled.Lock,
                 tint = Palette.statusPositive,
                 title = uiString(R.string.l10n_onboarding_screen_nothing_leaves_your_phone_502d5d0c),
-                message = "NOOP talks to your strap directly over Bluetooth Low Energy. There's no server in the middle. The connection is local, and so is every reading it pulls in.",
+                message = "NOOP talks to Noop Band directly over Bluetooth Low Energy. There's no server in the middle. The connection is local, and so is every reading it pulls in.",
             )
             Checkline("When Android asks, allow Bluetooth so NOOP can scan and connect.")
-            Checkline("WHOOP 5.0/MG may need pairing mode the first time, with the official WHOOP app closed.")
+            Checkline("If pairing stalls, put Noop Band in pairing mode and close any other band app.")
         }
     }
 }
@@ -496,7 +497,6 @@ private fun WearStep() {
 private fun ConnectStep(viewModel: AppViewModel) {
     val context = LocalContext.current
     val live by viewModel.live.collectAsState()
-    val selectedModel by viewModel.selectedModel.collectAsState()
 
     val blePerms = remember { blePermissions() }
     // The Scan button goes through the same shared gate as Live/Settings (requests the permission
@@ -523,7 +523,7 @@ private fun ConnectStep(viewModel: AppViewModel) {
         subtitle = when {
             live.bonded -> "Bonded. You can keep going."
             bleGranted -> "NOOP starts looking as soon as this step appears. You can keep going while it bonds."
-            else -> "Allow Bluetooth and tap Scan to find your strap, or keep going and connect later."
+            else -> "Allow Bluetooth and tap Scan to find Noop Band, or keep going and connect later."
         },
     ) {
         Column(
@@ -562,20 +562,24 @@ private fun ConnectStep(viewModel: AppViewModel) {
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            Text(uiString(R.string.l10n_onboarding_screen_strap_02b88eeb), style = NoopType.footnote, color = Palette.textSecondary)
-                            SegmentedPillControl(
-                                items = WhoopModel.entries.toList(),
-                                selection = selectedModel,
-                                label = { it.displayName },
-                                onSelect = {
-                                    viewModel.setSelectedModel(it)
-                                    if (!live.bonded) {
-                                        viewModel.disconnect()
-                                        requestConnect()
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
+                            Icon(
+                                Icons.Filled.Watch,
+                                contentDescription = null,
+                                tint = Palette.accent,
+                                modifier = Modifier.size(20.dp),
                             )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    WhoopModel.CUSTOMER_NAME,
+                                    style = NoopType.subhead,
+                                    color = Palette.textPrimary,
+                                )
+                                Text(
+                                    "Compatible hardware is detected automatically.",
+                                    style = NoopType.footnote,
+                                    color = Palette.textTertiary,
+                                )
+                            }
                         }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
@@ -616,8 +620,8 @@ private fun ConnectStep(viewModel: AppViewModel) {
             // they can continue now and pair a heart-rate strap or import data afterwards.
             if (!live.bonded) {
                 Text(
-                    uiString(R.string.l10n_onboarding_screen_no_whoop_you_can_still_continue_ec58d88d) +
-                        "or a gym machine under Devices, or import from WHOOP, Apple Health, Oura, Fitbit, Garmin " +
+                    "No Noop Band? You can still continue. Pair another heart-rate strap, watch, ring, " +
+                        "or gym machine under Devices, or import from WHOOP, Apple Health, Oura, Fitbit, Garmin " +
                         "and more under Data Sources. You can do either any time.",
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
@@ -659,8 +663,8 @@ private fun BondedStep(viewModel: AppViewModel) {
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                live.batteryPct?.let { "Your strap is bonded · ${it.toInt()}% battery." }
-                    ?: "Your strap is bonded and ready to stream.",
+                live.batteryPct?.let { "Noop Band is paired · ${it.toInt()}% battery." }
+                    ?: "Noop Band is paired and ready to stream.",
                 style = NoopType.body,
                 color = Palette.textSecondary,
                 textAlign = TextAlign.Center,
@@ -939,7 +943,7 @@ private fun ImportStep(viewModel: AppViewModel) {
 private fun NotificationsStep() {
     StepShell(
         title = uiString(R.string.l10n_onboarding_screen_stay_in_the_loop_f54254af),
-        subtitle = "NOOP keeps your strap connected in the background. When you continue, allow notifications so it can show that link and reach your wrist.",
+        subtitle = "NOOP keeps Noop Band connected in the background. When you continue, allow notifications so it can show that link and reach your wrist.",
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),

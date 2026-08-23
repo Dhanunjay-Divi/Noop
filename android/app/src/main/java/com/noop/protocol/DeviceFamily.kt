@@ -20,7 +20,7 @@ enum class DeviceFamily {
     /** Whoop 4.0 — 0x07 CRC8 header check. */
     WHOOP4,
 
-    /** Whoop 5.0 / MG — CRC16-Modbus header check, "puffin" packet types. */
+    /** Whoop 5.0 / MG - CRC16-Modbus header check, "puffin" packet types. */
     WHOOP5;
 
     /** The header-CRC algorithm this family uses; the payload CRC32 is identical for both. */

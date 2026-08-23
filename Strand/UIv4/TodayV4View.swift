@@ -1,7 +1,7 @@
 import SwiftUI
 import StrandDesign
 
-// TodayV4View.swift — "USEFUL" (UI v4).
+// TodayV4View.swift - "USEFUL" (UI v4).
 //
 // WHAT CHANGED AND WHY (owner feedback, verbatim: "Bevel looked good and NOOP 3d icons looked good…
 // how is load chart helpful i'm not understanding… I want useful clear and nice metrics"):
@@ -150,7 +150,7 @@ struct TodayV4View: View {
             .background(RoundedRectangle(cornerRadius: 5).fill(V4.inset))
     }
 
-    // "Am I recovered?" — NOOP's own BevelGauge (the 3D dial the owner likes), not a flat arc.
+    // "Am I recovered?" - NOOP's own BevelGauge (the 3D dial the owner likes), not a flat arc.
     private var heroCard: some View {
         VStack(spacing: 10) {
             BevelGauge(
@@ -158,7 +158,7 @@ struct TodayV4View: View {
                 stops: [.init(color: V4.good.opacity(0.85), location: 0),
                         .init(color: V4.good, location: 1)],
                 tipColor: V4.good,
-                numberText: model.recovery.map { "\(Int($0.rounded()))" } ?? "—",
+                numberText: model.recovery.map { "\(Int($0.rounded()))" } ?? "-",
                 captionText: "RECOVERY",
                 stateText: model.recoveryState.isEmpty ? nil : model.recoveryState,
                 diameter: 176,
@@ -180,7 +180,7 @@ struct TodayV4View: View {
         .v4Card(18)
     }
 
-    // "Why is it that number?" — the glass-box promise, made visible.
+    // "Why is it that number?" - the glass-box promise, made visible.
     private var whyCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("appwide.v4.why").v4Micro()
@@ -195,7 +195,7 @@ struct TodayV4View: View {
                         }
                         Spacer(minLength: 8)
                         HStack(alignment: .firstTextBaseline, spacing: 3) {
-                            Text(d.value ?? "—")
+                            Text(d.value ?? "-")
                                 .font(V4.figure(19))
                                 .foregroundStyle(d.value == nil ? V4.ink3 : V4.toneColor(d.tone))
                             if d.value != nil, !d.unit.isEmpty {
@@ -214,7 +214,7 @@ struct TodayV4View: View {
         .v4Card()
     }
 
-    // "What should I do today?" — a concrete number, not vibes.
+    // "What should I do today?" - a concrete number, not vibes.
     private var targetCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("appwide.v4.target").v4Micro()
@@ -231,7 +231,7 @@ struct TodayV4View: View {
                         .foregroundStyle(V4.ink)
                     Text("EFFORT").font(V4.micro).foregroundStyle(V4.ink3)
                 } else {
-                    Text("—").font(V4.figure(34, .bold)).foregroundStyle(V4.ink3)
+                    Text("-").font(V4.figure(34, .bold)).foregroundStyle(V4.ink3)
                 }
             }
             if !model.targetAction.isEmpty {
@@ -245,7 +245,7 @@ struct TodayV4View: View {
         .v4Card()
     }
 
-    // "Did I sleep enough?" — the DEFICIT IN MINUTES is the useful number, not a percentage.
+    // "Did I sleep enough?" - the DEFICIT IN MINUTES is the useful number, not a percentage.
     private var sleepCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -270,7 +270,7 @@ struct TodayV4View: View {
                 if let s = model.sleptMinutes {
                     Text("\(s / 60)h \(s % 60)m").font(V4.figure(26)).foregroundStyle(V4.ink)
                 } else {
-                    Text("—").font(V4.figure(26)).foregroundStyle(V4.ink3)
+                    Text("-").font(V4.figure(26)).foregroundStyle(V4.ink3)
                 }
                 if let n = model.neededMinutes {
                     Text(
@@ -317,7 +317,7 @@ struct TodayV4View: View {
         .v4Card()
     }
 
-    // "Is anything off?" — shown ONLY when something deviates. Silence is information too.
+    // "Is anything off?" - shown ONLY when something deviates. Silence is information too.
     private var watchCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("appwide.v4.watch").v4Micro()
@@ -344,7 +344,7 @@ struct TodayV4View: View {
         .v4Card()
     }
 
-    // "Am I trending up or down?" — one compact strip, direction words for a11y.
+    // "Am I trending up or down?" - one compact strip, direction words for a11y.
     private var directionCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("appwide.v4.last_seven_days").v4Micro()
@@ -362,7 +362,7 @@ struct TodayV4View: View {
                             }
                             .foregroundStyle(good ? V4.good : V4.watch)
                         } else {
-                            Text("—").font(V4.figure(15)).foregroundStyle(V4.ink3)
+                            Text("-").font(V4.figure(15)).foregroundStyle(V4.ink3)
                         }
                     }
                     .frame(maxWidth: .infinity)
@@ -413,7 +413,7 @@ extension TodayV4Model {
         m.recoveryState = "MODERATE"
         m.drivers = [
             .init(glyph: "waveform.path.ecg", name: "HRV", value: "91", unit: "ms",
-                  phrase: "Top of your usual range — a good sign", tone: .good),
+                  phrase: "Top of your usual range - a good sign", tone: .good),
             .init(glyph: "heart.fill", name: "Resting heart rate", value: "49", unit: "bpm",
                   phrase: "2 bpm below your average", tone: .good),
             .init(glyph: "moon.fill", name: "Sleep quality", value: "88", unit: "/100",
@@ -425,7 +425,7 @@ extension TodayV4Model {
         m.neededMinutes = 500         // 8h 20m
         m.sleepStages = [("Deep", 88, V4.violet), ("REM", 118, V4.cool), ("Light", 232, V4.cool.opacity(0.45)), ("Awake", 30, Color.white.opacity(0.18))]
         m.watchItems = [
-            "Skin temperature is 0.2 °C above your baseline — worth a look if it climbs again tomorrow."
+            "Skin temperature is 0.2 °C above your baseline - worth a look if it climbs again tomorrow."
         ]
         m.directions = [
             .init(name: "Recovery", delta: 4, unit: "", higherIsBetter: true),

@@ -112,7 +112,7 @@ struct MetricDescriptor: Identifiable, Hashable {
         // `my-whoop` is the local strap namespace. Its series can resolve to directly measured
         // strap rows OR to a sibling `-noop` series calculated on-device; calling the whole namespace
         // "Whoop" made independent Charge/Effort/Rest values look official. Keep that boundary visible.
-        case "my-whoop":     return String(localized: "NOOP / strap")
+        case "my-whoop":     return String(localized: "Noop Band")
         case let s where s.hasSuffix("-noop"):
             return "NOOP"
         case "whoop", "whoop-official-reference":
@@ -124,7 +124,7 @@ struct MetricDescriptor: Identifiable, Hashable {
 
     /// True for the Effort metric (#268). Its stored value is 0–100; the effort-scale toggle converts
     /// the DISPLAYED number + unit onto WHOOP's 0–21 axis. Mirrors the Android `MetricSpec.whoopEffort`
-    /// gate (`key == "strain"`) — the only value-converting metric in the catalog.
+    /// gate (`key == "strain"`) - the only value-converting metric in the catalog.
     private var isEffort: Bool { key == "strain" }
     /// The database convention for sleep efficiency is a 0–1 fraction, while the catalog presents it
     /// as a percentage. Keep conversion at the descriptor boundary so charts, tables and stat tiles all
@@ -135,7 +135,7 @@ struct MetricDescriptor: Identifiable, Hashable {
     /// absolute °C) OR a signed DEVIATION from the personal baseline (±°C, the live/computed pipeline) —
     /// `VitalBands.isAbsoluteSkinTemp(v)` (v >= 20 °C) tells them apart per value. A DEVIATION must convert
     /// to °F by ×9/5 with NO +32 offset; adding +32 to a deviation produced nonsense ONLY in Fahrenheit
-    /// (a −4.2 °C deviation rendered as "24.4 °F" — the bug), while Celsius appended the raw deviation and
+    /// (a −4.2 °C deviation rendered as "24.4 °F" - the bug), while Celsius appended the raw deviation and
     /// looked fine. An ABSOLUTE reading still uses the full C→F (×9/5 + 32). Key-based, mirroring `isEffort`
     /// and the Android HealthScreen per-value branch.
     private var isSkinTemp: Bool { key == "skin_temp" }
@@ -216,7 +216,7 @@ struct MetricDescriptor: Identifiable, Hashable {
         }
     }
 
-    /// The Effort metric's unit LABEL on the selected scale — "/100" or "/21" (#268). Non-Effort metrics
+    /// The Effort metric's unit LABEL on the selected scale - "/100" or "/21" (#268). Non-Effort metrics
     /// return their stored label unchanged. Mirrors the Android `MetricSpec.displayUnit` swap.
     func displayUnit(effortScale: EffortScale) -> String {
         guard isEffort else { return unit }
@@ -224,7 +224,7 @@ struct MetricDescriptor: Identifiable, Hashable {
     }
 }
 
-/// Canonical catalog — mirrors the WHOOP "Trend View" plus Apple Health body metrics.
+/// Canonical catalog - mirrors the WHOOP "Trend View" plus Apple Health body metrics.
 /// Keys match exactly what the importers write into metricSeries.
 enum MetricCatalog {
     static let categories = ["Heart", "Charge", "Rest", "Effort", "Health", "Nutrition", "Mind"]
@@ -275,13 +275,13 @@ enum MetricCatalog {
         // changes where any of them tap through. The Today card/tile route to it EXPLICITLY by source
         // (`.metricSourced` / `todayStepsMetric`), which is what actually needs it.
         d("steps", String(localized: "Steps (motion estimate)"), "Effort", "steps", "my-whoop", "figure.walk.motion", 0, true,
-          String(localized: "Estimated on device from WHOOP 5/MG motion-counter ticks and your step-scale setting. Not a validated pedometer count.")),
+          String(localized: "Estimated on device from Noop Band motion-counter ticks and your step-scale setting. Not a validated pedometer count.")),
         // On-device calibrated steps ESTIMATE for a WHOOP 4.0 (no readable step count over BLE): the strap's daily
         // motion volume scaled by a personal calibration. Stored under the computed "-noop" source, so
         // it reads through the same exploreSeries fallback fitness_age/vitality use. Distinct from the
         // @57 motion estimate above — both are labelled so neither is mistaken for a measured count.
         d("steps_est", String(localized: "Steps (estimated)"), "Effort", "steps", "my-whoop", "figure.walk.motion", 0, true,
-          String(localized: "Estimated from your WHOOP's motion, calibrated to your phone. Not a measured step count.")),
+          String(localized: "Estimated from Noop Band motion, calibrated to your phone. Not a measured step count.")),
         d("hr_zones13_min", String(localized: "HR Zones 1-3"), "Effort", "min", "my-whoop", "heart", 0, nil),
         d("hr_zones45_min", String(localized: "HR Zones 4-5"), "Effort", "min", "my-whoop", "heart.fill", 0, nil),
         d("hr_zones_all_min", String(localized: "HR Zones (All)"), "Effort", "min", "my-whoop", "heart.text.square", 0, nil),

@@ -1,6 +1,6 @@
 import Foundation
 
-// EffectRanker.swift — the unified, LAG-AWARE "what moves your Charge" ranker.
+// EffectRanker.swift - the unified, LAG-AWARE "what moves your Charge" ranker.
 //
 // Pure, deterministic, DB-free. Generalises ActivityCostEngine's single-sport D+1 to
 // EVERY logged journal behaviour against EVERY daily outcome, and searches a small fixed
@@ -22,14 +22,14 @@ import Foundation
 // HONESTY (effect-size first, not stargazing): the primary signal is the effect SIZE +
 // n + a ScoreConfidence tier, never a bare "significant" stamp. The lag search is capped
 // at the small fixed set {0,1,2} so the comparison count stays bounded and explainable; we
-// never claim a behaviour "causes" anything — only that it lines up with a change.
+// never claim a behaviour "causes" anything - only that it lines up with a change.
 //
 // Output: one RankedEffect per (b, o) that produced a usable lag, ranked with the same rule
 // as BehaviorInsights.rank (significant first, |cohensD| desc, stable tiebreak), so the feed
 // matches the existing Behaviour Effects ordering exactly. Self-contained except for the two
 // reused primitives, so the Kotlin twin is line-for-line.
 //
-// (Spec: 2026-06-19-v5-insights-correlation-engine-design.md — "Lag-aware effect ranking".)
+// (Spec: 2026-06-19-v5-insights-correlation-engine-design.md - "Lag-aware effect ranking".)
 
 // MARK: - Result
 

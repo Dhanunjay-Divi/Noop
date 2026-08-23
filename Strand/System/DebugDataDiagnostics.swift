@@ -33,7 +33,7 @@ enum DebugDataDiagnostics {
         let syncSec = d.double(forKey: "lastSyncedAt")
         lines.append("Last sync:   \(syncSec > 0 ? relTime(Date().timeIntervalSince1970 - syncSec) : "never")")
         // #57: write-health. "Last sync" fires even on an empty/failed offload, so distinguish "rows
-        // actually landed" from "an offload STALLED on a persist failure" (history won't persist — usually a
+        // actually landed" from "an offload STALLED on a persist failure" (history won't persist - usually a
         // backup restored without an app restart, the closed-store class).
         let now = Date().timeIntervalSince1970
         let okAt = d.double(forKey: "sync.lastWriteOkAt")
@@ -41,14 +41,14 @@ enum DebugDataDiagnostics {
         let restoreAt = d.double(forKey: "backup.lastRestoreAt")
         lines.append("Data write:  \(okAt > 0 ? "rows last landed \(relTime(now - okAt))" : "no rows ever persisted")")
         if stalledAt > 0, stalledAt >= okAt {
-            lines.append("             ⚠ history NOT persisting — last offload STALLED \(relTime(now - stalledAt)) "
-                + "(if you restored a backup, fully restart the app — #57)")
+            lines.append("             ⚠ history NOT persisting - last offload STALLED \(relTime(now - stalledAt)) "
+                + "(if you restored a backup, fully restart the app - #57)")
         }
         if restoreAt > 0 { lines.append("Last restore: \(relTime(now - restoreAt))") }
         #if os(iOS)
         // #52: iOS Backup & Sync folder-picker health. When users report "won't let me pick a folder",
         // this pins the failure stage: "cancelled"/"never used" ⇒ the picker's Open button never fired
-        // (an iOS-side picker issue — the in-app "Use NOOP's own folder" fallback sidesteps it);
+        // (an iOS-side picker issue - the in-app "Use NOOP's own folder" fallback sidesteps it);
         // "picked" + a FAILED flag ⇒ a returned folder failed to bookmark HERE (our bug).
         let pickEvent = d.string(forKey: "backupPicker.lastEvent") ?? "never used"
         let pickAt = d.double(forKey: "backupPicker.lastEventAt")
@@ -127,7 +127,7 @@ enum DebugDataDiagnostics {
         let resp = (try? await store.respSamples(deviceId: did, from: cs.startTs, to: cs.endTs, limit: 200_000)) ?? []
         lines.append("Night \(dayStamp(cs.startTs)): grav=\(grav.count) hr=\(hr.count) rr=\(rr.count) resp=\(resp.count) skin=\(skin.count)")
         if grav.isEmpty && hr.isEmpty {
-            lines.append("(no raw biometric samples under '\(did)' for this night — expected on a freshly re-added strap; reconnect + let a history sync run, then re-export)")
+            lines.append("(no raw biometric samples under '\(did)' for this night - expected on a freshly re-added strap; reconnect + let a history sync run, then re-export)")
             return lines
         }
         if let rem = SleepStager.remFunnelDiagnostic(start: cs.startTs, end: cs.endTs, grav: grav, hr: hr, rr: rr, resp: resp) {
@@ -233,7 +233,7 @@ enum DebugDataDiagnostics {
         let mins = (d.object(forKey: "behavior.smartAlarmMinutes") as? Int) ?? 7 * 60
         lines.append("Enabled: \(on ? "yes" : "no") · set \(String(format: "%02d:%02d", mins / 60, mins % 60))")
         // #3: model + the 5/MG experimental gate — a 5/MG firmware alarm is NOT armed unless Experimental is on.
-        // (selectedWhoopModel stores the WhoopModel rawValue — "WHOOP 5.0 / MG" / "WHOOP 4.0" — not "whoop5".)
+        // (selectedWhoopModel stores the WhoopModel rawValue - "WHOOP 5.0 / MG" / "WHOOP 4.0" - not "whoop5".)
         let model = d.string(forKey: "selectedWhoopModel") ?? WhoopModel.whoop4.rawValue
         if model == WhoopModel.whoop5mg.rawValue {
             lines.append("Model: \(model) · experimental: \(PuffinExperiment.isEnabled ? "on" : "off → firmware alarm NOT armed")")
@@ -246,9 +246,9 @@ enum DebugDataDiagnostics {
         if let newest = d.object(forKey: "strap.newestRecordTs") as? Int, newest > 0 {
             let behind = Int(Date().timeIntervalSince1970) - newest
             if behind > 3 * 86400 {
-                lines.append("Strap clock: \(behind / 86400)d behind wall (reset/stale — alarm unreliable; recent sleep may be filed ~\(behind / 86400)d in the past, #67)")
+                lines.append("Strap clock: \(behind / 86400)d behind wall (reset/stale - alarm unreliable; recent sleep may be filed ~\(behind / 86400)d in the past, #67)")
             } else if behind < -3 * 86400 {
-                lines.append("Strap clock: \(-behind / 86400)d AHEAD of wall (future-dated — alarm unreliable; recent sleep may be misdated, #67)")
+                lines.append("Strap clock: \(-behind / 86400)d AHEAD of wall (future-dated - alarm unreliable; recent sleep may be misdated, #67)")
             } else {
                 lines.append("Strap clock: OK")
             }
@@ -274,7 +274,7 @@ enum DebugDataDiagnostics {
             if let reported = d.object(forKey: "alarm.lastReportedEpoch") as? Int {
                 let mismatch = abs(reported - sent) > 120
                 var rline = "Strap reports: \(alarmStamp(reported))"
-                    + (mismatch ? "  ⚠️ MISMATCH — strap didn't accept the time" : "  ✓ matches")
+                    + (mismatch ? "  ⚠️ MISMATCH - strap didn't accept the time" : "  ✓ matches")
                 // #34: consecutive rejections — a persistent refusal (vs a one-off) points at a strap whose
                 // alarm register needs a reset, and is what SmartAlarmView warns the user about at ≥2.
                 let streak = d.integer(forKey: "alarm.rejectStreak")

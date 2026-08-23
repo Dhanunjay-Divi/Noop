@@ -10,7 +10,7 @@ import WhoopStore
 /// "EXPERIMENTAL, HELP US TEST": this is a best-effort, clean-room driver built from PUBLICLY DOCUMENTED
 /// protocol FACTS (open projects document the Huami GATT layout; we reuse only the facts and wrote our own
 /// code — no GPL/AGPL code copied). It is shipped behind the experimental add-device tier because it can't
-/// be hardware-verified here. It NEVER fabricates data: if it can't read a real HR it stays at "—".
+/// be hardware-verified here. It NEVER fabricates data: if it can't read a real HR it stays at "-".
 ///
 /// WHOOP-FIRST ISOLATION (identical to `StandardHRSource`): this class runs its OWN `CBCentralManager`
 /// and never imports, calls, or shares state with `BLEManager`. The WHOOP path cannot regress. The only
@@ -116,7 +116,7 @@ public final class HuamiHRSource: NSObject, ObservableObject {
         needsPairing = nil
         log("Huami: scanning for Amazfit / Zepp / Mi Band devices…")
         guard central.state == .poweredOn else {
-            log("Huami: Bluetooth not powered on (state=\(central.state.rawValue)) — scan deferred until ready")
+            log("Huami: Bluetooth not powered on (state=\(central.state.rawValue)) - scan deferred until ready")
             return
         }
         central.scanForPeripherals(withServices: nil,
@@ -136,7 +136,7 @@ public final class HuamiHRSource: NSObject, ObservableObject {
         let p = seenPeripherals[id] ?? central.retrievePeripherals(withIdentifiers: [id]).first
         guard let p else {
             pendingConnectID = id
-            log("Huami: device \(id) not cached yet — scanning to find it")
+            log("Huami: device \(id) not cached yet - scanning to find it")
             scan()
             return
         }
@@ -145,7 +145,7 @@ public final class HuamiHRSource: NSObject, ObservableObject {
         p.delegate = self
         guard central.state == .poweredOn else {
             pendingConnectID = id
-            log("Huami: Bluetooth not powered on — connect to \(id) deferred until ready")
+            log("Huami: Bluetooth not powered on - connect to \(id) deferred until ready")
             return
         }
         log("Huami: connecting to \(id)")
@@ -190,7 +190,7 @@ public final class HuamiHRSource: NSObject, ObservableObject {
         guard hr >= 30, hr <= 220 else { return }
         if !loggedFirstHR {
             loggedFirstHR = true
-            log("Huami: receiving data — first sample \(hr) bpm")
+            log("Huami: receiving data - first sample \(hr) bpm")
         }
         if feedsLive {
             live.setHeartRate(hr)
@@ -244,20 +244,20 @@ extension HuamiHRSource: @preconcurrency CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        log("Huami: connected — discovering services")
+        log("Huami: connected - discovering services")
         peripheral.delegate = self
         peripheral.discoverServices([Self.stdHeartRateService, Self.huamiService, Self.batteryService])
     }
 
     public func centralManager(_ central: CBCentralManager,
                                didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        log("Huami: WARNING failed to connect — \(error?.localizedDescription ?? "unknown error")")
+        log("Huami: WARNING failed to connect - \(error?.localizedDescription ?? "unknown error")")
         if feedsLive { live.connected = false }
     }
 
     public func centralManager(_ central: CBCentralManager,
                                didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        log("Huami: disconnected\(error.map { " — \($0.localizedDescription)" } ?? " (clean)")")
+        log("Huami: disconnected\(error.map { " - \($0.localizedDescription)" } ?? " (clean)")")
         loggedFirstHR = false
         enabledAnyHR = false
         batteryPct = nil
@@ -272,7 +272,7 @@ extension HuamiHRSource: @preconcurrency CBCentralManagerDelegate {
 extension HuamiHRSource: @preconcurrency CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error = error {
-            log("Huami: WARNING service discovery failed — \(error.localizedDescription)")
+            log("Huami: WARNING service discovery failed - \(error.localizedDescription)")
             return
         }
         guard let services = peripheral.services else { return }
@@ -280,12 +280,12 @@ extension HuamiHRSource: @preconcurrency CBPeripheralDelegate {
         let hasHuami = services.contains { $0.uuid == Self.huamiService }
         // Prefer the standard SIG HR service; fall back to the Huami custom one.
         if hasStd {
-            log("Huami: standard 0x180D heart-rate service FOUND — using it (preferred)")
+            log("Huami: standard 0x180D heart-rate service FOUND - using it (preferred)")
             for svc in services where svc.uuid == Self.stdHeartRateService {
                 peripheral.discoverCharacteristics([Self.stdHeartRateMeasurement], for: svc)
             }
         } else if hasHuami {
-            log("Huami: no standard 0x180D — trying the documented Huami custom HR characteristic")
+            log("Huami: no standard 0x180D - trying the documented Huami custom HR characteristic")
             for svc in services where svc.uuid == Self.huamiService {
                 peripheral.discoverCharacteristics([Self.huamiHeartRateMeasurement], for: svc)
             }
@@ -301,7 +301,7 @@ extension HuamiHRSource: @preconcurrency CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral,
                            didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         if let error = error {
-            log("Huami: WARNING characteristic discovery failed — \(error.localizedDescription)")
+            log("Huami: WARNING characteristic discovery failed - \(error.localizedDescription)")
             return
         }
         guard let chars = service.characteristics else { return }
@@ -336,7 +336,7 @@ extension HuamiHRSource: @preconcurrency CBPeripheralDelegate {
               characteristic.uuid == Self.huamiHeartRateMeasurement else { return }
         if let error = error {
             // The band refused the subscription — almost always the Huami auth gate. Be honest.
-            log("Huami: WARNING enabling notifications FAILED — \(error.localizedDescription)")
+            log("Huami: WARNING enabling notifications FAILED - \(error.localizedDescription)")
             announceNeedsPairing()
         } else {
             log("Huami: notifications enabled (isNotifying=\(characteristic.isNotifying))")
@@ -363,7 +363,7 @@ extension HuamiHRSource: @preconcurrency CBPeripheralDelegate {
         } else {
             return
         }
-        guard let hr else { return }   // no usable reading → stay at "—", never fabricate
+        guard let hr else { return }   // no usable reading → stay at "-", never fabricate
         ingest(hr: hr)
     }
 

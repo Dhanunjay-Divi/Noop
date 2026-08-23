@@ -261,7 +261,7 @@ private fun ExplainerCard(effortScale: EffortScale) {
                     "(~55%), resting heart rate (~20%), rest quality (~15%), respiration (~5%) " +
                     "and skin-temperature deviation (~5%). Effort is a 0 - ${UnitFormatter.effortScaleMax(effortScale)} " +
                     "cardiovascular load from time spent in each heart-rate zone. Sleep is staged " +
-                    "from movement and heart rate. The full on-device recompute from the strap's raw " +
+                    "from movement and heart rate. The full on-device recompute from Noop Band's raw " +
                     "streams is a later port; the scores below are read from each day's cached metrics.",
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
@@ -289,9 +289,9 @@ private fun EmptyNote() {
                 uiString(R.string.l10n_intelligence_screen_no_scored_days_yet_sync_your_cdd47684) +
                     "scored once a day's data is in. Recovery needs about four nights of sleep to learn your " +
                     "baseline (you'll see \"Calibrating\" until then), and keeps sharpening over your first " +
-                    "couple of weeks. On a WHOOP 5 or MG the strap banks little history, so that night count " +
-                    "can climb slowly or sit at 0 of 4 until you have worn it across a few nights. That's " +
-                    "its sync limit, not a fault. Import your WHOOP export to skip the wait.",
+                    "couple of weeks. Some Noop Band firmware banks only a short history, so that night count " +
+                    "can climb slowly or sit at 0 of 4 until you have worn it across a few nights. That is " +
+                    "the band's sync limit, not a fault. Import your WHOOP export to skip the wait.",
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
             )
@@ -402,13 +402,13 @@ private fun DayCard(d: DailyMetric, effortScale: EffortScale) {
             Row(modifier = Modifier.fillMaxWidth()) {
                 DayStat(
                     "Recovery",
-                    d.recovery?.let { "${it.roundToInt()}%" } ?: "—",
+                    d.recovery?.let { "${it.roundToInt()}%" } ?: "-",
                     d.recovery?.let { Palette.recoveryColor(it) } ?: Palette.textSecondary,
                     Modifier.weight(1f),
                 )
                 DayStat(
                     "Effort",
-                    d.strain?.let { UnitFormatter.effortDisplay(it, effortScale) } ?: "—",
+                    d.strain?.let { UnitFormatter.effortDisplay(it, effortScale) } ?: "-",
                     d.strain?.let { Palette.strainColor(it) } ?: Palette.textSecondary,
                     Modifier.weight(1f),
                 )
@@ -420,13 +420,13 @@ private fun DayCard(d: DailyMetric, effortScale: EffortScale) {
                 )
                 DayStat(
                     "HRV",
-                    d.avgHrv?.let { "${it.roundToInt()}" } ?: "—",
+                    d.avgHrv?.let { "${it.roundToInt()}" } ?: "-",
                     Palette.metricPurple,
                     Modifier.weight(1f),
                 )
                 DayStat(
                     "RHR",
-                    d.restingHr?.toString() ?: "—",
+                    d.restingHr?.toString() ?: "-",
                     Palette.metricRose,
                     Modifier.weight(1f),
                 )
@@ -466,7 +466,7 @@ private fun DayStat(label: String, value: String, color: Color, modifier: Modifi
 // MARK: - Derived helpers
 
 private fun sleepValue(totalMin: Double?): String {
-    val m = totalMin ?: return "—"
+    val m = totalMin ?: return "-"
     val total = m.roundToInt()
     return "${total / 60}h ${total % 60}m"
 }

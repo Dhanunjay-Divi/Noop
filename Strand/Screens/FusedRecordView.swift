@@ -2,7 +2,7 @@ import SwiftUI
 import StrandDesign
 import StrandAnalytics
 
-// MARK: - FusedRecordView — "Your Data, Fused" (v5 — Local Multi-Device Fusion)
+// MARK: - FusedRecordView - "Your Data, Fused" (v5 - Local Multi-Device Fusion)
 //
 // The read-only headline screen for the fusion pillar
 // (docs/superpowers/specs/2026-06-19-v5-local-multi-device-fusion-design.md §UX). For each core
@@ -143,7 +143,7 @@ struct FusedRecordView: View {
         #endif
     }
 
-    /// "Today's record owned by WHOOP" — the scores' single-owner, made honest. Only shown when the
+    /// "Today's record owned by WHOOP" - the scores' single-owner, made honest. Only shown when the
     /// fused record actually spans multiple sources (else there's no ambiguity to caption).
     private var dayBadgeRow: some View {
         HStack(spacing: 8) {
@@ -312,7 +312,7 @@ private struct FusedMetricRowView: View {
 // MARK: - Conflict-compare sheet
 
 /// A small read-only sheet: every source's value for the metric, side by side, with the one NOOP is
-/// using marked and its trust reason named. NOOP never adjudicates which is "correct" — it shows the
+/// using marked and its trust reason named. NOOP never adjudicates which is "correct" - it shows the
 /// spread and explains its best-signal pick. Transparency, not diagnosis.
 private struct ConflictCompareSheet: View {
     let row: FusedRow
@@ -338,7 +338,7 @@ private struct ConflictCompareSheet: View {
                     }
                 }
 
-                // Why this one — the honest explanation of the pick, never a "correct" claim.
+                // Why this one - the honest explanation of the pick, never a "correct" claim.
                 if let winner = point.contributors.first {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "info.circle")
@@ -361,7 +361,7 @@ private struct ConflictCompareSheet: View {
     }
 }
 
-/// One source's value inside the compare sheet — a source badge, its value, a "trust" caption (the
+/// One source's value inside the compare sheet - a source badge, its value, a "trust" caption (the
 /// reason), and a "● Using" marker on the winner.
 private struct ContributorRow: View {
     let contrib: ContributingSource
@@ -426,7 +426,7 @@ enum FusionFormat {
         }
     }
 
-    /// "8,420" — grouped integer.
+    /// "8,420" - grouped integer.
     private static func integerGrouped(_ v: Double) -> String {
         let f = NumberFormatter()
         f.numberStyle = .decimal
@@ -455,7 +455,7 @@ private extension FusedMetricPoint {
     }
 }
 
-#Preview("Your Data, Fused — multi-source") {
+#Preview("Your Data, Fused - multi-source") {
     let record = FusedRecord(
         rows: [
             FusedRow(point: .fixture("rhr", [(.whoopImport, 52), (.appleHealth, 53)]),
@@ -477,7 +477,7 @@ private extension FusedMetricPoint {
         .preferredColorScheme(.dark)
 }
 
-#Preview("Single WHOOP — plain record") {
+#Preview("Single WHOOP - plain record") {
     let record = FusedRecord(
         rows: [
             FusedRow(point: .fixture("rhr", [(.whoopImport, 52)]), label: "Resting HR"),

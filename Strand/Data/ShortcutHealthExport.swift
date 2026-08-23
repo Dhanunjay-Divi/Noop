@@ -228,7 +228,7 @@ enum ShortcutHealthExport {
         return "\(hr),,,\(timestamp(w.start, timeZone: timeZone))"
     }
 
-    /// No header, no trailing newline — a trailing "\n" would give the Shortcut's split-by-newline
+    /// No header, no trailing newline - a trailing "\n" would give the Shortcut's split-by-newline
     /// an empty last row.
     static func render(_ windows: [Window], timeZone: TimeZone) -> String {
         windows.map { line($0, timeZone: timeZone) }.joined(separator: "\n")

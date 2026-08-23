@@ -219,7 +219,7 @@ public struct SceneHeroBackground: View {
 
 // MARK: - Scene SCREEN background — the scene as the PAGE backdrop (cards float OVER it)
 
-/// The day-cycle scene anchored to the TOP of the SCREEN, behind the header + hero card — so it "forms
+/// The day-cycle scene anchored to the TOP of the SCREEN, behind the header + hero card - so it "forms
 /// part of the background" and the cards sit OVER it (the design direction). Aspect-filled to the full width,
 /// top-aligned (sky shows), fading into the canvas over its lower portion so it dissolves before the
 /// dashboard cards. A faint dark scrim under the very top keeps white header text legible on a bright sky.
@@ -288,7 +288,7 @@ public extension View {
 // MARK: - Preview
 
 #if DEBUG
-#Preview("Scene hero — sample hours") {
+#Preview("Scene hero - sample hours") {
     VStack(spacing: 16) {
         ForEach([2, 6, 8, 13, 18, 22], id: \.self) { hr in
             ZStack {

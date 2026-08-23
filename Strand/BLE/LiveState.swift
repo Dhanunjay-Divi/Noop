@@ -19,7 +19,7 @@ public final class LiveState: ObservableObject {
     /// True ONLY when the link reached a GENUINE encrypted bond — the WHOOP 5/MG CLIENT_HELLO ack, the
     /// WHOOP 4 confirmed-write bond, or a restored already-bonded link. Deliberately NOT set by the
     /// live-HR shortcut that flips `bonded` true when HR streams over the *unbonded* standard profile on
-    /// a 5/MG (issue #69) — so `bonded` can be true while `encryptedBond` is false ("Live HR, not fully
+    /// a 5/MG (issue #69) - so `bonded` can be true while `encryptedBond` is false ("Live HR, not fully
     /// paired"). WHOOP 4 always reaches a genuine bond, so the two track together there. Reset on
     /// connect/disconnect. Drives the Live pill's two-state distinction; the encrypted channel (buzz,
     /// alarm, double-tap, history offload) only works when this is true.
@@ -80,6 +80,12 @@ public final class LiveState: ObservableObject {
     /// separate short history to render an actually-moving R-R strip / rolling RMSSD. Appended (never
     /// replaced) by `setRRIntervals(_:)`; emptied by `clearBiometrics()`.
     @Published public private(set) var rrRecent: [Int] = []
+    /// Receipt time of the latest non-empty R-R packet. Automatic physiology consumers use this to
+    /// reject a cached interval packet after a transport gap.
+    public private(set) var rrReceivedAt: Date?
+    /// Recent wrist-motion evidence derived from timestamped strap gravity after a natural history
+    /// sync. Sparse or old motion clears this value; phone motion is never substituted.
+    @Published private(set) var recentWristMotionEvidence: TimestampedWristMotionEvidence?
     @Published public var batteryPct: Double? = nil
     /// Strap battery pack VOLTAGE (mV), decoded from the ~8-min BATTERY_LEVEL event (mv@21/@25) and the
     /// GET_EXTENDED_BATTERY_INFO response (#592). Shown on the Devices card as a "x.xx V" readout beside the
@@ -322,7 +328,7 @@ public final class LiveState: ObservableObject {
     /// Pure, honest display strings for the additive in-workout sensor readout. Each returns nil when the
     /// sensor hasn't sent that field (the UI then hides the tile rather than showing a fabricated value).
     /// Units are the sensor's native ones, no unit-conversion guessing: speed km/h (the decode/derivation
-    /// unit), cadence per-minute (steps/min for a footpod, crank rpm for a bike sensor — both "/min", and
+    /// unit), cadence per-minute (steps/min for a footpod, crank rpm for a bike sensor - both "/min", and
     /// LiveState doesn't carry the kind, so the neutral honest label is used), power watts. Mirrors the
     /// JVM-tested Kotlin `StandardHrSource.formatSensor*` so the two platforms read identically. `static`
     /// so they're trivially unit-testable away from the @MainActor instance.
@@ -346,7 +352,7 @@ public final class LiveState: ObservableObject {
     /// Short connection-status label shared by the sidebar footer (RootView) and the Settings strap
     /// card, so the two can't disagree the way they did in #266 (sidebar "Connecting…" vs Settings
     /// "Connected" for the same connected-but-unbonded 5/MG link). Once the link is up and HR is
-    /// flowing — even over the unbonded standard profile — this reads "Connected", never "Connecting…".
+    /// flowing - even over the unbonded standard profile - this reads "Connected", never "Connecting…".
     public var connectionStatusLabel: String {
         if connected && bonded { return "Bonded · streaming" }
         if connected { return "Connected" }
@@ -402,7 +408,7 @@ public final class LiveState: ObservableObject {
     @Published public var consoleChunksThisSession: Int = 0
 
     /// EXPERIMENTAL R22 telemetry (#174). How many of the 15 `enable_r22_*` SET_CONFIG flags the strap
-    /// has ACKed since the last "Send enable sequence" tap — 15 means the strap accepted the whole
+    /// has ACKed since the last "Send enable sequence" tap - 15 means the strap accepted the whole
     /// sequence (hardware-confirmed: it returns a COMMAND_RESPONSE per flag). Reset on each new attempt.
     @Published public var r22FlagsAccepted: Int = 0
     /// Count of type-0x2F records seen this session OUTSIDE our own history offload. #494 showed these are
@@ -423,12 +429,12 @@ public final class LiveState: ObservableObject {
     @Published public var puffinCaptureURL: URL?
 
     /// Set when a WHOOP 5/MG strap refuses the encrypted bond on first connect ("Encryption/Authentication
-    /// is insufficient") — CoreBluetooth won't start a fresh just-works bond against a strap still bonded to
+    /// is insufficient") - CoreBluetooth won't start a fresh just-works bond against a strap still bonded to
     /// the official WHOOP app. Surfaced as actionable pairing-mode guidance; cleared once the link bonds.
     @Published public var pairingHint: String? = nil
 
     /// Set when a connect attempt fails because the strap wiped its bond ("Peer removed pairing
-    /// information") — a firmware update, or the official WHOOP app re-bonding it. macOS keeps re-presenting
+    /// information") - a firmware update, or the official WHOOP app re-bonding it. macOS keeps re-presenting
     /// the now-stale pairing key, so reconnects loop on the same error with no recovery. Carries an
     /// actionable forget-and-re-pair guide; cleared on the next successful connect. (5/MG firmware reset, 2026-06)
     @Published public var reconnectGuide: String? = nil
@@ -505,14 +511,27 @@ public final class LiveState: ObservableObject {
     /// intervals onto the bounded `rrRecent` rolling buffer so the Live console can show a moving
     /// strip. Non-positive sentinels (a strap "no interval this beat" placeholder) are dropped from the
     /// rolling buffer. `recentLimit` caps the buffer; the oldest intervals fall off first.
-    public func setRRIntervals(_ intervals: [Int], recentLimit: Int = 60) {
-        rr = intervals
+    public func setRRIntervals(
+        _ intervals: [Int],
+        receivedAt: Date = Date(),
+        recentLimit: Int = 60
+    ) {
         let valid = intervals.filter { $0 > 0 }
+        if !valid.isEmpty { rrReceivedAt = receivedAt }
+        // Publish only after the receipt timestamp is ready. @Published emits from willSet, and the
+        // stress subscriber must observe the timestamp belonging to this exact packet, not the prior one.
+        rr = intervals
         guard !valid.isEmpty else { return }
         rrRecent.append(contentsOf: valid)
         if rrRecent.count > recentLimit {
             rrRecent.removeFirst(rrRecent.count - recentLimit)
         }
+    }
+
+    /// Replace the motion snapshot atomically after an offload completes. Passing nil is meaningful:
+    /// the latest sync did not provide dense, fresh evidence, so a previous window must not stay usable.
+    func setRecentWristMotionEvidence(_ evidence: TimestampedWristMotionEvidence?) {
+        recentWristMotionEvidence = evidence
     }
 
     /// Single funnel for one accepted HR packet. `publishEvenIfUnchanged` preserves each source's existing
@@ -541,6 +560,8 @@ public final class LiveState: ObservableObject {
         latestHeartRateSample = nil
         rr.removeAll()
         rrRecent.removeAll()
+        rrReceivedAt = nil
+        recentWristMotionEvidence = nil
         clearBatterySamples()   // a stale runtime estimate must not outlive the link either (#713)
         recentHrSamples.removeAll()       // Sleep readout buffers must not outlive the link (Group E)
         recentGravitySamples.removeAll()
@@ -646,7 +667,7 @@ public final class LiveState: ObservableObject {
         #else
         let osName = "macOS"
         #endif
-        var header = "NOOP strap log (scheduled export) — \(osName)\nApp: \(v)\n\(osName): "
+        var header = "NOOP strap log (scheduled export) - \(osName)\nApp: \(v)\n\(osName): "
             + ProcessInfo.processInfo.operatingSystemVersionString + "\n"
         if !extraHeaderLines.isEmpty { header += extraHeaderLines.joined(separator: "\n") + "\n" }
         header += String(repeating: "-", count: 40) + "\n"
@@ -655,7 +676,7 @@ public final class LiveState: ObservableObject {
 
     /// Scrub personal identifiers from a strap-log line so it's safe to share publicly (#445): BLE MAC
     /// addresses are masked to their first + last byte, the WHOOP's SERIAL — carried in its device
-    /// name ("WHOOP 4C1594026") and tied to the owner's account — is removed, and the CoreBluetooth
+    /// name ("WHOOP 4C1594026") and tied to the owner's account - is removed, and the CoreBluetooth
     /// peripheral identifier (a per-install random UUID iOS/macOS print in "Discovered …(<uuid>)" lines)
     /// is masked. Applied at the single log sink (BLEManager + the generic-HR diagnostics both feed it).
     /// MACs require colons, so hex command payloads are untouched; the dotted model names ("WHOOP

@@ -51,7 +51,7 @@ struct ContentView: View {
                 showWhatsNew = false
             })
         }
-        // The Terms gate must stay "over everything" — don't pop What's New on top of it after a
+        // The Terms gate must stay "over everything" - don't pop What's New on top of it after a
         // combined terms+version update. Gate on terms being current, and re-check when they're
         // accepted (onAppear already fired before acceptance), so What's New shows right after.
         .onAppear {

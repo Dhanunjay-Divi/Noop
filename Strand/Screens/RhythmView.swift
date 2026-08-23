@@ -3,7 +3,7 @@ import Foundation
 import StrandDesign
 import StrandAnalytics
 
-// RhythmView.swift — EXPERIMENTAL beat-to-beat regularity VISUALIZATION (v5 "Rhythm").
+// RhythmView.swift - EXPERIMENTAL beat-to-beat regularity VISUALIZATION (v5 "Rhythm").
 //
 // Spec: docs/superpowers/specs/2026-06-19-v5-rhythm-screening-design.md (§6, §9, §11).
 //
@@ -45,7 +45,7 @@ public enum RhythmConsent {
 
     /// The points the user must read before turning the feature on (spec §9). Each is its
     /// own line (head + body), like `Terms.points`. No condition name, no diagnosis, no
-    /// "consider a clinician" verdict — this is a visualization, not a screen.
+    /// "consider a clinician" verdict - this is a visualization, not a screen.
     public static let points: [(String, String)] = [
         (String(localized: "Experimental, and not a medical device"),
          String(localized: "This is an experimental wellness visualization of your beat-to-beat timing. It is NOT an ECG, and it cannot diagnose, detect, or rule out any heart condition.")),
@@ -398,7 +398,7 @@ struct RhythmView: View {
         .accessibilityHidden(true)
     }
 
-    // MARK: Plot card — the Poincaré scatter + the "comet vs cloud" reading note
+    // MARK: Plot card - the Poincaré scatter + the "comet vs cloud" reading note
 
     private var plotCard: some View {
         StrandCard(padding: 18, tint: StrandPalette.restColor) {
@@ -451,7 +451,7 @@ struct RhythmView: View {
                          caption: String(localized: "of beats"),
                          accent: StrandPalette.restColor)
                 StatTile(label: "BEATS READ",
-                         value: headlineWindow.map { "\($0.nBeats)" } ?? "—",
+                         value: headlineWindow.map { "\($0.nBeats)" } ?? "-",
                          caption: String(localized: "clean intervals"),
                          accent: StrandPalette.textSecondary)
             }
@@ -531,19 +531,19 @@ struct RhythmView: View {
     // MARK: - Formatting
 
     private func fmt(_ value: Double?, _ format: String) -> String {
-        guard let value else { return "—" }
+        guard let value else { return "-" }
         return String(format: format, value)
     }
 
     /// A 0…1 fraction rendered as a whole-number percent (normalised RMSSD / ectopic fraction).
     private func percent(_ value: Double?) -> String {
-        guard let value else { return "—" }
+        guard let value else { return "-" }
         return String(format: "%.0f%%", value * 100)
     }
 }
 
 #if DEBUG
-#Preview("Rhythm — steady") {
+#Preview("Rhythm - steady") {
     RhythmView(
         night: RhythmScreener.NightRhythmSummary(
             readableWindows: 6, steadyWindows: 6, occasionalWindows: 0,

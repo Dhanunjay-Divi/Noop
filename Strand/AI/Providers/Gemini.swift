@@ -59,7 +59,7 @@ struct GeminiClient: AIProviderClient {
         return parseModels(try await performRequest(req, session: session))
     }
 
-    /// Pure: unwrap Gemini's `{"models":[{"name":"models/…"}]}` — strip the prefix, keep chat-capable
+    /// Pure: unwrap Gemini's `{"models":[{"name":"models/…"}]}` - strip the prefix, keep chat-capable
     /// gemini-* only (drop embeddings/AQA). No network — unit-tested.
     func parseModels(_ json: [String: Any]) -> [String] {
         guard let list = json["models"] as? [[String: Any]] else { return [] }

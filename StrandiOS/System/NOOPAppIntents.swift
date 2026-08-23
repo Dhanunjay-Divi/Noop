@@ -39,7 +39,7 @@ enum PendingIntents {
     }
 }
 
-/// Record a timestamped "moment" — the iOS analogue of the strap double-tap "mark a moment" action.
+/// Record a timestamped "moment" - the iOS analogue of the strap double-tap "mark a moment" action.
 struct MarkMomentIntent: AppIntent {
     static let title: LocalizedStringResource = "Mark a Moment"
     static let description = IntentDescription("Record a timestamped moment in NOOP.")
@@ -52,8 +52,8 @@ struct MarkMomentIntent: AppIntent {
 
 /// Send a confirming haptic buzz to the strap. Opens the app so the live BLE link can deliver it.
 struct BuzzStrapIntent: AppIntent {
-    static let title: LocalizedStringResource = "Buzz Strap"
-    static let description = IntentDescription("Send a haptic buzz to your WHOOP strap.")
+    static let title: LocalizedStringResource = "Buzz Noop Band"
+    static let description = IntentDescription("Send a haptic vibration to Noop Band.")
     static let openAppWhenRun = true
 
     func perform() async throws -> some IntentResult {
@@ -70,8 +70,8 @@ struct NOOPShortcuts: AppShortcutsProvider {
                     shortTitle: "Mark a Moment",
                     systemImageName: "mappin.and.ellipse")
         AppShortcut(intent: BuzzStrapIntent(),
-                    phrases: ["Buzz my \(.applicationName) strap"],
-                    shortTitle: "Buzz Strap",
+                    phrases: ["Buzz my Noop Band with \(.applicationName)"],
+                    shortTitle: "Buzz Noop Band",
                     systemImageName: "waveform.path")
     }
 }

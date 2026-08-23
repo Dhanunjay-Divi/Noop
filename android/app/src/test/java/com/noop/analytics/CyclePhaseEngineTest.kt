@@ -97,6 +97,63 @@ class CyclePhaseEngineTest {
         assertEquals(CyclePhaseEngine.Phase.LEARNING, r.phase)
     }
 
+    @Test fun loggedStartProvidesBoundedCycleDayWhileTemperatureLearns() {
+        val nights = (0 until 17).map {
+            CyclePhaseEngine.Night(
+                CyclePhaseEngine.shiftDay("2026-01-20", it)!!,
+                null, null, null,
+            )
+        }
+        val r = CyclePhaseEngine.classify(
+            nights,
+            baselineUsable = false,
+            loggedPeriodStarts = listOf("2026-01-20"),
+        )
+        assertEquals(CyclePhaseEngine.Phase.LEARNING, r.phase)
+        assertEquals(CyclePhaseEngine.Confidence.BUILDING, r.confidence)
+        assertEquals(16, r.cycleDayLow)
+        assertEquals(18, r.cycleDayHigh)
+        assertNull(r.cycleLengthDays)
+        assertNotNull(r.nextPeriodWindow)
+        assertTrue(r.note.contains("28-day prior"))
+    }
+
+    @Test fun loggedCadenceUsesPlausiblePersonalMedianBeforeSensorCalibration() {
+        val nights = (0 until 13).map {
+            CyclePhaseEngine.Night(
+                CyclePhaseEngine.shiftDay("2026-01-29", it)!!,
+                null, null, null,
+            )
+        }
+        val r = CyclePhaseEngine.classify(
+            nights,
+            baselineUsable = false,
+            loggedPeriodStarts = listOf("2026-01-01", "2026-01-29"),
+        )
+        assertEquals(CyclePhaseEngine.Phase.LEARNING, r.phase)
+        assertEquals(28, r.cycleLengthDays)
+        assertEquals(12, r.cycleDayLow)
+        assertEquals(14, r.cycleDayHigh)
+        assertNotNull(r.nextPeriodWindow)
+        assertTrue(r.note.contains("logged starts"))
+    }
+
+    @Test fun staleOrFutureLoggedStartDoesNotFabricateCurrentCycle() {
+        val nights = listOf(
+            CyclePhaseEngine.Night("2026-03-01", null, null, null),
+        )
+        val r = CyclePhaseEngine.classify(
+            nights,
+            baselineUsable = false,
+            loggedPeriodStarts = listOf("2026-01-01", "2026-03-10", "2026-02-30"),
+        )
+        assertEquals(CyclePhaseEngine.Phase.LEARNING, r.phase)
+        assertNull(r.cycleDayLow)
+        assertNull(r.cycleDayHigh)
+        assertNull(r.nextPeriodWindow)
+        assertTrue(r.note.contains("over 40 days old"))
+    }
+
     @Test fun loggedPeriodMistimedIsFlagged() {
         val nights = biphasic(3)
         val lastDay = nights.last().day

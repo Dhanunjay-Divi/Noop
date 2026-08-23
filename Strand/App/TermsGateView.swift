@@ -64,6 +64,7 @@ struct TermsGateView: View {
                             #if os(macOS)
                             .toggleStyle(.checkbox)   // iOS falls back to the default switch toggle
                             #endif
+                            .accessibilityIdentifier("noop.terms.attestation.\(idx)")
                         }
 
                         Button {
@@ -88,13 +89,13 @@ struct TermsGateView: View {
 
                 Button(action: onAccept) {
                     Text("Accept & Continue")
-                        .font(StrandFont.headline)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 9)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(StrandPalette.accent)
+                // The system prominent style can resolve both the fill and label to white when NOOP's
+                // dark-mode accent is white. The house style explicitly pairs accent with accentInk.
+                .buttonStyle(NoopButtonStyle(.primary, fullWidth: true))
                 .disabled(!allChecked)
+                .accessibilityIdentifier("noop.terms.accept")
                 .keyboardShortcut(.defaultAction)
                 .padding(26)
             }

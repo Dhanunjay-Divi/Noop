@@ -56,7 +56,7 @@ private enum class TimelineMetric(val title: String) {
     Motion(uiString(R.string.timeline_metric_motion)),
     // #175: the strap's OWN band sleep_state track (0 wake/1 still/2 asleep/3 up), shown as a distinct
     // stepped track alongside the derived hypnogram. This is the band's REPORTED state, NOT a stage NOOP
-    // trusts as truth — the pill names it "Band Sleep State" so it can't be mistaken for the derived stages.
+    // trusts as truth - the pill names it "Band Sleep State" so it can't be mistaken for the derived stages.
     BandSleepState(uiString(R.string.timeline_metric_band_sleep_state)),
 }
 
@@ -94,7 +94,7 @@ fun FullDayChartScreen(vm: AppViewModel, onBack: () -> Unit) {
     var ownedOnly by remember { mutableStateOf(true) }
     // #623: is an empty SpO2 / respiration track "unsupported on this strap" or just "not this window"?
     // A 5.0/MG never decodes either (4.0-only wire signals). But the canonical registry-model resolver
-    // (#171) maps legacy bare-"WHOOP" 4.0s to the 5.0 family too, and a 4.0-v24 DOES bank SpO2 — so gate
+    // (#171) maps legacy bare-"WHOOP" 4.0s to the 5.0 family too, and a 4.0-v24 DOES bank SpO2 - so gate
     // the "not supported" copy on 5.0-family AND the strap having NEVER produced that metric, else a legacy
     // 4.0-v24 with data on other days would contradict itself. `ever*` default true (assume produced) so a
     // 4.0-v24 never flashes the wrong message before the async reads resolve.
@@ -202,7 +202,7 @@ fun FullDayChartScreen(vm: AppViewModel, onBack: () -> Unit) {
 
         // SOURCE PILL — the owned strap, with the #574 owned/all scope toggle.
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.timeline_my_whoop), style = NoopType.footnote, color = Palette.textSecondary)
+            Text("Noop Band", style = NoopType.footnote, color = Palette.textSecondary)
             Spacer(Modifier.weight(1f))
             val ownedLabel = stringResource(R.string.timeline_owned)
             val allLabel = stringResource(R.string.timeline_all)
@@ -317,7 +317,7 @@ private fun EmptyTimelineState(metric: TimelineMetric, ownedOnly: Boolean, metri
         Text(stringResource(R.string.timeline_empty_metric, metric.title.lowercase(Locale.US)),
             style = NoopType.body, color = Palette.textSecondary)
         // #623: when SpO2 / raw respiration is genuinely unsupported on this strap (a 5.0-family strap that
-        // has never produced it — those are 4.0-only wire signals), say so instead of a generic "nothing
+        // has never produced it - those are 4.0-only wire signals), say so instead of a generic "nothing
         // offloaded" that reads as broken, and point respiration at the Health screen where the R-R/RSA
         // estimate surfaces. [metricUnsupported] already folds in the family + never-produced + ownedOnly
         // gate, so a 4.0-v24 with data on other days keeps the generic message.
@@ -410,7 +410,7 @@ private suspend fun readTimeline(
             // #175: the strap's OWN band sleep_state (0 wake/1 still/2 asleep/3 up) as a stepped track. Read
             // the raw per-record stream (far sparser than 1 Hz HR, safe to load a day) and plot the 0-3 code
             // VERBATIM. Empty when the strap never reported it (a WHOOP 4.0, or a not-yet-offloaded window),
-            // which the view renders as its honest "nothing here" state — never a fabricated flat line.
+            // which the view renders as its honest "nothing here" state - never a fabricated flat line.
             runCatching { repo.sleepStateSamples(deviceId, from, to, 200_000) }.getOrDefault(emptyList())
                 .map { TimelinePoint(it.ts, it.state.toDouble()) }
     }
@@ -438,7 +438,7 @@ fun downsampleTimeline(points: List<TimelinePoint>, bucketSeconds: Long): List<T
 // MARK: - Presentation
 
 private fun resolutionSubtitle(points: List<TimelinePoint>, isRaw: Boolean, bucketSeconds: Long): String {
-    if (points.isEmpty()) return "—"
+    if (points.isEmpty()) return "-"
     if (isRaw) return "Raw · per second"
     val m = bucketSeconds / 60
     return if (m >= 1) "$m-minute average" else "${bucketSeconds}-second average"

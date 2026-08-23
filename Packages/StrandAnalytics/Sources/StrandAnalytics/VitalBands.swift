@@ -26,10 +26,21 @@ public enum VitalBands {
         public let basis: Basis
         /// Valid nights backing the personal baseline (0 when none).
         public let nights: Int
-        public init(band: Band, basis: Basis, nights: Int) {
+        /// The exact band used for this judgment, in the metric's native unit.
+        /// Personal results expose the learned ±2σ interval; provisional/stale results expose the
+        /// population fallback. This lets the UI show a truthful "you are here" readout without
+        /// reimplementing baseline math.
+        public let range: ClosedRange<Double>?
+        public init(
+            band: Band,
+            basis: Basis,
+            nights: Int,
+            range: ClosedRange<Double>? = nil
+        ) {
             self.band = band
             self.basis = basis
             self.nights = nights
+            self.range = range
         }
     }
 
@@ -51,24 +62,39 @@ public enum VitalBands {
                             history: [Double?],
                             populationRange: ClosedRange<Double>,
                             cfg: MetricCfg?) -> Result {
-        guard let value else { return Result(band: .noData, basis: .population, nights: 0) }
+        guard let value else {
+            return Result(
+                band: .noData,
+                basis: .population,
+                nights: 0,
+                range: populationRange
+            )
+        }
         guard let cfg else {
             return Result(band: populationRange.contains(value) ? .inRange : .outOfRange,
-                          basis: .population, nights: 0)
+                          basis: .population, nights: 0, range: populationRange)
         }
         let state = Baselines.foldHistory(history, cfg: cfg)
         // Absolute-plausibility outer guard: a value outside the physiological bounds is
         // out-of-range no matter how wide the personal spread happens to be.
         guard cfg.minVal <= value && value <= cfg.maxVal else {
-            return Result(band: .outOfRange, basis: .population, nights: state.nValid)
+            return Result(
+                band: .outOfRange,
+                basis: .population,
+                nights: state.nValid,
+                range: populationRange
+            )
         }
         if state.trusted {   // >= 14 valid nights and not stale
             let z = Baselines.deviation(value, state: state).z
+            let sigma = 1.253 * state.spread
+            let low = max(cfg.minVal, state.baseline - sigmaK * sigma)
+            let high = min(cfg.maxVal, state.baseline + sigmaK * sigma)
             return Result(band: abs(z) <= sigmaK ? .inRange : .outOfRange,
-                          basis: .personal, nights: state.nValid)
+                          basis: .personal, nights: state.nValid, range: low...high)
         }
         return Result(band: populationRange.contains(value) ? .inRange : .outOfRange,
-                      basis: .population, nights: state.nValid)
+                      basis: .population, nights: state.nValid, range: populationRange)
     }
 
     // MARK: - Skin temp (mixed semantics: absolute °C from CSV import vs ±°C on-device deviation)
@@ -80,6 +106,17 @@ public enum VitalBands {
     /// Heuristic but physically safe: no real wrist skin temp is below 20 °C, and no real
     /// nightly deviation reaches ±20 °C.
     public static func isAbsoluteSkinTemp(_ v: Double) -> Bool { v >= 20.0 }
+
+    /// Return a usable signed deviation, or nil when the overloaded daily column contains an
+    /// absolute temperature or an implausible/non-finite value. Every formula whose contract says
+    /// "deviation from baseline" should pass through this gate before using `skinTempDevC`.
+    public static func skinTempDeviation(from value: Double?) -> Double? {
+        guard let value, value.isFinite,
+              skinTempDeviationCfg.minVal <= value,
+              value <= skinTempDeviationCfg.maxVal,
+              !isAbsoluteSkinTemp(value) else { return nil }
+        return value
+    }
 
     /// Keep only history entries of the SAME kind (absolute vs deviation) as the displayed
     /// `value`; entries of the other kind become nil (missing nights) so the baseline that
@@ -97,6 +134,98 @@ public enum VitalBands {
     /// is the ABSOLUTE-°C one, used for CSV-imported rows.)
     public static let skinTempDeviationCfg = MetricCfg(
         minVal: -8.0, maxVal: 8.0, floorSpread: 0.3, halfLifeB: 14.0, halfLifeS: 21.0)
+
+    /// A skin-temperature input prepared for the illness engine. `deltaFromBaselineC` is always a
+    /// real CHANGE: for an absolute WHOOP import it is value minus the learned absolute baseline;
+    /// for an on-device deviation it is the already-relative value. This prevents UI labels such as
+    /// "+34 °C" and keeps the two stored semantics out of each other's baseline.
+    public struct SkinTempIllnessAssessment: Equatable, Sendable {
+        public enum Kind: String, Equatable, Sendable { case absolute, deviation }
+
+        public let reading: IllnessSignalEngine.SignalReading
+        public let baselineTrusted: Bool
+        public let deltaFromBaselineC: Double?
+        public let kind: Kind
+
+        public init(reading: IllnessSignalEngine.SignalReading,
+                    baselineTrusted: Bool,
+                    deltaFromBaselineC: Double?,
+                    kind: Kind) {
+            self.reading = reading
+            self.baselineTrusted = baselineTrusted
+            self.deltaFromBaselineC = deltaFromBaselineC
+            self.kind = kind
+        }
+    }
+
+    /// Prepare the recent skin-temperature signal without mixing absolute °C imports and signed
+    /// on-device deviations. `recent` and `baseline` retain nil positions so baseline staleness is
+    /// preserved. Absolute readings use the normal personal `skin_temp` baseline; deviations are
+    /// already relative and use the documented 0.3 °C scale after the ±8 °C plausibility gate.
+    public static func skinTempIllnessAssessment(
+        recent: [Double?],
+        baseline: [Double?]
+    ) -> SkinTempIllnessAssessment? {
+        guard let latest = recent.reversed().compactMap({ $0 }).first,
+              latest.isFinite else { return nil }
+        let kind: SkinTempIllnessAssessment.Kind =
+            isAbsoluteSkinTemp(latest) ? .absolute : .deviation
+
+        func matching(_ value: Double?) -> Double? {
+            guard let value, value.isFinite else { return nil }
+            switch kind {
+            case .absolute:
+                guard isAbsoluteSkinTemp(value),
+                      let cfg = Baselines.metricCfg["skin_temp"],
+                      cfg.minVal <= value, value <= cfg.maxVal else { return nil }
+                return value
+            case .deviation:
+                return skinTempDeviation(from: value)
+            }
+        }
+
+        // The newest non-nil value selected the semantics. If that value itself is implausible,
+        // fail closed instead of silently falling back to an older observation.
+        guard matching(latest) != nil else { return nil }
+        let recentValues = recent.compactMap(matching)
+        guard !recentValues.isEmpty else { return nil }
+        let recentMean = recentValues.reduce(0, +) / Double(recentValues.count)
+
+        switch kind {
+        case .absolute:
+            guard let cfg = Baselines.metricCfg["skin_temp"] else { return nil }
+            let state = Baselines.foldHistory(baseline.map(matching), cfg: cfg)
+            guard state.usable else {
+                return SkinTempIllnessAssessment(
+                    reading: IllnessSignalEngine.SignalReading(zIllnessward: 0, present: false),
+                    baselineTrusted: false,
+                    deltaFromBaselineC: nil,
+                    kind: kind
+                )
+            }
+            let deviation = Baselines.deviation(recentMean, state: state)
+            return SkinTempIllnessAssessment(
+                reading: IllnessSignalEngine.SignalReading(zIllnessward: deviation.z),
+                baselineTrusted: state.trusted,
+                deltaFromBaselineC: deviation.delta,
+                kind: kind
+            )
+
+        case .deviation:
+            let state = Baselines.foldHistory(
+                baseline.map(matching),
+                cfg: skinTempDeviationCfg
+            )
+            return SkinTempIllnessAssessment(
+                reading: IllnessSignalEngine.SignalReading(
+                    zIllnessward: recentMean / skinTempDeviationCfg.floorSpread
+                ),
+                baselineTrusted: state.trusted,
+                deltaFromBaselineC: recentMean,
+                kind: kind
+            )
+        }
+    }
 
     // MARK: - Calendar padding
 

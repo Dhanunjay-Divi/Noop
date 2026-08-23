@@ -4,7 +4,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /*
- * ActivityCostEngine.kt — "what each activity costs your recovery".
+ * ActivityCostEngine.kt - "what each activity costs your recovery".
  *
  * Faithful Kotlin mirror of StrandAnalytics/ActivityCostEngine.swift. Keep the tunables,
  * the baseline/next-morning/delta math, the bounce-back trajectory, the confidence gate,

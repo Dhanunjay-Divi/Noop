@@ -22,4 +22,14 @@ class LiveStateHeartRateSequenceTest {
 
         assertEquals(accepted.heartRateSampleSequence, presentationOnlyCopy.heartRateSampleSequence)
     }
+
+    @Test
+    fun identicalPhysicalEventsStillAdvanceGestureSequence() {
+        val first = LiveState().withPhysicalEvent("DOUBLE_TAP(14)")
+        val second = first.withPhysicalEvent("DOUBLE_TAP(14)")
+
+        assertEquals("DOUBLE_TAP(14)", second.lastEvent)
+        assertEquals(1L, first.gestureSequence)
+        assertEquals(2L, second.gestureSequence)
+    }
 }

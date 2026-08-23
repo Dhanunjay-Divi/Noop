@@ -45,6 +45,8 @@ import com.noop.analytics.SleepDebt
 import com.noop.analytics.SleepGoalMode
 import com.noop.analytics.SleepPlan
 import com.noop.analytics.SleepPlanner
+import com.noop.automation.AlarmTapAutomationPrefs
+import com.noop.automation.AlarmTapResponse
 import com.noop.ble.PuffinExperiment
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
@@ -78,14 +80,15 @@ fun SmartAlarmScreen(vm: AppViewModel) {
     // #536: the hint adapts to bond state — the strap can only be armed when a WHOOP 4.0 is connected.
     val liveState = vm.live.collectAsStateWithLifecycle().value
     val bonded = liveState.bonded
-    // #821: the strap-buzz row was hardcoded to "WHOOP 4", which reads wrong on a connected 5/MG (issue
-    // #730 follow-up). Name the actual strap generation instead: a detected 5/MG says "WHOOP 5/MG", anything
-    // else (a 4.0, or nothing connected yet) keeps "WHOOP 4.0", so the label never claims the wrong device.
-    val strapName = if (liveState.whoop5Detected) "WHOOP 5/MG" else "WHOOP 4.0"
+    val strapName = "Noop Band"
 
     // True when exact alarms are permitted. Re-read on each (re)composition because the user can grant
     // it in Settings and come back — there's no result callback for this special-access permission.
     var canSchedule by remember { mutableStateOf(vm.canScheduleExactAlarms()) }
+    var alarmTapEnabled by remember { mutableStateOf(AlarmTapAutomationPrefs.enabled(context)) }
+    var alarmTapResponse by remember { mutableStateOf(AlarmTapAutomationPrefs.response(context)) }
+    var alarmTapWindow by remember { mutableStateOf(AlarmTapAutomationPrefs.windowMinutes(context)) }
+    var alarmTapSnooze by remember { mutableStateOf(AlarmTapAutomationPrefs.snoozeMinutes(context)) }
 
     // Load the same full sleep-block union and learned main-night timing as the Sleep tab so recorded
     // naps repay the planner's recent balance without changing the canonical nightly total.
@@ -157,7 +160,7 @@ fun SmartAlarmScreen(vm: AppViewModel) {
         AlarmSettingsCard {
             ToggleRowLocal(
                 label = uiString(R.string.l10n_smart_alarm_screen_wake_me_with_a_smart_alarm_bbbd082d),
-                help = "A guaranteed OS alarm is set for the end of your window; the strap stream can move it earlier if you're sleeping lightly.",
+                help = "A guaranteed OS alarm is set for the end of your window; Noop Band data can move it earlier if you're sleeping lightly.",
                 checked = enabled,
                 onChange = { want ->
                     if (want && !vm.canScheduleExactAlarms()) {
@@ -219,6 +222,60 @@ fun SmartAlarmScreen(vm: AppViewModel) {
                         onChange = { vm.setPhoneAlarmWindowMinutes(it) },
                     )
                 }
+
+                RowDividerLocal()
+                ToggleRowLocal(
+                    label = stringResource(R.string.smart_alarm_tap_response_label),
+                    help = stringResource(R.string.smart_alarm_tap_response_help),
+                    checked = alarmTapEnabled,
+                    onChange = {
+                        alarmTapEnabled = it
+                        AlarmTapAutomationPrefs.setEnabled(context, it)
+                    },
+                )
+                if (alarmTapEnabled) {
+                    AlarmTapResponsePicker(
+                        selected = alarmTapResponse,
+                        onSelect = {
+                            alarmTapResponse = it
+                            AlarmTapAutomationPrefs.setResponse(context, it)
+                        },
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            stringResource(R.string.smart_alarm_tap_window_label),
+                            style = NoopType.body,
+                            color = Palette.textPrimary,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        TapMinuteStepper(
+                            minutes = alarmTapWindow,
+                            onChange = {
+                                alarmTapWindow = it
+                                AlarmTapAutomationPrefs.setWindowMinutes(context, it)
+                            },
+                            accessibility = stringResource(R.string.smart_alarm_tap_window_accessibility),
+                        )
+                    }
+                    if (alarmTapResponse == AlarmTapResponse.SNOOZE) {
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                stringResource(R.string.smart_alarm_snooze_length_label),
+                                style = NoopType.body,
+                                color = Palette.textPrimary,
+                            )
+                            Spacer(Modifier.weight(1f))
+                            TapMinuteStepper(
+                                minutes = alarmTapSnooze,
+                                onChange = {
+                                    alarmTapSnooze = it
+                                    AlarmTapAutomationPrefs.setSnoozeMinutes(context, it)
+                                },
+                                accessibility = stringResource(R.string.smart_alarm_tap_snooze_accessibility),
+                            )
+                        }
+                    }
+                }
             }
 
             // #536: companion strap-buzz, always visible so it's discoverable. Arms the strap's own firmware
@@ -228,9 +285,9 @@ fun SmartAlarmScreen(vm: AppViewModel) {
             ToggleRowLocal(
                 label = uiString(R.string.l10n_smart_alarm_screen_buzz_strapname_813772f4, strapName),
                 help = if (bonded)
-                    "Also arms your $strapName to buzz at your earliest wake time, so the strap wakes you first and the phone alarm is the guaranteed backup."
+                    "Also arms $strapName to vibrate at your earliest wake time, so the band wakes you first and the phone alarm is the guaranteed backup."
                 else
-                    "Connect your strap to use this. It arms the strap to buzz at your earliest wake time as a gentler first wake-up.",
+                    "Connect Noop Band to use this. It arms the band to vibrate at your earliest wake time as a gentler first wake-up.",
                 checked = buzzWhoop4,
                 onChange = { vm.setBuzzWhoop4Enabled(it) },
             )
@@ -286,15 +343,15 @@ private fun StrapAlarmCard(vm: AppViewModel) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Alarm, contentDescription = null, tint = Palette.accent)
                     Spacer(Modifier.width(10.dp))
-                    Text(uiString(R.string.l10n_smart_alarm_screen_strap_wake_alarm_1828fff3), style = NoopType.title2, color = Palette.textPrimary)
+                    Text("Noop Band wake alarm", style = NoopType.title2, color = Palette.textPrimary)
                 }
             }
             // Truth-sync (#535): the WHOOP 4.0 alarm payload was captured from the official app and
             // confirmed buzzing on a real 4.0 by the capture author, so the copy no longer calls the
             // 4.0 path experimental. The 5/MG Experimental-gate branch below is deliberately untouched.
             ToggleRowLocal(
-                label = uiString(R.string.l10n_smart_alarm_screen_wake_me_with_a_strap_buzz_1681ba1d),
-                help = "Arms the strap to buzz at your wake time, even if NOOP is closed. Sends the exact alarm command the official app sends, confirmed buzzing on a real WHOOP 4.0 (community wire capture + on-device test, #535). Keep a backup alarm for anything you truly can't miss.",
+                label = "Wake me with a band vibration",
+                help = "Arms Noop Band to vibrate at your wake time, even if NOOP is closed. Keep a backup alarm for anything you truly cannot miss.",
                 checked = smartAlarm,
                 onChange = { vm.setSmartAlarmEnabled(it) },
             )
@@ -305,7 +362,7 @@ private fun StrapAlarmCard(vm: AppViewModel) {
                     Spacer(Modifier.weight(1f))
                     TimeChip(
                         minutes = alarmMinutes,
-                        accessibilityLabel = "Strap alarm wake time",
+                        accessibilityLabel = "Noop Band alarm wake time",
                         onPicked = { vm.setSmartAlarmMinutes(it) },
                     )
                 }
@@ -325,8 +382,8 @@ private fun StrapAlarmCard(vm: AppViewModel) {
                 RowDividerLocal()
                 if (live.whoop5Detected && !experimentalOn) {
                     Text(
-                        uiString(R.string.l10n_smart_alarm_screen_your_whoop_5_mg_won_t_75029bae) +
-                            "Experimental). Right now your wake time is saved but the strap is NOT armed.",
+                        "This Noop Band firmware needs Experimental mode before wrist wake can be armed. " +
+                            "Your time is saved, but the band is not armed yet. Keep a backup alarm.",
                         style = NoopType.footnote, color = Palette.statusWarning,
                     )
                 } else if (live.whoop5Detected) {
@@ -335,19 +392,17 @@ private fun StrapAlarmCard(vm: AppViewModel) {
                     // NOT show here (#864 honesty). Byte-identical wording to the Swift SmartAlarmView twin.
                     Text(
                         if (live.bonded)
-                            "Armed on the strap itself with the experimental 5/MG command. A strap-driven wake is still unconfirmed on 5/MG on our side (confirmed only on WHOOP 4.0), so keep a backup alarm for anything you truly can't miss."
+                            "Armed using the experimental band command. Wrist wake is still under validation for this firmware, so keep a backup alarm."
                         else
-                            "Connect your strap to arm this; it's set on the strap's own firmware alarm. Confirmed working on WHOOP 4.0; still experimental on 5.0 and MG. Keep a backup alarm for anything you truly can't miss.",
+                            "Connect Noop Band to arm wrist wake. Keep a backup alarm for anything you truly cannot miss.",
                         style = NoopType.footnote, color = Palette.textTertiary,
                     )
                 } else {
                     Text(
                         if (live.bonded)
-                            // Truth-sync (#535): confirmed buzzing on a real WHOOP 4.0; byte-identical
-                            // wording to the Swift SmartAlarmView.
-                            "Armed on the strap itself, so it can buzz at your wake time even if your phone is asleep or NOOP is closed. Sends the exact alarm command the official app sends, confirmed buzzing on a real WHOOP 4.0 (community wire capture + on-device test, #535). Keep a backup alarm for anything you truly can't miss."
+                            "Armed on Noop Band, so it can vibrate even if your phone is asleep or NOOP is closed. Keep a backup alarm for anything you truly cannot miss."
                         else
-                            "Connect your strap to arm this; it's set on the strap's own firmware alarm. Confirmed working on WHOOP 4.0; still experimental on 5.0 and MG. Keep a backup alarm for anything you truly can't miss.",
+                            "Connect Noop Band to arm wrist wake. Keep a backup alarm for anything you truly cannot miss.",
                         style = NoopType.footnote, color = Palette.textTertiary,
                     )
                 }
@@ -477,7 +532,7 @@ private fun planConfidenceLabel(confidence: ScoreConfidence): String = when (con
 }
 
 /**
- * The always-visible "you WILL be woken by" guarantee card — a small Rest-world frosted hero. The
+ * The always-visible "you WILL be woken by" guarantee card - a small Rest-world frosted hero. The
  * wake window reads as a clean earliest→deadline time pairing in big rounded numerals over a scenic
  * Rest backdrop (it's about waking, so it lives in the indigo world, not the brand-green chrome).
  */
@@ -701,6 +756,68 @@ private fun ExplanationCard() {
                 style = NoopType.footnote, color = Palette.textTertiary,
             )
         }
+    }
+}
+
+@Composable
+private fun AlarmTapResponsePicker(
+    selected: AlarmTapResponse,
+    onSelect: (AlarmTapResponse) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(Palette.surfaceInset)
+            .padding(3.dp),
+    ) {
+        AlarmTapResponse.entries.forEach { response ->
+            val active = response == selected
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(if (active) Palette.accent else Palette.surfaceInset)
+                    .clickable { onSelect(response) }
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    if (response == AlarmTapResponse.DISMISS) {
+                        stringResource(R.string.l10n_today_screen_dismiss_70afe9ef)
+                    } else {
+                        stringResource(R.string.smart_alarm_snooze_action)
+                    },
+                    style = NoopType.body,
+                    color = if (active) Palette.surfaceBase else Palette.textSecondary,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TapMinuteStepper(
+    minutes: Int,
+    onChange: (Int) -> Unit,
+    accessibility: String,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        StepperButton(
+            symbol = "−",
+            onClick = { onChange((minutes - 5).coerceAtLeast(5)) },
+            label = stringResource(R.string.smart_alarm_tap_shorten_action, accessibility),
+        )
+        Text(
+            stringResource(R.string.sleep_planner_duration_minutes, minutes),
+            style = NoopType.bodyNumber,
+            color = Palette.textPrimary,
+        )
+        StepperButton(
+            symbol = "+",
+            onClick = { onChange((minutes + 5).coerceAtMost(30)) },
+            label = stringResource(R.string.smart_alarm_tap_lengthen_action, accessibility),
+        )
     }
 }
 

@@ -166,7 +166,7 @@ public enum ReadinessEngine {
         let sorted = days.sorted { $0.day < $1.day }
         // When an explicit `today` is given (the dashboard passes the device's real local day key), use
         // the row for THAT day and nothing else: a stale historical import has no row for today, so the
-        // readiness card reads "insufficient" rather than synthesizing off the newest stored — possibly
+        // readiness card reads "insufficient" rather than synthesizing off the newest stored - possibly
         // months-old — row (issue #23/#24). With no `today` (live-strap default callers) fall back to the
         // most recent row exactly as before, so nothing wearing the strap nightly changes.
         let latestRow: DailyMetric?

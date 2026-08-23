@@ -10,7 +10,7 @@ import WhoopStore
 // that fills as you advance, Back always available, and a forward CTA per step.
 //
 // Steps:
-//  1 Welcome           — NOOP + "all your data, none of the cloud"
+//  1 Welcome           - NOOP + "all your data, none of the cloud"
 //  2 What it does      — 3 calm value slides
 //  3 Bluetooth priming — explain BEFORE the OS prompt
 //  4 Wear & wake       — put your strap on, make sure it's charged
@@ -18,7 +18,7 @@ import WhoopStore
 //  6 Bonding           — celebration when live.bonded (a RecoveryRing blooms in)
 //  7 Profile           — age / sex / weight / height bound to ProfileStore
 //  8 Import (optional)  — WHOOP / Apple Health import from the wizard
-//  9 Done              — "Your thread starts here." → onFinished()
+//  9 Done              - "Your thread starts here." → onFinished()
 //
 // Presentation is wired centrally; this view only calls onFinished() when complete.
 
@@ -54,6 +54,7 @@ public struct OnboardingWizard: View {
 
     @State private var step: Step = .welcome
     @State private var glow = false
+    @State private var profileEditing = false
     /// Notification permission is never bundled into a generic Continue tap. This explicit, default-off
     /// choice is explained on the Notifications step and only then passed to the scheduler.
     @State private var dailyReviewOptIn = DailyReviewNotifications.isEnabled
@@ -80,7 +81,7 @@ public struct OnboardingWizard: View {
                     case .wear:       WearStep()
                     case .scan:       ScanStep(advance: advance)
                     case .bonded:     BondedStep()
-                    case .profile:    ProfileStep()
+                    case .profile:    ProfileStep(isEditing: $profileEditing)
                     case .importData: ImportStep()
                     case .notifications: NotificationsStep(dailyReviewOptIn: $dailyReviewOptIn)
                     case .safetyContacts: SafetyContactsStep()
@@ -97,9 +98,7 @@ public struct OnboardingWizard: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(StrandPalette.surfaceBase.ignoresSafeArea())
-        // Keep the progress + primary action in the safe area instead of hard-padding it inside the
-        // screen. SwiftUI raises this inset above the keyboard, while the active StepShell remains
-        // scrollable behind it — no clipped fields or unreachable CTA on compact phones.
+        // Keep the progress + primary action in the physical bottom safe area.
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomBar
                 .padding(.horizontal, 20)
@@ -114,6 +113,9 @@ public struct OnboardingWizard: View {
                     )
                     .ignoresSafeArea()
                 )
+                .opacity(step == .profile && profileEditing ? 0 : 1)
+                .allowsHitTesting(!(step == .profile && profileEditing))
+                .accessibilityHidden(step == .profile && profileEditing)
         }
         // Reduce Motion: leave the ambient bloom at its resting frame (no breathing).
         .onAppear { if !reduceMotion { glow = true } }
@@ -314,7 +316,7 @@ private struct WelcomeStep: View {
                     .font(StrandFont.title2)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .opacity(appear ? 1 : 0)
-                Text("A private window into your recovery, sleep and strain. Read straight from your strap, kept only on \(Platform.deviceNounPhrase).")
+                Text("A private window into your recovery, sleep and strain. Read straight from Noop Band and kept only on \(Platform.deviceNounPhrase).")
                     .font(StrandFont.body)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .multilineTextAlignment(.center)
@@ -346,7 +348,7 @@ private struct WhatItDoesStep: View {
         .init(icon: "waveform.path.ecg",
               tint: StrandPalette.accent,
               title: String(localized: "Watch your heart, live"),
-              body: String(localized: "Connect a WHOOP, a heart-rate strap or a gym machine and watch each beat in real time: heart rate, variability and zones as they happen. Already have history elsewhere? Import it from WHOOP, Apple Health, Oura, Fitbit or Garmin.")),
+              body: String(localized: "Connect Noop Band, a heart-rate strap, or a gym machine and watch each beat in real time: heart rate, variability, and zones as they happen. Already have history elsewhere? Import it from WHOOP, Apple Health, Oura, Fitbit, or Garmin.")),
         .init(icon: "lock.shield",
               tint: StrandPalette.statusPositive,
               title: String(localized: "Private by default"),
@@ -512,10 +514,10 @@ private struct BluetoothStep: View {
                     icon: "lock.fill",
                     tint: StrandPalette.statusPositive,
                     title: String(localized: "Direct, local Bluetooth"),
-                    message: String(localized: "NOOP talks straight to your strap over Bluetooth Low Energy, with no project server in the middle. Readings stay on this device unless you later enable an optional destination such as your own self-hosted server.")
+                    message: String(localized: "NOOP talks straight to Noop Band over Bluetooth Low Energy, with no project server in the middle. Readings stay on this device unless you later enable an optional destination such as your own self-hosted server.")
                 )
 
-                Text("When the system prompt appears, choose Allow so NOOP can find your strap.")
+                Text("When the system prompt appears, choose Allow so NOOP can find Noop Band.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .multilineTextAlignment(.center)
@@ -530,7 +532,7 @@ private struct BluetoothStep: View {
 
 private struct WearStep: View {
     var body: some View {
-        StepShell(title: String(localized: "Put your strap on"),
+        StepShell(title: String(localized: "Put Noop Band on"),
                   subtitle: String(localized: "And make sure it's charged.")) {
             VStack(spacing: 22) {
                 ZStack {
@@ -565,13 +567,11 @@ private struct ScanStep: View {
     @State private var scanning = false
     @State private var showHelp = false
 
-    /// Which strap to look for — shared with the Live screen via the same key.
-    @AppStorage("selectedWhoopModel") private var selectedModelRaw = WhoopModel.whoop4.rawValue
-    private var selectedModel: WhoopModel { WhoopModel(rawValue: selectedModelRaw) ?? .whoop4 }
-
     var body: some View {
-        StepShell(title: String(localized: "Find your strap"),
-                  subtitle: live.bonded ? String(localized: "Bonded. You're set.") : String(localized: "Pick your strap below, then tap Scan. NOOP will find it.")) {
+        StepShell(title: String(localized: "Find Noop Band"),
+                  subtitle: live.bonded
+                      ? String(localized: "Bonded. You're set.")
+                      : String(localized: "Keep your Noop Band nearby, then tap Scan. Hardware detection is automatic.")) {
             VStack(spacing: 24) {
                 RadarSweep(active: scanning && !live.bonded, bonded: live.bonded)
                     .frame(width: 220, height: 220)
@@ -579,44 +579,32 @@ private struct ScanStep: View {
                 statusLine
 
                 if !live.bonded {
-                    VStack(spacing: 8) {
-                        Text("Which strap are you pairing?").font(StrandFont.caption)
-                            .foregroundStyle(StrandPalette.textSecondary)
-                        SegmentedPillControl(
-                            WhoopModel.allCases,
-                            selection: Binding(
-                                get: { selectedModel },
-                                set: { restartScan(for: $0) }
-                            ),
-                            label: { $0.displayName }
-                        )
-                    }
-
-                    // Proactive 5/MG guidance (#130): the strap bonds to one host at a time, so a scan
-                    // here finds nothing while it's still paired in the official WHOOP app.
-                    if selectedModel == .whoop5mg {
-                        Text("WHOOP 5.0/MG pairs with one app at a time. If nothing's found, unpair it in the official WHOOP app and fully close that app, then Scan.")
+                    VStack(spacing: 6) {
+                        Label("Noop Band", systemImage: "applewatch.side.right")
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text("NOOP detects compatible band hardware automatically.")
                             .font(StrandFont.footnote)
-                            .foregroundStyle(StrandPalette.textSecondary)
+                            .foregroundStyle(StrandPalette.textTertiary)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: 360)
                     }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Noop Band. Hardware detection is automatic.")
+                    .accessibilityIdentifier("noop.onboarding.band")
 
                     Button(action: { startScan() }) {
                         Label(scanning ? "Scanning…" : "Scan", systemImage: "dot.radiowaves.left.and.right")
                     }
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(scanning)
+                    .accessibilityIdentifier("noop.onboarding.scan")
 
                     DisclosureToggle(open: $showHelp, label: String(localized: "Don't see it?"))
 
                     if showHelp { reassurance }
 
-                    // WHOOP is NOOP's primary band, so onboarding leads with it — but it isn't required.
-                    // Make that obvious so a non-WHOOP user doesn't feel stuck here: they can continue now
-                    // and pair a heart-rate strap or import data afterwards (in Devices / Data Sources).
-                    Text("No WHOOP? You can still continue. Pair a heart-rate strap (Polar, Wahoo, Coospo, Garmin HRM…) or a gym machine under Devices, or import from WHOOP, Apple Health, Oura, Fitbit, Garmin and more under Data Sources. You can do either any time.")
+                    Text("No Noop Band? You can still continue. Add another heart-rate strap, watch, ring, or gym machine under Devices, or connect an import under Data Sources at any time.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
                         .multilineTextAlignment(.center)
@@ -642,11 +630,12 @@ private struct ScanStep: View {
         }
     }
 
-    private func startScan(model scanModel: WhoopModel? = nil) {
-        let modelToScan = scanModel ?? selectedModel
+    private func startScan() {
         scanning = true
         showHelp = false
-        model.scan(model: modelToScan)
+        // The transport starts with the last observed family and automatically rotates after a short
+        // miss, so setup does not ask users for protocol-generation knowledge.
+        model.scan()
         // Surface the reassurance card if we haven't bonded after a calm beat.
         DispatchQueue.main.asyncAfter(deadline: .now() + 12) {
             if !live.bonded {
@@ -654,13 +643,6 @@ private struct ScanStep: View {
                 withAnimation(StrandMotion.gentle) { showHelp = true }
             }
         }
-    }
-
-    private func restartScan(for newModel: WhoopModel) {
-        selectedModelRaw = newModel.rawValue
-        guard !live.bonded else { return }
-        model.disconnect()
-        startScan(model: newModel)
     }
 
     // The calm, never-alarmist "can't find it" card.
@@ -675,7 +657,7 @@ private struct ScanStep: View {
                         .foregroundStyle(StrandPalette.textPrimary)
                 }
 
-                Text("WHOOP straps don't appear in your \(Platform.deviceNoun)'s Bluetooth settings. They advertise on a custom profile that only apps like NOOP can find, so there's nothing to pair there, and you shouldn't try.")
+                Text("A Noop Band may not appear in your \(Platform.deviceNoun)'s Bluetooth settings. NOOP finds its private band signal directly, so start pairing here.")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -684,7 +666,7 @@ private struct ScanStep: View {
 
                 VStack(alignment: .leading, spacing: 10) {
                     Checkline(text: String(localized: "It's charged and worn. The sensor needs skin contact to wake."))
-                    Checkline(text: String(localized: "It isn't held by the WHOOP phone app. Only one host at a time: close the app or turn off its Bluetooth."))
+                    Checkline(text: String(localized: "It isn't held by another band app. Close that app first because the band supports one active host."))
                     Checkline(text: String(localized: "It's within about a metre of \(Platform.deviceNounPhrase)."))
                 }
 
@@ -750,9 +732,9 @@ private struct BondedStep: View {
 
     private var batteryLine: String {
         if let pct = live.batteryPct {
-            return String(localized: "Your strap is bonded · \(Int(pct))% battery.")
+            return String(localized: "Noop Band is paired · \(Int(pct))% battery.")
         }
-        return String(localized: "Your strap is bonded and ready to stream.")
+        return String(localized: "Noop Band is paired and ready to stream.")
     }
 }
 
@@ -760,6 +742,7 @@ private struct BondedStep: View {
 
 private struct ProfileStep: View {
     @EnvironmentObject private var profile: ProfileStore
+    @Binding var isEditing: Bool
 
     // Distance keeps the app-wide system preference, but weight and height can override it independently:
     // kg + ft/in and lb + cm are both common real-world combinations. Storage remains SI throughout.
@@ -772,6 +755,13 @@ private struct ProfileStep: View {
 
     private enum InputField: Hashable { case weight, heightCm, heightFeet, heightInches }
     @FocusState private var focusedField: InputField?
+    /// Text-backed drafts deliberately remain separate from the validated SI profile values. A formatter-
+    /// bound Double field clamps an empty intermediate edit straight back to the minimum (the reported
+    /// "30.0 cannot be replaced" loop). Drafts may be empty while typing and commit only when valid.
+    @State private var weightDraft = ""
+    @State private var heightCmDraft = ""
+    @State private var heightFeetDraft = ""
+    @State private var heightInchesDraft = ""
 
     private let sexes: [(String, String)] = [
         ("male", String(localized: "Male")), ("female", String(localized: "Female")),
@@ -831,7 +821,34 @@ private struct ProfileStep: View {
                 }
             }
         }
-        .keyboardDoneToolbar($focusedField)
+        .onAppear { syncMeasurementDrafts() }
+        .onChangeCompat(of: massUnitRaw) { _ in syncWeightDraft() }
+        .onChangeCompat(of: heightUnitRaw) { _ in syncHeightDrafts() }
+        .onChangeCompat(of: profile.weightKg) { _ in
+            if focusedField != .weight { syncWeightDraft() }
+        }
+        .onChangeCompat(of: profile.heightCm) { _ in
+            if focusedField != .heightCm && focusedField != .heightFeet
+                && focusedField != .heightInches {
+                syncHeightDrafts()
+            }
+        }
+        .onChangeCompat(of: focusedField) { field in
+            isEditing = field != nil
+            guard field == nil else { return }
+            normalizeMeasurementDrafts()
+        }
+        .onDisappear { isEditing = false }
+        #if os(iOS)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { finishEditing() }
+                    .font(StrandFont.body)
+                    .foregroundStyle(StrandPalette.accent)
+            }
+        }
+        #endif
     }
 
     private var massSelection: Binding<MassUnit> {
@@ -876,24 +893,165 @@ private struct ProfileStep: View {
         )
     }
 
-    private var displayedFeet: Binding<Int> {
+    private var stepperWeight: Binding<Double> {
         Binding(
-            get: { UnitFormatter.cmToFeetInches(profile.heightCm).feet },
-            set: { feet in
-                let inches = UnitFormatter.cmToFeetInches(profile.heightCm).inches
-                displayedHeightInches.wrappedValue = Double(feet * 12 + inches)
+            get: { displayedWeight.wrappedValue },
+            set: {
+                displayedWeight.wrappedValue = $0
+                syncWeightDraft()
             }
         )
     }
 
-    private var displayedRemainingInches: Binding<Int> {
+    private var stepperHeightCm: Binding<Double> {
         Binding(
-            get: { UnitFormatter.cmToFeetInches(profile.heightCm).inches },
-            set: { inches in
-                let feet = UnitFormatter.cmToFeetInches(profile.heightCm).feet
-                displayedHeightInches.wrappedValue = Double(feet * 12 + min(11, max(0, inches)))
+            get: { displayedHeightCm.wrappedValue },
+            set: {
+                displayedHeightCm.wrappedValue = $0
+                syncHeightDrafts()
             }
         )
+    }
+
+    private var stepperHeightInches: Binding<Double> {
+        Binding(
+            get: { displayedHeightInches.wrappedValue },
+            set: {
+                displayedHeightInches.wrappedValue = $0
+                syncHeightDrafts()
+            }
+        )
+    }
+
+    private var weightDraftBinding: Binding<String> {
+        Binding(
+            get: { weightDraft },
+            set: { draft in
+                weightDraft = draft
+                guard let entered = decimalValue(draft),
+                      (massUnit == .pounds ? 66.0...551.0 : 30.0...250.0).contains(entered) else { return }
+                displayedWeight.wrappedValue = entered
+            }
+        )
+    }
+
+    private var heightCmDraftBinding: Binding<String> {
+        Binding(
+            get: { heightCmDraft },
+            set: { draft in
+                heightCmDraft = draft
+                guard let entered = decimalValue(draft), (120.0...230.0).contains(entered) else { return }
+                displayedHeightCm.wrappedValue = entered
+            }
+        )
+    }
+
+    private var heightFeetDraftBinding: Binding<String> {
+        Binding(
+            get: { heightFeetDraft },
+            set: { draft in
+                heightFeetDraft = draft
+                updateHeightFromFeetDrafts()
+            }
+        )
+    }
+
+    private var heightInchesDraftBinding: Binding<String> {
+        Binding(
+            get: { heightInchesDraft },
+            set: { draft in
+                heightInchesDraft = draft
+                updateHeightFromFeetDrafts()
+            }
+        )
+    }
+
+    private func decimalValue(_ text: String) -> Double? {
+        let normalized = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: Locale.current.decimalSeparator ?? ".", with: ".")
+            .replacingOccurrences(of: ",", with: ".")
+        guard !normalized.isEmpty else { return nil }
+        return Double(normalized)
+    }
+
+    private func syncMeasurementDrafts() {
+        syncWeightDraft()
+        syncHeightDrafts()
+    }
+
+    private func syncWeightDraft() {
+        let shown = displayedWeight.wrappedValue
+        weightDraft = massUnit == .kilograms
+            ? String(format: "%.1f", shown)
+            : String(format: "%.0f", shown)
+    }
+
+    private func syncHeightDrafts() {
+        heightCmDraft = String(format: "%.0f", profile.heightCm)
+        let parts = UnitFormatter.cmToFeetInches(profile.heightCm)
+        heightFeetDraft = String(parts.feet)
+        heightInchesDraft = String(parts.inches)
+    }
+
+    private func normalizeWeightDraft() {
+        guard !weightDraft.isEmpty else {
+            syncWeightDraft()
+            return
+        }
+        guard let entered = decimalValue(weightDraft),
+              (massUnit == .pounds ? 66.0...551.0 : 30.0...250.0).contains(entered) else {
+            syncWeightDraft()
+            return
+        }
+        displayedWeight.wrappedValue = entered
+        syncWeightDraft()
+    }
+
+    private func normalizeHeightCmDraft() {
+        guard !heightCmDraft.isEmpty else {
+            syncHeightDrafts()
+            return
+        }
+        guard let entered = decimalValue(heightCmDraft), (120.0...230.0).contains(entered) else {
+            syncHeightDrafts()
+            return
+        }
+        displayedHeightCm.wrappedValue = entered
+        syncHeightDrafts()
+    }
+
+    private func updateHeightFromFeetDrafts() {
+        guard let feet = Int(heightFeetDraft), let inches = Int(heightInchesDraft),
+              (0...11).contains(inches) else { return }
+        let total = feet * 12 + inches
+        guard (47...91).contains(total) else { return }
+        displayedHeightInches.wrappedValue = Double(total)
+    }
+
+    private func normalizeFeetInchesDrafts() {
+        updateHeightFromFeetDrafts()
+        syncHeightDrafts()
+    }
+
+    private func normalizeMeasurementDrafts() {
+        normalizeWeightDraft()
+        if heightUnit == .centimeters {
+            normalizeHeightCmDraft()
+        } else {
+            normalizeFeetInchesDrafts()
+        }
+    }
+
+    private func finishEditing() {
+        normalizeMeasurementDrafts()
+        focusedField = nil
+        isEditing = false
+    }
+
+    private func focus(_ field: InputField) {
+        isEditing = true
+        focusedField = field
     }
 
     private var weightEditor: some View {
@@ -910,24 +1068,36 @@ private struct ProfileStep: View {
             }
             HStack(spacing: 10) {
                 Spacer(minLength: 0)
-                TextField("Weight", value: displayedWeight,
-                          format: .number.precision(.fractionLength(massUnit == .kilograms ? 1 : 0)))
-                    .font(StrandFont.bodyNumber)
-                    .multilineTextAlignment(.trailing)
-                    .numericKeyboard()
-                    .focused($focusedField, equals: .weight)
-                    .frame(width: 74)
-                    .padding(.horizontal, 10)
-                    .frame(height: 40)
-                    .background(StrandPalette.surfaceOverlay, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .strokeBorder(StrandPalette.hairline, lineWidth: 1))
-                    .accessibilityLabel("Weight value")
+                HStack(spacing: 4) {
+                    TextField("Weight", text: weightDraftBinding)
+                        .font(StrandFont.bodyNumber)
+                        .multilineTextAlignment(.trailing)
+                        .numericKeyboard()
+                        .focused($focusedField, equals: .weight)
+                        .simultaneousGesture(TapGesture().onEnded { focus(.weight) })
+                        .accessibilityLabel("Weight value")
+                        .accessibilityIdentifier("noop.profile.weight")
+                    if !weightDraft.isEmpty {
+                        Button {
+                            weightDraft = ""
+                            focus(.weight)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 15))
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear weight")
+                        .accessibilityIdentifier("noop.profile.weight.clear")
+                    }
+                }
+                .frame(width: 92)
+                .measurementEntryChrome()
                 Text(massUnit.rawValue)
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .frame(minWidth: 22, alignment: .leading)
-                Stepper("Adjust weight", value: displayedWeight,
+                Stepper("Adjust weight", value: stepperWeight,
                         in: massUnit == .pounds ? 66...551 : 30...250,
                         step: massUnit == .pounds ? 1 : 0.5)
                     .labelsHidden()
@@ -950,31 +1120,48 @@ private struct ProfileStep: View {
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
                 if heightUnit == .centimeters {
-                    TextField("Height", value: displayedHeightCm,
-                              format: .number.precision(.fractionLength(0)))
-                        .font(StrandFont.bodyNumber)
-                        .multilineTextAlignment(.trailing)
-                        .numericKeyboard()
-                        .focused($focusedField, equals: .heightCm)
-                        .frame(width: 68)
-                        .measurementEntryChrome()
+                    HStack(spacing: 4) {
+                        TextField("Height", text: heightCmDraftBinding)
+                            .font(StrandFont.bodyNumber)
+                            .multilineTextAlignment(.trailing)
+                            .numericKeyboard()
+                            .focused($focusedField, equals: .heightCm)
+                            .simultaneousGesture(TapGesture().onEnded { focus(.heightCm) })
+                            .accessibilityLabel("Height value")
+                            .accessibilityIdentifier("noop.profile.height.cm")
+                        if !heightCmDraft.isEmpty {
+                            Button {
+                                heightCmDraft = ""
+                                focus(.heightCm)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(StrandPalette.textTertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Clear height")
+                            .accessibilityIdentifier("noop.profile.height.clear")
+                        }
+                    }
+                    .frame(width: 76)
+                    .measurementEntryChrome()
                     Text("cm")
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textSecondary)
-                    Stepper("Adjust height", value: displayedHeightCm, in: 120...230, step: 1)
+                    Stepper("Adjust height", value: stepperHeightCm, in: 120...230, step: 1)
                         .labelsHidden()
                 } else {
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 8) {
                             feetInchesFields
-                            Stepper("Adjust height", value: displayedHeightInches, in: 47...91, step: 1)
+                            Stepper("Adjust height", value: stepperHeightInches, in: 47...91, step: 1)
                                 .labelsHidden()
                         }
                         .fixedSize(horizontal: true, vertical: false)
 
                         VStack(alignment: .trailing, spacing: 8) {
                             feetInchesFields
-                            Stepper("Adjust height", value: displayedHeightInches, in: 47...91, step: 1)
+                            Stepper("Adjust height", value: stepperHeightInches, in: 47...91, step: 1)
                                 .labelsHidden()
                         }
                     }
@@ -985,21 +1172,27 @@ private struct ProfileStep: View {
 
     private var feetInchesFields: some View {
         HStack(spacing: 8) {
-            TextField("Feet", value: displayedFeet, format: .number)
+            TextField("Feet", text: heightFeetDraftBinding)
                 .font(StrandFont.bodyNumber)
                 .multilineTextAlignment(.trailing)
                 .numericKeyboard()
                 .focused($focusedField, equals: .heightFeet)
+                .simultaneousGesture(TapGesture().onEnded { focus(.heightFeet) })
+                .accessibilityLabel("Height feet")
+                .accessibilityIdentifier("noop.profile.height.feet")
                 .frame(width: 46)
                 .measurementEntryChrome()
             Text("ft")
                 .font(StrandFont.caption)
                 .foregroundStyle(StrandPalette.textSecondary)
-            TextField("Inches", value: displayedRemainingInches, format: .number)
+            TextField("Inches", text: heightInchesDraftBinding)
                 .font(StrandFont.bodyNumber)
                 .multilineTextAlignment(.trailing)
                 .numericKeyboard()
                 .focused($focusedField, equals: .heightInches)
+                .simultaneousGesture(TapGesture().onEnded { focus(.heightInches) })
+                .accessibilityLabel("Height inches")
+                .accessibilityIdentifier("noop.profile.height.inches")
                 .frame(width: 46)
                 .measurementEntryChrome()
             Text("in")
@@ -1247,12 +1440,12 @@ private struct NotificationsStep: View {
                     icon: "applewatch.radiowaves.left.and.right",
                     tint: StrandPalette.statusPositive,
                     title: String(localized: "A buzz, not a banner"),
-                    message: String(localized: "NOOP taps your strap so an alert lands on your wrist instead of your screen. No need to reach for it. Everything stays on \(Platform.deviceNounPhrase).")
+                    message: String(localized: "NOOP taps Noop Band so an alert lands on your wrist instead of your screen. No need to reach for it. Everything stays on \(Platform.deviceNounPhrase).")
                 )
 
                 VStack(spacing: 12) {
                     Checkline(text: String(localized: "Strain nudges and your smart alarm tap your wrist the moment they fire."))
-                    Checkline(text: String(localized: "Collection and analysis stay on your strap and \(Platform.deviceNounPhrase). Network features are off until you explicitly configure one."))
+                    Checkline(text: String(localized: "Collection and analysis stay on Noop Band and \(Platform.deviceNounPhrase). Network features are off until you explicitly configure one."))
                 }
                 .frame(maxWidth: 460)
                 #else
@@ -1260,7 +1453,7 @@ private struct NotificationsStep: View {
                     icon: "applewatch.radiowaves.left.and.right",
                     tint: StrandPalette.statusPositive,
                     title: String(localized: "A buzz, not a banner"),
-                    message: String(localized: "When the \(Platform.deviceNoun) apps you choose send a notification, NOOP taps your strap: Slack, Calendar, Messages, whatever matters. Everything stays on \(Platform.deviceNounPhrase).")
+                    message: String(localized: "When the \(Platform.deviceNoun) apps you choose send a notification, NOOP taps Noop Band: Slack, Calendar, Messages, or whatever matters. Everything stays on \(Platform.deviceNounPhrase).")
                 )
 
                 VStack(spacing: 12) {
@@ -1385,7 +1578,7 @@ private struct DoneStep: View {
 /// System / Light / Graphite / OLED Black setting that lives in Settings → Appearance. The wizard
 /// itself is the live preview.
 private struct AppearanceStep: View {
-    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.system.rawValue
+    @AppStorage(AppearanceMode.storageKey) private var appearanceRaw = AppearanceMode.defaultMode.rawValue
     var body: some View {
         StepShell(title: String(localized: "Make it yours"),
                   subtitle: String(localized: "Choose how NOOP looks. The whole app updates as you tap. You can change this any time in Settings → Appearance.")) {

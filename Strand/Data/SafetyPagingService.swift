@@ -2,6 +2,7 @@ import Combine
 import Foundation
 import NoopRemoteSync
 import Security
+import StrandAnalytics
 import UserNotifications
 
 @MainActor
@@ -227,6 +228,10 @@ final class SafetyPagingService: ObservableObject {
                 SafetyPagingPreferences.pendingPageKey = nil
                 lastDispatch = dispatch
                 merge(dispatch)
+                SafetySOSRuntime.shared.startLocationSharing(
+                    for: dispatch,
+                    service: self
+                )
                 statusMessage = (
                     "Safety page opened. SMS is sending now; voice follows "
                     + "if nobody acknowledges."
@@ -260,6 +265,11 @@ final class SafetyPagingService: ObservableObject {
                 )
                 lastDispatch = refreshed
                 merge(refreshed)
+                if ![.open, .acknowledged, .pending].contains(refreshed.status) {
+                    SafetySOSRuntime.shared.stopLocationSharing(
+                        dispatchId: refreshed.dispatchId
+                    )
+                }
             } else {
                 let response = try await client.safetyIncidents(
                     limit: 10,
@@ -279,6 +289,28 @@ final class SafetyPagingService: ObservableObject {
 
     func cancel(_ incident: RemoteSafetyDispatch) async {
         await transition(incident, action: .cancel)
+    }
+
+    func updateLocation(
+        for dispatchId: UUID,
+        sequence: Int64,
+        location: SafetyLocation
+    ) async throws -> RemoteSafetyLocationResponse {
+        guard location.isValid else {
+            throw SafetyPagingError.invalidLocation
+        }
+        let context = try Self.requiredContext()
+        return try await Self.client(for: context).updateSafetyIncidentLocation(
+            dispatchId,
+            update: RemoteSafetyLocationUpdate(
+                sequence: sequence,
+                latitude: location.latitude,
+                longitude: location.longitude,
+                horizontalAccuracyMeters: location.horizontalAccuracyMeters,
+                capturedAt: Self.iso8601Timestamp(location.capturedAtUnix)
+            ),
+            authorization: .safety(token: context.token)
+        )
     }
 
     private enum IncidentAction {
@@ -311,6 +343,9 @@ final class SafetyPagingService: ObservableObject {
                 }
                 lastDispatch = updated
                 merge(updated)
+                SafetySOSRuntime.shared.stopLocationSharing(
+                    dispatchId: incident.dispatchId
+                )
             } catch {
                 present(error)
             }
@@ -458,6 +493,14 @@ final class SafetyPagingService: ObservableObject {
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
         return "noop_safety_\(suffix)"
+    }
+
+    private static func iso8601Timestamp(_ unix: Int) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(
+            from: Date(timeIntervalSince1970: TimeInterval(unix))
+        )
     }
 
     static func normalizedE164(_ raw: String) -> String? {
@@ -648,6 +691,7 @@ private enum SafetyPagingError: LocalizedError {
     case keychainWrite
     case randomCredential
     case notEnrolled
+    case invalidLocation
 
     var errorDescription: String? {
         switch self {
@@ -657,6 +701,8 @@ private enum SafetyPagingError: LocalizedError {
             return "NOOP could not generate a private safety credential."
         case .notEnrolled:
             return "Finish Safety setup before managing emergency contacts."
+        case .invalidLocation:
+            return "The location fix is invalid."
         }
     }
 }

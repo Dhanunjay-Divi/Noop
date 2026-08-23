@@ -89,4 +89,65 @@ final class CycleTrackingStoreTests: XCTestCase {
         XCTAssertFalse(outOfRange)
         XCTAssertEqual(starts, ["2026-06-01"])
     }
+
+    func testDailyLogRoundTripsExplicitNoFlowAndSymptoms() async throws {
+        let (repo, _) = try await makeRepository()
+        let saved = await repo.saveCycleDailyLog(
+            day: "2026-08-23",
+            flow: .none,
+            symptoms: [.cramps, .fatigue, .backPain]
+        )
+        XCTAssertTrue(saved)
+        let logs = await repo.cycleDailyLogs()
+        XCTAssertEqual(
+            logs,
+            [
+                .init(
+                    day: "2026-08-23",
+                    flow: .none,
+                    symptoms: [.cramps, .fatigue, .backPain]
+                ),
+            ]
+        )
+    }
+
+    func testEmptyDailyLogPhysicallyDeletesOnlyThatDetailRow() async throws {
+        let (repo, store) = try await makeRepository()
+        let loggedStart = await repo.logPeriodStart(day: "2026-08-23")
+        let savedDetails = await repo.saveCycleDailyLog(
+            day: "2026-08-23",
+            flow: .medium,
+            symptoms: [.bloating]
+        )
+        let clearedDetails = await repo.saveCycleDailyLog(
+            day: "2026-08-23",
+            flow: nil,
+            symptoms: []
+        )
+        let remainingDetails = await repo.cycleDailyLogs()
+
+        XCTAssertTrue(loggedStart)
+        XCTAssertTrue(savedDetails)
+        XCTAssertTrue(clearedDetails)
+        XCTAssertTrue(remainingDetails.isEmpty)
+        let starts = try await store.metricSeries(
+            deviceId: CycleTrackingStore.sourceId,
+            key: CycleTrackingStore.periodStartKey,
+            from: CycleTrackingStore.earliestDay,
+            to: CycleTrackingStore.latestDay
+        )
+        XCTAssertEqual(starts.map(\.day), ["2026-08-23"])
+    }
+
+    func testDailyLogDecoderRejectsMalformedFutureBits() {
+        XCTAssertNil(CycleTrackingStore.decode(day: "not-a-day", value: 1))
+        XCTAssertNil(CycleTrackingStore.decode(day: "2026-08-23", value: .nan))
+        XCTAssertNil(CycleTrackingStore.decode(day: "2026-08-23", value: 1.5))
+        XCTAssertNil(
+            CycleTrackingStore.decode(
+                day: "2026-08-23",
+                value: Double((1 << 30) | 1)
+            )
+        )
+    }
 }

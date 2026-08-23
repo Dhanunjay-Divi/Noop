@@ -325,7 +325,7 @@ struct ManualWorkoutSheet: View {
     /// The validated row, or nil when the inputs can't make an honest one (drives the disabled Save +
     /// the inline note). Built through the same WorkoutSource.buildManualRow the engine trusts.
     private var builtRow: WorkoutRow? {
-        // A typed-but-unparseable number is invalid (e.g. "abc" in Avg HR) — guard before building.
+        // A typed-but-unparseable number is invalid (e.g. "abc" in Avg HR) - guard before building.
         if !avgHrText.trimmingCharacters(in: .whitespaces).isEmpty && avgHr == nil { return nil }
         if !kcalText.trimmingCharacters(in: .whitespaces).isEmpty && kcal == nil { return nil }
         guard let base = WorkoutSource.buildManualRow(start: start, durationMin: durationMin,

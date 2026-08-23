@@ -103,12 +103,12 @@ class FtmsSource(
         log("FTMS: scanning for gym equipment (0x1826)…")
         val sc = scanner ?: run {
             _scanning.value = false
-            log("FTMS: no BLE scanner available — Bluetooth may be off or unsupported")
+            log("FTMS: no BLE scanner available - Bluetooth may be off or unsupported")
             return
         }
         if (adapter?.isEnabled != true) {
             _scanning.value = false
-            log("FTMS: Bluetooth adapter is off — cannot scan")
+            log("FTMS: Bluetooth adapter is off - cannot scan")
             return
         }
         val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(FITNESS_MACHINE_SERVICE)).build()
@@ -189,7 +189,7 @@ class FtmsSource(
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     retried133 = false
-                    log("FTMS: connected (status=$status) — discovering services")
+                    log("FTMS: connected (status=$status) - discovering services")
                     g.discoverServices()
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
@@ -202,10 +202,10 @@ class FtmsSource(
                         val device = lastDevice
                         if (!retried133 && device != null) {
                             retried133 = true
-                            log("FTMS: connect error 133 — retrying once in 1s")
+                            log("FTMS: connect error 133 - retrying once in 1s")
                             handler.postDelayed({ connectToDevice(device) }, 1000)
                         } else {
-                            log("FTMS: still failing (133) — try forgetting the machine in Android " +
+                            log("FTMS: still failing (133) - try forgetting the machine in Android " +
                                 "Settings → Bluetooth, then re-pair.")
                         }
                     }
@@ -215,25 +215,25 @@ class FtmsSource(
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) = guarded("services-discovered") {
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                log("FTMS: WARNING service discovery failed (status=$status) — giving up on this machine")
+                log("FTMS: WARNING service discovery failed (status=$status) - giving up on this machine")
                 return@guarded
             }
             val svc = g.getService(FITNESS_MACHINE_SERVICE)
             if (svc == null) {
-                log("FTMS: 0x1826 service NOT FOUND — this device isn't a fitness machine")
+                log("FTMS: 0x1826 service NOT FOUND - this device isn't a fitness machine")
                 return@guarded
             }
-            log("FTMS: 0x1826 fitness machine service FOUND — enabling machine-data notifications")
+            log("FTMS: 0x1826 fitness machine service FOUND - enabling machine-data notifications")
             // Subscribe to whichever machine-data characteristic this machine exposes.
             for ((uuid, kind) in MACHINE_CHARS) {
                 val ch = svc.getCharacteristic(uuid) ?: continue
-                log("FTMS: ${kind.displayName} data characteristic found — enabling notifications")
+                log("FTMS: ${kind.displayName} data characteristic found - enabling notifications")
                 enableNotify(g, ch)
             }
             // Battery (0x2A19): read once if present.
             val batt = g.getService(BATTERY_SERVICE)?.getCharacteristic(BATTERY_CHAR)
             if (batt != null) {
-                log("FTMS: 0x180F battery service found — reading level")
+                log("FTMS: 0x180F battery service found - reading level")
                 runCatching { g.readCharacteristic(batt) }
             }
         }
@@ -270,7 +270,7 @@ class FtmsSource(
     private fun enableNotify(g: BluetoothGatt, ch: BluetoothGattCharacteristic) {
         g.setCharacteristicNotification(ch, true)
         val cccd = ch.getDescriptor(CCCD) ?: run {
-            log("FTMS: WARNING ${ch.uuid} has no CCCD (0x2902) — cannot enable notifications")
+            log("FTMS: WARNING ${ch.uuid} has no CCCD (0x2902) - cannot enable notifications")
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -305,7 +305,7 @@ class FtmsSource(
         val reading = FitnessMachine.decode(kind.uuid16, data) ?: return@guarded
         if (!loggedFirstReading) {
             loggedFirstReading = true
-            log("FTMS: receiving ${reading.kind.displayName} data — first reading" +
+            log("FTMS: receiving ${reading.kind.displayName} data - first reading" +
                 (reading.heartRate?.let { " HR $it bpm" } ?: ""))
         }
         handler.post {

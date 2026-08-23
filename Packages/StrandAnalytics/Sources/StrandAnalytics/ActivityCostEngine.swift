@@ -1,6 +1,6 @@
 import Foundation
 
-// ActivityCostEngine.swift — "what each activity costs your recovery".
+// ActivityCostEngine.swift - "what each activity costs your recovery".
 //
 // Pure, deterministic, DB-free. Given which days you tagged each SPORT on and your
 // daily Charge (recovery, 0–100) history, this answers, per sport: how far does your
@@ -16,7 +16,7 @@ import Foundation
 //
 //   restDays      = days with a Charge value that are neither tagged with ANY sport NOR inside a
 //                   session's forward recovery window (D+1…D+maxLookahead) — your UNTOUCHED days.
-//   baselineMean  = mean Charge over restDays. This is your "untouched" recovery — the
+//   baselineMean  = mean Charge over restDays. This is your "untouched" recovery - the
 //                   bar each sport is measured against. (Shared across all sports.)
 //
 //   For each tagged day D of sport S that HAS a Charge value on D+1:

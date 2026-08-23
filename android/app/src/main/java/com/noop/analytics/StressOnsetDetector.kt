@@ -1,7 +1,7 @@
 package com.noop.analytics
 
 /*
- * StressOnsetDetector.kt — the L3 closed-loop JITAI ("just-in-time adaptive intervention") detector.
+ * StressOnsetDetector.kt - the L3 closed-loop JITAI ("just-in-time adaptive intervention") detector.
  * Generalises the math currently inline in AppModel.evaluateStress() into an EDGE-triggered, motion-gated,
  * REPLAY-SAFE detector that decides — at the moment it matters — whether to offer a 60-s guided breathing
  * cue. PURE + DB-free, carrying its OWN de-dup state exactly like [SedentaryDetector.evaluate]: the caller
@@ -24,7 +24,7 @@ package com.noop.analytics
  *
  * HONEST / NON-CLINICAL: "stress" is an autonomic PROXY (HRV-down vs the user's OWN baseline), never a
  * diagnosis. The card says "short-window HRV moved below its recent baseline" and only mentions stillness
- * after contemporaneous motion evidence was actually observed — never "you are stressed".
+ * after contemporaneous motion evidence was actually observed - never "you are stressed".
  * On fire: a single confirming buzz + a passive in-app card; NEVER a push notification unless the user
  * opted into notifications (matches DaytimeStress's "passive suggestion, never a notification" stance).
  *

@@ -53,7 +53,7 @@ final class OuraConnectModel: ObservableObject {
                 await repo.refresh()
                 var line = "Imported \(s.days) days · \(s.sleeps) sleeps · \(s.workouts) workouts · \(s.hrSamples) HR samples"
                 if !s.skippedEndpoints.isEmpty {
-                    line += " · skipped: \(s.skippedEndpoints.joined(separator: ", ")) — tap Sync again to retry"
+                    line += " · skipped: \(s.skippedEndpoints.joined(separator: ", ")) - tap Sync again to retry"
                 }
                 statusText = line
             } catch { fail((error as? LocalizedError)?.errorDescription ?? error.localizedDescription) }

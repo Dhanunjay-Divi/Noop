@@ -11,6 +11,8 @@ import AppKit
 /// Personal-safety tools: explicitly page accepted contacts, prepare a message with an optional
 /// one-shot location, and arm a local check-in reminder. Wellness signals never silently page anyone.
 struct SafetyCenterView: View {
+    @Environment(\.openURL) private var openURL
+
     private enum IncidentAction: Equatable {
         case resolve
         case cancel
@@ -36,6 +38,8 @@ struct SafetyCenterView: View {
     @StateObject private var locationProvider = SafetyLocationProvider()
     @StateObject private var pagingService = SafetyPagingService()
     @AppStorage("safety.checkInDueAtUnix") private var checkInDueAtUnix = 0.0
+    @AppStorage(SafetySOSGesturePreferences.enabledKey) private var sosGestureEnabled = false
+    @AppStorage(SafetySOSGesturePreferences.requiredEventsKey) private var sosGestureEvents = 4
 
     @State private var shareIntent: SafetyShareIntent = .feelUnsafe
     @State private var displayName = ""
@@ -56,6 +60,7 @@ struct SafetyCenterView: View {
             subtitle: "safety.subtitle"
         ) {
             emergencyBoundary
+            fallResponseReadiness
             emergencyContactsSection
             contactPageSection
             shareSection
@@ -159,6 +164,45 @@ struct SafetyCenterView: View {
         }
     }
 
+    private var fallResponseReadiness: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+            SectionHeader("safety.fall.section", overline: "safety.fall.overline")
+            NoopCard(tint: StrandPalette.statusWarning) {
+                VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                    HStack(alignment: .top, spacing: NoopMetrics.space3) {
+                        Image(systemName: "figure.fall")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(StrandPalette.statusWarning)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                            HStack(alignment: .firstTextBaseline, spacing: NoopMetrics.space2) {
+                                Text("safety.fall.title")
+                                    .font(StrandFont.headline)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                Spacer(minLength: 8)
+                                StatePill("safety.fall.status", tone: .warning)
+                            }
+                            Text(
+                                String(
+                                    format: String(localized: "safety.fall.body_format"),
+                                    Int64(FallResponsePolicy.responseWindowSeconds)
+                                )
+                            )
+                            .font(StrandFont.body)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    Text("safety.fall.requirements")
+                        .font(StrandFont.caption)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
     private var contactPageSection: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.space3) {
             SectionHeader("safety.page.section", overline: "SOS")
@@ -201,6 +245,9 @@ struct SafetyCenterView: View {
                         incidentStatus(incident)
                     }
 
+                    Divider().overlay(StrandPalette.hairline)
+                    sosGestureControls
+
                     Text("safety.page.disclaimer")
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
@@ -209,6 +256,120 @@ struct SafetyCenterView: View {
             }
         }
     }
+
+    private var sosGestureControls: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+            Toggle(isOn: $sosGestureEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("safety.sos.gesture.title")
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text("safety.sos.gesture.subtitle")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                }
+            }
+            .tint(StrandPalette.statusCritical)
+
+            if sosGestureEnabled {
+                Picker("safety.sos.gesture.repeats", selection: sosGestureEventsBinding) {
+                    Text("safety.sos.gesture.three").tag(3)
+                    Text("safety.sos.gesture.four").tag(4)
+                }
+                .pickerStyle(.segmented)
+
+                Text(
+                    String(
+                        format: String(localized: "safety.sos.gesture.help_format"),
+                        Int64(sosGestureEvents)
+                    )
+                )
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                Label(
+                    "safety.sos.gesture.priority",
+                    systemImage: "hand.tap.fill"
+                )
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                #if os(iOS)
+                liveLocationPermissionControl
+                #endif
+            }
+        }
+        .onChangeCompat(of: sosGestureEnabled) { enabled in
+            SafetySOSGesturePreferences.setEnabled(enabled)
+        }
+    }
+
+    private var sosGestureEventsBinding: Binding<Int> {
+        Binding(
+            get: { min(max(sosGestureEvents, 3), 4) },
+            set: {
+                sosGestureEvents = min(max($0, 3), 4)
+                SafetySOSGesturePreferences.setRequiredEvents($0)
+            }
+        )
+    }
+
+    #if os(iOS)
+    @ViewBuilder private var liveLocationPermissionControl: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+            HStack(spacing: NoopMetrics.space2) {
+                Image(systemName: "location.fill")
+                    .foregroundStyle(
+                        locationProvider.hasBackgroundAuthorization
+                            ? StrandPalette.statusPositive
+                            : StrandPalette.statusWarning
+                    )
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("safety.sos.location.title")
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text(
+                        locationProvider.hasBackgroundAuthorization
+                            ? String(localized: "safety.sos.location.ready")
+                            : String(localized: "safety.sos.location.permission")
+                    )
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                }
+            }
+
+            if !locationProvider.hasBackgroundAuthorization {
+                if [.denied, .restricted].contains(locationProvider.authorizationStatus) {
+                    NoopButton(
+                        "safety.sos.location.settings",
+                        systemImage: "gearshape",
+                        kind: .secondary,
+                        fullWidth: true,
+                        action: openAppSettings
+                    )
+                } else {
+                    NoopButton(
+                        "safety.sos.location.enable",
+                        systemImage: "location.fill",
+                        kind: .secondary,
+                        fullWidth: true,
+                        action: locationProvider.requestBackgroundAuthorization
+                    )
+                }
+            }
+
+            Text(
+                "safety.sos.location.retention"
+            )
+            .font(StrandFont.caption)
+            .foregroundStyle(StrandPalette.textTertiary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+    #endif
 
     private var pageDisabledReason: String {
         if pagingService.setupState != .ready {
@@ -293,6 +454,44 @@ struct SafetyCenterView: View {
                     .foregroundStyle(StrandPalette.textSecondary)
                 }
                 .accessibilityElement(children: .combine)
+            }
+
+            if let location = incident.latestLocation {
+                Divider().overlay(StrandPalette.hairline)
+                HStack(alignment: .top, spacing: NoopMetrics.space3) {
+                    Image(systemName: "location.fill")
+                        .foregroundStyle(StrandPalette.statusPositive)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("safety.sos.location.latest")
+                            .font(StrandFont.body)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        if let accuracy = location.horizontalAccuracyMeters {
+                            Text(
+                                String(
+                                    format: String(
+                                        localized: "safety.sos.location.accuracy_format"
+                                    ),
+                                    Int64(accuracy.rounded())
+                                )
+                            )
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                }
+                NoopButton(
+                    "safety.sos.location.open_maps",
+                    systemImage: "map.fill",
+                    kind: .secondary,
+                    fullWidth: true
+                ) {
+                    guard let url = URL(
+                        string: "https://maps.apple.com/?ll=\(location.latitude),\(location.longitude)"
+                    ) else { return }
+                    openURL(url)
+                }
             }
 
             if [.open, .acknowledged, .pending].contains(incident.status) {

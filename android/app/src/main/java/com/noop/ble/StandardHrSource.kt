@@ -47,7 +47,7 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * Android runtime-permission notes (same contract as [WhoopBleClient]): the caller must hold
  * BLUETOOTH_SCAN + BLUETOOTH_CONNECT before [scan]/[connect]. Every android.bluetooth call is
- * @SuppressLint("MissingPermission") — the caller owns the grant.
+ * @SuppressLint("MissingPermission") - the caller owns the grant.
  */
 @SuppressLint("MissingPermission")
 class StandardHrSource(
@@ -156,12 +156,12 @@ class StandardHrSource(
         log("HR-strap: scanning for standard heart-rate straps (0x180D)…")
         val sc = scanner ?: run {
             _scanning.value = false
-            log("HR-strap: no BLE scanner available — Bluetooth may be off or unsupported")
+            log("HR-strap: no BLE scanner available - Bluetooth may be off or unsupported")
             return
         }
         if (adapter?.isEnabled != true) {
             _scanning.value = false
-            log("HR-strap: Bluetooth adapter is off — cannot scan")
+            log("HR-strap: Bluetooth adapter is off - cannot scan")
             return
         }
         val filter = ScanFilter.Builder()
@@ -295,7 +295,7 @@ class StandardHrSource(
                         log("HR-strap: WARNING connected with non-success status=$status")
                     }
                     retried133 = false   // a real connection clears the one-shot 133 retry guard
-                    log("HR-strap: connected (status=$status) — discovering services")
+                    log("HR-strap: connected (status=$status) - discovering services")
                     g.discoverServices()
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
@@ -312,10 +312,10 @@ class StandardHrSource(
                         val device = lastDevice
                         if (!retried133 && device != null) {
                             retried133 = true
-                            log("HR-strap: connect error 133 — retrying once in 1s")
+                            log("HR-strap: connect error 133 - retrying once in 1s")
                             handler.postDelayed({ connectToDevice(device) }, 1000)
                         } else {
-                            log("HR-strap: still failing (133) — try forgetting the strap in " +
+                            log("HR-strap: still failing (133) - try forgetting the strap in " +
                                 "Android Settings → Bluetooth, then re-pair.")
                         }
                     }
@@ -327,18 +327,18 @@ class StandardHrSource(
             log("HR-strap: services discovered (status=$status)")
             // Keep the silent-return behaviour, but LOG the reason first so #421 isn't blind.
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                log("HR-strap: WARNING service discovery failed (status=$status) — giving up on this strap")
+                log("HR-strap: WARNING service discovery failed (status=$status) - giving up on this strap")
                 return@guardedCallback
             }
             val svc = g.getService(HEART_RATE_SERVICE)
             if (svc == null) {
-                log("HR-strap: 0x180D heart-rate service NOT FOUND — this strap may not expose standard HR")
+                log("HR-strap: 0x180D heart-rate service NOT FOUND - this strap may not expose standard HR")
                 return@guardedCallback
             }
             log("HR-strap: 0x180D heart-rate service FOUND")
             val ch = svc.getCharacteristic(HEART_RATE_CHAR)
             if (ch == null) {
-                log("HR-strap: 0x2A37 measurement characteristic NOT FOUND — cannot read HR from this strap")
+                log("HR-strap: 0x2A37 measurement characteristic NOT FOUND - cannot read HR from this strap")
                 return@guardedCallback
             }
             log("HR-strap: 0x2A37 measurement characteristic found")
@@ -346,7 +346,7 @@ class StandardHrSource(
             // Explicit CCCD write (CoreBluetooth's setNotifyValue does this implicitly).
             val cccd = ch.getDescriptor(CCCD)
             if (cccd == null) {
-                log("HR-strap: WARNING 0x2A37 has no CCCD (0x2902) — cannot enable notifications")
+                log("HR-strap: WARNING 0x2A37 has no CCCD (0x2902) - cannot enable notifications")
                 return@guardedCallback
             }
             log("HR-strap: enabling notifications on 0x2A37")
@@ -367,7 +367,7 @@ class StandardHrSource(
             // separate from the HR path above — a strap without the battery service simply yields nothing.
             val batt = g.getService(BATTERY_SERVICE)?.getCharacteristic(BATTERY_CHAR)
             if (batt != null) {
-                log("HR-strap: 0x180F battery service found — reading level")
+                log("HR-strap: 0x180F battery service found - reading level")
                 runCatching { g.readCharacteristic(batt) }
             }
 
@@ -376,7 +376,7 @@ class StandardHrSource(
             // services from HR; a device without them yields no characteristic and the HR path is untouched.
             for ((svcUuid, charUuid) in FITNESS_SENSOR_CHARS) {
                 val sensorCh = g.getService(svcUuid)?.getCharacteristic(charUuid) ?: continue
-                log("HR-strap: fitness-sensor characteristic $charUuid found — enabling notifications")
+                log("HR-strap: fitness-sensor characteristic $charUuid found - enabling notifications")
                 enableFitnessNotify(g, sensorCh)
             }
         }
@@ -390,7 +390,7 @@ class StandardHrSource(
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 log("HR-strap: notifications enabled (CCCD write status=$status)")
             } else {
-                log("HR-strap: WARNING CCCD write FAILED (status=$status) — strap will send no HR data")
+                log("HR-strap: WARNING CCCD write FAILED (status=$status) - strap will send no HR data")
             }
         }
 
@@ -458,7 +458,7 @@ class StandardHrSource(
     private fun enableFitnessNotify(g: BluetoothGatt, ch: BluetoothGattCharacteristic) = guardedCallback("sensor-notify") {
         g.setCharacteristicNotification(ch, true)
         val cccd = ch.getDescriptor(CCCD) ?: run {
-            log("HR-strap: WARNING ${ch.uuid} has no CCCD (0x2902) — cannot enable notifications")
+            log("HR-strap: WARNING ${ch.uuid} has no CCCD (0x2902) - cannot enable notifications")
             return@guardedCallback
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -483,7 +483,7 @@ class StandardHrSource(
         val reading = FitnessSensor.decode(uuid16, data) ?: return@guardedCallback
         if (!loggedFirstSensor) {
             loggedFirstSensor = true
-            log("HR-strap: receiving ${reading.kind.displayName} data — first reading")
+            log("HR-strap: receiving ${reading.kind.displayName} data - first reading")
         }
         var metrics = lastSensorMetrics
         // RSC: direct instantaneous speed + cadence.
@@ -504,7 +504,7 @@ class StandardHrSource(
         // Log the FIRST sample of a connection only — proof that data is flowing — never every sample.
         if (!loggedFirstHr) {
             loggedFirstHr = true
-            log("HR-strap: receiving data — first sample ${parsed.hr} bpm (rr beats: ${parsed.rr.size})")
+            log("HR-strap: receiving data - first sample ${parsed.hr} bpm (rr beats: ${parsed.rr.size})")
         }
         // Surface live HR on the main looper (the UI's StateFlow expects main-thread updates).
         handler.post { guardedCallback("live-sink") { liveSink(parsed.hr, parsed.rr) } }
@@ -549,7 +549,7 @@ class StandardHrSource(
         // twin of Swift `LiveState.formatSensor*`. Each returns null when the field is absent / nonsensical
         // (the UI then hides that tile rather than show a fabricated value). Units are the sensor's native
         // ones — no unit-conversion guessing: speed km/h (the decode/derivation unit), cadence per-minute
-        // (steps/min for a footpod, crank rpm for a bike sensor — both "/min"; the metric doesn't carry the
+        // (steps/min for a footpod, crank rpm for a bike sensor - both "/min"; the metric doesn't carry the
         // kind, so the neutral honest label is used), power watts.
 
         /** Speed in km/h as one decimal, or null when absent / negative / non-finite. */

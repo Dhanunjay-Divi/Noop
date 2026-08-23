@@ -1,6 +1,6 @@
 import Foundation
 
-// HRDownPacer.swift — the L2 "buzz-below-heart-rate" relaxation metronome. Give the heart a felt rhythm a
+// HRDownPacer.swift - the L2 "buzz-below-heart-rate" relaxation metronome. Give the heart a felt rhythm a
 // few bpm BELOW its current rate; HR tends to drift toward an external rhythmic cue (ISWC 2025). PURE +
 // unit-tested; the live controller reads smoothed HR off `AppModel.bpm`, calls `next(...)`, fires ONE
 // light buzz per returned interval, and re-asks every recompute window. No I/O / BLE here.
@@ -16,7 +16,7 @@ import Foundation
 //   • Auto-stops when HR settles near a calm target, on timeout (`maxDurationSeconds`), or on user stop.
 //   • If HR DIDN'T fall, the caller says so plainly — no fabricated success (project evidence-first rule).
 //
-// We never claim it "lowers your heart rate" as a therapeutic outcome — it offers a rhythm to relax toward.
+// We never claim it "lowers your heart rate" as a therapeutic outcome - it offers a rhythm to relax toward.
 
 public enum HRDownPacer {
 

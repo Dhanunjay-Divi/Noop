@@ -84,7 +84,7 @@ public struct WidgetSnapshot: Codable, Equatable {
     /// nothing — App Store apps can't crash on a missing entitlement.
     public static func assertGroupProvisioned() {
         assert(UserDefaults(suiteName: suiteName) != nil,
-               "App Group '\(suiteName)' not provisioned on this target — check the entitlement.")
+               "App Group '\(suiteName)' not provisioned on this target - check the entitlement.")
     }
 
     public static var placeholder: WidgetSnapshot {

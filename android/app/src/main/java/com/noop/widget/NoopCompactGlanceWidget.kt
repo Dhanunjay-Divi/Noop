@@ -83,13 +83,13 @@ private fun CompactWidgetContent(context: Context, snap: WidgetSnapshot, appeara
             )
             Spacer(modifier = GlanceModifier.defaultWeight())
             Text(
-                text = snap.heartRate?.let { "♥ $it" } ?: "♥ —",
+                text = snap.heartRate?.let { "♥ $it" } ?: "♥ -",
                 modifier = GlanceModifier.clickable(widgetRouteAction(context, NoopNotificationRoute.LIVE)),
                 style = TextStyle(color = colors.primary, fontSize = 10.sp, fontWeight = FontWeight.Medium),
             )
             Spacer(modifier = GlanceModifier.width(8.dp))
             Text(
-                text = snap.batteryPct?.let { context.getString(R.string.widget_battery_value, it) } ?: "▰ —",
+                text = snap.batteryPct?.let { context.getString(R.string.widget_battery_value, it) } ?: "▰ -",
                 modifier = GlanceModifier.clickable(today),
                 style = TextStyle(color = colors.secondary, fontSize = 10.sp),
             )
@@ -153,7 +153,7 @@ private fun CompactScoreCell(
         )
         Spacer(modifier = GlanceModifier.width(3.dp))
         Text(
-            text = pct?.toString() ?: "—",
+            text = pct?.toString() ?: "-",
             style = TextStyle(
                 color = color,
                 fontSize = if (emphasized) 21.sp else 18.sp,

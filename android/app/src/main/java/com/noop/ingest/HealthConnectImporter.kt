@@ -11,6 +11,7 @@ import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
+import androidx.health.connect.client.records.HydrationRecord
 import androidx.health.connect.client.records.LeanBodyMassRecord
 import androidx.health.connect.client.records.OxygenSaturationRecord
 import androidx.health.connect.client.records.Record
@@ -24,6 +25,7 @@ import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import com.noop.analytics.FitnessAgeEngine
+import com.noop.analytics.HydrationStore
 import com.noop.data.AppleDaily
 import com.noop.data.DailyMetric
 import com.noop.data.ImportSummary
@@ -66,7 +68,7 @@ object HealthConnectImporter {
 
     private const val WHOOP = "my-whoop"
     // Health Connect data is stored under its OWN source ("health-connect"), NOT the shared
-    // "apple-health" bucket — otherwise it's mis-attributed to Apple Health in the UI (issue #34).
+    // "apple-health" bucket - otherwise it's mis-attributed to Apple Health in the UI (issue #34).
     /** Source partition used by every Health Connect-owned aggregate/series row. */
     const val DEVICE_ID = "health-connect"
     private const val HC_DEVICE = DEVICE_ID
@@ -121,6 +123,7 @@ object HealthConnectImporter {
         LeanBodyMassRecord::class,
         BodyTemperatureRecord::class,
         BasalBodyTemperatureRecord::class,
+        HydrationRecord::class,
         ExerciseSessionRecord::class,
         DistanceRecord::class,
     )
@@ -161,6 +164,7 @@ object HealthConnectImporter {
         is LeanBodyMassRecord -> record.time
         is BodyTemperatureRecord -> record.time
         is BasalBodyTemperatureRecord -> record.time
+        is HydrationRecord -> record.endTime
         else -> null
     }
 
@@ -183,6 +187,7 @@ object HealthConnectImporter {
             leanBodyMass = has(LeanBodyMassRecord::class),
             bodyTemperature = has(BodyTemperatureRecord::class),
             basalBodyTemperature = has(BasalBodyTemperatureRecord::class),
+            hydration = has(HydrationRecord::class),
             exercise = has(ExerciseSessionRecord::class),
             distance = has(DistanceRecord::class),
         )
@@ -229,7 +234,7 @@ object HealthConnectImporter {
         // #34 BEFORE importing, so a re-import refiles cleanly instead of duplicating across both sources.
         try { repo.refileLegacyHealthConnect() } catch (_: Exception) { /* best-effort */ }
         // #112 follow-up heal: purge the shadow rows earlier imports wrote while the covered-days
-        // gate missed active-strap ids — sparse HC-shaped "my-whoop" sleep/daily rows sitting over
+        // gate missed active-strap ids - sparse HC-shaped "my-whoop" sleep/daily rows sitting over
         // nights the strap's computed ("-noop") source already covers. Runs BEFORE this import's
         // own gate is read so the healed coverage is what gets consulted. Idempotent, best-effort
         // like the refile above.
@@ -454,6 +459,20 @@ object HealthConnectImporter {
                     zoneOffset = r.zoneOffset,
                     celsius = r.temperature.inCelsius,
                 )
+            }
+            // --- Confirmed fluid intake (ml), de-overlapped across writer apps. ---
+            // A phone and smart bottle can relay the same drink through different apps. Sum records
+            // within each writer, then take the largest writer total for the day at projection time.
+            // The record's end instant represents when the intake was completed; these intervals are
+            // normally point-like, but end-day keying also handles a drink spanning local midnight.
+            readGranted(HydrationRecord::class) { r ->
+                val b = bucket(dayOf(r.endTime, r.endZoneOffset ?: r.startZoneOffset))
+                val source = r.metadata.dataOrigin.packageName
+                val amountML = r.volume.inMilliliters
+                if (amountML.isFinite() && amountML > 0.0) {
+                    b.hydrationMlBySource[source] =
+                        (b.hydrationMlBySource[source] ?: 0.0) + amountML
+                }
             }
             // --- Exercise sessions -> WorkoutRow(source="health-connect") ---
             readGranted(ExerciseSessionRecord::class) { r ->
@@ -685,6 +704,9 @@ object HealthConnectImporter {
             // import: body_fat as a 0-100 percent, lean_mass in kg.
             a.bodyFatPct?.let { metricSeriesRows += MetricSeriesRow(HC_DEVICE, day, "body_fat", round2(it)) }
             a.leanMassKg?.let { metricSeriesRows += MetricSeriesRow(HC_DEVICE, day, "lean_mass", round2(it)) }
+            observedHydrationML(a.hydrationMlBySource)?.let {
+                metricSeriesRows += MetricSeriesRow(HC_DEVICE, day, HydrationStore.KEY, it)
+            }
 
             // Dedicated Health Connect row. Strap rows remain independent and win at read time.
             run {
@@ -858,7 +880,7 @@ object HealthConnectImporter {
         } catch (e: Exception) {
             null
         }
-        // Zero is indistinguishable from "no data yet today" — never overwrite a stored count with it.
+        // Zero is indistinguishable from "no data yet today" - never overwrite a stored count with it.
         if (sum <= 0L) return existing?.steps
 
         val updated = existing?.copy(steps = sum.toInt())
@@ -907,7 +929,7 @@ object HealthConnectImporter {
             return true
         } catch (e: Exception) {
             // One record type failing (e.g. a device/SDK validation quirk like "count must not be less
-            // than 1" seen on some Health Connect builds) must NOT abort the whole import — log it and
+            // than 1" seen on some Health Connect builds) must NOT abort the whole import - log it and
             // keep whatever was read, so every other data type still comes in (issue #34). The reads
             // accumulate into shared buckets, so a partial type is simply absent, never corrupt.
             android.util.Log.w("HealthConnect", "read of ${type.simpleName} failed; skipping: ${e.message}")
@@ -1057,6 +1079,17 @@ object HealthConnectImporter {
     /** #589 de-overlap for a per-source calorie map (Double twin of [maxSourceLong]); empty -> 0.0. */
     internal fun maxSourceDouble(bySource: Map<String, Double>): Double = bySource.values.maxOrNull() ?: 0.0
 
+    /**
+     * Confirmed daily intake imported from Health Connect. Writers can mirror the same drink, so values
+     * are summed within a writer before this helper takes the maximum across writers. Missing, invalid,
+     * and non-positive totals stay absent rather than fabricating a zero-water observation.
+     */
+    internal fun observedHydrationML(bySource: Map<String, Double>): Double? =
+        bySource.values
+            .filter { it.isFinite() && it > 0.0 }
+            .maxOrNull()
+            ?.let(::round2)
+
     /** One Health Connect energy record, tagged with its writing app for cross-source de-overlap. */
     internal data class KcalRecord(
         val startS: Long,
@@ -1068,7 +1101,7 @@ object HealthConnectImporter {
     /**
      * #951 — the BMI value the importer stores for a day, DERIVED from the day's weight + the user's
      * profile height (Health Connect has no BMI record, unlike Apple Health). Returns null — so no
-     * "bmi" metricSeries point is written — when there's no weight that day or no usable profile
+     * "bmi" metricSeries point is written - when there's no weight that day or no usable profile
      * height (heightCm <= 0), so a missing height never fabricates a value. Uses the same
      * [FitnessAgeEngine.bmi] the calorie / fitness-age estimates use, rounded to two places like the
      * other body-composition series. Factored out (and internal) so the derive-or-skip contract can be
@@ -1203,7 +1236,7 @@ object HealthConnectImporter {
     /**
      * Map of common ExerciseSessionRecord.EXERCISE_TYPE_* constants to readable labels. We reference the
      * library constants directly rather than hardcoding ints — the old hardcoded values were WRONG (e.g.
-     * 79 was mapped to "Swimming" but 79 is actually WALKING, so a walking session showed as swimming —
+     * 79 was mapped to "Swimming" but 79 is actually WALKING, so a walking session showed as swimming -
      * issue #53; 80 was "Swimming" but is WATER_POLO; 82 was "Walking" but is WHEELCHAIR; etc.). Using
      * the constants makes the int↔label mapping impossible to get wrong, and a renamed/removed constant
      * becomes a compile error instead of a silent mismatch. Unknown types fall back to "Workout".
@@ -1282,6 +1315,7 @@ object HealthConnectImporter {
         val stepsBySource = HashMap<String, Long>()
         val totalKcalBySource = HashMap<String, Double>()
         val activeKcalBySource = HashMap<String, Double>()
+        val hydrationMlBySource = HashMap<String, Double>()
 
         var hrSum: Long = 0L
         var hrCount: Int = 0

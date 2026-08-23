@@ -34,6 +34,7 @@ enum TabRoute: Hashable {
     case sleep
     case health
     case hydration
+    case smartAlarm
     case coupled
     /// The month-at-a-glance grid (2026-08-22) — reachable from Today's floating action button.
     case calendar
@@ -72,6 +73,7 @@ extension View {
             case .sleep: SleepView()
             case .health: HealthView()
             case .hydration: HydrationView()
+            case .smartAlarm: SmartAlarmView()
             case .coupled: CoupledView()
             case .calendar: CalendarMonthView()
             }

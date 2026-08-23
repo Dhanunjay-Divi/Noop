@@ -124,6 +124,19 @@ class SafetyRepository(Protocol):
         self, *, profile_id: str, limit: int
     ) -> list[dict[str, Any]]: ...
 
+    async def update_incident_location(
+        self,
+        *,
+        profile_id: str,
+        dispatch_id: str,
+        sequence: int,
+        latitude: float,
+        longitude: float,
+        horizontal_accuracy_meters: float | None,
+        captured_at: datetime,
+        received_at: datetime,
+    ) -> dict[str, Any]: ...
+
     async def update_provider_receipt(
         self,
         *,
@@ -200,6 +213,7 @@ class MemorySafetyRepository:
         self._deliveries: dict[str, dict[str, Any]] = {}
         self._delivery_attempts: dict[str, dict[str, Any]] = {}
         self._responses: dict[tuple[str, str], dict[str, Any]] = {}
+        self._locations: dict[str, dict[str, Any]] = {}
 
     async def create_profile(
         self,
@@ -724,6 +738,47 @@ class MemorySafetyRepository:
                 for row in rows
             ]
 
+    async def update_incident_location(
+        self,
+        *,
+        profile_id: str,
+        dispatch_id: str,
+        sequence: int,
+        latitude: float,
+        longitude: float,
+        horizontal_accuracy_meters: float | None,
+        captured_at: datetime,
+        received_at: datetime,
+    ) -> dict[str, Any]:
+        async with self._lock:
+            dispatch = self._dispatches.get(dispatch_id)
+            if dispatch is None or dispatch["profile_id"] != profile_id:
+                raise SafetyNotFoundError("safety incident was not found")
+            if (
+                dispatch["status"] not in {"open", "acknowledged"}
+                or dispatch["expires_at"] <= received_at
+            ):
+                raise SafetyConflictError(
+                    "this safety incident is no longer accepting location updates"
+                )
+            current = self._locations.get(dispatch_id)
+            if current is not None and (
+                sequence <= current["sequence"]
+                or captured_at <= current["captured_at"]
+            ):
+                return dict(current) | {"idempotent_replay": True}
+            location = {
+                "sequence": sequence,
+                "latitude": latitude,
+                "longitude": longitude,
+                "horizontal_accuracy_meters": horizontal_accuracy_meters,
+                "captured_at": captured_at,
+                "received_at": received_at,
+            }
+            self._locations[dispatch_id] = location
+            dispatch["updated_at"] = received_at
+            return dict(location) | {"idempotent_replay": False}
+
     async def update_provider_receipt(
         self,
         *,
@@ -895,6 +950,7 @@ class MemorySafetyRepository:
                 "status": effective_status,
                 "expires_at": dispatch["expires_at"],
                 "response": self._responses.get((dispatch_id, contact_id)),
+                "latest_location": self._locations.get(dispatch_id),
             }
 
     async def record_responder_decision(
@@ -1185,6 +1241,7 @@ class MemorySafetyRepository:
             "acknowledged_contact_display_name": acknowledged_name,
             "deliveries": deliveries,
             "responses": responses,
+            "latest_location": self._locations.get(dispatch_id),
         }
 
 
@@ -1950,6 +2007,93 @@ class PostgresSafetyRepository:
                 for row in dispatch_ids
             ]
 
+    async def update_incident_location(
+        self,
+        *,
+        profile_id: str,
+        dispatch_id: str,
+        sequence: int,
+        latitude: float,
+        longitude: float,
+        horizontal_accuracy_meters: float | None,
+        captured_at: datetime,
+        received_at: datetime,
+    ) -> dict[str, Any]:
+        pool = self._pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                incident = await connection.fetchrow(
+                    """
+                    SELECT status, expires_at
+                    FROM safety_dispatches
+                    WHERE dispatch_id = $1 AND profile_id = $2
+                    FOR UPDATE
+                    """,
+                    UUID(dispatch_id),
+                    UUID(profile_id),
+                )
+                if incident is None:
+                    raise SafetyNotFoundError("safety incident was not found")
+                if (
+                    incident["status"] not in {"open", "acknowledged"}
+                    or incident["expires_at"] <= received_at
+                ):
+                    raise SafetyConflictError(
+                        "this safety incident is no longer accepting location updates"
+                    )
+                current = await connection.fetchrow(
+                    """
+                    SELECT sequence, latitude, longitude,
+                           horizontal_accuracy_meters, captured_at, received_at
+                    FROM safety_incident_locations
+                    WHERE dispatch_id = $1
+                    FOR UPDATE
+                    """,
+                    UUID(dispatch_id),
+                )
+                if current is not None and (
+                    sequence <= current["sequence"]
+                    or captured_at <= current["captured_at"]
+                ):
+                    return dict(current) | {"idempotent_replay": True}
+                updated = await connection.fetchrow(
+                    """
+                    INSERT INTO safety_incident_locations (
+                        dispatch_id, sequence, latitude, longitude,
+                        horizontal_accuracy_meters, captured_at, received_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (dispatch_id) DO UPDATE
+                    SET sequence = EXCLUDED.sequence,
+                        latitude = EXCLUDED.latitude,
+                        longitude = EXCLUDED.longitude,
+                        horizontal_accuracy_meters =
+                            EXCLUDED.horizontal_accuracy_meters,
+                        captured_at = EXCLUDED.captured_at,
+                        received_at = EXCLUDED.received_at
+                    RETURNING sequence, latitude, longitude,
+                              horizontal_accuracy_meters,
+                              captured_at, received_at
+                    """,
+                    UUID(dispatch_id),
+                    sequence,
+                    latitude,
+                    longitude,
+                    horizontal_accuracy_meters,
+                    captured_at,
+                    received_at,
+                )
+                await connection.execute(
+                    """
+                    UPDATE safety_dispatches
+                    SET updated_at = $2
+                    WHERE dispatch_id = $1
+                    """,
+                    UUID(dispatch_id),
+                    received_at,
+                )
+                return dict(updated) | {"idempotent_replay": False}
+
     async def update_provider_receipt(
         self,
         *,
@@ -2202,7 +2346,13 @@ class PostgresSafetyRepository:
                    i.expires_at,
                    r.decision,
                    r.source,
-                   r.responded_at
+                   r.responded_at,
+                   l.sequence AS location_sequence,
+                   l.latitude AS location_latitude,
+                   l.longitude AS location_longitude,
+                   l.horizontal_accuracy_meters AS location_accuracy,
+                   l.captured_at AS location_captured_at,
+                   l.received_at AS location_received_at
             FROM safety_dispatches i
             JOIN safety_profiles p ON p.profile_id = i.profile_id
             JOIN safety_contacts c ON c.contact_id = $2
@@ -2212,6 +2362,8 @@ class PostgresSafetyRepository:
             LEFT JOIN safety_responses r
               ON r.dispatch_id = i.dispatch_id
              AND r.contact_id = c.contact_id
+            LEFT JOIN safety_incident_locations l
+              ON l.dispatch_id = i.dispatch_id
             WHERE i.dispatch_id = $1
             LIMIT 1
             """,
@@ -2233,6 +2385,23 @@ class PostgresSafetyRepository:
         decoded.pop("decision", None)
         decoded.pop("source", None)
         decoded.pop("responded_at", None)
+        if decoded["location_sequence"] is None:
+            decoded["latest_location"] = None
+        else:
+            decoded["latest_location"] = {
+                "sequence": decoded.pop("location_sequence"),
+                "latitude": decoded.pop("location_latitude"),
+                "longitude": decoded.pop("location_longitude"),
+                "horizontal_accuracy_meters": decoded.pop("location_accuracy"),
+                "captured_at": decoded.pop("location_captured_at"),
+                "received_at": decoded.pop("location_received_at"),
+            }
+        decoded.pop("location_sequence", None)
+        decoded.pop("location_latitude", None)
+        decoded.pop("location_longitude", None)
+        decoded.pop("location_accuracy", None)
+        decoded.pop("location_captured_at", None)
+        decoded.pop("location_received_at", None)
         return decoded
 
     async def record_responder_decision(
@@ -2523,10 +2692,20 @@ class PostgresSafetyRepository:
             """,
             UUID(dispatch_id),
         )
+        location = await connection.fetchrow(
+            """
+            SELECT sequence, latitude, longitude,
+                   horizontal_accuracy_meters, captured_at, received_at
+            FROM safety_incident_locations
+            WHERE dispatch_id = $1
+            """,
+            UUID(dispatch_id),
+        )
         return dict(dispatch) | {
             "idempotent_replay": idempotent_replay,
             "deliveries": [dict(row) for row in deliveries],
             "responses": [dict(row) for row in responses],
+            "latest_location": dict(location) if location is not None else None,
         }
 
 

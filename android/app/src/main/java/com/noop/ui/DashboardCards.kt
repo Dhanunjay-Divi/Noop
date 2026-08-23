@@ -18,21 +18,21 @@ import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.ui.graphics.vector.ImageVector
 import org.json.JSONArray
 
-// MARK: - "Your cards" customisable dashboard (WHOOP "My Dashboard") — Kotlin twin of DashboardCards.swift
+// MARK: - "Your cards" customisable dashboard (WHOOP "My Dashboard") - Kotlin twin of DashboardCards.swift
 //
 // The Today screen's "Your cards" section is a user-customisable dashboard faithful to WHOOP's "My
 // Dashboard": the user chooses WHICH metric cards show and in WHAT order from a registry of the values
 // Today already loads. Persistence is DISPLAY-ONLY — no metric is computed or stored differently; this just
 // decides which already-loaded values render as WHOOP metric rows and in what sequence.
 //
-// Stored as a JSON-encoded array of card ids in SharedPreferences ("today.dashboardCards") — the SAME
+// Stored as a JSON-encoded array of card ids in SharedPreferences ("today.dashboardCards") - the SAME
 // JSON-array form the iOS @AppStorage uses, so a backup/restore reads the same dashboard on either OS.
 // Unknown ids are dropped on read; a known id missing from the saved list is offered (disabled) in the
 // editor so a future card can't be lost. Mirrors the existing [KeyMetricPrefs] mechanism but as its own
 // list so the two sections stay independent (Key Metrics grid vs. the Your-cards dashboard).
 
 /**
- * One available card in the "Your cards" dashboard. The [raw] is the stable persisted identifier — keep it
+ * One available card in the "Your cards" dashboard. The [raw] is the stable persisted identifier - keep it
  * BYTE-IDENTICAL to the iOS `DashboardCard` rawValue so a backup/restore reads the same dashboard on either
  * OS. [title] / [subtitle] / [unit] mirror the Swift registry verbatim; [icon] is the Material twin of the
  * SF Symbol (closest match in the bundled icon set).

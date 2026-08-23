@@ -189,7 +189,7 @@ class Backfiller(
      *  freeing history we never stored (the closed-DB-after-restore data-loss in #57). The offload stalls
      *  safely (strap keeps everything past the last GOOD ack); a fresh session ([begin]) clears it.
      *  Exposed read-only so the client can surface a "history isn't persisting" signal in the debug export
-     *  (#57 was invisible to a report — the UI just showed "0 synced"). */
+     *  (#57 was invisible to a report - the UI just showed "0 synced"). */
     var persistStalled = false
         private set
     var sessionMotionRows = 0
@@ -206,7 +206,7 @@ class Backfiller(
     val sessionNights: Int get() = sessionNightKeys.size
 
     /**
-     * Logged once per session when the strap reports trim=0xFFFFFFFF — the "no valid flash cursor"
+     * Logged once per session when the strap reports trim=0xFFFFFFFF - the "no valid flash cursor"
      * sentinel: it has no banked history to offload (a clock/charge state, not a decode bug).
      */
     private var loggedNoCursor = false
@@ -221,7 +221,7 @@ class Backfiller(
     /**
      * The trim cursor of the LAST chunk this Backfiller acked (durably persisted + confirmed to the
      * strap). Survives across sessions on the same connection so the auto-continue gate (#364) can ask
-     * "did the offload actually advance the strap's trim this session?" — the spin-detector signal that
+     * "did the offload actually advance the strap's trim this session?" - the spin-detector signal that
      * stops it re-kicking forever when the cursor is frozen. null until the first ack. NOT reset in
      * [begin] (it's a cross-session high-water mark, not a per-session tally). Mirrors Swift
      * `Backfiller.lastAckedTrim`.
@@ -421,7 +421,7 @@ class Backfiller(
                 )
                 log(
                     "Backfill: WARNING dropped ${decoded.droppedImplausibleTs} record(s) with an " +
-                        "implausible timestamp$span (bad strap clock — far-past or future-dated); they are " +
+                        "implausible timestamp$span (bad strap clock - far-past or future-dated); they are " +
                         "excluded so they can't misdate history.",
                 )
             }
@@ -434,7 +434,7 @@ class Backfiller(
                     log(
                         "Backfill: strap reported ${ev.kind} with an implausible own-timestamp " +
                             "${BadClockDiagnostics.isoDay(ev.rawTs)} (${BadClockDiagnostics.hoursOffset(ev.rawTs, nowForRtc)} " +
-                            "vs now) — the strap's RTC reset to a wrong base (#324/#928); this is the ground-truth " +
+                            "vs now) - the strap's RTC reset to a wrong base (#324/#928); this is the ground-truth " +
                             "cause of the future-dated banking, not a NOOP decode bug.",
                     )
                 }
@@ -455,7 +455,7 @@ class Backfiller(
             if (rejected.isNotEmpty()) {
                 log(
                     "Backfill: WARNING ${rejected.size} record frame(s) decoded to 0 rows " +
-                        "(trim=$trim) — archiving raw bytes before ack (CRC/unmapped layout)",
+                        "(trim=$trim) - archiving raw bytes before ack (CRC/unmapped layout)",
                 )
                 // #91 / #30: a hex sample in the strap log so an unmapped firmware's record layout can
                 // be mapped from a shared log. Dump the FULL frame (not a 64-byte prefix — v25/v26
@@ -477,7 +477,7 @@ class Backfiller(
                 val counts = repository.insert(decoded, deviceId)
                 committed = decoded
                 // Success-side observability (#150): tally what actually persisted so the session can emit
-                // "persisted N rows (M with motion) across K night(s)" — the win-rate signal we never logged.
+                // "persisted N rows (M with motion) across K night(s)" - the win-rate signal we never logged.
                 val (rows, motion, nights) = chunkTally(counts, decoded.gravity.map { it.ts } + decoded.hr.map { it.ts })
                 sessionRowsPersisted += rows
                 sessionMotionRows += motion
@@ -506,7 +506,7 @@ class Backfiller(
             // chunk next offload. The decoded rows are already durable, so that re-send's insert is an
             // idempotent no-op while the archive retries. No data loss either way.
             if (rejected.isNotEmpty() && !rejectedSink(rejected, trim)) {
-                log("Backfill: rejected-frame archive failed (trim=$trim) — holding ack so the strap re-sends.")
+                log("Backfill: rejected-frame archive failed (trim=$trim) - holding ack so the strap re-sends.")
                 persistStalled = true   // #57
                 return
             }
@@ -538,7 +538,7 @@ class Backfiller(
         // the whole offload until a fresh session with a working store re-offers everything past the last
         // GOOD ack.
         if (persistStalled) {
-            log("Backfill: persist stalled earlier this session — NOT acking trim=$trim so the strap can't trim past un-stored history. Reconnect once the store is healthy (a backup restore needs an app restart, #57).")
+            log("Backfill: persist stalled earlier this session - NOT acking trim=$trim so the strap can't trim past un-stored history. Reconnect once the store is healthy (a backup restore needs an app restart, #57).")
             return
         }
 

@@ -20,6 +20,7 @@ final class SafetyLocationProvider: NSObject, ObservableObject {
 
     @Published private(set) var state: State = .idle
     @Published private(set) var location: SafetyLocation?
+    @Published private(set) var authorizationStatus: CLAuthorizationStatus = .notDetermined
 
     private let manager = CLLocationManager()
 
@@ -27,6 +28,7 @@ final class SafetyLocationProvider: NSObject, ObservableObject {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
+        authorizationStatus = manager.authorizationStatus
     }
 
     func requestCurrentLocation() {
@@ -54,6 +56,30 @@ final class SafetyLocationProvider: NSObject, ObservableObject {
         state = .idle
     }
 
+    var hasBackgroundAuthorization: Bool {
+        authorizationStatus == .authorizedAlways
+    }
+
+    #if os(iOS)
+    func requestBackgroundAuthorization() {
+        authorizationStatus = manager.authorizationStatus
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse:
+            manager.requestAlwaysAuthorization()
+        case .authorizedAlways:
+            Task { @MainActor in
+                await SafetySOSRuntime.shared.restoreLocationSharingIfNeeded()
+            }
+        case .denied, .restricted:
+            state = .denied
+        @unknown default:
+            state = .failed
+        }
+    }
+    #endif
+
     private func beginRequest() {
         state = .requesting
         manager.requestLocation()
@@ -64,9 +90,13 @@ final class SafetyLocationProvider: NSObject, ObservableObject {
 // bridges Core Location's older nonisolated delegate declaration without weakening this object's UI state.
 extension SafetyLocationProvider: @preconcurrency CLLocationManagerDelegate {
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        authorizationStatus = manager.authorizationStatus
         switch manager.authorizationStatus {
         case .authorizedAlways, .authorizedWhenInUse:
             if state == .requesting { beginRequest() }
+            Task { @MainActor in
+                await SafetySOSRuntime.shared.restoreLocationSharingIfNeeded()
+            }
         case .denied, .restricted:
             location = nil
             state = .denied

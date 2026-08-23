@@ -33,7 +33,7 @@ object DemoSeeder {
     // The NOOP-COMPUTED strap source ("<strap>-noop") the IntelligenceEngine persists its derived weekly
     // scores under (fitness_age / vo2max_est / vitality / body_age). The Health screen + Today "Your cards"
     // + Trends resolve these through the computed UNION (WhoopRepository.metricSeriesComputedUnion), which in
-    // the demo (activeStrapId "my-whoop") reads "my-whoop-noop" — so the demo MUST seed them here, not under
+    // the demo (activeStrapId "my-whoop") reads "my-whoop-noop" - so the demo MUST seed them here, not under
     // the imported "my-whoop" source, or those surfaces read empty ("No Data") while the rest of the demo is
     // full. Mirrors the real engine's write target.
     private const val WHOOP_NOOP = "$WHOOP-noop"
@@ -91,7 +91,7 @@ object DemoSeeder {
         val zone = ZoneId.systemDefault()
         val startDay = LocalDate.now().minusDays((DAYS - 1).toLong())
 
-        repo.upsertDevice(WHOOP, name = "WHOOP (demo)")
+        repo.upsertDevice(WHOOP, name = "Noop Band (demo)")
 
         val daily = ArrayList<DailyMetric>(DAYS)
         val sleeps = ArrayList<SleepSession>(DAYS)
@@ -256,7 +256,7 @@ object DemoSeeder {
             if (date.dayOfWeek.value != 6) continue // 6 = Saturday
             val day = date.toString()
             // Seed under the NOOP-COMPUTED source (WHOOP_NOOP), exactly where the IntelligenceEngine writes
-            // these derived weekly scores in the real app — so the Health screen, the Today "Your cards"
+            // these derived weekly scores in the real app - so the Health screen, the Today "Your cards"
             // Fitness age / Vitality cards and Trends (all via the computed union) resolve them in the demo instead
             // of showing "No Data". Trends ~42 → ~34 (younger) for Fitness age; vitality climbs ~55 → ~80.
             series.add(MetricSeriesRow(WHOOP_NOOP, day, "fitness_age",

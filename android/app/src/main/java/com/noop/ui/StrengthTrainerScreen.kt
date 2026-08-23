@@ -471,7 +471,7 @@ private fun StrengthDashboard(
                         )
                         StatTile(
                             stringResource(R.string.strength_loaded_volume),
-                            if (summary.loadedVolumeSetCount == 0) "—"
+                            if (summary.loadedVolumeSetCount == 0) "-"
                             else UnitFormatter.massFromKilograms(summary.loadedVolumeKg, massUnit),
                             Modifier.weight(1f),
                             if (summary.loadedVolumeSetCount == 0) {
@@ -844,14 +844,14 @@ private fun StrengthExerciseProgressPanel(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatTile(
                     "Heaviest load",
-                    heaviest?.let { UnitFormatter.massFromKilograms(it, massUnit) } ?: "—",
+                    heaviest?.let { UnitFormatter.massFromKilograms(it, massUnit) } ?: "-",
                     Modifier.weight(1f),
                     "external load",
                     Palette.effortColor,
                 )
                 StatTile(
                     "Most reps",
-                    mostReps?.toString() ?: "—",
+                    mostReps?.toString() ?: "-",
                     Modifier.weight(1f),
                     "one completed set",
                     Palette.accent,
@@ -860,7 +860,7 @@ private fun StrengthExerciseProgressPanel(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatTile(
                     "Best set volume",
-                    bestVolume?.let { UnitFormatter.massFromKilograms(it, massUnit) } ?: "—",
+                    bestVolume?.let { UnitFormatter.massFromKilograms(it, massUnit) } ?: "-",
                     Modifier.weight(1f),
                     "load × reps",
                     Palette.metricPurple,

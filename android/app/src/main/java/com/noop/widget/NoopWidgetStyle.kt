@@ -197,14 +197,14 @@ internal fun WidgetSnapshot.freshnessText(context: Context, nowMs: Long = System
     }
     return when (freshness(nowMs)) {
         WidgetFreshness.LIVE -> context.getString(R.string.widget_connected)
-        WidgetFreshness.RECENT -> context.getString(R.string.widget_updated_at, formattedTime ?: "—")
-        WidgetFreshness.STALE -> context.getString(R.string.widget_last_update_at, formattedTime ?: "—")
+        WidgetFreshness.RECENT -> context.getString(R.string.widget_updated_at, formattedTime ?: "-")
+        WidgetFreshness.STALE -> context.getString(R.string.widget_last_update_at, formattedTime ?: "-")
         WidgetFreshness.EMPTY -> context.getString(R.string.widget_open_noop)
     }
 }
 
 internal fun formatWidgetSleep(context: Context, minutes: Int?): String {
-    if (minutes == null || minutes < 0) return "—"
+    if (minutes == null || minutes < 0) return "-"
     return context.getString(R.string.widget_sleep_duration_format, minutes / 60, minutes % 60)
 }
 

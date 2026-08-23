@@ -47,6 +47,8 @@ struct SmartAlarmView: View {
     // FrameRouter). ≥2 = the strap is persistently refusing the alarm (a corrupted clock/alarm register),
     // which the strapRejectedCard surfaces with reset guidance. @AppStorage so it updates live.
     @AppStorage("alarm.rejectStreak") private var alarmRejectStreak = 0
+    @AppStorage(TapAutomationPreferences.alarmDoubleTapEnabledKey) private var alarmDoubleTapEnabled = false
+    @AppStorage(TapAutomationPreferences.alarmWindowMinutesKey) private var alarmTapWindowMinutes = 15
     /// Calendar weekday numbers laid out Monday-first (Mon…Sun → 2,3,4,5,6,7,1), matching AutomationsView.
     nonisolated private static let weekdayOrder = [2, 3, 4, 5, 6, 7, 1]
 
@@ -64,13 +66,9 @@ struct SmartAlarmView: View {
         .task(id: repo.refreshSeq) {
             allSleepSessions = await repo.allSleepSessions()
             habitualMidsleepSec = await repo.habitualMidsleepSec()
-            WindDownNudge.setRecoveryMinutes(sleepPlan.recoveryMinutes)
         }
-        .onAppear {
-            WindDownNudge.setRecoveryMinutes(sleepPlan.recoveryMinutes)
-        }
-        .onChangeCompat(of: sleepPlan.recoveryMinutes) { minutes in
-            WindDownNudge.setRecoveryMinutes(minutes)
+        .onChangeCompat(of: sleepPlan.recoveryMinutes) { _ in
+            if behavior.smartAlarmMode == .adaptiveSleep { model.applySmartAlarm() }
         }
         .alert(String(localized: "Notifications are off"), isPresented: $showNotifDeniedAlert) {
             Button(String(localized: "Open Settings")) { Self.openNotificationSettings() }
@@ -240,7 +238,7 @@ struct SmartAlarmView: View {
     private func sleepGoalLabel(_ mode: SleepGoalMode) -> String {
         switch mode {
         case .target: return String(localized: "Target")
-        case .balance: return String(localized: "Balance")
+        case .balance: return String(localized: "Adaptive")
         case .extraOpportunity: return String(localized: "Extra")
         }
     }
@@ -250,7 +248,7 @@ struct SmartAlarmView: View {
         case .target:
             return String(localized: "Keep the sleep target fixed, even when recent history is short.")
         case .balance:
-            return String(localized: "Add a bounded 15-minute-step adjustment when at least 3 recorded nights show a shortfall.")
+            return String(localized: "Move bedtime earlier in bounded 15-minute steps when at least 3 recorded nights show a shortfall.")
         case .extraOpportunity:
             return String(localized: "Reserve at least 30 extra minutes tonight. This is added opportunity, not a promise of better recovery.")
         }
@@ -276,10 +274,10 @@ struct SmartAlarmView: View {
                         .foregroundStyle(StrandPalette.statusWarning)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Your strap isn't accepting the alarm")
+                        Text("Noop Band isn't accepting the alarm")
                             .font(StrandFont.headline)
                             .foregroundStyle(StrandPalette.textPrimary)
-                        Text("The strap keeps reporting a different time than NOOP sends, so its firmware alarm won't fire at your wake time — usually a strap whose clock or alarm has reset. Reset the strap in the official WHOOP app (or fully charge it and reconnect), and keep your phone's Clock alarm as your wake until it takes.")
+                        Text("Noop Band keeps reporting a different time than NOOP sends, so its alarm may not fire at your wake time. Restart the band from Devices, or fully charge it and reconnect. Keep your phone's Clock alarm as your wake until the band accepts the time.")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -299,10 +297,10 @@ struct SmartAlarmView: View {
                     .foregroundStyle(StrandPalette.statusWarning)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("The strap alarm is a silent buzz, not a sound")
+                    Text("The Noop Band alarm is a silent vibration, not a sound")
                         .font(StrandFont.headline)
                         .foregroundStyle(StrandPalette.textPrimary)
-                    Text("The wake-alarm above buzzes your wrist from the strap's own firmware. It can't sound a loud alarm. We also schedule a backup notification at your wake time, but a sideloaded app can't sound a guaranteed wake on this device (that needs a critical-alert permission this build doesn't have), so Focus or silent mode can still mute it. Keep your phone's built-in Clock alarm as your real backup. NOOP's phone-based smart wake (light-sleep detection) is available on the Android app.")
+                    Text("Noop Band provides a silent wrist vibration. Fixed-time alarms stay on the band once armed. Detected-sleep alarms are revised when fresh sleep data reaches NOOP, so background timing depends on Bluetooth sync and iOS scheduling. The phone backup is a normal notification, not a guaranteed loud alarm; Focus or silent mode can suppress it. Keep a Clock alarm for anything you cannot miss.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -317,72 +315,140 @@ struct SmartAlarmView: View {
     // even if the phone is asleep or NOOP is closed. Lifted verbatim (behaviour intact) out of
     // AutomationsView.alarmCard so users stop conflating it with the wind-down reminder below.
     private var strapAlarmCard: some View {
-        StrandCard(padding: 20, tint: behavior.smartAlarmEnabled ? StrandPalette.accent : nil) {
+        StrandCard(padding: 20, tint: behavior.smartAlarmEnabled ? StrandPalette.chargeColor : nil) {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Morning").strandOverline()
                     HStack(spacing: 10) {
                         Image(systemName: "alarm.fill")
-                            .foregroundStyle(StrandPalette.accent)
+                            .foregroundStyle(StrandPalette.chargeColor)
                             .accessibilityHidden(true)
-                        Text("Strap wake-alarm")
-                            .font(StrandFont.title2)
+                        Text("Noop Band wake alarm")
+                            .font(StrandFont.headline)
                             .foregroundStyle(StrandPalette.textPrimary)
                     }
                 }
 
                 HStack(alignment: .center, spacing: 16) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Wake me with a strap buzz")
+                        Text("Wake me with a band vibration")
                             .font(StrandFont.body)
                             .foregroundStyle(StrandPalette.textPrimary)
-                        Text("Arms the strap to buzz at your wake time, even if NOOP is closed. Sends the exact alarm command the official app sends, confirmed buzzing on a real WHOOP 4.0 (community wire capture + on-device test, #535). Keep a backup alarm for anything you truly can't miss.")
+                        Text("The band can vibrate at your wake time after NOOP arms it. Keep a phone alarm for anything you cannot miss.")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer()
                     Toggle("", isOn: $behavior.smartAlarmEnabled)
-                        .labelsHidden().toggleStyle(.switch).tint(StrandPalette.accent)
-                        .accessibilityLabel("Wake me with a strap buzz")
+                        .labelsHidden().toggleStyle(.switch).tint(StrandPalette.chargeColor)
+                        .accessibilityLabel("Wake me with a band vibration")
                 }
                 .frame(minHeight: 42)
 
                 if behavior.smartAlarmEnabled {
                     Divider().overlay(StrandPalette.hairline)
-                    HStack {
-                        Text("Wake at").font(StrandFont.body).foregroundStyle(StrandPalette.textPrimary)
-                        Spacer()
-                        DatePicker("", selection: alarmTimeBinding, displayedComponents: .hourAndMinute)
-                            .labelsHidden().datePickerStyle(.compact)
-                            .accessibilityLabel("Wake time")
+                    Picker("Wake rule", selection: $behavior.smartAlarmMode) {
+                        Text("At a time").tag(SmartAlarmMode.wakeTime)
+                        Text("After sleep").tag(SmartAlarmMode.sleepDuration)
+                        Text("Adaptive").tag(SmartAlarmMode.adaptiveSleep)
                     }
-                    .frame(minHeight: 42)
+                    .pickerStyle(.segmented)
+                    .accessibilityLabel("Wake alarm mode")
+
+                    Divider().overlay(StrandPalette.hairline)
+                    Toggle(isOn: $alarmDoubleTapEnabled) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Double-tap to stop vibration")
+                                .font(StrandFont.body)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Text("Consumes the first live double-tap after the band alarm; it does not silence Apple Clock alarms.")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .tint(StrandPalette.chargeColor)
+                    if alarmDoubleTapEnabled {
+                        Stepper(value: $alarmTapWindowMinutes, in: 5...30, step: 5) {
+                            HStack {
+                                Text("Active tap window")
+                                    .font(StrandFont.body)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                Spacer()
+                                Text("\(alarmTapWindowMinutes) min")
+                                    .font(StrandFont.captionNumber)
+                                    .foregroundStyle(StrandPalette.textSecondary)
+                                    .monospacedDigit()
+                            }
+                        }
+                    }
+
+                    if behavior.smartAlarmMode == .wakeTime {
+                        HStack {
+                            Label("Wake at", systemImage: "clock")
+                                .font(StrandFont.body)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Spacer()
+                            DatePicker("", selection: alarmTimeBinding, displayedComponents: .hourAndMinute)
+                                .labelsHidden().datePickerStyle(.compact)
+                                .accessibilityLabel("Wake time")
+                        }
+                        .frame(minHeight: 44)
+                    } else if behavior.smartAlarmMode == .sleepDuration {
+                        Stepper(
+                            value: $behavior.smartAlarmDurationMinutes,
+                            in: SleepDurationAlarmPolicy.minimumTargetMinutes...SleepDurationAlarmPolicy.maximumTargetMinutes,
+                            step: 15
+                        ) {
+                            HStack {
+                                Label("Detected sleep", systemImage: "moon.zzz.fill")
+                                    .font(StrandFont.body)
+                                    .foregroundStyle(StrandPalette.textPrimary)
+                                Spacer()
+                                Text(durationLabel(behavior.smartAlarmDurationMinutes))
+                                    .font(StrandFont.number(18))
+                                    .foregroundStyle(StrandPalette.restBright)
+                                    .monospacedDigit()
+                            }
+                        }
+                        .accessibilityLabel("Detected sleep target")
+                        .accessibilityValue(durationLabel(behavior.smartAlarmDurationMinutes))
+                    } else {
+                        HStack {
+                            Label("Tonight's plan", systemImage: "moon.stars.fill")
+                                .font(StrandFont.body)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Spacer()
+                            Text(durationLabel(sleepPlan.sleepOpportunityMinutes))
+                                .font(StrandFont.number(18))
+                                .foregroundStyle(StrandPalette.restBright)
+                                .monospacedDigit()
+                        }
+                        Text("Updates from your sleep target and the planner's bounded recent-balance adjustment.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
                     Divider().overlay(StrandPalette.hairline)
                     alarmWeekdayPicker
-                    // #864: a WHOOP 5/MG only arms its firmware alarm when Experimental is on (see
-                    // BLEManager.armStrapAlarm, which logs "not armed" and returns otherwise). Without this
-                    // branch the card claimed "Armed on the strap itself" to a 5/MG owner whose strap was
-                    // NOT armed, an honest-data violation (reporter: 5/MG, Experimental off, never buzzed).
-                    // Mirrors the Android SmartAlarmScreen StrapAlarmCard wording exactly. The else copy
-                    // was truth-synced once a real 4.0 wake was confirmed (PR #535: official-app wire
-                    // capture + on-device buzz by the capture author); 5/MG remains unconfirmed, so this
-                    // gated branch keeps its honesty wording.
+                    alarmRuntimeStatus
                     if model.whoop5Detected && !PuffinExperiment.isEnabled {
-                        Text("Your WHOOP 5/MG won't arm this until Experimental mode is on (Settings, Experimental). Right now your wake time is saved but the strap is NOT armed. Even with Experimental on, a 5/MG strap-driven wake is still unconfirmed on our side, so keep a backup alarm.")
+                        Text("This Noop Band firmware needs Experimental mode before wrist wake can be armed. Your time is saved, but the band is not armed yet. Keep a backup alarm.")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.statusWarning)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else if model.whoop5Detected {
-                        // 5/MG with Experimental ON: the strap IS armed (the rev-4 puffin payload), but a
-                        // strap-driven wake has NEVER been captured on 5/MG - so the "confirmed on 4.0" copy
-                        // must NOT show here (#864 honesty). Keep the 5/MG-unconfirmed caveat.
-                        Text("Armed on the strap itself with the experimental 5/MG command. A strap-driven wake is still unconfirmed on 5/MG on our side (confirmed only on WHOOP 4.0), so keep a backup alarm for anything you truly can't miss.")
+                        Text("Armed using the experimental band command. Wrist wake is still under validation for this firmware, so keep a backup alarm.")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if behavior.smartAlarmMode.usesDetectedSleep {
+                        Text("Once NOOP has a fresh detected sleep session, it arms Noop Band for the projected target and revises that time as awake minutes accumulate. The band can still vibrate with NOOP closed after it has been armed; detecting and revising the target remains best-effort in the background.")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
-                        Text("Armed on the strap itself, so it can buzz at your wake time even if your phone is asleep or NOOP is closed. Sends the exact alarm command the official app sends, confirmed buzzing on a real WHOOP 4.0 (community wire capture + on-device test, #535). Keep a backup alarm for anything you truly can't miss.")
+                        Text("Armed on Noop Band, so it can vibrate even if the phone is asleep or NOOP is closed. Keep a backup alarm for anything you cannot miss.")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -390,8 +456,42 @@ struct SmartAlarmView: View {
                 }
             }
             .onChangeCompat(of: behavior.smartAlarmEnabled) { _ in model.applySmartAlarm() }
+            .onChangeCompat(of: behavior.smartAlarmMode) { _ in model.applySmartAlarm() }
             .onChangeCompat(of: behavior.smartAlarmMinutes) { _ in model.applySmartAlarm() }
+            .onChangeCompat(of: behavior.smartAlarmDurationMinutes) { _ in model.applySmartAlarm() }
             .onChangeCompat(of: behavior.smartAlarmWeekdays) { _ in model.applySmartAlarm() }
+        }
+    }
+
+    @ViewBuilder private var alarmRuntimeStatus: some View {
+        switch model.smartAlarmRuntimeState {
+        case .off:
+            EmptyView()
+        case .fixed(let date):
+            Label(
+                String(localized: "Next wrist buzz \(date.formatted(date: .omitted, time: .shortened))"),
+                systemImage: "checkmark.circle.fill"
+            )
+            .font(StrandFont.caption)
+            .foregroundStyle(StrandPalette.statusPositive)
+        case .waitingForSleep:
+            Label("Waiting for fresh detected sleep", systemImage: "moon.zzz")
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+        case .durationScheduled(let fireDate, let asleepMinutes, let targetMinutes):
+            Label(
+                String(localized: "\(durationLabel(asleepMinutes)) of \(durationLabel(targetMinutes)) detected · projected \(fireDate.formatted(date: .omitted, time: .shortened))"),
+                systemImage: "waveform.path.ecg"
+            )
+            .font(StrandFont.caption)
+            .foregroundStyle(StrandPalette.restBright)
+        case .durationReached(let asleepMinutes, let targetMinutes):
+            Label(
+                String(localized: "Sleep target reached · \(durationLabel(min(asleepMinutes, targetMinutes)))"),
+                systemImage: "checkmark.circle.fill"
+            )
+            .font(StrandFont.caption)
+            .foregroundStyle(StrandPalette.statusPositive)
         }
     }
 
@@ -406,7 +506,7 @@ struct SmartAlarmView: View {
                             .foregroundStyle(StrandPalette.restColor)
                             .accessibilityHidden(true)
                         Text("Wind-down nudge")
-                            .font(StrandFont.title2)
+                            .font(StrandFont.headline)
                             .foregroundStyle(StrandPalette.textPrimary)
                     }
                 }
@@ -416,7 +516,7 @@ struct SmartAlarmView: View {
                         Text("Remind me to wind down")
                             .font(StrandFont.body)
                             .foregroundStyle(StrandPalette.textPrimary)
-                        Text("A gentle notification at the plan's wind-down time. It is a suggestion, not a guaranteed alarm.")
+                        Text("A gentle notification at your planned wind-down time.")
                             .font(StrandFont.footnote)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -472,6 +572,7 @@ struct SmartAlarmView: View {
                             sleepTargetMinutes - 15
                         )
                         WindDownNudge.setSleepNeedMinutes(sleepTargetMinutes)
+                        if behavior.smartAlarmMode == .adaptiveSleep { model.applySmartAlarm() }
                     },
                     onIncrement: {
                         sleepTargetMinutes = min(
@@ -479,6 +580,7 @@ struct SmartAlarmView: View {
                             sleepTargetMinutes + 15
                         )
                         WindDownNudge.setSleepNeedMinutes(sleepTargetMinutes)
+                        if behavior.smartAlarmMode == .adaptiveSleep { model.applySmartAlarm() }
                     }
                 )
 
@@ -517,14 +619,14 @@ struct SmartAlarmView: View {
                         .accessibilityLabel("Planner wake time")
                 }
                 if behavior.smartAlarmEnabled && behavior.smartAlarmMinutes != wakeMinutes {
-                    Button("Use strap alarm time") {
+                    Button("Use Noop Band alarm time") {
                         wakeMinutes = behavior.smartAlarmMinutes
                         WindDownNudge.setWakeMinutes(wakeMinutes)
                     }
                     .font(StrandFont.footnote)
                     .buttonStyle(.plain)
                     .foregroundStyle(StrandPalette.accent)
-                    .accessibilityHint("Aligns the sleep plan with the separate strap wake alarm")
+                    .accessibilityHint("Aligns the sleep plan with the separate Noop Band wake alarm")
                 }
 
                 Text(sleepPlan.recoveryMinutes > 0
@@ -558,12 +660,12 @@ struct SmartAlarmView: View {
     // override set) every evening uses the single wake time above. Each weekday row shows the effective wake
     // (override or the default) and lets the user set or clear that day's time.
     @ViewBuilder private var perDaySection: some View {
-        HStack(alignment: .center, spacing: 16) {
+        HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Different wake time per day")
                     .font(StrandFont.body)
                     .foregroundStyle(StrandPalette.textPrimary)
-                Text("Set a wake time for specific days (a lie-in at the weekend, say). Days you leave alone use the time above.")
+                Text("Override only the days you choose.")
                     .font(StrandFont.footnote)
                     .foregroundStyle(StrandPalette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -572,6 +674,7 @@ struct SmartAlarmView: View {
             Toggle("", isOn: $perDayOn)
                 .labelsHidden().toggleStyle(.switch).tint(StrandPalette.accent)
                 .accessibilityLabel("Different wake time per day")
+                .accessibilityIdentifier("noop.sleep-planner.per-day")
                 .onChangeCompat(of: perDayOn) { on in
                     // Turning the section OFF clears every override (so the nudge reverts to the single time);
                     // turning it ON just reveals the editor — no override is created until the user sets one.
@@ -681,36 +784,36 @@ struct SmartAlarmView: View {
         onDecrement: @escaping () -> Void,
         onIncrement: @escaping () -> Void
     ) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .center, spacing: 12) {
                 Text(title)
                     .font(StrandFont.body)
                     .foregroundStyle(StrandPalette.textPrimary)
-                Text(help)
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                HStack(spacing: 6) {
+                    plannerStepButton(
+                        systemName: "minus",
+                        enabled: decrementEnabled,
+                        accessibilityLabel: decrementLabel,
+                        action: onDecrement
+                    )
+                    Text(value)
+                        .font(StrandFont.bodyNumber)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .frame(width: 58)
+                        .accessibilityLabel(value)
+                    plannerStepButton(
+                        systemName: "plus",
+                        enabled: incrementEnabled,
+                        accessibilityLabel: incrementLabel,
+                        action: onIncrement
+                    )
+                }
             }
-            Spacer(minLength: 8)
-            HStack(spacing: 8) {
-                plannerStepButton(
-                    systemName: "minus",
-                    enabled: decrementEnabled,
-                    accessibilityLabel: decrementLabel,
-                    action: onDecrement
-                )
-                Text(value)
-                    .font(StrandFont.bodyNumber)
-                    .foregroundStyle(StrandPalette.textPrimary)
-                    .frame(minWidth: 60)
-                    .accessibilityLabel(value)
-                plannerStepButton(
-                    systemName: "plus",
-                    enabled: incrementEnabled,
-                    accessibilityLabel: incrementLabel,
-                    action: onIncrement
-                )
-            }
+            Text(help)
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(minHeight: 44)
     }
@@ -761,12 +864,14 @@ struct SmartAlarmView: View {
                         .contentShape(Circle())
                         .onTapGesture { behavior.smartAlarmWeekdays = Self.alarmToggledWeekday(dow, in: behavior.smartAlarmWeekdays) }
                         .accessibilityLabel(Self.weekdayName(dow))
+                        .accessibilityIdentifier("noop.sleep-planner.weekday.\(dow)")
                         .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
             Text(Self.alarmWeekdaySummary(behavior.smartAlarmWeekdays))
                 .font(StrandFont.caption)
                 .foregroundStyle(StrandPalette.textTertiary)
+                .accessibilityIdentifier("noop.sleep-planner.weekday-summary")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

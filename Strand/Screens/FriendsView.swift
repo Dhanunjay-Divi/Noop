@@ -414,7 +414,7 @@ struct FriendsView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
-            Text(value.map { String(Int($0.rounded())) } ?? "—")
+            Text(value.map { String(Int($0.rounded())) } ?? "-")
                 .font(StrandFont.number(26))
                 .foregroundStyle(value == nil ? StrandPalette.textTertiary : color)
         }
@@ -593,7 +593,7 @@ private struct CircleInviteSheet: View {
                                 .background(StrandPalette.accent, in: Capsule())
                         }
 
-                        Text("The code expires within 72 hours and works once. Noop shares the server and code as plain text instead of putting the capability in a custom app link; the recipient enters both in Friends. Joining creates a request—you still decide whether to accept.")
+                        Text("The code expires within 72 hours and works once. Noop shares the server and code as plain text instead of putting the capability in a custom app link; the recipient enters both in Friends. Joining creates a request-you still decide whether to accept.")
                             .font(StrandFont.caption)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)

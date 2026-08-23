@@ -45,7 +45,7 @@ object PuffinDeepBufferLog {
     }
 
     /** Decoded-IMU field for the JSONL line: `,"imu":{...features...}` when [frame] is the 1244-B 6-axis
-     *  IMU buffer, else `""` (the 2140-B optical buffer and everything else). Pure and non-throwing — a
+     *  IMU buffer, else `""` (the 2140-B optical buffer and everything else). Pure and non-throwing - a
      *  decode miss just omits the field, so a diagnostics-only summary can never disturb the capture path.
      *  The first CALLER of [Whoop5RawImu.decode] outside its own tests. */
     fun decodedImuField(frame: ByteArray): String {

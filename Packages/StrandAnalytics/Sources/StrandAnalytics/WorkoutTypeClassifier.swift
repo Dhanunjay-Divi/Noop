@@ -23,8 +23,8 @@ import WhoopProtocol
 // below the Nyquist rate a real gait/pedal cadence would need (~1.5–3 Hz for walk/run strides). Per
 // the CLAUDE.md derived-signal rule (and the withdrawn PPG→HR estimate, #194), autocorrelation or
 // spectral analysis on a fixed low sample rate can manufacture a peak at the RECORD period that looks
-// physiological but isn't — so this file never does that. Where the design doc talks about a "cadence
-// proxy" it means `motionCV` (coefficient of variation of the intensity series — a coarse burstiness/
+// physiological but isn't - so this file never does that. Where the design doc talks about a "cadence
+// proxy" it means `motionCV` (coefficient of variation of the intensity series - a coarse burstiness/
 // regularity statistic), NOT a frequency estimate. Treat it as "how steady vs. bursty is the motion",
 // nothing more.
 //

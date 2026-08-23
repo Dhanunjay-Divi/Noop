@@ -17,18 +17,18 @@ class StrapStatusDetailTest {
         // Even when already bonded + connected, an active scan must say "Searching…".
         assertTrue(
             strapStatusDetail(bonded = true, connected = true, scanning = true)
-                .startsWith("Searching for your WHOOP"),
+                .startsWith("Searching for Noop Band"),
         )
         assertTrue(
             strapStatusDetail(bonded = false, connected = false, scanning = true)
-                .startsWith("Searching for your WHOOP"),
+                .startsWith("Searching for Noop Band"),
         )
     }
 
     @Test
     fun nonScanning_branches_areUnchanged() {
         assertEquals(
-            "Your strap is paired and sending data. Open Live for a real-time heart rate.",
+            "Noop Band is paired and sending data. Open Live for a real-time heart rate.",
             strapStatusDetail(bonded = true, connected = true, scanning = false),
         )
         assertEquals(
@@ -40,7 +40,7 @@ class StrapStatusDetailTest {
             strapStatusDetail(bonded = true, connected = false, scanning = false),
         )
         assertEquals(
-            "No strap connected. Put your WHOOP nearby and tap Re-scan to pair.",
+            "No band connected. Put Noop Band nearby and tap Re-scan to pair.",
             strapStatusDetail(bonded = false, connected = false, scanning = false),
         )
     }

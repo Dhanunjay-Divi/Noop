@@ -3,15 +3,15 @@ import SwiftUI
 
 // MARK: - Editable Key-Metrics layout (#251)
 //
-// The Today screen's "Key Metrics" grid was a fixed list of ten tiles in one order. This lets the user
-// choose WHICH tiles show and in WHAT order, with the default being the original order so nothing changes
-// for anyone who never opens the editor. Persistence is display-only — no metric is computed or stored
-// differently; this just decides which of the already-computed tiles render and in what sequence.
+// The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin one to five in
+// their preferred order. A fresh install starts with NOOP's three core daily signals — Recovery, Effort,
+// and Sleep — while every other metric remains available in the editor. Persistence is display-only: no
+// metric is computed or stored differently.
 //
 // Stored as a single comma-joined string of metric keys in @AppStorage (UserDefaults), the same
 // mechanism every other macOS NOOP preference uses. The Android side mirrors this exactly in
 // KeyMetricPrefs.kt (SharedPreferences "today.keyMetrics"). Unknown keys are dropped on read and any
-// known key missing from the saved list is appended (disabled) so a future tile addition can't be lost.
+// known key missing from the saved list is appended by the editor as an unselected option.
 
 /// One of the Today screen's Key-Metric tiles. The rawValue is the stable persisted identifier — keep it
 /// byte-identical to the Android `KeyMetric` enum so a backup/restore reads the same layout on either OS.
@@ -73,11 +73,14 @@ enum KeyMetric: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The original, hard-coded grid order — the default when the user hasn't customised the layout.
+    /// Canonical catalog order. This includes every choice and is also used to order unselected options.
     static let defaultOrder: [KeyMetric] = [
         .charge, .effort, .rest, .hrv, .restingHr,
         .bloodOxygen, .respiratory, .steps, .weight, .calories,
     ]
+
+    /// NOOP's useful fresh-install starting point. Users can replace or extend it up to five metrics.
+    static let defaultSelection: [KeyMetric] = [.charge, .effort, .rest]
 }
 
 /// Display-only persistence for the Key-Metrics layout. Holds an ORDERED list of the enabled tiles; a
@@ -85,25 +88,39 @@ enum KeyMetric: String, CaseIterable, Identifiable {
 enum KeyMetricPrefs {
     /// UserDefaults key — a comma-joined list of `KeyMetric` rawValues in display order.
     static let layoutKey = "today.keyMetrics"
+    static let minimumSelectionCount = 1
+    static let maximumSelectionCount = 5
 
-    /// Encode an ordered list of enabled tiles into the stored comma-joined string.
+    /// Encode a valid ordered pin set. This boundary also protects callers other than the editor from
+    /// persisting duplicates, an empty dashboard, or more tiles than the Today surface supports.
     static func encode(_ metrics: [KeyMetric]) -> String {
-        metrics.map(\.rawValue).joined(separator: ",")
+        normalized(metrics).map(\.rawValue).joined(separator: ",")
     }
 
-    /// Decode the stored string into an ordered list of enabled tiles. An empty/unset string yields the
-    /// full default order (so a fresh install shows every tile). Unknown tokens are ignored; this returns
-    /// ONLY the enabled tiles in their saved order — the editor pairs it with the disabled remainder.
+    /// Decode the stored string into an ordered pin set. Empty, unset, or all-unknown data yields the
+    /// three core defaults. Older app versions allowed more than five; preserving their first five makes
+    /// that migration deterministic and keeps the user's strongest ordering signal.
     static func decodeEnabled(_ raw: String) -> [KeyMetric] {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return KeyMetric.defaultOrder }
+        guard !trimmed.isEmpty else { return KeyMetric.defaultSelection }
         var seen = Set<KeyMetric>()
         var result: [KeyMetric] = []
         for token in trimmed.split(separator: ",") {
-            if let m = KeyMetric(rawValue: String(token)), seen.insert(m).inserted {
+            let rawValue = String(token).trimmingCharacters(in: .whitespaces)
+            if let m = KeyMetric(rawValue: rawValue), seen.insert(m).inserted {
                 result.append(m)
+                if result.count == maximumSelectionCount { break }
             }
         }
-        return result
+        return result.isEmpty ? KeyMetric.defaultSelection : result
+    }
+
+    /// Ordered dedupe + cap shared by encoding and tests. An empty request falls back to the product
+    /// default because Today must always retain at least one useful metric.
+    static func normalized(_ metrics: [KeyMetric]) -> [KeyMetric] {
+        var seen = Set<KeyMetric>()
+        let selected = metrics.filter { seen.insert($0).inserted }
+            .prefix(maximumSelectionCount)
+        return selected.isEmpty ? KeyMetric.defaultSelection : Array(selected)
     }
 }

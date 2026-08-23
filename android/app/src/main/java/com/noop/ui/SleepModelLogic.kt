@@ -21,7 +21,7 @@ internal fun heroDisplay(model: SleepModel?, night: HeroNight?): HeroDisplay? {
     val segments = night?.realSegments ?: return null
     val stages = stagesFromSegments(segments) ?: return null
     val eff = night.session.efficiency
-        ?.let { e -> "${(if (e <= 1.0) e * 100.0 else e).roundToInt()}%" } ?: "—"
+        ?.let { e -> "${(if (e <= 1.0) e * 100.0 else e).roundToInt()}%" } ?: "-"
     return HeroDisplay(stages, segments, eff)
 }
 
@@ -43,7 +43,7 @@ internal fun stagesFromSegments(segments: List<Pair<String, Float>>): Stages? {
 
 /**
  * Extract stage minute counts from a session's stagesJSON, handling both formats:
- *  • Minute dict  {"awake":…,"light":…,"deep":…,"rem":…}  — imported nights (noopdb / WHOOP export)
+ *  • Minute dict  {"awake":…,"light":…,"deep":…,"rem":…}  - imported nights (noopdb / WHOOP export)
  *  • Segment array [{start,end,stage}]                     — on-device computed nights
  * Returns null when the JSON is absent or unparseable, so callers fall back to DailyMetric columns.
  * SleepWindowReclip keeps the minute dict up to date after a wake-time edit, so stage counts
@@ -176,7 +176,7 @@ internal fun buildSleepModel(
     }
     val consistency = run {
         // Prefer the imported sleep_consistency series, but only when it covers the latest
-        // night — otherwise "latest" would silently be a months-old import-era value.
+        // night - otherwise "latest" would silently be a months-old import-era value.
         val lastDay = days.lastOrNull()?.day
         if (lastDay != null && imported.consistency[lastDay] != null) {
             val series = days.mapNotNull { imported.consistency[it.day] }
@@ -245,7 +245,7 @@ internal fun buildSleepModel(
     return SleepModel(
         stages = stages,
         clockLabel = clockLabel(latest, session),
-        efficiencyText = efficiency.latest?.let { "${it.roundToInt()}%" } ?: "—",
+        efficiencyText = efficiency.latest?.let { "${it.roundToInt()}%" } ?: "-",
         performance = performance,
         efficiency = efficiency,
         consistency = consistency,

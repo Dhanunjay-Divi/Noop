@@ -759,7 +759,7 @@ final class AICoachEngine: ObservableObject {
                 .filter { $0.effect.significant }
                 .prefix(3)
             if !ranked.isEmpty {
-                lines.append("STRONGEST PERSONAL PATTERNS (the user's own data — association, not cause):")
+                lines.append("STRONGEST PERSONAL PATTERNS (the user's own data - association, not cause):")
                 for r in ranked { lines.append("  • " + r.sentence()) }
             }
         }
@@ -773,13 +773,13 @@ final class AICoachEngine: ObservableObject {
                 for (key, kRows) in byKey {
                     guard let latest = kRows.sorted(by: { $0.takenAt < $1.takenAt }).last else { continue }
                     let name = MarkerCatalog.definition(for: key)?.displayName ?? key
-                    let value = latest.value.map { "\(LabBookFormat.value($0, key: key)) \(latest.unit)" } ?? latest.valueText ?? "—"
+                    let value = latest.value.map { "\(LabBookFormat.value($0, key: key)) \(latest.unit)" } ?? latest.valueText ?? "-"
                     markerSummaries.append("\(name) \(value)")
                 }
             }
             if !markerSummaries.isEmpty {
                 lines.append("")
-                lines.append("LAB BOOK (the user's own logged health numbers — not medical advice; do not interpret as clinical findings):")
+                lines.append("LAB BOOK (the user's own logged health numbers - not medical advice; do not interpret as clinical findings):")
                 lines.append("  " + markerSummaries.prefix(8).joined(separator: ", "))
             }
         }
@@ -1060,7 +1060,7 @@ final class AICoachEngine: ObservableObject {
         // Last ~14 days, newest first for readability.
         let recent = Array(days.suffix(14)).reversed()
         lines.append("")
-        lines.append("Recent days (newest first) — Recovery(0-100), Effort(0-100), sleep(h), HRV(ms), RHR(bpm):")
+        lines.append("Recent days (newest first) - Recovery(0-100), Effort(0-100), sleep(h), HRV(ms), RHR(bpm):")
         for d in recent {
             lines.append("  " + dayLine(d))
         }
@@ -1079,7 +1079,7 @@ final class AICoachEngine: ObservableObject {
         // can be an @57 motion-derived estimate. The coach must not present it as a factual step count.
         lines.append("  SpO2: \(avgInt(last30.compactMap { $0.spo2Pct }))%"
                      + ", respiration: \(avgOne(last30.compactMap { $0.respRateBpm }))/min"
-                     + ", skin-temp deviation: \(avgOne(last30.compactMap { $0.skinTempDevC }))°C"
+                     + ", skin-temp change vs baseline: \(skinTempChangeSummary(last30))"
                      + ", active energy: \(avgInt(last30.compactMap { $0.activeKcalEst }))kcal/day")
 
         return lines.joined(separator: "\n")
@@ -1108,27 +1108,38 @@ final class AICoachEngine: ObservableObject {
 
     private func dayLine(_ d: DailyMetric) -> String {
         var parts: [String] = [d.day + ":"]
-        parts.append("Recovery " + (d.recovery.map { "\(Int($0.rounded()))" } ?? "—"))
-        parts.append("Effort " + (d.strain.map { String(format: "%.1f", $0) } ?? "—"))
-        parts.append("sleep " + (d.totalSleepMin.map { String(format: "%.1fh", $0 / 60) } ?? "—"))
-        parts.append("HRV " + (d.avgHrv.map { "\(Int($0.rounded()))ms" } ?? "—"))
-        parts.append("RHR " + (d.restingHr.map { "\($0)bpm" } ?? "—"))
+        parts.append("Recovery " + (d.recovery.map { "\(Int($0.rounded()))" } ?? "-"))
+        parts.append("Effort " + (d.strain.map { String(format: "%.1f", $0) } ?? "-"))
+        parts.append("sleep " + (d.totalSleepMin.map { String(format: "%.1fh", $0 / 60) } ?? "-"))
+        parts.append("HRV " + (d.avgHrv.map { "\(Int($0.rounded()))ms" } ?? "-"))
+        parts.append("RHR " + (d.restingHr.map { "\($0)bpm" } ?? "-"))
         return parts.joined(separator: ", ")
     }
 
     private func avgOne(_ xs: [Double]) -> String {
-        guard !xs.isEmpty else { return "—" }
+        guard !xs.isEmpty else { return "-" }
         return String(format: "%.1f", xs.reduce(0, +) / Double(xs.count))
     }
 
+    /// The daily column may contain absolute WHOOP temperatures or signed local deviations.
+    /// Summarize only a real baseline change so coach context never says "+34 °C deviation".
+    private func skinTempChangeSummary(_ days: [DailyMetric]) -> String {
+        let assessment = VitalBands.skinTempIllnessAssessment(
+            recent: days.suffix(2).map(\.skinTempDevC),
+            baseline: days.suffix(31).dropLast(3).map(\.skinTempDevC)
+        )
+        guard let delta = assessment?.deltaFromBaselineC else { return "n/a" }
+        return String(format: "%+.1f°C", delta)
+    }
+
     private func avgInt(_ xs: [Double]) -> String {
-        guard !xs.isEmpty else { return "—" }
+        guard !xs.isEmpty else { return "-" }
         return "\(Int((xs.reduce(0, +) / Double(xs.count)).rounded()))"
     }
 
     private func avgSleepHours(_ days: [DailyMetric]) -> String {
         let mins = days.compactMap { $0.totalSleepMin }
-        guard !mins.isEmpty else { return "—" }
+        guard !mins.isEmpty else { return "-" }
         return String(format: "%.1f", (mins.reduce(0, +) / Double(mins.count)) / 60)
     }
 

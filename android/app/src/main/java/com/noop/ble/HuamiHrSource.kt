@@ -34,7 +34,7 @@ import java.util.concurrent.ConcurrentHashMap
  * "EXPERIMENTAL, HELP US TEST": best-effort, clean-room driver built from PUBLICLY DOCUMENTED protocol
  * FACTS (open projects document the Huami GATT layout; we reuse only the facts and wrote our own code —
  * no GPL/AGPL code copied). Shipped behind the experimental add-device tier because it can't be
- * hardware-verified here. It NEVER fabricates data: if it can't read a real HR it stays at "—".
+ * hardware-verified here. It NEVER fabricates data: if it can't read a real HR it stays at "-".
  *
  * WHOOP-FIRST ISOLATION (identical to [StandardHrSource]): own scan + [BluetoothGatt], never touches
  * [WhoopBleClient]. Shared surfaces are injected closures: [liveSink], [persist], [log], [onBattery].
@@ -124,12 +124,12 @@ class HuamiHrSource(
         log("Huami: scanning for Amazfit / Zepp / Mi Band devices…")
         val sc = scanner ?: run {
             _scanning.value = false
-            log("Huami: no BLE scanner available — Bluetooth may be off or unsupported")
+            log("Huami: no BLE scanner available - Bluetooth may be off or unsupported")
             return
         }
         if (adapter?.isEnabled != true) {
             _scanning.value = false
-            log("Huami: Bluetooth adapter is off — cannot scan")
+            log("Huami: Bluetooth adapter is off - cannot scan")
             return
         }
         // No ScanFilter (broad scan); the callback filters by recognised name.
@@ -205,7 +205,7 @@ class HuamiHrSource(
         if (hr !in 30..220) return   // out of range → dropped, never shown / persisted
         if (!loggedFirstHr) {
             loggedFirstHr = true
-            log("Huami: receiving data — first sample $hr bpm")
+            log("Huami: receiving data - first sample $hr bpm")
         }
         handler.post { guarded("live-sink") { liveSink(hr) } }
         enqueue(hr)
@@ -246,7 +246,7 @@ class HuamiHrSource(
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     retried133 = false
-                    log("Huami: connected (status=$status) — discovering services")
+                    log("Huami: connected (status=$status) - discovering services")
                     g.discoverServices()
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
@@ -259,10 +259,10 @@ class HuamiHrSource(
                         val device = lastDevice
                         if (!retried133 && device != null) {
                             retried133 = true
-                            log("Huami: connect error 133 — retrying once in 1s")
+                            log("Huami: connect error 133 - retrying once in 1s")
                             handler.postDelayed({ connectToDevice(device) }, 1000)
                         } else {
-                            log("Huami: still failing (133) — try forgetting the band in Android " +
+                            log("Huami: still failing (133) - try forgetting the band in Android " +
                                 "Settings → Bluetooth, then re-pair.")
                         }
                     }
@@ -272,19 +272,19 @@ class HuamiHrSource(
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) = guarded("services-discovered") {
             if (status != BluetoothGatt.GATT_SUCCESS) {
-                log("Huami: WARNING service discovery failed (status=$status) — giving up on this band")
+                log("Huami: WARNING service discovery failed (status=$status) - giving up on this band")
                 return@guarded
             }
             val stdSvc = g.getService(STD_HEART_RATE_SERVICE)
             val huamiSvc = g.getService(HUAMI_SERVICE)
             when {
                 stdSvc != null -> {
-                    log("Huami: standard 0x180D heart-rate service FOUND — using it (preferred)")
+                    log("Huami: standard 0x180D heart-rate service FOUND - using it (preferred)")
                     val ch = stdSvc.getCharacteristic(STD_HEART_RATE_CHAR)
                     if (ch != null) enableNotify(g, ch) else announceNeedsPairing()
                 }
                 huamiSvc != null -> {
-                    log("Huami: no standard 0x180D — trying the documented Huami custom HR characteristic")
+                    log("Huami: no standard 0x180D - trying the documented Huami custom HR characteristic")
                     val ch = huamiSvc.getCharacteristic(HUAMI_HEART_RATE_CHAR)
                     if (ch != null && ch.canNotify()) enableNotify(g, ch) else announceNeedsPairing()
                 }
@@ -293,7 +293,7 @@ class HuamiHrSource(
             // Battery (0x2A19): read once if present.
             val batt = g.getService(BATTERY_SERVICE)?.getCharacteristic(BATTERY_CHAR)
             if (batt != null) {
-                log("Huami: 0x180F battery service found — reading level")
+                log("Huami: 0x180F battery service found - reading level")
                 runCatching { g.readCharacteristic(batt) }
             }
         }
@@ -304,7 +304,7 @@ class HuamiHrSource(
                 log("Huami: notifications enabled (CCCD write status=$status)")
             } else {
                 // The band refused the subscription — almost always the Huami auth gate. Be honest.
-                log("Huami: WARNING CCCD write FAILED (status=$status) — band may need pairing we can't do")
+                log("Huami: WARNING CCCD write FAILED (status=$status) - band may need pairing we can't do")
                 announceNeedsPairing()
             }
         }
@@ -338,7 +338,7 @@ class HuamiHrSource(
         loggedFirstHr = false
         g.setCharacteristicNotification(ch, true)
         val cccd = ch.getDescriptor(CCCD) ?: run {
-            log("Huami: WARNING ${ch.uuid} has no CCCD (0x2902) — cannot enable notifications")
+            log("Huami: WARNING ${ch.uuid} has no CCCD (0x2902) - cannot enable notifications")
             announceNeedsPairing()
             return
         }
@@ -372,7 +372,7 @@ class HuamiHrSource(
             STD_HEART_RATE_CHAR -> StandardHeartRate.parse(data)?.hr   // standard 0x2A37 layout
             HUAMI_HEART_RATE_CHAR -> HuamiHeartRate.parse(data)        // Huami custom layout
             else -> return@guarded
-        } ?: return@guarded                                            // no usable reading → "—", never faked
+        } ?: return@guarded                                            // no usable reading → "-", never faked
         ingest(hr)
     }
 

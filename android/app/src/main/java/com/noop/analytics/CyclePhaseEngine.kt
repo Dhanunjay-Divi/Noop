@@ -16,7 +16,7 @@ import kotlin.math.roundToInt
 //
 // WELLNESS / AWARENESS ONLY — APPROXIMATE. NOT contraception, NOT a fertility/ovulation predictor, NOT a
 // medical device, NOT a diagnosis. Never a "fertile window" / "safe days", never a single confident period
-// DATE (only a probabilistic WINDOW), never a condition verdict — flat/irregular → "no clear pattern".
+// DATE (only a probabilistic WINDOW), never a condition verdict - flat/irregular → "no clear pattern".
 object CyclePhaseEngine {
 
     // ── Tuning constants (pinned by test; mirror the Swift twin exactly) ──
@@ -91,7 +91,27 @@ object CyclePhaseEngine {
         baselineUsable: Boolean,
         loggedPeriodStarts: List<String> = emptyList(),
     ): Result {
+        // Explicit logs can anchor a bounded day range and broad period window while temperature is
+        // still calibrating. They never create a sensor-derived phase.
+        val asOfDay = nights.map { it.day }.filter { parseDay(it) != null }.maxOrNull()
+            ?: loggedPeriodStarts.filter { parseDay(it) != null }.maxOrNull()
+        val loggedEstimate = asOfDay?.let {
+            estimateFromLoggedStarts(loggedPeriodStarts, it)
+        }
+
         if (!baselineUsable || nights.size < minNightsToClassify) {
+            if (loggedEstimate != null) {
+                return Result(
+                    Phase.LEARNING,
+                    Confidence.BUILDING,
+                    loggedEstimate.cycleDayLow,
+                    loggedEstimate.cycleDayHigh,
+                    loggedEstimate.cycleLengthDays,
+                    loggedEstimate.nextPeriodWindow,
+                    emptyList(),
+                    loggedEstimate.note,
+                )
+            }
             return Result(Phase.LEARNING, Confidence.LEARNING, null, null, null, null, emptyList(),
                 "Learning your pattern from your nightly temperature - keep wearing it overnight.")
         }
@@ -101,6 +121,18 @@ object CyclePhaseEngine {
         }
         val values = fused.mapNotNull { it.second }
         if (values.size < minNightsToClassify) {
+            if (loggedEstimate != null) {
+                return Result(
+                    Phase.LEARNING,
+                    Confidence.BUILDING,
+                    loggedEstimate.cycleDayLow,
+                    loggedEstimate.cycleDayHigh,
+                    loggedEstimate.cycleLengthDays,
+                    loggedEstimate.nextPeriodWindow,
+                    emptyList(),
+                    loggedEstimate.note,
+                )
+            }
             return Result(Phase.LEARNING, Confidence.LEARNING, null, null, null, null, emptyList(),
                 "Learning your pattern from your nightly temperature - keep wearing it overnight.")
         }
@@ -119,10 +151,25 @@ object CyclePhaseEngine {
         }
         val shiftMarkers = onsets.map { ShiftMarker(fused[it].first) }
 
-        val lastOnsetIdx = onsets.lastOrNull()
-            ?: return Result(Phase.UNKNOWN, Confidence.BUILDING, null, null, null, null, shiftMarkers,
+        val lastOnsetIdx = onsets.lastOrNull() ?: run {
+            if (loggedEstimate != null) {
+                return Result(
+                    Phase.UNKNOWN,
+                    Confidence.BUILDING,
+                    loggedEstimate.cycleDayLow,
+                    loggedEstimate.cycleDayHigh,
+                    loggedEstimate.cycleLengthDays,
+                    loggedEstimate.nextPeriodWindow,
+                    shiftMarkers,
+                    "No clear temperature pattern yet. ${loggedEstimate.note}",
+                )
+            }
+            return Result(
+                Phase.UNKNOWN, Confidence.BUILDING, null, null, null, null, shiftMarkers,
                 "No clear temperature pattern yet - this can happen with irregular cycles, " +
-                    "hormonal birth control, or shift work.")
+                    "hormonal birth control, or shift work.",
+            )
+        }
 
         val onsetGaps = mutableListOf<Int>()
         if (onsets.size >= 2) {
@@ -205,6 +252,78 @@ object CyclePhaseEngine {
         Phase.LUTEAL -> "Luteal range - temperature is running above your baseline."
         Phase.UNKNOWN -> "No clear pattern yet."
         Phase.LEARNING -> "Learning your pattern - keep wearing it overnight."
+    }
+
+    // ── Logged-start estimate ──
+
+    private data class LoggedEstimate(
+        val cycleDayLow: Int?,
+        val cycleDayHigh: Int?,
+        val cycleLengthDays: Int?,
+        val nextPeriodWindow: NextPeriodWindow?,
+        val note: String,
+    )
+
+    /**
+     * Bounded estimate from explicit period-start logs. One start uses a broad 28-day population prior
+     * only for the window; repeated starts use the median plausible personal gap. This never emits a phase.
+     */
+    private fun estimateFromLoggedStarts(
+        loggedPeriodStarts: List<String>,
+        asOfDay: String,
+    ): LoggedEstimate? {
+        if (parseDay(asOfDay) == null) return null
+        val starts = loggedPeriodStarts
+            .filter { it <= asOfDay && parseDay(it) != null }
+            .distinct()
+            .sorted()
+        val latestStart = starts.lastOrNull() ?: return null
+        val daysSinceStart = daysBetween(latestStart, asOfDay)?.takeIf { it >= 0 } ?: return null
+
+        val plausibleGaps = mutableListOf<Double>()
+        for (index in 1 until starts.size) {
+            val gap = daysBetween(starts[index - 1], starts[index]) ?: continue
+            if (gap in minCycleDays..maxCycleDays) plausibleGaps.add(gap.toDouble())
+        }
+        val personalLength = plausibleGaps
+            .takeIf { it.isNotEmpty() }
+            ?.let { median(it).roundToInt() }
+
+        // Never roll an old log through guessed cycles. Ask for a fresh anchor instead.
+        if (daysSinceStart >= maxCycleDays) {
+            return LoggedEstimate(
+                cycleDayLow = null,
+                cycleDayHigh = null,
+                cycleLengthDays = personalLength,
+                nextPeriodWindow = null,
+                note = "Your last logged start is over 40 days old. Log the latest start to refresh " +
+                    "this estimate; temperature calibration is still learning.",
+            )
+        }
+
+        val cycleDay = daysSinceStart + 1
+        val cadence = personalLength ?: defaultCycleDays
+        val uncertainty = if (personalLength == null) 5 else 3
+        val earliest = shiftDay(latestStart, cadence - uncertainty)
+        val latest = shiftDay(latestStart, cadence + uncertainty)
+        val window = if (earliest != null && latest != null && latest >= asOfDay) {
+            NextPeriodWindow(maxOf(asOfDay, earliest), latest)
+        } else null
+
+        val note = if (personalLength != null) {
+            "Cycle day and the broad period window come from your logged starts while nightly " +
+                "temperature calibration continues."
+        } else {
+            "Cycle day is anchored to your logged start. The broad period window uses a 28-day prior " +
+                "while nightly temperature calibration continues."
+        }
+        return LoggedEstimate(
+            cycleDayLow = maxOf(1, cycleDay - 1),
+            cycleDayHigh = cycleDay + 1,
+            cycleLengthDays = personalLength,
+            nextPeriodWindow = window,
+            note = note,
+        )
     }
 
     // ── Small stats / day helpers (self-contained, parity-clean) ──

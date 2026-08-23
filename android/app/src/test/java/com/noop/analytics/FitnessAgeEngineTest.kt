@@ -150,4 +150,11 @@ class FitnessAgeEngineTest {
         assertEquals(FitnessAgeConfidence.READY,
             FitnessAgeEngine.assessReadiness(true, true, 7, 6, false).confidence)
     }
+
+    @Test fun coverageDaysUntilReadyTracksEitherRequiredSignal() {
+        assertEquals(4, FitnessAgeEngine.coverageDaysUntilReady(0))
+        assertEquals(2, FitnessAgeEngine.coverageDaysUntilReady(2))
+        assertEquals(0, FitnessAgeEngine.coverageDaysUntilReady(4))
+        assertEquals(0, FitnessAgeEngine.coverageDaysUntilReady(7))
+    }
 }

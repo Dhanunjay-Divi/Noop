@@ -5,13 +5,13 @@ import UserNotifications
 //
 // A single opt-in, default-OFF informational nudge: once per day, when the day's canonical 0–100 Effort
 // reaches the LOW end of DailyActionPlanner's evidence-gated personal range, post an "Effort marker
-// reached" notification. Twin of the Android `StrainTargetNotifier`/`StrainTargetPolicy` — the pure policy
+// reached" notification. Twin of the Android `StrainTargetNotifier`/`StrainTargetPolicy` - the pure policy
 // must stay byte-identical (feature-level parity).
 //
 // CLEAN-ROOM: this reimplements the BEHAVIOUR only. The copy is NOOP's own — NOT WHOOP's decompiled
 // strings — and the target is NOOP's own personal-history planner output, not a value read off another app.
 //
-// It is NOT "the instant" you cross the target — daily Effort is a per-analytics-pass rollup, so it fires
+// It is NOT "the instant" you cross the target - daily Effort is a per-analytics-pass rollup, so it fires
 // on the first pass at/after the crossing. Once-per-day dedupe uses a persisted day string, the same
 // crossing-dedupe idiom as BatteryNotifier / the Android ScheduledReportPolicy.
 enum StrainTargetNotifier {
@@ -37,7 +37,7 @@ enum StrainTargetNotifier {
         /// deliberately avoids "optimal", "earned", or permission-to-push claims.
         static func copy(target: Int) -> (title: String, body: String) {
             (String(localized: "Effort marker reached"),
-             String(localized: "You've reached today's Effort marker of \(target). It is a planning cue, not a limit—check how you feel before adding more."))
+             String(localized: "You've reached today's Effort marker of \(target). It is a planning cue, not a limit-check how you feel before adding more."))
         }
     }
 

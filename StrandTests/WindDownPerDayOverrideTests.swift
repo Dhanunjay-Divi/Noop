@@ -101,4 +101,28 @@ final class WindDownPerDayOverrideTests: XCTestCase {
         WindDownNudge.setWakeOverride(weekday: 9, minutes: 8 * 60)   // no weekday 9
         XCTAssertFalse(WindDownNudge.hasPerDayOverrides)
     }
+
+    func testReminderPolicyUsesHealthFallbackWithoutDoubleCountingOverlap() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 8, day: 22, hour: 12
+        )))
+        let context = ReminderDataPolicy.sleepContext(
+            observations: [
+                .init(day: "2026-08-20", minutes: 300, source: .appleHealth),
+                .init(day: "2026-08-20", minutes: 480, source: .wearable),
+                .init(day: "2026-08-21", minutes: 420, source: .appleHealth),
+                .init(day: "2026-08-22", minutes: 420, source: .wearable),
+            ],
+            targetMinutes: 480,
+            goalMode: .balance,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertTrue(context.isCurrent)
+        XCTAssertEqual(context.historyNights, 3)
+        XCTAssertEqual(context.source, .mixed)
+        XCTAssertEqual(context.recoveryMinutes, 45)
+    }
 }

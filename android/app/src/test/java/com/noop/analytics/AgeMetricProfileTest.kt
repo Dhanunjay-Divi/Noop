@@ -33,6 +33,23 @@ class AgeMetricProfileTest {
     }
 
     @Test
+    fun fitnessAgeV2NeverAcceptsMissingOrLegacyCalibrationMarkers() {
+        val fitness = AgeMetricProfile.fitnessAgeToken(40.0, "female")
+        val vo2 = AgeMetricProfile.vo2maxEstimateToken(40.0, "female", 82.0)
+
+        assertFalse(AgeMetricProfile.acceptsFitnessAge(null, fitness))
+        assertFalse(AgeMetricProfile.acceptsFitnessAge(391.0, fitness))
+        assertTrue(AgeMetricProfile.acceptsFitnessAge(fitness, fitness))
+        assertFalse(AgeMetricProfile.acceptsVO2maxEstimate(null, vo2))
+        assertTrue(AgeMetricProfile.acceptsVO2maxEstimate(vo2, vo2))
+        assertNotEquals(AgeMetricProfile.LEGACY_FITNESS_AGE_KEY, AgeMetricProfile.FITNESS_AGE_KEY)
+        assertNotEquals(
+            AgeMetricProfile.LEGACY_VO2MAX_ESTIMATE_KEY,
+            AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
+        )
+    }
+
+    @Test
     fun vitalityV2NeverAcceptsAMissingOrLegacyMarker() {
         val current = AgeMetricProfile.vitalityToken(40.0)
 

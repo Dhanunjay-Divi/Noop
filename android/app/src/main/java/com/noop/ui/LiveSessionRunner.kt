@@ -14,7 +14,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
-// MARK: - LiveSessionRunner — the Live Session controller ("silent guardian" v1)
+// MARK: - LiveSessionRunner - the Live Session controller ("silent guardian" v1)
 //
 // The thin, impure shell around the pure [LiveSessionEngine]: a 1 Hz coroutine tick feeds the engine
 // wall-clock + the most-recent live bpm, publishes the engine's Output (plus elapsed/cue/accrual state)

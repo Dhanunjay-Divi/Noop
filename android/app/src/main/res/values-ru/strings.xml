@@ -39,7 +39,7 @@
     <string name="sleep_planner_duration_hours_minutes">%1$d ч %2$d мин</string>
     <string name="nav_alarms">Планировщик сна</string>
     <string name="strength_title">Силовые тренировки</string>
-    <string name="strength_subtitle">Программы, подходы, повторения, отдых и точные записи — конфиденциально на этом устройстве.</string>
+    <string name="strength_subtitle">Программы, подходы, повторения, отдых и точные записи - конфиденциально на этом устройстве.</string>
     <string name="strength_close_trainer">Закрыть силовые тренировки</string>
     <string name="strength_loading_title">Загрузка журнала силовых тренировок</string>
     <string name="strength_loading_body">Чтение личных программ, тренировок и подходов с этого устройства.</string>
@@ -73,7 +73,7 @@
     <string name="strength_no_finished_title">Нет завершённых силовых тренировок</string>
     <string name="strength_no_finished_body">Завершённые тренировки появятся здесь с подходами, повторениями и внешним весом.</string>
     <string name="strength_numbers_meaning_title">Что означают эти числа</string>
-    <string name="strength_numbers_meaning_body">Объём нагрузки — это внешний вес × повторения только для завершённых подходов. Подходы с собственным весом и на время тоже учитываются, но NOOP никогда не придумывает тоннаж или расчётный максимум на одно повторение.</string>
+    <string name="strength_numbers_meaning_body">Объём нагрузки - это внешний вес × повторения только для завершённых подходов. Подходы с собственным весом и на время тоже учитываются, но NOOP никогда не придумывает тоннаж или расчётный максимум на одно повторение.</string>
     <string name="strength_default_workout_name">Силовая тренировка</string>
     <string name="strength_session_actions">Действия с тренировкой</string>
     <string name="strength_edit_session">Изменить тренировку</string>
@@ -171,4 +171,10 @@
     <string name="strength_exercise_biceps_curl">Сгибания на бицепс</string>
     <string name="strength_exercise_triceps_pushdown">Разгибания на трицепс в блоке</string>
     <string name="strength_exercise_plank">Планка</string>
+    <string name="key_metrics_selection_instructions">Выберите до пяти метрик для Пульта управления и поставьте самую важную первой.</string>
+    <string name="key_metrics_selection_count">Выбрано %1$d из %2$d</string>
+    <string name="hydration_adaptive_timing_label">Адаптивное расписание</string>
+    <string name="hydration_adaptive_timing_help">Корректирует сегодняшний интервал по Нагрузке и подтверждённому потреблению воды. Недостающие данные не оцениваются.</string>
+    <string name="hydration_adaptive_timing_status">Сейчас каждые %1$d мин. Расписание меняется только при наличии подтверждающих данных за сегодня.</string>
+    <string name="hydration_base_interval_label">Базовый интервал</string>
 </resources>

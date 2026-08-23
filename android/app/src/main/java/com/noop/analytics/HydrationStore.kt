@@ -5,19 +5,29 @@ import com.noop.data.WhoopRepository
 import java.util.TimeZone
 
 /**
- * HydrationStore — the logging + read seam for the Hydration tracker (MVP, opt-in, local-only).
+ * HydrationStore — the logging + read seam for the opt-in Hydration tracker.
  *
  * Kotlin twin of the Swift hydration store calls. The day total is banked in the generic metric-series
  * store under the [KEY] series, keyed by the device's LOCAL calendar day — the SAME `metricSeries`
  * table + `WhoopRepository.upsertMetricSeries` path every other generic daily series uses (no schema
  * change). Because that table holds one row per (deviceId, day, key), a tap reads the day's running
  * total and re-upserts total + amount, so the stored value IS "the sum of today's hydration logged for
- * this local day". Everything stays on-device; nothing is synced.
+ * this local day". Confirmed Health Connect records remain in their own source partition and are
+ * merged conservatively at read time, so a drink mirrored by two apps is not counted twice.
  *
  * `ts` (a wall-clock unix second) selects which local day a log lands on; the goal itself comes from the
  * pure [HydrationGoal] engine, never from here.
  */
 object HydrationStore {
+
+    enum class ReadingSource { NOOP, HEALTH_CONNECT, BOTH }
+
+    data class Reading(
+        val valueMl: Double,
+        val source: ReadingSource,
+        val noopMl: Double,
+        val healthConnectMl: Double,
+    )
 
     /**
      * #989 (Kotlin twin of Repository.hydrationSeq): bumped on every mutation ([log] / [set]; [remove]
@@ -33,6 +43,13 @@ object HydrationStore {
     /** The source/device id the hydration total is written under — its own local-only source so it is
      *  never confused with strap-imported or computed metrics. Matches the Swift source id. */
     const val SOURCE_ID: String = "hydration"
+
+    private fun validTotal(value: Double?): Double =
+        value?.takeIf { it.isFinite() }?.coerceAtLeast(0.0) ?: 0.0
+
+    /** Conservative source merge: duplicate manual/relay records are possible, so never add totals. */
+    internal fun observedTotal(noopMl: Double?, healthConnectMl: Double?): Double =
+        maxOf(validTotal(noopMl), validTotal(healthConnectMl))
 
     /** Seconds EAST of UTC for the device's current zone — the offset [AnalyticsEngine.dayString] needs
      *  to bucket a timestamp on the LOCAL calendar day (matches the dashboard's local "today" read). */
@@ -52,7 +69,7 @@ object HydrationStore {
     suspend fun log(repo: WhoopRepository, amountMl: Int, ts: Long = System.currentTimeMillis() / 1000L): Double {
         if (amountMl <= 0) return total(repo, ts)
         val day = dayKey(ts)
-        val current = total(repo, ts)
+        val current = noopTotal(repo, day)
         val next = current + amountMl
         repo.upsertMetricSeries(listOf(MetricSeriesRow(SOURCE_ID, day, KEY, next)))
         mutationSeq.value += 1   // #989: tell Today's card directly (see mutationSeq)
@@ -96,14 +113,45 @@ object HydrationStore {
      */
     suspend fun remove(repo: WhoopRepository, amountMl: Int, ts: Long = System.currentTimeMillis() / 1000L): Double {
         if (amountMl <= 0) return total(repo, ts)
-        return set(repo, afterRemoving(total(repo, ts), amountMl), ts)
+        return set(repo, afterRemoving(noopTotal(repo, dayKey(ts)), amountMl), ts)
     }
 
-    /** The total fluid (ml) logged for the local day containing [ts] (defaults to now), or 0.0 when
-     *  nothing has been logged that day. */
-    suspend fun total(repo: WhoopRepository, ts: Long = System.currentTimeMillis() / 1000L): Double {
+    private suspend fun noopTotal(repo: WhoopRepository, day: String): Double =
+        validTotal(repo.metricSeries(SOURCE_ID, KEY, day, day).firstOrNull()?.value)
+
+    /** Source-aware confirmed intake for the local day containing [ts], or null when neither source
+     * has a record. NOOP and Health Connect remain visible separately for honest UI/corrections. */
+    suspend fun reading(
+        repo: WhoopRepository,
+        ts: Long = System.currentTimeMillis() / 1000L,
+    ): Reading? {
         val day = dayKey(ts)
-        return repo.metricSeries(SOURCE_ID, KEY, day, day).firstOrNull()?.value ?: 0.0
+        val noopRow = repo.metricSeries(SOURCE_ID, KEY, day, day).firstOrNull()
+        val healthRow = repo.metricSeries(
+            WhoopRepository.HEALTH_CONNECT_SOURCE,
+            KEY,
+            day,
+            day,
+        ).firstOrNull()
+        if (noopRow == null && healthRow == null) return null
+        val noop = validTotal(noopRow?.value)
+        val health = validTotal(healthRow?.value)
+        val source = when {
+            noopRow != null && healthRow != null -> ReadingSource.BOTH
+            noopRow != null -> ReadingSource.NOOP
+            else -> ReadingSource.HEALTH_CONNECT
+        }
+        return Reading(
+            valueMl = observedTotal(noop, health),
+            source = source,
+            noopMl = noop,
+            healthConnectMl = health,
+        )
+    }
+
+    /** The best confirmed fluid-intake total for the local day containing [ts], or 0 when unrecorded. */
+    suspend fun total(repo: WhoopRepository, ts: Long = System.currentTimeMillis() / 1000L): Double {
+        return reading(repo, ts)?.valueMl ?: 0.0
     }
 
     /**
@@ -120,11 +168,19 @@ object HydrationStore {
         val from = nowSec - (n - 1).toLong() * 86_400L
         val fromKey = dayKey(from)
         val toKey = dayKey(nowSec)
-        // One ranged read; project onto the full day grid so empty days read as 0 rather than vanishing.
-        val byDay = repo.metricSeries(SOURCE_ID, KEY, fromKey, toKey).associate { it.day to it.value }
+        // Keep sources separate and take the per-day max. Adding them would double a drink entered in
+        // NOOP and mirrored into Health Connect by another app.
+        val noopByDay = repo.metricSeries(SOURCE_ID, KEY, fromKey, toKey)
+            .associate { it.day to validTotal(it.value) }
+        val healthByDay = repo.metricSeries(
+            WhoopRepository.HEALTH_CONNECT_SOURCE,
+            KEY,
+            fromKey,
+            toKey,
+        ).associate { it.day to validTotal(it.value) }
         return (0 until n).map { i ->
             val key = dayKey(nowSec - (n - 1 - i).toLong() * 86_400L)
-            key to (byDay[key] ?: 0.0)
+            key to observedTotal(noopByDay[key], healthByDay[key])
         }
     }
 }

@@ -121,7 +121,7 @@ public enum SleepStager {
     // MARK: - H7 morning-stillness nap suppression (#531)
 
     // After a real overnight wake the wrist is often still (sitting with coffee, back in bed scrolling, a
-    // sofa) for a stretch that the gravity spine reads as a fresh "nap" — #531's 9 am phantom nap right after
+    // sofa) for a stretch that the gravity spine reads as a fresh "nap" - #531's 9 am phantom nap right after
     // the night ended. It is NOT a night-tail continuation (that is handled by `nightContinuationGapMin` and
     // exempted), and it can clear the ordinary daytime guard (it is long + the post-wake HR is still low), so
     // it slipped through. H7 holds a daytime block that BEGINS within `morningStillnessWindowMin` of the
@@ -191,7 +191,7 @@ public enum SleepStager {
     public static let maxOffWristSleepFraction: Double = 0.5
 
     /// Minimum average HR-stream density for the off-wrist HR-gap proxy to be trusted (#507). The proxy
-    /// reads a >`offWristHRGapMin`-minute hole in HR as "off the wrist" — valid only when HR is otherwise
+    /// reads a >`offWristHRGapMin`-minute hole in HR as "off the wrist" - valid only when HR is otherwise
     /// dense (live 5/MG, or a worn night with continuous HR), so a real gap is anomalous. A WHOOP 4.0's
     /// SYNCED night is reconstructed mostly from MOTION with sparse, derived HR, whose natural gaps would
     /// otherwise read as off-wrist and wrongly DROP a real night. So if the HR stream averages fewer than
@@ -520,7 +520,7 @@ public enum SleepStager {
         if seg.count < hrRefineMinSamples { return true }
         // Confirm on the run's MEDIAN, not its mean. A real sleep night carries brief arousal / wake HR
         // spikes (observed to ~190 bpm) that pull the MEAN above baseline × mult and reject the run — and for
-        // a typical single main-sleep run per night that means zero sessions ("no sleep recorded") — while
+        // a typical single main-sleep run per night that means zero sessions ("no sleep recorded") - while
         // the spike-robust median stays at the true sleep level. Baseline is itself a median, so both sides
         // use the same robust statistic; a genuinely elevated (awake) run still has a high median and fails.
         // Median ≤ mean for the right-skewed HR of a real night, so this only ever RELAXES the gate — every
@@ -669,7 +669,7 @@ public enum SleepStager {
         // Suspected morning stillness needs at least the ordinary daytime guard (long enough + a real dip).
         if !passesDaytimeGuard(p, restingHR: restingHR, baseline: baseline) { return false }
         // CONSUME the strap's OWN banked band sleep_state (#531 / H8): if the strap itself scored this block
-        // predominantly "asleep", that is a strong independent re-onset anchor — KEEP it even on a borderline
+        // predominantly "asleep", that is a strong independent re-onset anchor - KEEP it even on a borderline
         // HR dip. This only ever RESCUES a block the strap says was real sleep; it never fabricates one.
         if bandStateConfirmsAsleep(p, bandSleepState: bandSleepState) { return true }
         // Otherwise require the clearly-deeper cardiac dip of a true second sleep.
@@ -916,7 +916,7 @@ public enum SleepStager {
             }
             // H4 physiological in-bed span cap (#547/#531/#509 tail): a single assembled main-sleep run
             // longer than ~16 h is a bad-clock artefact (a frozen still stretch banked under a stale/wrong
-            // clock), not a real night. Drop it rather than report (or truncate to) a 12 h+ "sleep" — an
+            // clock), not a real night. Drop it rather than report (or truncate to) a 12 h+ "sleep" - an
             // over-long block can't be trusted to assert a span at all, and truncating would fabricate a
             // wake time. Checked before staging so the artefact never reaches the aggregate.
             if (p.end - p.start) > maxMainSleepSpanS {
@@ -933,7 +933,7 @@ public enum SleepStager {
             }
             // Off-wrist backstop (#500), FRACTIONAL rule (design credited to j0b-dev's #504 analysis):
             // a wrist-OFF stretch is still gravity with no HR, so it slips past both the gravity spine
-            // and the daytime guard's "missing data" path. Measure off-wrist COVERAGE — the union of the
+            // and the daytime guard's "missing data" path. Measure off-wrist COVERAGE - the union of the
             // run's long HR-coverage gaps (the must-have proxy) and any WRIST_OFF→WRIST_ON intervals
             // overlapping it — and drop the run only when that reaches maxOffWristSleepFraction of its
             // duration. This no longer nukes a real night that over-extends into a SHORT (<50%) off-wrist
@@ -1785,7 +1785,7 @@ public enum SleepStager {
                                    onsetIdx: Int, finalWakeIdx: Int) -> [String] {
         var out = labels
         let noREMEpochs = Int((noREMAfterOnsetMin * 60.0 / epochS).rounded())
-        // "Deep is front-loaded" re-imposes scattered late "deep" back to light — BUT only when there's
+        // "Deep is front-loaded" re-imposes scattered late "deep" back to light - BUT only when there's
         // deep in the first third to anchor that prior. If the whole detected deep block lands later
         // (individual variation, or HR/HRV-only staging without respiration placing the deepest, lowest-HR
         // window later), zeroing it out gives a wrong "0 m deep"; keeping the best estimate is better. (#127)
@@ -1995,7 +1995,7 @@ public enum SleepStager {
     }
 
     /// Display/scoring smoothing of the staged label sequence (#274). Absorbs sub-threshold
-    /// "noise" runs WITHOUT erasing real transitions — applied AFTER staging, it never
+    /// "noise" runs WITHOUT erasing real transitions - applied AFTER staging, it never
     /// touches the underlying per-epoch detection.
     ///
     /// Per run shorter than fragmentMergeEpochs:
@@ -2162,7 +2162,7 @@ public enum SleepStager {
         return out
     }
 
-    /// The LAST contiguous run of deep-stage windows in `windows` — the WHOOP-style "last slow-wave-sleep"
+    /// The LAST contiguous run of deep-stage windows in `windows` - the WHOOP-style "last slow-wave-sleep"
     /// comparator for the HRV nightly trace. Empty when no deep window is present. (#141)
     static func lastDeepRun(_ windows: [HrvWindow]) -> [HrvWindow] {
         var lastRun: [HrvWindow] = []

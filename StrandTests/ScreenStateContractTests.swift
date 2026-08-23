@@ -195,6 +195,7 @@ final class NutritionLocalizationAccessibilityContractTests: XCTestCase {
 
         XCTAssertTrue(shell.contains("expandedReservedHeight: CGFloat = 88"))
         XCTAssertTrue(shell.contains(".padding(.bottom, visibleTabBarHeight)"))
+        XCTAssertFalse(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
         XCTAssertFalse(shell.contains("floatingTabBarClearance"))
     }
 }

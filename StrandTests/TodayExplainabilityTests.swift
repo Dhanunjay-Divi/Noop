@@ -80,7 +80,7 @@ final class TodayExplainabilityTests: XCTestCase {
         XCTAssertEqual(s, .carriedLastNight(date: "14 May", stale: true))
         XCTAssertEqual(rendered(s.title), "Latest sleep · 14 May")
         XCTAssertEqual(s.accessibilityText,
-                       "Latest sleep, 14 May. This is your last scored session. Wear the strap overnight for a fresh score.")
+                       "Latest sleep, 14 May. This is your last scored session. Wear Noop Band overnight for a fresh score.")
     }
 
     func testScoreState_nothingBanked_isNeedsStrap() {
@@ -127,12 +127,12 @@ final class TodayExplainabilityTests: XCTestCase {
 
     func testScoreState_carriedLastNight_stampsDate() {
         XCTAssertEqual(MetricTileState.carriedLastNight(date: "14 Jun", stale: false).accessibilityText,
-                       "Last night, 14 Jun. Tonight's lands after you sleep with the strap on.")
+                       "Last night, 14 Jun. Tonight's lands after you sleep with Noop Band on.")
     }
 
     func testScoreState_needsStrap_copy() {
         XCTAssertEqual(MetricTileState.needsStrap.accessibilityText,
-                       "Needs the strap. No data for today. Was your strap worn and connected overnight?")
+                       "Needs wearable data. No data for today. Was Noop Band worn and connected overnight?")
     }
 
     func testScoreState_scored_hasNoStateText() {
@@ -229,7 +229,7 @@ final class TodayExplainabilityTests: XCTestCase {
 
     func testRecordingState_recording_copy() {
         XCTAssertEqual(RecordingState.recording.accessibilityText,
-                       "Recording. Your strap is connected and saving data.")
+                       "Recording. Noop Band is connected and saving data.")
     }
 
     func testRecordingState_lastSynced_copy() {
@@ -239,7 +239,7 @@ final class TodayExplainabilityTests: XCTestCase {
 
     func testRecordingState_notRecording_copy() {
         XCTAssertEqual(RecordingState.notRecording.accessibilityText,
-                       "Not recording. Strap not connected. Tap to connect.")
+                       "Not recording. Noop Band is not connected. Tap to connect.")
     }
 
     func testRecordingState_copy_hasNoEmDash() {
@@ -312,13 +312,11 @@ final class TodayExplainabilityTests: XCTestCase {
             "Apple Watch")
     }
 
-    func testTodayChipLabel_nonWatchSources_deferToSharedLabel() {
-        // Everything else stays byte-identical to the shared provenance label (and the footer): the
-        // Today relabel only touches the apple-health source.
+    func testTodayChipLabel_usesProductFacingBandNameAndPreservesOtherSources() {
         XCTAssertEqual(
             TodayView.todayProvenanceChipLabel(rawSource: "my-whoop", deviceId: "my-whoop",
                                                appleHealthSource: "apple-health"),
-            "Whoop")
+            "Noop Band")
         XCTAssertEqual(
             TodayView.todayProvenanceChipLabel(rawSource: "my-whoop-noop", deviceId: "my-whoop",
                                                appleHealthSource: "apple-health"),
@@ -342,7 +340,7 @@ final class TodayExplainabilityTests: XCTestCase {
             LiquidTodayView.heroSourceLabel(
                 rawSources: ["my-whoop", "my-whoop-noop", "apple-health"],
                 deviceId: "my-whoop"),
-            "Whoop + On-device")
+            "Noop Band + On-device")
     }
 
     func testLiquidHeroSourceLabel_hidesWhenNoScoreHasAResolvedSource() {

@@ -438,7 +438,7 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/LiveSessionScreen.kt",
-      "Signal lost — coaching paused."
+      "Signal lost. Coaching paused."
     ],
     [
       "android/app/src/main/java/com/noop/ui/LiveWorkoutScreen.kt",
@@ -952,7 +952,7 @@
     ],
     [
       "Strand/Screens/SettingsView.swift",
-      "NOOP estimates your steps from your WHOOP's motion, calibrated to your phone's step count. It's an estimate, not a step counter — a WHOOP 5.0 / MG streams motion (not a step count) only with deep data on."
+      "NOOP estimates your steps from your WHOOP's motion, calibrated to your phone's step count. It's an estimate, not a step counter. A WHOOP 5.0 / MG streams motion (not a step count) only with deep data on."
     ],
     [
       "Strand/Screens/SettingsView.swift",

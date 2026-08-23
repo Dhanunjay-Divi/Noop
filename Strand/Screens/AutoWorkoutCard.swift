@@ -23,6 +23,8 @@ struct AutoWorkoutCard: View {
     /// Guards the Save button while the write is in flight.
     @State private var saving = false
     @State private var saveError: String?
+    /// User-confirmed specific activity. Detection stays broad; this picker carries the honest game/sport.
+    @State private var selectedSportName = ""
 
     var body: some View {
         Group {
@@ -91,12 +93,27 @@ struct AutoWorkoutCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
+                HStack(spacing: NoopMetrics.space2) {
+                    Label("Activity", systemImage: "figure.mixed.cardio")
+                        .font(StrandFont.subhead)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    Spacer(minLength: 8)
+                    Picker("Activity", selection: $selectedSportName) {
+                        ForEach(WorkoutCatalog.all) { sport in
+                            Text(sport.name).tag(sport.name)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .tint(StrandPalette.accent)
+                    .accessibilityHint("Choose the exact activity or game before saving")
+                }
+
                 HStack(spacing: NoopMetrics.space3) {
                     Button {
                         save(w)
                     } label: {
-                        Label(w.suggestedClass.map { "Save as \(className($0))" } ?? "Save it",
-                              systemImage: "checkmark")
+                        Label("Save workout", systemImage: "checkmark")
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(StrandPalette.accent)
@@ -216,14 +233,19 @@ struct AutoWorkoutCard: View {
             }
         }
         // A fresh scan resets the session guard so a NEW window can surface after one is handled.
-        if next != candidate { handledThisSession = false }
+        if next != candidate {
+            handledThisSession = false
+            selectedSportName = next.map(AutoWorkoutSportPreference.preferredSport) ?? ""
+        }
         candidate = next
     }
 
     private func save(_ w: DetectedWorkout) {
         saving = true
+        let selectedSport = selectedSportName
         Task {
-            if await repo.saveDetectedWorkout(w) {
+            if await repo.saveDetectedWorkout(w, sportOverride: selectedSport) {
+                AutoWorkoutSportPreference.remember(selectedSport, for: w.suggestedClass)
                 AutoWorkoutNotifications.removeHandled()
                 handledThisSession = true
                 candidate = nil
@@ -289,4 +311,32 @@ struct AutoWorkoutCard: View {
 private struct AutoWorkoutLoadKey: Equatable {
     let seq: Int
     let mode: String
+}
+
+/// Remembers the user's last exact choice for each broad detector hint. Values are catalog labels only,
+/// never free text, so this preference contains no private note or location.
+private enum AutoWorkoutSportPreference {
+    private static let keyPrefix = "workouts.autoDetectPreferredSport."
+
+    static func preferredSport(for candidate: DetectedWorkout) -> String {
+        let key = keyPrefix + (candidate.suggestedClass?.rawValue ?? "generic")
+        if let stored = UserDefaults.standard.string(forKey: key),
+           let match = WorkoutCatalog.sport(named: stored) {
+            return match.name
+        }
+        switch candidate.suggestedClass {
+        case .walk: return "Walking"
+        case .run: return "Running"
+        case .strength: return "Strength"
+        case .cycle: return "Cycling"
+        case .ski: return "Skiing"
+        case .other, .none: return WorkoutCatalog.defaultSportName
+        }
+    }
+
+    static func remember(_ sportName: String, for hint: CoarseWorkoutClass?) {
+        guard let sport = WorkoutCatalog.sport(named: sportName) else { return }
+        let key = keyPrefix + (hint?.rawValue ?? "generic")
+        UserDefaults.standard.set(sport.name, forKey: key)
+    }
 }

@@ -5,7 +5,7 @@ import com.noop.data.HrSample
 import kotlin.math.sqrt
 
 /*
- * AutoWorkoutDetector.kt — MVP retroactive "did you just work out?" detector.
+ * AutoWorkoutDetector.kt - MVP retroactive "did you just work out?" detector.
  *
  * Faithful Kotlin port of StrandAnalytics/AutoWorkoutDetector.swift — the two MUST stay
  * BYTE-PARITY on the detection logic (same thresholds, same span/merge/overlap rules,

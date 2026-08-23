@@ -1,7 +1,7 @@
 import Foundation
 import WhoopStore
 
-// MARK: - SleepMark (#461 Phase 1 — tap-to-mark "going to sleep" / "awake")
+// MARK: - SleepMark (#461 Phase 1 - tap-to-mark "going to sleep" / "awake")
 //
 // A user-tapped sleep boundary, captured for the record only — it does NOT feed the sleep detector
 // (that stays the strap's job). Phase 1 is pure logging: every mark is persisted into the existing
@@ -105,7 +105,7 @@ struct SleepMark: Equatable, Sendable {
         return f
     }()
 
-    /// Device-locale clock for the log line ("11:42 PM" / "23:42") — follows the 12-/24-hour setting,
+    /// Device-locale clock for the log line ("11:42 PM" / "23:42") - follows the 12-/24-hour setting,
     /// matching the Sleep screen's Asleep/Woke row.
     private static let clockFormatter: DateFormatter = {
         let f = DateFormatter()

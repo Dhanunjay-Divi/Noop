@@ -4,10 +4,9 @@ import android.content.Context
 
 // MARK: - Editable Key-Metrics layout (#251)
 //
-// The Today screen's "Key Metrics" grid was a fixed list of ten tiles in one order. This lets the user
-// choose WHICH tiles show and in WHAT order, with the default being the original order so nothing changes
-// for anyone who never opens the editor. Persistence is display-only — no metric is computed or stored
-// differently; this just decides which of the already-computed tiles render and in what sequence.
+// The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin one to five in
+// their preferred order. A fresh install starts with NOOP's three core daily signals — Recovery, Effort,
+// and Sleep — while every other metric remains available in the editor. Persistence is display-only.
 //
 // Stored as a single comma-joined string of metric keys in SharedPreferences ("today.keyMetrics"), the
 // same mechanism every other Android preference uses. Mirrors the macOS KeyMetricPrefs.swift +
@@ -40,11 +39,14 @@ enum class KeyMetric(
     companion object {
         fun fromRaw(raw: String?): KeyMetric? = entries.firstOrNull { it.raw == raw }
 
-        /** The original, hard-coded grid order — the default when the layout isn't customised. */
+        /** Canonical catalog order. Includes every choice and orders unselected editor rows. */
         val defaultOrder: List<KeyMetric> = listOf(
             CHARGE, EFFORT, REST, HRV, RESTING_HR,
             BLOOD_OXYGEN, RESPIRATORY, STEPS, WEIGHT, CALORIES,
         )
+
+        /** NOOP's useful fresh-install starting point. Users can replace or extend it up to five. */
+        val defaultSelection: List<KeyMetric> = listOf(CHARGE, EFFORT, REST)
     }
 }
 
@@ -55,7 +57,9 @@ enum class KeyMetric(
  * Mirrors the macOS KeyMetricPrefs (@AppStorage "today.keyMetrics").
  */
 object KeyMetricPrefs {
-    private const val KEY_LAYOUT = "today.keyMetrics"
+    internal const val KEY_LAYOUT = "today.keyMetrics"
+    const val MIN_SELECTION_COUNT = 1
+    const val MAX_SELECTION_COUNT = 5
     private const val KEY_DETAILED = "today.keyMetricsDetailed"
 
     /** Whether the Key-Metrics tiles render DETAILED — taller/squarer with a 14-day trend graph under the
@@ -79,30 +83,36 @@ object KeyMetricPrefs {
         NoopPrefs.of(context).edit().putInt(KEY_WINDOW, value).apply()
     }
 
-    /** The enabled tiles in display order. An empty/unset string yields the full default order. */
+    /** The selected tiles in display order. Empty/unset preferences yield the three core defaults. */
     fun enabled(context: Context): List<KeyMetric> =
         decodeEnabled(NoopPrefs.of(context).getString(KEY_LAYOUT, null))
 
-    /** Persist the enabled tiles in order. Disabled tiles are simply omitted from the stored string. */
+    /** Persist a valid ordered selection; the preference boundary enforces the same invariants as the UI. */
     fun setEnabled(context: Context, metrics: List<KeyMetric>) {
         NoopPrefs.of(context).edit().putString(KEY_LAYOUT, encode(metrics)).apply()
     }
 
-    /** Encode an ordered list of enabled tiles into the stored comma-joined string. */
-    fun encode(metrics: List<KeyMetric>): String = metrics.joinToString(",") { it.raw }
+    /** Encode an ordered, deduplicated selection capped at five. */
+    fun encode(metrics: List<KeyMetric>): String =
+        normalized(metrics).joinToString(",") { it.raw }
 
     /**
-     * Decode the stored string into an ordered list of enabled tiles. An empty/unset string yields the
-     * full default order (so a fresh install shows every tile). Unknown tokens are ignored, duplicates
-     * collapsed; this returns ONLY the enabled tiles in their saved order.
+     * Decode the stored string into an ordered selection. Empty, unset, or all-unknown data yields the
+     * three core defaults. Older versions allowed more than five; their first five survive in order.
      */
     fun decodeEnabled(raw: String?): List<KeyMetric> {
         val trimmed = raw?.trim().orEmpty()
-        if (trimmed.isEmpty()) return KeyMetric.defaultOrder
+        if (trimmed.isEmpty()) return KeyMetric.defaultSelection
         val seen = LinkedHashSet<KeyMetric>()
         trimmed.split(",").forEach { token ->
-            KeyMetric.fromRaw(token.trim())?.let { seen.add(it) }
+            if (seen.size < MAX_SELECTION_COUNT) {
+                KeyMetric.fromRaw(token.trim())?.let { seen.add(it) }
+            }
         }
-        return if (seen.isEmpty()) KeyMetric.defaultOrder else seen.toList()
+        return if (seen.isEmpty()) KeyMetric.defaultSelection else seen.toList()
     }
+
+    /** Ordered dedupe + cap. Today always retains at least the product-default metric set. */
+    fun normalized(metrics: List<KeyMetric>): List<KeyMetric> =
+        metrics.distinct().take(MAX_SELECTION_COUNT).ifEmpty { KeyMetric.defaultSelection }
 }

@@ -54,6 +54,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.noop.R
+import com.noop.ble.WhoopConnectionService
+import com.noop.safety.FallResponsePolicy
 import com.noop.safety.SafetyCheckInPolicy
 import com.noop.safety.SafetyCheckInReminderPrefs
 import com.noop.safety.SafetyCheckInReminderScheduler
@@ -68,6 +70,7 @@ import com.noop.safety.SafetyResponseDecision
 import com.noop.safety.SafetyShareCopy
 import com.noop.safety.SafetyShareIntent
 import com.noop.safety.SafetyShareMessage
+import com.noop.safety.SafetySosGesturePrefs
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -113,10 +116,30 @@ fun SafetyCenterScreen() {
     var offerNotificationSettings by remember { mutableStateOf(false) }
     var confirmsContactPage by remember { mutableStateOf(false) }
     var pendingIncidentAction by remember { mutableStateOf<SafetyIncidentAction?>(null) }
+    var sosGestureEnabled by remember {
+        mutableStateOf(SafetySosGesturePrefs.enabled(context))
+    }
+    var sosGestureEvents by remember {
+        mutableStateOf(SafetySosGesturePrefs.requiredEvents(context))
+    }
+    val hasForegroundLocation =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+    val hasBackgroundLocation =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+            ) == PackageManager.PERMISSION_GRANTED
+    val sosLocationReady = hasForegroundLocation && hasBackgroundLocation
     val reminderAvailability = SafetyCheckInReminderScheduler.deliveryAvailability(context)
     val scheduleFailure = stringResource(R.string.safety_error_schedule)
     val notificationsOffStart = stringResource(R.string.safety_error_notifications_start)
     val channelOffStart = stringResource(R.string.safety_error_channel_start)
+    val sosThreeLabel = stringResource(R.string.safety_sos_gesture_three)
+    val sosFourLabel = stringResource(R.string.safety_sos_gesture_four)
     val safetyShareCopy = SafetyShareCopy(
         needHelpNowOpening = stringResource(R.string.safety_message_need_help_opening),
         feelUnsafeOpening = stringResource(R.string.safety_message_feel_unsafe_opening),
@@ -166,6 +189,9 @@ fun SafetyCenterScreen() {
     ) { result ->
         if (result.values.any { it }) captureLocation() else locationState = SafetyLocationState.Denied
     }
+    val sosLocationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { }
 
     fun requestLocation() {
         val granted =
@@ -385,6 +411,60 @@ fun SafetyCenterScreen() {
         }
 
         SectionHeader(
+            stringResource(R.string.safety_fall_section),
+            overline = stringResource(R.string.safety_fall_overline),
+        )
+        NoopCard(tint = Palette.statusWarning) {
+            Column(verticalArrangement = Arrangement.spacedBy(Metrics.space12)) {
+                Row(
+                    modifier = Modifier.semantics(mergeDescendants = true) {},
+                    horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Icon(
+                        Icons.Filled.Shield,
+                        contentDescription = null,
+                        tint = Palette.statusWarning,
+                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(Metrics.space8),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Text(
+                                stringResource(R.string.safety_fall_title),
+                                style = NoopType.headline,
+                                color = Palette.textPrimary,
+                                modifier = Modifier.weight(1f),
+                            )
+                            StatePill(
+                                stringResource(R.string.safety_fall_status),
+                                tone = StrandTone.Warning,
+                            )
+                        }
+                        Text(
+                            stringResource(
+                                R.string.safety_fall_body_format,
+                                FallResponsePolicy.RESPONSE_WINDOW_SECONDS,
+                            ),
+                            style = NoopType.body,
+                            color = Palette.textSecondary,
+                        )
+                    }
+                }
+                Text(
+                    stringResource(R.string.safety_fall_requirements),
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                )
+            }
+        }
+
+        SectionHeader(
             stringResource(R.string.safety_contacts_section),
             overline = stringResource(R.string.safety_network_overline),
         )
@@ -526,6 +606,54 @@ fun SafetyCenterScreen() {
                             },
                         )
                     }
+                    dispatch.latestLocation?.let { latest ->
+                        HorizontalDivider(color = Palette.hairline)
+                        Row(
+                            modifier = Modifier.semantics(mergeDescendants = true) {},
+                            horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Icon(
+                                Icons.Filled.LocationOn,
+                                contentDescription = null,
+                                tint = Palette.statusPositive,
+                            )
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+                            ) {
+                                Text(
+                                    stringResource(R.string.safety_sos_location_latest),
+                                    style = NoopType.body,
+                                    color = Palette.textPrimary,
+                                )
+                                latest.horizontalAccuracyMeters?.let { accuracy ->
+                                    Text(
+                                        stringResource(
+                                            R.string.safety_sos_location_accuracy_format,
+                                            accuracy.roundToInt(),
+                                        ),
+                                        style = NoopType.caption,
+                                        color = Palette.textTertiary,
+                                    )
+                                }
+                            }
+                        }
+                        NoopButton(
+                            text = stringResource(R.string.safety_sos_location_open_maps),
+                            leadingIcon = Icons.Filled.LocationOn,
+                            kind = NoopButtonKind.Secondary,
+                            fullWidth = true,
+                        ) {
+                            val coordinates = "${latest.latitude},${latest.longitude}"
+                            val uri = Uri.parse(
+                                "https://www.google.com/maps/search/?api=1&query=$coordinates",
+                            )
+                            runCatching {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                            }
+                        }
+                    }
                     if (dispatch.status in setOf(
                             SafetyIncidentStatus.OPEN,
                             SafetyIncidentStatus.ACKNOWLEDGED,
@@ -551,6 +679,147 @@ fun SafetyCenterScreen() {
                             pendingIncidentAction = SafetyIncidentAction.Cancel
                         }
                     }
+                }
+
+                HorizontalDivider(color = Palette.hairline)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .toggleable(
+                            value = sosGestureEnabled,
+                            role = Role.Switch,
+                            onValueChange = { enabled ->
+                                sosGestureEnabled = enabled
+                                SafetySosGesturePrefs.setEnabled(context, enabled)
+                                if (enabled) WhoopConnectionService.start(context)
+                            },
+                        )
+                        .padding(vertical = Metrics.space4)
+                        .semantics(mergeDescendants = true) {},
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+                    ) {
+                        Text(
+                            stringResource(R.string.safety_sos_gesture_title),
+                            style = NoopType.headline,
+                            color = Palette.textPrimary,
+                        )
+                        Text(
+                            stringResource(R.string.safety_sos_gesture_subtitle),
+                            style = NoopType.footnote,
+                            color = Palette.textSecondary,
+                        )
+                    }
+                    Spacer(Modifier.width(Metrics.space12))
+                    Switch(
+                        checked = sosGestureEnabled,
+                        onCheckedChange = null,
+                    )
+                }
+
+                if (sosGestureEnabled) {
+                    Text(
+                        stringResource(R.string.safety_sos_gesture_repeats),
+                        style = NoopType.overline,
+                        color = Palette.textTertiary,
+                    )
+                    SegmentedPillControl(
+                        items = listOf(3, 4),
+                        selection = sosGestureEvents,
+                        label = { if (it == 3) sosThreeLabel else sosFourLabel },
+                        accessibilityLabel = {
+                            if (it == 3) sosThreeLabel else sosFourLabel
+                        },
+                        onSelect = { count ->
+                            sosGestureEvents = count
+                            SafetySosGesturePrefs.setRequiredEvents(context, count)
+                        },
+                        adaptsToAvailableWidth = true,
+                    )
+                    Text(
+                        stringResource(
+                            R.string.safety_sos_gesture_help_format,
+                            sosGestureEvents,
+                        ),
+                        style = NoopType.footnote,
+                        color = Palette.textSecondary,
+                    )
+                    Text(
+                        stringResource(R.string.safety_sos_gesture_priority),
+                        style = NoopType.caption,
+                        color = Palette.textTertiary,
+                    )
+
+                    HorizontalDivider(color = Palette.hairline)
+                    Row(
+                        modifier = Modifier.semantics(mergeDescendants = true) {},
+                        horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Icon(
+                            Icons.Filled.LocationOn,
+                            contentDescription = null,
+                            tint = if (sosLocationReady) {
+                                Palette.statusPositive
+                            } else {
+                                Palette.statusWarning
+                            },
+                        )
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+                        ) {
+                            Text(
+                                stringResource(R.string.safety_sos_location_title),
+                                style = NoopType.body,
+                                color = Palette.textPrimary,
+                            )
+                            Text(
+                                stringResource(
+                                    if (sosLocationReady) {
+                                        R.string.safety_sos_location_ready
+                                    } else {
+                                        R.string.safety_sos_location_permission
+                                    },
+                                ),
+                                style = NoopType.caption,
+                                color = Palette.textTertiary,
+                            )
+                        }
+                    }
+                    if (!sosLocationReady) {
+                        NoopButton(
+                            text = stringResource(
+                                if (hasForegroundLocation) {
+                                    R.string.safety_sos_location_settings
+                                } else {
+                                    R.string.safety_sos_location_enable
+                                },
+                            ),
+                            leadingIcon = Icons.Filled.MyLocation,
+                            kind = NoopButtonKind.Secondary,
+                            fullWidth = true,
+                        ) {
+                            if (hasForegroundLocation) {
+                                openAppSettings()
+                            } else {
+                                sosLocationPermissionLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        stringResource(R.string.safety_sos_location_retention),
+                        style = NoopType.caption,
+                        color = Palette.textTertiary,
+                    )
                 }
                 Text(
                     stringResource(R.string.safety_page_disclaimer),

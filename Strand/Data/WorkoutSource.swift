@@ -5,10 +5,10 @@ import StrandAnalytics   // WorkoutsTrace: the dedup-decision line formatter for
 /// Origin of a workout row, classified from its stored `source` column. The macOS read model
 /// (`WorkoutRow`) carries no `deviceId`, so the row's origin has to be recovered from `source`.
 /// Stored values today:
-///   - "whoop"        — WhoopImporter (imported WHOOP session)
-///   - "apple_health" / "apple-health" — AppleHealthImport
-///   - "manual"       — AppModel.endWorkout (v1.67 live session) AND the retro add/edit sheet
-///   - "my-whoop-noop"— IntelligenceEngine detected bouts (source == the computed deviceId, i.e.
+///   - "whoop"        - WhoopImporter (imported WHOOP session)
+///   - "apple_health" / "apple-health" - AppleHealthImport
+///   - "manual"       - AppModel.endWorkout (v1.67 live session) AND the retro add/edit sheet
+///   - "my-whoop-noop"- IntelligenceEngine detected bouts (source == the computed deviceId, i.e.
 ///                       it ends in "-noop"). These are re-derived every analyzeRecent run.
 ///
 /// Classification order matters: "-noop" is checked BEFORE "whoop" because the computed id
@@ -143,7 +143,7 @@ enum WorkoutSource: Equatable {
         return catalogSportKeys.contains(key) ? key : "custom"
     }
 
-    /// How many "rich" captured signals a row carries — the tiebreak for which duplicate to keep.
+    /// How many "rich" captured signals a row carries - the tiebreak for which duplicate to keep.
     /// A live-tracked strap session scores high (HR trace, peak, strain, zones, distance); a thin
     /// import scores low. Energy is the most commonly-present import field so it is weighted lowest.
     static func richness(_ row: WorkoutRow) -> Int {
@@ -233,7 +233,7 @@ enum WorkoutSource: Equatable {
     }
 
     /// The shared cross-source collapse walk behind `dedupCrossSource` and `dedupCrossSourceTrace`. Byte-
-    /// identical to the naive "compare every kept row" walk — same first match (kept insertion order), same
+    /// identical to the naive "compare every kept row" walk - same first match (kept insertion order), same
     /// `preferred` winner, same resulting list — but near-linear instead of O(n²): `sportKey` is computed
     /// ONCE per row (not twice per comparison), rows are bucketed by it, and a candidate only ever compares
     /// against kept rows of the SAME sport (a cross-sport pair can never be `sameActivity`). That removes the

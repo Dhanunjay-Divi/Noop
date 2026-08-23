@@ -309,7 +309,7 @@ fun LiquidSkyStatic(hour: Double? = null, modifier: Modifier = Modifier, settleS
 /**
  * A subtle full-bleed time-of-day sky for any screen's top background, so the liquid atmosphere carries
  * across EVERY tab. Same static sky as the chart-heavy tabs at a modest header [height], top-aligned,
- * so the charts/cards below sit on the dark canvas — the redesign's "the options change, not the page"
+ * so the charts/cards below sit on the dark canvas - the redesign's "the options change, not the page"
  * feel. Non-interactive + accessibility-hidden (pure decoration). Mirrors the iOS `liquidScaffoldSky`.
  */
 @Composable

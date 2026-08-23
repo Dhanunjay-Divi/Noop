@@ -22,6 +22,7 @@ final class VitalBandsTests: XCTestCase {
         XCTAssertEqual(r.band, .outOfRange)
         XCTAssertEqual(r.basis, .population)
         XCTAssertEqual(r.nights, 10)
+        XCTAssertEqual(r.range, hrvPop)
     }
 
     // The fix: at 14 trusted nights the same 35 ms is in-range against the user's OWN baseline.
@@ -31,6 +32,8 @@ final class VitalBandsTests: XCTestCase {
         XCTAssertEqual(r.band, .inRange)
         XCTAssertEqual(r.basis, .personal)
         XCTAssertEqual(r.nights, 14)
+        XCTAssertNotNil(r.range)
+        XCTAssertTrue(r.range?.contains(35) == true)
     }
 
     func testPersonalBigDeviationOutOfRange() {
@@ -39,6 +42,7 @@ final class VitalBandsTests: XCTestCase {
                                 populationRange: hrvPop, cfg: hrvCfg)
         XCTAssertEqual(r.band, .outOfRange)
         XCTAssertEqual(r.basis, .personal)
+        XCTAssertFalse(r.range?.contains(70) ?? true)
     }
 
     func testPersonalJustInside2SigmaInRange() {
@@ -64,6 +68,7 @@ final class VitalBandsTests: XCTestCase {
         let r = VitalBands.band(value: 93, history: [], populationRange: 95...100, cfg: nil)
         XCTAssertEqual(r.band, .outOfRange)
         XCTAssertEqual(r.basis, .population)
+        XCTAssertEqual(r.range, 95...100)
     }
 
     func testNilNightsDoNotCountTowardTrust() {
@@ -85,6 +90,45 @@ final class VitalBandsTests: XCTestCase {
         let mixed: [Double?] = [34.1, 0.2, nil, 33.8, -0.1]
         XCTAssertEqual(VitalBands.skinTempHistory(matching: 0.3, in: mixed), [nil, 0.2, nil, nil, -0.1])
         XCTAssertEqual(VitalBands.skinTempHistory(matching: 34.0, in: mixed), [34.1, nil, nil, 33.8, nil])
+    }
+
+    func testSkinTempDeviationRejectsAbsoluteAndImplausibleValues() {
+        XCTAssertEqual(VitalBands.skinTempDeviation(from: 0.7), 0.7)
+        XCTAssertEqual(VitalBands.skinTempDeviation(from: -8.0), -8.0)
+        XCTAssertNil(VitalBands.skinTempDeviation(from: 34.2))
+        XCTAssertNil(VitalBands.skinTempDeviation(from: 9.0))
+        XCTAssertNil(VitalBands.skinTempDeviation(from: .nan))
+    }
+
+    func testAbsoluteSkinTempIllnessSignalUsesAbsolutePersonalBaseline() throws {
+        let assessment = try XCTUnwrap(VitalBands.skinTempIllnessAssessment(
+            recent: [35.0, 35.0],
+            baseline: Array(repeating: 34.0, count: 20)
+        ))
+        XCTAssertEqual(assessment.kind, .absolute)
+        XCTAssertTrue(assessment.baselineTrusted)
+        XCTAssertEqual(try XCTUnwrap(assessment.deltaFromBaselineC), 1.0, accuracy: 0.001)
+        XCTAssertGreaterThan(assessment.reading.zIllnessward, 2.0)
+    }
+
+    func testDeviationSkinTempIllnessSignalIgnoresAbsoluteRows() throws {
+        let mixedBase: [Double?] =
+            Array(repeating: 34.0, count: 8) + Array(repeating: 0.0, count: 14)
+        let assessment = try XCTUnwrap(VitalBands.skinTempIllnessAssessment(
+            recent: [34.8, 0.6],
+            baseline: mixedBase
+        ))
+        XCTAssertEqual(assessment.kind, .deviation)
+        XCTAssertTrue(assessment.baselineTrusted)
+        XCTAssertEqual(try XCTUnwrap(assessment.deltaFromBaselineC), 0.6, accuracy: 0.001)
+        XCTAssertEqual(assessment.reading.zIllnessward, 2.0, accuracy: 0.001)
+    }
+
+    func testSkinTempIllnessSignalFailsClosedForInvalidNewestValue() {
+        XCTAssertNil(VitalBands.skinTempIllnessAssessment(
+            recent: [0.4, 12.0],
+            baseline: Array(repeating: 0.0, count: 20)
+        ))
     }
 
     func testCalendarSeriesPadsMissingDays() {

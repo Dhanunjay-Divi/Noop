@@ -52,7 +52,7 @@ object BreathPacer {
     /** Loops for an exhale onset — two pulses (heavier), as Breathe fires today. */
     const val EXHALE_LOOPS: Int = 2
 
-    /** Default inhale fraction of the cycle — the calming long-exhale ratio (≈40:60) the "Relax" preset
+    /** Default inhale fraction of the cycle - the calming long-exhale ratio (≈40:60) the "Relax" preset
      *  uses. Exhale gets the remaining 0.6. */
     const val DEFAULT_INHALE_FRACTION: Double = 0.4
 

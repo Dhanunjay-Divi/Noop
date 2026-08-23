@@ -140,7 +140,7 @@ public struct RecoveryRing: View {
 
     // MARK: Brand layers
 
-    /// Micro "NOOP" wordmark above the number — the recovery ring carries the
+    /// Micro "NOOP" wordmark above the number - the recovery ring carries the
     /// lock-up so its centre reads as the "O" in NOOP. ALL-CAPS, tertiary,
     /// letter-spacing ≈ .34em (× the cap height per the spec). Nudged up so it
     /// sits clear above BevelGauge's centred number.
@@ -155,7 +155,7 @@ public struct RecoveryRing: View {
             .accessibilityHidden(true)
     }
 
-    /// The brand "on-device core" — a small solid ACCENT dot at the exact centre (WHOOP: blue, no
+    /// The brand "on-device core" - a small solid ACCENT dot at the exact centre (WHOOP: blue, no
     /// gold). It belongs to the glyph-only brand lock-up (logo / nav / onboarding), where it reads as
     /// the core of the open ring. On a METRIC gauge the centre is occupied by the read-out number, and
     /// a dot sitting behind the digits just muddies them (community feedback at the v3 launch), so it
@@ -202,7 +202,7 @@ public struct RecoveryArc: Shape {
 }
 
 #if DEBUG && !os(watchOS)
-#Preview("RecoveryRing — scores") {
+#Preview("RecoveryRing - scores") {
     VStack(spacing: 16) {
         HStack(spacing: 28) {
             RecoveryRing(score: 22, supporting: "HRV 38ms · RHR 58 · take it easy", diameter: 220)
@@ -216,7 +216,7 @@ public struct RecoveryArc: Shape {
     .preferredColorScheme(.dark)
 }
 
-#Preview("RecoveryRing — primed/peak") {
+#Preview("RecoveryRing - primed/peak") {
     HStack(spacing: 28) {
         RecoveryRing(score: 78, supporting: "HRV 62ms · RHR 51 · ready for moderate strain", diameter: 220)
         RecoveryRing(score: 91, supporting: "HRV 74ms · RHR 47 · primed to push", diameter: 220)
@@ -240,5 +240,5 @@ private struct RecoveryRingLive: View {
     }
 }
 
-#Preview("RecoveryRing — interactive") { RecoveryRingLive() }
+#Preview("RecoveryRing - interactive") { RecoveryRingLive() }
 #endif

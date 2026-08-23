@@ -18,6 +18,5 @@ class OnboardingAttachContractTest {
         assertFalse(text.contains("collectAsStateWithLifecycle"))
         assertFalse(text.contains("LocalLifecycleOwner"))
         assertTrue(text.contains("viewModel.live.collectAsState()"))
-        assertTrue(text.contains("viewModel.selectedModel.collectAsState()"))
     }
 }

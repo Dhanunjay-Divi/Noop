@@ -156,7 +156,7 @@ internal object HeaderNorm {
         "esfuerzo_de_la_actividad" to "activity_strain",
         // — French (issue #79): physiological_cycles keeps its English filename; sommeil.csv /
         //   entrainements.csv. Full header set incl. workouts, from a real export. Apostrophes and the
-        //   non-breaking space before % both fold to "_" in normalize, so these keys are exact. —
+        //   non-breaking space before % both fold to "_" in normalize, so these keys are exact. -
         "heure_de_debut_du_cycle" to "cycle_start_time",
         "heure_de_fin_du_cycle" to "cycle_end_time",
         "fuseau_horaire_du_cycle" to "cycle_timezone",

@@ -74,11 +74,11 @@ private enum class PrimerSection(
     ),
     SCORES(
         title = uiString(R.string.l10n_how_noop_works_screen_how_your_scores_work_21a0e2be),
-        body = "Recovery, Effort and Sleep Score are scored on your own device from your strap data. " +
+        body = "Recovery, Effort and Sleep Score are scored on your own device from Noop Band data. " +
             "Recovery needs about four nights of sleep to learn your baseline (that's \"Calibrating\", " +
             "counted as nights of 4 on the ring), and keeps sharpening over your first couple of weeks. " +
-            "On a WHOOP 5 or MG the strap banks little history, so that count can sit at 0 of 4 until you " +
-            "have worn it across a few nights. That's the strap's sync limit, not a fault. " +
+            "Some Noop Band firmware banks only a short history, so that count can sit at 0 of 4 until you " +
+            "have worn it across a few nights. That is the band's sync limit, not a fault. " +
             "Before there's a number, NOOP shows what it can without faking one.",
         icon = Icons.Filled.Insights,
     ),
@@ -96,14 +96,14 @@ private enum class PrimerSection(
     ),
     RECORDING(
         title = uiString(R.string.l10n_how_noop_works_screen_what_recording_means_b896c422),
-        body = "When your strap is connected NOOP is saving data live. \"Last synced\" tells " +
+        body = "When Noop Band is connected, NOOP saves data live. \"Last synced\" tells " +
             "you how fresh it is. If it says \"Not recording\", reconnect.",
         icon = Icons.Filled.Sensors,
     ),
     PROVENANCE(
         title = uiString(R.string.l10n_how_noop_works_screen_where_your_numbers_come_from_e169963a),
         body = "A badge shows whether a number was scored on-device by NOOP, or imported " +
-            "from Whoop or Apple Health.",
+            "from a WHOOP export or Apple Health.",
         icon = Icons.Filled.Verified,
     );
 
@@ -119,7 +119,7 @@ private enum class PrimerSection(
 }
 
 /**
- * The "How NOOP works" primer sheet. [onClose] dismisses. Pure presentation — it reads
+ * The "How NOOP works" primer sheet. [onClose] dismisses. Pure presentation - it reads
  * nothing and writes nothing; every line is static approved copy.
  */
 @Composable
@@ -205,7 +205,7 @@ private fun IntroCard() {
             Text(
                 uiString(R.string.l10n_how_noop_works_screen_noop_never_shows_you_a_number_d1db9958) +
                     "it tells you why and what to do next. Everything here runs on your " +
-                    "device, from your strap.",
+                    "device, from Noop Band.",
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
             )

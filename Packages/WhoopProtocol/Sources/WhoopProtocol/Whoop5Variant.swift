@@ -27,13 +27,13 @@ public enum Whoop5Variant: String, Sendable, CaseIterable {
     /// Not identified yet, contradictory evidence, or a non-WHOOP strap. NEVER a guess.
     case unknown
 
-    /// Short display label ("MG" / "5.0" / "—"). UI strings live in the app layer's catalogs;
+    /// Short display label ("MG" / "5.0" / "-"). UI strings live in the app layer's catalogs;
     /// this is the bare token for logs + diagnostics.
     public var label: String {
         switch self {
         case .mg: return "MG"
         case .fiveZero: return "5.0"
-        case .unknown: return "—"
+        case .unknown: return "-"
         }
     }
 

@@ -5,7 +5,7 @@ import kotlin.math.exp
 import kotlin.math.sqrt
 
 /*
- * EffectRanker.kt — the unified, LAG-AWARE "what moves your Charge" ranker.
+ * EffectRanker.kt - the unified, LAG-AWARE "what moves your Charge" ranker.
  *
  * Faithful Kotlin mirror of StrandAnalytics/EffectRanker.swift. Keep the lag set, the
  * shift-by-lag alignment, the Welch t / Cohen's d effect math, the best-lag selection, the
@@ -30,7 +30,7 @@ import kotlin.math.sqrt
  * tier, never a bare "significant" stamp; the lag set is capped so the comparison count stays
  * bounded; copy never claims a behaviour "causes" anything.
  *
- * (Spec: 2026-06-19-v5-insights-correlation-engine-design.md — "Lag-aware effect ranking".)
+ * (Spec: 2026-06-19-v5-insights-correlation-engine-design.md - "Lag-aware effect ranking".)
  */
 
 /**

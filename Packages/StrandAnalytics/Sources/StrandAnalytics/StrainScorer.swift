@@ -1,7 +1,7 @@
 import Foundation
 import WhoopProtocol
 
-// StrainScorer.swift — cardiovascular load on a 0–100 logarithmic strain ("Effort") scale.
+// StrainScorer.swift - cardiovascular load on a 0–100 logarithmic strain ("Effort") scale.
 //
 // Ported from server/ingest/app/analysis/strain.py. INDEPENDENT implementation of
 // published exercise-physiology methods (WHOOP-*like*, not a reproduction of the
@@ -267,7 +267,7 @@ public enum StrainScorer {
     ///   - maxHR: HRmax (bpm). Defaults to 220 − defaultAge when nil.
     ///   - restingHR: resting HR (bpm) for the HRR denominator (default 60).
     ///   - method: `.edwards` (default) or `.banister`.
-    ///   - sex: "male"/"female" — selects the Banister coefficient (ignored by Edwards).
+    ///   - sex: "male"/"female" - selects the Banister coefficient (ignored by Edwards).
     ///   - denominator: log-map D (default STRAIN_DENOMINATOR).
     public static func strain(_ hr: [HRSample],
                               maxHR: Double? = nil,

@@ -4,7 +4,7 @@ import Foundation
 // per-user dose-response fit shrinks toward until the user has logged enough nights.
 //
 // Pure data + a tiny lookup. These are deliberately CONSERVATIVE, clearly-labelled
-// "typical patterns, not yours" constants — never learned from any user, never updated
+// "typical patterns, not yours" constants - never learned from any user, never updated
 // from the field. The shrinkage in DoseResponseEngine blends the user's own OLS slope
 // with one of these priors weighted by how much data they have; with no data the user
 // sees the prior, with enough data the prior fades out entirely (see DoseResponseEngine).
@@ -12,13 +12,13 @@ import Foundation
 // Each prior is an EFFECT PER INCREMENTAL UNIT of dose on a named outcome:
 //   - Alcohol  → Recovery (0–100): roughly −Δ points per extra drink.
 //   - Caffeine → HRV (ms): roughly −Δ ms for each step LATER in the day a caffeine
-//     dose lands (the caffeine "dose" axis is a TIMING bucket, not mg — copy says so).
+//     dose lands (the caffeine "dose" axis is a TIMING bucket, not mg - copy says so).
 //
 // Magnitudes are intentionally modest and are surfaced to the user AS priors, framed as
-// "typical patterns" — wellness association, never a causal/clinical claim. Values mirror
+// "typical patterns" - wellness association, never a causal/clinical claim. Values mirror
 // the Kotlin DoseResponsePriors twin byte-for-byte so a future sync round-trips.
 //
-// (Spec: 2026-06-19-v5-insights-correlation-engine-design.md — "Personal dose-response
+// (Spec: 2026-06-19-v5-insights-correlation-engine-design.md - "Personal dose-response
 // with population-prior shrinkage", DoseResponsePriors.swift in the file table.)
 
 /// Identifies a dosed behaviour whose dose-response has a documented population prior.

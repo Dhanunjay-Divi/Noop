@@ -4,7 +4,7 @@ import com.noop.data.GravitySample
 import com.noop.data.StepSample
 
 /**
- * WakeMotionRefinement.kt — motion-aware wake refinement (#364 "Proposal 2" follow-up; density-gate
+ * WakeMotionRefinement.kt - motion-aware wake refinement (#364 "Proposal 2" follow-up; density-gate
  * precedent #345). Direct Kotlin port of the Swift `WakeMotionRefinement`
  * (Packages/StrandAnalytics/Sources/StrandAnalytics/WakeMotionRefinement.swift) — same constants, same
  * algorithm, same [StageSegment] shape.
@@ -72,7 +72,7 @@ object WakeMotionRefinement {
     const val SINGLE_MINUTE_WALK_TICKS: Int = 40
 
     /**
-     * Per-minute gravity posture variance (g², see [postureVariance]) below this reads as "stable" — the
+     * Per-minute gravity posture variance (g², see [postureVariance]) below this reads as "stable" - the
      * reference night's motionless stretches measured < 0.01; 0.05 leaves headroom above strap/decode
      * noise while still well below the reference night's turn-over spikes.
      */

@@ -57,6 +57,25 @@ final class RecoveryScorerTraceTests: XCTestCase {
         XCTAssertFalse(nilLine!.contains("hrv,"))      // hrv + sleepPerf survived
     }
 
+    func testTraceDropsAbsoluteTemperatureFromDeviationTerm() {
+        let hrvB = baseline(mean: 50, sigma: 6)
+        let (score, lines) = RecoveryScorer.recoveryTrace(
+            hrv: 55, rhr: 55, resp: nil,
+            hrvBaseline: hrvB, rhrBaseline: nil, respBaseline: nil,
+            sleepPerf: 0.85, skinTempDev: 34.2
+        )
+        XCTAssertEqual(
+            score,
+            RecoveryScorer.recovery(
+                hrv: 55, rhr: 55, resp: nil,
+                hrvBaseline: hrvB, rhrBaseline: nil, respBaseline: nil,
+                sleepPerf: 0.85, skinTempDev: nil
+            )
+        )
+        XCTAssertFalse(lines.contains { $0.contains("charge term skinTempDev ") })
+        XCTAssertTrue(lines.contains { $0.contains("skinTempDev") && $0.contains("nilTerm") })
+    }
+
     func testColdStartTraceReportsTheGateAndNilScore() {
         let coldHRV = BaselineState(baseline: 50, spread: 5, nValid: 2,
                                     nightsSinceUpdate: 0, status: .calibrating)

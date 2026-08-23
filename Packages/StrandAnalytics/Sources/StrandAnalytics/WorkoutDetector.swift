@@ -419,7 +419,7 @@ public enum Calories {
     /// validated for genuine EXERCISE HR; applying it to ordinary low-intensity daytime
     /// HR (walking, stairs, standing — typically ~95–110 bpm) across the WHOLE day credits
     /// the full gross-exercise rate to every elevated second and over-counts by ~1000+ kcal
-    /// (community "Calories too high"). The bout path keeps the 0.30 detector fraction —
+    /// (community "Calories too high"). The bout path keeps the 0.30 detector fraction -
     /// Keytel is appropriate for a real detected/manual workout — but the day path raises
     /// the gate to 50% HRR so the gross rate only applies at genuine exercise-level HR.
     static let dayActiveHRRFraction = 0.50
@@ -475,7 +475,7 @@ public enum Calories {
         // equals real energy when the stream is exactly 1 Hz. A sparse WHOOP 5/MG bout can
         // run far below 1 sample/s, which previously undercounted energy roughly in proportion
         // to the coverage gap (calories collapsing toward ~1 kcal, #137). Each interval is
-        // capped at mergeGapS (150 s) — the detector's own "still continuous, not resting"
+        // capped at mergeGapS (150 s) - the detector's own "still continuous, not resting"
         // threshold — so a brief dropout is fully counted but a wear gap can't inflate one
         // reading. At a steady 1 Hz every interval is ~1 s: behaviour is unchanged.
         let ordered = hrSamples.sorted { $0.ts < $1.ts }

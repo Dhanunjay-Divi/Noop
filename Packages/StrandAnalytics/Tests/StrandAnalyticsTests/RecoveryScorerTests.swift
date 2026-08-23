@@ -152,6 +152,21 @@ final class RecoveryScorerTests: XCTestCase {
         XCTAssertLessThan(bigWarm, warm)
     }
 
+    func testAbsoluteAndImplausibleSkinTemperatureDoNotAffectCharge() {
+        func score(_ value: Double?) -> Double {
+            RecoveryScorer.recovery(
+                hrv: 55, rhr: 52, resp: nil,
+                hrvBaseline: baseline(mean: 50, sigma: 6),
+                rhrBaseline: baseline(mean: 55, sigma: 3),
+                respBaseline: nil,
+                sleepPerf: 0.9,
+                skinTempDev: value)!
+        }
+        XCTAssertEqual(score(34.2), score(nil), accuracy: 1e-9)
+        XCTAssertEqual(score(9.0), score(nil), accuracy: 1e-9)
+        XCTAssertLessThan(score(1.0), score(nil))
+    }
+
     func testBandThresholds() {
         XCTAssertEqual(RecoveryScorer.band(20), "red")
         XCTAssertEqual(RecoveryScorer.band(33.9), "red")

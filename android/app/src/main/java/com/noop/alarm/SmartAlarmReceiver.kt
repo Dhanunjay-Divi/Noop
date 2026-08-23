@@ -12,6 +12,7 @@ import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.noop.R
+import com.noop.automation.AlarmTapAutomationPrefs
 import com.noop.ui.appLaunchIntent
 
 /**
@@ -24,43 +25,45 @@ import com.noop.ui.appLaunchIntent
  * the smart (light-sleep) time or the hard deadline, so the user is woken either way.
  *
  * Registered in the manifest (exported=false) so it survives the app being killed. After firing it
- * clears the persisted schedule (a one-shot alarm), then re-arms the strap-independent fallback for
- * the NEXT day only when the watcher / app re-arms it — we do not silently re-schedule here, so a
- * disabled-then-fired alarm doesn't resurrect itself.
+ * clears the persisted schedule (a one-shot alarm), then immediately re-arms the next day only when
+ * the alarm is still enabled. A disabled-but-fired alarm cannot resurrect itself.
  */
 class SmartAlarmReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent?) {
-        if (intent?.action != SmartAlarmScheduler.ACTION_FIRE) return
+        val action = intent?.action ?: return
+        val isSnooze = action == SmartAlarmScheduler.ACTION_FIRE_SNOOZE
+        if (action != SmartAlarmScheduler.ACTION_FIRE && !isSnooze) return
         val smart = intent.getBooleanExtra(SmartAlarmScheduler.EXTRA_SMART, false)
 
-        // Clear the schedule we just fired so a boot right after firing doesn't re-raise THIS one...
-        val store = SmartAlarmStore.from(context)
-        store.scheduledDeadlineMs = 0L
-        store.scheduledWindowStartMs = 0L
-        // ...then, if the alarm is still enabled, re-arm the GUARANTEED deadline for the NEXT day so
-        // the smart alarm recurs each morning. `afterFire = true` forces tomorrow even on the EARLY
-        // (light-sleep) fire path, where today's hard deadline is still in the future and a plain
-        // re-arm would schedule a SECOND wake the same morning. A disabled-but-fired alarm does NOT
-        // resurrect itself.
-        runCatching { if (store.enabled) SmartAlarmScheduler.arm(context, store, afterFire = true) }
+        if (!isSnooze) {
+            // Clear the schedule we just fired so a boot right after firing doesn't re-raise THIS one...
+            val store = SmartAlarmStore.from(context)
+            store.scheduledDeadlineMs = 0L
+            store.scheduledWindowStartMs = 0L
+            // ...then, if the alarm is still enabled, re-arm the GUARANTEED deadline for the NEXT day.
+            runCatching { if (store.enabled) SmartAlarmScheduler.arm(context, store, afterFire = true) }
+        }
 
         ensureChannel(context)
         // Defensive: a notify() throw (OEM quirk / revoked POST_NOTIFICATIONS) must not crash the
         // broadcast. The system alarm sound below is the fallback-of-the-fallback audible cue.
         runCatching {
             val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            mgr.notify(NOTIF_ID, buildNotification(context, smart))
+            mgr.notify(NOTIF_ID, buildNotification(context, smart, isSnooze))
         }
+        AlarmTapAutomationPrefs.armForActiveAlarm(context)
     }
 
-    private fun buildNotification(context: Context, smart: Boolean): Notification {
+    private fun buildNotification(context: Context, smart: Boolean, snooze: Boolean): Notification {
         val fullScreen = PendingIntent.getActivity(
             context, 0, appLaunchIntent(context),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val title = "Good morning"
-        val body = if (smart) {
+        val body = if (snooze) {
+            "Your snooze has ended. Time to get up."
+        } else if (smart) {
             "You're in a lighter sleep phase. Time to wake up."
         } else {
             "Your wake window has ended. Time to get up."
@@ -111,6 +114,11 @@ class SmartAlarmReceiver : BroadcastReceiver() {
 
     companion object {
         const val CHANNEL_ID = "noop_smart_alarm"
-        private const val NOTIF_ID = 4307
+        const val NOTIF_ID = 4307
+
+        fun dismissActive(context: Context) {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.cancel(NOTIF_ID)
+        }
     }
 }

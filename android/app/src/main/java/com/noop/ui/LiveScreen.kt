@@ -94,7 +94,7 @@ import com.noop.ble.WhoopModel
 private val LIVE_HERO_FILL: Color = Color(red = 13f / 255f, green = 14f / 255f, blue = 20f / 255f, alpha = 0.80f)
 private val LIVE_HERO_RADIUS: Dp = 26.dp
 internal const val LIVE_TRACKING_BATTERY_COPY =
-    "High-rate, beat-by-beat tracking uses more strap and phone battery. " +
+    "High-rate, beat-by-beat tracking uses more Noop Band and phone battery. " +
         "It runs only while this Live screen and NOOP are in the foreground."
 internal const val LIVE_TRACKING_SEPARATION_COPY =
     "Connection and history sync continue when it is off. " +
@@ -108,7 +108,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
     val ouraWear by viewModel.ouraWearState.collectAsStateWithLifecycle()
     val bpm by viewModel.bpm.collectAsStateWithLifecycle()
     val selectedModel by viewModel.selectedModel.collectAsStateWithLifecycle()
-    // Active band name (MW-6) — names the band whose live data the console shows; falls back to "WHOOP".
+    // Active band name (MW-6) - names the band whose live data the console shows; falls back to "WHOOP".
     val activeDeviceName by viewModel.activeDeviceName.collectAsStateWithLifecycle()
     val activeWorkout by viewModel.activeWorkout.collectAsStateWithLifecycle()
     val lastWorkout by viewModel.lastWorkout.collectAsStateWithLifecycle()
@@ -247,7 +247,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
 
     LazyScreenScaffold(
         title = uiString(R.string.l10n_live_screen_live_body_console_54838e06),
-        subtitle = "Current physiology, strap trust, and session controls",
+        subtitle = "Current physiology, Noop Band trust, and session controls",
         // LIQUID SKY BACKDROP (the pilot pattern — LiquidScreenSky.kt): the time-of-day liquid sky settles
         // behind the header + hero and the cards float over the flat canvas below. Reuses the shared
         // LiquidScreenSky() slot verbatim; when the day-cycle background is off, the scaffold paints the
@@ -258,11 +258,11 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
         fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
 
-        // Active band row (MW-6) — names the band the console is reading, with a "Manage devices"
+        // Active band row (MW-6) - names the band the console is reading, with a "Manage devices"
         // affordance that opens the Devices screen. Additive; the connect/disconnect controls below are
         // untouched. Mirrors the iOS Live screen's active-band header + Manage-devices link.
         item {
-        ActiveBandRow(name = activeDeviceName ?: "WHOOP", onManageDevices = onManageDevices)
+        ActiveBandRow(name = activeDeviceName ?: "Noop Band", onManageDevices = onManageDevices)
         }
 
         // Console header — the pill + a connection-mode badge (+ a live SYNCING badge during a history
@@ -351,8 +351,8 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
                 )
                 Text(
                     if (live.syncChunksThisSession > 0)
-                        "Syncing your strap history… ${live.syncChunksThisSession} chunks pulled"
-                    else "Syncing your strap history…",
+                        "Syncing Noop Band history… ${live.syncChunksThisSession} chunks pulled"
+                    else "Syncing Noop Band history…",
                     style = NoopType.footnote,
                     color = Palette.textSecondary,
                 )
@@ -434,17 +434,17 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-                        StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_hr_f187928f), value = bpm?.toString() ?: "—",
+                        StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_hr_f187928f), value = bpm?.toString() ?: "-",
                             accent = if (bpm == null) Palette.textPrimary else Palette.metricRose)
-                        StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_avg_cdc93143), value = if (w.avgHr > 0) "${w.avgHr}" else "—")
-                        StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_peak_c83dbbd3), value = if (w.peakHr > 0) "${w.peakHr}" else "—")
+                        StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_avg_cdc93143), value = if (w.avgHr > 0) "${w.avgHr}" else "-")
+                        StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_peak_c83dbbd3), value = if (w.peakHr > 0) "${w.peakHr}" else "-")
                         StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_effort_8c974bc6), value = UnitFormatter.effortDisplay(w.liveStrain, effortScale),
                             accent = Palette.strainColor(w.liveStrain))
                     }
                     if (w.gpsEnabled) {
                         Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
                             StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_distance_42320809), value = liveDistance(w.distanceM, unitSystem))
-                            StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_pace_7a9a6226), value = w.paceSecPerKm?.let { livePace(it, unitSystem) } ?: "—")
+                            StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_pace_7a9a6226), value = w.paceSecPerKm?.let { livePace(it, unitSystem) } ?: "-")
                         }
                     }
                     Button(
@@ -552,39 +552,32 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
         }
         }
 
-        // Strap picker — choose the model before scanning so we look for exactly one device family.
-        // Shown whenever we're not actively streaming, so a user with both a WHOOP 4 and a 5/MG can
-        // switch between them (it used to hide once `bonded`, which stuck after the first pairing).
+        // Hardware family is detected internally. Device switching belongs in Devices, so Live keeps
+        // one stable product identity instead of exposing transport generations.
         if (!(live.connected && live.bonded)) {
-            // Two siblings (picker Row + optional 5/MG guidance) that the eager column spaced by 20dp —
-            // an inner `Column(spacedBy(20.dp))` reproduces that gap inside the single lazy item.
             item {
-            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Metrics.gap),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(uiString(R.string.l10n_live_screen_strap_02b88eeb), style = NoopType.footnote, color = Palette.textSecondary)
-                SegmentedPillControl(
-                    items = WhoopModel.entries.toList(),
-                    selection = selectedModel,
-                    label = { it.displayName },
-                    onSelect = { viewModel.setSelectedModel(it) },
-                )
-            }
-            // Proactive 5/MG guidance (#130): the strap bonds to one host at a time, so a scan finds
-            // nothing while it's still paired in the official WHOOP app. Shown the moment 5/MG is picked.
-            if (selectedModel == WhoopModel.WHOOP5_MG) {
-                Text(
-                    uiString(R.string.l10n_live_screen_whoop_5_0_mg_pairs_with_b93143f2) +
-                        "the official WHOOP app and fully close that app, then Connect again.",
-                    style = NoopType.footnote,
-                    color = Palette.textSecondary,
-                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                )
-            }
-            }
+                NoopCard(padding = 14.dp) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            Icons.Filled.Watch,
+                            contentDescription = null,
+                            tint = Palette.accent,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Noop Band", style = NoopType.subhead, color = Palette.textPrimary)
+                            Text(
+                                "Compatible hardware is detected automatically. If pairing stalls, close any other band app.",
+                                style = NoopType.footnote,
+                                color = Palette.textTertiary,
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -675,7 +668,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
         }
         }
 
-        // Manual "Sync now" — kick a historical offload on demand instead of waiting for the 15-min
+        // Manual "Sync now" - kick a historical offload on demand instead of waiting for the 15-min
         // periodic timer (#93). Only meaningful once bonded (the offload needs the command channel), and
         // disabled mid-session so a double-tap can't fight the in-flight offload — viewModel.syncNow()
         // also no-ops in that case, this is just the matching UI state. While syncing, the button shows
@@ -809,7 +802,7 @@ private fun MaxHrZoneCard(hrMax: Int, zone5Bpm: Int, coachingOn: Boolean) {
             }
             Text(
                 if (coachingOn)
-                    "Strap buzzes when you climb into Zone 5 (≥ $zone5Bpm bpm). Manage it in Automations → Haptic coaching."
+                    "Noop Band vibrates when you climb into Zone 5 (≥ $zone5Bpm bpm). Manage it in Automations → Haptic coaching."
                 else
                     "Turn on HR-zone coaching in Automations for a wrist buzz when you reach Zone 5 (≥ $zone5Bpm bpm).",
                 style = NoopType.footnote,
@@ -888,7 +881,7 @@ private fun ConsoleHeader(live: LiveState, activeConnection: Boolean, ouraWear: 
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 StatePill(label, tone = tone, pulsing = live.bonded || live.scanning)
-                // Suppress the redundant rose "OFFLINE" badge while fully offline — the pill already
+                // Suppress the redundant rose "OFFLINE" badge while fully offline - the pill already
                 // reads "Disconnected" in critical/rose. Keep it for every informative state (FULL BOND
                 // / LIVE HR ONLY / CONNECTING / PAIRED). Gate matches exactly the "OFFLINE" branch.
                 if (showsModeBadge(live, activeConnection)) {
@@ -903,7 +896,7 @@ private fun ConsoleHeader(live: LiveState, activeConnection: Boolean, ouraWear: 
                 // Charging bolt next to the battery % when the strap reports it's charging (PR #568 reimpl).
                 HeaderStat(
                     "Battery",
-                    live.batteryPct?.let { "${it.toInt()}%" } ?: "—",
+                    live.batteryPct?.let { "${it.toInt()}%" } ?: "-",
                     charging = live.charging == true,
                 )
                 HeaderStat("Worn", wornLabel(live, activeConnection, ouraWear))
@@ -1007,13 +1000,13 @@ internal fun hasLiveHrConnection(live: LiveState): Boolean =
 /** The "Worn" stat text. An Oura ring reports a precise live wear/charge state (live-HR presence + charger
  *  STATE + a removal watchdog), so prefer it — it flips to not-worn the moment the ring is off the finger
  *  or on the charger, unlike the WHOOP wrist boolean which lingers. WHOOP has no such signal ([ouraWear]
- *  stays null) so it keeps the wrist-event read. "—" off a live link; because an Oura ring streams WITHOUT
+ *  stays null) so it keeps the wrist-event read. "-" off a live link; because an Oura ring streams WITHOUT
  *  bonding, a live stream counts as a link too (not just [activeConnection]). Mirrors iOS LiveView.wornNow
  *  (#628 / #218). */
 private fun wornLabel(live: LiveState, activeConnection: Boolean, ouraWear: OuraWearState?): String {
     val liveLink = activeConnection || ringStreaming(live)
     return when {
-        !liveLink -> "—"
+        !liveLink -> "-"
         ouraWear != null -> if (ouraWear == OuraWearState.WORN) "Yes" else "No"
         else -> if (live.worn) "Yes" else "No"
     }
@@ -1028,7 +1021,7 @@ private fun connectionModeBadge(live: LiveState, activeConnection: Boolean): Str
     else -> "OFFLINE"
 }
 
-/** Whether to render the connection-mode badge. False exactly when the badge would read "OFFLINE" —
+/** Whether to render the connection-mode badge. False exactly when the badge would read "OFFLINE" -
  *  the pill already says "Disconnected", so the duplicate rose badge is pure redundancy. */
 private fun showsModeBadge(live: LiveState, activeConnection: Boolean): Boolean =
     !(!activeConnection && !live.connected && !live.encryptedBond)
@@ -1120,7 +1113,7 @@ private fun HeartReadout(live: LiveState, bpm: Int?, activeConnection: Boolean, 
                     )
                 } else {
                     Text(
-                        text = "—",
+                        text = "-",
                         style = NoopType.number(64f, weight = FontWeight.Bold),
                         color = Palette.textSecondary,
                     )
@@ -1163,12 +1156,12 @@ private fun PhysiologyStack(live: LiveState, activeConnection: Boolean) {
             // stream. Mirrors the macOS liveProofMetric(offline:).
             LiveProofMetric(
                 Modifier.weight(1f), "R-R",
-                if (activeConnection) (live.rr.lastOrNull()?.let { "$it ms" } ?: "—") else "Offline",
+                if (activeConnection) (live.rr.lastOrNull()?.let { "$it ms" } ?: "-") else "Offline",
                 Palette.metricCyan, offline = !activeConnection,
             )
             LiveProofMetric(
                 Modifier.weight(1f), "Event",
-                if (activeConnection) (live.lastEvent ?: "—") else "Offline",
+                if (activeConnection) (live.lastEvent ?: "-") else "Offline",
                 Palette.statusWarning, offline = !activeConnection,
             )
         }
@@ -1223,7 +1216,7 @@ private fun RRStrip(rrRecent: List<Int>) {
 
 /** One R-R / Event proof tile. When [offline] the value is dimmed to textTertiary (regardless of the
  *  passed accent) so an idle tile reads as a muted empty state, not a broken live readout in
- *  cyan/amber — matching the rrStrip's "Waiting for R-R intervals." treatment above. */
+ *  cyan/amber - matching the rrStrip's "Waiting for R-R intervals." treatment above. */
 @Composable
 private fun LiveProofMetric(modifier: Modifier, label: String, value: String, tint: Color, offline: Boolean = false) {
     val shape = RoundedCornerShape(10.dp)
@@ -1298,7 +1291,7 @@ private fun signalTiles(live: LiveState, bpm: Int?, activeConnection: Boolean): 
         },
         when {
             activeConnection && live.encryptedBond -> "Controls unlocked"
-            ringStreaming(live) -> "Live stream, no WHOOP bond"
+            ringStreaming(live) -> "External live stream, no band bond"
             else -> "Standard HR is not a full bond"
         },
         connectionModeColor(live, activeConnection),
@@ -1317,7 +1310,7 @@ private fun signalTiles(live: LiveState, bpm: Int?, activeConnection: Boolean): 
     SignalTile(
         "Battery",
         live.batteryPct?.let { "${it.toInt()}%" } ?: "Unknown",
-        if (live.charging == true) "Charging" else "Last reported by strap",
+        if (live.charging == true) "Charging" else "Last reported by Noop Band",
         batteryTint(live.batteryPct),
     ),
     // Wear is only trustworthy on a live link: `worn` defaults true and is only updated by
@@ -1326,7 +1319,7 @@ private fun signalTiles(live: LiveState, bpm: Int?, activeConnection: Boolean): 
     SignalTile(
         "Wear state",
         if (activeConnection) (if (live.worn) "On wrist" else "Off wrist") else "Unknown",
-        if (activeConnection) (if (live.worn) "Eligible for live physiology" else "Wear the strap for scoring") else "Connect to read wear state",
+        if (activeConnection) (if (live.worn) "Eligible for live physiology" else "Wear Noop Band for scoring") else "Connect to read wear state",
         when {
             !activeConnection -> Palette.textTertiary
             live.worn -> Palette.accent
@@ -1350,21 +1343,21 @@ private fun SignalTrustTile(tile: SignalTile, modifier: Modifier = Modifier) {
 
 private fun signalTrustSummary(live: LiveState, activeConnection: Boolean): String = when {
     activeConnection && live.encryptedBond -> "Encrypted stream - deep controls and history sync available."
-    activeConnection -> "Live heart rate is flowing; full strap controls need an encrypted bond."
+    activeConnection -> "Live heart rate is flowing; full Noop Band controls need a secure connection."
     live.connected -> "Connected, waiting for a streaming state."
     // The actionable "Scan and connect…" CTA now lives in the above-the-fold OfflineConnectCallout,
     // so this ring caption stays a calm empty-state descriptor rather than a competing CTA.
-    else -> "Live heart rate appears here once a strap is connected."
+    else -> "Live heart rate appears here once Noop Band is connected."
 }
 
 private fun connectionModeDetail(live: LiveState, activeConnection: Boolean): String = when {
-    activeConnection && live.encryptedBond -> "Full strap stream is active."
+    activeConnection && live.encryptedBond -> "Full Noop Band stream is active."
     activeConnection || ringStreaming(live) -> "Heart rate stream is active."
     live.connected -> "Radio connected, stream not yet trusted."
     else -> "No live stream."
 }
 
-/** A "feel" RMSSD over the recent R-R buffer — time-gap-unaware on purpose (a live indicator, not a
+/** A "feel" RMSSD over the recent R-R buffer - time-gap-unaware on purpose (a live indicator, not a
  *  clinical figure; blanked on disconnect by clearedBiometrics). null until ≥3 intervals land. */
 private fun rollingRMSSD(rrRecent: List<Int>): Double? {
     val values = rrRecent.takeLast(12)

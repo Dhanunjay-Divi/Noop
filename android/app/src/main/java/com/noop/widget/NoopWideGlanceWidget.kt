@@ -101,7 +101,7 @@ private fun WideWidgetContent(context: Context, snap: WidgetSnapshot, appearance
                     style = TextStyle(color = colors.secondary, fontSize = 8.sp, fontWeight = FontWeight.Medium),
                 )
                 Text(
-                    text = snap.recoveryPct?.let { context.getString(R.string.widget_percent_value, it) } ?: "—",
+                    text = snap.recoveryPct?.let { context.getString(R.string.widget_percent_value, it) } ?: "-",
                     style = TextStyle(
                         color = recoveryWidgetColor(snap.recoveryPct, colors),
                         fontSize = 34.sp,
@@ -188,7 +188,7 @@ private fun MiniScore(
 ) {
     Row(modifier = modifier.clickable(action), verticalAlignment = Alignment.CenterVertically) {
         Text(
-            text = value?.toString() ?: "—",
+            text = value?.toString() ?: "-",
             style = TextStyle(color = color, fontSize = 15.sp, fontWeight = FontWeight.Bold),
         )
         Spacer(modifier = GlanceModifier.width(3.dp))
@@ -215,7 +215,7 @@ private fun WideMetric(
         Text(text = label, style = TextStyle(color = colors.secondary, fontSize = 8.sp), maxLines = 1)
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
-                text = value ?: "—",
+                text = value ?: "-",
                 style = TextStyle(color = colors.primary, fontSize = 15.sp, fontWeight = FontWeight.Bold),
                 maxLines = 1,
             )

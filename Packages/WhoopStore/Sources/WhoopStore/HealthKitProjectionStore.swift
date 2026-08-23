@@ -18,6 +18,7 @@ public enum HealthKitProjectionKind: String, Sendable, CaseIterable {
     case activeEnergy
     case basalEnergy
     case vo2Max
+    case hydration
     case bodyMass
     case bodyFat
     case leanBodyMass
@@ -38,6 +39,7 @@ public enum HealthKitProjectionKind: String, Sendable, CaseIterable {
         case .activeEnergy: return ["active_kcal"]
         case .basalEnergy: return ["basal_kcal"]
         case .vo2Max: return ["vo2max"]
+        case .hydration: return ["hydration"]
         case .bodyMass: return ["weight"]
         case .bodyFat: return ["body_fat"]
         case .leanBodyMass: return ["lean_mass"]

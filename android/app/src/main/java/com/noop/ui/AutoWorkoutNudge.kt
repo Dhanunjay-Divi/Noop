@@ -13,8 +13,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
@@ -120,11 +123,12 @@ internal object AutoWorkoutBackgroundPolicy {
 internal fun buildDetectedAutoWorkoutRow(
     computedDeviceId: String,
     candidate: AutoWorkoutDetector.DetectedWorkout,
+    sportOverride: String? = null,
 ) = WorkoutEditing.buildDetectedSuggestionRow(
     deviceId = computedDeviceId,
     startSeconds = candidate.startSec,
     endSeconds = candidate.endSec,
-    sport = acceptedAutoDetectSport(candidate.suggestedClass),
+    sport = acceptedAutoDetectSport(candidate.suggestedClass, sportOverride),
     avgHr = candidate.avgBpm,
     source = computedDeviceId,
 )
@@ -138,13 +142,21 @@ private fun className(value: CoarseWorkoutClass): String = when (value) {
     CoarseWorkoutClass.OTHER -> "Workout"
 }
 
-internal fun acceptedAutoDetectSport(value: CoarseWorkoutClass?): String = when (value) {
-    CoarseWorkoutClass.WALK -> "Walking"
-    CoarseWorkoutClass.RUN -> "Running"
-    CoarseWorkoutClass.STRENGTH -> "Strength Training"
-    CoarseWorkoutClass.CYCLE -> "Cycling"
-    CoarseWorkoutClass.SKI -> "Skiing"
-    CoarseWorkoutClass.OTHER, null -> AUTO_DETECT_SPORT
+internal fun acceptedAutoDetectSport(
+    value: CoarseWorkoutClass?,
+    requestedSport: String? = null,
+): String {
+    com.noop.analytics.WorkoutSport.all.firstOrNull {
+        it.name.equals(requestedSport?.trim(), ignoreCase = true)
+    }?.let { return it.name }
+    return when (value) {
+        CoarseWorkoutClass.WALK -> "Walking"
+        CoarseWorkoutClass.RUN -> "Running"
+        CoarseWorkoutClass.STRENGTH -> "Strength Training"
+        CoarseWorkoutClass.CYCLE -> "Cycling"
+        CoarseWorkoutClass.SKI -> "Skiing"
+        CoarseWorkoutClass.OTHER, null -> AUTO_DETECT_SPORT
+    }
 }
 
 private fun suggestionTitle(w: AutoWorkoutDetector.DetectedWorkout): String =
@@ -303,6 +315,10 @@ fun AutoWorkoutNudgeCard(
     }
 
     val w = candidate ?: return
+    var selectedSport by remember(w.startSec) {
+        mutableStateOf(AutoWorkoutPrefs.preferredSport(context, w))
+    }
+    var sportMenuExpanded by remember(w.startSec) { mutableStateOf(false) }
 
     NoopCard(tint = Palette.accent) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -357,6 +373,40 @@ fun AutoWorkoutNudgeCard(
                     color = Palette.textTertiary,
                 )
             }
+            Box {
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { sportMenuExpanded = true },
+                    enabled = !saving,
+                ) {
+                    Text(
+                        uiString(R.string.auto_workout_activity_label),
+                        modifier = Modifier.weight(1f),
+                        color = Palette.textSecondary,
+                    )
+                    Text(selectedSport, color = Palette.textPrimary)
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        Icons.Filled.KeyboardArrowDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                DropdownMenu(
+                    expanded = sportMenuExpanded,
+                    onDismissRequest = { sportMenuExpanded = false },
+                ) {
+                    com.noop.analytics.WorkoutSport.all.forEach { sport ->
+                        DropdownMenuItem(
+                            text = { Text(sport.name) },
+                            onClick = {
+                                selectedSport = sport.name
+                                sportMenuExpanded = false
+                            },
+                        )
+                    }
+                }
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -367,7 +417,7 @@ fun AutoWorkoutNudgeCard(
                         // Even an explicitly accepted detector suggestion remains honestly classified as
                         // Detected/NOOP (not Manual) and is editable/dismissible in Workouts.
                         val row = buildDetectedAutoWorkoutRow(
-                            viewModel.repo.computedDeviceId(activeDeviceId), w,
+                            viewModel.repo.computedDeviceId(activeDeviceId), w, selectedSport,
                         )
                         // #214 ROOT CAUSE: save on the ViewModel's scope, NOT the card's. Setting
                         // handledThisSession=true removes this card from composition immediately (see the
@@ -384,6 +434,9 @@ fun AutoWorkoutNudgeCard(
                                 saving = false
                                 when (AutoWorkoutSuggestionPolicy.afterSave(saved)) {
                                     AutoWorkoutSuggestionPolicy.SaveDisposition.CLEAR_CANDIDATE -> {
+                                        AutoWorkoutPrefs.rememberSport(
+                                            context, selectedSport, w.suggestedClass,
+                                        )
                                         AutoWorkoutCandidateNotifier.cancelHandled(context)
                                         handledThisSession = true
                                         candidate = null
@@ -401,8 +454,7 @@ fun AutoWorkoutNudgeCard(
                         containerColor = Palette.accent, contentColor = Palette.surfaceBase,
                     ),
                 ) {
-                    Text(w.suggestedClass?.let { uiString(R.string.auto_workout_save_as, className(it)) }
-                        ?: uiString(R.string.l10n_auto_workout_nudge_save_it_01d23661))
+                    Text(uiString(R.string.auto_workout_save_workout))
                 }
 
                 OutlinedButton(

@@ -36,7 +36,10 @@ import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -47,6 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,6 +70,7 @@ import com.noop.analytics.CircadianEngine
 import com.noop.analytics.CyclePhaseEngine
 import com.noop.analytics.IllnessDistance
 import com.noop.analytics.IllnessSignalEngine
+import com.noop.data.CycleTrackingStore
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -86,7 +91,7 @@ import kotlin.math.roundToInt
 //   • BodyClockCard        — CircadianEngine.PhaseEstimate (+ optional JetLagPlan). LIGHT +
 //                            SLEEP TIMING only, never a supplement/drug.
 //   • HeadsUpCard          — IllnessSignalEngine.Result. Confounder-suppressed illness
-//                            "heads-up". On-device estimate — not a diagnosis.
+//                            "heads-up". On-device estimate - not a diagnosis.
 //
 // DESIGN-SYSTEM ONLY: NoopCard + Palette/DomainTheme tokens, NoopType, Metrics, StatePill.
 // No raw hex, no ad-hoc cards. Privacy-forward copy (this data is incapable of leaving the
@@ -155,7 +160,13 @@ fun CycleAwarenessCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Overline("Cycle awareness")
                     Text(
-                        uiString(R.string.l10n_skin_temp_cards_screen_from_your_nightly_temperature_ff8cca1a),
+                        uiString(
+                            if (result.cycleDayLow == null) {
+                                R.string.l10n_skin_temp_cards_screen_from_your_nightly_temperature_ff8cca1a
+                            } else {
+                                R.string.cycle_from_logs_and_temperature
+                            }
+                        ),
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
                     )
@@ -251,18 +262,26 @@ fun CycleAwarenessOptInCard(onEnable: () -> Unit) {
 // MARK: - Private cycle tracker
 
 /**
- * On-device period-start history used only to anchor [CyclePhaseEngine]. This intentionally records one
- * date per cycle—not flow, symptoms, fertility, contraception, or a diagnosis. All mutations are suspend
- * callbacks so the host can persist first and only then republish the visible history.
+ * On-device cycle history. Period starts anchor [CyclePhaseEngine]; optional daily flow and symptoms
+ * remain context-only and never become fertility, contraception, or diagnosis outputs. All mutations
+ * are suspend callbacks so the host persists before republishing visible history.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun CycleTrackerSheet(
     result: CyclePhaseEngine.Result,
     periodStarts: List<String>,
+    dailyLogs: List<CycleTrackingStore.DailyLog>,
     onLogPeriodStart: suspend (String) -> Boolean,
     onDeletePeriodStart: suspend (String) -> Boolean,
     onDeleteAllPeriodStarts: suspend () -> Boolean,
+    onSaveDailyLog: suspend (
+        String,
+        CycleTrackingStore.Flow?,
+        Set<CycleTrackingStore.Symptom>,
+    ) -> Boolean,
+    onDeleteDailyLog: suspend (String) -> Boolean,
+    onDeleteAllDailyLogs: suspend () -> Boolean,
     onDismiss: () -> Unit,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -272,8 +291,21 @@ internal fun CycleTrackerSheet(
     var operationInFlight by remember { mutableStateOf(false) }
     var operationFailed by remember { mutableStateOf(false) }
     var confirmDeleteAll by remember { mutableStateOf(false) }
+    var confirmDeleteAllDetails by remember { mutableStateOf(false) }
+    var flowMenuOpen by remember { mutableStateOf(false) }
+    var selectedFlow by remember { mutableStateOf<CycleTrackingStore.Flow?>(null) }
+    var selectedSymptoms by remember {
+        mutableStateOf<Set<CycleTrackingStore.Symptom>>(emptySet())
+    }
     val starts = remember(periodStarts) { periodStarts.distinct().sortedDescending() }
+    val details = remember(dailyLogs) { dailyLogs.sortedByDescending { it.day } }
     val alreadyLogged = selectedDay in starts
+    val selectedLog = details.firstOrNull { it.day == selectedDay }
+
+    LaunchedEffect(selectedDay, dailyLogs) {
+        selectedFlow = selectedLog?.flow
+        selectedSymptoms = selectedLog?.symptoms ?: emptySet()
+    }
 
     fun runMutation(block: suspend () -> Boolean) {
         if (operationInFlight) return
@@ -381,6 +413,108 @@ internal fun CycleTrackerSheet(
                 }
             }
 
+            NoopCard(tint = Palette.restColor) {
+                Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+                    Overline("Daily details")
+                    Text(
+                        prettyPeriodStartDay(selectedDay),
+                        style = NoopType.bodyNumber,
+                        color = Palette.textPrimary,
+                    )
+                    Box {
+                        OutlinedButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !operationInFlight,
+                            onClick = { flowMenuOpen = true },
+                        ) {
+                            Text(
+                                "Flow: ${selectedFlow?.let(::cycleFlowLabel) ?: "Not entered"}",
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = flowMenuOpen,
+                            onDismissRequest = { flowMenuOpen = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Not entered") },
+                                onClick = {
+                                    selectedFlow = null
+                                    flowMenuOpen = false
+                                },
+                            )
+                            CycleTrackingStore.Flow.entries.forEach { flow ->
+                                DropdownMenuItem(
+                                    text = { Text(cycleFlowLabel(flow)) },
+                                    onClick = {
+                                        selectedFlow = flow
+                                        flowMenuOpen = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+
+                    Text("Symptoms", style = NoopType.overline, color = Palette.textTertiary)
+                    CycleTrackingStore.Symptom.entries.forEach { symptom ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = !operationInFlight) {
+                                    selectedSymptoms = if (symptom in selectedSymptoms) {
+                                        selectedSymptoms - symptom
+                                    } else {
+                                        selectedSymptoms + symptom
+                                    }
+                                },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = symptom in selectedSymptoms,
+                                onCheckedChange = null,
+                            )
+                            Text(
+                                cycleSymptomLabel(symptom),
+                                style = NoopType.body,
+                                color = Palette.textPrimary,
+                            )
+                        }
+                    }
+
+                    Button(
+                        enabled = !operationInFlight &&
+                            (selectedFlow != null || selectedSymptoms.isNotEmpty()),
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Palette.restColor,
+                            contentColor = Palette.surfaceBase,
+                        ),
+                        onClick = {
+                            runMutation {
+                                onSaveDailyLog(selectedDay, selectedFlow, selectedSymptoms)
+                            }
+                        },
+                    ) {
+                        Text(if (selectedLog == null) "Save daily details" else "Update daily details")
+                    }
+                    if (selectedLog != null) {
+                        TextButton(
+                            enabled = !operationInFlight,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                runMutation { onDeleteDailyLog(selectedDay) }
+                            },
+                        ) {
+                            Text("Clear this day", color = Palette.statusCritical)
+                        }
+                    }
+                    Text(
+                        "Optional context only. These entries do not diagnose a condition, predict safe or fertile days, or trigger an emergency alert.",
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
+                }
+            }
+
             NoopCard {
                 Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -432,10 +566,51 @@ internal fun CycleTrackerSheet(
                 }
             }
 
+            if (details.isNotEmpty()) {
+                NoopCard {
+                    Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Overline("Daily history")
+                            Spacer(Modifier.weight(1f))
+                            TextButton(
+                                enabled = !operationInFlight,
+                                onClick = { confirmDeleteAllDetails = true },
+                            ) {
+                                Text("Delete all", color = Palette.statusCritical)
+                            }
+                        }
+                        details.take(14).forEachIndexed { index, log ->
+                            if (index > 0) HorizontalDivider(color = Palette.hairline)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                Text(
+                                    prettyPeriodStartDay(log.day),
+                                    style = NoopType.bodyNumber,
+                                    color = Palette.textPrimary,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    cycleDailySummary(log),
+                                    style = NoopType.footnote,
+                                    color = Palette.textSecondary,
+                                    modifier = Modifier.weight(1.3f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(CyclePhaseEngine.awarenessLine, style = NoopType.footnote, color = Palette.textTertiary)
                 PrivacyNote(
-                    "Period-start dates stay in NOOP's local database on this phone unless you explicitly export your data."
+                    "Cycle dates and daily details stay in NOOP's local database on this phone unless you explicitly export your data."
                 )
             }
         }
@@ -470,6 +645,63 @@ internal fun CycleTrackerSheet(
             },
         )
     }
+
+    if (confirmDeleteAllDetails) {
+        AlertDialog(
+            onDismissRequest = { if (!operationInFlight) confirmDeleteAllDetails = false },
+            title = { Text("Delete all daily cycle details?") },
+            text = {
+                Text("This permanently removes flow and symptom entries. Period-start dates and wearable history are unchanged.")
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteAllDetails = false }) {
+                    Text(uiString(R.string.l10n_sleep_screen_cancel_77dfd213))
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDeleteAllDetails = false
+                        runMutation { onDeleteAllDailyLogs() }
+                    },
+                ) {
+                    Text("Delete all details", color = Palette.statusCritical)
+                }
+            },
+        )
+    }
+}
+
+private fun cycleFlowLabel(flow: CycleTrackingStore.Flow): String = when (flow) {
+    CycleTrackingStore.Flow.NONE -> "No bleeding"
+    CycleTrackingStore.Flow.SPOTTING -> "Spotting"
+    CycleTrackingStore.Flow.LIGHT -> "Light"
+    CycleTrackingStore.Flow.MEDIUM -> "Medium"
+    CycleTrackingStore.Flow.HEAVY -> "Heavy"
+}
+
+private fun cycleSymptomLabel(symptom: CycleTrackingStore.Symptom): String = when (symptom) {
+    CycleTrackingStore.Symptom.CRAMPS -> "Cramps"
+    CycleTrackingStore.Symptom.HEADACHE -> "Headache"
+    CycleTrackingStore.Symptom.FATIGUE -> "Fatigue"
+    CycleTrackingStore.Symptom.BLOATING -> "Bloating"
+    CycleTrackingStore.Symptom.MOOD_CHANGES -> "Mood changes"
+    CycleTrackingStore.Symptom.BREAST_TENDERNESS -> "Breast tenderness"
+    CycleTrackingStore.Symptom.ACNE -> "Acne"
+    CycleTrackingStore.Symptom.NAUSEA -> "Nausea"
+    CycleTrackingStore.Symptom.BACK_PAIN -> "Back pain"
+    CycleTrackingStore.Symptom.CRAVINGS -> "Cravings"
+}
+
+private fun cycleDailySummary(log: CycleTrackingStore.DailyLog): String {
+    val parts = mutableListOf<String>()
+    log.flow?.let { parts += cycleFlowLabel(it) }
+    if (log.symptoms.isNotEmpty()) {
+        parts += log.symptoms
+            .sortedBy { it.ordinal }
+            .joinToString(", ", transform = ::cycleSymptomLabel)
+    }
+    return parts.joinToString(" · ")
 }
 
 // MARK: - 2. Body Clock card
@@ -647,7 +879,7 @@ private fun cyclePhaseTitle(phase: CyclePhaseEngine.Phase): String = when (phase
     CyclePhaseEngine.Phase.LEARNING -> "Learning your pattern"
 }
 
-/** "~day 18–22" — always a RANGE, never a single point. */
+/** "~day 18–22" - always a RANGE, never a single point. */
 private fun cycleDayText(r: CyclePhaseEngine.Result): String? {
     val lo = r.cycleDayLow ?: return null
     val hi = r.cycleDayHigh ?: return null
@@ -666,7 +898,7 @@ private fun cycleConfidenceTone(c: CyclePhaseEngine.Confidence): StrandTone = wh
     CyclePhaseEngine.Confidence.SOLID -> StrandTone.Accent
 }
 
-/** "About 25 min later than your schedule" — a plain, skimmable headline. */
+/** "About 25 min later than your schedule" - a plain, skimmable headline. */
 private fun bodyClockOffsetTitle(e: CircadianEngine.PhaseEstimate): String {
     if (e.confidence == CircadianEngine.PhaseConfidence.UNREADABLE) return "Hard to read right now"
     val mins = abs(e.offsetVsScheduleMinutes).roundToInt()

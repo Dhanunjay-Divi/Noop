@@ -64,6 +64,25 @@ class RecoveryScorerTraceTest {
         assertTrue(nilLine.contains("skinTempDev"))
     }
 
+    @Test fun traceDropsAbsoluteTemperatureFromDeviationTerm() {
+        val hrvB = baseline(50.0, 6.0)
+        val (score, lines) = RecoveryScorerTrace.recoveryTrace(
+            hrv = 55.0, rhr = 55.0, resp = null,
+            hrvBaseline = hrvB, rhrBaseline = null, respBaseline = null,
+            sleepPerf = 0.85, skinTempDev = 34.2,
+        )
+        assertEquals(
+            RecoveryScorer.recovery(
+                hrv = 55.0, rhr = 55.0, resp = null,
+                hrvBaseline = hrvB, rhrBaseline = null, respBaseline = null,
+                sleepPerf = 0.85, skinTempDev = null,
+            ),
+            score,
+        )
+        assertFalse(lines.any { it.contains("charge term skinTempDev ") })
+        assertTrue(lines.any { it.contains("skinTempDev") && it.contains("nilTerm") })
+    }
+
     @Test fun coldStartTraceReportsTheGateAndNilScore() {
         val coldHRV = BaselineState(
             baseline = 50.0, spread = 5.0, nValid = 2, nightsSinceUpdate = 0,

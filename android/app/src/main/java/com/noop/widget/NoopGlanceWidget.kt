@@ -132,13 +132,13 @@ private fun WidgetContent(context: Context, snap: WidgetSnapshot, appearance: No
                 maxLines = 1,
             )
             MetricPill(
-                text = snap.heartRate?.let { "♥ $it" } ?: "♥ —",
+                text = snap.heartRate?.let { "♥ $it" } ?: "♥ -",
                 action = widgetRouteAction(context, NoopNotificationRoute.LIVE),
                 colors = colors,
             )
             Spacer(modifier = GlanceModifier.width(5.dp))
             MetricPill(
-                text = snap.batteryPct?.let { context.getString(R.string.widget_battery_value, it) } ?: "▰ —",
+                text = snap.batteryPct?.let { context.getString(R.string.widget_battery_value, it) } ?: "▰ -",
                 action = today,
                 colors = colors,
             )
@@ -165,7 +165,7 @@ private fun ScoreCell(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = pct?.toString() ?: "—",
+            text = pct?.toString() ?: "-",
             style = TextStyle(color = color, fontSize = valueSize, fontWeight = FontWeight.Bold),
         )
         Text(

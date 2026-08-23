@@ -293,7 +293,8 @@ targets:
         NSMicrophoneUsageDescription: "NOOP uses the microphone only while you explicitly dictate a Coach question or journal draft. Audio is transcribed by the system and is not stored by NOOP."
         NSSpeechRecognitionUsageDescription: "NOOP uses system speech recognition only while you explicitly dictate a Coach question or journal draft."
         NSLocalNetworkUsageDescription: "NOOP connects to a self-hosted server on your local network only when you configure and enable that optional sync."
-        NSLocationWhenInUseUsageDescription: "NOOP uses location when you request an outdoor-workout route or choose to add one current location to a safety message. Workout recording can continue with the screen off. Location stays on your device unless you deliberately share that message."
+        NSLocationWhenInUseUsageDescription: "NOOP uses location when you enable Today weather, record an outdoor-workout route, prepare a safety message, or explicitly send an SOS page. Safety location is shared only for the active page."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "When you explicitly enable the band SOS gesture, Always location access lets NOOP keep the latest location fix available to your accepted contacts while an SOS page is active. NOOP retains no route history and stops sharing when the page ends."
         NSHealthShareUsageDescription: "NOOP reads your Apple Health data to compute metrics locally. It uploads derived records only if you explicitly enable your own self-hosted server."
         NSHealthUpdateUsageDescription: "NOOP writes the metrics it computes from your strap back into Apple Health, on-device and only when you allow it."
         NSMotionUsageDescription: "NOOP reads your iPhone's step count for activity summaries. It uploads derived records only if you explicitly enable your own self-hosted server."
@@ -324,6 +325,7 @@ targets:
         # This does not guarantee timing; Apple may coalesce or defer wakes.
         com.apple.developer.healthkit.background-delivery: true
         com.apple.developer.healthkit.access: []
+        com.apple.developer.weatherkit: true
         com.apple.security.application-groups:
           - $(APP_GROUP_ID)
     settings:

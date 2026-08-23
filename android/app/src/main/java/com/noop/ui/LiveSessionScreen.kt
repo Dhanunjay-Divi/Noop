@@ -62,7 +62,7 @@ import java.time.ZoneId
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-// MARK: - LiveSessionScreen — the Live Session ("silent guardian") surface + end-of-session summary
+// MARK: - LiveSessionScreen - the Live Session ("silent guardian") surface + end-of-session summary
 //
 // The deliberately NEAR-EMPTY session screen the design contract asks for
 // (docs/superpowers/specs/2026-07-04-live-sessions-design.md): one breathing ring, one guarding line, a
@@ -218,7 +218,7 @@ private fun LiveSessionBody(
         // The one line of copy. STALE says so honestly (coaching paused, nothing accrues); otherwise the
         // guarding promise — the whole design is that this screen has nothing to watch.
         Text(
-            if (stale) "Signal lost — coaching paused."
+            if (stale) "Signal lost - coaching paused."
             else "Guarding your session. Silence means you're on track.",
             style = NoopType.subhead,
             color = if (stale) Palette.textTertiary else Palette.textSecondary,
@@ -495,12 +495,12 @@ private fun LiveSessionSummary(
  * engine coaches to its middle-of-the-road default band, and we never invent a percentage.
  */
 internal fun liveSessionChargeSentence(charge: Double?): String {
-    if (charge == null) return "No Recovery yet today — guarding a middle-of-the-road band."
+    if (charge == null) return "No Recovery yet today - guarding a middle-of-the-road band."
     val pct = charge.roundToInt()
     return when {
-        pct < 34 -> "Today's ceiling is lower — Recovery is $pct%."
-        pct < 67 -> "A middling day — Recovery is $pct%, so the band sits mid-range."
-        else -> "Plenty in the tank — Recovery is $pct%, so today's ceiling is higher."
+        pct < 34 -> "Today's ceiling is lower - Recovery is $pct%."
+        pct < 67 -> "A middling day - Recovery is $pct%, so the band sits mid-range."
+        else -> "Plenty in the tank - Recovery is $pct%, so today's ceiling is higher."
     }
 }
 

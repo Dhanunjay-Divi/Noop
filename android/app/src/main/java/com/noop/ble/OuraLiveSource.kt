@@ -1355,7 +1355,7 @@ class OuraLiveSource(
         }
         // A gated/unavailable feature reports ALL-ZERO (mode/status/state); the streaming daytime-HR, by
         // contrast, reads mode=1 status=0x11 state=2. Flag the all-zero case as the honest "cloud never
-        // enabled it" — NOT `subscription==0` alone, since daytime-HR is subscription=0 yet active.
+        // enabled it" - NOT `subscription==0` alone, since daytime-HR is subscription=0 yet active.
         val off = st.mode == 0 && st.status == 0 && st.state == 0
         val gate = if (off) " - INACTIVE (server-gated off; the cloud never enabled it, not emitted offline)" else ""
         // Name the enum fields so the log reads plainly (OURA_PROTOCOL.md s7.1 [ring4-ble]) — e.g. a gated
@@ -1428,7 +1428,7 @@ class OuraLiveSource(
                     handler.post { guardedCallback("live-sink") { liveSink(bpm, emptyList()) } }
                 }
                 // A LIVE HR push (0x2F) exists only while the ring is measuring on a finger, so it is the
-                // sole safe "worn now" signal — fed unconditionally (even a gated-out bpm still proves the
+                // sole safe "worn now" signal - fed unconditionally (even a gated-out bpm still proves the
                 // ring is on a finger). NEVER fed from OuraEvent.Ibi below: the history path decodes IBI
                 // tags to .Ibi only (never .Hr), so a past-night re-serve can't reach here and falsely
                 // flip the badge to worn. Mirrors iOS OuraLiveSource `.hr` case. Posted to the main looper

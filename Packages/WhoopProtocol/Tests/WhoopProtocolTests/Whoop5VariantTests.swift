@@ -64,7 +64,7 @@ final class Whoop5VariantTests: XCTestCase {
     func testLabels() {
         XCTAssertEqual(Whoop5Variant.mg.label, "MG")
         XCTAssertEqual(Whoop5Variant.fiveZero.label, "5.0")
-        XCTAssertEqual(Whoop5Variant.unknown.label, "—")
+        XCTAssertEqual(Whoop5Variant.unknown.label, "-")
         XCTAssertEqual(Whoop5Variant.mg.registryModelLabel, "WHOOP MG")
         XCTAssertEqual(Whoop5Variant.fiveZero.registryModelLabel, "WHOOP 5.0")
         XCTAssertNil(Whoop5Variant.unknown.registryModelLabel)

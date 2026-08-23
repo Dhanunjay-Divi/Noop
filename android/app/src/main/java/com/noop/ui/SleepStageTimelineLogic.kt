@@ -8,7 +8,7 @@ internal data class PersistedSegment(val start: Long, val end: Long, val stage: 
 
 /**
  * Parse the verbatim per-epoch segments array the on-device stager persists
- * ([{"start","end","stage"}], unix seconds, stage ∈ wake|light|deep|rem — see
+ * ([{"start","end","stage"}], unix seconds, stage ∈ wake|light|deep|rem - see
  * AnalyticsEngine.encodeStages). Returns null for the imported minutes shapes
  * (the macOS {"light",…} dict and the CSV-import [{stage,min}] array) and any
  * malformed input, so callers keep the synthesized fallback. Pure + unit-tested

@@ -9,8 +9,14 @@ public enum WhoopModel: String, CaseIterable, Identifiable, Hashable {
     case whoop4   = "WHOOP 4.0"
     case whoop5mg = "WHOOP 5.0 / MG"
 
+    public static let customerName = "Noop Band"
+
     public var id: String { rawValue }
-    public var displayName: String { rawValue }
+    /// Hardware generation is an internal transport detail. Setup and status surfaces use one product name.
+    public var displayName: String { Self.customerName }
+
+    /// Diagnostic-only transport identity. Never use this on ordinary customer setup or status screens.
+    public var transportName: String { rawValue }
 
     /// The OTHER WHOOP family to try when a service-filtered scan for this model finds nothing. A
     /// stale/missing persisted preference (after an update or a state restore) can point the scan at

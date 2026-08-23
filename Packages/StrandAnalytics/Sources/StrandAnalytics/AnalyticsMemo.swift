@@ -27,7 +27,7 @@ import Foundation
 
 /// A bounded, thread-safe memoization cache. `Key` is a cheap value-type fingerprint of the inputs;
 /// `Value` is the engine's small result. Eviction is insertion-order (FIFO) once `capacity` is
-/// reached — the access pattern here is "the same night/day re-requested", so the hot set stays
+/// reached - the access pattern here is "the same night/day re-requested", so the hot set stays
 /// resident and the cap simply stops unbounded growth across a long session.
 final class AnalyticsMemoCache<Key: Hashable, Value>: @unchecked Sendable {
     private let lock = NSLock()

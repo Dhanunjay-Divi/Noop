@@ -122,7 +122,7 @@ enum class CommandNumber(val rawValue: Int) {
     SET_ADVERTISING_NAME(77),
     RUN_HAPTICS_PATTERN(79),
     GET_ALL_HAPTICS_PATTERN(80),
-    // SET_CONFIG / SET_FF_VALUE (0x78) — write one persistent feature flag. The 5/MG "enable R22
+    // SET_CONFIG / SET_FF_VALUE (0x78) - write one persistent feature flag. The 5/MG "enable R22
     // packets" sequence (Whoop5Config) sends 15 of these to switch on the deep biometric streams.
     // Reversible; gated behind the deep-data opt-in; iOS/Android only. (#174)
     SET_CONFIG(120),
@@ -244,7 +244,7 @@ enum class RebootProbeVariant(
     // on the harder power-cycle opcode and a different byte on reboot.
     REBOOT_29_PAYLOAD1(CommandNumber.REBOOT_STRAP, byteArrayOf(0x01),
         "C · REBOOT_STRAP(29) payload=01", "C/reboot29-payload01"),
-    // D — opcode 32 POWER_CYCLE_STRAP, payload [0x01]: the "harder restart" opcode with the sub-command
+    // D - opcode 32 POWER_CYCLE_STRAP, payload [0x01]: the "harder restart" opcode with the sub-command
     // byte that made 29 react (#275). Best remaining safe candidate for a genuine power-cycle.
     POWER_CYCLE_32_PAYLOAD1(CommandNumber.POWER_CYCLE_STRAP, byteArrayOf(0x01),
         "D · POWER_CYCLE(32) payload=01", "D/powercycle32-payload01"),

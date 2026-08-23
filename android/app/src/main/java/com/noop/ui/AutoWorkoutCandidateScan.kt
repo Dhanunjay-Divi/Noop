@@ -8,6 +8,8 @@ import com.noop.analytics.WorkoutTypeFeatureExtractor
 import com.noop.data.DailyMetric
 import com.noop.data.WhoopRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -16,6 +18,26 @@ import kotlinx.coroutines.withContext
  */
 internal object AutoWorkoutCandidateScan {
     private const val DAYS_BACK = 2L
+    private val scanMutex = Mutex()
+
+    private data class CacheKey(
+        val repositoryIdentity: Int,
+        val activeDeviceId: String,
+        val dayCount: Int,
+        val latestDay: String?,
+        val latestRestingDay: String?,
+        val latestRestingHr: Int?,
+        val dismissedHash: Int,
+        val minuteBucket: Long,
+    )
+
+    private data class Cache(
+        val key: CacheKey,
+        val candidate: AutoWorkoutDetector.DetectedWorkout?,
+        val createdAtNanos: Long,
+    )
+
+    @Volatile private var cache: Cache? = null
 
     /**
      * Scan recent active/canonical strap history, exclude every saved or dismissed span, and return the
@@ -29,6 +51,52 @@ internal object AutoWorkoutCandidateScan {
         dismissedTokens: Set<String>,
         nowSec: Long = System.currentTimeMillis() / 1_000L,
         traceSink: ((String) -> Unit)? = null,
+        forceRefresh: Boolean = false,
+    ): AutoWorkoutDetector.DetectedWorkout? {
+        val latestResting = days.lastOrNull { it.restingHr != null }
+        val key = CacheKey(
+            repositoryIdentity = System.identityHashCode(repository),
+            activeDeviceId = activeDeviceId,
+            dayCount = days.size,
+            latestDay = days.lastOrNull()?.day,
+            latestRestingDay = latestResting?.day,
+            latestRestingHr = latestResting?.restingHr,
+            dismissedHash = dismissedTokens.hashCode(),
+            minuteBucket = nowSec / 60L,
+        )
+        val requestStarted = System.nanoTime()
+
+        return scanMutex.withLock {
+            // A force request means "fresh after this sync." If another identical scan completed while
+            // this caller waited for the lock, reuse it; otherwise bypass an older visible-card result.
+            val cached = cache
+            if (traceSink == null && cached?.key == key &&
+                (!forceRefresh || cached.createdAtNanos >= requestStarted)
+            ) {
+                return@withLock cached.candidate
+            }
+            val candidate = scan(
+                repository = repository,
+                activeDeviceId = activeDeviceId,
+                days = days,
+                dismissedTokens = dismissedTokens,
+                nowSec = nowSec,
+                traceSink = traceSink,
+            )
+            if (traceSink == null) {
+                cache = Cache(key, candidate, System.nanoTime())
+            }
+            candidate
+        }
+    }
+
+    private suspend fun scan(
+        repository: WhoopRepository,
+        activeDeviceId: String,
+        days: List<DailyMetric>,
+        dismissedTokens: Set<String>,
+        nowSec: Long,
+        traceSink: ((String) -> Unit)?,
     ): AutoWorkoutDetector.DetectedWorkout? = withContext(Dispatchers.Default) {
         val fromSec = nowSec - DAYS_BACK * 86_400L
 

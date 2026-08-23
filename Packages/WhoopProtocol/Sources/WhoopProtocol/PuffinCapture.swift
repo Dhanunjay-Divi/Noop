@@ -4,7 +4,7 @@ import Foundation
 /// correlate raw bytes against ground truth.
 ///
 /// The `hex` key is intentionally the same shape the test fixtures use (`frames.json` is an array of
-/// `{"hex": …}`), so a capture file is *directly* usable as a parity fixture — the extra fields are a
+/// `{"hex": …}`), so a capture file is *directly* usable as a parity fixture - the extra fields are a
 /// superset the decoder ignores. Keys are snake_case to match the existing `golden.json` style.
 public struct PuffinCaptureRecord: Codable, Equatable {
     /// Full on-wire frame as lowercase hex — the canonical `ParsedFrame.rawHex`.
@@ -79,7 +79,7 @@ public final class PuffinCapture {
         return try enc.encode(records)
     }
 
-    /// The `[{"hex": …}]` subset — byte-for-byte the shape `Tests/.../Resources/frames.json` expects,
+    /// The `[{"hex": …}]` subset - byte-for-byte the shape `Tests/.../Resources/frames.json` expects,
     /// so a capture can be dropped straight into the parity suite.
     public func framesFixtureJSON() throws -> Data {
         struct HexOnly: Encodable { let hex: String }

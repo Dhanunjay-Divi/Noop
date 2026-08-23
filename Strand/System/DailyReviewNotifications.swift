@@ -5,7 +5,9 @@ import UserNotifications
 /// open a trusted top-level screen, never a URL or arbitrary stored navigation value.
 enum NoopNotificationRoute: String, Equatable, Sendable {
     case today
+    case trends
     case sleep
+    case hydration
     case devices
     case safety
     case coach
@@ -177,7 +179,7 @@ enum DailyReviewNotifications {
         ]
     }
 
-    static func clampMinute(_ minutes: Int) -> Int {
+    nonisolated static func clampMinute(_ minutes: Int) -> Int {
         min(max(minutes, 0), 24 * 60 - 1)
     }
 

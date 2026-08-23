@@ -36,7 +36,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
-// MARK: - WhoopModelComparisonScreen (FI-2 / #490) — "what each strap can read, and why"
+// MARK: - WhoopModelComparisonScreen (FI-2 / #490) - "what each strap can read, and why"
 //
 // A plain-English comparison of the WHOOP 4.0 and the WHOOP 5.0/MG, reached from Settings → Strap by
 // EITHER model owner. The point (issue #490): a 4.0 user wrongly believed broadcast-out was 5.0-only.

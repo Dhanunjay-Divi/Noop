@@ -203,7 +203,7 @@ object ScheduledReportNotifier {
                     CHANNEL_ID, "Daily reports",
                     NotificationManager.IMPORTANCE_LOW,
                 ).apply {
-                    description = "A morning recap and post-workout summary, after your strap syncs."
+                    description = "A morning recap and post-workout summary after Noop Band syncs."
                 },
             )
         }

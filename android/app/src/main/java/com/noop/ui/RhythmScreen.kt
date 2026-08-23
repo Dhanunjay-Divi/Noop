@@ -48,7 +48,7 @@ import com.noop.analytics.RhythmScreener
 import kotlin.math.min
 
 /*
- * RhythmScreen.kt — EXPERIMENTAL beat-to-beat regularity VISUALIZATION (v5 "Rhythm").
+ * RhythmScreen.kt - EXPERIMENTAL beat-to-beat regularity VISUALIZATION (v5 "Rhythm").
  *
  * Faithful Compose twin of Strand/Screens/RhythmView.swift.
  * Spec: docs/superpowers/specs/2026-06-19-v5-rhythm-screening-design.md (§6, §9, §11).
@@ -320,7 +320,7 @@ private fun ConfidencePill(headline: RhythmScreener.WindowResult?, readable: Int
     }
 }
 
-// ── Plot card — the Poincaré scatter + the "comet vs cloud" reading note ──────────────────
+// ── Plot card - the Poincaré scatter + the "comet vs cloud" reading note ──────────────────
 
 @Composable
 private fun PlotCard(points: List<RhythmScreener.PoincarePoint>) {
@@ -443,7 +443,7 @@ private fun StatsCard(headline: RhythmScreener.WindowResult?) {
                 modifier = Modifier.weight(1f),
             )
             StatTile(
-                label = uiString(R.string.l10n_rhythm_screen_beats_read_15da45e3), value = headline?.nBeats?.toString() ?: "—",
+                label = uiString(R.string.l10n_rhythm_screen_beats_read_15da45e3), value = headline?.nBeats?.toString() ?: "-",
                 caption = "clean intervals", accent = Palette.textSecondary,
                 modifier = Modifier.weight(1f),
             )
@@ -514,8 +514,8 @@ private fun headlineDetail(label: RhythmRegularity): String = when (label) {
 // ── Formatting ────────────────────────────────────────────────────────────────────────────
 
 private fun fmt(value: Double?, format: String): String =
-    if (value == null) "—" else String.format(format, value)
+    if (value == null) "-" else String.format(format, value)
 
 /** A 0…1 fraction rendered as a whole-number percent (normalised RMSSD / ectopic fraction). */
 private fun percent(value: Double?): String =
-    if (value == null) "—" else String.format("%.0f%%", value * 100)
+    if (value == null) "-" else String.format("%.0f%%", value * 100)

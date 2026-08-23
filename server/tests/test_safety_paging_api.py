@@ -687,3 +687,167 @@ def test_twilio_delivery_receipts_require_capability_and_valid_signature() -> No
         assert (
             contacts.json()["contacts"][0]["invitation_delivery_status"] == "delivered"
         )
+
+
+def test_incident_location_keeps_only_latest_fix_and_signed_link_shows_it() -> None:
+    provider = FakePagingProvider()
+    client, _ = _client(
+        provider,
+        acknowledgement_timeout_seconds=10,
+        signed_callbacks=True,
+    )
+    with client:
+        _, headers, _ = _bootstrap(client)
+        _ready_contacts(client, provider, headers)
+        created = client.post(
+            "/v1/safety/incidents",
+            headers={**headers, "Idempotency-Key": str(uuid4())},
+            json={"trigger": "manual_sos"},
+        )
+        assert created.status_code == 202, created.text
+        incident_id = created.json()["dispatch_id"]
+        _wait_until(lambda: len(provider.pages) == 2)
+
+        captured_at = datetime.now(UTC)
+        first = client.put(
+            f"/v1/safety/incidents/{incident_id}/location",
+            headers=headers,
+            json={
+                "sequence": 1,
+                "latitude": 40.7128,
+                "longitude": -74.0060,
+                "horizontal_accuracy_meters": 24.5,
+                "captured_at": captured_at.isoformat(),
+            },
+        )
+        assert first.status_code == 200, first.text
+        assert first.json()["retention"] == "latest_only"
+        assert first.json()["location"]["idempotent_replay"] is False
+
+        second_captured_at = captured_at + timedelta(seconds=1)
+        second = client.put(
+            f"/v1/safety/incidents/{incident_id}/location",
+            headers=headers,
+            json={
+                "sequence": 2,
+                "latitude": 40.7131,
+                "longitude": -74.0057,
+                "horizontal_accuracy_meters": 12.0,
+                "captured_at": second_captured_at.isoformat(),
+            },
+        )
+        assert second.status_code == 200, second.text
+        assert second.json()["location"]["idempotent_replay"] is False
+
+        owner_view = client.get(
+            f"/v1/safety/incidents/{incident_id}",
+            headers=headers,
+        )
+        assert owner_view.status_code == 200
+        assert owner_view.json()["latest_location"]["sequence"] == 2
+        assert owner_view.json()["latest_location"]["latitude"] == 40.7131
+
+        contact_view = client.get(provider.pages[0].response_url)
+        assert contact_view.status_code == 200
+        assert "Latest shared location" in contact_view.text
+        assert "40.713100" in contact_view.text
+        assert 'http-equiv="refresh"' in contact_view.text
+
+
+def test_location_replays_are_idempotent_and_stale_fixes_are_rejected() -> None:
+    provider = FakePagingProvider()
+    client, _ = _client(provider, acknowledgement_timeout_seconds=10)
+    with client:
+        _, headers, _ = _bootstrap(client)
+        _ready_contacts(client, provider, headers)
+        created = client.post(
+            "/v1/safety/incidents",
+            headers={**headers, "Idempotency-Key": str(uuid4())},
+            json={"trigger": "manual_sos"},
+        )
+        incident_id = created.json()["dispatch_id"]
+        captured_at = datetime.now(UTC)
+        payload = {
+            "sequence": 1,
+            "latitude": 37.7749,
+            "longitude": -122.4194,
+            "horizontal_accuracy_meters": 18.0,
+            "captured_at": captured_at.isoformat(),
+        }
+        assert (
+            client.put(
+                f"/v1/safety/incidents/{incident_id}/location",
+                headers=headers,
+                json=payload,
+            ).status_code
+            == 200
+        )
+
+        replay = client.put(
+            f"/v1/safety/incidents/{incident_id}/location",
+            headers=headers,
+            json=payload,
+        )
+        assert replay.status_code == 200
+        assert replay.json()["location"]["idempotent_replay"] is True
+
+        out_of_order = client.put(
+            f"/v1/safety/incidents/{incident_id}/location",
+            headers=headers,
+            json={
+                **payload,
+                "sequence": 2,
+                "latitude": 1.0,
+                "captured_at": (captured_at - timedelta(seconds=1)).isoformat(),
+            },
+        )
+        assert out_of_order.status_code == 200
+        assert out_of_order.json()["location"]["idempotent_replay"] is True
+        assert out_of_order.json()["location"]["latitude"] == 37.7749
+
+        stale = client.put(
+            f"/v1/safety/incidents/{incident_id}/location",
+            headers=headers,
+            json={
+                **payload,
+                "sequence": 3,
+                "captured_at": (
+                    datetime.now(UTC) - timedelta(minutes=6)
+                ).isoformat(),
+            },
+        )
+        assert stale.status_code == 422
+        assert "too old" in stale.json()["detail"]
+
+
+def test_terminal_incident_rejects_location_updates() -> None:
+    provider = FakePagingProvider()
+    client, _ = _client(provider, acknowledgement_timeout_seconds=10)
+    with client:
+        _, headers, _ = _bootstrap(client)
+        _ready_contacts(client, provider, headers)
+        created = client.post(
+            "/v1/safety/incidents",
+            headers={**headers, "Idempotency-Key": str(uuid4())},
+            json={"trigger": "manual_sos"},
+        )
+        incident_id = created.json()["dispatch_id"]
+        cancelled = client.post(
+            f"/v1/safety/incidents/{incident_id}/cancel",
+            headers=headers,
+            json={"note": "Cancelled during the confirmation window"},
+        )
+        assert cancelled.status_code == 200
+
+        update = client.put(
+            f"/v1/safety/incidents/{incident_id}/location",
+            headers=headers,
+            json={
+                "sequence": 1,
+                "latitude": 34.0522,
+                "longitude": -118.2437,
+                "captured_at": datetime.now(UTC).isoformat(),
+            },
+        )
+        assert update.status_code == 409
+        assert "no longer accepting" in update.json()["detail"]

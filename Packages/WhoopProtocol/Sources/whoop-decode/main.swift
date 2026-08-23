@@ -155,7 +155,7 @@ func pad(_ s: String, _ width: Int, right: Bool = false) -> String {
 }
 
 func render(_ v: ParsedValue?) -> String {
-    guard let v else { return "—" }
+    guard let v else { return "-" }
     switch v {
     case .int(let n): return String(n)
     case .double(let d): return String(d)
@@ -203,8 +203,8 @@ for (n, rec) in records.enumerated() {
     }
 
     // Text dump.
-    let crc = parsed.crcOK.map { $0 ? "ok" : "BAD" } ?? "—"
-    var head = "[\(n)] \(family.rawValue) ok=\(parsed.ok) type=\(parsed.typeName) seq=\(parsed.seq.map(String.init) ?? "—") crc=\(crc)"
+    let crc = parsed.crcOK.map { $0 ? "ok" : "BAD" } ?? "-"
+    var head = "[\(n)] \(family.rawValue) ok=\(parsed.ok) type=\(parsed.typeName) seq=\(parsed.seq.map(String.init) ?? "-") crc=\(crc)"
     if let c = rec.char { head += " char=\(c)" }
     if let hr = rec.hr { head += " hr=\(hr)" }
     print(head)
@@ -225,7 +225,7 @@ if jsonOut {
     }
 } else {
     // Summary to stderr so it doesn't pollute a piped dump.
-    var summary = "\n— \(okCount)/\(total) frames decoded ok —\n"
+    var summary = "\n- \(okCount)/\(total) frames decoded ok -\n"
     for (t, c) in typeCounts.sorted(by: { $0.value > $1.value }) {
         summary += "  \(pad(String(c), 5, right: true))  \(t)\n"
     }

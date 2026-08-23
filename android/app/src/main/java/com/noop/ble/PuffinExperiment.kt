@@ -30,7 +30,7 @@ class PuffinExperiment(private val prefs: SharedPreferences) {
         get() = prefs.getBoolean(KEY_CAPTURE, false)
         set(v) = prefs.edit().putBoolean(KEY_CAPTURE, v).apply()
 
-    /** True if the user opted in to the WHOOP 5/MG "R22" deep-data unlock — the one probe that WRITES
+    /** True if the user opted in to the WHOOP 5/MG "R22" deep-data unlock - the one probe that WRITES
      *  a persistent feature flag to the strap (the `enable_r22_*` SET_CONFIG sequence). Kept distinct
      *  from [isEnabled] because it changes strap state; reversible, default false. Mirrors the macOS
      *  `PuffinExperiment.deepDataKey`. Driven only from `WhoopBleClient.enableWhoop5DeepData()`. (#174) */

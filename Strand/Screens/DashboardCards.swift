@@ -119,7 +119,7 @@ enum DashboardCard: String, CaseIterable, Identifiable {
 
     /// The default set when the user hasn't customised the dashboard: the original Stress / Fitness age /
     /// Vitality trio plus HRV + Resting HR (per the task's "sensible default"). Cards with no value yet
-    /// simply render "—", so the default set is safe on a fresh install.
+    /// simply render "-", so the default set is safe on a fresh install.
     static let defaultSelection: [DashboardCard] = [
         .stress, .fitnessAge, .vitality, .hrv, .restingHr,
     ]

@@ -7,7 +7,7 @@ import WhoopStore
 // Observable @MainActor cache over the synchronous `DeviceRegistryStore` (device-foundation
 // Task 5). The UI observes this for the paired-device list + the currently active device; the
 // app's `deviceId` is sourced from `activeDeviceId` so it's "the active device's id" rather than
-// the hardcoded "my-whoop" literal. Behaviour is unchanged today — migration v15 seeds a single
+// the hardcoded "my-whoop" literal. Behaviour is unchanged today - migration v15 seeds a single
 // 'my-whoop' row as `.active`, so the active id is still "my-whoop".
 //
 // `DeviceRegistryStore` is synchronous (its own GRDB queue, internally serialized), so the reads

@@ -25,7 +25,7 @@ internal fun clockLabel(latest: DailyMetric, session: SleepSession?): String {
     }.getOrNull() ?: latest.day
 }
 
-/** "Wed 4 Jun · 22:50–06:48" — the night-nav header's date · onset–wake line. (#160) */
+/** "Wed 4 Jun · 22:50–06:48" - the night-nav header's date · onset–wake line. (#160) */
 internal fun sessionClockLabel(session: SleepSession): String =
     clockLabelFor(session.effectiveStartTs, session.endTs) // EFFECTIVE onset so an edited bedtime shows (PR #395)
 

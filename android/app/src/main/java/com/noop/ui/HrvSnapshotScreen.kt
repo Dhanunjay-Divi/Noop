@@ -69,7 +69,7 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * Manual HRV snapshot — "Take an HRV reading" (#127). Kotlin parity twin of
+ * Manual HRV snapshot - "Take an HRV reading" (#127). Kotlin parity twin of
  * Strand/Screens/HRVSnapshotView.swift.
  *
  * A short, deliberate seated capture: the user sits still and breathes normally while the strap's
@@ -177,7 +177,7 @@ fun HrvSnapshotScreen(
             }
             Spacer(Modifier.width(8.dp))
             if (bonded) {
-                StatePill("Strap live", tone = StrandTone.Positive)
+                StatePill("Noop Band live", tone = StrandTone.Positive)
             } else {
                 StatePill("Not connected", tone = StrandTone.Warning)
             }
@@ -494,9 +494,9 @@ private fun captureFraction(phase: HrvPhase, secondsRemaining: Int): Float = whe
 
 private fun dialValue(phase: HrvPhase, runningRmssd: Double?, result: HrvAnalyzer.HrvResult?): String =
     when (phase) {
-        HrvPhase.Idle -> "—"
+        HrvPhase.Idle -> "-"
         HrvPhase.Capturing -> runningRmssd?.let { String.format(Locale.US, "%.0f", it) } ?: "…"
-        HrvPhase.Done -> result?.rmssd?.let { String.format(Locale.US, "%.0f", it) } ?: "—"
+        HrvPhase.Done -> result?.rmssd?.let { String.format(Locale.US, "%.0f", it) } ?: "-"
     }
 
 private fun primaryLabel(phase: HrvPhase): String = when (phase) {
@@ -510,7 +510,7 @@ private fun instruction(phase: HrvPhase, bonded: Boolean, result: HrvAnalyzer.Hr
         HrvPhase.Idle -> if (bonded) {
             "Sit still and breathe normally. Tap below to take a 60-second reading."
         } else {
-            "Connect your strap on the Live screen to take a reading."
+            "Connect Noop Band on the Live screen to take a reading."
         }
         HrvPhase.Capturing -> "Sit still, breathe normally. Keep your wrist relaxed and steady."
         HrvPhase.Done -> if (result != null && result.rmssd == null) {
@@ -522,7 +522,7 @@ private fun instruction(phase: HrvPhase, bonded: Boolean, result: HrvAnalyzer.Hr
 
 /** Format a nullable Double with a C-style format, em-dash for null. Shared with the tests. */
 internal fun formatHrv(value: Double?, fmt: String): String =
-    if (value == null) "—" else String.format(Locale.US, fmt, value)
+    if (value == null) "-" else String.format(Locale.US, fmt, value)
 
 /**
  * Mean heart rate (bpm) from the mean NN interval (ms): 60000 / meanNN. null when meanNN is missing

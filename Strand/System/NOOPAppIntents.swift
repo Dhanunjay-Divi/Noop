@@ -16,16 +16,16 @@ enum NOOPIntentError: Error, CustomLocalizedStringResourceConvertible {
     case notConnected
     var localizedStringResource: LocalizedStringResource {
         switch self {
-        case .notRunning:   return "Open NOOP first so it can reach your strap."
-        case .notConnected: return "Connect your WHOOP strap in NOOP, then try again."
+        case .notRunning:   return "Open NOOP first so it can reach Noop Band."
+        case .notConnected: return "Connect Noop Band in NOOP, then try again."
         }
     }
 }
 
 @available(macOS 13.0, *)
 struct BuzzStrapIntent: AppIntent {
-    static var title: LocalizedStringResource = "Buzz Strap"
-    static var description = IntentDescription("Vibrate your connected WHOOP strap.")
+    static var title: LocalizedStringResource = "Buzz Noop Band"
+    static var description = IntentDescription("Vibrate your connected Noop Band.")
     static var openAppWhenRun = false
 
     @MainActor
@@ -42,7 +42,7 @@ struct BuzzStrapIntent: AppIntent {
 @available(macOS 13.0, *)
 struct MarkMomentIntent: AppIntent {
     static var title: LocalizedStringResource = "Mark a Moment"
-    static var description = IntentDescription("Record a timestamped moment (and buzz the strap if it's connected).")
+    static var description = IntentDescription("Record a timestamped moment (and vibrate Noop Band if it's connected).")
     static var openAppWhenRun = false
 
     @MainActor
@@ -59,8 +59,8 @@ struct MarkMomentIntent: AppIntent {
 struct NOOPShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(intent: BuzzStrapIntent(),
-                    phrases: ["Buzz my strap with \(.applicationName)", "Buzz \(.applicationName)"],
-                    shortTitle: "Buzz Strap", systemImageName: "waveform")
+                    phrases: ["Buzz my Noop Band with \(.applicationName)", "Buzz \(.applicationName)"],
+                    shortTitle: "Buzz Noop Band", systemImageName: "waveform")
         AppShortcut(intent: MarkMomentIntent(),
                     phrases: ["Mark a moment with \(.applicationName)", "Mark a moment in \(.applicationName)"],
                     shortTitle: "Mark a Moment", systemImageName: "mappin.and.ellipse")

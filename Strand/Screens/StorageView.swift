@@ -1,7 +1,7 @@
 import SwiftUI
 import StrandDesign
 
-/// #590 — on-device storage diagnostics. iOS users saw "Documents & Data" balloon to ~19 GB after an
+/// #590 - on-device storage diagnostics. iOS users saw "Documents & Data" balloon to ~19 GB after an
 /// Apple Health import: the document picker's `asCopy:true` duplicate sat in `Documents/Inbox/` forever
 /// and the WAL never truncated. AppModel now reclaims both automatically (Inbox cleanup on import +
 /// launch, WAL truncate after each import); this screen makes the footprint VISIBLE and gives a manual
@@ -131,7 +131,7 @@ struct StorageView: View {
                 }
             }
             Spacer(minLength: 8)
-            Text(bytes.map(Self.format) ?? "—")
+            Text(bytes.map(Self.format) ?? "-")
                 .font(StrandFont.bodyNumber)
                 .foregroundStyle(StrandPalette.textSecondary)
         }

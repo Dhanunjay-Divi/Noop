@@ -38,14 +38,77 @@ enum AppleDemoSeeder {
     }
 
     /// Seed only if requested AND the store is empty. Safe to call on every launch.
-    static func seedIfRequested(into store: WhoopStore, vitalityProfileAge: Int) async {
+    static func seedIfRequested(
+        into store: WhoopStore,
+        profileAge: Int,
+        profileSex: String
+    ) async {
         guard requested else { return }
         seedDemoDeviceIfNeeded(into: store)
         await seedNutritionIfRequested(into: store)
         let existing = (try? await store.dailyMetrics(deviceId: whoop, from: "0000-00-00", to: "9999-99-99")) ?? []
-        guard existing.isEmpty else { return }
-        do { try await seed(into: store, vitalityProfileAge: vitalityProfileAge) }
-        catch { NSLog("AppleDemoSeeder: seed failed — \(error)") }
+        guard existing.isEmpty else {
+            // Screenshot databases survive app reinstalls between UI-test runs. Repair only the
+            // DEBUG fixture's versioned marker when an older demo dataset is already present, so a
+            // newly tightened production provenance gate does not make repeated captures flaky.
+            do {
+                _ = try await repairFitnessAgeProfileMarkers(
+                    in: store,
+                    profileAge: profileAge,
+                    profileSex: profileSex
+                )
+            } catch {
+                NSLog("AppleDemoSeeder: profile-marker repair failed - \(error)")
+            }
+            return
+        }
+        do {
+            try await seed(
+                into: store,
+                profileAge: profileAge,
+                profileSex: profileSex
+            )
+        }
+        catch { NSLog("AppleDemoSeeder: seed failed - \(error)") }
+    }
+
+    /// Upgrades a persisted DEBUG demo fixture after the Fitness Age model marker changes. This is
+    /// deliberately called only from the explicit `--demo-seed` path; release/user databases never
+    /// receive synthetic provenance. Existing correct rows are skipped, making repeated launches a no-op.
+    @discardableResult
+    static func repairFitnessAgeProfileMarkers(
+        in store: WhoopStore,
+        profileAge: Int,
+        profileSex: String
+    ) async throws -> Int {
+        guard let token = AgeMetricProfile.fitnessAgeToken(
+            age: profileAge,
+            sex: profileSex
+        ) else { return 0 }
+
+        async let ageRowsRead = store.metricSeries(
+            deviceId: whoop,
+            key: "fitness_age",
+            from: "0000-00-00",
+            to: "9999-99-99"
+        )
+        async let markerRowsRead = store.metricSeries(
+            deviceId: whoop,
+            key: AgeMetricProfile.fitnessAgeKey,
+            from: "0000-00-00",
+            to: "9999-99-99"
+        )
+        let ageRows = try await ageRowsRead
+        guard !ageRows.isEmpty else { return 0 }
+        let markerByDay = Dictionary(
+            uniqueKeysWithValues: try await markerRowsRead.map { ($0.day, $0.value) }
+        )
+        let repairs = ageRows.compactMap { row -> MetricPoint? in
+            guard markerByDay[row.day] != token else { return nil }
+            return MetricPoint(day: row.day, key: AgeMetricProfile.fitnessAgeKey, value: token)
+        }
+        guard !repairs.isEmpty else { return 0 }
+        return try await store.upsertMetricSeries(repairs, deviceId: whoop)
     }
 
     /// Deterministic mixed-source day plus reusable prior manual meals for provenance and quick-repeat
@@ -139,13 +202,13 @@ enum AppleDemoSeeder {
             _ = try await store.upsertNutritionEntries(rows)
             NSLog("AppleDemoSeeder: nutrition fixture ready for \(today)")
         } catch {
-            NSLog("AppleDemoSeeder: nutrition fixture failed — \(error)")
+            NSLog("AppleDemoSeeder: nutrition fixture failed - \(error)")
         }
     }
 
     /// DEBUG/demo-only: so the Devices screen renders with content under `--demo-seed`, pair a second
     /// (non-WHOOP) strap alongside the seeded WHOOP. If the registry only holds the WHOOP, add a
-    /// `.paired` "Polar H10" — the screenshot then shows the WHOOP (Active) plus a paired strap. Status
+    /// `.paired` "Polar H10" - the screenshot then shows the WHOOP (Active) plus a paired strap. Status
     /// `.paired` (not `.active`) keeps the WHOOP active, so the SourceCoordinator stays dormant and the
     /// existing WHOOP path is untouched. No-op once a second device already exists.
     private static func seedDemoDeviceIfNeeded(into store: WhoopStore) {
@@ -160,13 +223,17 @@ enum AppleDemoSeeder {
         try? registry.add(polar)
     }
 
-    private static func seed(into store: WhoopStore, vitalityProfileAge: Int) async throws {
+    private static func seed(
+        into store: WhoopStore,
+        profileAge: Int,
+        profileSex: String
+    ) async throws {
         var rng = SplitMix64(seed: 0xC0FFEE)
         let cal = Calendar.current
         let zone = TimeZone.current
         let startDay = cal.date(byAdding: .day, value: -(DAYS - 1), to: cal.startOfDay(for: Date()))!
 
-        try? await store.upsertDevice(id: whoop, mac: nil, name: "WHOOP (demo)")
+        try? await store.upsertDevice(id: whoop, mac: nil, name: "Noop Band (demo)")
 
         var daily: [DailyMetric] = []
         var sleeps: [CachedSleepSession] = []
@@ -318,11 +385,16 @@ enum AppleDemoSeeder {
                 value: round1((vitality + gauss(&rng, 0.0, 1.0)).clamped(40.0, 80.0))))
             series.append(MetricPoint(day: day, key: "body_age",
                 value: round1((bodyAgeDemo + gauss(&rng, 0.0, 0.3)).clamped(30.0, 45.0))))
-            // Demo Vitality is synthetic but uses the current provenance-safe model contract. Seed the
-            // same v2 marker the real engine writes so strict upgrade gating does not hide the fixture.
+            // Demo age metrics are synthetic but use the current provenance-safe model contract. Seed
+            // the same v2 markers the real engine writes so strict upgrade gating exercises the actual
+            // production reader instead of silently hiding the fixture.
+            if let token = AgeMetricProfile.fitnessAgeToken(age: profileAge, sex: profileSex) {
+                series.append(MetricPoint(
+                    day: day, key: AgeMetricProfile.fitnessAgeKey, value: token))
+            }
             series.append(MetricPoint(
                 day: day, key: AgeMetricProfile.vitalityKey,
-                value: AgeMetricProfile.vitalityToken(age: vitalityProfileAge)))
+                value: AgeMetricProfile.vitalityToken(age: profileAge)))
             fitnessAge -= 0.75  // ~6 yr younger across the 8 seeded Saturdays
             vo2 += 0.75
             vitality += 2.0

@@ -186,7 +186,7 @@ object ReadinessEngine {
         val sorted = days.sortedBy { it.day }
         // When an explicit [today] is given (the dashboard passes the device's real local day key), use
         // the row for THAT day and nothing else: a stale historical import has no row for today, so the
-        // readiness card reads "insufficient" rather than synthesizing off the newest stored — possibly
+        // readiness card reads "insufficient" rather than synthesizing off the newest stored - possibly
         // months-old — row (issue #23/#24). With no [today] (live-strap default callers) fall back to the
         // most recent row exactly as before, so nothing wearing the strap nightly changes.
         val latest = if (today != null) sorted.firstOrNull { it.day == today } else sorted.lastOrNull()
@@ -377,7 +377,7 @@ object ReadinessEngine {
     /**
      * Format a metric value with the given number of decimals. Mirrors Swift's helper char-for-char:
      * the 0-decimal case uses round-half-AWAY-from-zero (Swift `Int(x.rounded())`, here `Math.round`)
-     * — NOT printf's "%.0f" which is round-half-to-EVEN and would disagree at an exact .5; the >0 case
+     * - NOT printf's "%.0f" which is round-half-to-EVEN and would disagree at an exact .5; the >0 case
      * uses "%.Nf" (round-half-to-even) to match Swift's `String(format:)`. Locale.US so the separator
      * is always ".".
      */
@@ -387,7 +387,7 @@ object ReadinessEngine {
 
     private fun acwrSignal(ratio: Double, acute: Double, chronic: Double): Signal {
         // #1033 (ryanbr): route the acute:chronic ratio through the Locale.US-pinned [fmt] helper (matching
-        // the evidence line below) so a comma-decimal device locale can't render "1,15" — iOS's
+        // the evidence line below) so a comma-decimal device locale can't render "1,15" - iOS's
         // String(format:) is already locale-independent. Pure separator fix, no behavior change.
         val pct = fmt(ratio, 2)
         // Evidence: the two strain loads the ratio is built from, 1 dp each.

@@ -1,6 +1,6 @@
 package com.noop.analytics
 
-// LiveSessionEngine.kt — the "silent guardian" coach for a Live Session. Pure, deterministic, DB-free.
+// LiveSessionEngine.kt - the "silent guardian" coach for a Live Session. Pure, deterministic, DB-free.
 // Byte-for-byte mirror of Strand/Packages/StrandAnalytics/Sources/StrandAnalytics/LiveSessionEngine.swift.
 //
 // Watches a live heart-rate stream against a recovery-gated target BAND and emits at most two haptic cues:

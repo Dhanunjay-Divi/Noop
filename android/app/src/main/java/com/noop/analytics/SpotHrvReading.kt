@@ -1,7 +1,7 @@
 package com.noop.analytics
 
 /**
- * On-demand "take an HRV reading now" — the single-value spot RMSSD path (#537, @sunny-noop).
+ * On-demand "take an HRV reading now" - the single-value spot RMSSD path (#537, @sunny-noop).
  *
  * This wraps NOOP's canonical [HrvAnalyzer] for the LIVE, user-triggered HRV snapshot the Live screen
  * captures over ~60 s of beat-to-beat (R-R) intervals. It exists so the spot value, its honesty gate,
@@ -20,7 +20,7 @@ package com.noop.analytics
  * Honesty is built in, not bolted on:
  *  - A number is returned ONLY when enough CLEAN beats survive ([HrvAnalyzer.MIN_BEATS]); otherwise the
  *    result is [Insufficient] with the surviving/needed counts so the UI can say so plainly (never a
- *    fabricated value, unknown stays "—").
+ *    fabricated value, unknown stays "-").
  *  - The caveat ([caveatFor]) is source-aware: a 60 s spot reading is not the overnight baseline, it
  *    needs enough beats, and R-R derived from a WHOOP 5/MG's optical PPG is noisier than a chest strap's
  *    electrical R-R. Pure strings, US-neutral, no em-dashes.

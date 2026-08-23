@@ -206,7 +206,7 @@ fun IntervalsScreen(vm: AppViewModel) {
     // semantics-walked. Order/spacing unchanged (LazyColumn reproduces the eager `spacedBy(20.dp)`).
     LazyScreenScaffold(
         title = uiString(R.string.l10n_intervals_screen_interval_timer_1d703deb),
-        subtitle = "Silent haptic HIIT - the strap buzzes the transitions",
+        subtitle = "Silent haptic HIIT: Noop Band vibrates at each transition",
     ) {
         // --- Status row ---
         item {
@@ -214,7 +214,7 @@ fun IntervalsScreen(vm: AppViewModel) {
             if (live.bonded) {
                 StatePill("Buzz cues on", tone = StrandTone.Positive)
             } else {
-                StatePill("Connect strap for buzz cues", tone = StrandTone.Warning)
+                StatePill("Connect Noop Band for haptic cues", tone = StrandTone.Warning)
             }
             Spacer(Modifier.weight(1f))
             when {
@@ -446,7 +446,7 @@ private fun PhaseChip(label: String, color: Color) {
     )
 }
 
-/** Frosted round chip — "ROUND n / N". */
+/** Frosted round chip - "ROUND n / N". */
 @Composable
 private fun RoundChip(currentRound: Int, rounds: Int) {
     val shape = RoundedCornerShape(50)

@@ -109,6 +109,63 @@ final class CyclePhaseEngineTests: XCTestCase {
         XCTAssertEqual(r.phase, .learning)
     }
 
+    func testLoggedStartProvidesBoundedCycleDayWhileTemperatureLearns() {
+        let nights = (0..<17).map {
+            CyclePhaseEngine.Night(
+                day: CyclePhaseEngine.shiftDay("2026-01-20", by: $0)!,
+                tempZ: nil, rhrZ: nil, hrvZ: nil
+            )
+        }
+        let r = CyclePhaseEngine.classify(
+            nights,
+            baselineUsable: false,
+            loggedPeriodStarts: ["2026-01-20"]
+        )
+        XCTAssertEqual(r.phase, .learning)
+        XCTAssertEqual(r.confidence, .building)
+        XCTAssertEqual(r.cycleDayLow, 16)
+        XCTAssertEqual(r.cycleDayHigh, 18)
+        XCTAssertNil(r.cycleLengthDays)
+        XCTAssertNotNil(r.nextPeriodWindow)
+        XCTAssertTrue(r.note.contains("28-day prior"))
+    }
+
+    func testLoggedCadenceUsesPlausiblePersonalMedianBeforeSensorCalibration() {
+        let nights = (0..<13).map {
+            CyclePhaseEngine.Night(
+                day: CyclePhaseEngine.shiftDay("2026-01-29", by: $0)!,
+                tempZ: nil, rhrZ: nil, hrvZ: nil
+            )
+        }
+        let r = CyclePhaseEngine.classify(
+            nights,
+            baselineUsable: false,
+            loggedPeriodStarts: ["2026-01-01", "2026-01-29"]
+        )
+        XCTAssertEqual(r.phase, .learning)
+        XCTAssertEqual(r.cycleLengthDays, 28)
+        XCTAssertEqual(r.cycleDayLow, 12)
+        XCTAssertEqual(r.cycleDayHigh, 14)
+        XCTAssertNotNil(r.nextPeriodWindow)
+        XCTAssertTrue(r.note.contains("logged starts"))
+    }
+
+    func testStaleOrFutureLoggedStartDoesNotFabricateCurrentCycle() {
+        let nights = [
+            CyclePhaseEngine.Night(day: "2026-03-01", tempZ: nil, rhrZ: nil, hrvZ: nil)
+        ]
+        let r = CyclePhaseEngine.classify(
+            nights,
+            baselineUsable: false,
+            loggedPeriodStarts: ["2026-01-01", "2026-03-10", "2026-02-30"]
+        )
+        XCTAssertEqual(r.phase, .learning)
+        XCTAssertNil(r.cycleDayLow)
+        XCTAssertNil(r.cycleDayHigh)
+        XCTAssertNil(r.nextPeriodWindow)
+        XCTAssertTrue(r.note.contains("over 40 days old"))
+    }
+
     // MARK: - Logged-period mode: agrees, and a mistimed log is flagged
 
     func testLoggedPeriodMistimedIsFlagged() {

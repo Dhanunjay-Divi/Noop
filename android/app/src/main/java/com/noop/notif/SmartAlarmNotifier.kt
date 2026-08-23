@@ -49,6 +49,10 @@ object SmartAlarmNotifier {
         }
     }
 
+    fun dismiss(context: Context) {
+        NotificationManagerCompat.from(context.applicationContext).cancel(NOTIF_ID)
+    }
+
     private fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         runCatching {
@@ -59,7 +63,7 @@ object SmartAlarmNotifier {
                     CHANNEL_ID, "Smart alarm",
                     NotificationManager.IMPORTANCE_HIGH,
                 ).apply {
-                    description = "Your wake-up smart alarm went off on the strap."
+                    description = "Your wake-up smart alarm went off on Noop Band."
                 },
             )
         }

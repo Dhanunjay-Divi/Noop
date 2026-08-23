@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - On-device activity-file import (GPX / TCX / FIT) — source "activity-file"
+// MARK: - On-device activity-file import (GPX / TCX / FIT) - source "activity-file"
 //
 // Lets a user bring in a single exported activity FILE from ANY brand — Garmin, Coros, Suunto,
 // Wahoo, Polar, Strava, WHOOP, Apple, etc. — fully offline. The three universal interchange formats

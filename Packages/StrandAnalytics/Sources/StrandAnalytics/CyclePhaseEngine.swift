@@ -12,7 +12,7 @@ import Foundation
 // WELLNESS / AWARENESS ONLY — APPROXIMATE. This is NOT contraception, NOT a fertility/ovulation predictor,
 // NOT a medical device, and NOT a diagnosis. It never frames a "fertile window" or "safe days," never
 // emits a single confident period DATE (only a probabilistic WINDOW), and never diagnoses PCOS,
-// pregnancy, perimenopause or any condition — when the signal is flat/irregular it says "no clear
+// pregnancy, perimenopause or any condition - when the signal is flat/irregular it says "no clear
 // pattern," never a verdict. All of this is the load-bearing legal/ethical framing.
 public enum CyclePhaseEngine {
 
@@ -73,7 +73,7 @@ public enum CyclePhaseEngine {
 
     public enum Confidence: String, Equatable, Sendable, Codable {
         case learning       // < minNightsToClassify, or baseline not usable
-        case building       // classifies, but the cadence is still coarse (one elevation seen)
+        case building       // useful logged cadence or a coarse sensor pattern, not yet sensor-solid
         case solid          // a stable repeating shift detected
     }
 
@@ -135,8 +135,29 @@ public enum CyclePhaseEngine {
     public static func classify(_ nights: [Night],
                                 baselineUsable: Bool,
                                 loggedPeriodStarts: [String] = []) -> Result {
+        // Explicitly logged starts can provide a bounded cycle-day range and a broad next-period window
+        // before temperature calibration completes. They never create a sensor-derived phase: phase stays
+        // `learning` until the baseline + night-count gate below is satisfied.
+        let asOfDay = nights.map(\.day).filter { parseDay($0) != nil }.max()
+            ?? loggedPeriodStarts.filter { parseDay($0) != nil }.max()
+        let loggedEstimate = asOfDay.flatMap {
+            estimateFromLoggedStarts(loggedPeriodStarts, asOfDay: $0)
+        }
+
         // Gate: need a usable baseline and ~1.5 cycles of data.
         guard baselineUsable, nights.count >= minNightsToClassify else {
+            if let loggedEstimate {
+                return Result(
+                    phase: .learning,
+                    confidence: .building,
+                    cycleDayLow: loggedEstimate.cycleDayLow,
+                    cycleDayHigh: loggedEstimate.cycleDayHigh,
+                    cycleLengthDays: loggedEstimate.cycleLengthDays,
+                    nextPeriodWindow: loggedEstimate.nextPeriodWindow,
+                    shiftMarkers: [],
+                    note: loggedEstimate.note
+                )
+            }
             return Result(phase: .learning, confidence: .learning, cycleDayLow: nil, cycleDayHigh: nil,
                           cycleLengthDays: nil, nextPeriodWindow: nil, shiftMarkers: [],
                           note: "Learning your pattern from your nightly temperature - keep wearing it overnight.")
@@ -148,6 +169,18 @@ public enum CyclePhaseEngine {
         }
         let values = fused.compactMap { $0.value }
         guard values.count >= minNightsToClassify else {
+            if let loggedEstimate {
+                return Result(
+                    phase: .learning,
+                    confidence: .building,
+                    cycleDayLow: loggedEstimate.cycleDayLow,
+                    cycleDayHigh: loggedEstimate.cycleDayHigh,
+                    cycleLengthDays: loggedEstimate.cycleLengthDays,
+                    nextPeriodWindow: loggedEstimate.nextPeriodWindow,
+                    shiftMarkers: [],
+                    note: loggedEstimate.note
+                )
+            }
             return Result(phase: .learning, confidence: .learning, cycleDayLow: nil, cycleDayHigh: nil,
                           cycleLengthDays: nil, nextPeriodWindow: nil, shiftMarkers: [],
                           note: "Learning your pattern from your nightly temperature - keep wearing it overnight.")
@@ -171,6 +204,18 @@ public enum CyclePhaseEngine {
 
         // No detectable shift at all → honest "no clear pattern," never a fabricated phase.
         guard let lastOnsetIdx = onsets.last else {
+            if let loggedEstimate {
+                return Result(
+                    phase: .unknown,
+                    confidence: .building,
+                    cycleDayLow: loggedEstimate.cycleDayLow,
+                    cycleDayHigh: loggedEstimate.cycleDayHigh,
+                    cycleLengthDays: loggedEstimate.cycleLengthDays,
+                    nextPeriodWindow: loggedEstimate.nextPeriodWindow,
+                    shiftMarkers: shiftMarkers,
+                    note: "No clear temperature pattern yet. \(loggedEstimate.note)"
+                )
+            }
             return Result(phase: .unknown, confidence: .building, cycleDayLow: nil, cycleDayHigh: nil,
                           cycleLengthDays: nil, nextPeriodWindow: nil, shiftMarkers: shiftMarkers,
                           note: "No clear temperature pattern yet - this can happen with irregular cycles, "
@@ -292,6 +337,81 @@ public enum CyclePhaseEngine {
         }
     }
 
+    // MARK: - Logged-start estimate
+
+    private struct LoggedEstimate {
+        let cycleDayLow: Int?
+        let cycleDayHigh: Int?
+        let cycleLengthDays: Int?
+        let nextPeriodWindow: NextPeriodWindow?
+        let note: String
+    }
+
+    /// A deliberately bounded estimate from explicit period-start logs. One start uses a broad 28-day
+    /// population prior only for the window; two or more starts use the median plausible personal gap.
+    /// Neither path produces a phase, a fixed date, or a fertility claim.
+    private static func estimateFromLoggedStarts(_ loggedPeriodStarts: [String],
+                                                 asOfDay: String) -> LoggedEstimate? {
+        guard parseDay(asOfDay) != nil else { return nil }
+        let starts = Array(Set(loggedPeriodStarts.filter {
+            $0 <= asOfDay && parseDay($0) != nil
+        })).sorted()
+        guard let latestStart = starts.last,
+              let daysSinceStart = daysBetween(latestStart, asOfDay),
+              daysSinceStart >= 0 else { return nil }
+
+        var plausibleGaps: [Double] = []
+        if starts.count >= 2 {
+            for index in 1..<starts.count {
+                guard let gap = daysBetween(starts[index - 1], starts[index]),
+                      (minCycleDays...maxCycleDays).contains(gap) else { continue }
+                plausibleGaps.append(Double(gap))
+            }
+        }
+        let personalLength = plausibleGaps.isEmpty
+            ? nil
+            : Int(median(plausibleGaps).rounded())
+
+        // A stale start must not be silently rolled forward through guessed cycles. Ask for the current
+        // anchor instead of making an old log look current.
+        guard daysSinceStart < maxCycleDays else {
+            return LoggedEstimate(
+                cycleDayLow: nil,
+                cycleDayHigh: nil,
+                cycleLengthDays: personalLength,
+                nextPeriodWindow: nil,
+                note: "Your last logged start is over 40 days old. Log the latest start to refresh this estimate; temperature calibration is still learning."
+            )
+        }
+
+        let cycleDay = daysSinceStart + 1
+        let cycleDayLow = max(1, cycleDay - 1)
+        let cycleDayHigh = cycleDay + 1
+        let cadence = personalLength ?? defaultCycleDays
+        let uncertainty = personalLength == nil ? 5 : 3
+
+        var window: NextPeriodWindow?
+        if let earliest = shiftDay(latestStart, by: cadence - uncertainty),
+           let latest = shiftDay(latestStart, by: cadence + uncertainty),
+           latest >= asOfDay {
+            window = NextPeriodWindow(earliestDay: max(asOfDay, earliest), latestDay: latest)
+        }
+
+        let note: String
+        if personalLength != nil {
+            note = "Cycle day and the broad period window come from your logged starts while nightly temperature calibration continues."
+        } else {
+            note = "Cycle day is anchored to your logged start. The broad period window uses a 28-day prior while nightly temperature calibration continues."
+        }
+        return LoggedEstimate(
+            cycleDayLow: cycleDayLow,
+            cycleDayHigh: cycleDayHigh,
+            cycleLengthDays: personalLength,
+            nextPeriodWindow: window,
+            note: note
+        )
+    }
+
     // MARK: - Small stats / day helpers (self-contained so the engine stays I/O-free and parity-clean)
 
     static func median(_ xs: [Double]) -> Double {
@@ -328,7 +448,10 @@ public enum CyclePhaseEngine {
         comps.year = y; comps.month = m; comps.day = d
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "UTC")!
-        return cal.date(from: comps)
+        guard let date = cal.date(from: comps) else { return nil }
+        let roundTrip = cal.dateComponents([.year, .month, .day], from: date)
+        guard roundTrip.year == y, roundTrip.month == m, roundTrip.day == d else { return nil }
+        return date
     }
 
     /// Shift a "yyyy-MM-dd" by `delta` days. UTC, deterministic. nil if unparseable.

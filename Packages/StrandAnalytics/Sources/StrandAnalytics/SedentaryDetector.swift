@@ -1,7 +1,7 @@
 import Foundation
 import WhoopProtocol
 
-// SedentaryDetector.swift — the pure core of the "inactivity reminder" (wrist buzz after sitting
+// SedentaryDetector.swift - the pure core of the "inactivity reminder" (wrist buzz after sitting
 // too long). Faithful port of the Android PR #419 logic (ActivityDetector.detectSedentaryBouts +
 // InactivityPrefs.mayBuzzInactivity + WhoopBleClient.maybeBuzzInactivity de-dup), folded into one
 // pure, deterministic, DB-free engine so Swift and Kotlin are a byte-identical pair.
@@ -45,7 +45,7 @@ public struct SedentaryState: Equatable, Sendable {
     public var lastProcessedGravityTs: Int
     /// Unix-seconds of the last buzz (0 = never) — drives the re-nudge cadence.
     public var lastBuzzAt: Int
-    /// Start of the last buzzed bout (0 = none) — distinguishes "same bout, re-nudge" from "new bout".
+    /// Start of the last buzzed bout (0 = none) - distinguishes "same bout, re-nudge" from "new bout".
     public var lastBuzzedBoutStart: Int
     /// End of the last buzzed bout (0 = none).
     public var lastBuzzedBoutEnd: Int

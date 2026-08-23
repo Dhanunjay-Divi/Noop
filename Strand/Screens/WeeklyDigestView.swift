@@ -401,7 +401,7 @@ struct WeeklyDigestContent: View {
     }
 
     private func meanText(_ s: WeeklyMetricSummary, effortScale: EffortScale) -> String {
-        guard s.thisWeek.n > 0 else { return "—" }
+        guard s.thisWeek.n > 0 else { return "-" }
         // #463/#268: Effort is STORED 0-100; render it on the user's chosen display scale WITH the
         // denominator ("4.6 / 21", "21.6 / 100") so VoiceOver never speaks a different number than the
         // visible gauge. Mirrors Android meanText(s, effortScale) byte-for-byte.
@@ -518,7 +518,7 @@ private struct DigestScoreCard: View {
         return min(max(summary.thisWeek.mean / 100.0, 0), 1)
     }
     private var numberText: String {
-        guard summary.thisWeek.n > 0 else { return "—" }
+        guard summary.thisWeek.n > 0 else { return "-" }
         return isEffort
             ? UnitFormatter.effortDisplay(summary.thisWeek.mean, scale: effortScale)
             : "\(Int(summary.thisWeek.mean.rounded()))"

@@ -44,13 +44,13 @@ public enum BodyLocationProbe {
         if resultCode == 3 {
             verdict = "opcode 84 REJECTED by firmware (UNSUPPORTED)"
         } else if hasPayload {
-            verdict = "opcode 84 ACCEPTED — \(pay.count)-byte payload"
+            verdict = "opcode 84 ACCEPTED - \(pay.count)-byte payload"
         } else {
-            verdict = "opcode 84 answered with a bare stub — ambiguous"
+            verdict = "opcode 84 answered with a bare stub - ambiguous"
         }
 
         var sb = ""
-        sb += "#690 BODY-LOCATION PROBE — \(fam)\n"
+        sb += "#690 BODY-LOCATION PROBE - \(fam)\n"
         sb += "Verdict: \(verdict)\n"
         if let resultLabel { sb += "Result code @12: \(resultLabel)(\(resultCode!))\n" }
         // Full raw hex on ONE line so it copies cleanly for sharing.
@@ -78,9 +78,9 @@ public enum BodyLocationProbe {
                 sb += "  confidence: \(confidence)  (raw)\n"
                 sb += "  status:     \(status)  (raw)\n"
             } else if !isWhoop5 {
-                sb += "\nPayload shorter than the 4-byte body-location record — fields kept raw only\n"
+                sb += "\nPayload shorter than the 4-byte body-location record - fields kept raw only\n"
             } else {
-                sb += "\n5/MG: the record's offset inside the puffin envelope is unconfirmed — NOT decoded (the raw grid above stands); a real capture is needed to map the fields\n"
+                sb += "\n5/MG: the record's offset inside the puffin envelope is unconfirmed - NOT decoded (the raw grid above stands); a real capture is needed to map the fields\n"
             }
             // Per-byte diff vs the previous capture — helps map confidence/status as they move with wear.
             sb += "\n"
@@ -91,15 +91,15 @@ public enum BodyLocationProbe {
                     deltas += String(format: " @%02d:%02x→%02x", i, prev[i], Int(pay[i]))
                 }
                 if deltas.isEmpty {
-                    sb += "Δ vs previous capture: identical — re-probe after moving/re-seating the strap to expose the fields"
+                    sb += "Δ vs previous capture: identical - re-probe after moving/re-seating the strap to expose the fields"
                 } else {
                     sb += "Δ vs previous capture:\(deltas)"
                 }
             } else {
-                sb += "Δ vs previous capture: first capture — probe again in another position to diff"
+                sb += "Δ vs previous capture: first capture - probe again in another position to diff"
             }
         } else {
-            sb += "\nNo payload beyond the command byte (bare stub) — no body-location data on this firmware"
+            sb += "\nNo payload beyond the command byte (bare stub) - no body-location data on this firmware"
         }
         return (sb, payloadHex)
     }

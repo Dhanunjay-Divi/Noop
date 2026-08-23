@@ -51,7 +51,7 @@ public enum BreathPacer {
     public static let inhaleLoops: Int = 1
     /// Loops for an exhale onset — two pulses (heavier), as Breathe fires today.
     public static let exhaleLoops: Int = 2
-    /// Default inhale fraction of the cycle — the calming long-exhale ratio (≈40:60) the "Relax" preset
+    /// Default inhale fraction of the cycle - the calming long-exhale ratio (≈40:60) the "Relax" preset
     /// uses. Exhale gets the remaining 0.6.
     public static let defaultInhaleFraction: Double = 0.4
     /// Slowest / fastest paces we ever schedule (the resonance sweep band, 4.5–7 br/min). Out-of-range

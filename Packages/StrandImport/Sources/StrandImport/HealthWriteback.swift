@@ -26,11 +26,11 @@ public enum HealthWriteback {
     ///
     /// Only the on-device SleepStager segment shape (`[{"start","end","stage"}]`, unix seconds)
     /// carries timing, so only it yields intervals. The two aggregate shapes NOOP has also
-    /// persisted (`{"deep":min,…}` and `[{"stage","min"}]` — see `WhoopCsvExporter.stageMinutes`)
+    /// persisted (`{"deep":min,…}` and `[{"stage","min"}]` - see `WhoopCsvExporter.stageMinutes`)
     /// have no placement information; fabricating positions for them would write fiction into
     /// Health, so they return `[]` and the caller falls back to one `.asleepUnspecified` block.
     ///
-    /// Normalization: the stager labels awake as `"wake"`, importers as `"awake"` — both map to
+    /// Normalization: the stager labels awake as `"wake"`, importers as `"awake"` - both map to
     /// `.awake`. Unknown labels are dropped. Segments are clamped to `[sessionStart, sessionEnd]`
     /// and zero/negative-length segments (before or after clamping) are dropped.
     public static func stageIntervals(stagesJSON: String?,
@@ -42,7 +42,7 @@ public enum HealthWriteback {
         else { return [] }
         var out: [StageInterval] = []
         for seg in segments {
-            // Aggregate shape ([{"stage","min"}]) has no start/end — bail to the no-timing path
+            // Aggregate shape ([{"stage","min"}]) has no start/end - bail to the no-timing path
             // for the WHOLE session rather than emit a partial mix.
             guard let rawStart = intValue(seg["start"]), let rawEnd = intValue(seg["end"]) else {
                 return []

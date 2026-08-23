@@ -35,6 +35,7 @@ extension RecoveryScorer {
         -> (score: Double?, trace: [String]) {
 
         func r2(_ x: Double) -> Double { (x * 100.0).rounded() / 100.0 }
+        let validSkinTempDev = VitalBands.skinTempDeviation(from: skinTempDev)
 
         var lines: [String] = []
         var nilTerms: [String] = []
@@ -43,7 +44,7 @@ extension RecoveryScorer {
         let score = recovery(hrv: hrv, rhr: rhr, resp: resp,
                              hrvBaseline: hrvBaseline, rhrBaseline: rhrBaseline,
                              respBaseline: respBaseline, sleepPerf: sleepPerf,
-                             skinTempDev: skinTempDev)
+                             skinTempDev: validSkinTempDev)
 
         // Cold-start gate: HRV baseline not usable -> recovery() returns nil before any term is built.
         // Report the gate so a nil Charge is explainable, then stop (no terms were scored).
@@ -108,7 +109,7 @@ extension RecoveryScorer {
         }
 
         // Skin-temp term: SYMMETRIC penalty on |deviation|, added only when supplied.
-        if let dev = skinTempDev {
+        if let dev = validSkinTempDev {
             let z = -abs(dev) / skinTempScaleC
             terms.append(("skinTempDev", z, wSkinTemp))
             lines.append("charge term skinTempDev z=\(r2(z)) w=\(r2(wSkinTemp)) "

@@ -1,6 +1,6 @@
 import Foundation
 
-/// EXPERIMENTAL Garmin support — recognition + the in-app "enable Broadcast Heart Rate" hint.
+/// EXPERIMENTAL Garmin support - recognition + the in-app "enable Broadcast Heart Rate" hint.
 ///
 /// HONEST, NON-PROPRIETARY BY DESIGN. Garmin watches do NOT expose a NOOP-readable proprietary live
 /// stream. They DO broadcast the STANDARD Bluetooth Heart Rate profile (0x180D / 0x2A37) when the user

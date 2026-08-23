@@ -1,7 +1,6 @@
 import Foundation
 
-// IllnessSignalEngine.swift — multi-signal "Heads-Up" early-warning with explicit false-positive
-// suppression. Pure, deterministic, DB-free.
+// IllnessSignalEngine.swift - multi-signal "Heads-Up" early-warning. Pure, deterministic, DB-free.
 //
 // INDEPENDENT implementation of the published multi-parameter pre-symptomatic signature documented
 // across the wearable literature (e.g. the Stanford/Snyder resting-HR-elevation work and successor
@@ -12,21 +11,20 @@ import Foundation
 // This replaces the blunt 2-of-4 threshold rule in AppModel.evaluateIllness with:
 //   • a calibrated 0–100 composite anomaly score (so the surface can read "mild" vs "strong"),
 //   • a minimum-corroboration gate (≥ 2 signals) so a single noisy night never fires,
-//   • EXPLICIT confounder suppression cross-checked against the same-day journal tags
-//     (alcohol / stress / sauna / late-or-intense workout / travel), which is the differentiating
-//     part — alcohol elevates RHR + skin temp and crushes HRV exactly like early illness, so a night
-//     out must NOT cry wolf,
-//   • a visible "why" (which signals fired) AND "what was ruled out" (which confounders were present),
+//   • explanatory context cross-checked against same-day journal tags (alcohol / stress / sauna /
+//     late-or-intense workout / travel). Context is shown but NEVER suppresses or downgrades a
+//     corroborated shift: those factors can coexist with illness or another health concern,
+//   • a visible "why" (which signals fired) AND nearby context,
 //   • honest gating: a trusted baseline is required; below that the engine is silent.
 //
 // WELLNESS ONLY — APPROXIMATE, NOT A DIAGNOSIS. The engine never names a condition, illness, infection
 // or fever; the copy is always "a heads-up to rest" / "consider taking it easy" (see the shipped
-// IllnessNotifier copy: "On-device estimate (approximate) — not a diagnosis").
+// IllnessNotifier copy: "On-device estimate (approximate) - not a diagnosis").
 public enum IllnessSignalEngine {
 
     // MARK: - Tuning constants (pinned by test; mirror the Kotlin twin exactly)
 
-    /// Composite score (0–100) at/above which the heads-up is RAISED. Below this it is "mild" — surfaced
+    /// Composite score (0–100) at/above which the heads-up is RAISED. Below this it is "mild" - surfaced
     /// only in a detail view, never a notification (keeps the banner from re-introducing noise).
     public static let raiseThreshold: Double = 50.0
     /// Score floor below which there is nothing worth saying at all (engine returns `.quiet`).
@@ -43,8 +41,8 @@ public enum IllnessSignalEngine {
     public static let kZToScore: Double = 22.0
     public static let perSignalCap: Double = 40.0
 
-    /// When a confounder is present, the composite is multiplied by this and the level is downgraded —
-    /// the signals are real, but a plainer explanation exists, so we soften rather than scream.
+    /// Retained for source compatibility with older clients. Context no longer changes the score.
+    @available(*, deprecated, message: "Journal context is explanatory and no longer dampens health signals.")
     public static let confounderDampen: Double = 0.45
 
     // MARK: - Inputs
@@ -76,9 +74,9 @@ public enum IllnessSignalEngine {
         }
     }
 
-    /// Same-day behaviour context that can explain an anomaly away. All default-false / nil so a caller
-    /// with no journal still gets the raw signal read. `travelPhaseJump` is the cross-feature hook — the
-    /// CircadianEngine can flag a detected body-clock jump (jet lag), which itself shifts temp + RHR.
+    /// Same-day behaviour context that may contribute to a shift. It is explanatory only and can never
+    /// hide or downgrade the signal result. All values default false so a caller with no journal still
+    /// gets the raw signal read. `travelPhaseJump` is the cross-feature hook from CircadianEngine.
     public struct Context: Equatable, Sendable {
         public var alcohol: Bool
         public var stress: Bool
@@ -86,48 +84,80 @@ public enum IllnessSignalEngine {
         public var hardOrLateWorkout: Bool
         public var travelPhaseJump: Bool
         public var alreadyUnwell: Bool
+        /// A user-entered recent medication start or dose change. Explanatory only: medication names,
+        /// doses, and schedules never enter this engine, and this flag cannot change score or level.
+        public var recentMedicationChange: Bool
         /// True iff the caller's baseline for the anomaly is `trusted` (≥ 14 valid nights, not stale).
         /// Below this the engine stays silent — we don't warn off a cold-start baseline.
         public var baselineTrusted: Bool
         public init(alcohol: Bool = false, stress: Bool = false, sauna: Bool = false,
                     hardOrLateWorkout: Bool = false, travelPhaseJump: Bool = false,
-                    alreadyUnwell: Bool = false, baselineTrusted: Bool = true) {
+                    alreadyUnwell: Bool = false, recentMedicationChange: Bool = false,
+                    baselineTrusted: Bool = true) {
             self.alcohol = alcohol; self.stress = stress; self.sauna = sauna
             self.hardOrLateWorkout = hardOrLateWorkout; self.travelPhaseJump = travelPhaseJump
-            self.alreadyUnwell = alreadyUnwell; self.baselineTrusted = baselineTrusted
+            self.alreadyUnwell = alreadyUnwell
+            self.recentMedicationChange = recentMedicationChange
+            self.baselineTrusted = baselineTrusted
         }
     }
 
     // MARK: - Output
 
-    /// How loud the heads-up is. `.quiet` shows nothing; `.alreadyUnwell` is the "rest up" path when the
-    /// user has already logged feeling ill; `.suppressed` is "signals up, but a confounder explains it".
+    /// How loud the heads-up is. `.quiet` shows nothing; `.alreadyUnwell` is the symptom-first path when
+    /// the user has already logged feeling unwell. `.suppressed` is retained only for decoding old data;
+    /// current evaluation never emits it because journal context cannot rule out a health concern.
     public enum Level: String, Equatable, Sendable, Codable {
         case quiet           // nothing worth saying (below mild, or not enough corroboration, or untrusted baseline)
         case mild            // some signals up — detail view only, no notification
         case raised          // clear multi-signal anomaly, no confounder — surface + notify
-        case suppressed      // anomaly present but a behaviour tag / travel explains it — quietly informative
-        case alreadyUnwell   // user logged feeling unwell — "rest up", not a scare
+        case suppressed      // legacy only; current evaluation never emits this level
+        case alreadyUnwell   // user logged feeling unwell - "rest up", not a scare
+    }
+
+    /// Presentation-safe interpretation of an illness result. In particular, `.quiet` is only `.steady`
+    /// when the result was backed by enough fresh trusted signals; missing data remains `.building`.
+    public enum DisplayState: String, Equatable, Sendable, Codable {
+        case building
+        case steady
+        case watch
+        case alert
     }
 
     public struct Result: Equatable, Sendable {
-        /// 0–100 composite anomaly score (post-dampening for the suppressed level so the surface matches).
+        /// 0–100 composite anomaly score.
         public let score: Double
         public let level: Level
         /// Human-readable reasons a signal fired, e.g. "RHR +6", "HRV −22%", "skin temp +0.7 °C". The
         /// caller supplies the rendered phrases; the engine decides which to include (only firing ones).
         public let firedSignals: [String]
-        /// Named confounders that were present and damped/explained the score, e.g. "alcohol", "travel".
+        /// Historical field name retained for compatibility. These are nearby contextual factors, not
+        /// explanations and not reasons to suppress the result.
         public let suppressedBy: [String]
         /// Count of signals over the firing threshold (corroboration), regardless of level.
         public let signalCount: Int
         /// One-line non-clinical copy, terminating in the shipped not-a-diagnosis framing where it raises.
         public let copy: String
+        /// Fresh, finite signals backed by their own trusted personal baseline. This is deliberately
+        /// separate from `signalCount`, which counts only anomalous signals.
+        public let trustedSignalCount: Int
+
+        public var displayState: DisplayState {
+            switch level {
+            case .raised, .alreadyUnwell:
+                return .alert
+            case .mild, .suppressed:
+                return .watch
+            case .quiet:
+                return trustedSignalCount >= minCorroboratingSignals ? .steady : .building
+            }
+        }
 
         public init(score: Double, level: Level, firedSignals: [String], suppressedBy: [String],
-                    signalCount: Int, copy: String) {
+                    signalCount: Int, copy: String, trustedSignalCount: Int = 0) {
             self.score = score; self.level = level; self.firedSignals = firedSignals
             self.suppressedBy = suppressedBy; self.signalCount = signalCount; self.copy = copy
+            self.trustedSignalCount = trustedSignalCount
         }
     }
 
@@ -155,7 +185,7 @@ public enum IllnessSignalEngine {
         var rawScore = 0.0
         var firedKeys: [String] = []
         for (key, reading) in ordered {
-            guard let r = reading, r.present else { continue }
+            guard let r = reading, r.present, r.zIllnessward.isFinite else { continue }
             let over = r.zIllnessward - signalZThreshold
             guard over > 0 else { continue }
             firedKeys.append(key)
@@ -164,65 +194,68 @@ public enum IllnessSignalEngine {
         let score = min(100.0, rawScore)
         let signalCount = firedKeys.count
         let firedSignals = firedKeys.compactMap { firedLabels[$0] }
+        let trustedSignalCount = context.baselineTrusted
+            ? ordered.filter { $0.reading?.present == true && $0.reading?.zIllnessward.isFinite == true }.count
+            : 0
 
-        // Gate 0: untrusted baseline → silent (don't warn off a cold-start). Score still reported for a
-        // detail view, but never raised.
-        if !context.baselineTrusted {
-            return Result(score: score, level: .quiet, firedSignals: firedSignals,
-                          suppressedBy: [], signalCount: signalCount,
-                          copy: "Still learning your baseline - keeping an eye out.")
-        }
-
-        // Already-unwell path: the user told us. Switch from "early warning" to a gentle "rest up" and
-        // never scare — regardless of score (their log is the ground truth).
+        // A symptom report outranks every wearable-data gate. Wearables cannot assess symptom severity,
+        // so this path remains visible even with no baseline or no sensor data.
         if context.alreadyUnwell {
             let agreeing = score >= mildThreshold && signalCount >= 1
             let copy = agreeing
-                ? "Rest up - you logged feeling unwell, and some of your signals also shifted. \(disclaimerTail)"
-                : "Rest up - you logged feeling unwell. Take it easy today. \(disclaimerTail)"
+                ? "You logged feeling unwell, and some wearable signals also shifted. Wearable data cannot assess severity. If symptoms are severe or worsening, seek urgent help. \(disclaimerTail)"
+                : "You logged feeling unwell. Missing or unchanged wearable data cannot rule out a problem or assess severity. If symptoms are severe or worsening, seek urgent help. \(disclaimerTail)"
             return Result(score: score, level: .alreadyUnwell, firedSignals: firedSignals,
-                          suppressedBy: [], signalCount: signalCount, copy: copy)
+                          suppressedBy: [], signalCount: signalCount, copy: copy,
+                          trustedSignalCount: trustedSignalCount)
+        }
+
+        // Untrusted or insufficient per-signal baselines are not a normal result. The adapter marks only
+        // fresh, baseline-backed readings present; this gate prevents cold-start or sparse data alerts.
+        if !context.baselineTrusted {
+            return Result(score: score, level: .quiet, firedSignals: firedSignals,
+                          suppressedBy: [], signalCount: signalCount,
+                          copy: "Not enough fresh, baseline-backed signals to assess a pattern. Missing data is not a healthy result.",
+                          trustedSignalCount: trustedSignalCount)
         }
 
         // Corroboration + magnitude gate: need ≥ 2 firing signals and a mild-or-better composite, else quiet.
         guard signalCount >= minCorroboratingSignals, score >= mildThreshold else {
             return Result(score: score, level: .quiet, firedSignals: firedSignals,
                           suppressedBy: [], signalCount: signalCount,
-                          copy: "Nothing notable - your signals look like your normal range.")
+                          copy: "No corroborated shift in the fresh signals checked. This does not assess overall health or symptoms.",
+                          trustedSignalCount: trustedSignalCount)
         }
 
-        // Confounder suppression — the differentiating part. Collect every present behaviour/travel tag
-        // that offers a plainer explanation; if any are present, dampen the score and downgrade.
-        var suppressedBy: [String] = []
-        if context.alcohol { suppressedBy.append("alcohol") }
-        if context.stress { suppressedBy.append("stress") }
-        if context.sauna { suppressedBy.append("sauna") }
-        if context.hardOrLateWorkout { suppressedBy.append("a hard or late workout") }
-        if context.travelPhaseJump { suppressedBy.append("travel") }
+        // Collect nearby context for explainability only. It never changes score or level because a
+        // plausible contributor can coexist with illness or another health concern.
+        var contextualFactors: [String] = []
+        if context.alcohol { contextualFactors.append("alcohol") }
+        if context.stress { contextualFactors.append("stress") }
+        if context.sauna { contextualFactors.append("sauna") }
+        if context.hardOrLateWorkout { contextualFactors.append("a hard or late workout") }
+        if context.travelPhaseJump { contextualFactors.append("travel") }
+        if context.recentMedicationChange { contextualFactors.append("a recent medication change") }
 
         let signalsPhrase = firedSignals.isEmpty ? "Some signals are up" : firedSignals.joined(separator: ", ")
+        let contextSuffix = contextualFactors.isEmpty
+            ? ""
+            : " You also logged \(joinReasons(contextualFactors)); that may contribute but does not rule out the shift."
 
-        if !suppressedBy.isEmpty {
-            let dampened = score * confounderDampen
-            let reason = joinReasons(suppressedBy)
-            let copy = "Some signals shifted (\(signalsPhrase)). You also logged \(reason), which can "
-                + "move the same signals. Review how you feel. \(disclaimerTail)"
-            return Result(score: dampened, level: .suppressed, firedSignals: firedSignals,
-                          suppressedBy: suppressedBy, signalCount: signalCount, copy: copy)
-        }
-
-        // No confounder. Mild stays in the detail view; a strong composite raises.
+        // Mild stays in the detail view; a strong composite raises.
         if score < raiseThreshold {
             let copy = "A few signals are mildly up (\(signalsPhrase)). The shift is small; keep monitoring "
-                + "how you feel. \(disclaimerTail)"
+                + "how you feel.\(contextSuffix) \(disclaimerTail)"
             return Result(score: score, level: .mild, firedSignals: firedSignals,
-                          suppressedBy: [], signalCount: signalCount, copy: copy)
+                          suppressedBy: contextualFactors, signalCount: signalCount, copy: copy,
+                          trustedSignalCount: trustedSignalCount)
         }
 
         let copy = "Several signals shifted together (\(signalsPhrase)). Many things can cause this "
-            + "pattern; consider a gentler day and review how you feel. \(disclaimerTail)"
+            + "pattern; review how you feel.\(contextSuffix) Symptoms matter more than this estimate. \(disclaimerTail)"
         return Result(score: score, level: .raised, firedSignals: firedSignals,
-                      suppressedBy: [], signalCount: signalCount, copy: copy)
+                      suppressedBy: contextualFactors, signalCount: signalCount, copy: copy,
+                      trustedSignalCount: trustedSignalCount)
     }
 
     // MARK: - Helpers

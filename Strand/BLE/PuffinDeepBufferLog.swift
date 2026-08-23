@@ -76,7 +76,7 @@ final class PuffinDeepBufferLog {
     }
 
     /// Decoded-IMU field for the JSONL line: `,"imu":{…features…}` when `frame` is the 1244-B 6-axis
-    /// IMU buffer, else `""` (the 2140-B optical buffer and everything else). Pure and non-throwing —
+    /// IMU buffer, else `""` (the 2140-B optical buffer and everything else). Pure and non-throwing -
     /// a decode miss just omits the field, so a diagnostics-only summary can never disturb the capture
     /// path. `ImuActivityFeatures` is `Codable`, so this is its canonical JSON.
     nonisolated static func decodedImuField(_ frame: [UInt8]) -> String {

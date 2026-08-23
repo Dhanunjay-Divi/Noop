@@ -17,7 +17,7 @@ package com.noop.analytics
  * Each prior is an EFFECT PER INCREMENTAL UNIT of dose on a named outcome:
  *   - Alcohol  → Recovery (0–100): roughly −Δ points per extra drink.
  *   - Caffeine → HRV (ms): roughly −Δ ms per step LATER in the day a caffeine dose lands
- *     (the caffeine "dose" axis is a TIMING bucket, not mg — copy says so).
+ *     (the caffeine "dose" axis is a TIMING bucket, not mg - copy says so).
  *
  * (Spec: 2026-06-19-v5-insights-correlation-engine-design.md.)
  */

@@ -138,8 +138,8 @@ fun PipBar(
  * Each pip owns the sub-range `[index/N, (index+1)/N]`. As [fraction] sweeps up it crosses these
  * edges left→right, so segments fill in sequence. Within a pip the fill ramps over its own span
  * (so the leading pip fades in smoothly rather than snapping); the pip currently holding the lead
- * edge (the target fraction sits inside it) is nudged a touch brighter — the "last filled segment
- * is a touch brighter". Flat — no glow.
+ * edge (the target fraction sits inside it) is nudged a touch brighter - the "last filled segment
+ * is a touch brighter". Flat - no glow.
  */
 private fun pipColor(
     index: Int,

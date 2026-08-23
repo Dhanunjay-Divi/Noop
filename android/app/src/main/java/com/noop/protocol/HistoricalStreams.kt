@@ -52,7 +52,7 @@ const val MIN_PLAUSIBLE_UNIX: Long = 1_700_000_000L
 
 /**
  * How far past the offload wall-clock a record may be stamped (#547). A historical record can NEVER
- * post-date its own capture, so anything more than one day ahead of "now" is a bad-clock artefact —
+ * post-date its own capture, so anything more than one day ahead of "now" is a bad-clock artefact -
  * drop it. One day of slack absorbs benign timezone/RTC skew without admitting a future-dated row.
  */
 const val FUTURE_MARGIN: Long = 86_400L
@@ -362,7 +362,7 @@ private fun decodeWhoop5Historical(frame: ByteArray): Map<String, Any?>? {
     // scale lives in the consumer.
     frame.histU16(73)?.let { if ((it / 100.0) in 5.0..45.0) out["skin_temp_raw"] = it }
     // @75 a 16-bit status word; NOT a deep-sleep marker (low nibble 0 across observed records, equal
-    // awake/asleep — the "80=deep" reading is a misread).
+    // awake/asleep - the "80=deep" reading is a misread).
     frame.histU16(75)?.let { out["status_word"] = it }
     // @77 / @79 two further 16-bit status words adjacent to @75; carried raw, meaning not pinned.
     frame.histU16(77)?.let { out["status_word_1"] = it }
@@ -454,7 +454,7 @@ private fun decodeWhoop5HistoricalV26(frame: ByteArray): V26Record? {
  * [extractHistoricalStreams] silently drops: their biometric payload would otherwise be lost forever once
  * the strap trims the acked history.
  *
- * EXCLUDED (decode to zero rows BY DESIGN, never "lost" data — must NOT be counted):
+ * EXCLUDED (decode to zero rows BY DESIGN, never "lost" data - must NOT be counted):
  *   - CONSOLE_LOGS (type-50) frames — the strap's own diagnostics text channel. On WHOOP 4.0 the
  *     inner type byte is frame[4]; type-50 (0x32) is not type-47 so the family-aware type guard below
  *     already skips it. On WHOOP 5/MG the inner type byte is at frame[8].

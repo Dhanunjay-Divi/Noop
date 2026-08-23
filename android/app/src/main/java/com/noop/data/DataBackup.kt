@@ -562,7 +562,7 @@ object DataBackup {
 
     /**
      * Pure classification of the rows `PRAGMA quick_check` returned: null = healthy (the single
-     * canonical "ok" row), otherwise the first complaint row VERBATIM — never a fabricated summary.
+     * canonical "ok" row), otherwise the first complaint row VERBATIM - never a fabricated summary.
      * An EMPTY result set is a failure too: quick_check always answers, so silence means the query
      * was swallowed and the file must not be trusted. Mirrors the Apple side's
      * `DatabaseIntegrity.verdict(fromRows:)` byte-for-byte — the same golden vectors are pinned in
@@ -684,7 +684,7 @@ class CorruptionPreservingOpenHelperFactory(
             val path = runCatching { db.path }.getOrNull()
             Log.e(
                 "WhoopDatabase",
-                "SQLite reported corruption in $path — quarantining it to *.corrupt.<epoch> and recreating " +
+                "SQLite reported corruption in $path - quarantining it to *.corrupt.<epoch> and recreating " +
                     "a fresh store. The corrupt copy is kept; restore from a backup to get your data back.",
             )
             runCatching { db.close() }

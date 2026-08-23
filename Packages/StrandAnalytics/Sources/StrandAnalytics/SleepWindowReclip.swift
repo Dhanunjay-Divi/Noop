@@ -11,11 +11,11 @@ import Foundation
 /// keeps sleep that happened before the user got into bed while the displayed window shrank.
 ///
 /// Two formats, mirroring the app's two writers (see SleepView.decodeSegments / decodeStages):
-///   • segment array `[{"start":epoch,"end":epoch,"stage":"wake"|"light"|"deep"|"rem"}]` — computed
+///   • segment array `[{"start":epoch,"end":epoch,"stage":"wake"|"light"|"deep"|"rem"}]` - computed
 ///     nights. Clip to `[newStart, newEnd]`: drop segments wholly outside it, clip a straddling
 ///     segment's start up to `newStart` and end down to `newEnd`, and if the window grew at the tail
 ///     append a trailing `wake` segment (extra time in bed reads as awake).
-///   • minute dict `{"awake","light","deep","rem"}` — imported nights. No timeline, so shift by the
+///   • minute dict `{"awake","light","deep","rem"}` - imported nights. No timeline, so shift by the
 ///     duration delta `(newEnd - newStart) - (oldEnd - sessionStart)`: trim from the tail-most stages
 ///     (awake → light → rem → deep) when shortened, add to awake when lengthened.
 ///

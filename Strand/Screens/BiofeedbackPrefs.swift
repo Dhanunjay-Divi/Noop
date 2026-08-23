@@ -13,10 +13,10 @@ enum BiofeedbackPrefs {
 
     /// Evidence capability for automatic stress haptic nudges.
     ///
-    /// The present live path supplies clean R-R intervals but does not supply a fresh, timestamp-matched
-    /// wrist-motion observation to `StressOnsetDetector`. Phone motion is intentionally not substituted:
-    /// it says where the phone moved, not whether the wearer's wrist was still. Keep this one gate as the
-    /// source of truth until the live wearable pipeline wires that evidence into `AppModel`.
+    /// The wearable pipeline can now publish a dense, timestamp-matched gravity window after a natural
+    /// history sync. Availability means the path exists, not that evidence is always present: AppModel
+    /// still passes nil whenever the current window is sparse, stale, off-wrist, or does not overlap the
+    /// latest R-R packet. Phone motion is never substituted.
     enum AutomaticStressNudgeCapability: Equatable, Sendable {
         case unavailableNeedsTimestampMatchedWristMotion
         case availableWithTimestampMatchedWristMotion
@@ -26,10 +26,10 @@ enum BiofeedbackPrefs {
         }
     }
 
-    /// Compile-time truth for the currently-wired live source. Changing this to `.available…` is only
-    /// valid in the same change that passes fresh, timestamp-matched wrist motion to the detector.
+    /// Compile-time truth for the currently-wired source path. Per-event freshness remains a separate
+    /// runtime gate in `AppModel.evaluateStress`.
     static let automaticStressNudgeCapability: AutomaticStressNudgeCapability =
-        .unavailableNeedsTimestampMatchedWristMotion
+        .availableWithTimestampMatchedWristMotion
 
     static var automaticStressNudgesAvailable: Bool {
         automaticStressNudgeCapability.isAvailable
@@ -43,6 +43,7 @@ enum BiofeedbackPrefs {
         // L3 stress check-in (haptic) toggles.
         static let checkInOn    = "biofeedback.stressCheckIn"          // master
         static let autoNudge    = "biofeedback.stressAutoNudge"        // sub
+        static let phoneNudge   = "biofeedback.stressPhoneNudge"       // optional local notification
         static let quietHours   = "biofeedback.stressQuietHours"       // sub
         static let useResonance = "biofeedback.stressUseResonancePace" // sub
         static let quietStart   = "biofeedback.stressQuietStartMin"
@@ -64,7 +65,7 @@ enum BiofeedbackPrefs {
         return v > 0 ? v : nil
     }
 
-    /// When the locked pace was measured — shown dated on the result card ("locked 19 Jun"); the pace
+    /// When the locked pace was measured - shown dated on the result card ("locked 19 Jun"); the pace
     /// drifts, so we never claim it's permanent.
     static var lockedPaceDate: Date? {
         let t = d.double(forKey: K.lockedDate)
@@ -90,6 +91,10 @@ enum BiofeedbackPrefs {
     static var autoNudge: Bool {
         get { d.object(forKey: K.autoNudge) as? Bool ?? false }
         set { d.set(newValue, forKey: K.autoNudge) }
+    }
+    static var phoneNudge: Bool {
+        get { d.object(forKey: K.phoneNudge) as? Bool ?? false }
+        set { d.set(newValue, forKey: K.phoneNudge) }
     }
     static var quietHoursEnabled: Bool {
         get { d.object(forKey: K.quietHours) as? Bool ?? true }

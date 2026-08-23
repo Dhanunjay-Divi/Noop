@@ -17,7 +17,7 @@ public enum WhoopStoreInfo {
 /// update that adds a migration, a cold *background* relaunch (iOS CoreBluetooth state restoration) can
 /// fire both opens at once. Each `DatabaseMigrator` reads "migration N unapplied", both apply it, and
 /// the loser's bookkeeping `INSERT` collides: `UNIQUE constraint failed: grdb_migrations.identifier`
-/// (SQLITE_CONSTRAINT). That open throws — on iOS the backfill sees "store not ready" and the offload
+/// (SQLITE_CONSTRAINT). That open throws - on iOS the backfill sees "store not ready" and the offload
 /// is deferred to the next tick. It self-heals once one migrator commits, but the failed open is a
 /// real, user-visible sync stall.
 ///
@@ -45,7 +45,7 @@ private actor StoreOpenGate {
         // Self-heal a foreign DB left in place by a bad cross-platform restore (#222): an Android
         // (Room) backup that slipped past the import guard replaces our file with one that has our
         // data tables but NO `grdb_migrations` bookkeeping. The migrator then thinks nothing is
-        // applied, re-runs v1, and crashes with `table "device" already exists` on every open — the
+        // applied, re-runs v1, and crashes with `table "device" already exists` on every open - the
         // store never bootstraps. Quarantine such a file BEFORE opening so we start fresh instead of
         // looping forever. (A normal GRDB backup carries grdb_migrations and is left untouched.)
         WhoopStore.quarantineIncompatibleDatabase(at: path)

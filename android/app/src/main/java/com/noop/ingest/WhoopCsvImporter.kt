@@ -310,7 +310,7 @@ object WhoopCsvImporter {
             append(".")
             // #70: never silently truncate. If the aggregate RAM budget tripped, the retained CSV set was
             // partial — say so plainly instead of reporting a clean import over incomplete data.
-            if (truncated) append(" (partial — export exceeded the ${MAX_TOTAL_BYTES shr 30} GB import memory budget)")
+            if (truncated) append(" (partial - export exceeded the ${MAX_TOTAL_BYTES shr 30} GB import memory budget)")
         }
 
         return ImportSummary(

@@ -22,7 +22,7 @@ object WorkoutEditing {
 
     /**
      * Classify a row's origin from its `source`. Order matters: the computed detected source
-     * "<id>-noop" also contains "whoop", so the "-noop" suffix is checked FIRST — otherwise a
+     * "<id>-noop" also contains "whoop", so the "-noop" suffix is checked FIRST - otherwise a
      * detected bout would read as an imported WHOOP row and become un-dismissable.
      */
     fun classify(source: String): WorkoutSource {
@@ -121,7 +121,7 @@ object WorkoutEditing {
     }
 
     /**
-     * How many "rich" captured signals a row carries — the tiebreak for which duplicate to keep. A
+     * How many "rich" captured signals a row carries - the tiebreak for which duplicate to keep. A
      * live-tracked strap session scores high (HR trace, peak, strain, zones, distance); a thin import
      * scores low. Energy is the most commonly-present import field so it is weighted lowest.
      */
@@ -221,7 +221,7 @@ object WorkoutEditing {
 
     /**
      * The shared cross-source collapse walk behind [dedupCrossSource] and [dedupCrossSourceTrace]. Byte-
-     * identical to the naive "compare every kept row" walk — same first match (kept insertion order), same
+     * identical to the naive "compare every kept row" walk - same first match (kept insertion order), same
      * [preferred] winner, same resulting list — but near-linear instead of O(n²): [sportKey] is computed
      * ONCE per row (not twice per comparison), rows are bucketed by it, and a candidate only ever compares
      * against kept rows of the SAME sport (a cross-sport pair can never be [sameActivity]). That removes the

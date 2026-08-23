@@ -99,6 +99,16 @@ class RecoveryDriversTest {
         assertTrue(skin.deltaPoints <= 0)
     }
 
+    @Test fun absoluteSkinTemperatureDoesNotCreateDeviationDriver() {
+        val drivers = RecoveryDrivers.chargeDrivers(
+            hrv = 50.0, rhr = 55.0, resp = null,
+            hrvBaseline = baseline(50.0, 6.0),
+            rhrBaseline = baseline(55.0, 3.0),
+            respBaseline = null, sleepPerf = null, skinTempDev = 34.2,
+        )
+        assertFalse(drivers.any { it.label == "Skin temperature" })
+    }
+
     @Test fun coldStartYieldsEmptyDrivers() {
         val coldHRV = BaselineState(
             baseline = 50.0, spread = 5.0, nValid = 2, nightsSinceUpdate = 0,

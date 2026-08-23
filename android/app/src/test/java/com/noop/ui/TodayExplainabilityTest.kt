@@ -72,7 +72,7 @@ class TodayExplainabilityTest {
             today = "2026-01-15")
         assertEquals(ScoreState.CarriedLastNight("14 Jan", false), state)
         assertEquals("Last night · 14 Jan", state.title)
-        assertEquals("Tonight's lands after you sleep with the strap on.", state.detail)
+        assertEquals("Tonight's lands after you sleep with Noop Band on.", state.detail)
     }
 
     @Test
@@ -84,7 +84,7 @@ class TodayExplainabilityTest {
             today = "2026-02-11")
         assertEquals(ScoreState.CarriedLastNight("14 Jan", true), state)
         assertEquals("Latest sleep · 14 Jan", state.title)
-        assertEquals("This is your last scored session. Wear the strap overnight for a fresh score.", state.detail)
+        assertEquals("This is your last scored session. Wear Noop Band overnight for a fresh score.", state.detail)
     }
 
     @Test
@@ -102,8 +102,8 @@ class TodayExplainabilityTest {
     fun scoreState_needsStrap_whenNothingToShow() {
         val state = scoreStateForToday(todayRecovery = null, calibratingNights = null, carriedDay = null)
         assertEquals(ScoreState.NeedsStrap, state)
-        assertEquals("Needs the strap", state.title)
-        assertEquals("No data for today. Was your strap worn and connected overnight?", state.detail)
+        assertEquals("Needs wearable data", state.title)
+        assertEquals("No data for today. Was Noop Band worn and connected overnight?", state.detail)
     }
 
     @Test
@@ -131,7 +131,7 @@ class TodayExplainabilityTest {
         val state = recordingStateFor(connected = true, liveHeartRate = 58, lastSyncAtSec = null, nowSec = 1_000_000)
         assertEquals(RecordingState.Recording, state)
         assertEquals("Recording", state.title)
-        assertEquals("Your strap is connected and saving data.", state.detail)
+        assertEquals("Noop Band is connected and saving data.", state.detail)
         assertEquals(StrandTone.Positive, state.tone)
     }
 
@@ -209,7 +209,7 @@ class TodayExplainabilityTest {
         val state = recordingStateFor(connected = false, liveHeartRate = null, lastSyncAtSec = null, nowSec = 1_000_000)
         assertEquals(RecordingState.NotRecording, state)
         assertEquals("Not recording", state.title)
-        assertEquals("Strap not connected. Tap to connect.", state.detail)
+        assertEquals("Noop Band not connected. Tap to connect.", state.detail)
         assertEquals(StrandTone.Critical, state.tone)
     }
 
@@ -324,7 +324,7 @@ class TodayExplainabilityTest {
     @Test
     fun liquidHeroSourceLabel_capsMixedWinnersAtTwoInScoreOrder() {
         assertEquals(
-            "Whoop + On-device",
+            "Noop Band + On-device",
             heroSourceLabel(listOf("my-whoop", "my-whoop-noop", "health-connect")),
         )
     }
@@ -354,7 +354,7 @@ class TodayExplainabilityTest {
     @Test
     fun liquidHeroSourceLabel_keepsCurrentDayRecoveryAheadOfCarriedFallback() {
         assertEquals(
-            "Whoop",
+            "Noop Band",
             scoreHeroSourceLabel(
                 provenanceByMetric = mapOf("recovery" to "my-whoop"),
                 carriedRecoverySource = "my-whoop-noop",

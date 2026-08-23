@@ -325,7 +325,7 @@ private func sampleYear() -> [RecoveryDay] {
 
 #Preview("YearHeatStrip") {
     VStack(alignment: .leading, spacing: 12) {
-        Text("Recovery — past year").strandOverline()
+        Text("Recovery - past year").strandOverline()
         Text("Hover a cell: ring + date, score and recovery-state tooltip.")
             .font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
         YearHeatStrip(days: sampleYear())

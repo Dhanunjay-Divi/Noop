@@ -4,7 +4,7 @@ import kotlin.math.abs
 import kotlin.math.roundToLong
 
 /*
- * RangeReport.kt — the data model for a shareable offline "trends report" over a date
+ * RangeReport.kt - the data model for a shareable offline "trends report" over a date
  * range. Faithful Kotlin mirror of StrandAnalytics/RangeReport.swift. Keep the metric
  * set, the per-metric trend thresholds, the half-split, the trend mapping, and the
  * headline ranking byte-identical to Swift — cross-platform parity is the contract.

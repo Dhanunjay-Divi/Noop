@@ -152,9 +152,9 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
 
             // Live stats grid — avg / peak / effort, from the captured window.
             Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap), modifier = Modifier.fillMaxWidth()) {
-                StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_workout_screen_avg_cdc93143), value = if (w.avgHr > 0) "${w.avgHr}" else "—",
+                StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_workout_screen_avg_cdc93143), value = if (w.avgHr > 0) "${w.avgHr}" else "-",
                     accent = if (w.avgHr > 0) Palette.metricRose else Palette.textPrimary)
-                StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_workout_screen_peak_c83dbbd3), value = if (w.peakHr > 0) "${w.peakHr}" else "—",
+                StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_workout_screen_peak_c83dbbd3), value = if (w.peakHr > 0) "${w.peakHr}" else "-",
                     accent = if (w.peakHr > 0) Palette.metricRose else Palette.textPrimary)
                 StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_workout_screen_effort_8c974bc6), value = UnitFormatter.effortDisplay(w.liveStrain, effortScale),
                     accent = Palette.strainColor(w.liveStrain))
@@ -347,7 +347,7 @@ private fun HeroHeartRate(bpm: Int?, zone: Int) {
                         .clip(CircleShape)
                         .background(tint.copy(alpha = if (bpm == null) 0f else 0.14f)),
                 )
-                Text(bpm?.toString() ?: "—", style = NoopType.number(80f), color = tint)
+                Text(bpm?.toString() ?: "-", style = NoopType.number(80f), color = tint)
             }
             Text("bpm", style = NoopType.subhead, color = Palette.textSecondary)
             Text(

@@ -964,7 +964,7 @@ object IntelligenceEngine {
             // across days" question with data. Gated by the existing strap-log export. Mirrors the Swift line.
             val tsmLog = daily.totalSleepMin?.let { Math.round(it).toString() } ?: "nil"
             // #386: the banked stage split + efficiency ride beside the rollup, so a "homepage disagrees
-            // with the Sleep tab" report is self-diagnosing from the export alone — totalSleepMin vs the
+            // with the Sleep tab" report is self-diagnosing from the export alone - totalSleepMin vs the
             // deep+rem+light sum is the identity both screens must agree on, now verifiable per pass, per
             // day, without screenshots. Rounded minutes only (same privacy class as the rest of the line);
             // stages=nil when the day has no banked stage split (an unstaged or imported-total-only day).
@@ -1124,28 +1124,42 @@ object IntelligenceEngine {
         for (d in faPriorDaily) faGateByDay[d.day] = d
         for (d in dailies) faGateByDay[d.day] = d
         val faGate7 = faGateByDay.values.sortedBy { it.day }.takeLast(7)
+        val storedLegacyFitnessToken = repo.latestMetricComputedUnion(
+            importedDeviceId, AgeMetricProfile.LEGACY_FITNESS_AGE_KEY,
+        )?.value
         val storedFitnessToken = repo.latestMetricComputedUnion(
             importedDeviceId, AgeMetricProfile.FITNESS_AGE_KEY,
+        )?.value
+        val storedLegacyVo2Token = repo.latestMetricComputedUnion(
+            importedDeviceId, AgeMetricProfile.LEGACY_VO2MAX_ESTIMATE_KEY,
         )?.value
         val storedVo2Token = repo.latestMetricComputedUnion(
             importedDeviceId, AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
         )?.value
-        if (!AgeMetricProfile.accepts(
+        if (storedLegacyFitnessToken != null ||
+            !AgeMetricProfile.acceptsFitnessAge(
                 storedFitnessToken, AgeMetricProfile.fitnessAgeToken(profile.age, profile.sex),
-                profile.fitnessAgeProvenanceRequired,
             )
         ) purgeComputedMetricKeys(
             repo, importedDeviceId, computedId,
-            listOf("fitness_age", AgeMetricProfile.FITNESS_AGE_KEY),
+            listOf(
+                AgeMetricProfile.FITNESS_AGE_KEY,
+                AgeMetricProfile.LEGACY_FITNESS_AGE_KEY,
+                "fitness_age",
+            ),
         )
-        if (!AgeMetricProfile.accepts(
+        if (storedLegacyVo2Token != null ||
+            !AgeMetricProfile.acceptsVO2maxEstimate(
                 storedVo2Token,
                 AgeMetricProfile.vo2maxEstimateToken(profile.age, profile.sex, profile.waistCm),
-                profile.vo2maxProvenanceRequired,
             )
         ) purgeComputedMetricKeys(
             repo, importedDeviceId, computedId,
-            listOf("vo2max_est", AgeMetricProfile.VO2MAX_ESTIMATE_KEY),
+            listOf(
+                AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
+                AgeMetricProfile.LEGACY_VO2MAX_ESTIMATE_KEY,
+                "vo2max_est",
+            ),
         )
 
         val faSatKey = saturdayKeyOnOrBefore(newestDay)
@@ -1167,7 +1181,11 @@ object IntelligenceEngine {
             // the old estimate while leaving a measured `vo2max` import untouched.
             purgeComputedMetricKeys(
                 repo, importedDeviceId, computedId,
-                listOf("vo2max_est", AgeMetricProfile.VO2MAX_ESTIMATE_KEY),
+                listOf(
+                    AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
+                    AgeMetricProfile.LEGACY_VO2MAX_ESTIMATE_KEY,
+                    "vo2max_est",
+                ),
             )
         }
         if (faPts.isNotEmpty()) repo.upsertMetricSeries(faPts)
@@ -1176,8 +1194,9 @@ object IntelligenceEngine {
             FitnessAgeEngine.supportsAge(profile.age) && FitnessAgeEngine.supportsSex(profile.sex)
         if (!fitnessInputsUsable) {
             purgeComputedMetricKeys(repo, importedDeviceId, computedId, listOf(
-                "fitness_age", "vo2max_est", AgeMetricProfile.FITNESS_AGE_KEY,
-                AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
+                AgeMetricProfile.FITNESS_AGE_KEY, AgeMetricProfile.LEGACY_FITNESS_AGE_KEY,
+                AgeMetricProfile.VO2MAX_ESTIMATE_KEY, AgeMetricProfile.LEGACY_VO2MAX_ESTIMATE_KEY,
+                "fitness_age", "vo2max_est",
             ))
         }
 
@@ -1738,28 +1757,42 @@ object IntelligenceEngine {
         val oldestDay = AnalyticsEngine.dayString(nowLocalMidnight - (maxDays - 1) * SECONDS_PER_DAY, tzOffsetSeconds)
         val gate7 = repo.daysMerged(importedDeviceId)
             .filter { it.day in oldestDay..newestDay }.sortedBy { it.day }.takeLast(7)
+        val storedLegacyFitnessToken = repo.latestMetricComputedUnion(
+            importedDeviceId, AgeMetricProfile.LEGACY_FITNESS_AGE_KEY,
+        )?.value
         val storedFitnessToken = repo.latestMetricComputedUnion(
             importedDeviceId, AgeMetricProfile.FITNESS_AGE_KEY,
+        )?.value
+        val storedLegacyVo2Token = repo.latestMetricComputedUnion(
+            importedDeviceId, AgeMetricProfile.LEGACY_VO2MAX_ESTIMATE_KEY,
         )?.value
         val storedVo2Token = repo.latestMetricComputedUnion(
             importedDeviceId, AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
         )?.value
-        if (!AgeMetricProfile.accepts(
+        if (storedLegacyFitnessToken != null ||
+            !AgeMetricProfile.acceptsFitnessAge(
                 storedFitnessToken, AgeMetricProfile.fitnessAgeToken(profile.age, profile.sex),
-                profile.fitnessAgeProvenanceRequired,
             )
         ) purgeComputedMetricKeys(
             repo, importedDeviceId, computedId,
-            listOf("fitness_age", AgeMetricProfile.FITNESS_AGE_KEY),
+            listOf(
+                AgeMetricProfile.FITNESS_AGE_KEY,
+                AgeMetricProfile.LEGACY_FITNESS_AGE_KEY,
+                "fitness_age",
+            ),
         )
-        if (!AgeMetricProfile.accepts(
+        if (storedLegacyVo2Token != null ||
+            !AgeMetricProfile.acceptsVO2maxEstimate(
                 storedVo2Token,
                 AgeMetricProfile.vo2maxEstimateToken(profile.age, profile.sex, profile.waistCm),
-                profile.vo2maxProvenanceRequired,
             )
         ) purgeComputedMetricKeys(
             repo, importedDeviceId, computedId,
-            listOf("vo2max_est", AgeMetricProfile.VO2MAX_ESTIMATE_KEY),
+            listOf(
+                AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
+                AgeMetricProfile.LEGACY_VO2MAX_ESTIMATE_KEY,
+                "vo2max_est",
+            ),
         )
 
         val satKey = saturdayKeyOnOrBefore(newestDay)
@@ -1775,15 +1808,20 @@ object IntelligenceEngine {
             }
         } else purgeComputedMetricKeys(
             repo, importedDeviceId, computedId,
-            listOf("vo2max_est", AgeMetricProfile.VO2MAX_ESTIMATE_KEY),
+            listOf(
+                AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
+                AgeMetricProfile.LEGACY_VO2MAX_ESTIMATE_KEY,
+                "vo2max_est",
+            ),
         )
         if (rows.isNotEmpty()) repo.upsertMetricSeries(rows)
         if (!profile.ageInputConfirmed || !profile.sexInputConfirmed ||
             !FitnessAgeEngine.supportsAge(profile.age) || !FitnessAgeEngine.supportsSex(profile.sex)
         ) {
             purgeComputedMetricKeys(repo, importedDeviceId, computedId, listOf(
-                "fitness_age", "vo2max_est", AgeMetricProfile.FITNESS_AGE_KEY,
-                AgeMetricProfile.VO2MAX_ESTIMATE_KEY,
+                AgeMetricProfile.FITNESS_AGE_KEY, AgeMetricProfile.LEGACY_FITNESS_AGE_KEY,
+                AgeMetricProfile.VO2MAX_ESTIMATE_KEY, AgeMetricProfile.LEGACY_VO2MAX_ESTIMATE_KEY,
+                "fitness_age", "vo2max_est",
             ))
         }
         return rows.any { it.key == "fitness_age" }
@@ -1914,8 +1952,8 @@ object IntelligenceEngine {
      * The `stages=` token of the per-day sleep diagnostic line (#386): `<deep>+<rem>+<light>=<sum>` in
      * rounded minutes when the day carries a full banked stage split, `nil` when any component is
      * absent (an unstaged night, or an imported day that only brought a total). The sum is printed
-     * rather than left to the reader so a rollup-vs-stages divergence — the exact identity a "homepage
-     * disagrees with the Sleep tab" report hinges on — is a one-line visual check against the
+     * rather than left to the reader so a rollup-vs-stages divergence - the exact identity a "homepage
+     * disagrees with the Sleep tab" report hinges on - is a one-line visual check against the
      * `totalSleepMin=` field beside it. Pure + unit-tested; mirrors the Swift twin.
      */
     internal fun sleepStagesLogToken(deep: Double?, rem: Double?, light: Double?): String {

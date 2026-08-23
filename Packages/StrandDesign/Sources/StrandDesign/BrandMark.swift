@@ -159,7 +159,7 @@ private struct NoopMonogram: Shape {
 }
 
 #if DEBUG
-#Preview("BrandMark — sizes") {
+#Preview("BrandMark - sizes") {
     VStack(spacing: 40) {
         BrandMark(size: 120)
         HStack(spacing: 28) {

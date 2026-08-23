@@ -3,7 +3,7 @@ import Foundation
 /// Pure, testable decision core for the Oura history drain + durable resume cursor (#91 / #291).
 ///
 /// Extracted from `OuraLiveSource` so the drain guards and cursor logic — which silently regressed once
-/// already when the Oura BLE stack was refactored (#291: "lost when refactoring") — are pinned by unit
+/// already when the Oura BLE stack was refactored (#291: "lost when refactoring") - are pinned by unit
 /// tests instead of only on-device observation. This owns ONLY the per-drain counters and the decisions;
 /// the caller (`OuraLiveSource`) keeps all I/O — anchor resolution, persistence, logging, and the actual
 /// `historyCursorAdvanced` emit.

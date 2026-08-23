@@ -1,5 +1,7 @@
 package com.noop.notif
 
+import kotlin.math.roundToInt
+
 /** One local wall-clock hydration-reminder slot. [epochDay] is LocalDate.toEpochDay(). */
 internal data class HydrationReminderSlot(
     val epochDay: Long,
@@ -8,6 +10,25 @@ internal data class HydrationReminderSlot(
     val key: String get() = "$epochDay:$minuteOfDay"
     val absoluteMinute: Long get() = epochDay * HydrationReminderPolicy.MINUTES_PER_DAY + minuteOfDay
 }
+
+internal enum class HydrationAdaptiveReason {
+    HIGHER_EFFORT,
+    ACTIVE_DAY,
+    BEHIND_GOAL,
+    AHEAD_OF_GOAL,
+}
+
+internal data class HydrationAdaptiveContext(
+    val effort: Double?,
+    val consumedMl: Double?,
+    val goalMl: Int?,
+    val minuteOfDay: Int,
+)
+
+internal data class HydrationAdaptivePlan(
+    val intervalMinutes: Int,
+    val reasons: List<HydrationAdaptiveReason>,
+)
 
 /**
  * Pure schedule, de-dup and privacy policy for opt-in hydration reminders.
@@ -30,6 +51,68 @@ internal object HydrationReminderPolicy {
 
     fun clampIntervalMinutes(raw: Int): Int =
         raw.coerceIn(MIN_INTERVAL_MINUTES, MAX_INTERVAL_MINUTES)
+
+    /**
+     * Conservatively adjusts a user-selected base interval from signals already available on-device.
+     * Missing or non-finite values are ignored rather than estimated. This changes reminder timing only;
+     * it never records intake, infers dehydration, or changes any health score.
+     */
+    fun adaptivePlan(
+        baseIntervalMinutes: Int,
+        startMinutes: Int,
+        endMinutes: Int,
+        context: HydrationAdaptiveContext,
+    ): HydrationAdaptivePlan {
+        var adjustment = 0
+        val reasons = mutableListOf<HydrationAdaptiveReason>()
+
+        val effort = context.effort
+        if (effort != null && effort.isFinite()) {
+            when {
+                effort >= 70.0 -> {
+                    adjustment -= 30
+                    reasons += HydrationAdaptiveReason.HIGHER_EFFORT
+                }
+                effort >= 40.0 -> {
+                    adjustment -= 15
+                    reasons += HydrationAdaptiveReason.ACTIVE_DAY
+                }
+            }
+        }
+
+        val start = clampMinuteOfDay(startMinutes)
+        val end = clampMinuteOfDay(endMinutes)
+        val span = Math.floorMod(end - start, MINUTES_PER_DAY.toInt())
+        val duration = if (span == 0) MINUTES_PER_DAY.toInt() else span
+        val elapsed = Math.floorMod(clampMinuteOfDay(context.minuteOfDay) - start, MINUTES_PER_DAY.toInt())
+        val consumed = context.consumedMl
+        val goal = context.goalMl
+        if (elapsed < duration &&
+            consumed != null && consumed.isFinite() &&
+            goal != null && goal > 0
+        ) {
+            val expected = elapsed.toDouble() / duration.toDouble()
+            val actual = consumed.coerceAtLeast(0.0) / goal.toDouble()
+            when {
+                expected >= 0.25 && actual < expected - 0.20 -> {
+                    adjustment -= 15
+                    reasons += HydrationAdaptiveReason.BEHIND_GOAL
+                }
+                actual > expected + 0.25 -> {
+                    adjustment += 15
+                    reasons += HydrationAdaptiveReason.AHEAD_OF_GOAL
+                }
+            }
+        }
+
+        adjustment = adjustment.coerceIn(-60, 30)
+        val adjusted = clampIntervalMinutes(baseIntervalMinutes) + adjustment
+        val stepped = (adjusted.toDouble() / 15.0).roundToInt() * 15
+        return HydrationAdaptivePlan(
+            intervalMinutes = clampIntervalMinutes(stepped),
+            reasons = reasons,
+        )
+    }
 
     /** Local minutes at which a reminder is due each day, sorted in clock order. */
     fun slotMinutes(
@@ -96,8 +179,41 @@ internal object HydrationReminderPolicy {
             .minBy { it.absoluteMinute }
     }
 
+    private fun absoluteMinuteFromKey(key: String?): Long? {
+        if (key == null) return null
+        val parts = key.split(':', limit = 2)
+        if (parts.size != 2) return null
+        val epochDay = parts[0].toLongOrNull() ?: return null
+        val minute = parts[1].toIntOrNull()?.takeIf { it in 0 until MINUTES_PER_DAY.toInt() }
+            ?: return null
+        return epochDay * MINUTES_PER_DAY + minute
+    }
+
+    /**
+     * A changed adaptive interval can realign wall-clock slots. Keep separate phone and wrist lanes,
+     * but never let that realignment produce two occurrences inside the minimum supported interval.
+     */
+    private fun sufficientlySeparated(currentSlotKey: String?, previousSlotKey: String?): Boolean {
+        if (currentSlotKey == null) return false
+        if (previousSlotKey == null) return true
+        if (currentSlotKey == previousSlotKey) return false
+        val current = absoluteMinuteFromKey(currentSlotKey) ?: return true
+        val previous = absoluteMinuteFromKey(previousSlotKey) ?: return true
+        return current - previous >= MIN_INTERVAL_MINUTES.toLong()
+    }
+
     fun shouldNotify(enabled: Boolean, currentSlotKey: String?, lastNotifiedSlotKey: String?): Boolean =
-        enabled && currentSlotKey != null && currentSlotKey != lastNotifiedSlotKey
+        enabled && sufficientlySeparated(currentSlotKey, lastNotifiedSlotKey)
+
+    fun shouldEscalateAfterTapWindow(
+        enabled: Boolean,
+        bandFirst: Boolean,
+        currentSlotKey: String?,
+        lastConfirmedSlotKey: String?,
+        lastNotifiedSlotKey: String?,
+    ): Boolean = enabled && bandFirst && currentSlotKey != null &&
+        currentSlotKey != lastConfirmedSlotKey &&
+        sufficientlySeparated(currentSlotKey, lastNotifiedSlotKey)
 
     /** Strap haptics require every trust gate; a remembered/cached HR is not a fresh live sample. */
     fun shouldBuzzStrap(
@@ -114,7 +230,7 @@ internal object HydrationReminderPolicy {
         lastBuzzedSlotKey: String?,
     ): Boolean = enabled && strapBuzzEnabled && wristAlertsMasterOn &&
         connected && bonded && encryptedBond && worn && freshLiveSample && !inQuietHours &&
-        currentSlotKey != null && currentSlotKey != lastBuzzedSlotKey
+        sufficientlySeparated(currentSlotKey, lastBuzzedSlotKey)
 
     /** Generic lock-screen copy: deliberately contains no intake, goal, score or biometric value. */
     fun notificationCopy(): Pair<String, String> =

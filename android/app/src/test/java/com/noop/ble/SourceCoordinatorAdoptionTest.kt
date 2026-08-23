@@ -186,7 +186,7 @@ class SourceCoordinatorAdoptionTest {
         // And the mismatch is logged with the exact macOS wording.
         assertEquals(
             "Multi-WHOOP: active device my-whoop is registered to strap AA:BB:CC:DD:EE:01 but " +
-                "AA:BB:CC:DD:EE:02 connected — not overwriting.",
+                "AA:BB:CC:DD:EE:02 connected - not overwriting.",
             logged,
         )
         assertTrue("a different physical strap must not refresh this row", dao.touches.isEmpty())

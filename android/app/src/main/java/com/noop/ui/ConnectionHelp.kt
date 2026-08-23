@@ -66,12 +66,10 @@ fun ConnectionHelp(viewModel: AppViewModel, modifier: Modifier = Modifier) {
     if (live.whoop5Detected) {
         NoopCard(modifier = modifier) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(uiString(R.string.l10n_connection_help_whoop_5_mg_experimental_109076ae), style = NoopType.headline, color = Palette.textPrimary)
+                Text("Noop Band connection", style = NoopType.headline, color = Palette.textPrimary)
                 Text(
-                    uiString(R.string.l10n_connection_help_your_strap_is_connected_and_we_8ab98ac6) +
-                        "heart rate from the standard profile. This isn't verified on 5/MG hardware yet, so " +
-                        "HR may or may not appear, and deeper metrics (recovery, strain, sleep) aren't " +
-                        "decoded for 5/MG yet. Nothing's wrong with your strap - WHOOP 4.0 is fully supported.",
+                    "Noop Band is connected. Some advanced history streams depend on its firmware and " +
+                        "may take longer to appear. Live heart rate can continue while NOOP finishes the secure connection.",
                     style = NoopType.footnote,
                     color = Palette.textSecondary,
                 )
@@ -86,10 +84,10 @@ fun ConnectionHelp(viewModel: AppViewModel, modifier: Modifier = Modifier) {
 
             HelpStep(
                 done = !whoopInstalled,
-                title = uiString(R.string.l10n_connection_help_close_the_official_whoop_app_768d7d17),
-                body = "Your strap only pairs with ONE app at a time. If the WHOOP app is connected, " +
-                    "NOOP can't reach the strap. Force stop it (swiping it out of recents isn't enough).",
-                actionLabel = if (whoopInstalled) "Open WHOOP app, then Force stop" else "WHOOP app isn't installed",
+                title = "Close other band apps",
+                body = "Noop Band uses one active app connection at a time. If another band app is " +
+                    "connected, force stop it before trying again.",
+                actionLabel = if (whoopInstalled) "Open detected band app settings" else "No conflicting band app detected",
                 enabled = whoopInstalled,
                 onAction = { openAppInfo(context, WHOOP_PACKAGE) },
             )
@@ -107,7 +105,7 @@ fun ConnectionHelp(viewModel: AppViewModel, modifier: Modifier = Modifier) {
                 done = permGranted,
                 title = uiString(R.string.l10n_connection_help_allow_nearby_devices_f7c74880),
                 body = if (permGranted) "Permission granted."
-                else "On Android 12+, \"Nearby devices\" is the Bluetooth permission. NOOP needs it to find your strap.",
+                else "On Android 12+, \"Nearby devices\" is the Bluetooth permission. NOOP needs it to find Noop Band.",
                 actionLabel = if (!permGranted) "Grant permission" else null,
                 enabled = !permGranted,
                 onAction = { permLauncher.launch(perms) },
@@ -115,7 +113,7 @@ fun ConnectionHelp(viewModel: AppViewModel, modifier: Modifier = Modifier) {
             HelpStep(
                 done = false,
                 title = uiString(R.string.l10n_connection_help_charge_it_and_put_it_on_31b04814),
-                body = "A flat or off-wrist strap won't advertise, so nothing shows up. A real phone is " +
+                body = "A flat or off-wrist Noop Band won't advertise, so nothing shows up. A real phone is " +
                     "required too: an emulator has no Bluetooth.",
                 actionLabel = null,
                 enabled = false,

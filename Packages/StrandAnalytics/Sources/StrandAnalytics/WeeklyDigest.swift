@@ -1,6 +1,6 @@
 import Foundation
 
-// WeeklyDigest.swift — a deterministic, offline "week in review".
+// WeeklyDigest.swift - a deterministic, offline "week in review".
 //
 // Pure, deterministic, DB-free. Given the daily series for each tracked metric
 // (keyed by "yyyy-MM-dd"), this builds a Monday-anchored "this week" summary:
@@ -344,13 +344,13 @@ public enum WeeklyDigestEngine {
         // Nothing cleared the mover bar. Distinguish three very different reasons:
         //   • the CURRENT week is SPARSE (fewer than minDaysForFocus days in) — we simply
         //     can't call a week-over-week trend yet, even though the per-metric chips may
-        //     show a big raw swing off 1–2 days. Saying "a steady week — nothing moved"
+        //     show a big raw swing off 1–2 days. Saying "a steady week - nothing moved"
         //     there flatly contradicts those chips (the #463 report). Be honest instead.
         //   • the PREVIOUS week is SPARSE (typical new user in week 2): movers are gated
         //     on previous.n ≥ minDaysForFocus, so nothing can surface even when the chips
         //     show big raw %s off last week's 1–2 days — the same #463 contradiction,
         //     mirrored. Same honesty, aimed at last week.
-        //   • the week has enough days and genuinely held even — the calm "steady" read.
+        //   • the week has enough days and genuinely held even - the calm "steady" read.
         if lines.isEmpty {
             let currentDays = summaries.map { $0.weekOverWeek.current.n }.max() ?? 0
             let prevDays = summaries.map { $0.weekOverWeek.previous.n }.max() ?? 0
@@ -373,8 +373,8 @@ public enum WeeklyDigestEngine {
     }
 
     /// Render one mover as a plain-English sentence, the way BehaviorInsights.sentence
-    /// renders an effect. Folds in good/bad framing (a Recovery rise is "up — good", a
-    /// Resting HR rise is "up — worth a look"). `effortDisplayFactor` rescales the
+    /// renders an effect. Folds in good/bad framing (a Recovery rise is "up - good", a
+    /// Resting HR rise is "up - worth a look"). `effortDisplayFactor` rescales the
     /// EFFORT averages (and its pts fallback) for display only — % is scale-invariant.
     static func moverSentence(_ s: WeeklyMetricSummary,
                               effortDisplayFactor: Double = 1.0) -> String {

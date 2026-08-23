@@ -1,6 +1,8 @@
 package com.noop.analytics
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -92,6 +94,49 @@ class VitalBandsTest {
         val mixed: List<Double?> = listOf(34.1, 0.2, null, 33.8, -0.1)
         assertEquals(listOf(null, 0.2, null, null, -0.1), VitalBands.skinTempHistory(0.3, mixed))
         assertEquals(listOf(34.1, null, null, 33.8, null), VitalBands.skinTempHistory(34.0, mixed))
+    }
+
+    @Test
+    fun skinTempDeviation_rejectsAbsoluteAndImplausibleValues() {
+        assertEquals(0.7, VitalBands.skinTempDeviation(0.7)!!, 0.0)
+        assertEquals(-8.0, VitalBands.skinTempDeviation(-8.0)!!, 0.0)
+        assertNull(VitalBands.skinTempDeviation(34.2))
+        assertNull(VitalBands.skinTempDeviation(9.0))
+        assertNull(VitalBands.skinTempDeviation(Double.NaN))
+    }
+
+    @Test
+    fun absoluteSkinTempIllnessSignal_usesAbsolutePersonalBaseline() {
+        val assessment = VitalBands.skinTempIllnessAssessment(
+            recent = listOf(35.0, 35.0),
+            baseline = List(20) { 34.0 },
+        )!!
+        assertEquals(VitalBands.SkinTempKind.ABSOLUTE, assessment.kind)
+        assertTrue(assessment.baselineTrusted)
+        assertEquals(1.0, assessment.deltaFromBaselineC!!, 0.001)
+        assertTrue(assessment.reading.zIllnessward > 2.0)
+    }
+
+    @Test
+    fun deviationSkinTempIllnessSignal_ignoresAbsoluteRows() {
+        val assessment = VitalBands.skinTempIllnessAssessment(
+            recent = listOf(34.8, 0.6),
+            baseline = List(8) { 34.0 } + List(14) { 0.0 },
+        )!!
+        assertEquals(VitalBands.SkinTempKind.DEVIATION, assessment.kind)
+        assertTrue(assessment.baselineTrusted)
+        assertEquals(0.6, assessment.deltaFromBaselineC!!, 0.001)
+        assertEquals(2.0, assessment.reading.zIllnessward, 0.001)
+    }
+
+    @Test
+    fun skinTempIllnessSignal_failsClosedForInvalidNewestValue() {
+        assertNull(
+            VitalBands.skinTempIllnessAssessment(
+                recent = listOf(0.4, 12.0),
+                baseline = List(20) { 0.0 },
+            ),
+        )
     }
 
     @Test

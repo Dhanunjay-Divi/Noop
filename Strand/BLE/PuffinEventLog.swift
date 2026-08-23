@@ -13,7 +13,7 @@ import CoreBluetooth
 ///
 /// Gated on the same Settings toggle as the frame recorder (`PuffinFrameRecorder.enabledKey`) —
 /// capture is passive/read-only with respect to the strap, and this adds no new setting. One JSONL
-/// line per frame (`{"ts_ms":…,"char":…,"hex":"…"}` — the same key names as `PuffinCaptureRecord`,
+/// line per frame (`{"ts_ms":…,"char":…,"hex":"…"}` - the same key names as `PuffinCaptureRecord`,
 /// so existing tooling reads it). Rotates at a soft cap keeping one previous generation, the same
 /// idiom as the Android twin (`WhoopBleClient.writeWhoop5EventLog`, `whoop5-events.jsonl`).
 @MainActor

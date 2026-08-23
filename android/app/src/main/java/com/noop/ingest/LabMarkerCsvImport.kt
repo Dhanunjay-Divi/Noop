@@ -13,7 +13,7 @@ import java.util.TimeZone
 import java.util.UUID
 
 /**
- * Lab Book markers CSV import (source "lab-csv") — Kotlin twin of
+ * Lab Book markers CSV import (source "lab-csv") - Kotlin twin of
  * Packages/StrandImport/Sources/StrandImport/LabMarkerCsvImport.swift. Keep the two
  * byte-identical (the LabBookProjection twin pattern): same column resolution, same
  * marker aliases, same value/date grammar, same bounds.
@@ -428,7 +428,7 @@ object LabMarkerCsvImport {
     /**
      * Parse a value cell as a number. Handles plain decimals, a European decimal comma
      * ("5,2"), a thousands-grouped integer ("1,234"), and a trailing unit accidentally
-     * left in the cell ("5.2 mmol/L"). Anything else — text results, empty cells, a
+     * left in the cell ("5.2 mmol/L"). Anything else - text results, empty cells, a
      * slash pair outside the BP path — is null, so the row is SKIPPED and counted,
      * never guessed. Byte-identical to the Swift grammar.
      */
@@ -507,7 +507,7 @@ object LabMarkerCsvImport {
      * date is tolerated and ignored):
      *   • ISO-first: "2026-06-15", "2026/6/1", "2026-06-15 08:30".
      *   • Day/month-first with a 4-digit year: "15/01/2026" (day-first when the first
-     *     number can only be a day), otherwise month-first ("01/15/2026" — the US
+     *     number can only be a day), otherwise month-first ("01/15/2026" - the US
      *     spreadsheet default, same rule as NutritionCsvImporter.parseDay).
      * Anything else is null, so the row is skipped and counted.
      */
@@ -546,7 +546,7 @@ object LabMarkerCsvImport {
 
     // MARK: - takenAt derivation (wrapper only, not part of the pure parse)
 
-    /** Epoch seconds of UTC noon on a "yyyy-MM-dd" day — a deterministic, LOCATION-INDEPENDENT takenAt
+    /** Epoch seconds of UTC noon on a "yyyy-MM-dd" day - a deterministic, LOCATION-INDEPENDENT takenAt
      *  for imported rows, so re-importing the same file (even after travelling to another zone) upserts
      *  in place instead of minting a duplicate. Pinned to UTC on BOTH platforms so the natural key
      *  (deviceId, markerKey, takenAt, source) never shifts with the device zone. History dates render

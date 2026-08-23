@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.Color
 import com.noop.analytics.FusionSource
 import com.noop.analytics.ReadinessEngine
 import com.noop.ble.WhoopBleClient
+import com.noop.ble.WhoopModel
 import com.noop.data.WhoopRepository
 
 /**
@@ -66,7 +67,9 @@ internal fun todayProvenanceChipLabel(
 ): String = if (rawSource == WhoopRepository.APPLE_HEALTH_SOURCE) {
     "Apple Watch"
 } else {
-    provenanceDisplayLabel(rawSource, deviceId)
+    provenanceDisplayLabel(rawSource, deviceId).let {
+        if (it == "Whoop") WhoopModel.CUSTOMER_NAME else it
+    }
 }
 
 /**
@@ -122,7 +125,7 @@ internal fun todayPullToSyncEnabled(
  *  Apple Health, the positive status hue for on-device (and anything else). Matches the Data Sources
  *  footer + the Swift `provenanceTint` so the same source reads the same colour on Today. */
 internal fun provenanceLabelTint(label: String): Color = when (label) {
-    "Whoop" -> Palette.accent
+    "Whoop", WhoopModel.CUSTOMER_NAME -> Palette.accent
     "Apple Health" -> Palette.metricCyan
     "Health Connect" -> Palette.metricPurple
     else -> Palette.statusPositive
@@ -151,7 +154,7 @@ internal fun readinessWord(level: ReadinessEngine.Level): String? = when (level)
  */
 internal fun syncedFromSummary(hasWhoop: Boolean, hasApple: Boolean, hasHealthConnect: Boolean = false, hasXiaomi: Boolean): String {
     val names = buildList {
-        if (hasWhoop) add("WHOOP")
+        if (hasWhoop) add(WhoopModel.CUSTOMER_NAME)
         if (hasApple) add("Apple Watch")
         if (hasHealthConnect) add("Health Connect")
         if (hasXiaomi) add("Mi Band")

@@ -85,8 +85,8 @@ object AppChangelog {
             title = uiString(R.string.l10n_app_changelog_optimal_strain_alerts_faster_history_sync_6488a27a),
             date = "July 2026",
             items = listOf(
-                "**\"Optimal strain reached\" alert (#593).** Turn it on and NOOP buzzes once when your day's effort hits the optimal range for your recovery — off by default, and only for the day you're actually building.",
-                "**Strap pack voltage in Devices (#592).** NOOP now shows your strap's measured pack voltage next to the battery percent — a truer read of what's actually left.",
+                "**\"Optimal strain reached\" alert (#593).** Turn it on and NOOP buzzes once when your day's effort hits the optimal range for your recovery - off by default, and only for the day you're actually building.",
+                "**Strap pack voltage in Devices (#592).** NOOP now shows your strap's measured pack voltage next to the battery percent - a truer read of what's actually left.",
                 "**Faster history sync (experimental, #533).** Opt-in toggles let NOOP ask the strap for a quicker connection during a history offload, so a deep backlog catches up in fewer syncs.",
                 "**More accurate steps, workouts and sleep.** Second-strap workouts fill in heart rate again (#512), Today steps count from the right source (#551), foot-sport step totals are no longer halved (#568), and a deleted sleep window can be recomputed (#526).",
                 "**Fixes across the app.** iPhone asks for notification permission during onboarding (#591), pull-to-sync shows a steady \"Syncing…\" (#590), Oura interval imports decode correctly (#511), and the morning recap won't double-fire (#567).",
@@ -97,11 +97,11 @@ object AppChangelog {
             title = uiString(R.string.l10n_app_changelog_german_french_spanish_pull_to_sync_1109bda2),
             date = "July 2026",
             items = listOf(
-                "**NOOP now speaks German, French and Spanish (#453).** The whole app — every screen and label — is translated across iPhone, Mac and Android, so it reads in your language end to end.",
-                "**Pull to sync on Today (#334).** Pull down on the Today screen to ask your strap for a fresh history sync — on iPhone, Mac and Android. It only fires when the strap is connected and ready, and the sync status keeps you posted.",
+                "**NOOP now speaks German, French and Spanish (#453).** The whole app - every screen and label - is translated across iPhone, Mac and Android, so it reads in your language end to end.",
+                "**Pull to sync on Today (#334).** Pull down on the Today screen to ask your strap for a fresh history sync - on iPhone, Mac and Android. It only fires when the strap is connected and ready, and the sync status keeps you posted.",
                 "**The day-cycle sky shows behind your cards by default.** The Today background now extends behind the whole scroll out of the box; turn it off in Settings if you prefer the flat canvas.",
                 "**Trend charts show the date when you inspect them (#492).** Tap or scrub a point on an Android trend chart and it shows the date beside the value now, matching iPhone and Mac.",
-                "**Fixes.** macOS can hold its Bluetooth permission again (#429), WHOOP 5.0/MG battery % shows reliably (#490), activity-file (FIT) imports fill in your steps (#483), and a batch of Today polish — the day title no longer clips, Strain drops a stray %, and the source badges sit right (#486, #492).",
+                "**Fixes.** macOS can hold its Bluetooth permission again (#429), WHOOP 5.0/MG battery % shows reliably (#490), activity-file (FIT) imports fill in your steps (#483), and a batch of Today polish - the day title no longer clips, Strain drops a stray %, and the source badges sit right (#486, #492).",
             ),
         ),
         Release(
@@ -110,11 +110,11 @@ object AppChangelog {
             date = "July 2026",
             items = listOf(
                 "**Power saving that looks after your strap (#477).** A new Settings → Power saving section eases how hard NOOP works your WHOOP when the strap's own battery is running low: it syncs less often and pauses the always-on background HRV stream, so the band lasts longer until you can charge it. You pick the strap-battery level it kicks in at; it's off by default and never runs while the strap is charging. iPhone, Mac and Android.",
-                "**The AI Coach now runs Google Gemini on Android too (#400).** Android gains the native Gemini coach that iPhone and Mac already had, so your model choice and coaching work the same on every platform. On-device and opt-in as before — nothing is sent anywhere unless you turn it on and add your own key.",
-                "**Richer metric detail (#430, #432, #433, #435).** Key Metrics gains a Detailed-tiles option with tap-to-open trend detail, and every metric's detail timeline gets selectable windows — 1 day, 2 days, up to 3 months, a year, or All — matched across iPhone, Mac and Android.",
+                "**The AI Coach now runs Google Gemini on Android too (#400).** Android gains the native Gemini coach that iPhone and Mac already had, so your model choice and coaching work the same on every platform. On-device and opt-in as before - nothing is sent anywhere unless you turn it on and add your own key.",
+                "**Richer metric detail (#430, #432, #433, #435).** Key Metrics gains a Detailed-tiles option with tap-to-open trend detail, and every metric's detail timeline gets selectable windows - 1 day, 2 days, up to 3 months, a year, or All - matched across iPhone, Mac and Android.",
                 "**Keep NOOP running overnight on Android (#386).** An opt-in toggle that guides you through exempting NOOP from your phone maker's aggressive background-kill, so an overnight re-score isn't silently stopped. NOOP also now catches up a killed overnight score the moment you open it.",
                 "**More accurate sleep.** Elevated heart rate on a motionless wrist no longer scores as awake (#462), split nights report the whole night's Asleep total and hypnogram (#345), and a sleep-staging tune that was over-calling \"awake\" for healthy sleepers in the field is reverted (#431).",
-                "**WHOOP 5.0 / MG motion, decoded (#423).** For research, NOOP now decodes the strap's 100 Hz 6-axis motion buffer and can capture the high-rate sensor buffers behind the scenes — the groundwork for real activity detection on the 5.0/MG. Thanks vishk23 and tanarchytan.",
+                "**WHOOP 5.0 / MG motion, decoded (#423).** For research, NOOP now decodes the strap's 100 Hz 6-axis motion buffer and can capture the high-rate sensor buffers behind the scenes - the groundwork for real activity detection on the 5.0/MG. Thanks vishk23 and tanarchytan.",
             ),
         ),
         Release(
@@ -122,8 +122,8 @@ object AppChangelog {
             title = uiString(R.string.l10n_app_changelog_a_sync_chip_on_today_clearer_37682fc9),
             date = "July 2026",
             items = listOf(
-                "**See your strap syncing at a glance (#245).** The Today screen now shows a small sync chip for everyone — a spinner with a live count while your strap's history downloads, and when it last synced the rest of the time — so you can tell it's working without opening the Live screen. iPhone, Mac and Android.",
-                "**A clear warning when your strap's clock is wrong (#324).** A strap whose clock is set far in the future had NOOP quietly importing nothing from it; NOOP now says plainly that the clock is off and how to fix it — fully charge the strap to 100%, then power-cycle it. iPhone, Mac and Android.",
+                "**See your strap syncing at a glance (#245).** The Today screen now shows a small sync chip for everyone - a spinner with a live count while your strap's history downloads, and when it last synced the rest of the time - so you can tell it's working without opening the Live screen. iPhone, Mac and Android.",
+                "**A clear warning when your strap's clock is wrong (#324).** A strap whose clock is set far in the future had NOOP quietly importing nothing from it; NOOP now says plainly that the clock is off and how to fix it - fully charge the strap to 100%, then power-cycle it. iPhone, Mac and Android.",
                 "**Smart wake alarm arms more reliably (#34).** On WHOOP 4.0 the firmware wake alarm is now set only once the strap connection has fully settled, so the alarm time reliably reaches the strap instead of being sent before the link was ready. Thanks digitalerdude.",
                 "**Tidier menus (#336).** Removed settings that appeared in two places at once, renamed the two \"Broadcast heart rate\" toggles so you can tell them apart (strap broadcast for Garmin/ANT vs. broadcasting from your phone), and moved developer-only controls into the Test Centre. Nothing lost its home. Thanks tanarchytan.",
                 "**Complete German translation (#326).** German text that was missing across charts, shared screens and the Apple Watch app is filled in, so German users no longer see English fragments mid-screen. Thanks digitalerdude.",
@@ -135,7 +135,7 @@ object AppChangelog {
             date = "July 2026",
             items = listOf(
                 "**Your data in Apple Health (iPhone) (#249).** Sleep stages, minute-by-minute heart rate, and your workouts now write to Apple Health, so other apps can read them. Thanks vishk23.",
-                "**Sleep nights no longer go missing (#268).** Nights with a few brief heart-rate spikes were being dropped as \"no sleep recorded\" — those nights are recovered now. Thanks tanarchytan.",
+                "**Sleep nights no longer go missing (#268).** Nights with a few brief heart-rate spikes were being dropped as \"no sleep recorded\" - those nights are recovered now. Thanks tanarchytan.",
                 "**Sleep times and totals read right after an edit (#259).** A corrected bedtime no longer shows the wrong hour on the Sleep tab, and a night can never read as more sleep than time in bed.",
                 "**Imported rides count toward Effort (#137).** On a day you didn't wear the strap, an imported GPX / TCX / FIT ride's real heart rate now lights that day's Effort ring instead of being ignored.",
                 "**Low-battery heads-up (#250).** NOOP warns you when your strap has roughly a day of charge left, on iPhone, Mac and Android. Thanks vishk23.",
@@ -147,8 +147,8 @@ object AppChangelog {
             title = uiString(R.string.l10n_app_changelog_restart_your_strap_lighter_on_battery_2ccbef88),
             date = "July 2026",
             items = listOf(
-                "**Restart your strap from NOOP (#166).** A new *Restart strap* option on the connected band in Devices — a clean way to reboot a misbehaving strap without the official app. Confirmation-gated, keeps your data, and shows a *Reconnecting…* state while it comes back. iPhone, Mac and Android.",
-                "**Lighter on battery (Android) (#228).** NOOP stops re-polling the strap on a fixed cadence once it keeps banking nothing, and backs off the reconnect churn when another app is holding the band — so the strap and phone last longer. Thanks tanarchytan.",
+                "**Restart your strap from NOOP (#166).** A new *Restart strap* option on the connected band in Devices - a clean way to reboot a misbehaving strap without the official app. Confirmation-gated, keeps your data, and shows a *Reconnecting…* state while it comes back. iPhone, Mac and Android.",
+                "**Lighter on battery (Android) (#228).** NOOP stops re-polling the strap on a fixed cadence once it keeps banking nothing, and backs off the reconnect churn when another app is holding the band - so the strap and phone last longer. Thanks tanarchytan.",
                 "**Health Connect works on Android 13 (#226).** NOOP now appears in Health Connect's app-permissions list on Android 13, so you can grant access and import your data. Android 14+ was already fine.",
                 "**Auto-detected workouts save now (Android) (#214).** Tapping *Save* on a \"looks like a workout\" suggestion was silently dropped mid-save; it now saves, shows up in your workouts, and stops re-prompting the same window.",
             ),
@@ -158,8 +158,8 @@ object AppChangelog {
             title = uiString(R.string.l10n_app_changelog_hrv_that_reads_true_and_a_2b09fa43),
             date = "July 2026",
             items = listOf(
-                "**Overnight HRV reads true, not roughly twice as high (#195).** When cleaning drops a single noisy heartbeat, its neighbours no longer splice together into a phantom spike — the flaw that had some nights reading HRV about 2× too high, and skewing the recovery built on it. iPhone, Mac and Android.",
-                "**The deep-sleep HRV setting takes effect right away (#201).** Switching between whole-night and deep-sleep no longer drops Charge back to \"calibrating\" for several nights — with a few nights of history behind you, the change applies immediately. Thanks digitalerdude.",
+                "**Overnight HRV reads true, not roughly twice as high (#195).** When cleaning drops a single noisy heartbeat, its neighbours no longer splice together into a phantom spike - the flaw that had some nights reading HRV about 2× too high, and skewing the recovery built on it. iPhone, Mac and Android.",
+                "**The deep-sleep HRV setting takes effect right away (#201).** Switching between whole-night and deep-sleep no longer drops Charge back to \"calibrating\" for several nights - with a few nights of history behind you, the change applies immediately. Thanks digitalerdude.",
                 "**Latest Workouts, tidied up (#200).** The Today workout section shows your true most-recent sessions in one clean list, drops the duplicate that appeared when a workout came from more than one source, keeps up when you re-pair your strap, and names more sports. Thanks TheBoroer.",
             ),
         ),
@@ -179,8 +179,8 @@ object AppChangelog {
             title = uiString(R.string.l10n_app_changelog_whoop_style_hrv_warm_ups_counted_199aaa42),
             date = "July 2026",
             items = listOf(
-                "**HRV, the WHOOP way (#141).** A new Settings option computes your nightly HRV over the deep-sleep window — the same slow-wave window WHOOP uses — so the number lines up with what your WHOOP app shows. Whole-night stays the default; switching re-learns your Charge baseline over a few nights.",
-                "**Workouts catch the warm-up (#148).** Auto-detected walks and rides no longer lose their first 10–15 minutes while your heart rate is still climbing — the start now reaches back over the warm-up to when you actually got moving.",
+                "**HRV, the WHOOP way (#141).** A new Settings option computes your nightly HRV over the deep-sleep window - the same slow-wave window WHOOP uses - so the number lines up with what your WHOOP app shows. Whole-night stays the default; switching re-learns your Charge baseline over a few nights.",
+                "**Workouts catch the warm-up (#148).** Auto-detected walks and rides no longer lose their first 10–15 minutes while your heart rate is still climbing - the start now reaches back over the warm-up to when you actually got moving.",
                 "**Fitness Age stops getting stuck on \"No Data\" (#139/#140).** When all your readiness inputs are in, Fitness Age now scores instead of showing an empty gauge, there's a refresh button to recompute on demand, and the card shows how many more nights it needs rather than a dead end.",
                 "**Trends can draw bars (#134).** A new Settings toggle renders the Trends graphs as bar charts, zero-anchored, instead of lines.",
                 "**Clearer Home cards (#150).** Hydration no longer shares an identical icon with Blood Oxygen.",
@@ -191,7 +191,7 @@ object AppChangelog {
             title = uiString(R.string.l10n_app_changelog_raw_spo_honest_units_and_a_55e83a59),
             date = "July 2026",
             items = listOf(
-                "**See your raw blood-oxygen signal (WHOOP 4.0).** The Health screen now surfaces the strap's raw red/IR SpO₂ sensor reading natively — honest, uncalibrated data, no export needed. It's not a clinical %, which needs WHOOP's own calibration.",
+                "**See your raw blood-oxygen signal (WHOOP 4.0).** The Health screen now surfaces the strap's raw red/IR SpO₂ sensor reading natively - honest, uncalibrated data, no export needed. It's not a clinical %, which needs WHOOP's own calibration.",
                 "**Skin temperature and Effort now respect your settings.** The Deep Timeline shows skin temp in °F when you've chosen Fahrenheit, and the Today \"Effort\" ring finally follows your 0–100 vs WHOOP 0–21 scale (with a decimal on the 21 scale).",
                 "**The \"workout in progress\" card is back on Home.** The Liquid redesign dropped it; an active manual workout is once again visible on the Home screen and taps straight through to Live.",
                 "**Apple Health steps count again.** Steps imported from an Apple Health export now reach your daily totals instead of quietly going missing.",
@@ -205,10 +205,10 @@ object AppChangelog {
             date = "July 2026",
             items = listOf(
                 "**NOOP runs natively on Intel Macs again.** The macOS build is a true universal binary, so it launches and runs at full speed on both Apple-silicon and Intel Macs.",
-                "**Back up on iPhone without fighting the folder picker.** Backup & Sync now offers *Use NOOP's own folder* — a one-tap backup saved inside NOOP and visible in the Files app, for when iOS won't let you pick a folder.",
+                "**Back up on iPhone without fighting the folder picker.** Backup & Sync now offers *Use NOOP's own folder* - a one-tap backup saved inside NOOP and visible in the Files app, for when iOS won't let you pick a folder.",
                 "**The Settings screen fits your screen again.** A control that could push Settings off the edge (most visibly in German, or at larger text sizes) is fixed.",
                 "**Snappier sleep and recovery analysis.** The nightly re-score reads your data in far fewer database round-trips, and the app carries lighter scene art.",
-                "**Your phone backup alarm no longer depends on wrist alerts.** If you set a smart alarm, the backup notification is scheduled even if you never turned wrist alerts on — and NOOP now warns you when a strap keeps refusing the alarm time.",
+                "**Your phone backup alarm no longer depends on wrist alerts.** If you set a smart alarm, the backup notification is scheduled even if you never turned wrist alerts on - and NOOP now warns you when a strap keeps refusing the alarm time.",
             ),
         ),
         Release(
@@ -216,7 +216,7 @@ object AppChangelog {
             title = uiString(R.string.l10n_app_changelog_clearer_sync_status_6431bf19),
             date = "July 2026",
             items = listOf(
-                "**A finished sync no longer looks like a failure.** After your strap hands over its history, NOOP could flash a \"no banked history — charge to 100%\" warning even though it had just offloaded hundreds of records. That false alarm is gone — a caught-up sync now reads as caught up.",
+                "**A finished sync no longer looks like a failure.** After your strap hands over its history, NOOP could flash a \"no banked history - charge to 100%\" warning even though it had just offloaded hundreds of records. That false alarm is gone - a caught-up sync now reads as caught up.",
             ),
         ),
         Release(
@@ -224,9 +224,9 @@ object AppChangelog {
             title = uiString(R.string.l10n_app_changelog_your_macos_data_is_back_and_e5e3e3bd),
             date = "July 2026",
             items = listOf(
-                "**macOS: your history is back.** Upgrading the Mac app could open an empty database — your data was never lost, just looked for in the wrong place. It now finds your existing store and imports it on first launch (the original is left untouched).",
+                "**macOS: your history is back.** Upgrading the Mac app could open an empty database - your data was never lost, just looked for in the wrong place. It now finds your existing store and imports it on first launch (the original is left untouched).",
                 "**Full French.** The app is now completely translated into French, alongside German and Spanish.",
-                "**Sleep stages read right.** On nights with fine-grained staging the stage graphic no longer collapses into a single row of dots — it draws as a continuous timeline again.",
+                "**Sleep stages read right.** On nights with fine-grained staging the stage graphic no longer collapses into a single row of dots - it draws as a continuous timeline again.",
             ),
         ),
         Release(
@@ -234,7 +234,7 @@ object AppChangelog {
             title = uiString(R.string.l10n_app_changelog_workout_display_fixes_255b56e8),
             date = "July 2026",
             items = listOf(
-                "**Imported workout files show up.** A FIT / GPX / TCX file you import now appears in Workouts — it was saved and counted, but the list wasn't reading that source.",
+                "**Imported workout files show up.** A FIT / GPX / TCX file you import now appears in Workouts - it was saved and counted, but the list wasn't reading that source.",
                 "**Workouts return after re-pairing your strap.** Re-adding a strap could hide workouts recorded before it; the Workouts screen now finds them again.",
             ),
         ),
@@ -244,7 +244,7 @@ object AppChangelog {
             date = "July 2026",
             items = listOf(
                 "**Restoring a backup works again.** A good backup could fail to restore with a database error; NOOP now reads it correctly during its safety check, so your snapshots restore.",
-                "**Card transparency.** Settings → Appearance now lets you dial how see-through the cards are — solid to clear, saved and applied live.",
+                "**Card transparency.** Settings → Appearance now lets you dial how see-through the cards are - solid to clear, saved and applied live.",
                 "**Sky behind cards.** An optional setting extends the day-cycle sky behind the whole Today screen, so it shows through transparent cards.",
                 "**More useful bug reports.** The shared strap log now includes your strap + data state and the sleep-analysis funnels, so a report arrives with the detail to fix it.",
             ),
@@ -977,7 +977,7 @@ object AppChangelog {
             title = uiString(R.string.l10n_app_changelog_estimated_steps_for_your_whoop_4_e961cade),
             date = "June 2026",
             items = listOf(
-                "Steps on a WHOOP 4.0 - estimated, and calibrated to you. A WHOOP 4.0 doesn't send a step count over Bluetooth, so NOOP now estimates your daily steps from the strap's own motion and calibrates that against your phone's step count (Apple Health / Health Connect) - learning a coefficient personal to your gait. It's honest about what it is: an estimate, never a pretend pedometer - shown with an \"est.\" marker, and \"—\" when there isn't enough movement to say.",
+                "Steps on a WHOOP 4.0 - estimated, and calibrated to you. A WHOOP 4.0 doesn't send a step count over Bluetooth, so NOOP now estimates your daily steps from the strap's own motion and calibrates that against your phone's step count (Apple Health / Health Connect) - learning a coefficient personal to your gait. It's honest about what it is: an estimate, never a pretend pedometer - shown with an \"est.\" marker, and \"-\" when there isn't enough movement to say.",
                 "A Steps calibration screen (Settings → Profile → Steps estimate): see your estimate next to your phone's real count, how confident the fit is, and a manual dial to tune it to you with a live preview. No phone steps to calibrate against? Set the dial by hand.",
                 "Where you do have a real phone step count, that always wins - the estimate only fills the days your phone didn't cover.",
                 "Generic heart-rate straps now actually connect. A Polar / Wahoo / Coospo strap you made active was being discovered but never connected to - so it sat there with no live data. Fixed. Thanks @pilleuspulcher-blip (#421).",
@@ -2039,7 +2039,7 @@ object AppChangelog {
             title = uiString(R.string.l10n_app_changelog_android_the_widget_now_actually_updates_dc770011),
             date = "June 2026",
             items = listOf(
-                "Fixed (Android): the home-screen widget could freeze on \"—\" for heart rate and battery while the app itself streamed live HR perfectly well (#82, second find). The widget update was being cancelled mid-write every time a new heart-rate sample arrived - and with samples landing every second, no update ever finished once streaming started. Updates now run to completion, and the first heart-rate sample after connecting shows on the widget immediately instead of waiting out a refresh window. Thanks to the reporter whose precise symptoms - live HR fine in the app, widget stuck with \"Connected\" underneath - pointed straight at it. Mac: version bump only.",
+                "Fixed (Android): the home-screen widget could freeze on \"-\" for heart rate and battery while the app itself streamed live HR perfectly well (#82, second find). The widget update was being cancelled mid-write every time a new heart-rate sample arrived - and with samples landing every second, no update ever finished once streaming started. Updates now run to completion, and the first heart-rate sample after connecting shows on the widget immediately instead of waiting out a refresh window. Thanks to the reporter whose precise symptoms - live HR fine in the app, widget stuck with \"Connected\" underneath - pointed straight at it. Mac: version bump only.",
             ),
         ),
         Release(
@@ -2277,7 +2277,7 @@ object AppChangelog {
             title = uiString(R.string.l10n_app_changelog_today_trends_stay_within_their_window_ba2e4c57),
             date = "June 2026",
             items = listOf(
-                "Fixed (Mac): the Today screen's metric sparklines are labelled a \"14-day trend\", but if a metric had fewer than two readings in that window it quietly fell back to your entire history - so an old import could draw months-old data as if it were a current trend. The sparklines now stay strictly within their window, and a metric whose latest reading is older than the window shows \"—\" rather than a stale number. Thanks to a community contributor (#49). Android already windowed these correctly, so this is a Mac-only fix.",
+                "Fixed (Mac): the Today screen's metric sparklines are labelled a \"14-day trend\", but if a metric had fewer than two readings in that window it quietly fell back to your entire history - so an old import could draw months-old data as if it were a current trend. The sparklines now stay strictly within their window, and a metric whose latest reading is older than the window shows \"-\" rather than a stale number. Thanks to a community contributor (#49). Android already windowed these correctly, so this is a Mac-only fix.",
             ),
         ),
         Release(
@@ -2285,7 +2285,7 @@ object AppChangelog {
             title = uiString(R.string.l10n_app_changelog_no_more_hr_spike_when_you_7dc052ba),
             date = "June 2026",
             items = listOf(
-                "Fixed: when you reopened NOOP or returned to the Live screen, your heart rate could briefly show a high stale number (around 100) and then drift back down over several seconds. The strap was fine - the app was re-showing the last smoothed value from before the gap, until fresh readings refilled the averaging window. The hero number now blanks to \"—\" on resume and shows your real heart rate the instant the first fresh reading arrives. Both Mac and Android.",
+                "Fixed: when you reopened NOOP or returned to the Live screen, your heart rate could briefly show a high stale number (around 100) and then drift back down over several seconds. The strap was fine - the app was re-showing the last smoothed value from before the gap, until fresh readings refilled the averaging window. The hero number now blanks to \"-\" on resume and shows your real heart rate the instant the first fresh reading arrives. Both Mac and Android.",
             ),
         ),
         Release(

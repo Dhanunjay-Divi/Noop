@@ -44,7 +44,7 @@ public enum BackupSettings {
     ///
     /// Profile: the body metrics that power HR zones / calories / recovery baselines, plus the manual
     /// HR-max override (`profile.hrMax`, 0 = auto/Tanaka). Display: the metric/imperial system, the
-    /// separate temperature override ("" = match the system), and the Effort axis (#268) — the three
+    /// separate temperature override ("" = match the system), and the Effort axis (#268) - the three
     /// display prefs that exist with identical semantics on both platforms.
     ///
     /// V3 adds only preferences that describe the person's intended app setup. Delivery cursors,
@@ -98,6 +98,7 @@ public enum BackupSettings {
         "hydrationReminders.intervalMinutes": .int,
         "hydrationReminders.activeStartMinutes": .int,
         "hydrationReminders.activeEndMinutes": .int,
+        "hydrationReminders.adaptiveEnabled": .bool,
         "hydrationReminders.strapBuzzEnabled": .bool,
     ]
 
@@ -151,6 +152,7 @@ public enum BackupSettings {
         "hydrationReminders.intervalMinutes": "hydrationReminders.intervalMinutes",
         "hydrationReminders.activeStartMinutes": "hydrationReminders.activeStartMinutes",
         "hydrationReminders.activeEndMinutes": "hydrationReminders.activeEndMinutes",
+        "hydrationReminders.adaptiveEnabled": "hydrationReminders.adaptiveEnabled",
         "hydrationReminders.strapBuzzEnabled": "hydrationReminders.strapBuzzEnabled",
     ]
 
@@ -229,7 +231,7 @@ public enum BackupSettings {
     }
 
     /// Decode a `settings.json` payload down to its whitelisted, correctly-typed subset. Malformed
-    /// JSON, a non-object root, unknown keys, and wrong-typed values all degrade to "fewer keys" —
+    /// JSON, a non-object root, unknown keys, and wrong-typed values all degrade to "fewer keys" -
     /// never an error, because a bad settings entry must not fail a restore whose DB half is fine.
     public static func decode(_ data: Data) -> [String: Any] {
         guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return [:] }
@@ -313,7 +315,7 @@ public enum BackupSettings {
             return allowedString(coerced, ["titanium", "classic"])
         case "trend.chart.style":
             return allowedString(coerced, ["line", "bar"])
-        case "today.sectionOrder", "today.keyMetrics":
+        case "today.sectionOrder":
             guard let string = coerced as? String,
                   string.utf8.count <= 2_048,
                   string.unicodeScalars.allSatisfy({
@@ -321,6 +323,14 @@ public enum BackupSettings {
                           CharacterSet(charactersIn: ".,_- ")).contains($0)
                   }) else { return nil }
             return string
+        case "today.keyMetrics":
+            guard let string = coerced as? String,
+                  string.utf8.count <= 2_048,
+                  string.unicodeScalars.allSatisfy({
+                      CharacterSet.alphanumerics.union(
+                          CharacterSet(charactersIn: ".,_- ")).contains($0)
+                  }) else { return nil }
+            return normalizedKeyMetricSelection(string)
         case "noop.cardOpacityPercent":
             return boundedInt(coerced, 0...100)
         case "today.keyMetricsWindowDays":
@@ -351,6 +361,24 @@ public enum BackupSettings {
     private static func allowedString(_ value: Any, _ allowed: Set<String>) -> String? {
         guard let string = value as? String, allowed.contains(string) else { return nil }
         return string
+    }
+
+    /// Keep the portable dashboard preference inside the app's one-to-five pin contract. Older backups
+    /// may contain all ten metrics; their first five valid unique ids survive in the user's saved order.
+    private static func normalizedKeyMetricSelection(_ raw: String) -> String? {
+        let allowed: Set<String> = [
+            "charge", "effort", "rest", "hrv", "restingHr",
+            "bloodOxygen", "respiratory", "steps", "weight", "calories",
+        ]
+        var seen = Set<String>()
+        var selected: [String] = []
+        for part in raw.split(separator: ",") {
+            let token = String(part).trimmingCharacters(in: .whitespaces)
+            guard allowed.contains(token), seen.insert(token).inserted else { continue }
+            selected.append(token)
+            if selected.count == 5 { break }
+        }
+        return selected.isEmpty ? nil : selected.joined(separator: ",")
     }
 
     private static func boundedInt(_ value: Any, _ range: ClosedRange<Int>) -> Int? {

@@ -55,7 +55,7 @@ struct StrengthTrainerView: View {
         NavigationStack {
             ScreenScaffold(
                 title: "Strength Trainer",
-                subtitle: "Routines, sets, reps, rest, and factual records—private on this device.",
+                subtitle: "Routines, sets, reps, rest, and factual records-private on this device.",
                 onRefresh: { await load() },
                 topBackground: liquidScaffoldSky()
             ) {
@@ -236,7 +236,7 @@ struct StrengthTrainerView: View {
                 StatTile(
                     label: "Loaded volume",
                     value: summary.loadedVolumeSetCount == 0
-                        ? "—"
+                        ? "-"
                         : UnitFormatter.massFromKilograms(summary.loadedVolumeKg, unit: massUnit),
                     caption: summary.loadedVolumeSetCount == 0
                         ? "needs load + reps"
@@ -529,7 +529,7 @@ struct StrengthTrainerView: View {
                 ScreenStateCard(
                     kind: .empty,
                     title: "No routines yet",
-                    message: "Build a workout, then choose Save as routine. Routines store targets—not claims about what you completed.",
+                    message: "Build a workout, then choose Save as routine. Routines store targets-not claims about what you completed.",
                     symbol: "list.bullet.clipboard"
                 )
             } else {
@@ -867,7 +867,7 @@ private struct StrengthSessionEditor: View {
                 .disabled(routineName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The routine will store exercise order, set count, rep targets, and rest—not completed results.")
+            Text("The routine will store exercise order, set count, rep targets, and rest-not completed results.")
         }
         .alert("Strength Trainer", isPresented: Binding(
             get: { errorMessage != nil },
@@ -1493,13 +1493,13 @@ private struct StrengthExerciseProgressView: View {
                             label: "Heaviest load",
                             value: heaviestLoadKg.map {
                                 UnitFormatter.massFromKilograms($0, unit: massUnit)
-                            } ?? "—",
+                            } ?? "-",
                             caption: "external load",
                             accent: StrandPalette.effortColor
                         )
                         StatTile(
                             label: "Most reps",
-                            value: mostReps.map(String.init) ?? "—",
+                            value: mostReps.map(String.init) ?? "-",
                             caption: "one completed set",
                             accent: StrandPalette.accent
                         )
@@ -1507,7 +1507,7 @@ private struct StrengthExerciseProgressView: View {
                             label: "Best set volume",
                             value: bestSetVolumeKg.map {
                                 UnitFormatter.massFromKilograms($0, unit: massUnit)
-                            } ?? "—",
+                            } ?? "-",
                             caption: "load × reps",
                             accent: StrandPalette.metricPurple
                         )

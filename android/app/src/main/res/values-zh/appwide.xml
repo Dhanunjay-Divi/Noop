@@ -11,6 +11,16 @@
     <string name="appwide_calendar_summary_overline">本月</string>
     <string name="appwide_calendar_summary_scored_format">已评分 %1$d 天 · 平均 %2$d</string>
     <string name="appwide_calendar_your_month">你的本月概览</string>
+    <string name="appwide_daily_signal_a11y_hint">打开健康监测和此状态背后的信号。</string>
+    <string name="appwide_daily_signal_alert_a11y_hint">打开健康监测和此次检查背后的信号。</string>
+    <string name="appwide_daily_signal_alert_review">查看详情</string>
+    <string name="appwide_daily_signal_alert_title">信号发生变化</string>
+    <string name="appwide_daily_signal_alert_unwell_title">立即查看</string>
+    <string name="appwide_daily_signal_label">今日信号</string>
+    <string name="appwide_daily_signal_status_aligned">一致</string>
+    <string name="appwide_daily_signal_status_building">建立中</string>
+    <string name="appwide_daily_signal_status_check_in">查看</string>
+    <string name="appwide_daily_signal_status_recheck">复查</string>
     <string name="appwide_disclaimer_estimates">根据你的信号在此设备上计算。仅为估算，并非医疗设备。</string>
     <string name="appwide_disclaimer_estimates_advice">根据你的信号在此设备上计算的估算值。并非医疗设备，也不构成医疗建议。</string>
     <string name="appwide_field_label_unit_format">%1$s（%2$s）</string>

@@ -511,7 +511,7 @@ fun BarChart(
     color: Color = Palette.accent,
     selectionEnabled: Boolean = false,
     // Optional per-point display labels index-aligned with [values]; when supplied, a tap shows
-    // "<label> · <value>" (e.g. "16 Jul · 87") instead of the bare value — parity with LineChart (#691).
+    // "<label> · <value>" (e.g. "16 Jul · 87") instead of the bare value - parity with LineChart (#691).
     selectionLabels: List<String>? = null,
 ) {
     val cleanValues = remember(values) { values.map { if (it.isFinite() && it > 0.0) it else 0.0 } }
@@ -847,7 +847,7 @@ fun zoomedWindow(
 
 // MARK: - Round-time x-axis ticks (prototype hr-chart-time-axis)
 
-/** Shared "HH:mm" tick/readout clock format — one instance, DateTimeFormatter is thread-safe. */
+/** Shared "HH:mm" tick/readout clock format - one instance, DateTimeFormatter is thread-safe. */
 private val chartTickTimeFormat = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
 
 /**

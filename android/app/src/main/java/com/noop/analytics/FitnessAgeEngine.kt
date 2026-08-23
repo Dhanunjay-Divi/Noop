@@ -1,6 +1,6 @@
 package com.noop.analytics
 
-// FitnessAgeEngine.kt — on-device "Fitness Age" from resting HR + activity + profile.
+// FitnessAgeEngine.kt - on-device "Fitness Age" from resting HR + activity + profile.
 // Byte-for-byte mirror of Strand/Packages/StrandAnalytics/Sources/StrandAnalytics/FitnessAgeEngine.swift.
 //
 // INDEPENDENT implementation of published, peer-reviewed methods (NOT medical advice; a fitness
@@ -11,8 +11,8 @@ package com.noop.analytics
 //     coefficients could NOT be reliably confirmed against the original and are deliberately not used.
 //   • Physical-activity index: HUNT1 PA-Q (Kurtze 2008), frequency×intensity×duration ∈ [0, 15];
 //     reconstructed from NOOP's measured weekly signals.
-//   • Fitness Age: invert the SAME Nes equation self-consistently — normative curve at population-
-//     reference RHR and PA-index. The waist term cancels, so the headline number needs only
+//   • Fitness Age: invert the SAME Nes equation self-consistently — comparison curve at NOOP's explicit
+//     neutral RHR and PA-index anchors. The waist term cancels, so the headline number needs only
 //     age/sex/RHR/PA, and an average-fitness person maps to their own age by construction.
 object FitnessAgeEngine {
 
@@ -23,7 +23,7 @@ object FitnessAgeEngine {
     private const val womenWC = 0.259; private const val womenRHR = 0.114; private const val womenPAI = 0.198
     const val seeMen = 5.70; const val seeWomen = 5.14
 
-    // Normative reference point — the "average peer" the Fitness Age compares against.
+    // Internal neutral anchors, not population-fitted constants.
     const val restingHRReference = 65.0
     const val paiReference = 5.0
 
@@ -135,10 +135,11 @@ object FitnessAgeEngine {
     const val minCoverageDays = 4
     const val goodCoverageDays = 6
 
-    /** Nights of resting-HR still needed before the headline can compute AT ALL — the countdown the
-     *  not-ready card shows ("N more nights of wear…"). 0 once [minCoverageDays] is met. Assumes continued
-     *  nightly wear. Shared with the iOS engine so both platforms show the same number. */
-    fun nightsUntilReady(rhrDays: Int): Int = maxOf(0, minCoverageDays - rhrDays)
+    /** Observed days still needed for either required coverage gate. */
+    fun coverageDaysUntilReady(observedDays: Int): Int = maxOf(0, minCoverageDays - observedDays)
+
+    /** Resting-HR compatibility wrapper for overnight-wear presentation. */
+    fun nightsUntilReady(rhrDays: Int): Int = coverageDaysUntilReady(rhrDays)
 
     private fun coverageStatus(days: Int, floor: Int): FitnessReadinessStatus = when {
         days >= goodCoverageDays -> FitnessReadinessStatus.SATISFIED

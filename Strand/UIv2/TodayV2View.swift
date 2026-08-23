@@ -1,13 +1,13 @@
 import SwiftUI
 
-// TodayV2View.swift — the v2 "Aurora" Today screen (UI v2).
+// TodayV2View.swift - the v2 "Aurora" Today screen (UI v2).
 //
 // HIERARCHY (the core fix vs v1): v1 put three equal rings + badges + synthesis + vitals + a metric grid
 // above the fold, so nothing led. v2 reads top-to-bottom as an answer:
 //   1. ONE hero arc — the day's headline score.
 //   2. Two satellites — the other scores, clearly secondary.
-//   3. ONE coaching line — "the one thing that matters today".
-//   4. Your own range — vitals as "where I sit in MY range" (the question a bare number never answers).
+//   3. ONE coaching line - "the one thing that matters today".
+//   4. Your own range - vitals as "where I sit in MY range" (the question a bare number never answers).
 //   5. Pattern — the week×hour load heatmap (R7 engine).
 //   6. Detail — the metric grid, last.
 //
@@ -236,8 +236,8 @@ struct TodayV2View: View {
         if v < r.0 { return "Below your usual range" }
         if v > r.1 { return "Above your usual range" }
         let f = (v - r.0) / (r.1 - r.0)          // 0 = bottom of your band, 1 = top
-        if f >= 0.75 { return higherIsBetter ? "Top of your range — strong" : "High side of your range" }
-        if f <= 0.25 { return higherIsBetter ? "Low side of your range" : "Bottom of your range — good" }
+        if f >= 0.75 { return higherIsBetter ? "Top of your range - strong" : "High side of your range" }
+        if f <= 0.25 { return higherIsBetter ? "Low side of your range" : "Bottom of your range - good" }
         return "Mid-range for you"
     }
 
@@ -316,7 +316,7 @@ extension TodayV2Model {
         m.confidence = "Solid"
         m.provenance = "On-device"
         m.coachOverline = "Today's focus"
-        m.coachMessage = "Sleep was strong and your HRV is inside your usual range — a moderate-to-hard session is well supported today."
+        m.coachMessage = "Sleep was strong and your HRV is inside your usual range - a moderate-to-hard session is well supported today."
         m.coachAction = "See training target"
         m.hrv = 91          // near the top of the personal band -> "Top of your range"
         m.hrvRange = (62, 96)

@@ -27,7 +27,7 @@ enum OuraError: LocalizedError, Equatable {
         case .tokenExchangeFailed(let d):
             return "Couldn't exchange the Oura authorization code: \(d)"
         case .badResponse(let code, let detail):
-            let extra = detail.isEmpty ? "" : " — \(detail)"
+            let extra = detail.isEmpty ? "" : " - \(detail)"
             return "Oura returned an error (\(code))\(extra)."
         case .rateLimited:
             return "Oura is rate-limiting requests. Waiting before retrying."

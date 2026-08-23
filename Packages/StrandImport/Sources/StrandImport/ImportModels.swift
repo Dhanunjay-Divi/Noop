@@ -19,7 +19,7 @@ public enum DataSourceKind: String, Sendable, Codable, Equatable, CaseIterable {
     /// Fitbit — the user's own Google Takeout → Fitbit JSON export (per-day sleep /
     /// resting_heart_rate / steps / heart_rate files). Fully offline, no Fitbit/Google API.
     case fitbitImport
-    /// Garmin — the user's own Garmin Connect "Export Your Data" (GDPR) wellness JSON/CSV
+    /// Garmin - the user's own Garmin Connect "Export Your Data" (GDPR) wellness JSON/CSV
     /// (sleep / resting HR / stress / steps). The FIT activity files inside the same ZIP are
     /// handled by the wave-1 FIT parser; this path does the WELLNESS daily + sleep only.
     case garminImport

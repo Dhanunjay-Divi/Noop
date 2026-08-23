@@ -103,7 +103,7 @@ object ReportCompleteness {
      * "this report carries no diagnostic for X" signal). The parenthetical names the token that ACTUALLY
      * matched, never the one we hoped for (#386's mislabel): a killer-trace match keeps the bare
      * `(<killer>)`, an evidence-only match (#127) reads `(via <evidence>)`, and MISSING reads
-     * `(expected <killer>)` — the Swift renderer's "expected …" wording for the missing case. Returns
+     * `(expected <killer>)` - the Swift renderer's "expected …" wording for the missing case. Returns
      * the section WITHOUT a leading newline; the assembler joins it.
      */
     fun captureCheckSection(reportText: String, active: Set<TestDomain>): String {
