@@ -58,6 +58,9 @@
     <string name="nutrition_error_empty">Füge vor dem Sichern einen Namen, eine Notiz, Kalorien oder mindestens einen Makronährstoff hinzu.</string>
     <string name="nutrition_error_generic">NOOP konnte das private Ernährungsprotokoll nicht aktualisieren. Versuche es erneut.</string>
     <string name="nutrition_error_range">Ein Nährstoffwert liegt außerhalb des unterstützten Bereichs. Prüfe die Zahlen und versuche es erneut.</string>
+    <string name="nutrition_glucose_none">Keine Nüchternglukose im Laborbuch erfasst</string>
+    <string name="nutrition_glucose_recorded_format">Laborbuch · Erfasst am %1$s</string>
+    <string name="nutrition_glucose_title">Nüchternglukose</string>
     <string name="nutrition_intake_daily">Tagesaufnahme</string>
     <string name="nutrition_intake_no_calories">Keine Kalorien erfasst</string>
     <string name="nutrition_intake_today">Heutige Aufnahme</string>
@@ -95,6 +98,7 @@
     <string name="nutrition_state_loading_body">Die privaten Ernährungseinträge dieses Tages werden von diesem Gerät gelesen.</string>
     <string name="nutrition_state_loading_title">Ernährung wird geladen</string>
     <string name="nutrition_subtitle">Mahlzeiten, Makros und importierte Summen – privat auf diesem Gerät.</string>
+    <string name="nutrition_summary_today_foods">Heutige Lebensmittel</string>
     <string name="nutrition_title">Ernährung</string>
     <string name="nutrition_totals_empty">Für diesen Tag wurde noch nichts gezählt.</string>
     <string name="nutrition_totals_imported">Die Summen verwenden die importierte Tagesübersicht. Nicht enthaltene Nährstoffe bleiben leer statt null.</string>

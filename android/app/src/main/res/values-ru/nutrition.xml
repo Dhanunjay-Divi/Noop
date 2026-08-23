@@ -58,6 +58,9 @@
     <string name="nutrition_error_empty">Перед сохранением добавьте название, заметку, калории или хотя бы один макронутриент.</string>
     <string name="nutrition_error_generic">NOOP не удалось обновить личный дневник питания. Повторите попытку.</string>
     <string name="nutrition_error_range">Одно значение нутриента выходит за допустимый диапазон. Проверьте числа и повторите попытку.</string>
+    <string name="nutrition_glucose_none">В лабораторном журнале нет записи о глюкозе натощак</string>
+    <string name="nutrition_glucose_recorded_format">Лабораторный журнал · Записано %1$s</string>
+    <string name="nutrition_glucose_title">Глюкоза натощак</string>
     <string name="nutrition_intake_daily">Питание за день</string>
     <string name="nutrition_intake_no_calories">Калории не указаны</string>
     <string name="nutrition_intake_today">Питание сегодня</string>
@@ -95,6 +98,7 @@
     <string name="nutrition_state_loading_body">Чтение личных записей о питании за этот день с устройства.</string>
     <string name="nutrition_state_loading_title">Загрузка данных о питании</string>
     <string name="nutrition_subtitle">Приёмы пищи, макронутриенты и импортированные итоги. Конфиденциально на этом устройстве.</string>
+    <string name="nutrition_summary_today_foods">Еда за сегодня</string>
     <string name="nutrition_title">Питание</string>
     <string name="nutrition_totals_empty">За этот день пока ничего не учтено.</string>
     <string name="nutrition_totals_imported">Итоги берутся из импортированной дневной сводки. Отсутствующие нутриенты остаются пустыми, а не нулевыми.</string>

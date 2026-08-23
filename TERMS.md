@@ -1,6 +1,6 @@
 # NOOP — Terms of Use & Acknowledgment
 
-**Version 2.1**
+**Version 2.2**
 
 > **This is not legal advice.** This document was drafted with the help of an AI tool, not a lawyer.
 > It is offered honestly and in good faith, but the NOOP maintainers are not lawyers and nothing here
@@ -16,9 +16,13 @@ remove it.
 
 ## 1. What NOOP is — and who provides it
 
-NOOP is a free, independent, **non-commercial**, local-first application for macOS, Android and iOS
+NOOP is an independent, local-first application for macOS, Android and iOS
 that can read supported wearables and health stores. Its core database stays on your device by default;
 NOOP does not require a NOOP account or automatic NOOP-operated cloud storage.
+
+**NOOP Band is in development and is not available yet.** Until NOOP Band is announced ready,
+current direct-band support interoperates with compatible third-party WHOOP hardware owned by the
+user. The app will identify NOOP Band explicitly when first-party hardware support is ready.
 
 Some features deliberately send selected data to a destination you enable or invoke. These include a
 self-hosted server, Friends sharing, Oura import, an AI provider, Apple Health, and files or share-sheet
@@ -26,21 +30,21 @@ exports. Each destination has its own operator and privacy terms. Review its scr
 do not configure a destination you do not trust. The maintainers cannot promise that an external
 destination will handle data as NOOP's local store does.
 
-NOOP is published anonymously by an unpaid hobbyist maintainer and contributors, referred to
-throughout as **"the maintainers."** No personal identity is asserted or implied. "You" means the
-individual or entity using NOOP.
+NOOP is currently maintained by its project maintainers and contributors, referred to throughout as
+**"the maintainers."** "You" means the individual or entity using NOOP.
 
-## 2. Independent — not affiliated with WHOOP
+## 2. Current third-party hardware compatibility
 
-NOOP is an **independent, unofficial project. It is not affiliated with, endorsed by, sponsored by,
-or connected to WHOOP, Inc. in any way.** "WHOOP" is a trademark of WHOOP, Inc., used here only
+NOOP is developed independently. It is **not affiliated with, endorsed by, sponsored by, or connected
+to WHOOP, Inc. in any way.** "WHOOP" is a trademark of WHOOP, Inc., used here only
 **descriptively (nominative fair use)** to identify the third-party hardware NOOP interoperates with —
 never to suggest origin, sponsorship, or endorsement, and never as NOOP's own brand. All other
 trademarks belong to their respective owners.
 
 ## 3. Use at your own risk — and the WHOOP Terms of Service
 
-You may use NOOP **only with a WHOOP device you own**, to read **your own data.**
+While current third-party band support is active, you may use NOOP **only with a compatible WHOOP
+device you own**, to read **your own data.**
 
 **Using NOOP may breach WHOOP's Terms of Service.** Whether to use NOOP, and any consequences for
 your WHOOP account, subscription, device, or warranty, are **your responsibility and your decision
@@ -107,33 +111,32 @@ law that applies to you** — for example, liability for death or personal injur
 or for fraud. Where a limitation above is not permitted by your local law, it applies only to the
 fullest extent that law allows, and the rest of these terms remain in effect.
 
-Because NOOP is provided free of charge, on a non-commercial basis, and clearly labelled as
-experimental, you accept that this allocation of risk is reasonable.
+Because this is early-access software and the third-party interoperability path is clearly disclosed,
+you accept that this allocation of risk is reasonable.
 
 ## 7. Your acknowledgment
 
 On first launch (and again if these terms materially change), NOOP asks you to confirm several
 statements **individually** before you can continue. By ticking each box you confirm that:
 
-- **you are not a WHOOP employee, contractor, or affiliate, and are not using NOOP on WHOOP's behalf;**
-- **you own the WHOOP device you will use with NOOP, will only use it to access your own data, and
-  accept that doing so is your decision and your risk** — including any effect on your WHOOP account,
-  subscription, device, or warranty, and that it may breach WHOOP's Terms of Service;
-- **you understand NOOP is unofficial and experimental, provided free and "as is" with no warranty,
-  and is not a medical device or medical advice;** and
-- **to the fullest extent the law allows, you will not hold the maintainers or contributors liable**
-  for any loss or damage arising from your use of it, beyond what §6 preserves.
+- **you understand NOOP Band is not available yet, this version currently connects to compatible
+  WHOOP hardware you own, and you will use only your own band and your own data;**
+- **you understand NOOP is early-access wellness software, provided "as is", and is not a medical
+  device or medical advice;** and
+- **you have read and accept these Terms of Use, including the warranty and liability limits allowed
+  by law.**
 
 You also confirm that you have read and accept §1–§6. NOOP records, on your device, the version you
 accepted and when — a local record of your acknowledgment. If these terms change in a way that
 materially affects your rights, NOOP will ask you to acknowledge the new version.
 
-## 8. WHOOP personnel
+## 8. Product transition and third-party independence
 
-If you are employed by, or acting on behalf of, WHOOP, Inc., we ask that you **do not use this
-software**, and the first-launch acknowledgment asks you to confirm that you are not (see §7). NOOP
-exists to let people read their own device's data on their own device; it is not intended to compete
-with, substitute for, or harm WHOOP's products or services.
+NOOP Band is planned as NOOP's own product. Until it is announced ready, references to supported
+direct-band hardware describe third-party WHOOP devices. Nothing in NOOP suggests that the app or its
+planned hardware originates from, is sponsored by, or is endorsed by WHOOP. Current interoperability
+exists to let people read their own device's data on their own device; it is not intended to disrupt
+or damage third-party products or services.
 
 ## 9. Changes, governing law, and severance
 

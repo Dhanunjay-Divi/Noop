@@ -40,7 +40,7 @@ class NutritionLocalizationContractTest {
         assumeTrue("Nutrition locale resources unavailable", files.values.all { it != null })
         val values = files.mapValues { nutritionStrings(it.value!!) }
         val base = values.getValue("values")
-        assertEquals(99, base.size)
+        assertEquals(103, base.size)
 
         val placeholder = Regex("""%\d+\$[ds]""")
         for ((folder, localized) in values) {
@@ -71,6 +71,8 @@ class NutritionLocalizationContractTest {
         assertTrue(text.contains("semantics(mergeDescendants = true)"))
         assertTrue(text.contains("R.string.nutrition_repeat_action_format"))
         assertTrue(text.contains("userFacingNutritionMessage(context: Context)"))
+        assertTrue(text.contains("LocalDensity.current.fontScale > 1.3f"))
+        assertTrue(text.contains("NutritionMacroSummaryColumn("))
         assertFalse(text.contains("title = \"Nutrition\""))
         assertFalse(text.contains("Text(\"Imported total prevents double counting\")"))
         assertFalse(text.contains("Recent manual meals only. You can edit the new entry afterward."))

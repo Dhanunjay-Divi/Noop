@@ -58,6 +58,9 @@
     <string name="nutrition_error_empty">Avant d’enregistrer, ajoutez un nom, une note, des calories ou au moins un macronutriment.</string>
     <string name="nutrition_error_generic">NOOP n’a pas pu mettre à jour le journal nutritionnel privé. Réessayez.</string>
     <string name="nutrition_error_range">Une valeur nutritionnelle est hors de la plage acceptée. Vérifiez les nombres et réessayez.</string>
+    <string name="nutrition_glucose_none">Aucune glycémie à jeun enregistrée dans le carnet de laboratoire</string>
+    <string name="nutrition_glucose_recorded_format">Carnet de laboratoire · Enregistré le %1$s</string>
+    <string name="nutrition_glucose_title">Glycémie à jeun</string>
     <string name="nutrition_intake_daily">Apports quotidiens</string>
     <string name="nutrition_intake_no_calories">Aucune calorie enregistrée</string>
     <string name="nutrition_intake_today">Apports du jour</string>
@@ -95,6 +98,7 @@
     <string name="nutrition_state_loading_body">Lecture sur cet appareil des entrées nutritionnelles privées de cette journée.</string>
     <string name="nutrition_state_loading_title">Chargement de la nutrition</string>
     <string name="nutrition_subtitle">Repas, macros et totaux importés, en privé sur cet appareil.</string>
+    <string name="nutrition_summary_today_foods">Aliments du jour</string>
     <string name="nutrition_title">Nutrition</string>
     <string name="nutrition_totals_empty">Rien n’a encore été comptabilisé pour cette journée.</string>
     <string name="nutrition_totals_imported">Les totaux utilisent le résumé quotidien importé. Les nutriments absents restent vides, et non à zéro.</string>

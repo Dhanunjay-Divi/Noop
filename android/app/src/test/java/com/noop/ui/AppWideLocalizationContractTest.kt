@@ -39,7 +39,12 @@ class AppWideLocalizationContractTest {
         assumeTrue("App-wide locale resources unavailable", files.values.all { it != null })
         val values = files.mapValues { appWideStrings(it.value!!) }
         val base = values.getValue("values")
-        assertEquals(71, base.size)
+        assertEquals(100, base.size)
+        assertEquals("NOOP Band is coming", base["appwide_terms_title"])
+        assertTrue(
+            base.getValue("appwide_terms_subtitle")
+                .contains("compatible WHOOP band you own"),
+        )
 
         val placeholder = Regex("""%\d+\$[ds]""")
         for ((folder, localized) in values) {

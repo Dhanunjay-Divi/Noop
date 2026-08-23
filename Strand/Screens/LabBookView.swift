@@ -498,40 +498,45 @@ extension LabMarkerCategory {
 
 enum LabBookFormat {
     /// Format a numeric value with the marker's catalog decimals (default 1 for custom markers).
-    static func value(_ v: Double, key: String) -> String {
+    static func value(_ v: Double, key: String, locale: Locale = .current) -> String {
         let decimals = MarkerCatalog.definition(for: key)?.decimals ?? 1
-        return decimals == 0 ? String(Int(v.rounded())) : String(format: "%.\(decimals)f", v)
+        let formatter = NumberFormatter()
+        formatter.locale = locale
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = decimals
+        formatter.maximumFractionDigits = decimals
+        formatter.usesGroupingSeparator = false
+        return formatter.string(from: NSNumber(value: v)) ?? String(v)
     }
 
-    private static let dayFormatter: DateFormatter = {
+    private static func displayDayFormatter(
+        locale: Locale,
+        timeZone: TimeZone? = nil
+    ) -> DateFormatter {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "d MMM yyyy"
+        f.locale = locale
+        f.timeZone = timeZone
+        f.setLocalizedDateFormatFromTemplate("d MMM y")
         return f
-    }()
-
-    /// "12 Jun 2026" for a takenAt epoch-seconds value.
-    static func day(_ epoch: Int) -> String {
-        dayFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(epoch)))
     }
 
-    /// "12 Jun 2026" rendered from a stored `yyyy-MM-dd` day string, LOCATION-INDEPENDENTLY: the day key
+    /// A localized calendar date for a takenAt epoch-seconds value.
+    static func day(_ epoch: Int, locale: Locale = .current) -> String {
+        displayDayFormatter(locale: locale)
+            .string(from: Date(timeIntervalSince1970: TimeInterval(epoch)))
+    }
+
+    /// A localized date rendered from a stored `yyyy-MM-dd` day string, LOCATION-INDEPENDENTLY: the day key
     /// is parsed in UTC and reformatted in UTC, so the history date never shifts with the device zone the
     /// way `day(takenAt)` (a local render of a stored instant) can near midnight. Falls back to the raw
     /// string if it doesn't parse.
-    static func dayFromKey(_ day: String) -> String {
+    static func dayFromKey(_ day: String, locale: Locale = .current) -> String {
         guard let date = utcKeyFormatter.date(from: day) else { return day }
-        return utcDayFormatter.string(from: date)
+        return displayDayFormatter(
+            locale: locale,
+            timeZone: TimeZone(identifier: "UTC")
+        ).string(from: date)
     }
-
-    /// "d MMM yyyy" pinned to UTC, paired with `utcKeyFormatter` so `dayFromKey` round-trips a UTC day.
-    private static let utcDayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "UTC")
-        f.dateFormat = "d MMM yyyy"
-        return f
-    }()
 
     /// The `yyyy-MM-dd` day key the projection uses (LOCAL day of the reading).
     private static let keyFormatter: DateFormatter = {

@@ -58,6 +58,9 @@
     <string name="nutrition_error_empty">儲存前請新增食物名稱、備註、熱量或至少一項巨量營養素。</string>
     <string name="nutrition_error_generic">NOOP 無法更新私人營養記錄。請再試一次。</string>
     <string name="nutrition_error_range">某項營養素數值超出支援範圍。請檢查數字後再試一次。</string>
+    <string name="nutrition_glucose_none">化驗記錄中沒有空腹血糖記錄</string>
+    <string name="nutrition_glucose_recorded_format">化驗記錄 · 記錄於%1$s</string>
+    <string name="nutrition_glucose_title">空腹血糖</string>
     <string name="nutrition_intake_daily">每日攝取</string>
     <string name="nutrition_intake_no_calories">未記錄熱量</string>
     <string name="nutrition_intake_today">今日攝取</string>
@@ -95,6 +98,7 @@
     <string name="nutrition_state_loading_body">正在從此裝置讀取當天的私人營養記錄。</string>
     <string name="nutrition_state_loading_title">正在載入營養記錄</string>
     <string name="nutrition_subtitle">餐點、巨量營養素和匯入總量，只會私密保存在此裝置上。</string>
+    <string name="nutrition_summary_today_foods">今日飲食</string>
     <string name="nutrition_title">營養</string>
     <string name="nutrition_totals_empty">當天尚未計入任何資料。</string>
     <string name="nutrition_totals_imported">總量使用匯入的每日摘要。匯入中缺少的營養素會保持空白，而不是記為零。</string>

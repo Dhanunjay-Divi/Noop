@@ -131,10 +131,54 @@ final class NOOPiOSUITests: XCTestCase {
         keepScreenshot(app, name: "daily-signal-alert")
     }
 
+    func testNutritionSummaryUsesLoggedMacrosAndLabBookReading() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--demo-seed",
+            "--demo-more-route", "nutrition",
+            "--demo-nutrition",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Today’s foods"].waitForExistence(timeout: 20))
+        let calories = app.descendants(matching: .any)["noop.nutrition.calories"]
+        let protein = app.descendants(matching: .any)["noop.nutrition.protein"]
+        let carbs = app.descendants(matching: .any)["noop.nutrition.carbs"]
+        let fat = app.descendants(matching: .any)["noop.nutrition.fat"]
+        let glucose = app.descendants(matching: .any)["noop.nutrition.fasting-glucose"]
+        XCTAssertTrue(calories.waitForExistence(timeout: 5))
+        XCTAssertTrue(protein.waitForExistence(timeout: 5))
+        XCTAssertTrue(carbs.waitForExistence(timeout: 5))
+        XCTAssertTrue(fat.waitForExistence(timeout: 5))
+        XCTAssertTrue(glucose.waitForExistence(timeout: 5))
+        XCTAssertTrue(String(describing: calories.value).contains("2,100"))
+        XCTAssertEqual(protein.value as? String, "140 g")
+        XCTAssertEqual(carbs.value as? String, "220 g")
+        XCTAssertEqual(fat.value as? String, "70 g")
+        XCTAssertEqual(glucose.label, "Fasting glucose")
+        XCTAssertTrue((glucose.value as? String)?.contains("5.2 mmol/L") == true)
+        XCTAssertTrue((glucose.value as? String)?.contains("Lab Book") == true)
+        XCTAssertFalse(app.staticTexts["Blood glucose"].exists)
+        keepScreenshot(app, name: "nutrition-logged-summary")
+    }
+
     func testTermsPrimaryActionRemainsVisible() {
         let app = launchDemoScreen("terms")
+        XCTAssertTrue(app.staticTexts["NOOP Band is coming"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.staticTexts.matching(identifier: "NOOP Band is coming").count, 1)
+        XCTAssertTrue(
+            app.staticTexts[
+                "Until NOOP Band is ready, this version works with a compatible WHOOP band you own."
+            ].exists
+        )
+        XCTAssertFalse(app.staticTexts["Independent: not affiliated with WHOOP"].exists)
+        XCTAssertTrue(
+            app.staticTexts.matching(
+                NSPredicate(format: "label CONTAINS %@", "may breach WHOOP's Terms of Service")
+            ).firstMatch.exists
+        )
         let accept = app.buttons["noop.terms.accept"]
-        XCTAssertTrue(accept.waitForExistence(timeout: 20))
+        XCTAssertTrue(accept.waitForExistence(timeout: 5))
         XCTAssertEqual(accept.label, "Accept & Continue")
         keepScreenshot(app, name: "terms-readable-primary-action")
     }

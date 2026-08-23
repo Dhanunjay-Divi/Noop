@@ -58,6 +58,9 @@
     <string name="nutrition_error_empty">Add a food name, note, calories, or at least one macro before saving.</string>
     <string name="nutrition_error_generic">NOOP couldn’t update the private nutrition log. Please try again.</string>
     <string name="nutrition_error_range">One nutrient value is outside the supported range. Check the numbers and try again.</string>
+    <string name="nutrition_glucose_none">No fasting-glucose reading in Lab Book</string>
+    <string name="nutrition_glucose_recorded_format">Lab Book · Recorded %1$s</string>
+    <string name="nutrition_glucose_title">Fasting glucose</string>
     <string name="nutrition_intake_daily">Daily intake</string>
     <string name="nutrition_intake_no_calories">No calories logged</string>
     <string name="nutrition_intake_today">Today’s intake</string>
@@ -95,6 +98,7 @@
     <string name="nutrition_state_loading_body">Reading this day’s private nutrition entries from this device.</string>
     <string name="nutrition_state_loading_title">Loading nutrition</string>
     <string name="nutrition_subtitle">Meals, macros, and imported totals. Private on this device.</string>
+    <string name="nutrition_summary_today_foods">Today’s foods</string>
     <string name="nutrition_title">Nutrition</string>
     <string name="nutrition_totals_empty">Nothing has been counted for this day yet.</string>
     <string name="nutrition_totals_imported">Totals use the imported daily summary. Nutrients absent from the import stay blank, not zero.</string>

@@ -58,6 +58,9 @@
     <string name="nutrition_error_empty">Antes de guardar, adicione um nome, uma nota, calorias ou pelo menos um macronutriente.</string>
     <string name="nutrition_error_generic">O NOOP não conseguiu atualizar o registo privado de nutrição. Tente novamente.</string>
     <string name="nutrition_error_range">Um valor nutricional está fora do intervalo suportado. Verifique os números e tente novamente.</string>
+    <string name="nutrition_glucose_none">Sem glicemia em jejum registada no Livro de análises</string>
+    <string name="nutrition_glucose_recorded_format">Livro de análises · Registado em %1$s</string>
+    <string name="nutrition_glucose_title">Glicemia em jejum</string>
     <string name="nutrition_intake_daily">Ingestão diária</string>
     <string name="nutrition_intake_no_calories">Sem calorias registadas</string>
     <string name="nutrition_intake_today">Ingestão de hoje</string>
@@ -95,6 +98,7 @@
     <string name="nutrition_state_loading_body">A ler neste dispositivo as entradas privadas de nutrição deste dia.</string>
     <string name="nutrition_state_loading_title">A carregar nutrição</string>
     <string name="nutrition_subtitle">Refeições, macros e totais importados, em privado neste dispositivo.</string>
+    <string name="nutrition_summary_today_foods">Alimentos de hoje</string>
     <string name="nutrition_title">Nutrição</string>
     <string name="nutrition_totals_empty">Ainda não foi contabilizado nada neste dia.</string>
     <string name="nutrition_totals_imported">Os totais usam o resumo diário importado. Os nutrientes ausentes ficam em branco, não a zero.</string>

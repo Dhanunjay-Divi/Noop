@@ -200,6 +200,22 @@ enum AppleDemoSeeder {
 
         do {
             _ = try await store.upsertNutritionEntries(rows)
+            _ = try await store.upsertLabMarkers([
+                LabMarkerRow(
+                    id: "demo-nutrition-fasting-glucose",
+                    deviceId: whoop,
+                    markerKey: "fasting_glucose",
+                    category: "bloodPanel",
+                    day: today,
+                    takenAt: todayStart + 7 * 3_600,
+                    value: 5.2,
+                    valueText: nil,
+                    unit: "mmol/L",
+                    source: "demo",
+                    note: nil,
+                    referenceText: nil
+                ),
+            ])
             NSLog("AppleDemoSeeder: nutrition fixture ready for \(today)")
         } catch {
             NSLog("AppleDemoSeeder: nutrition fixture failed - \(error)")

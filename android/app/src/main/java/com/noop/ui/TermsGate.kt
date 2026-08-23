@@ -38,7 +38,7 @@ import com.noop.R
  * `Terms.currentVersion`. The full text ships in TERMS.md.
  */
 object Terms {
-    const val CURRENT_VERSION = "2.1"
+    const val CURRENT_VERSION = "2.2"
 
     /**
      * Plain-English summary of TERMS.md §1–§6 — kept identical to the macOS `Terms.points`. Each is
@@ -48,11 +48,10 @@ object Terms {
      * the agreement.
      */
     val points: List<Pair<Int, Int>> = listOf(
-        R.string.terms_point_independent_head to R.string.terms_point_independent_body,
-        R.string.terms_point_tos_head to R.string.terms_point_tos_body,
-        R.string.terms_point_experimental_head to R.string.terms_point_experimental_body,
-        R.string.terms_point_medical_head to R.string.terms_point_medical_body,
-        R.string.terms_point_warranty_head to R.string.terms_point_warranty_body,
+        R.string.appwide_terms_point_compatibility_head to R.string.appwide_terms_point_compatibility_body,
+        R.string.appwide_terms_point_ownership_head to R.string.appwide_terms_point_ownership_body,
+        R.string.appwide_terms_point_medical_head to R.string.appwide_terms_point_medical_body,
+        R.string.appwide_terms_point_early_access_head to R.string.appwide_terms_point_early_access_body,
     )
 
     /**
@@ -63,10 +62,9 @@ object Terms {
      * NOTE: the exact legal phrasing should be reviewed by a solicitor before this ships publicly.
      */
     val attestations: List<Int> = listOf(
-        R.string.terms_attest_not_affiliated,
-        R.string.terms_attest_own_device,
-        R.string.terms_attest_asis,
-        R.string.terms_attest_liability,
+        R.string.appwide_terms_attest_band,
+        R.string.appwide_terms_attest_early_access,
+        R.string.appwide_terms_attest_full_terms,
     )
 }
 
@@ -120,10 +118,14 @@ fun TermsGateScreen(onAccept: () -> Unit) {
     Surface(modifier = Modifier.fillMaxSize(), color = Palette.surfaceBase) {
         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
             Spacer(Modifier.height(40.dp))
-            Text(stringResource(R.string.terms_title), style = NoopType.title1, color = Palette.textPrimary)
+            Text(
+                stringResource(R.string.appwide_terms_title),
+                style = NoopType.title1,
+                color = Palette.textPrimary,
+            )
             Spacer(Modifier.height(4.dp))
             Text(
-                stringResource(R.string.terms_subtitle),
+                stringResource(R.string.appwide_terms_subtitle),
                 style = NoopType.subhead, color = Palette.textSecondary,
             )
             Spacer(Modifier.height(20.dp))

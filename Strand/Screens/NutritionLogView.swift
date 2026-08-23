@@ -14,6 +14,7 @@ struct NutritionLogView: View {
     }
 
     @EnvironmentObject private var repo: Repository
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var selectedDay = Calendar.current.startOfDay(for: Date())
     @State private var entries: [NutritionEntryRow] = []
@@ -25,6 +26,7 @@ struct NutritionLogView: View {
         carbsG: nil,
         fatG: nil
     )
+    @State private var fastingGlucose: LabMarkerRow?
     @State private var loading = true
     @State private var editor: EditorContext?
     @State private var deleteCandidate: NutritionEntryRow?
@@ -166,33 +168,33 @@ struct NutritionLogView: View {
     private var totalsCard: some View {
         NoopCard(tint: StrandPalette.statusPositive) {
             VStack(alignment: .leading, spacing: NoopMetrics.space4) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(isToday
-                             ? String(localized: "nutrition.intake.today")
-                             : selectedDay.formatted(date: .abbreviated, time: .omitted))
-                            .font(StrandFont.overline)
-                            .tracking(StrandFont.overlineTracking)
-                            .textCase(.uppercase)
-                            .foregroundStyle(StrandPalette.textSecondary)
-                        Text(formatted(totals.caloriesKcal, maximumFractionDigits: 0))
-                            .font(StrandFont.rounded(42, weight: .bold))
-                            .foregroundStyle(StrandPalette.textPrimary)
-                            .monospacedDigit()
-                    }
+                HStack(spacing: NoopMetrics.space3) {
+                    Text(summaryTitle)
+                        .font(StrandFont.title2)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Spacer()
-                    Text(totals.caloriesKcal == nil
-                         ? String(localized: "nutrition.intake.no_calories")
-                         : "kcal")
-                        .font(StrandFont.subhead)
-                        .foregroundStyle(StrandPalette.textTertiary)
+                    Button {
+                        editor = EditorContext(entry: nil, day: selectedDay, catalogItem: nil)
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(width: 36, height: 36)
+                            .background(
+                                StrandPalette.surfaceInset,
+                                in: Circle()
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(StrandPalette.accent)
+                    .accessibilityLabel(Text("nutrition.entries.add_accessibility"))
                 }
 
-                HStack(spacing: NoopMetrics.space3) {
-                    macroCell("nutrition.nutrient.protein", value: totals.proteinG, tint: StrandPalette.statusPositive)
-                    macroCell("nutrition.nutrient.carbs", value: totals.carbsG, tint: StrandPalette.accent)
-                    macroCell("nutrition.nutrient.fat", value: totals.fatG, tint: StrandPalette.statusWarning)
-                }
+                nutritionSummaryLayout
+
+                Divider().overlay(StrandPalette.hairline)
+                fastingGlucoseSummary
 
                 Text(totalsExplanation)
                     .font(StrandFont.caption)
@@ -201,24 +203,169 @@ struct NutritionLogView: View {
             }
         }
         .redacted(reason: loading ? .placeholder : [])
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("noop.nutrition.summary")
     }
 
-    private func macroCell(_ label: LocalizedStringKey, value: Double?, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label)
-                .font(StrandFont.caption)
-                .foregroundStyle(StrandPalette.textTertiary)
-            Text(value.map { "\(formatted($0, maximumFractionDigits: 1)) g" } ?? "-")
-                .font(StrandFont.rounded(17, weight: .semibold))
-                .foregroundStyle(value == nil ? StrandPalette.textTertiary : tint)
+    private var summaryTitle: String {
+        isToday
+            ? String(localized: "nutrition.summary.today_foods")
+            : selectedDay.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private var calorieDial: some View {
+        NutritionCalorieDial(
+            valueText: formatted(totals.caloriesKcal, maximumFractionDigits: 0),
+            hasValue: totals.caloriesKcal != nil
+        )
+    }
+
+    @ViewBuilder
+    private var nutritionSummaryLayout: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .center, spacing: NoopMetrics.space4) {
+                calorieDial
+                macroSummaryColumn
+            }
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: NoopMetrics.space4) {
+                    calorieDial
+                    Spacer(minLength: 0)
+                    macroSummaryRow
+                        .frame(width: 178)
+                }
+                VStack(alignment: .center, spacing: NoopMetrics.space4) {
+                    calorieDial
+                    macroSummaryRow
+                }
+            }
+        }
+    }
+
+    private var macroValues: [Double?] {
+        [totals.proteinG, totals.carbsG, totals.fatG]
+    }
+
+    private var macroSummaryRow: some View {
+        HStack(alignment: .top, spacing: NoopMetrics.space2) {
+            macroSummary(
+                "nutrition.nutrient.protein",
+                value: totals.proteinG,
+                tint: StrandPalette.statusPositive,
+                identifier: "noop.nutrition.protein"
+            )
+            macroSummary(
+                "nutrition.nutrient.carbs",
+                value: totals.carbsG,
+                tint: StrandPalette.metricCyan,
+                identifier: "noop.nutrition.carbs"
+            )
+            macroSummary(
+                "nutrition.nutrient.fat",
+                value: totals.fatG,
+                tint: StrandPalette.metricAmber,
+                identifier: "noop.nutrition.fat"
+            )
+        }
+    }
+
+    private var macroSummaryColumn: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.space4) {
+            macroSummary(
+                "nutrition.nutrient.protein",
+                value: totals.proteinG,
+                tint: StrandPalette.statusPositive,
+                identifier: "noop.nutrition.protein"
+            )
+            macroSummary(
+                "nutrition.nutrient.carbs",
+                value: totals.carbsG,
+                tint: StrandPalette.metricCyan,
+                identifier: "noop.nutrition.carbs"
+            )
+            macroSummary(
+                "nutrition.nutrient.fat",
+                value: totals.fatG,
+                tint: StrandPalette.metricAmber,
+                identifier: "noop.nutrition.fat"
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func macroSummary(
+        _ label: LocalizedStringKey,
+        value: Double?,
+        tint: Color,
+        identifier: String
+    ) -> some View {
+        NutritionMacroSummary(
+            label: label,
+            valueText: value.map { "\(formatted($0, maximumFractionDigits: 1)) g" } ?? "-",
+            hasValue: value != nil,
+            filledDots: NutritionSummaryContract.relativeMacroDotCount(
+                value: value,
+                among: macroValues
+            ),
+            tint: tint,
+            identifier: identifier
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var fastingGlucoseSummary: some View {
+        HStack(spacing: NoopMetrics.space3) {
+            Circle()
+                .fill(fastingGlucose == nil
+                      ? StrandPalette.textTertiary.opacity(0.35)
+                      : StrandPalette.metricCyan)
+                .frame(width: 9, height: 9)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("nutrition.glucose.title")
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(glucoseCaption)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: NoopMetrics.space2)
+
+            Text(glucoseValueLabel)
+                .font(StrandFont.number(17))
+                .foregroundStyle(
+                    fastingGlucose?.value == nil
+                        ? StrandPalette.textTertiary
+                        : StrandPalette.textPrimary
+                )
                 .monospacedDigit()
                 .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .minimumScaleFactor(0.72)
         }
-        .padding(NoopMetrics.space3)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(StrandPalette.surfaceInset, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("noop.nutrition.fasting-glucose")
+        .accessibilityLabel(Text("nutrition.glucose.title"))
+        .accessibilityValue(Text(verbatim: "\(glucoseValueLabel). \(glucoseCaption)"))
+    }
+
+    private var glucoseValueLabel: String {
+        guard let row = fastingGlucose, let value = row.value else { return "-" }
+        let number = LabBookFormat.value(value, key: NutritionSummaryContract.fastingGlucoseKey)
+        return row.unit.isEmpty ? number : "\(number) \(row.unit)"
+    }
+
+    private var glucoseCaption: String {
+        guard let row = fastingGlucose else {
+            return String(localized: "nutrition.glucose.none")
+        }
+        return nutritionFormat(
+            String(localized: "nutrition.glucose.recorded_format"),
+            LabBookFormat.dayFromKey(row.day)
+        )
     }
 
     private var totalsExplanation: String {
@@ -522,6 +669,7 @@ struct NutritionLogView: View {
             entries = snapshot.entries
             totals = snapshot.totals
             recentEntries = snapshot.recentManualEntries
+            fastingGlucose = snapshot.fastingGlucose
             #if DEBUG
             if AppleDemoSeeder.nutritionRequested {
                 NSLog(
@@ -532,6 +680,16 @@ struct NutritionLogView: View {
             #endif
         } catch {
             guard requestedDay == dayKey else { return }
+            entries = []
+            recentEntries = []
+            fastingGlucose = nil
+            totals = NutritionDailyTotals(
+                day: requestedDay,
+                caloriesKcal: nil,
+                proteinG: nil,
+                carbsG: nil,
+                fatG: nil
+            )
             errorMessage = error.localizedDescription
         }
         if requestedDay == dayKey { loading = false }
@@ -649,6 +807,123 @@ struct NutritionLogView: View {
 
 func nutritionFormat(_ template: String, _ arguments: CVarArg...) -> String {
     String(format: template, locale: .current, arguments: arguments)
+}
+
+private struct NutritionCalorieDial: View {
+    let valueText: String
+    let hasValue: Bool
+    @ScaledMetric(relativeTo: .title3) private var diameter: CGFloat = 94
+
+    private var tint: Color {
+        hasValue ? StrandPalette.statusPositive : StrandPalette.textTertiary
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(
+                    tint.opacity(hasValue ? 0.42 : 0.18),
+                    style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [1, 5])
+                )
+            Circle()
+                .stroke(StrandPalette.textPrimary.opacity(0.08), lineWidth: 7)
+                .padding(10)
+            Circle()
+                .stroke(tint.opacity(hasValue ? 0.9 : 0.28), lineWidth: 5)
+                .padding(10)
+            VStack(spacing: 0) {
+                Text(valueText)
+                    .font(StrandFont.rounded(21, weight: .bold))
+                    .foregroundStyle(hasValue ? StrandPalette.textPrimary : StrandPalette.textTertiary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+                Text("kcal")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
+            .padding(.horizontal, 14)
+        }
+        .frame(width: diameter, height: diameter)
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("noop.nutrition.calories")
+        .accessibilityLabel(Text("nutrition.nutrient.calories"))
+        .accessibilityValue(
+            Text(
+                hasValue
+                    ? "\(valueText) kcal"
+                    : String(localized: "nutrition.intake.no_calories")
+            )
+        )
+    }
+}
+
+private struct NutritionMacroSummary: View {
+    let label: LocalizedStringKey
+    let valueText: String
+    let hasValue: Bool
+    let filledDots: Int
+    let tint: Color
+    let identifier: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label)
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(valueText)
+                .font(StrandFont.rounded(16, weight: .semibold))
+                .foregroundStyle(hasValue ? tint : StrandPalette.textTertiary)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            NutritionMacroDotField(filledDots: filledDots, tint: tint)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier(identifier)
+        .accessibilityLabel(Text(label))
+        .accessibilityValue(Text(valueText))
+    }
+}
+
+private struct NutritionMacroDotField: View {
+    let filledDots: Int
+    let tint: Color
+
+    private let columns = 6
+    private let rows = 4
+
+    var body: some View {
+        Canvas { context, size in
+            let xStep = size.width / CGFloat(columns)
+            let yStep = size.height / CGFloat(rows)
+            let diameter = min(xStep, yStep) * 0.48
+
+            for row in 0..<rows {
+                for column in 0..<columns {
+                    let fillIndex = (rows - 1 - row) * columns + column
+                    let color = fillIndex < filledDots
+                        ? tint.opacity(0.86)
+                        : StrandPalette.textPrimary.opacity(0.08)
+                    let center = CGPoint(
+                        x: (CGFloat(column) + 0.5) * xStep,
+                        y: (CGFloat(row) + 0.5) * yStep
+                    )
+                    let rect = CGRect(
+                        x: center.x - diameter / 2,
+                        y: center.y - diameter / 2,
+                        width: diameter,
+                        height: diameter
+                    )
+                    context.fill(Path(ellipseIn: rect), with: .color(color))
+                }
+            }
+        }
+        .frame(width: 48, height: 30)
+        .accessibilityHidden(true)
+    }
 }
 
 private struct NutritionEntryEditor: View {

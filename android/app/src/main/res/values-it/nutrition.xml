@@ -58,6 +58,9 @@
     <string name="nutrition_error_empty">Prima di salvare, aggiungi un nome, una nota, calorie o almeno un macronutriente.</string>
     <string name="nutrition_error_generic">NOOP non ha potuto aggiornare il registro nutrizionale privato. Riprova.</string>
     <string name="nutrition_error_range">Un valore nutrizionale non rientra nell’intervallo supportato. Controlla i numeri e riprova.</string>
+    <string name="nutrition_glucose_none">Nessuna glicemia a digiuno registrata nel Registro esami</string>
+    <string name="nutrition_glucose_recorded_format">Registro esami · Registrato il %1$s</string>
+    <string name="nutrition_glucose_title">Glicemia a digiuno</string>
     <string name="nutrition_intake_daily">Apporto giornaliero</string>
     <string name="nutrition_intake_no_calories">Nessuna caloria registrata</string>
     <string name="nutrition_intake_today">Apporto di oggi</string>
@@ -95,6 +98,7 @@
     <string name="nutrition_state_loading_body">Lettura su questo dispositivo delle voci nutrizionali private della giornata.</string>
     <string name="nutrition_state_loading_title">Caricamento della nutrizione</string>
     <string name="nutrition_subtitle">Pasti, macro e totali importati, privati su questo dispositivo.</string>
+    <string name="nutrition_summary_today_foods">Alimenti di oggi</string>
     <string name="nutrition_title">Nutrizione</string>
     <string name="nutrition_totals_empty">Non è stato ancora conteggiato nulla per questo giorno.</string>
     <string name="nutrition_totals_imported">I totali usano il riepilogo giornaliero importato. I nutrienti assenti restano vuoti, non a zero.</string>

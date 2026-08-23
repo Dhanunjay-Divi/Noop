@@ -58,6 +58,9 @@
     <string name="nutrition_error_empty">Antes de guardar, añade un nombre, una nota, calorías o al menos un macronutriente.</string>
     <string name="nutrition_error_generic">NOOP no pudo actualizar el registro privado de nutrición. Inténtalo de nuevo.</string>
     <string name="nutrition_error_range">Un valor nutricional está fuera del intervalo permitido. Revisa los números e inténtalo de nuevo.</string>
+    <string name="nutrition_glucose_none">No hay glucosa en ayunas registrada en Lab Book</string>
+    <string name="nutrition_glucose_recorded_format">Lab Book · Registrado el %1$s</string>
+    <string name="nutrition_glucose_title">Glucosa en ayunas</string>
     <string name="nutrition_intake_daily">Ingesta diaria</string>
     <string name="nutrition_intake_no_calories">No hay calorías registradas</string>
     <string name="nutrition_intake_today">Ingesta de hoy</string>
@@ -95,6 +98,7 @@
     <string name="nutrition_state_loading_body">Leyendo en este dispositivo las entradas privadas de nutrición de este día.</string>
     <string name="nutrition_state_loading_title">Cargando nutrición</string>
     <string name="nutrition_subtitle">Comidas, macros y totales importados, en privado en este dispositivo.</string>
+    <string name="nutrition_summary_today_foods">Alimentos de hoy</string>
     <string name="nutrition_title">Nutrición</string>
     <string name="nutrition_totals_empty">Todavía no se ha contabilizado nada para este día.</string>
     <string name="nutrition_totals_imported">Los totales usan el resumen diario importado. Los nutrientes ausentes quedan en blanco, no en cero.</string>

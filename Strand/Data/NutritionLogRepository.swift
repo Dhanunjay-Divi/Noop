@@ -16,10 +16,62 @@ struct NutritionLogDaySnapshot: Sendable {
     let entries: [NutritionEntryRow]
     let totals: NutritionDailyTotals
     let recentManualEntries: [NutritionEntryRow]
+    let fastingGlucose: LabMarkerRow?
 }
 
 struct NutritionLibrarySnapshot: Sendable {
     let items: [NutritionCatalogItemRow]
+}
+
+enum NutritionSummaryContract {
+    static let fastingGlucoseKey = "fasting_glucose"
+    static let macroDotCapacity = 24
+
+    /// Lab Book can contain several same-day readings and qualitative rows. Nutrition shows only the
+    /// latest numeric fasting-glucose value that existed by the selected day, never a future result.
+    static func latestFastingGlucose(
+        in rows: [LabMarkerRow],
+        through day: String
+    ) -> LabMarkerRow? {
+        rows
+            .filter {
+                $0.markerKey == fastingGlucoseKey
+                    && $0.day <= day
+                    && $0.value?.isFinite == true
+            }
+            .max {
+                if $0.takenAt == $1.takenAt { return $0.id < $1.id }
+                return $0.takenAt < $1.takenAt
+            }
+    }
+
+    static func bestEffortLatestFastingGlucose(
+        in rows: [LabMarkerRow]?,
+        through day: String
+    ) -> LabMarkerRow? {
+        guard let rows else { return nil }
+        return latestFastingGlucose(in: rows, through: day)
+    }
+
+    /// The compact dot fields compare logged macros with one another. They do not imply a target,
+    /// recommendation, or completeness. Missing and explicit-zero values both draw no filled dots,
+    /// while the adjacent value keeps those two states distinguishable.
+    static func relativeMacroDotCount(
+        value: Double?,
+        among values: [Double?],
+        capacity: Int = macroDotCapacity
+    ) -> Int {
+        guard capacity > 0,
+              let value,
+              value.isFinite,
+              value > 0 else { return 0 }
+        let maximum = values.compactMap { candidate -> Double? in
+            guard let candidate, candidate.isFinite, candidate > 0 else { return nil }
+            return candidate
+        }.max() ?? 0
+        guard maximum > 0 else { return 0 }
+        return min(capacity, max(1, Int(ceil(value / maximum * Double(capacity)))))
+    }
 }
 
 @MainActor
@@ -36,10 +88,25 @@ extension Repository {
         async let entries = store.nutritionEntries(from: day, to: day)
         async let totals = store.nutritionTotals(day: day)
         async let recent = store.recentManualNutritionEntries(through: day, limit: 4)
-        let snapshot = try await NutritionLogDaySnapshot(
-            entries: entries,
-            totals: totals,
-            recentManualEntries: recent
+        let markerDeviceID = deviceId
+        async let fastingGlucoseRows: [LabMarkerRow]? = try? await store.labMarkers(
+            deviceId: markerDeviceID,
+            markerKey: NutritionSummaryContract.fastingGlucoseKey
+        )
+        let (loadedEntries, loadedTotals, loadedRecent, glucoseRows) = try await (
+            entries,
+            totals,
+            recent,
+            fastingGlucoseRows
+        )
+        let snapshot = NutritionLogDaySnapshot(
+            entries: loadedEntries,
+            totals: loadedTotals,
+            recentManualEntries: loadedRecent,
+            fastingGlucose: NutritionSummaryContract.bestEffortLatestFastingGlucose(
+                in: glucoseRows,
+                through: day
+            )
         )
         #if DEBUG
         if AppleDemoSeeder.nutritionRequested {

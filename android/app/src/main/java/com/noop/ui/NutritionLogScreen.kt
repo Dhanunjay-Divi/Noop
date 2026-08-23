@@ -7,15 +7,19 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import com.noop.R
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -56,14 +60,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import com.journeyapps.barcodescanner.ScanContract
@@ -75,6 +84,7 @@ import com.noop.data.NutritionCatalogItemRow
 import com.noop.data.NutritionDailyTotals
 import com.noop.data.NutritionEntryRow
 import com.noop.data.NutritionLogContract
+import com.noop.data.LabMarkerRow
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDate
@@ -84,6 +94,10 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.PI
+import kotlin.math.ceil
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlinx.coroutines.launch
 
 private data class NutritionEditorContext(
@@ -91,6 +105,44 @@ private data class NutritionEditorContext(
     val day: LocalDate,
     val catalogItem: NutritionCatalogItemRow? = null,
 )
+
+private data class NutritionScreenSnapshot(
+    val entries: List<NutritionEntryRow>,
+    val totals: NutritionDailyTotals,
+    val recentEntries: List<NutritionEntryRow>,
+    val fastingGlucose: LabMarkerRow?,
+)
+
+internal object NutritionSummaryContract {
+    const val FASTING_GLUCOSE_KEY = "fasting_glucose"
+    const val LAB_BOOK_DEVICE_ID = "my-whoop"
+    const val MACRO_DOT_CAPACITY = 24
+
+    fun latestFastingGlucose(rows: List<LabMarkerRow>, throughDay: String): LabMarkerRow? =
+        rows.asSequence()
+            .filter {
+                it.markerKey == FASTING_GLUCOSE_KEY &&
+                    it.day <= throughDay &&
+                    it.value?.isFinite() == true
+            }
+            .maxWithOrNull(compareBy<LabMarkerRow> { it.takenAt }.thenBy { it.id })
+
+    fun bestEffortLatestFastingGlucose(
+        rows: List<LabMarkerRow>?,
+        throughDay: String,
+    ): LabMarkerRow? = rows?.let { latestFastingGlucose(it, throughDay) }
+
+    fun relativeMacroDotCount(
+        value: Double?,
+        values: List<Double?>,
+        capacity: Int = MACRO_DOT_CAPACITY,
+    ): Int {
+        if (capacity <= 0 || value == null || !value.isFinite() || value <= 0.0) return 0
+        val maximum = values.filterNotNull().filter { it.isFinite() && it > 0.0 }.maxOrNull() ?: 0.0
+        if (maximum <= 0.0) return 0
+        return ceil(value / maximum * capacity.toDouble()).toInt().coerceIn(1, capacity)
+    }
+}
 
 private enum class NutritionMeal(val storage: String, @StringRes val labelRes: Int) {
     Breakfast("breakfast", R.string.nutrition_meal_breakfast),
@@ -117,6 +169,7 @@ fun NutritionLogScreen(vm: AppViewModel) {
     var totals by remember {
         mutableStateOf(NutritionDailyTotals(null, null, null, null))
     }
+    var fastingGlucose by remember { mutableStateOf<LabMarkerRow?>(null) }
     var loading by remember { mutableStateOf(true) }
     var reloadToken by remember { mutableIntStateOf(0) }
     var editor by remember { mutableStateOf<NutritionEditorContext?>(null) }
@@ -212,19 +265,39 @@ fun NutritionLogScreen(vm: AppViewModel) {
         val requested = selectedDay
         loading = true
         runCatching {
-            Triple(
-                vm.repo.nutritionEntries(requested.toString(), requested.toString()),
-                vm.repo.nutritionTotals(requested.toString()),
-                vm.repo.recentManualNutritionEntries(requested.toString(), limit = 4),
+            val glucoseRows = runCatching {
+                vm.repo.labMarkersByKey(
+                    NutritionSummaryContract.LAB_BOOK_DEVICE_ID,
+                    NutritionSummaryContract.FASTING_GLUCOSE_KEY,
+                )
+            }.getOrNull()
+            NutritionScreenSnapshot(
+                entries = vm.repo.nutritionEntries(requested.toString(), requested.toString()),
+                totals = vm.repo.nutritionTotals(requested.toString()),
+                recentEntries = vm.repo.recentManualNutritionEntries(
+                    requested.toString(),
+                    limit = 4,
+                ),
+                fastingGlucose = NutritionSummaryContract.bestEffortLatestFastingGlucose(
+                    glucoseRows,
+                    throughDay = requested.toString(),
+                ),
             )
-        }.onSuccess { (loadedEntries, loadedTotals, loadedRecent) ->
+        }.onSuccess { snapshot ->
             if (selectedDay == requested) {
-                entries = loadedEntries
-                totals = loadedTotals
-                recentEntries = loadedRecent
+                entries = snapshot.entries
+                totals = snapshot.totals
+                recentEntries = snapshot.recentEntries
+                fastingGlucose = snapshot.fastingGlucose
             }
         }.onFailure {
-            if (selectedDay == requested) errorMessage = it.userFacingNutritionMessage(appContext)
+            if (selectedDay == requested) {
+                entries = emptyList()
+                recentEntries = emptyList()
+                totals = NutritionDailyTotals(null, null, null, null)
+                fastingGlucose = null
+                errorMessage = it.userFacingNutritionMessage(appContext)
+            }
         }
         if (selectedDay == requested) loading = false
     }
@@ -324,7 +397,13 @@ fun NutritionLogScreen(vm: AppViewModel) {
             today = today,
             onSelect = { selectedDay = it.coerceAtMost(today) },
         )
-        NutritionTotalsCard(day = selectedDay, totals = totals, loading = loading)
+        NutritionTotalsCard(
+            day = selectedDay,
+            totals = totals,
+            fastingGlucose = fastingGlucose,
+            loading = loading,
+            onAdd = { editor = NutritionEditorContext(null, selectedDay) },
+        )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -534,69 +613,350 @@ private fun NutritionDateNavigator(
 private fun NutritionTotalsCard(
     day: LocalDate,
     totals: NutritionDailyTotals,
+    fastingGlucose: LabMarkerRow?,
     loading: Boolean,
+    onAdd: () -> Unit,
 ) {
-    NoopCard(
-        modifier = Modifier.semantics(mergeDescendants = true) {},
-        tint = Palette.statusPositive,
-    ) {
+    val shownTotals = if (loading) NutritionDailyTotals(null, null, null, null) else totals
+    val shownGlucose = if (loading) null else fastingGlucose
+    val accessibilityText = LocalDensity.current.fontScale > 1.3f
+
+    NoopCard(tint = Palette.statusPositive) {
         Column(verticalArrangement = Arrangement.spacedBy(Metrics.space16)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Bottom,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Overline(
-                        if (day == LocalDate.now()) {
-                            uiString(R.string.nutrition_intake_today)
-                        } else {
-                            uiString(R.string.nutrition_intake_daily)
-                        }
-                    )
-                    Text(
-                        if (loading) "-" else formatNutritionNumber(totals.caloriesKcal, 0),
-                        style = NoopType.display(42f),
-                        color = Palette.textPrimary,
+                Text(
+                    if (day == LocalDate.now()) {
+                        uiString(R.string.nutrition_summary_today_foods)
+                    } else {
+                        day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
+                    },
+                    style = NoopType.title2,
+                    color = Palette.textPrimary,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(Metrics.space12))
+                IconButton(
+                    onClick = onAdd,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(Palette.surfaceInset, CircleShape),
+                ) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = uiString(R.string.nutrition_entries_add_accessibility),
+                        tint = Palette.accent,
+                        modifier = Modifier.size(19.dp),
                     )
                 }
-                Text(
-                    if (totals.caloriesKcal == null) {
-                        uiString(R.string.nutrition_intake_no_calories)
-                    } else {
-                        "kcal"
-                    },
-                    style = NoopType.subhead,
-                    color = Palette.textTertiary,
-                )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(Metrics.space8)) {
-                NutritionMacroCell(
-                    uiString(R.string.nutrition_nutrient_protein),
-                    totals.proteinG,
-                    Palette.statusPositive,
-                    Modifier.weight(1f),
-                )
-                NutritionMacroCell(
-                    uiString(R.string.nutrition_nutrient_carbs),
-                    totals.carbsG,
-                    Palette.accent,
-                    Modifier.weight(1f),
-                )
-                NutritionMacroCell(
-                    uiString(R.string.nutrition_nutrient_fat),
-                    totals.fatG,
-                    Palette.statusWarning,
-                    Modifier.weight(1f),
-                )
+
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                if (!accessibilityText && maxWidth >= 282.dp) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        NutritionCalorieDial(shownTotals.caloriesKcal)
+                        Spacer(Modifier.width(Metrics.space16))
+                        NutritionMacroSummaryRow(
+                            totals = shownTotals,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(Metrics.space16),
+                    ) {
+                        NutritionCalorieDial(shownTotals.caloriesKcal)
+                        if (accessibilityText) {
+                            NutritionMacroSummaryColumn(
+                                totals = shownTotals,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            NutritionMacroSummaryRow(
+                                totals = shownTotals,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
+                }
             }
+
+            HorizontalDivider(color = Palette.hairline)
+            NutritionGlucoseSummary(shownGlucose)
+
             Text(
-                nutritionTotalsExplanation(totals),
+                nutritionTotalsExplanation(shownTotals),
                 style = NoopType.caption,
                 color = Palette.textTertiary,
             )
         }
     }
 }
+
+@Composable
+private fun NutritionCalorieDial(value: Double?) {
+    val hasValue = value != null
+    val tint = if (hasValue) Palette.statusPositive else Palette.textTertiary
+    val valueText = formatNutritionNumber(value, 0)
+    val spoken = if (hasValue) {
+        "${uiString(R.string.nutrition_nutrient_calories)}, $valueText kcal"
+    } else {
+        "${uiString(R.string.nutrition_nutrient_calories)}, " +
+            uiString(R.string.nutrition_intake_no_calories)
+    }
+    val dialDiameter = (94f * LocalDensity.current.fontScale.coerceIn(1f, 2f)).dp
+
+    Box(
+        modifier = Modifier
+            .size(dialDiameter)
+            .semantics(mergeDescendants = true) { contentDescription = spoken },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val tickRadius = size.minDimension / 2f - 2.dp.toPx()
+            for (index in 0 until 48) {
+                val angle = -PI / 2.0 + index * (2.0 * PI / 48.0)
+                val point = Offset(
+                    x = center.x + (cos(angle) * tickRadius).toFloat(),
+                    y = center.y + (sin(angle) * tickRadius).toFloat(),
+                )
+                drawCircle(
+                    color = tint.copy(alpha = if (hasValue) 0.42f else 0.18f),
+                    radius = (if (index % 4 == 0) 1.25.dp else 0.8.dp).toPx(),
+                    center = point,
+                )
+            }
+
+            val ringRadius = size.minDimension / 2f - 15.dp.toPx()
+            drawCircle(
+                color = Palette.textPrimary.copy(alpha = 0.08f),
+                radius = ringRadius,
+                style = Stroke(width = 7.dp.toPx()),
+            )
+            drawCircle(
+                color = tint.copy(alpha = if (hasValue) 0.9f else 0.28f),
+                radius = ringRadius,
+                style = Stroke(width = 5.dp.toPx()),
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                valueText,
+                style = NoopType.number(21f).copy(fontWeight = FontWeight.Bold),
+                color = if (hasValue) Palette.textPrimary else Palette.textTertiary,
+                maxLines = 1,
+            )
+            Text("kcal", style = NoopType.caption, color = Palette.textTertiary)
+        }
+    }
+}
+
+@Composable
+private fun NutritionMacroSummaryRow(
+    totals: NutritionDailyTotals,
+    modifier: Modifier = Modifier,
+) {
+    val values = listOf(totals.proteinG, totals.carbsG, totals.fatG)
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+        verticalAlignment = Alignment.Top,
+    ) {
+        NutritionMacroSummary(
+            label = uiString(R.string.nutrition_nutrient_protein),
+            value = totals.proteinG,
+            tint = Palette.statusPositive,
+            values = values,
+            modifier = Modifier.weight(1f),
+        )
+        NutritionMacroSummary(
+            label = uiString(R.string.nutrition_nutrient_carbs),
+            value = totals.carbsG,
+            tint = Palette.metricCyan,
+            values = values,
+            modifier = Modifier.weight(1f),
+        )
+        NutritionMacroSummary(
+            label = uiString(R.string.nutrition_nutrient_fat),
+            value = totals.fatG,
+            tint = Palette.metricAmber,
+            values = values,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun NutritionMacroSummaryColumn(
+    totals: NutritionDailyTotals,
+    modifier: Modifier = Modifier,
+) {
+    val values = listOf(totals.proteinG, totals.carbsG, totals.fatG)
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(Metrics.space16),
+    ) {
+        NutritionMacroSummary(
+            label = uiString(R.string.nutrition_nutrient_protein),
+            value = totals.proteinG,
+            tint = Palette.statusPositive,
+            values = values,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        NutritionMacroSummary(
+            label = uiString(R.string.nutrition_nutrient_carbs),
+            value = totals.carbsG,
+            tint = Palette.metricCyan,
+            values = values,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        NutritionMacroSummary(
+            label = uiString(R.string.nutrition_nutrient_fat),
+            value = totals.fatG,
+            tint = Palette.metricAmber,
+            values = values,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun NutritionMacroSummary(
+    label: String,
+    value: Double?,
+    tint: Color,
+    values: List<Double?>,
+    modifier: Modifier,
+) {
+    Column(
+        modifier = modifier.semantics(mergeDescendants = true) {},
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Text(
+            label,
+            style = NoopType.caption,
+            color = Palette.textTertiary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.heightIn(min = 32.dp),
+        )
+        Text(
+            value?.let {
+                stringResource(
+                    R.string.appwide_unit_grams_format,
+                    formatNutritionNumber(it, 1),
+                )
+            } ?: "-",
+            style = NoopType.headline.copy(fontWeight = FontWeight.SemiBold),
+            color = if (value == null) Palette.textTertiary else tint,
+            maxLines = 1,
+        )
+        NutritionMacroDots(
+            filledDots = NutritionSummaryContract.relativeMacroDotCount(value, values),
+            tint = tint,
+        )
+    }
+}
+
+@Composable
+private fun NutritionMacroDots(
+    filledDots: Int,
+    tint: Color,
+) {
+    Canvas(
+        modifier = Modifier.size(width = 48.dp, height = 30.dp),
+    ) {
+        val columns = 6
+        val rows = 4
+        val xStep = size.width / columns
+        val yStep = size.height / rows
+        val radius = minOf(xStep, yStep) * 0.24f
+
+        for (row in 0 until rows) {
+            for (column in 0 until columns) {
+                val fillIndex = (rows - 1 - row) * columns + column
+                drawCircle(
+                    color = if (fillIndex < filledDots) {
+                        tint.copy(alpha = 0.86f)
+                    } else {
+                        Palette.textPrimary.copy(alpha = 0.08f)
+                    },
+                    radius = radius,
+                    center = Offset(
+                        x = (column + 0.5f) * xStep,
+                        y = (row + 0.5f) * yStep,
+                    ),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NutritionGlucoseSummary(row: LabMarkerRow?) {
+    val valueLabel = row?.value?.let {
+        val number = formatNutritionNumber(it, 1)
+        if (row.unit.isBlank()) number else "$number ${row.unit}"
+    } ?: "-"
+    val caption = row?.let {
+        uiString(
+            R.string.nutrition_glucose_recorded_format,
+            formatNutritionDayKey(it.day),
+        )
+    } ?: uiString(R.string.nutrition_glucose_none)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {},
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(9.dp)
+                .background(
+                    if (row == null) {
+                        Palette.textTertiary.copy(alpha = 0.35f)
+                    } else {
+                        Palette.metricCyan
+                    },
+                    CircleShape,
+                ),
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(Metrics.space2),
+        ) {
+            Text(
+                uiString(R.string.nutrition_glucose_title),
+                style = NoopType.headline,
+                color = Palette.textPrimary,
+            )
+            Text(caption, style = NoopType.caption, color = Palette.textTertiary)
+        }
+        Text(
+            valueLabel,
+            style = NoopType.headline,
+            color = if (row?.value == null) Palette.textTertiary else Palette.textPrimary,
+            maxLines = 1,
+        )
+    }
+}
+
+private fun formatNutritionDayKey(day: String): String =
+    runCatching {
+        LocalDate.parse(day).format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
+    }.getOrDefault(day)
 
 @Composable
 private fun NutritionQuickRepeat(
@@ -679,34 +1039,6 @@ private fun NutritionQuickRepeat(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun NutritionMacroCell(
-    label: String,
-    value: Double?,
-    tint: Color,
-    modifier: Modifier,
-) {
-    Column(
-        modifier = modifier
-            .background(Palette.surfaceInset, RoundedCornerShape(12.dp))
-            .padding(Metrics.space12),
-        verticalArrangement = Arrangement.spacedBy(Metrics.space2),
-    ) {
-        Text(label, style = NoopType.caption, color = Palette.textTertiary)
-        Text(
-            value?.let {
-                stringResource(
-                    R.string.appwide_unit_grams_format,
-                    formatNutritionNumber(it, 1),
-                )
-            } ?: "-",
-            style = NoopType.headline.copy(fontWeight = FontWeight.SemiBold),
-            color = if (value == null) Palette.textTertiary else tint,
-            maxLines = 1,
-        )
     }
 }
 
