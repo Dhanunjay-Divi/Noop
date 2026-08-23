@@ -763,8 +763,7 @@ class MemorySafetyRepository:
                 )
             current = self._locations.get(dispatch_id)
             if current is not None and (
-                sequence <= current["sequence"]
-                or captured_at <= current["captured_at"]
+                sequence <= current["sequence"] or captured_at <= current["captured_at"]
             ):
                 return dict(current) | {"idempotent_replay": True}
             location = {

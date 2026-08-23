@@ -23,7 +23,8 @@ provenance enforcement.
 
 Final engineering evidence includes 25/25 tool tests, Android compile and unit
 tests, iOS and macOS app builds, exact legal inventory verification, health-copy
-scanning, workflow parsing, ops validation, and private-data/diff hygiene.
+scanning, workflow parsing, server tests, i18n regression coverage, ops
+validation, and private-data/diff hygiene.
 
 The stricter distribution gate intentionally fails on:
 
@@ -39,7 +40,9 @@ The stricter distribution gate intentionally fails on:
    only newly authored or separately licensed code.
 3. Keep behavior-specification, clean-room implementation, and overlap review
    roles separate, then commit structured evidence.
-4. Only after the distribution gate passes, resume store signing, release
+4. Migrate the 247 Android and 166 Apple baseline-tracked literals into
+   reviewed localization resources and complete native-speaker review.
+5. Only after the distribution gate passes, resume store signing, release
    metadata, physical-device validation, accuracy studies, Safety paging
    staging, and regulatory review.
 
@@ -50,5 +53,7 @@ The stricter distribution gate intentionally fails on:
 - Back up before schema, container, import, or destructive device work.
 - Build and simulator success do not prove BLE, sleep, background, haptic,
   battery, detector, medical, or regulatory behavior.
+- Passing i18n CI prevents new debt; it does not translate the 413 baseline
+  entries or approve machine-translated reproductive-health copy.
 - Keep the repository private and do not treat private hosting as commercial
   distribution approval.

@@ -78,6 +78,11 @@ has reviewable evidence.
 - Replaced the stale active ops handoff and added a current agent handoff.
 - Consolidated all completed work on `main` and removed the three merged remote
   feature branches.
+- Used the repository's explicit migration baseline to capture the previously
+  unpushed localization debt exposed by hosted CI: 247 unique Android literals
+  and 166 unique Apple literals. The no-new-literal gate remains strict.
+- Restored focus-locale catalog completeness and applied the pinned Ruff format
+  to two server files that hosted CI identified.
 
 ## Data, privacy, and medical truth
 
@@ -88,6 +93,9 @@ has reviewable evidence.
   scoring, detection, and calibration formulas did not.
 - Terms impact: version 2.3 causes a fresh acknowledgment where the app's
   existing terms gate requires one.
+- Localization impact: focus-locale coverage is structurally complete, but the
+  tracked literal baseline is not translated UI and reproductive-health copy
+  still requires native-speaker review.
 - Permissions/network disclosure impact: none in app runtime behavior.
 - Health/medical claim impact and limitations: the health-claims gate remains
   clear; no build or unit test establishes medical accuracy or safety.
@@ -104,6 +112,9 @@ has reviewable evidence.
 | Unsigned macOS Debug app build | Passed | The macOS app graph compiles after the synchronized Terms change | Signing, notarization, runtime behavior, or physical BLE behavior |
 | Unsigned iOS Debug simulator build | Passed | The iOS app graph compiles after the synchronized Terms change | Signing, App Store acceptance, physical BLE, background, haptic, or battery behavior |
 | Workflow YAML parse and release-workflow tests | Passed | Renamed workflow files are syntactically readable and retain tested promotion/rollback contracts | A hosted release run or signing-secret availability |
+| First hosted `main` run | i18n and server Ruff-format jobs failed | Canonical CI caught debt hidden while 46 commits were local-only | Product or release readiness |
+| `python3 Tools/i18n_audit.py --ci origin/main` after migration | Passed; 247 Android and 166 Apple unique literals baseline-tracked | Focus locales are structurally complete and future literal additions fail CI | Translation of baseline entries or native-speaker approval |
+| Ruff 0.12.2 and local server tests | `ruff check` and format check passed; 59 tests passed, 4 database-dependent tests skipped | Python style and non-database server behavior are green | TimescaleDB, containers, backup restore, or production deployment |
 | Ops validator, private-data guard, JSON parse, and `git diff --check` | Passed | Documentation structure, filename privacy guard, structured state, and whitespace are clean | A full secret-history audit |
 | Authenticated GitHub inspection | Private; default `main`; `isFork=false`; parent absent | The canonical hosting repository is standalone in GitHub metadata | Ownership of inherited source |
 | Git ancestry checks | All three legacy branches and `origin/main` were ancestors of local `main` | Mainline push and branch deletion do not discard unique branch commits | Correctness of every historical commit |
@@ -122,7 +133,7 @@ has reviewable evidence.
 - Changed paths: legal/provenance tooling and tests, terms, notices, workflow
   names, repository/ops documentation, and obsolete artifact removals.
 - Commits: one repository-independence commit on top of the 45 completed local
-  commits that were ahead of the prior remote `main`.
+  commits, followed by a bounded hosted-CI remediation commit.
 - Branch and remote state: local `main` matches `origin/main`; merged remote
   feature branches are removed; `origin/HEAD` resolves to `origin/main`.
 - Repository visibility verified: private.
@@ -145,6 +156,10 @@ has reviewable evidence.
   counsel.
 - No store signing, notarization, release-secret, physical-device, accuracy,
   clinical, or regulatory gate was completed.
+- The i18n baseline tracks 413 unique hardcoded or unextracted literals. Passing
+  the regression gate does not mean those surfaces are translated.
+- The reproductive-health locale values remain machine translations pending
+  native-speaker sign-off in every supported locale.
 - A new GitHub repository containing this inherited history is not a clean-room
   commercial implementation.
 
@@ -156,7 +171,9 @@ has reviewable evidence.
    only newly authored or separately licensed code.
 3. Record affected-source manifests and independent review evidence, then
    update the rights state and rerun both legal gates.
-4. Only after the distribution gate passes, complete signing, store,
+4. Retire the localization baseline through reviewed resource migrations and
+   complete native-speaker review of reproductive-health copy.
+5. Only after the distribution gate passes, complete signing, store,
    physical-device, accuracy, safety, and regulatory release work.
 
 ## Privacy check

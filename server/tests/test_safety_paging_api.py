@@ -811,9 +811,7 @@ def test_location_replays_are_idempotent_and_stale_fixes_are_rejected() -> None:
             json={
                 **payload,
                 "sequence": 3,
-                "captured_at": (
-                    datetime.now(UTC) - timedelta(minutes=6)
-                ).isoformat(),
+                "captured_at": (datetime.now(UTC) - timedelta(minutes=6)).isoformat(),
             },
         )
         assert stale.status_code == 422

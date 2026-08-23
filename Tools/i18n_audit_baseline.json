@@ -2,6 +2,14 @@
   "android": [
     [
       "android/app/src/main/java/com/noop/ui/AddDeviceWizard.kt",
+      "Noop Band provides the deepest on-device experience. Other supported straps, watches, "
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/AddDeviceWizard.kt",
+      "Noop Band uses one active app connection at a time. Close any other band app before "
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/AddDeviceWizard.kt",
       "The most common cause is the ring was not fully reset in the Oura app, or the Oura "
     ],
     [
@@ -11,6 +19,34 @@
     [
       "android/app/src/main/java/com/noop/ui/AppRoot.kt",
       "Expanded"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/AutomationsScreen.kt",
+      "Also buzz Noop Band"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/AutomationsScreen.kt",
+      "Longer-term VO2 max changes"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/AutomationsScreen.kt",
+      "Noop Band haptics are unavailable until it has a live encrypted bond. The phone reminder remains independent."
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/AutomationsScreen.kt",
+      "Noop Band is ready. A buzz still needs a fresh live stream at the reminder time."
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/AutomationsScreen.kt",
+      "Oxygen and body temperature"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/AutomationsScreen.kt",
+      "Vital trend reviews"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/AutomationsScreen.kt",
+      "Wrist alerts are off. Turn on the master switch in Settings, Notifications before Noop Band can buzz."
     ],
     [
       "android/app/src/main/java/com/noop/ui/BackupSyncScreen.kt",
@@ -169,6 +205,18 @@
       "Max 4"
     ],
     [
+      "android/app/src/main/java/com/noop/ui/ConnectionHelp.kt",
+      "Close other band apps"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/ConnectionHelp.kt",
+      "Noop Band connection"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/ConnectionHelp.kt",
+      "Noop Band is connected. Some advanced history streams depend on its firmware and "
+    ],
+    [
       "android/app/src/main/java/com/noop/ui/CoupledScreen.kt",
       "A classic one-glance read of NOOP's own scores. Same data, different lens."
     ],
@@ -179,6 +227,10 @@
     [
       "android/app/src/main/java/com/noop/ui/CoupledScreen.kt",
       "Recovery, no data yet"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/DataSourcesScreen.kt",
+      "${WhoopModel.CUSTOMER_NAME} (Live Bluetooth)"
     ],
     [
       "android/app/src/main/java/com/noop/ui/DataSourcesScreen.kt",
@@ -209,6 +261,14 @@
       " · FW $it"
     ],
     [
+      "android/app/src/main/java/com/noop/ui/DevicesScreen.kt",
+      "Noop Band is NOOP's fully supported band. Other heart-rate straps can stream live heart "
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/FullDayChartScreen.kt",
+      "Noop Band"
+    ],
+    [
       "android/app/src/main/java/com/noop/ui/FusedRecordScreen.kt",
       ", in use"
     ],
@@ -234,7 +294,7 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/HealthScreen.kt",
-      "Awaiting strap"
+      "Awaiting Noop Band"
     ],
     [
       "android/app/src/main/java/com/noop/ui/HealthScreen.kt",
@@ -278,11 +338,11 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/HealthScreen.kt",
-      "Sync now. Connect your strap first."
+      "Sync now. Connect Noop Band first."
     ],
     [
       "android/app/src/main/java/com/noop/ui/HealthScreen.kt",
-      "Sync now. Pulls your strap's stored history immediately, without waiting "
+      "Sync now. Pulls Noop Band's stored history immediately, without waiting "
     ],
     [
       "android/app/src/main/java/com/noop/ui/HealthScreen.kt",
@@ -386,7 +446,19 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
+      "Compatible hardware is detected automatically. If pairing stalls, close any other band app."
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
       "Connect"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
+      "Noop Band"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
+      "Noop Band vibrates when you climb into Zone 5 (≥ $zone5Bpm bpm). Manage it in Automations → Haptic coaching."
     ],
     [
       "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
@@ -406,19 +478,15 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
-      "Strap buzzes when you climb into Zone 5 (≥ $zone5Bpm bpm). Manage it in Automations → Haptic coaching."
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
       "Sync now"
     ],
     [
       "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
-      "Syncing your strap history…"
+      "Syncing Noop Band history…"
     ],
     [
       "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
-      "Syncing your strap history… ${live.syncChunksThisSession} chunks pulled"
+      "Syncing Noop Band history… ${live.syncChunksThisSession} chunks pulled"
     ],
     [
       "android/app/src/main/java/com/noop/ui/LiveScreen.kt",
@@ -438,7 +506,7 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/LiveSessionScreen.kt",
-      "Signal lost. Coaching paused."
+      "Signal lost - coaching paused."
     ],
     [
       "android/app/src/main/java/com/noop/ui/LiveWorkoutScreen.kt",
@@ -477,20 +545,36 @@
       "Off"
     ],
     [
+      "android/app/src/main/java/com/noop/ui/NutritionLogScreen.kt",
+      "${uiString(R.string.nutrition_nutrient_calories)}, "
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/NutritionLogScreen.kt",
+      "${uiString(R.string.nutrition_nutrient_calories)}, $valueText kcal"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt",
+      "Compatible hardware is detected automatically."
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt",
+      "No Noop Band? You can still continue. Pair another heart-rate strap, watch, ring, "
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt",
+      "Noop Band is paired and ready to stream."
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt",
+      "Noop Band is paired · ${it.toInt()}% battery."
+    ],
+    [
       "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt",
       "Re-scan"
     ],
     [
       "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt",
       "Scan again"
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt",
-      "Your strap is bonded and ready to stream."
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/OnboardingScreen.kt",
-      "Your strap is bonded · ${it.toInt()}% battery."
     ],
     [
       "android/app/src/main/java/com/noop/ui/PipBar.kt",
@@ -526,7 +610,23 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
+      "Compatible Noop Band firmware may require feature flags before it emits high-rate heart rate, motion, and history. This reversible control writes that experimental enable sequence to the band and may do nothing on some firmware."
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
+      "Counter ticks per step. Leave at 1.0 unless your steps run high. Some Noop Band "
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
       "Expanded"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
+      "Experimental band protocols"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
+      "Makes compatible Noop Band hardware advertise heart rate as a standard Bluetooth sensor for Garmin, Zwift, or gym equipment. The reversible setting applies on the next connection."
     ],
     [
       "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
@@ -534,7 +634,15 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
-      "Needs the full encrypted bond: close the official WHOOP app and pair the strap to NOOP first (a live-HR-only link can't carry the unlock)."
+      "Needs the full encrypted bond. Close any other app connected to Noop Band, then pair it to NOOP again."
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
+      "Noop Band accepted ${live.r22FlagsAccepted}/15 R22 flags…"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
+      "On compatible Noop Band firmware, NOOP sends an advanced real-time stream request after the handshake and records the response for protocol validation."
     ],
     [
       "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
@@ -542,7 +650,7 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
-      "Put the strap on first. The deep stream is on-wrist only."
+      "Put Noop Band on first. The deep stream is on-wrist only."
     ],
     [
       "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
@@ -554,19 +662,79 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
-      "Strap accepted ${live.r22FlagsAccepted}/15 R22 flags…"
+      "The companion for Noop Band. Data stays on this phone by default and leaves only through a sync or sharing destination you explicitly enable."
     ],
     [
       "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
-      "Wear the strap, tap once, then let it sync and share your strap log."
+      "Try advanced band protocol probes"
     ],
     [
       "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
-      "✓ Strap accepted all 15 R22 flags"
+      "Unlock advanced band data"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
+      "Unlock advanced band data (R22)"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
+      "Wear Noop Band, tap once, then let it sync and share your band log."
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
+      "When Noop Band does not send a measured step count, NOOP estimates steps from motion "
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SettingsScreen.kt",
+      "✓ Noop Band accepted all 15 R22 flags"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SkinTempCardsScreen.kt",
+      "Clear this day"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SkinTempCardsScreen.kt",
+      "Delete all"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SkinTempCardsScreen.kt",
+      "Delete all daily cycle details?"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SkinTempCardsScreen.kt",
+      "Delete all details"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SkinTempCardsScreen.kt",
+      "Flow: ${selectedFlow?.let(::cycleFlowLabel) ?: \"Not entered\"}"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SkinTempCardsScreen.kt",
+      "Not entered"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SkinTempCardsScreen.kt",
+      "Optional context only. These entries do not diagnose a condition, predict safe or fertile days, or trigger an emergency alert."
     ],
     [
       "android/app/src/main/java/com/noop/ui/SkinTempCardsScreen.kt",
       "Plan a trip or shift"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SkinTempCardsScreen.kt",
+      "Save daily details"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SkinTempCardsScreen.kt",
+      "Symptoms"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SkinTempCardsScreen.kt",
+      "This permanently removes flow and symptom entries. Period-start dates and wearable history are unchanged."
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SkinTempCardsScreen.kt",
+      "Update daily details"
     ],
     [
       "android/app/src/main/java/com/noop/ui/SkinTempCardsScreen.kt",
@@ -598,15 +766,27 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/SmartAlarmScreen.kt",
-      "Armed on the strap itself with the experimental 5/MG command. A strap-driven wake is still unconfirmed on 5/MG on our side (confirmed only on WHOOP 4.0), so keep a backup alarm for anything you truly can't miss."
+      "Armed on Noop Band, so it can vibrate even if your phone is asleep or NOOP is closed. Keep a backup alarm for anything you truly cannot miss."
     ],
     [
       "android/app/src/main/java/com/noop/ui/SmartAlarmScreen.kt",
-      "Armed on the strap itself, so it can buzz at your wake time even if your phone is asleep or NOOP is closed. Sends the exact alarm command the official app sends, confirmed buzzing on a real WHOOP 4.0 (community wire capture + on-device test, #535). Keep a backup alarm for anything you truly can't miss."
+      "Armed using the experimental band command. Wrist wake is still under validation for this firmware, so keep a backup alarm."
     ],
     [
       "android/app/src/main/java/com/noop/ui/SmartAlarmScreen.kt",
-      "Connect your strap to arm this; it's set on the strap's own firmware alarm. Confirmed working on WHOOP 4.0; still experimental on 5.0 and MG. Keep a backup alarm for anything you truly can't miss."
+      "Connect Noop Band to arm wrist wake. Keep a backup alarm for anything you truly cannot miss."
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SmartAlarmScreen.kt",
+      "Noop Band wake alarm"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SmartAlarmScreen.kt",
+      "This Noop Band firmware needs Experimental mode before wrist wake can be armed. "
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/SmartAlarmScreen.kt",
+      "Wake me with a band vibration"
     ],
     [
       "android/app/src/main/java/com/noop/ui/StepsCalibrationScreen.kt",
@@ -615,6 +795,14 @@
     [
       "android/app/src/main/java/com/noop/ui/StepsCalibrationScreen.kt",
       "Auto"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/StepsCalibrationScreen.kt",
+      "NOOP estimates steps from Noop Band motion and calibrates the estimate to your phone's "
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/StepsCalibrationScreen.kt",
+      "Noop Band · motion to steps"
     ],
     [
       "android/app/src/main/java/com/noop/ui/StepsCalibrationScreen.kt",
@@ -638,7 +826,7 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
-      "Calibrating , no heart rate banked yet today. Your curve fills in as the strap offloads."
+      "Calibrating, no heart rate banked yet today. Your curve fills in as Noop Band syncs."
     ],
     [
       "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
@@ -650,11 +838,19 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
-      "No heart rate for this day. Step back to a day the strap was worn."
+      "No heart rate for this day. Step back to a day Noop Band was worn."
     ],
     [
       "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
       "No heart rate in the last ${hrWindow.label}. Try a wider window or Today."
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
+      "Noop Band battery"
+    ],
+    [
+      "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
+      "Noop Band battery ${it.roundToInt()} percent"
     ],
     [
       "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
@@ -667,22 +863,6 @@
     [
       "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
       "SOLID"
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
-      "Show all metrics ($hidden)"
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
-      "Show fewer"
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
-      "Strap battery"
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
-      "Strap battery ${it.roundToInt()} percent"
     ],
     [
       "android/app/src/main/java/com/noop/ui/TodayScreen.kt",
@@ -828,11 +1008,31 @@
     ],
     [
       "Packages/StrandDesign/Sources/StrandDesign/TrendChart.swift",
+      "HRV (ms) - 30 days"
+    ],
+    [
+      "Packages/StrandDesign/Sources/StrandDesign/TrendChart.swift",
+      "Recovery - 30 days"
+    ],
+    [
+      "Packages/StrandDesign/Sources/StrandDesign/TrendChart.swift",
       "Trend"
+    ],
+    [
+      "Packages/StrandDesign/Sources/StrandDesign/Typography.swift",
+      "Body / Regular 15 - the thread of you, read in full."
+    ],
+    [
+      "Packages/StrandDesign/Sources/StrandDesign/YearHeatStrip.swift",
+      "Recovery - past year"
     ],
     [
       "Packages/StrandDesign/Sources/StrandDesign/YearHeatStrip.swift",
       "\\(DateFormatterCache.day.string(from: day.date)) · recovery \\(Int(score.rounded()))"
+    ],
+    [
+      "Strand/App/RootView.swift",
+      "Noop Band not connected"
     ],
     [
       "Strand/Liquid/LiquidPrimitives.swift",
@@ -843,16 +1043,128 @@
       " \\(unit)"
     ],
     [
+      "Strand/Liquid/LiquidTodayView.swift",
+      "Connect Noop Band to see live heart rate"
+    ],
+    [
+      "Strand/Liquid/LiquidTodayView.swift",
+      "Noop Band battery"
+    ],
+    [
+      "Strand/Liquid/LiquidTodayView.swift",
+      "Start a live session. Beta. Silent Noop Band coaching against today's Recovery."
+    ],
+    [
+      "Strand/MenuBar/MenuBarContent.swift",
+      "Noop Band not connected"
+    ],
+    [
+      "Strand/Onboarding/OnboardingWizard.swift",
+      "A private window into your recovery, sleep and strain. Read straight from Noop Band and kept only on \\(Platform.deviceNounPhrase)."
+    ],
+    [
+      "Strand/Onboarding/OnboardingWizard.swift",
+      "When the system prompt appears, choose Allow so NOOP can find Noop Band."
+    ],
+    [
+      "Strand/Screens/AddDeviceWizard.swift",
+      "Not showing up? Another band app may still be holding the connection. Force-quit it, then tap Rescan."
+    ],
+    [
+      "Strand/Screens/AddDeviceWizard.swift",
+      "Some Noop Band firmware features are still experimental in NOOP."
+    ],
+    [
       "Strand/Screens/AddDeviceWizard.swift",
       "The most common cause is the ring was not fully reset in the Oura app, or the Oura app is still running. Reset the ring again, force-quit Oura, then try once more. If it keeps failing, your ring may be a generation NOOP cannot adopt yet. The ring is not bricked: re-pair it in the Oura app to recover it. You can still use file import."
+    ],
+    [
+      "Strand/Screens/AutomationsView.swift",
+      "Noop Band reminders use the schedule below. They do not need notification permission, but iOS cannot guarantee a Bluetooth vibration while NOOP is suspended or terminated."
     ],
     [
       "Strand/Screens/BreathingView.swift",
       "%.1f br/min"
     ],
     [
+      "Strand/Screens/BreathingView.swift",
+      "Connect Noop Band for haptic guidance. You'll feel one pulse on the inhale and two on the exhale, so you can breathe with your eyes closed."
+    ],
+    [
+      "Strand/Screens/BreathingView.swift",
+      "Connect Noop Band for the felt cue. The sweep paces you with one vibration on the inhale and two on the exhale."
+    ],
+    [
+      "Strand/Screens/BreathingView.swift",
+      "Connect Noop Band. Calm me is a felt rhythm on the wrist, so it needs a bonded connection."
+    ],
+    [
+      "Strand/Screens/BreathingView.swift",
+      "Noop Band vibrates a gentle rhythm just below your current heart rate, a felt metronome to relax toward. It trails your heart down rather than yanking it and stops on its own."
+    ],
+    [
+      "Strand/Screens/BreathingView.swift",
+      "Not enough clean beat data to lock a pace today. Try again rested, sitting still with Noop Band snug. For now we'll pace you at 5.5 br/min (coherence)."
+    ],
+    [
+      "Strand/Screens/CalendarMonthView.swift",
+      "\\(vals.count) recorded days · average \\(metric.format(mean))"
+    ],
+    [
+      "Strand/Screens/CoupledView.swift",
+      "Wear Noop Band overnight to score a night first."
+    ],
+    [
       "Strand/Screens/DataSourcesView.swift",
       "Import your Oura history"
+    ],
+    [
+      "Strand/Screens/DataSourcesView.swift",
+      "No live heart rate yet. Open Live to pair Noop Band."
+    ],
+    [
+      "Strand/Screens/DevicesView.swift",
+      "Connect a Noop Band, Apple Watch, heart-rate strap, ring, or supported gym machine. NOOP will show only the signals that device actually provides."
+    ],
+    [
+      "Strand/Screens/DevicesView.swift",
+      "ECG spot recording (experimental)…"
+    ],
+    [
+      "Strand/Screens/DevicesView.swift",
+      "ECG spot-recording probe"
+    ],
+    [
+      "Strand/Screens/DevicesView.swift",
+      "Make \\(device.displayName) your active wearable? From now on it provides your live data. \\(currentActiveName)'s history stays exactly as it is. Only new days come from \\(device.displayName)."
+    ],
+    [
+      "Strand/Screens/DevicesView.swift",
+      "Noop Band ECG spot recording (experimental)"
+    ],
+    [
+      "Strand/Screens/DevicesView.swift",
+      "Noop Band is NOOP's fully supported band. Other heart-rate straps can stream live heart rate and HRV, but they do not provide the deeper nightly signals available from Noop Band."
+    ],
+    [
+      "Strand/Screens/DevicesView.swift",
+      "Research instrumentation only, not a diagnostic ECG or continuous monitor. Keep the opposite hand touching both clasp electrodes for the full 30 seconds. Signal units, scale, and any band-provided rhythm classification are unvalidated and are not shown as health results. The commands may do nothing; Stop reverses the stream controls."
+    ],
+    [
+      "Strand/Screens/DevicesView.swift",
+      "Restart Noop Band…"
+    ],
+    [
+      "Strand/Screens/DevicesView.swift",
+      "Start 30-second spot recording"
+    ],
+    [
+      "Strand/Screens/DevicesView.swift",
+      "Stop spot recording"
+    ],
+    [
+      "Strand/Screens/DevicesView.swift",
+      "You removed your active wearable. Choose which paired device provides your live data, or leave none active and pair one later."
     ],
     [
       "Strand/Screens/FullDayChartView.swift",
@@ -863,12 +1175,40 @@
       "Zoomed in. Drag to pan · hold to read"
     ],
     [
+      "Strand/Screens/HRVSnapshotView.swift",
+      "A 60-second snapshot of beat-to-beat (R-R) intervals from Noop Band, cleaned with range and ectopic-beat filtering before computing RMSSD the same way your overnight HRV is computed."
+    ],
+    [
+      "Strand/Screens/HRVSnapshotView.swift",
+      "An HRV reading needs the live R-R stream. Open the Live screen and connect Noop Band, then come back."
+    ],
+    [
+      "Strand/Screens/HealthView.swift",
+      "Biomarker trends"
+    ],
+    [
       "Strand/Screens/HealthView.swift",
       "Refresh Fitness Age now"
     ],
     [
       "Strand/Screens/HealthView.swift",
+      "Some vitals compare with your personal baseline after 14 nights. Blood oxygen and sleep continue to use typical adult ranges. These ranges are approximate, not medical advice."
+    ],
+    [
+      "Strand/Screens/HealthView.swift",
+      "Timeline"
+    ],
+    [
+      "Strand/Screens/HealthView.swift",
+      "Values retain their original source and recorded date. Sparklines appear only for recent, closely spaced observations; missing periods are not connected. These are not diagnoses or targets."
+    ],
+    [
+      "Strand/Screens/HealthView.swift",
       "Vitality \\(Int(v.rounded())) out of 100"
+    ],
+    [
+      "Strand/Screens/HowNoopWorksView.swift",
+      "NOOP never shows you a number it had to make up. If a score isn't ready, it tells you why and what to do next. Everything here runs on your device, from Noop Band."
     ],
     [
       "Strand/Screens/HydrationView.swift",
@@ -885,6 +1225,14 @@
     [
       "Strand/Screens/InsightsView.swift",
       "r = %+.2f"
+    ],
+    [
+      "Strand/Screens/IntelligenceView.swift",
+      "Recovery weighs your HRV against your personal baseline (~55%), resting heart rate (~20%), sleep quality (~15%), respiration (~5%) and skin-temperature deviation (~5%). Effort is a 0-\\(UnitFormatter.effortScaleMax(effortScale)) cardiovascular load from time in heart-rate zones. Sleep is staged from movement and heart rate. Everything is computed here from Noop Band's raw data. It works for any day NOOP collected raw streams."
+    ],
+    [
+      "Strand/Screens/IntervalTimerView.swift",
+      "Pair Noop Band on the Live screen to feel the transitions hands-free."
     ],
     [
       "Strand/Screens/JournalLogCard.swift",
@@ -936,11 +1284,55 @@
     ],
     [
       "Strand/Screens/LabBookView.swift",
+      "No overlap yet between this marker and \\(signal?.title.lowercased() ?? String(localized: \"that signal\")). Log a few more readings and keep wearing Noop Band."
+    ],
+    [
+      "Strand/Screens/LabBookView.swift",
       "the signal"
+    ],
+    [
+      "Strand/Screens/LiveView.swift",
+      "Can't connect: Noop Band pairing was reset"
+    ],
+    [
+      "Strand/Screens/LiveView.swift",
+      "Compatible hardware is detected automatically."
+    ],
+    [
+      "Strand/Screens/LiveView.swift",
+      "High-rate, beat-by-beat tracking uses more Noop Band and phone battery. It runs only while this Live screen and NOOP are in the foreground."
+    ],
+    [
+      "Strand/Screens/LiveView.swift",
+      "If pairing stalls, close any other band app before trying again."
+    ],
+    [
+      "Strand/Screens/LiveView.swift",
+      "Live HR works. Re-pair Noop Band to unlock haptics, alarms, and sync"
+    ],
+    [
+      "Strand/Screens/MetricExplorerView.swift",
+      "LATEST ESTIMATE"
+    ],
+    [
+      "Strand/Screens/MetricExplorerView.swift",
+      "Latest estimate"
+    ],
+    [
+      "Strand/Screens/MetricExplorerView.swift",
+      "Review cadence"
+    ],
+    [
+      "Strand/Screens/MetricExplorerView.swift",
+      "\\(metric.title) review reminder"
     ],
     [
       "Strand/Screens/MetricExplorerView.swift",
       "\\(row.time), \\(row.value), \\(row.source)"
+    ],
+    [
+      "Strand/Screens/NutritionLogView.swift",
+      "\\(valueText) kcal"
     ],
     [
       "Strand/Screens/SettingsView.swift",
@@ -948,11 +1340,107 @@
     ],
     [
       "Strand/Screens/SettingsView.swift",
+      "Band name"
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Broadcast HR is on. Noop Band is advertising heart rate continuously, which uses more battery. Turn it off when you are not using it with another device."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Broadcast Noop Band HR"
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Changes the Bluetooth name Noop Band advertises when pairing. The band restarts to apply it, so the new name appears on the next connection. Available only on supported firmware."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Compatible Noop Band firmware may require feature flags before it emits high-rate heart rate, motion, and history. This reversible control writes that experimental enable sequence to the band. It may do nothing on your firmware and is available from iPhone or Android only."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Counter ticks per step. Leave at 1.0 unless your steps run high. Some Noop Band firmware reports a high-rate motion counter, so this goes up to 30. Walk a known 1,000 steps and divide NOOP's count by the real count to get your value."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
       "Date of birth, age \\(profile.age) years"
     ],
     [
       "Strand/Screens/SettingsView.swift",
-      "NOOP estimates your steps from your WHOOP's motion, calibrated to your phone's step count. It's an estimate, not a step counter. A WHOOP 5.0 / MG streams motion (not a step count) only with deep data on."
+      "Keeps the detailed beat-to-beat heart-rate stream running all day and night, not just while a live screen is open, so NOOP captures much more for overnight HRV, recovery and sleep. Uses more battery because Noop Band streams heart rate continuously while connected."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Kick in at (Noop Band battery)"
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Makes compatible Noop Band hardware advertise heart rate as a standard Bluetooth sensor for Garmin, Zwift, or gym equipment. The reversible setting applies on the next connection and is available from iPhone only."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "NOOP estimates steps from Noop Band motion, calibrated to your phone. It remains an estimate, not a measured step count."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "NOOP estimates steps from Noop Band motion, calibrated to your phone. This firmware needs advanced band data enabled before motion is available."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "New band name"
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "No days yet where both NOOP and your phone counted steps. Once your phone logs a few days alongside Noop Band, they'll appear here so you can see how close the estimate is."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Noop Band ECG spot recording (experimental)"
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Noop Band accepted \\(live.r22FlagsAccepted)/15 R22 flags…"
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Noop Band accepted all 15 R22 flags"
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Noop Band · motion to steps"
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "On ECG-capable Noop Band hardware, this unlocks a user-started 30-second protocol spot recording in Devices. It cannot monitor continuously. Keep the opposite hand touching both clasp electrodes for the full recording. NOOP refuses to send unless the hardware positively identifies ECG support; the command is unvalidated and may do nothing."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "On compatible Noop Band hardware, NOOP sends an advanced real-time stream request after the handshake and logs the response for protocol validation."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Replaces the Today tab with the prototype redesign. Turn it off any time to return to the classic dashboard. Reads the same live data from Noop Band."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Research instrumentation only. Signal units, scale, and any rhythm classification reported by the band are unvalidated and are not shown as a health result. This is not a diagnostic ECG and cannot detect or rule out a heart condition. Never use it to make a health decision. If you have symptoms or are worried about your heart, contact a qualified professional."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Reviews each scored wake block for real evidence of getting up (walking cadence, a change in body position) instead of just a heart-rate rise. A wake block with no locomotion and a stable posture - a hot night, a brief turn-over - is folded back into light sleep; a real get-up is left alone. It checks how much motion detail Noop Band actually recorded and stays off when a night is too sparse to trust. Off by default; takes effect on the next nights staged."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Silence-first Noop Band coaching during workouts."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Slows background band sync (every 45 min instead of 15) while Noop Band's battery is low. No data is lost because the band keeps banking readings and syncs them in larger, less frequent pulls."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "The companion for Noop Band. Your history, live stream, and numbers stay on this device by default. Data leaves only through features you explicitly enable, such as your own self-hosted sync."
     ],
     [
       "Strand/Screens/SettingsView.swift",
@@ -960,7 +1448,71 @@
     ],
     [
       "Strand/Screens/SettingsView.swift",
-      "WHOOP 5.0 / MG · motion → steps"
+      "Try advanced band protocol probes"
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "Unlock advanced band data (R22)"
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "When Noop Band does not expose a measured step count, NOOP estimates steps from motion and calibrates them to your phone. Tap to review and adjust the estimate."
+    ],
+    [
+      "Strand/Screens/SettingsView.swift",
+      "While Noop Band's battery is low, stop the always-on background HRV stream, the biggest continuous drain on the band. A Live screen still shows heart rate, and capture re-arms automatically once the band is charged."
+    ],
+    [
+      "Strand/Screens/SkinTempCardsView.swift",
+      "Clear this day"
+    ],
+    [
+      "Strand/Screens/SkinTempCardsView.swift",
+      "Daily details"
+    ],
+    [
+      "Strand/Screens/SkinTempCardsView.swift",
+      "Daily history"
+    ],
+    [
+      "Strand/Screens/SkinTempCardsView.swift",
+      "Delete all daily cycle details?"
+    ],
+    [
+      "Strand/Screens/SkinTempCardsView.swift",
+      "Delete all details"
+    ],
+    [
+      "Strand/Screens/SkinTempCardsView.swift",
+      "Flow"
+    ],
+    [
+      "Strand/Screens/SkinTempCardsView.swift",
+      "Not entered"
+    ],
+    [
+      "Strand/Screens/SkinTempCardsView.swift",
+      "Optional context only. These entries do not diagnose a condition, predict safe or fertile days, or trigger an emergency alert."
+    ],
+    [
+      "Strand/Screens/SkinTempCardsView.swift",
+      "Save daily details"
+    ],
+    [
+      "Strand/Screens/SkinTempCardsView.swift",
+      "Symptoms"
+    ],
+    [
+      "Strand/Screens/SkinTempCardsView.swift",
+      "This permanently removes flow and symptom entries. Period-start dates and wearable history are unchanged."
+    ],
+    [
+      "Strand/Screens/SkinTempCardsView.swift",
+      "Update daily details"
+    ],
+    [
+      "Strand/Screens/SleepView.swift",
+      "No nights with sleep data yet. Your ledger fills in as you wear Noop Band to bed."
     ],
     [
       "Strand/Screens/SleepView.swift",
@@ -975,8 +1527,36 @@
       "Undo sleep deletion"
     ],
     [
+      "Strand/Screens/SmartAlarmView.swift",
+      "Noop Band isn't accepting the alarm"
+    ],
+    [
+      "Strand/Screens/SmartAlarmView.swift",
+      "Noop Band keeps reporting a different time than NOOP sends, so its alarm may not fire at your wake time. Restart the band from Devices, or fully charge it and reconnect. Keep your phone's Clock alarm as your wake until the band accepts the time."
+    ],
+    [
+      "Strand/Screens/SmartAlarmView.swift",
+      "Noop Band provides a silent wrist vibration. Fixed-time alarms stay on the band once armed. Detected-sleep alarms are revised when fresh sleep data reaches NOOP, so background timing depends on Bluetooth sync and iOS scheduling. The phone backup is a normal notification, not a guaranteed loud alarm; Focus or silent mode can suppress it. Keep a Clock alarm for anything you cannot miss."
+    ],
+    [
+      "Strand/Screens/SmartAlarmView.swift",
+      "Once NOOP has a fresh detected sleep session, it arms Noop Band for the projected target and revises that time as awake minutes accumulate. The band can still vibrate with NOOP closed after it has been armed; detecting and revising the target remains best-effort in the background."
+    ],
+    [
+      "Strand/Screens/SmartAlarmView.swift",
+      "The Noop Band alarm is a silent vibration, not a sound"
+    ],
+    [
+      "Strand/Screens/SmartAlarmView.swift",
+      "Use Noop Band alarm time"
+    ],
+    [
       "Strand/Screens/StressView.swift",
       "Stress \\(String(format: \"%.1f\", score)) of 3"
+    ],
+    [
+      "Strand/Screens/TodayView.swift",
+      "Noop Band battery \\(Int(pct.rounded())) percent\\(live.charging == true ? \", charging\" : \"\")\\(estimateText.map { \", \\($0)\" } ?? \"\")"
     ],
     [
       "Strand/Screens/TrendsView.swift",
@@ -989,6 +1569,18 @@
     [
       "Strand/Screens/WorkoutDetailView.swift",
       "of 21"
+    ],
+    [
+      "Strand/Screens/WorkoutsView.swift",
+      "1 recorded activity"
+    ],
+    [
+      "Strand/Screens/WorkoutsView.swift",
+      "3 or more activities"
+    ],
+    [
+      "Strand/Screens/WorkoutsView.swift",
+      "Activity calendar"
     ],
     [
       "Strand/Screens/WorkoutsView.swift",
@@ -1036,7 +1628,31 @@
     ],
     [
       "Strand/Screens/WorkoutsView.swift",
+      "\\(count) recorded activities"
+    ],
+    [
+      "Strand/Screens/WorkoutsView.swift",
+      "\\(date.formatted(date: .long, time: .omitted)), "
+    ],
+    [
+      "Strand/Screens/WorkoutsView.swift",
+      "\\(label) activities"
+    ],
+    [
+      "Strand/Screens/WorkoutsView.swift",
       "of 21"
+    ],
+    [
+      "StrandiOS/App/ShortcutExportSettingsView.swift",
+      "Estimated from Noop Band motion, calibrated to your phone. Not a measured step count."
+    ],
+    [
+      "StrandiOS/App/SiriShortcutsSettingsView.swift",
+      "Buzz Noop Band or mark a moment from Siri, Spotlight, the Shortcuts app, or a Back-Tap automation. No setup needed."
+    ],
+    [
+      "StrandiOS/App/SiriShortcutsSettingsView.swift",
+      "Wire NOOP's actions into a Back-Tap, a focus automation, or a longer Shortcut. For example, double-tap the back of your iPhone to buzz Noop Band."
     ]
   ]
 }
