@@ -1,6 +1,6 @@
 # NOOP production readiness
 
-Last reviewed: **2026-08-22**
+Last reviewed: **2026-08-23**
 
 This is the release decision record for NOOP. A compiled screen or passing unit
 test proves code behavior only. It does not prove carrier delivery, wearable
@@ -20,8 +20,8 @@ or a person's response to a page.
 
 | Area | Status | Current evidence and boundary |
 |---|---|---|
-| macOS app | **Locally verified** | The 1,272-test app suite passes and an unsigned Release build produces a universal `x86_64` + `arm64` app. A distributable Developer ID build and notarization remain external. |
-| iPhone, Watch, widgets | **Locally verified** | Phone UI tests pass in Simulator and an unsigned generic Release simulator build validates the embedded Watch app and widgets; the phone visual matrix captured 32/32 primary routes on iPhone 17 Pro Max and iPhone 17e; and Watch visual captures cover glance, home, and strength handoff. Simulator execution does not validate CoreBluetooth, HealthKit entitlements, background collection, or Watch connectivity. |
+| macOS app | **Locally verified** | The 1,356-test app suite passes with one environment-gated fixture skipped, and an unsigned Release build produces a universal `x86_64` + `arm64` app. A distributable Developer ID build and notarization remain external. |
+| iPhone, Watch, widgets | **Locally verified** | All 15 phone UI tests pass serially in Simulator and an unsigned generic Release simulator build validates the embedded Watch app and widgets; the phone visual matrix captured 40/40 states across 20 scenarios on iPhone 17 Pro Max and iPhone 17e; and Watch visual captures cover glance, home, and strength handoff. Simulator execution does not validate CoreBluetooth, HealthKit entitlements, background collection, or Watch connectivity. |
 | Android app | **Locally verified** | `assembleFullDebug`, all JVM tests, Android-test source compilation, `lintFullDebug`, and the API 35 Gradle-managed-device instrumentation suite pass. Physical-device/OEM behavior remains an external gate. |
 | Self-hosted server | **Locally verified** | The full Pytest suite and Ruff check/format gates pass. PostgreSQL integration and real-provider tests remain separately gated by environment variables. |
 | Private Friends | **Locally verified on Apple and Android** | Invitation-only enrollment, accepted requests, directional six-field privacy, summary-only replacement upload, removal, deletion, and localized Android UI are implemented. Android uses an encrypted member credential, retry-stable enrollment and upload identities, best-effort WorkManager refresh, and server-confirmed cleanup for an interrupted first join. There is no public directory, ranking, or end-to-end encryption. |
@@ -32,7 +32,8 @@ or a person's response to a page.
 | Coach | **Locally verified** | Local durable transcript and editable memory, opt-in scheduled check-ins, voice/text Journal drafts, and confirmed Journal/routine actions exist. Model output cannot silently mutate records. |
 | Nutrition | **Locally verified** | Editable meals, nullable nutrients, CSV reconciliation, barcode scan/manual lookup, Open Food Facts, saved foods/meals, and portable restore exist on Apple and Android. Product values require review before save. |
 | Backup and restore | **Locally verified for implemented scope** | Same-platform native backups use integrity manifests and staged restore. The cross-platform portable payload validates and restores nutrition/library and normalized strength records. It is not a complete server-to-device restore of every local table. |
-| UI shell | **Locally verified by build, contract, UI, and visual tests** | The app-wide visual system, glass navigation, floating add action, loading/empty/error states, and primary routes compile on Apple and Android. iOS UI tests and the 32-route/two-viewport screenshot matrix pass. Final accessibility acceptance and physical-device visual review remain release evidence gates. |
+| UI shell | **Locally verified by build, contract, UI, and visual tests** | The app-wide visual system, glass navigation, floating add action, loading/empty/error states, and primary routes compile on Apple and Android. All 15 iOS UI tests and the 40-capture/two-viewport screenshot matrix pass. Final accessibility acceptance and physical-device visual review remain release evidence gates. |
+| Localization | **Implemented, evidence pending** | Extracted catalog keys are complete in the focus locales, but the strict audit still fails on 68 Android and 102 Apple literals beyond its reviewed baseline. Those strings need extraction, translation review, or an explicit non-UI disposition before a localized store release. |
 
 ## Launch gates requiring external evidence
 
