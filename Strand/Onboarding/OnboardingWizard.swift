@@ -100,22 +100,22 @@ public struct OnboardingWizard: View {
         .background(StrandPalette.surfaceBase.ignoresSafeArea())
         // Keep the progress + primary action in the physical bottom safe area.
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            bottomBar
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-                .background(
-                    LinearGradient(
-                        colors: [StrandPalette.surfaceBase.opacity(0),
-                                 StrandPalette.surfaceBase.opacity(0.96)],
-                        startPoint: .top,
-                        endPoint: .center
+            if step != .profile || !profileEditing {
+                bottomBar
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+                    .background(
+                        LinearGradient(
+                            colors: [StrandPalette.surfaceBase.opacity(0),
+                                     StrandPalette.surfaceBase.opacity(0.96)],
+                            startPoint: .top,
+                            endPoint: .center
+                        )
+                        .ignoresSafeArea()
                     )
-                    .ignoresSafeArea()
-                )
-                .opacity(step == .profile && profileEditing ? 0 : 1)
-                .allowsHitTesting(!(step == .profile && profileEditing))
-                .accessibilityHidden(step == .profile && profileEditing)
+                    .transition(.opacity)
+            }
         }
         // Reduce Motion: leave the ambient bloom at its resting frame (no breathing).
         .onAppear { if !reduceMotion { glow = true } }
@@ -745,6 +745,7 @@ private struct ProfileStep: View {
     private var heightUnit: HeightUnit { UnitPrefs.resolveHeight(system: unitSystem, override: heightUnitRaw) }
 
     private enum InputField: Hashable { case weight, heightCm, heightFeet, heightInches }
+    private enum ScrollAnchor: Hashable { case height }
     @FocusState private var focusedField: InputField?
     /// Text-backed drafts deliberately remain separate from the validated SI profile values. A formatter-
     /// bound Double field clamps an empty intermediate edit straight back to the minimum (the reported
@@ -760,92 +761,96 @@ private struct ProfileStep: View {
     ]
 
     var body: some View {
-        StepShell(title: String(localized: "About you"),
-                  subtitle: String(localized: "So your zones, calories and baselines are accurate.")) {
-            VStack(spacing: 16) {
-                StrandCard {
-                    VStack(spacing: 18) {
-                        // #146: capture a date of birth so age advances on its own instead of going stale.
-                        DatePicker(selection: $profile.dateOfBirth,
-                                   in: ProfileStore.dateOfBirthRange,
-                                   displayedComponents: .date) {
-                            FieldRow(label: String(localized: "Date of birth"),
-                                     value: String(localized: "\(profile.age) yrs"))
-                        }
-                        .tint(StrandPalette.accent)
-
-                        Divider().overlay(StrandPalette.hairline)
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Sex").strandOverline()
-                            Picker("Sex", selection: $profile.sex) {
-                                ForEach(sexes, id: \.0) { key, label in
-                                    Text(label).tag(key)
-                                }
+        ScrollViewReader { scrollProxy in
+            StepShell(title: String(localized: "About you"),
+                      subtitle: String(localized: "So your zones, calories and baselines are accurate.")) {
+                VStack(spacing: 16) {
+                    StrandCard {
+                        VStack(spacing: 18) {
+                            // #146: capture a date of birth so age advances on its own instead of going stale.
+                            DatePicker(selection: $profile.dateOfBirth,
+                                       in: ProfileStore.dateOfBirthRange,
+                                       displayedComponents: .date) {
+                                FieldRow(label: String(localized: "Date of birth"),
+                                         value: String(localized: "\(profile.age) yrs"))
                             }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
+                            .tint(StrandPalette.accent)
+
+                            Divider().overlay(StrandPalette.hairline)
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Sex").strandOverline()
+                                Picker("Sex", selection: $profile.sex) {
+                                    ForEach(sexes, id: \.0) { key, label in
+                                        Text(label).tag(key)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .labelsHidden()
+                            }
+
+                            Divider().overlay(StrandPalette.hairline)
+
+                            weightEditor
+
+                            Divider().overlay(StrandPalette.hairline)
+
+                            heightEditor
+                                .id(ScrollAnchor.height)
                         }
-
-                        Divider().overlay(StrandPalette.hairline)
-
-                        weightEditor
-
-                        Divider().overlay(StrandPalette.hairline)
-
-                        heightEditor
                     }
-                }
 
-                Text("Weight and height units are independent. NOOP stores one precise value and only changes how it is displayed.")
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.textTertiary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                HStack(spacing: 8) {
-                    Image(systemName: "bolt.heart")
-                        .foregroundStyle(StrandPalette.accent)
-                    Text("Estimated max heart rate · \(profile.hrMax) bpm")
+                    Text("Weight and height units are independent. NOOP stores one precise value and only changes how it is displayed.")
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 8) {
+                        Image(systemName: "bolt.heart")
+                            .foregroundStyle(StrandPalette.accent)
+                        Text("Estimated max heart rate · \(profile.hrMax) bpm")
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
                 }
             }
-        }
-        .onAppear { syncMeasurementDrafts() }
-        .onChangeCompat(of: massUnitRaw) { _ in syncWeightDraft() }
-        .onChangeCompat(of: heightUnitRaw) { _ in syncHeightDrafts() }
-        .onChangeCompat(of: profile.weightKg) { _ in
-            if focusedField != .weight { syncWeightDraft() }
-        }
-        .onChangeCompat(of: profile.heightCm) { _ in
-            if focusedField != .heightCm && focusedField != .heightFeet
-                && focusedField != .heightInches {
-                syncHeightDrafts()
+            .onAppear { syncMeasurementDrafts() }
+            .onChangeCompat(of: massUnitRaw) { _ in syncWeightDraft() }
+            .onChangeCompat(of: heightUnitRaw) { _ in syncHeightDrafts() }
+            .onChangeCompat(of: profile.weightKg) { _ in
+                if focusedField != .weight { syncWeightDraft() }
             }
-        }
-        .onChangeCompat(of: focusedField) { field in
-            guard field == nil else {
-                isEditing = true
-                return
+            .onChangeCompat(of: profile.heightCm) { _ in
+                if focusedField != .heightCm && focusedField != .heightFeet
+                    && focusedField != .heightInches {
+                    syncHeightDrafts()
+                }
             }
-            DispatchQueue.main.async {
-                guard focusedField == nil else { return }
-                isEditing = false
-                normalizeMeasurementDrafts()
+            .onChangeCompat(of: focusedField) { field in
+                guard field == nil else {
+                    isEditing = true
+                    revealMeasurements(using: scrollProxy)
+                    return
+                }
+                DispatchQueue.main.async {
+                    guard focusedField == nil else { return }
+                    isEditing = false
+                    normalizeMeasurementDrafts()
+                }
             }
-        }
-        .onDisappear { isEditing = false }
-        #if os(iOS)
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") { finishEditing() }
-                    .font(StrandFont.body)
-                    .foregroundStyle(StrandPalette.accent)
+            .onDisappear { isEditing = false }
+            #if os(iOS)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { finishEditing() }
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.accent)
+                }
             }
+            #endif
         }
-        #endif
     }
 
     private var massSelection: Binding<MassUnit> {
@@ -1049,6 +1054,18 @@ private struct ProfileStep: View {
     private func focus(_ field: InputField) {
         isEditing = true
         focusedField = field
+    }
+
+    private func revealMeasurements(using proxy: ScrollViewProxy) {
+        #if os(iOS)
+        proxy.scrollTo(ScrollAnchor.height, anchor: .center)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            guard focusedField != nil else { return }
+            withAnimation(StrandMotion.gentle) {
+                proxy.scrollTo(ScrollAnchor.height, anchor: .center)
+            }
+        }
+        #endif
     }
 
     private var weightEditor: some View {

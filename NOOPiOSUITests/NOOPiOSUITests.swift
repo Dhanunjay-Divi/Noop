@@ -215,9 +215,11 @@ final class NOOPiOSUITests: XCTestCase {
 
         let height = app.textFields["noop.profile.height.cm"]
         XCTAssertTrue(height.exists)
+        XCTAssertTrue(height.isHittable, "Height must remain above the software keyboard while weight is active.")
         height.tap()
         let clearHeight = app.buttons["noop.profile.height.clear"]
         XCTAssertTrue(clearHeight.waitForExistence(timeout: 3))
+        XCTAssertTrue(clearHeight.isHittable)
         clearHeight.tap()
         height.typeText("183")
         XCTAssertEqual(height.value as? String, "183")
