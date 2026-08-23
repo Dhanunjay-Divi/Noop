@@ -238,17 +238,17 @@ public enum StrandPalette {
         .init(color: Color(light: "#CB3A2F", dark: "#E5483B"), location: 1.0),
     ]
 
-    // MARK: Recovery / Charge gradient - the gold "Charge" colour world.
-    // A single warm metal ramp: a deep bronze floor climbs through brand gold into a
-    // bright champagne peak — no green anywhere; depleted reads as dim gold, not coral.
-    // 0.00 bronze → 0.30 antique gold → 0.55 brand gold → 0.78 soft gold → 1.00 champagne.
+    // MARK: Recovery / Charge gradient.
+    // Recovery is a semantic red → orange → yellow → green scale. Continuous sampling is useful for
+    // charts; state-labelled gauges use `recoveryGaugeColors` below so their highlight cannot spill into
+    // the next named state (for example, a MODERATE yellow gauge must not end in PRIMED green).
     public static let recovery000 = Color(light: "#C0392B", dark: "#E0463C") // depleted - WHOOP red
     public static let recovery030 = Color(light: "#D9682A", dark: "#E8743C") // low - red-orange
     public static let recovery055 = Color(light: "#C99A00", dark: "#F9DF4A") // moderate - WHOOP yellow
     public static let recovery078 = Color(light: "#6FB23A", dark: "#8FD86A") // primed - yellow-green
     public static let recovery100 = Color(light: "#0F9D62", dark: "#03E095") // peak - WHOOP green
 
-    /// Ordered gradient stops for the recovery scale (Titanium gold ramp, or the Classic red→green).
+    /// Ordered gradient stops for the continuous red-to-green recovery scale.
     public static var recoveryStops: [Gradient.Stop] {
         isClassic ? cRecoveryStops : [
             .init(color: recovery000, location: 0.00),
@@ -259,7 +259,7 @@ public enum StrandPalette {
         ]
     }
 
-    /// The signature recovery gradient (bronze → champagne, or Classic red→green).
+    /// The continuous recovery gradient used by charts and heat strips.
     public static var recoveryGradient: Gradient { Gradient(stops: recoveryStops) }
 
     // MARK: Strain / Effort ramp - the amber "Effort" colour world.
@@ -421,10 +421,39 @@ public enum StrandPalette {
 
     // MARK: - Sampling helpers
 
-    /// Sample the recovery gradient (bronze → champagne) at a recovery score 0...100.
+    /// Sample the continuous recovery gradient at a recovery score 0...100.
     /// Returns the exact interpolated color used everywhere recovery is tinted.
     public static func recoveryColor(_ score: Double) -> Color {
         sample(stops: recoveryStops, at: score / 100.0)
+    }
+
+    /// A state-consistent base/highlight pair for a gauge that also displays `recoveryState(_:)`.
+    /// The arc length still communicates the exact score. Capping each color sample inside the current
+    /// label's range prevents the decorative highlight from implying a better state than the copy.
+    public static func recoveryGaugeColors(_ score: Double) -> (base: Color, tip: Color) {
+        switch score {
+        case ..<25:
+            return (recoveryColor(score), recoveryColor(24))
+        case ..<50:
+            return (recoveryColor(score), recoveryColor(49))
+        case ..<70:
+            // The continuous ramp starts turning green above its 55-point yellow stop. Keep the entire
+            // MODERATE treatment warm yellow until the PRIMED threshold is actually reached.
+            return (recoveryColor(min(score, 55)), signalYellow)
+        case ..<88:
+            return (recoveryColor(max(score, 78)), recoveryColor(87))
+        default:
+            return (recoveryColor(score), chargeBright)
+        }
+    }
+
+    /// A two-stop gradient for a Recovery gauge that displays a named state.
+    public static func recoveryGaugeStops(_ score: Double) -> [Gradient.Stop] {
+        let colors = recoveryGaugeColors(score)
+        return [
+            .init(color: colors.base, location: 0),
+            .init(color: colors.tip, location: 1),
+        ]
     }
 
     /// Sample the strain ("Effort") gradient at a value on NOOP's 0...100 Effort scale.

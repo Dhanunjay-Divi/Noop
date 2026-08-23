@@ -1514,8 +1514,8 @@
     <string name="l10n_today_screen_calories_3e62ecfe">Calories</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">Choisissez les vignettes à afficher dans votre Centre de contrôle et réorganisez-les avec les flèches.</string>
-    <string name="key_metrics_selection_instructions">Choisissez de 3 à 5 métriques pour votre Centre de contrôle et placez la plus importante en premier.</string>
-    <string name="key_metrics_selection_count">%1$d sur %2$d sélectionnées</string>
+    <string name="key_metrics_selection_instructions">Épinglez 3 à 5 métriques en haut. Toutes les métriques restent visibles.</string>
+    <string name="key_metrics_selection_count">%1$d sur %2$d épinglées</string>
     <string name="key_metrics_show_selected">Afficher les métriques sélectionnées</string>
     <string name="key_metrics_show_all_count">Afficher toutes les métriques (%1$d)</string>
     <string name="l10n_today_screen_data_label_data_value_data_unit_27f6fd6b">%1$s %2$s %3$s</string>
@@ -1543,7 +1543,7 @@
     <string name="l10n_today_screen_rest_hr_04005617">FC au repos</string>
     <string name="l10n_today_screen_resting_heart_rate_348928d6">Fréquence cardiaque au repos</string>
     <string name="l10n_today_screen_resting_hr_26677094">FC au repos</string>
-    <string name="l10n_today_screen_show_item_metric_title_81803daf">Afficher %1$s</string>
+    <string name="l10n_today_screen_show_item_metric_title_81803daf">Épingler %1$s</string>
     <string name="l10n_today_screen_sleep_3cac34e6">Sommeil</string>
     <string name="l10n_today_screen_source_herosourcelabel_d3363687">Source: %1$s</string>
     <string name="l10n_today_screen_squarer_tiles_with_a_trend_graph_3c297dec">Tuiles carrées avec un graphique de tendance sous la barre.</string>

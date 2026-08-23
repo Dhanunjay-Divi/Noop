@@ -6,10 +6,12 @@ blocked.
 ## Read first
 
 1. [`../ops/ACTIVE.md`](../ops/ACTIVE.md)
-2. [`../ops/rounds/2026-08-23-repository-independence.md`](../ops/rounds/2026-08-23-repository-independence.md)
-3. [`../REPOSITORY_INDEPENDENCE.md`](../REPOSITORY_INDEPENDENCE.md)
-4. [`../provenance/rights-status.json`](../provenance/rights-status.json)
-5. [`RELEASE-BLOCKERS.md`](RELEASE-BLOCKERS.md)
+2. [`../ops/rounds/2026-08-23-today-metrics-recovery.md`](../ops/rounds/2026-08-23-today-metrics-recovery.md)
+3. [`../ops/rounds/2026-08-23-repository-independence.md`](../ops/rounds/2026-08-23-repository-independence.md)
+4. [`../REPOSITORY_INDEPENDENCE.md`](../REPOSITORY_INDEPENDENCE.md)
+5. [`../provenance/rights-status.json`](../provenance/rights-status.json)
+6. [`RELEASE-BLOCKERS.md`](RELEASE-BLOCKERS.md)
+7. [`ROUND-14-today-metrics-recovery.md`](ROUND-14-today-metrics-recovery.md)
 
 ## Current repository truth
 
@@ -44,6 +46,11 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
   editing and returns afterward.
 - The DEBUG charging fixture now initializes live state before the first frame,
   removing a hosted UI-test race without changing Release behavior.
+- Today now keeps the complete ten-metric catalog visible on Apple and Android;
+  the saved three-to-five metrics are pins that lead the grid, not a visibility
+  filter.
+- Moderate Recovery gauges stay entirely yellow, and the Recovery hero and tile
+  now agree on the same score-state color.
 
 ## Verified gates
 
@@ -57,14 +64,24 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
 - i18n: focus-locale completeness and the no-new-literal regression gate pass.
 - Server: pinned Ruff checks pass; local tests pass 59 with 4
   database-dependent skips.
-- iOS production shell: 16/16 tests passed locally at `94661a17`.
+- Current iOS production shell: 17/17 tests passed locally at repository HEAD,
+  including the complete-catalog regression.
+- Current macOS app suite: 1,390 executed locally, with 1,389 passed,
+  1 intentional skip, and 0 failures.
+- Current StrandDesign package: 44/44 tests passed.
+- Current Android Demo Debug unit suite passed, including the mirrored Recovery
+  color and full-catalog ordering contracts.
+- Simulator captures for the current Today pass are committed under
+  `docs/assets/` and linked from the Round 14 handoff.
+- Prior iOS production shell: 16/16 tests passed locally at `94661a17`.
 - Profile keyboard regression: 5/5 passed on iPhone 17 Pro and 5/5 on compact
   iPhone 17e; both assert the lower measurement controls remain hittable.
 - Charging fixture regression: 5/5 passed on a newly created simulator, and the
   focused `AppleDemoSeederTests` contract passed 2/2.
 - Hosted app run `32670362286` passed at `94661a17`: the universal macOS build
-  and 1,390-test suite passed with 1 skipped, while the iOS simulator build and
-  16/16 production-shell tests passed, including the charging assertion.
+  executed 1,390 tests with 1 skipped and 0 failures, while the iOS simulator
+  build and 16/16 production-shell tests passed, including the charging
+  assertion.
 - Hosted i18n run `32670362251` and health-claims run `32670362291` passed at
   `94661a17`.
 - Workflow YAML parsing, ops records, private-data filename guard, JSON parsing,

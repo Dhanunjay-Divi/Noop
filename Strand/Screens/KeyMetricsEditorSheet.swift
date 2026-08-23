@@ -3,22 +3,20 @@ import StrandDesign
 
 // MARK: - Key-Metrics layout editor (#251)
 //
-// A Today-local sheet (no new nav destination — another lane owns the nav graph) for choosing which
-// Key-Metric tiles show on the Control Center and in what order. Display-only: it edits the persisted
-// `today.keyMetrics` layout string, never any stored metric. Three to five selected tiles render in the
-// list's order; the up/down chevrons reorder them. Explicit controls behave identically on macOS and iOS
-// without depending on List EditMode.
+// A Today-local sheet for choosing which Key-Metric tiles lead the Control Center and in what order.
+// Display-only: it edits the persisted `today.keyMetrics` pin string, never any stored metric. Every tile
+// remains visible; three to five pinned tiles render first. Explicit controls behave identically on macOS
+// and iOS without depending on List EditMode.
 
 struct KeyMetricsEditorSheet: View {
-    /// The persisted layout string (comma-joined enabled `KeyMetric` rawValues, in order). Bound straight
+    /// The persisted layout string (comma-joined pinned `KeyMetric` rawValues, in order). Bound straight
     /// to the Today screen's @AppStorage so an edit takes effect live and survives relaunch.
     @Binding var layoutRaw: String
 
     @Environment(\.dismiss) private var dismiss
 
-    /// Working copy: the full ordered list with an enabled flag per tile. Enabled tiles come first in
-    /// their saved order, then the disabled remainder in the default order — so toggling one on drops it
-    /// at the end of the visible set, and the editor always lists every known tile exactly once.
+    /// Working copy: the full ordered list with a pinned flag per tile. Pinned tiles come first in their
+    /// saved order, then the unpinned remainder in default order, so every known tile appears exactly once.
     @State private var items: [Item]
 
     private struct Item: Identifiable {
@@ -33,7 +31,7 @@ struct KeyMetricsEditorSheet: View {
         _layoutRaw = layoutRaw
         let enabled = KeyMetricPrefs.decodeEnabled(layoutRaw.wrappedValue)
         let enabledSet = Set(enabled)
-        // Enabled tiles first (saved order), then the rest in the canonical default order.
+        // Pinned tiles first (saved order), then the rest in the canonical default order.
         var working = enabled.map { Item(metric: $0, enabled: true) }
         for m in KeyMetric.defaultOrder where !enabledSet.contains(m) {
             working.append(Item(metric: m, enabled: false))
@@ -81,7 +79,7 @@ struct KeyMetricsEditorSheet: View {
             HStack(spacing: 12) {
                 MetricGlyph(item.metric.icon, size: 30)
                     .opacity(item.enabled ? 1 : 0.42)
-                // Show/hide toggle — an off tile is dimmed but stays listed so it can be re-enabled.
+                // Pin toggle. An unpinned tile stays visible on Today, after the priority set.
                 Toggle(isOn: enabledBinding(at: index)) {
                     Text(item.metric.title)
                         .font(StrandFont.body)
@@ -90,7 +88,7 @@ struct KeyMetricsEditorSheet: View {
                 .toggleStyle(KeyMetricSelectionToggleStyle())
                 .disabled(toggleLocked)
                 .accessibilityIdentifier("noop.key-metric.toggle.\(item.metric.rawValue)")
-                .accessibilityLabel("Show \(item.metric.title)")
+                .accessibilityLabel("Pin \(item.metric.title)")
                 .accessibilityHint(toggleHint(item))
 
                 Spacer(minLength: 0)
@@ -152,11 +150,11 @@ struct KeyMetricsEditorSheet: View {
             Text("Edit Key Metrics")
                 .font(StrandFont.rounded(24, weight: .bold))
                 .foregroundStyle(StrandPalette.textPrimary)
-            Text("Choose 3 to 5 metrics for your Control Center and put the most important first.")
+            Text("Pin 3 to 5 metrics at the top. Every metric stays visible.")
                 .font(StrandFont.subhead)
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("\(selectedCount) of \(KeyMetricPrefs.maximumSelectionCount) selected")
+            Text("\(selectedCount) of \(KeyMetricPrefs.maximumSelectionCount) pinned")
                 .font(StrandFont.captionNumber)
                 .foregroundStyle(
                     selectedCount == KeyMetricPrefs.maximumSelectionCount
@@ -219,12 +217,12 @@ struct KeyMetricsEditorSheet: View {
 
     private func toggleHint(_ item: Item) -> String {
         if item.enabled, selectedCount <= KeyMetricPrefs.minimumSelectionCount {
-            return String(localized: "At least three metrics must stay selected.")
+            return String(localized: "At least three metrics must stay pinned.")
         }
         if !item.enabled, selectedCount >= KeyMetricPrefs.maximumSelectionCount {
-            return String(localized: "Five metrics are already selected.")
+            return String(localized: "Five metrics are already pinned.")
         }
-        return String(localized: "Select or hide this metric.")
+        return String(localized: "Pin or unpin this metric.")
     }
 
     private func move(from: Int, to: Int) {
@@ -238,8 +236,8 @@ struct KeyMetricsEditorSheet: View {
         items = KeyMetric.defaultOrder.map { Item(metric: $0, enabled: defaults.contains($0)) }
     }
 
-    /// Persist the enabled tiles in their current order. Disabled tiles are simply omitted from the
-    /// stored string — `KeyMetricPrefs.decodeEnabled` rebuilds the editor's disabled remainder from the
+    /// Persist the pinned tiles in their current order. Unpinned tiles are omitted from the stored string;
+    /// `KeyMetricPrefs.decodeEnabled` rebuilds the editor's unpinned remainder from the
     /// default order on next open, so nothing is lost.
     private func commit() {
         layoutRaw = KeyMetricPrefs.encode(items.filter { $0.enabled }.map(\.metric))

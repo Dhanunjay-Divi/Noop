@@ -1514,8 +1514,8 @@
     <string name="l10n_today_screen_calories_3e62ecfe">Calorías</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">Elige qué mosaicos se muestran en tu Control Center y reordénalos con las flechas.</string>
-    <string name="key_metrics_selection_instructions">Elige entre 3 y 5 métricas para tu Centro de control y coloca primero la más importante.</string>
-    <string name="key_metrics_selection_count">%1$d de %2$d seleccionadas</string>
+    <string name="key_metrics_selection_instructions">Fija entre 3 y 5 métricas en la parte superior. Todas las métricas permanecen visibles.</string>
+    <string name="key_metrics_selection_count">%1$d de %2$d fijadas</string>
     <string name="key_metrics_show_selected">Mostrar métricas seleccionadas</string>
     <string name="key_metrics_show_all_count">Mostrar todas las métricas (%1$d)</string>
     <string name="l10n_today_screen_data_label_data_value_data_unit_27f6fd6b">%1$s %2$s %3$s</string>
@@ -1543,7 +1543,7 @@
     <string name="l10n_today_screen_rest_hr_04005617">FC en reposo</string>
     <string name="l10n_today_screen_resting_heart_rate_348928d6">Frecuencia cardíaca en reposo</string>
     <string name="l10n_today_screen_resting_hr_26677094">FC en reposo</string>
-    <string name="l10n_today_screen_show_item_metric_title_81803daf">Mostrar %1$s</string>
+    <string name="l10n_today_screen_show_item_metric_title_81803daf">Fijar %1$s</string>
     <string name="l10n_today_screen_sleep_3cac34e6">Sueño</string>
     <string name="l10n_today_screen_source_herosourcelabel_d3363687">Fuente: %1$s</string>
     <string name="l10n_today_screen_squarer_tiles_with_a_trend_graph_3c297dec">Azulejos cuadrados con un gráfico de tendencia bajo el bar.</string>

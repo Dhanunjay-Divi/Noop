@@ -1,8 +1,8 @@
 # Release blockers & production readiness
 
 **Assessed:** 2026-08-23
-**Implementation commit:** `94661a17` (use `git log -1` for the later handoff
-documentation commit)
+**Hosted implementation checkpoint:** `94661a17`; use `git log -1` for the
+current Round 14 implementation and handoff commit.
 **Verdict:** engineering gates are **green**. Commercial distribution is
 blocked by the three unresolved rights entries in
 `docs/provenance/rights-status.json`.
@@ -17,7 +17,7 @@ Current continuation instructions:
 | Gate | Result | Command |
 |---|---|---|
 | iOS app (`NOOPiOS`, Debug) | ✅ BUILD SUCCEEDED | `xcodebuild -scheme NOOPiOS -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build` |
-| iOS production-shell UI suite | PASS, 16 tests, 0 failures | `xcodebuild -scheme NOOPiOS -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test` |
+| iOS production-shell UI suite | PASS, 17 tests, 0 failures | `xcodebuild -scheme NOOPiOS -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test` |
 | Profile keyboard regression | PASS, 5/5 on iPhone 17 Pro and 5/5 on compact iPhone 17e | `testProfileMeasurementsCanBeClearedAndRetyped` with `-test-iterations 5` |
 | Charging fixture regression | PASS, 5/5 UI iterations and 2/2 focused unit contracts | Charging UI test on a new simulator plus `AppleDemoSeederTests` |
 | macOS app (`Strand`, Debug) | ✅ BUILD SUCCEEDED | `xcodebuild -scheme Strand -destination 'platform=macOS' build` |
@@ -37,6 +37,12 @@ local full-suite, clean-simulator repetition, and unit-contract evidence all
 pass after the change. Final hosted app run `32670362286` passed both jobs at
 `94661a17`: universal macOS build and tests, plus iOS simulator build and 16/16
 production-shell tests including the charging assertion.
+
+At the current local HEAD, Round 14 adds the complete Today metric-catalog UI
+regression, bringing the iOS suite to 17/17. The macOS suite remains 1,390 tests
+with 0 failures and 1 skip, StrandDesign passes 44/44, and the Android Demo
+Debug unit suite passes. Visual and continuation evidence is in
+[`ROUND-14-today-metrics-recovery.md`](ROUND-14-today-metrics-recovery.md).
 
 ---
 

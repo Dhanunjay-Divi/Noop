@@ -227,8 +227,8 @@ struct TodayView: View {
     @AppStorage(UnitPrefs.hrvWindowKey) private var hrvWindowRaw = HrvWindow.whole.rawValue
     private var hrvWindow: HrvWindow { HrvWindow(rawValue: hrvWindowRaw) ?? .whole }
 
-    // Editable Key-Metrics layout (#251), an ordered list of the enabled tiles, persisted display-only.
-    // Empty/unset shows the full default order. The "Edit" affordance on the section opens a local sheet.
+    // Editable Key-Metrics layout (#251), persisted as the three-to-five tiles pinned first. Every metric
+    // remains visible; the "Edit" affordance only controls priority and order.
     @AppStorage(KeyMetricPrefs.layoutKey) private var keyMetricsRaw = ""
     @State private var showingMetricsEditor = false
     private var enabledKeyMetrics: [KeyMetric] { KeyMetricPrefs.decodeEnabled(keyMetricsRaw) }
@@ -2851,14 +2851,16 @@ struct TodayView: View {
     private func chargeRing(score: Double?, d: DailyMetric?, diameter: CGFloat) -> some View {
         if let s = score {
             GlowRing(fraction: s / 100, value: s, format: { "\(Int($0.rounded()))" },
-                     color: StrandPalette.chargeColor, diameter: diameter, lineWidth: diameter * 0.10)
+                     color: StrandPalette.recoveryGaugeColors(s).base,
+                     diameter: diameter, lineWidth: diameter * 0.10)
         } else if recoveryCalibration == nil, let carried = lastScoredCharge {
             // #802: a CARRIED last-night Charge draws as a real (dimmed) ring, matching the Rest ring, rather
             // than a bare number on a faint track, which read as broken next to Rest's filled ring. Same
             // diameter, so the #762 self-sizing hero row is untouched; the dim + the row-level "Last night"
             // caption already beneath the rings mark it as carried, not today's fresh score.
             GlowRing(fraction: carried.value / 100, value: carried.value, format: { "\(Int($0.rounded()))" },
-                     color: StrandPalette.chargeColor, diameter: diameter, lineWidth: diameter * 0.10)
+                     color: StrandPalette.recoveryGaugeColors(carried.value).base,
+                     diameter: diameter, lineWidth: diameter * 0.10)
                 .opacity(0.8)
         } else {
             emptyHeroRing(diameter: diameter) { ringEmptyOverlay(d: d, diameter: diameter) }
@@ -3217,10 +3219,10 @@ struct TodayView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(StrandPalette.accent)
                 .accessibilityLabel("Edit Key Metrics")
-                .help("Choose which Key Metrics show and reorder them")
+                .help("Choose and reorder pinned Key Metrics")
             }
-            // The editor owns both visibility and order. Keep the dashboard to the user's three-to-five
-            // selected metrics; the complete catalog remains visible in the editor and Metric Explorer.
+            // Keep every prior metric visible. The editor's three-to-five pins lead the grid in saved order,
+            // and the unpinned catalog follows in its stable canonical order.
             LazyVGrid(columns: grid, alignment: .leading, spacing: NoopMetrics.gap) {
                 ForEach(visibleKeyMetrics) { metric in
                     // Pin every tile to one height so the grid reads as an even matrix. A LazyVGrid only
@@ -3231,6 +3233,7 @@ struct TodayView: View {
                     keyMetricTile(metric)
                         .frame(maxWidth: .infinity)
                         .frame(height: NoopMetrics.keyMetricTileHeight)
+                        .accessibilityIdentifier("noop.today.key-metric.\(metric.rawValue)")
                 }
             }
         }
@@ -3239,9 +3242,9 @@ struct TodayView: View {
         }
     }
 
-    /// The persisted list is the visible dashboard, not merely a pin order.
+    /// The complete catalog with the user's saved three-to-five pins first.
     private var visibleKeyMetrics: [KeyMetric] {
-        enabledKeyMetrics
+        KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)
     }
 
     /// A carried recovery-vital tile's (value, caption): today's own value wins (with the metric's
@@ -3336,8 +3339,9 @@ struct TodayView: View {
                     ?? recoveryCalibration.map { _ in String(localized: "Calibrating") }
                     ?? carried.map { $0.caption }
                     ?? Self.needsStrapCaption,
-                accent: d?.recovery.map { StrandPalette.recoveryColor($0) }
-                    ?? carried.map { StrandPalette.recoveryColor($0.value) } ?? StrandPalette.textPrimary
+                accent: d?.recovery.map { StrandPalette.recoveryGaugeColors($0).base }
+                    ?? carried.map { StrandPalette.recoveryGaugeColors($0.value).base }
+                    ?? StrandPalette.textPrimary
             )
         case .effort:
             // Unscored TODAY → a short "building" hint instead of the "of N" axis caption, so a

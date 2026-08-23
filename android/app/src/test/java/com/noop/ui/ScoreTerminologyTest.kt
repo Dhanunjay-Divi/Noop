@@ -1,5 +1,6 @@
 package com.noop.ui
 
+import com.noop.R
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -9,9 +10,9 @@ class ScoreTerminologyTest {
     @Test
     fun stableMetricKeysUseClearDisplayNames() {
         assertEquals("charge", KeyMetric.CHARGE.raw)
-        assertEquals("Recovery", KeyMetric.CHARGE.title)
+        assertEquals(R.string.l10n_today_screen_recovery_ea924f72, KeyMetric.CHARGE.titleRes)
         assertEquals("rest", KeyMetric.REST.raw)
-        assertEquals("Sleep", KeyMetric.REST.title)
+        assertEquals(R.string.l10n_today_screen_sleep_3cac34e6, KeyMetric.REST.titleRes)
     }
 
     @Test

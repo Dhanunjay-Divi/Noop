@@ -241,22 +241,43 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(hrv.isEnabled)
 
         hrv.tap()
-        XCTAssertTrue(app.staticTexts["4 of 5 selected"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["4 of 5 pinned"].waitForExistence(timeout: 3))
         XCTAssertEqual(hrv.value as? String, "1")
         XCTAssertTrue(recovery.isEnabled)
 
         recovery.tap()
-        XCTAssertTrue(app.staticTexts["3 of 5 selected"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["3 of 5 pinned"].waitForExistence(timeout: 3))
         XCTAssertEqual(recovery.value as? String, "0")
         XCTAssertFalse(hrv.isEnabled)
 
         recovery.tap()
-        XCTAssertTrue(app.staticTexts["4 of 5 selected"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["4 of 5 pinned"].waitForExistence(timeout: 3))
         restingHR.tap()
-        XCTAssertTrue(app.staticTexts["5 of 5 selected"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["5 of 5 pinned"].waitForExistence(timeout: 3))
         XCTAssertEqual(restingHR.value as? String, "1")
         XCTAssertFalse(bloodOxygen.isEnabled)
         keepScreenshot(app, name: "key-metrics-accessible-color-boundaries")
+    }
+
+    func testTodayKeepsTheCompleteMetricCatalogVisible() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--demo-seed",
+            "--demo-tab", "today",
+            "--demo-key-metrics",
+        ]
+        app.launch()
+
+        let metricIDs = [
+            "charge", "effort", "rest", "hrv", "restingHr",
+            "bloodOxygen", "respiratory", "steps", "weight", "calories",
+        ]
+        for id in metricIDs {
+            let tile = app.descendants(matching: .any)["noop.today.key-metric.\(id)"]
+            for _ in 0..<4 where !tile.exists { app.swipeUp() }
+            XCTAssertTrue(tile.waitForExistence(timeout: 3), "\(id) must remain in the Today catalog.")
+        }
+        keepScreenshot(app, name: "today-complete-key-metric-catalog")
     }
 
     func testMetricScreensExposeTheirOwnReminderControls() {

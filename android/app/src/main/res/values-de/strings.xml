@@ -1680,8 +1680,8 @@
     <string name="l10n_today_screen_calories_3e62ecfe">Kalorien</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">Wähle, welche Kacheln in deinem Kontrollzentrum erscheinen, und ordne sie mit den Pfeilen neu.</string>
-    <string name="key_metrics_selection_instructions">Wähle 3 bis 5 Messwerte für dein Kontrollzentrum aus und stelle den wichtigsten an die erste Stelle.</string>
-    <string name="key_metrics_selection_count">%1$d von %2$d ausgewählt</string>
+    <string name="key_metrics_selection_instructions">Pinne 3 bis 5 Messwerte oben an. Alle Messwerte bleiben sichtbar.</string>
+    <string name="key_metrics_selection_count">%1$d von %2$d angepinnt</string>
     <string name="key_metrics_show_selected">Ausgewählte Messwerte anzeigen</string>
     <string name="key_metrics_show_all_count">Alle Messwerte anzeigen (%1$d)</string>
     <string name="l10n_today_screen_data_label_data_value_data_unit_27f6fd6b">%1$s %2$s %3$s</string>
@@ -1709,7 +1709,7 @@
     <string name="l10n_today_screen_rest_hr_04005617">Ruhepuls</string>
     <string name="l10n_today_screen_resting_heart_rate_348928d6">Ruheherzfrequenz</string>
     <string name="l10n_today_screen_resting_hr_26677094">Ruhe-HF</string>
-    <string name="l10n_today_screen_show_item_metric_title_81803daf">%1$s anzeigen</string>
+    <string name="l10n_today_screen_show_item_metric_title_81803daf">%1$s anpinnen</string>
     <string name="l10n_today_screen_sleep_3cac34e6">Schlaf</string>
     <string name="l10n_today_screen_source_herosourcelabel_d3363687">Quelle: %1$s</string>
     <string name="l10n_today_screen_squarer_tiles_with_a_trend_graph_3c297dec">Squarer-Kacheln mit einem Trendgraphen unter der Bar.</string>

@@ -117,12 +117,14 @@ struct LiquidTodayView: View {
         #endif
         return saved
     }
-    // The Key-Metrics grid honours the shared editor's selection/order. Each applicable tile gets a
-    // compact 14-day trace for immediate context; window controls and exact values remain in Trends/detail.
+    // The Key-Metrics grid always shows the full catalog. The shared editor chooses the three-to-five
+    // metrics pinned first and their order; every applicable tile keeps its compact history trace.
     @AppStorage(KeyMetricPrefs.layoutKey) private var keyMetricsRaw = ""
     @State private var showKeyMetricsEditor = false
     private var enabledKeyMetrics: [KeyMetric] { KeyMetricPrefs.decodeEnabled(keyMetricsRaw) }
-    private var visibleKeyMetrics: [KeyMetric] { enabledKeyMetrics }
+    private var visibleKeyMetrics: [KeyMetric] {
+        KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)
+    }
     /// One shared, selected-day-anchored history cache for the compact tile traces. Building this in
     /// `load()` keeps the grid body O(1), and prevents an older selected day from seeing future readings.
     @State private var keyMetricTrends: [KeyMetric: [Double]] = [:]
@@ -980,13 +982,19 @@ struct LiquidTodayView: View {
         )
     }
 
+    private var recoveryHeroColors: (base: Color, tip: Color) {
+        guard let score = chargeDisplay.pct else {
+            return (StrandPalette.chargeColor, StrandPalette.chargeBright)
+        }
+        return StrandPalette.recoveryGaugeColors(score)
+    }
+
     private var recoveryHeroTone: Color {
-        chargeDisplay.pct.map(StrandPalette.recoveryColor) ?? StrandPalette.chargeColor
+        recoveryHeroColors.base
     }
 
     private var recoveryHeroTip: Color {
-        guard let score = chargeDisplay.pct else { return StrandPalette.chargeBright }
-        return StrandPalette.recoveryColor(min(100, score + 18))
+        recoveryHeroColors.tip
     }
 
     private var recoveryHeroCaption: String {
@@ -1905,17 +1913,15 @@ struct LiquidTodayView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Edit Key Metrics")
             }
-            // The editor owns both visibility and order. The dashboard renders only the selected
-            // three-to-five metrics; every other metric remains available in the editor and history.
-            // Two columns give values and units enough room to breathe on a phone. Three columns
-            // made long labels and five-digit values compete for the same narrow sliver, which looked
-            // like a diagnostic table rather than a premium daily dashboard.
+            // Pinned metrics lead in the user's order, followed by every remaining catalog metric.
+            // Two columns keep values and long labels readable; three made the grid feel like a table.
             LazyVGrid(
                 columns: Array(repeating: GridItem(.flexible(), spacing: NoopMetrics.space3), count: 2),
                 spacing: NoopMetrics.space3
             ) {
                 ForEach(visibleKeyMetrics) { metric in
                     ktileFor(metric, hrv: hrv, rhr: rhr)
+                        .accessibilityIdentifier("noop.today.key-metric.\(metric.rawValue)")
                 }
             }
             NavigationLink(value: TabRoute.metricExplorer) {
@@ -1940,7 +1946,7 @@ struct LiquidTodayView: View {
             // hero are the same number, so a carry that reached only one of them would put two answers for
             // Charge on one screen. (#543: one prior row feeds every recovery-derived read-out.) Strain below
             // stays raw, matching the Effort hero, which correctly does not carry.
-            ktile(String(localized: "Recovery"), intText(chargeDisplay.pct), "%", StrandPalette.chargeColor,
+            ktile(String(localized: "Recovery"), intText(chargeDisplay.pct), "%", recoveryHeroTone,
                   frac(chargeDisplay.pct), symbol: metric.icon, key: "recovery")
         case .effort:
             let display = effortScale == .whoop

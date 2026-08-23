@@ -54,6 +54,14 @@ class AppearanceModeTest {
     }
 
     @Test
+    fun moderateRecoveryGaugeCannotDriftIntoPrimedGreen() {
+        val (base, tip) = Palette.recoveryGaugeColors(69.0)
+        assertEquals(Palette.recoveryColor(55.0), base)
+        assertEquals(Palette.signalYellow, tip)
+        assertEquals(listOf(0.0f to base, 1.0f to tip), Palette.recoveryGaugeStops(69.0))
+    }
+
+    @Test
     fun semanticStatusTextMatchesAppleAndMeetsPearlContrast() {
         assertEquals(Color(0xFF19734A), LightTokens.statusPositiveText)
         assertEquals(Color(0xFF895900), LightTokens.statusWarningText)

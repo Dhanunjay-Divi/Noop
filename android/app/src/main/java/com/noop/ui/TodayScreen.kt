@@ -440,7 +440,7 @@ fun TodayScreen(
     val ageMetricProfileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
     val ageMetricState = remember(ageMetricProfileVersion) { profileStore.ageMetricStateToken }
 
-    // Editable Key-Metrics layout (#251), an ordered list of the enabled tiles, persisted display-only.
+    // Editable Key-Metrics layout (#251), an ordered list of the pinned tiles, persisted display-only.
     // SharedPreferences isn't reactive, so it's mirrored into local state and re-read when the editor saves.
     var showMetricsEditor by remember { mutableStateOf(false) }
     var enabledKeyMetrics by remember { mutableStateOf(KeyMetricPrefs.enabled(context)) }
@@ -712,9 +712,8 @@ fun TodayScreen(
     val journalReminderOn = remember { NoopPrefs.journalReminderEnabled(context) }
     // S4: the Synthesis card collapses to a one-liner that expands on tap (default collapsed). Mirrors iOS.
     var synthesisExpanded by remember { mutableStateOf(false) }
-    // Key Metrics starts with the user's three-to-five pins and can expand to the complete ten-tile
-    // catalog without mutating them. Data Sources still collapses to its summary. Neither state persists.
-    var metricsExpanded by remember { mutableStateOf(false) }
+    // Key Metrics always shows the complete catalog with the user's three-to-five pins first. Data Sources
+    // still collapses to its summary.
     var sourcesExpanded by remember { mutableStateOf(false) }
     var scoringCardSeen by remember { mutableStateOf(ScoringGuidePrefs.cardSeen(context)) }
 
@@ -1594,8 +1593,6 @@ fun TodayScreen(
                                     enabledMetrics = enabledKeyMetrics,
                                     isToday = selectedDayOffset == 0,
                                     onScoreInfo = openGuide,
-                                    metricsExpanded = metricsExpanded,
-                                    onToggleMetrics = { metricsExpanded = !metricsExpanded },
                                     detailed = keyMetricsDetailed,
                                     onOpenMetric = onOpenMetric,
                                 )
@@ -3178,7 +3175,7 @@ private fun ScoreHeroRow(
                                 modifier = Modifier.alpha(0.8f),
                                 fraction = carried.value / 100.0,
                                 value = carried.value,
-                                tint = Palette.recoveryColor(carried.value),
+                                tint = Palette.recoveryGaugeColors(carried.value).first,
                                 diameter = ring,
                                 animated = animated,
                                 showsValue = true,
@@ -3197,7 +3194,8 @@ private fun ScoreHeroRow(
                             HeroScoreVessel(
                                 fraction = recoveryProgress,
                                 value = recovery ?: 0.0,
-                                tint = Palette.recoveryColor(recovery ?: 0.0),
+                                tint = recovery?.let { Palette.recoveryGaugeColors(it).first }
+                                    ?: Palette.chargeColor,
                                 diameter = ring,
                                 animated = animated,
                                 showsValue = recovery != null,
@@ -5081,9 +5079,6 @@ private fun MetricGrid(
     enabledMetrics: List<KeyMetric> = KeyMetric.defaultOrder,
     isToday: Boolean = false,
     onScoreInfo: (ScoreSection) -> Unit = {},
-    // Compact mode shows the saved three-to-five pins. Expanded mode appends all unpinned catalog metrics.
-    metricsExpanded: Boolean = true,
-    onToggleMetrics: () -> Unit = {},
     // Detailed tiles (the #251 editor's switch): squarer tiles with a 14-day trend graph under the bar.
     detailed: Boolean = false,
     // Tile drill-ins: every tile opens its focused trend timeline (vital_detail/<key>, the Sleep
@@ -5094,7 +5089,7 @@ private fun MetricGrid(
     // — a 9sp/+1.2 overline label and a value + small unit. Genuinely bounded daily scores also get a thin
     // 8dp LiquidTube; raw measurements keep the same aligned space without an arbitrary "more is better"
     // fill. One descriptor per KeyMetric carries the same value/tint reads the old builders used. The #251
-    // editor + enabled-order + collapse expander are all preserved; only the tile look changes.
+    // editor's pin order is preserved while every catalog tile remains visible.
     val descriptors: Map<KeyMetric, KeyTileData> = mapOf(
         KeyMetric.CHARGE to run {
             val v = d?.recovery ?: lastScoredCharge?.value
@@ -5113,7 +5108,7 @@ private fun MetricGrid(
                     ?: recoveryCalibration?.let { "$it/${Baselines.minNightsSeed}" }
                     ?: lastScoredCharge?.let { "${it.value.roundToInt()}" } ?: NO_DATA,
                 unit = if (d?.recovery != null || lastScoredCharge != null) "%" else "",
-                tint = v?.let { Palette.recoveryColor(it) } ?: Palette.chargeColor,
+                tint = v?.let { Palette.recoveryGaugeColors(it).first } ?: Palette.chargeColor,
                 frac = progress?.coerceIn(0.0, 1.0),
                 spark = w.recovery,
             )
@@ -5218,9 +5213,8 @@ private fun MetricGrid(
         },
     )
 
-    // Resolve pins and the full catalog separately. Expansion is display-only: the saved list stays 3-to-5.
-    val pinnedTiles = enabledMetrics.mapNotNull { m -> descriptors[m]?.let { m to it } }
-    val catalogTiles = KeyMetricPrefs.catalogOrder(enabledMetrics)
+    // Always show the complete catalog. The saved three-to-five pins only determine which tiles lead.
+    val tiles = KeyMetricPrefs.catalogOrder(enabledMetrics)
         .mapNotNull { m -> descriptors[m]?.let { m to it } }
     // Tile tap -> its focused trend TIMELINE (the Sleep night-detail pattern), uniformly for every tile
     // with a windowed series: Recovery/Effort/Rest open their new trend details; the vitals +
@@ -5239,9 +5233,6 @@ private fun MetricGrid(
         KeyMetric.CALORIES -> ({ onOpenMetric("active_kcal") })
         KeyMetric.WEIGHT -> null
     }
-    val hasOverflow = catalogTiles.size > pinnedTiles.size
-    val tiles = if (metricsExpanded) catalogTiles else pinnedTiles
-
     // iOS `keyMetricsSection` LazyVGrid: 3 columns, spacing 8. Build from rows so tile heights tile uniformly
     // and a partial last row pads with empty weight so the columns stay aligned.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -5263,30 +5254,6 @@ private fun MetricGrid(
                     )
                 }
                 repeat(3 - rowTiles.size) { Spacer(Modifier.weight(1f)) }
-            }
-        }
-        // The centered expander changes visibility only; the editor remains the owner of saved pins.
-        if (hasOverflow) {
-            val hidden = catalogTiles.size - pinnedTiles.size
-            TextButton(
-                onClick = onToggleMetrics,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.textButtonColors(contentColor = Palette.accent),
-            ) {
-                Text(
-                    if (metricsExpanded) {
-                        stringResource(R.string.key_metrics_show_selected)
-                    } else {
-                        stringResource(R.string.key_metrics_show_all_count, hidden)
-                    },
-                    style = NoopType.subhead,
-                )
-                Spacer(Modifier.width(4.dp))
-                Icon(
-                    if (metricsExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                )
             }
         }
     }
@@ -6844,11 +6811,10 @@ private fun grouped(value: Int): String =
 
 // MARK: - Key-Metrics layout editor (#251)
 //
-// A Today-local dialog (no new nav destination, another lane owns the nav graph) for choosing which
-// Key-Metric tiles show on the Control Center and in what order. Display-only: it edits the persisted
-// `today.keyMetrics` layout, never any stored metric. A switch hides/shows a tile and the up/down arrows
-// reorder it, explicit arrows rather than drag so it behaves the same on every device. Mirrors the macOS
-// KeyMetricsEditorSheet.
+// A Today-local dialog for choosing which Key-Metric tiles lead the Control Center and in what order.
+// Display-only: it edits the persisted `today.keyMetrics` pins, never any stored metric. Every tile remains
+// visible; switches pin three to five, and explicit arrows reorder them consistently on every device.
+// Mirrors the Apple KeyMetricsEditorSheet.
 
 /** The Key-Metrics header's trailing label for the chosen detailed-graph window. */
 private fun trendWindowLabel(days: Int): String = when (days) {
@@ -6857,7 +6823,7 @@ private fun trendWindowLabel(days: Int): String = when (days) {
     else -> "14-day trend"
 }
 
-/** One editor row: a tile with its current enabled flag. The working list is rebuilt on each edit. */
+/** One editor row with its current pinned flag. The working list is rebuilt on each edit. */
 private data class EditableMetric(val metric: KeyMetric, val enabled: Boolean)
 
 @Composable
@@ -6872,7 +6838,7 @@ private fun KeyMetricsEditorDialog(
     // chosen trailing window (2 days / 1 week / 2 weeks).
     var detailed by remember { mutableStateOf(initialDetailed) }
     var windowDays by remember { mutableStateOf(initialWindowDays) }
-    // Working copy: enabled tiles first (saved order), then the disabled remainder in the default order,     // so toggling one on drops it at the end of the visible set, and every known tile is listed once.
+    // Working copy: pinned tiles first in saved order, then the unpinned remainder in canonical order.
     val items = remember {
         val enabledSet = initial.toHashSet()
         mutableStateListOf<EditableMetric>().apply {
@@ -6965,6 +6931,7 @@ private fun KeyMetricsEditorDialog(
                         .verticalScroll(rememberScrollState()),
                 ) {
                     items.forEachIndexed { index, item ->
+                        val metricTitle = uiString(item.metric.titleRes)
                         val toggleEnabled = if (item.enabled) {
                             selectedCount > KeyMetricPrefs.MIN_SELECTION_COUNT
                         } else {
@@ -6992,11 +6959,11 @@ private fun KeyMetricsEditorDialog(
                                     disabledUncheckedTrackColor = Palette.surfaceInset,
                                     disabledUncheckedBorderColor = Palette.hairline,
                                 ),
-                                modifier = Modifier.semantics { contentDescription = uiString(R.string.l10n_today_screen_show_item_metric_title_81803daf, item.metric.title) },
+                                modifier = Modifier.semantics { contentDescription = uiString(R.string.l10n_today_screen_show_item_metric_title_81803daf, metricTitle) },
                             )
                             Spacer(Modifier.width(12.dp))
                             Text(
-                                item.metric.title,
+                                metricTitle,
                                 style = NoopType.body,
                                 color = if (item.enabled) Palette.textPrimary else Palette.textTertiary,
                                 modifier = Modifier.weight(1f),
@@ -7008,7 +6975,7 @@ private fun KeyMetricsEditorDialog(
                             ) {
                                 Icon(
                                     Icons.Filled.KeyboardArrowUp,
-                                    contentDescription = uiString(R.string.l10n_today_screen_move_item_metric_title_up_52d2104c, item.metric.title),
+                                    contentDescription = uiString(R.string.l10n_today_screen_move_item_metric_title_up_52d2104c, metricTitle),
                                     tint = if (index > 0) Palette.textSecondary else Palette.textTertiary,
                                     modifier = Modifier.size(Metrics.iconSmall),
                                 )
@@ -7020,7 +6987,7 @@ private fun KeyMetricsEditorDialog(
                             ) {
                                 Icon(
                                     Icons.Filled.KeyboardArrowDown,
-                                    contentDescription = uiString(R.string.l10n_today_screen_move_item_metric_title_down_890afe60, item.metric.title),
+                                    contentDescription = uiString(R.string.l10n_today_screen_move_item_metric_title_down_890afe60, metricTitle),
                                     tint = if (index < items.lastIndex) Palette.textSecondary else Palette.textTertiary,
                                     modifier = Modifier.size(Metrics.iconSmall),
                                 )
@@ -7035,7 +7002,7 @@ private fun KeyMetricsEditorDialog(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(
                         onClick = {
-                            // Reset to NOOP's three core daily signals; every other metric stays available.
+                            // Reset NOOP's three core pins; every other metric remains visible below them.
                             val defaults = KeyMetric.defaultSelection.toSet()
                             items.clear()
                             KeyMetric.defaultOrder.forEach {

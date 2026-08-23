@@ -5,6 +5,7 @@ recorded; it does not erase the explicit limitations in that record.
 
 | Date | Round | Status | Branch | Implementation evidence | Outcome |
 |---|---|---|---|---|---|
+| 2026-08-23 | [Today metric catalog and Recovery color](2026-08-23-today-metrics-recovery.md) | Completed; distribution unchanged | `main` | Commit containing the round record | Moderate Recovery is consistently yellow; all ten Today metrics remain visible with user pins first. |
 | 2026-08-23 | [Repository independence and mainline consolidation](2026-08-23-repository-independence.md) | Completed; distribution blocked | `main` | Commit containing the round record | Canonical hosting and branch cleanup completed; commercial release remains fail-closed on three rights blockers. |
 | 2026-08-22 | [First App Store submission](2026-08-22-first-app-store-connect-preview.md) | Blocked before upload | `codex/day4-sync-performance` | `972a126b` plus documentation follow-up | App Store preparation and launch gate completed; public upload blocked by rights, signing/reviewer, and physical-validation gates. |
 | 2026-08-21 | [Ops documentation bootstrap](2026-08-21-ops-documentation-bootstrap.md) | Completed | `codex/day4-sync-performance` | Documentation-only round after `241f2000` | Added the durable round ledger and local ops-skill contract. |

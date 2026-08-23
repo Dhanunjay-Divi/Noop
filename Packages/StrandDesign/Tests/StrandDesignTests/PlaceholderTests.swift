@@ -65,6 +65,26 @@ final class StrandDesignTests: XCTestCase {
         XCTAssertEqual(StrandPalette.recoveryState(95), "PEAK")
     }
 
+    func testModerateRecoveryGaugeStaysInTheYellowState() {
+        let colors = StrandPalette.recoveryGaugeColors(69)
+        let base = colors.base.rgbaComponents
+        let yellow = StrandPalette.recoveryColor(55).rgbaComponents
+        XCTAssertEqual(base.r, yellow.r, accuracy: 0.01)
+        XCTAssertEqual(base.g, yellow.g, accuracy: 0.01)
+        XCTAssertEqual(base.b, yellow.b, accuracy: 0.01)
+
+        let tip = colors.tip.rgbaComponents
+        let signalYellow = StrandPalette.signalYellow.rgbaComponents
+        XCTAssertEqual(tip.r, signalYellow.r, accuracy: 0.01)
+        XCTAssertEqual(tip.g, signalYellow.g, accuracy: 0.01)
+        XCTAssertEqual(tip.b, signalYellow.b, accuracy: 0.01)
+
+        let stops = StrandPalette.recoveryGaugeStops(69)
+        XCTAssertEqual(stops.count, 2)
+        XCTAssertEqual(stops.first?.location, 0)
+        XCTAssertEqual(stops.last?.location, 1)
+    }
+
     func testStrainColorScaleAndEndpoints() {
         // Effort samples the 0...100 ramp; endpoints match ember/magenta.
         let ember = StrandPalette.strainColor(0).rgbaComponents

@@ -233,6 +233,24 @@ object Palette {
     /** Sample the recovery gradient at a recovery score 0..100. */
     fun recoveryColor(score: Double): Color = sample(recoveryStops, (score / 100.0).toFloat())
 
+    /**
+     * State-consistent gauge colors. Charts keep the continuous ramp, while a score paired with a
+     * DEPLETED/LOW/MODERATE/PRIMED/PEAK label cannot visually drift into the next state.
+     */
+    fun recoveryGaugeColors(score: Double): Pair<Color, Color> = when {
+        score < 25.0 -> recoveryColor(score) to recoveryColor(24.0)
+        score < 50.0 -> recoveryColor(score) to recoveryColor(49.0)
+        score < 70.0 -> recoveryColor(minOf(score, 55.0)) to signalYellow
+        score < 88.0 -> recoveryColor(maxOf(score, 78.0)) to recoveryColor(87.0)
+        else -> recoveryColor(score) to chargeBright
+    }
+
+    /** Two-stop gradient for a Recovery gauge that displays a named state. */
+    fun recoveryGaugeStops(score: Double): List<Pair<Float, Color>> {
+        val (base, tip) = recoveryGaugeColors(score)
+        return listOf(0.0f to base, 1.0f to tip)
+    }
+
     /** Sample the strain gradient at an Effort value on the 0..100 scale. */
     fun strainColor(strain: Double): Color = sample(strainStops, (strain / 100.0).toFloat())
 

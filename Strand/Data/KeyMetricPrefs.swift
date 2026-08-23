@@ -5,13 +5,13 @@ import SwiftUI
 //
 // The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin three to five in
 // their preferred order. A fresh install starts with NOOP's three core daily signals — Recovery, Effort,
-// and Sleep — while every other metric remains available in the editor. Persistence is display-only: no
-// metric is computed or stored differently.
+// and Sleep — while every other metric follows them in the complete catalog. Persistence is display-only:
+// no metric is computed or stored differently.
 //
 // Stored as a single comma-joined string of metric keys in @AppStorage (UserDefaults), the same
 // mechanism every other macOS NOOP preference uses. The Android side mirrors this exactly in
 // KeyMetricPrefs.kt (SharedPreferences "today.keyMetrics"). Unknown keys are dropped on read and any
-// known key missing from the saved list is appended by the editor as an unselected option.
+// known key missing from the saved list is treated as unpinned and remains visible after the priority set.
 
 /// One of the Today screen's Key-Metric tiles. The rawValue is the stable persisted identifier — keep it
 /// byte-identical to the Android `KeyMetric` enum so a backup/restore reads the same layout on either OS.
@@ -83,8 +83,8 @@ enum KeyMetric: String, CaseIterable, Identifiable {
     static let defaultSelection: [KeyMetric] = [.charge, .effort, .rest]
 }
 
-/// Display-only persistence for the Key-Metrics layout. Holds an ORDERED list of the enabled tiles; a
-/// tile not in the list is hidden. Mirrors the macOS @AppStorage("today.keyMetrics") + Android side.
+/// Display-only persistence for the Key-Metrics layout. Holds an ORDERED list of pinned tiles; a tile not
+/// in the list remains visible after them. Mirrors @AppStorage("today.keyMetrics") + the Android side.
 enum KeyMetricPrefs {
     /// UserDefaults key — a comma-joined list of `KeyMetric` rawValues in display order.
     static let layoutKey = "today.keyMetrics"
@@ -129,8 +129,8 @@ enum KeyMetricPrefs {
         return selected
     }
 
-    /// The full dashboard catalog with the user's pinned metrics first. "Show all" uses this display-only
-    /// order so every prior tile remains reachable without changing or expanding the saved 3-to-5 selection.
+    /// The full dashboard catalog with the user's pinned metrics first. Resolving this display order never
+    /// changes or expands the saved three-to-five pin set.
     static func catalogOrder(startingWith metrics: [KeyMetric]) -> [KeyMetric] {
         let selected = normalized(metrics)
         let selectedSet = Set(selected)

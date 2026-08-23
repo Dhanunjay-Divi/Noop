@@ -9,8 +9,9 @@ Last updated: **2026-08-23**
 - Active branch: `main`; local and `origin/main` match after the completed push.
 - Remote branches: only `origin/main` remains after merged-branch cleanup.
 - GitHub reports `isFork=false`, no parent, and `main` as the default branch.
-- Final implementation checkpoint before the current documentation update:
-  `94661a17`.
+- Previous hosted implementation checkpoint: `94661a17`.
+- Current implementation and round record: use `git log -1`; this record is
+  committed with the Today metric-catalog and Recovery-color change.
 - Hosting independence is complete. Commercial source independence is not.
 - Current agent instructions:
   [`../handoff/AGENT-HANDOFF-20260823.md`](../handoff/AGENT-HANDOFF-20260823.md)
@@ -18,26 +19,23 @@ Last updated: **2026-08-23**
 ## Last completed round
 
 The
-[repository-independence and mainline-consolidation round](rounds/2026-08-23-repository-independence.md)
-put all completed work on canonical `main`, removed obsolete hosting artifacts
-and the shared debug key, synchronized Terms 2.3, and added machine-readable
-provenance enforcement.
+[Today metric catalog and Recovery color round](rounds/2026-08-23-today-metrics-recovery.md)
+keeps every existing Key Metric visible on Apple and Android. The saved
+three-to-five preference now means priority pins: those metrics lead, and the
+remaining catalog follows in canonical order. It also bounds named Recovery
+gauges to their displayed state, so Moderate stays warm yellow and does not
+finish in green.
 
-Final engineering evidence includes 25/25 tool tests, Android compile and unit
-tests, iOS and macOS app builds, exact legal inventory verification, health-copy
-scanning, workflow parsing, server tests, i18n regression coverage, ops
-validation, and private-data/diff hygiene. The final local iOS production-shell
-suite passed 16/16. Focused profile editing passed 5/5 on both iPhone 17 Pro and
-compact iPhone 17e, the clean charging-state regression passed 5/5, and the
-focused seeder contract passed 2/2.
+Current local evidence includes 44/44 StrandDesign tests, the 1,390-test macOS
+suite with one intentional skip, 17/17 iOS production-shell tests, the Android
+Demo Debug unit suite, and an iOS Debug simulator build. Tracked simulator
+captures are under `docs/assets/`.
 
-Hosted i18n run `32670362251` and health-claims run `32670362291` passed at
-`94661a17`. The immediately preceding hosted app run exposed a first-frame
-DEBUG charging-fixture race; the synchronous remediation is included in
-`94661a17` and the failed run remains recorded in the round rather than being
-hidden. Final hosted app run `32670362286` then passed both Apple jobs: the
-universal macOS build and 1,390-test suite passed with 1 skipped, and the iOS
-simulator build plus 16/16 production-shell tests passed.
+The preceding
+[repository-independence round](rounds/2026-08-23-repository-independence.md)
+remains the authority for repository and source-rights state. Hosted i18n run
+`32670362251`, health-claims run `32670362291`, and app run `32670362286`
+passed at `94661a17`.
 
 The stricter distribution gate intentionally fails on:
 
@@ -68,5 +66,7 @@ The stricter distribution gate intentionally fails on:
   battery, detector, medical, or regulatory behavior.
 - Passing i18n CI prevents new debt; it does not translate the 413 baseline
   entries or approve machine-translated reproductive-health copy.
+- The Today round changes presentation and ordering only; it does not validate
+  scoring, sensors, BLE, background work, haptics, or medical accuracy.
 - Keep the repository private and do not treat private hosting as commercial
   distribution approval.

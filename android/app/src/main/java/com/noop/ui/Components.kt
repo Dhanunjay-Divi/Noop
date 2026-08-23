@@ -1096,10 +1096,11 @@ fun RecoveryRing(
     showsLabel: Boolean = true,
     valueFormat: ((Double) -> String)? = null,
 ) {
+    val gaugeColors = Palette.recoveryGaugeColors(score)
     BevelGauge(
         fraction = score / 100.0,
-        stops = Palette.recoveryStops,
-        tipColor = Palette.recoveryColor(score),
+        stops = Palette.recoveryGaugeStops(score),
+        tipColor = gaugeColors.second,
         numberText = valueFormat?.invoke(score) ?: score.toInt().toString(),
         stateText = Palette.recoveryState(score),
         supporting = supporting,

@@ -1,17 +1,19 @@
 package com.noop.ui
 
 import android.content.Context
+import androidx.annotation.StringRes
+import com.noop.R
 
 // MARK: - Editable Key-Metrics layout (#251)
 //
 // The Today screen's "Key Metrics" grid has ten available tiles. This lets the user pin three to five in
 // their preferred order. A fresh install starts with NOOP's three core daily signals — Recovery, Effort,
-// and Sleep — while every other metric remains available in the editor. Persistence is display-only.
+// and Sleep — while every other metric follows them in the complete catalog. Persistence is display-only.
 //
 // Stored as a single comma-joined string of metric keys in SharedPreferences ("today.keyMetrics"), the
 // same mechanism every other Android preference uses. Mirrors the macOS KeyMetricPrefs.swift +
 // @AppStorage("today.keyMetrics"). Unknown keys are dropped on read so a removed tile can't crash, and
-// any known key missing from the saved list is treated as disabled (the editor re-lists it).
+// any known key missing from the saved list is treated as unpinned (the editor still re-lists it).
 
 /**
  * One of the Today screen's Key-Metric tiles. The [raw] is the stable persisted identifier — keep it
@@ -19,22 +21,22 @@ import android.content.Context
  */
 enum class KeyMetric(
     val raw: String,
-    val title: String,
+    @StringRes val titleRes: Int,
     /** True only when the tile's value has a real, bounded progress axis. Raw vitals deliberately stay
      *  false: mapping HRV, resting HR, respiration, etc. to an arbitrary ceiling makes a decorative fill
      *  look like "more is better" health progress. */
     val isBoundedProgress: Boolean = false,
 ) {
-    CHARGE("charge", "Recovery", isBoundedProgress = true),
-    EFFORT("effort", "Effort", isBoundedProgress = true),
-    REST("rest", "Sleep", isBoundedProgress = true),
-    HRV("hrv", "HRV"),
-    RESTING_HR("restingHr", "Resting HR"),
-    BLOOD_OXYGEN("bloodOxygen", "Blood Oxygen"),
-    RESPIRATORY("respiratory", "Respiratory"),
-    STEPS("steps", "Steps"),
-    WEIGHT("weight", "Weight"),
-    CALORIES("calories", "Calories");
+    CHARGE("charge", R.string.l10n_today_screen_recovery_ea924f72, isBoundedProgress = true),
+    EFFORT("effort", R.string.trends_effort, isBoundedProgress = true),
+    REST("rest", R.string.l10n_today_screen_sleep_3cac34e6, isBoundedProgress = true),
+    HRV("hrv", R.string.widget_hrv),
+    RESTING_HR("restingHr", R.string.l10n_today_screen_resting_hr_26677094),
+    BLOOD_OXYGEN("bloodOxygen", R.string.l10n_today_screen_blood_oxygen_a8ad9ff5),
+    RESPIRATORY("respiratory", R.string.l10n_today_screen_respiratory_1cd8c175),
+    STEPS("steps", R.string.l10n_today_screen_steps_cdde4f20),
+    WEIGHT("weight", R.string.l10n_today_screen_weight_69c0b815),
+    CALORIES("calories", R.string.l10n_today_screen_calories_3e62ecfe);
 
     companion object {
         fun fromRaw(raw: String?): KeyMetric? = entries.firstOrNull { it.raw == raw }
@@ -51,8 +53,8 @@ enum class KeyMetric(
 }
 
 /**
- * Display-only persistence for the Key-Metrics layout. Holds an ORDERED list of the enabled tiles; a tile
- * not in the list is hidden. SharedPreferences isn't reactive, so the Today screen reads this once into
+ * Display-only persistence for the Key-Metrics layout. Holds an ORDERED list of pinned tiles; a tile not
+ * in the list remains visible after them. SharedPreferences isn't reactive, so Today reads this once into
  * remembered state (like the other prefs) and re-reads on the recomposition the editor's write triggers.
  * Mirrors the macOS KeyMetricPrefs (@AppStorage "today.keyMetrics").
  */
@@ -83,21 +85,21 @@ object KeyMetricPrefs {
         NoopPrefs.of(context).edit().putInt(KEY_WINDOW, value).apply()
     }
 
-    /** The selected tiles in display order. Empty/unset preferences yield the three core defaults. */
+    /** The pinned tiles in display order. Empty/unset preferences yield the three core defaults. */
     fun enabled(context: Context): List<KeyMetric> =
         decodeEnabled(NoopPrefs.of(context).getString(KEY_LAYOUT, null))
 
-    /** Persist a valid ordered selection; the preference boundary enforces the same invariants as the UI. */
+    /** Persist a valid ordered pin set; the preference boundary enforces the same invariants as the UI. */
     fun setEnabled(context: Context, metrics: List<KeyMetric>) {
         NoopPrefs.of(context).edit().putString(KEY_LAYOUT, encode(metrics)).apply()
     }
 
-    /** Encode an ordered, deduplicated selection capped at five. */
+    /** Encode an ordered, deduplicated pin set capped at five. */
     fun encode(metrics: List<KeyMetric>): String =
         normalized(metrics).joinToString(",") { it.raw }
 
     /**
-     * Decode the stored string into an ordered selection. Empty, unset, or all-unknown data yields the
+     * Decode the stored string into an ordered pin set. Empty, unset, or all-unknown data yields the
      * three core defaults. Older versions allowed more than five; their first five survive in order.
      */
     fun decodeEnabled(raw: String?): List<KeyMetric> {
@@ -121,7 +123,7 @@ object KeyMetricPrefs {
         return selected.take(MAX_SELECTION_COUNT)
     }
 
-    /** Full catalog with the saved 3-to-5 pins first; expanding it never mutates the saved selection. */
+    /** Full catalog with the saved 3-to-5 pins first; display ordering never mutates the saved pins. */
     fun catalogOrder(startingWith: List<KeyMetric>): List<KeyMetric> {
         val selected = normalized(startingWith)
         val selectedSet = selected.toHashSet()

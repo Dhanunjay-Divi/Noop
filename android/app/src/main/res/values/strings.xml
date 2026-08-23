@@ -1693,8 +1693,8 @@
     <string name="l10n_today_screen_calories_3e62ecfe">Calories</string>
     <string name="l10n_today_screen_card_title_value_e4bb76b3">%1$s: %2$s</string>
     <string name="l10n_today_screen_choose_which_tiles_show_on_your_a4e3acfb">Choose which tiles show on your Control Center and reorder them with the arrows.</string>
-    <string name="key_metrics_selection_instructions">Choose 3 to 5 metrics for your Control Center and put the most important first.</string>
-    <string name="key_metrics_selection_count">%1$d of %2$d selected</string>
+    <string name="key_metrics_selection_instructions">Pin 3 to 5 metrics at the top. Every metric stays visible.</string>
+    <string name="key_metrics_selection_count">%1$d of %2$d pinned</string>
     <string name="key_metrics_show_selected">Show selected metrics</string>
     <string name="key_metrics_show_all_count">Show all metrics (%1$d)</string>
     <string name="l10n_today_screen_data_label_data_value_data_unit_27f6fd6b">%1$s %2$s %3$s</string>
@@ -1722,7 +1722,7 @@
     <string name="l10n_today_screen_rest_hr_04005617">Resting HR</string>
     <string name="l10n_today_screen_resting_heart_rate_348928d6">Resting heart rate</string>
     <string name="l10n_today_screen_resting_hr_26677094">Resting HR</string>
-    <string name="l10n_today_screen_show_item_metric_title_81803daf">Show %1$s</string>
+    <string name="l10n_today_screen_show_item_metric_title_81803daf">Pin %1$s</string>
     <string name="l10n_today_screen_sleep_3cac34e6">Sleep</string>
     <string name="l10n_today_screen_source_herosourcelabel_d3363687">Source: %1$s</string>
     <string name="l10n_today_screen_squarer_tiles_with_a_trend_graph_3c297dec">Squarer tiles with a trend graph under the bar.</string>

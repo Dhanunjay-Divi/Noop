@@ -73,14 +73,17 @@ public struct RecoveryRing: View {
     @State private var bloomPulse: Bool = false
 
     private var fraction: Double { min(max(score / 100.0, 0), 1) }
-    private var tipColor: Color { StrandPalette.recoveryColor(score) }
+    private var gaugeColors: (base: Color, tip: Color) {
+        StrandPalette.recoveryGaugeColors(score)
+    }
+    private var tipColor: Color { gaugeColors.tip }
     private var stateWord: String { StrandPalette.recoveryState(score) }
 
     public var body: some View {
         ZStack {
             BevelGauge(
                 fraction: fraction,
-                stops: StrandPalette.recoveryStops,
+                stops: StrandPalette.recoveryGaugeStops(score),
                 tipColor: tipColor,
                 numberText: numberString,
                 captionText: showsLabel ? "of 100" : nil,

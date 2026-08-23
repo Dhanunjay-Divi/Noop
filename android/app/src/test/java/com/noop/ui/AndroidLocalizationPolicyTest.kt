@@ -88,7 +88,9 @@ class AndroidLocalizationPolicyTest {
         val partial = partialFiles.mapValues { resources(it.value!!) }
         val expectedKeys = partial.getValue("values-it").keys
         val allowed = Regex(
-            """string:(wind_down_|sleep_planner_|strength_|key_metrics_(selection_|show_)|hydration_(adaptive_timing_|base_interval_label)).*|string:nav_alarms""",
+            """string:(wind_down_|sleep_planner_|strength_|key_metrics_(selection_|show_)|hydration_(adaptive_timing_|base_interval_label)).*|""" +
+                """string:(widget_hrv|trends_effort|l10n_today_screen_(recovery_ea924f72|sleep_3cac34e6|resting_hr_26677094|blood_oxygen_a8ad9ff5|respiratory_1cd8c175|steps_cdde4f20|weight_69c0b815|calories_3e62ecfe))|""" +
+                """string:nav_alarms""",
         )
 
         assertTrue(

@@ -423,20 +423,28 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         XCTAssertTrue(shell.contains(#"MoreRow("Health & Biology", "heart.text.square.fill", .health)"#))
     }
 
-    func testTodayHonorsTheSavedThreeToFiveMetricSelection() throws {
+    func testTodayShowsTheFullCatalogWithSavedMetricsPinnedFirst() throws {
         let classic = try text("Strand/Screens/TodayView.swift")
         let liquid = try text("Strand/Liquid/LiquidTodayView.swift")
+        let recoveryRing = try text("Packages/StrandDesign/Sources/StrandDesign/RecoveryRing.swift")
+        let androidToday = try text("android/app/src/main/java/com/noop/ui/TodayScreen.kt")
+        let androidRing = try text("android/app/src/main/java/com/noop/ui/Components.kt")
 
         XCTAssertTrue(classic.contains("private var visibleKeyMetrics: [KeyMetric]"))
         XCTAssertTrue(classic.contains("ForEach(visibleKeyMetrics)"))
-        XCTAssertFalse(classic.contains(
+        XCTAssertTrue(classic.contains(
             "KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)"
         ))
         XCTAssertTrue(liquid.contains("private var visibleKeyMetrics: [KeyMetric]"))
         XCTAssertTrue(liquid.contains("ForEach(visibleKeyMetrics)"))
-        XCTAssertFalse(liquid.contains(
+        XCTAssertTrue(liquid.contains(
             "KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)"
         ))
+        XCTAssertTrue(classic.contains("StrandPalette.recoveryGaugeColors(s).base"))
+        XCTAssertTrue(liquid.contains("StrandPalette.recoveryGaugeColors(score)"))
+        XCTAssertTrue(recoveryRing.contains("StrandPalette.recoveryGaugeStops(score)"))
+        XCTAssertTrue(androidToday.contains("Palette.recoveryGaugeColors(it).first"))
+        XCTAssertTrue(androidRing.contains("Palette.recoveryGaugeStops(score)"))
     }
 }
 
