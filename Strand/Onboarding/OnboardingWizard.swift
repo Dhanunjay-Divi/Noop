@@ -825,9 +825,15 @@ private struct ProfileStep: View {
             }
         }
         .onChangeCompat(of: focusedField) { field in
-            isEditing = field != nil
-            guard field == nil else { return }
-            normalizeMeasurementDrafts()
+            guard field == nil else {
+                isEditing = true
+                return
+            }
+            DispatchQueue.main.async {
+                guard focusedField == nil else { return }
+                isEditing = false
+                normalizeMeasurementDrafts()
+            }
         }
         .onDisappear { isEditing = false }
         #if os(iOS)
@@ -1068,19 +1074,20 @@ private struct ProfileStep: View {
                         .simultaneousGesture(TapGesture().onEnded { focus(.weight) })
                         .accessibilityLabel("Weight value")
                         .accessibilityIdentifier("noop.profile.weight")
-                    if !weightDraft.isEmpty {
-                        Button {
-                            weightDraft = ""
-                            focus(.weight)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 15))
-                                .foregroundStyle(StrandPalette.textTertiary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Clear weight")
-                        .accessibilityIdentifier("noop.profile.weight.clear")
+                    Button {
+                        focus(.weight)
+                        weightDraft = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(StrandPalette.textTertiary)
                     }
+                    .buttonStyle(.plain)
+                    .opacity(weightDraft.isEmpty ? 0 : 1)
+                    .disabled(weightDraft.isEmpty)
+                    .accessibilityHidden(weightDraft.isEmpty)
+                    .accessibilityLabel("Clear weight")
+                    .accessibilityIdentifier("noop.profile.weight.clear")
                 }
                 .frame(width: 92)
                 .measurementEntryChrome()
@@ -1120,19 +1127,20 @@ private struct ProfileStep: View {
                             .simultaneousGesture(TapGesture().onEnded { focus(.heightCm) })
                             .accessibilityLabel("Height value")
                             .accessibilityIdentifier("noop.profile.height.cm")
-                        if !heightCmDraft.isEmpty {
-                            Button {
-                                heightCmDraft = ""
-                                focus(.heightCm)
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 15))
-                                    .foregroundStyle(StrandPalette.textTertiary)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Clear height")
-                            .accessibilityIdentifier("noop.profile.height.clear")
+                        Button {
+                            focus(.heightCm)
+                            heightCmDraft = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 15))
+                                .foregroundStyle(StrandPalette.textTertiary)
                         }
+                        .buttonStyle(.plain)
+                        .opacity(heightCmDraft.isEmpty ? 0 : 1)
+                        .disabled(heightCmDraft.isEmpty)
+                        .accessibilityHidden(heightCmDraft.isEmpty)
+                        .accessibilityLabel("Clear height")
+                        .accessibilityIdentifier("noop.profile.height.clear")
                     }
                     .frame(width: 76)
                     .measurementEntryChrome()

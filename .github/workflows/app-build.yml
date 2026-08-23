@@ -95,7 +95,6 @@ jobs:
           CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
           test
 
-  # Fork-only housekeeping: on-demand app-build runs are dispatched from disposable `ci/<name>` branches
   # Repository housekeeping: on-demand app-build runs may use disposable `ci/<name>` branches
   # (a PR's content pushed somewhere the workflow can run). Once the build finishes (pass OR fail —
   # always()), delete that branch so GitHub's "Compare & pull request" banner doesn't linger after each
