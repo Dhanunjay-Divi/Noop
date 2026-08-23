@@ -79,6 +79,21 @@ targets:
     sources:
       - path: Strand
         excludes:
+          # UI exploration prototype SCREENS (v2 "Aurora", v3 "Instrument", v4 "Useful"). They were
+          # design studies reachable only through --demo-screen, so they were shipping ~1.9k lines of
+          # unreachable UI in the binary. Everything worth keeping already graduated into the real app:
+          # the WHY / TARGET / WORTH-WATCHING Today sections, and CalendarMonthView (which supersedes
+          # V2MonthCalendar). The files stay in the repo for reference - restore by deleting these lines.
+          #
+          # NOT excluded: UIv2/NoopV2Components.swift AND UIv2/NoopV2Tokens.swift (the components read
+          # the `NoopV2` token namespace). Despite living in a folder named "UIv2" they are
+          # PRODUCTION code - the shipping LiquidTodayView renders V2HeroArc, V2SatelliteRing and V2Chip
+          # from it. Excluding the whole directory breaks both app targets. (Follow-up: move that file out
+          # of UIv2 so its production status is obvious from its path.)
+          - "UIv2/TodayV2View.swift"
+          - "UIv2/V2MonthCalendar.swift"
+          - "UIv3"
+          - "UIv4"
           - "Resources/Info.plist"
           - "Resources/Strand.entitlements"
           # The liquid Today is now cross-platform: its iOS-only chrome (topBarTrailing / navigationBarTitleDisplayMode
@@ -204,6 +219,21 @@ targets:
     sources:
       - path: Strand
         excludes:
+          # UI exploration prototype SCREENS (v2 "Aurora", v3 "Instrument", v4 "Useful"). They were
+          # design studies reachable only through --demo-screen, so they were shipping ~1.9k lines of
+          # unreachable UI in the binary. Everything worth keeping already graduated into the real app:
+          # the WHY / TARGET / WORTH-WATCHING Today sections, and CalendarMonthView (which supersedes
+          # V2MonthCalendar). The files stay in the repo for reference - restore by deleting these lines.
+          #
+          # NOT excluded: UIv2/NoopV2Components.swift AND UIv2/NoopV2Tokens.swift (the components read
+          # the `NoopV2` token namespace). Despite living in a folder named "UIv2" they are
+          # PRODUCTION code - the shipping LiquidTodayView renders V2HeroArc, V2SatelliteRing and V2Chip
+          # from it. Excluding the whole directory breaks both app targets. (Follow-up: move that file out
+          # of UIv2 so its production status is obvious from its path.)
+          - "UIv2/TodayV2View.swift"
+          - "UIv2/V2MonthCalendar.swift"
+          - "UIv3"
+          - "UIv4"
           - "Resources/Info.plist"
           - "Resources/Strand.entitlements"
           - "Resources/Assets.xcassets"

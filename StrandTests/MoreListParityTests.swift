@@ -200,9 +200,9 @@ final class MoreListParityTests: XCTestCase {
                       "Horizontal charts and Back gestures must not consume the scroll interaction budget.")
         XCTAssertTrue(shell.contains("reportScrollPosition(offset, for: tag)"),
                       "Primary tabs must drive chrome from the real ScrollView top marker.")
-        XCTAssertTrue(shell.contains("offset <= -36, tracker.directionalTravel <= -18"),
+        XCTAssertTrue(shell.contains("offset <= -24, tracker.directionalTravel <= -12"),
                       "Compaction needs both page progress and directional hysteresis.")
-        XCTAssertTrue(shell.contains("tracker.directionalTravel >= 26"),
+        XCTAssertTrue(shell.contains("tracker.directionalTravel >= 18"),
                       "Expansion needs a deliberate return, not a one-frame bounce.")
         XCTAssertTrue(shell.contains("offset >= -10"),
                       "Returning to the page's top band must always restore labels.")
@@ -237,8 +237,16 @@ final class MoreListParityTests: XCTestCase {
                       "Accessibility Dynamic Type must retain visible labels.")
         XCTAssertTrue(shell.contains(".font(.system(size: 11,"),
                       "Tab labels need a native-sized fixed font so the longest title never ellipsizes.")
-        XCTAssertTrue(shell.contains(#"? "Train" : item.title"#),
-                      "The narrow rail needs a concise visible activity label while accessibility keeps Workouts.")
+        // The rail used to shorten Workouts to a hard-coded "Train". That literal had no String Catalog
+        // entry, so it rendered untranslated in all nine locales; it was removed. The rail now draws the
+        // LOCALIZED title and stays whole via lineLimit + minimumScaleFactor. Pin that, and pin the
+        // absence of the bare literal so the untranslated shortening cannot quietly return.
+        XCTAssertTrue(shell.contains("Text(visualTitle(for: item))"),
+                      "The rail label must go through visualTitle(for:).")
+        XCTAssertTrue(shell.contains(".minimumScaleFactor(0.8)"),
+                      "Long localized titles must scale down rather than be replaced by English shorthand.")
+        XCTAssertFalse(shell.contains(#"? "Train" : item.title"#),
+                       "An untranslated English tab label must not be reintroduced; add a catalog key instead.")
         XCTAssertTrue(shell.contains(".accessibilityLabel(item.title)"),
                       "The concise activity label must not replace the full spoken destination name.")
         XCTAssertTrue(shell.contains(".frame(minHeight: 44)"))

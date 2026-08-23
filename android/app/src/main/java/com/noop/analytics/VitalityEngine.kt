@@ -95,6 +95,10 @@ object VitalityEngine {
             out.add(Contribution("sleep", "Sleep duration", dev.coerceIn(0.0, 3.0) * 0.110))
         }
         inputs.sleepConsistency?.let {
+            // Coefficient 0.450 / ref 0.75: INTERNAL, UNCITED product choice. Must NOT be attributed to
+            // the UK Biobank Sleep Regularity Index — published SRI hazard ratios come from sleep–wake
+            // TIMING, whereas this input is 1 − CV of nightly DURATION, a weaker partial correlate.
+            // Byte-identical to the Swift twin; see VitalityEngine.swift for the full rationale.
             out.add(Contribution("consistency", "Sleep-duration consistency", (0.75 - it.coerceIn(0.0, 1.0)) * 0.450))
         }
         val h = inputs.rmssd; val norm = inputs.rmssdNorm

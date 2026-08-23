@@ -121,13 +121,9 @@ struct LiquidTodayView: View {
     // compact 14-day trace for immediate context; window controls and exact values remain in Trends/detail.
     @AppStorage(KeyMetricPrefs.layoutKey) private var keyMetricsRaw = ""
     @State private var showKeyMetricsEditor = false
-    @State private var keyMetricsExpanded = false
     private var enabledKeyMetrics: [KeyMetric] { KeyMetricPrefs.decodeEnabled(keyMetricsRaw) }
     private var allKeyMetricsInDisplayOrder: [KeyMetric] {
         KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)
-    }
-    private var visibleKeyMetrics: [KeyMetric] {
-        keyMetricsExpanded ? allKeyMetricsInDisplayOrder : enabledKeyMetrics
     }
     /// One shared, selected-day-anchored history cache for the compact tile traces. Building this in
     /// `load()` keeps the grid body O(1), and prevents an older selected day from seeing future readings.
@@ -1560,6 +1556,20 @@ struct LiquidTodayView: View {
                 action: dailyPlanActionLabel(plan.action)
             )
         case .ready:
+            // S1 PARITY: Kotlin renders the CALIBRATING state row when a READY plan carries no target
+            // (TodayScreen.kt, Availability.READY -> target == null). Swift used to fall through and show
+            // a bare action line with no range and no explanation, so the two platforms disagreed on the
+            // same input. Both planners currently gate `target` before emitting .ready, so this is a dead
+            // path today - but an un-mirrored fallback is exactly how a future planner change becomes a
+            // silent cross-platform divergence, which the parity constraint forbids.
+            if plan.target == nil {
+                dailyPlanStateRow(
+                    symbol: "chart.line.uptrend.xyaxis",
+                    title: "daily_plan.state.calibrating.title",
+                    body: "daily_plan.state.calibrating.body",
+                    tint: StrandPalette.statusWarning
+                )
+            } else {
             VStack(alignment: .leading, spacing: 10) {
                 if let target = plan.target {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -1589,6 +1599,7 @@ struct LiquidTodayView: View {
                     .foregroundStyle(StrandPalette.textPrimary)
             }
             .accessibilityElement(children: .combine)
+            }
         }
     }
 
@@ -1896,9 +1907,9 @@ struct LiquidTodayView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Edit Key Metrics")
             }
-            // The compact grid honours the editor's ordered set of three to five choices. Expanding appends
-            // every unpinned catalog metric without altering the saved selection, so none of the previous
-            // dashboard metrics disappears merely because the default view is focused.
+            // Always render the complete catalog. The editor still owns which three-to-five metrics lead
+            // the grid and their order; unpinned metrics follow immediately instead of hiding behind a
+            // disclosure control.
             // Two columns give values and units enough room to breathe on a phone. Three columns
             // made long labels and five-digit values compete for the same narrow sliver, which looked
             // like a diagnostic table rather than a premium daily dashboard.
@@ -1906,45 +1917,17 @@ struct LiquidTodayView: View {
                 columns: Array(repeating: GridItem(.flexible(), spacing: NoopMetrics.space3), count: 2),
                 spacing: NoopMetrics.space3
             ) {
-                ForEach(visibleKeyMetrics) { metric in
+                ForEach(allKeyMetricsInDisplayOrder) { metric in
                     ktileFor(metric, hrv: hrv, rhr: rhr)
                 }
             }
-            Button {
-                withAnimation(StrandMotion.interactive) { keyMetricsExpanded.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Text(keyMetricsExpanded ? "Show selected metrics" : "Show all metrics")
-                        .font(StrandFont.subhead)
-                    if !keyMetricsExpanded {
-                        Text("\(allKeyMetricsInDisplayOrder.count - enabledKeyMetrics.count)")
-                            .font(StrandFont.captionNumber)
-                            .foregroundStyle(StrandPalette.textTertiary)
-                    }
-                    Image(systemName: keyMetricsExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 11, weight: .bold))
-                }
-                .foregroundStyle(StrandPalette.accent)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 2)
-                .contentShape(Rectangle())
+            NavigationLink(value: TabRoute.metricExplorer) {
+                Label("Open all metric history", systemImage: "clock.arrow.circlepath")
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .frame(maxWidth: .infinity)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(
-                keyMetricsExpanded
-                    ? "Show selected metrics"
-                    : "Show all metrics, \(allKeyMetricsInDisplayOrder.count - enabledKeyMetrics.count) more"
-            )
-
-            if keyMetricsExpanded {
-                NavigationLink(value: TabRoute.metricExplorer) {
-                    Label("Open all metric history", systemImage: "clock.arrow.circlepath")
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textSecondary)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.plain)
-            }
         }
     }
 

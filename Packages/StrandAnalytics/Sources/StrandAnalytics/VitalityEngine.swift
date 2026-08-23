@@ -142,7 +142,14 @@ public enum VitalityEngine {
     ///   • Resting HR: +~10.5% all-cause mortality per +10 bpm (UK Biobank / meta-analyses). ref 65.
     ///   • VO₂max: ~14% per MET (3.5 ml/kg/min) vs the age/sex-expected value (FRIEND). fitter = protective.
     ///   • Sleep duration: U-shaped, optimum ~7.5 h; only deviation beyond ±0.5 h adds hazard (~12%/h).
-    ///   • Sleep regularity: most-regular vs least ≈ HR 0.70 (UK Biobank SRI). ref 0.75 of the 0–1 range.
+    ///   • Sleep-duration consistency: coefficient 0.450, ref 0.75 of the 0–1 range. INTERNAL, UNCITED —
+    ///     do NOT re-attribute this to the UK Biobank Sleep Regularity Index. The published SRI hazard
+    ///     ratios are derived from sleep–wake TIMING across 24-hour epochs; our input is
+    ///     `sleepConsistency`, which is 1 − CV of nightly DURATION (see its doc comment). Duration
+    ///     variability is a weaker, partial correlate of SRI, so borrowing the SRI hazard ratio wholesale
+    ///     would overstate what this input can support. The term is retained because duration regularity
+    ///     is plausibly associated with outcomes, but the magnitude is a product choice, not a citation.
+    ///     OPEN: attenuate once we compute a true timing-based SRI (see ROUND-13 doc, validation backlog).
     ///   • HRV (RMSSD): ~16% per relative SD below the age norm (lower HRV = higher hazard).
     ///   • Steps: ~12% per 1,000 steps/day up to ~7k, diminishing to ~11k (pooled step-mortality meta).
     public static func contributions(_ inputs: Inputs) -> [Contribution] {

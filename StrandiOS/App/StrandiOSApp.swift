@@ -550,15 +550,7 @@ enum DemoScreens {
         // to have diverged from. Without this, the default Today was the one screen the harness could not
         // capture.
         case "liquidtoday": return AnyView(LiquidTodayView())
-        // UI v2 ("Aurora") - the redesigned Today. Renders from TodayV2Model.demo so the harness can
-        // capture it deterministically; the live wiring reads the same model shape.
-        case "todayv2":  return AnyView(TodayV2View(model: .demo))
-        case "v2calendar": return AnyView(V2MonthCalendarDemo())
         case "calendar": return AnyView(CalendarMonthView())
-        // UI v3 "Instrument" - dense, flat-field, status-word instrument language.
-        case "todayv3":  return AnyView(TodayV3View(model: .demo))
-        // UI v4 "Useful" - NOOP 3D glyphs + BevelGauge, every block answers one real question.
-        case "todayv4":  return AnyView(TodayV4View(model: .demo))
         case "trends":   return AnyView(TrendsView())
         case "sleep":    return AnyView(SleepView())
         case "live":     return AnyView(LiveView())

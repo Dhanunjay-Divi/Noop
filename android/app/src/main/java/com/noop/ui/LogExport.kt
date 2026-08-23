@@ -135,7 +135,7 @@ object LogExport {
 
             val dynamic = com.noop.testcentre.AndroidDiagnostics.dynamicLines(context)
             val header = buildString {
-                appendLine("NOOP strap log (scheduled debug export)")
+                appendLine("Noop Band log (scheduled debug export)")
                 appendLine("App:     ${BuildConfig.VERSION_NAME} (${BuildConfig.TIER})")
                 for (line in com.noop.testcentre.AndroidDiagnostics.summaryLines(context)) appendLine(line)
                 for (line in dynamic) appendLine(line)
@@ -187,7 +187,7 @@ object LogExport {
         mirrorToRollingBuffer(logText)
         val dynamic = com.noop.testcentre.AndroidDiagnostics.dynamicLines(context)
         val header = buildString {
-            appendLine("NOOP strap log")
+            appendLine("Noop Band log")
             appendLine("App:     ${BuildConfig.VERSION_NAME} (${BuildConfig.TIER})")
             for (line in com.noop.testcentre.AndroidDiagnostics.summaryLines(context)) appendLine(line)
             for (line in dynamic) appendLine(line)
@@ -339,7 +339,7 @@ object LogExport {
             }
             if (confirmDiagnosticShare(context, prepared)) {
                 withContext(Dispatchers.Main.immediate) {
-                    startFileShare(context, file, "text/plain", "NOOP strap log", "Share strap log")
+                    startFileShare(context, file, "text/plain", "Noop Band log", "Share Noop Band log")
                 }
             }
         }.onFailure {

@@ -272,9 +272,20 @@ struct CycleAwarenessOptInCard: View {
 
 // MARK: - Cycle tracker detail
 
-/// Local period-start history used only to anchor the awareness engine. This deliberately records one
-/// date per cycle—not symptoms, flow, fertility, contraception, or diagnoses—and shows whether an
-/// anchor was entered in NOOP or imported from Apple Health. Manual and imported sources are isolated.
+/// Local period-start history used to anchor the awareness engine, plus OPTIONAL per-day detail the user
+/// types in themselves.
+///
+/// Scope, stated precisely because this is reproductive-health data:
+///   • ALWAYS: one period-start date per cycle (`CycleTrackingStore.Entry`), and whether that anchor was
+///     entered in NOOP or imported from Apple Health. Manual and imported sources stay isolated.
+///   • OPTIONAL, user-entered only: flow level and symptoms (`CycleTrackingStore.DailyLog`, surfaced by
+///     `selectedFlow` / `selectedSymptoms` below). Never imported, never inferred from the wearable, and
+///     independently erasable via the "delete flow and symptom entries" control.
+///   • NEVER: fertility windows, contraception data, or any diagnosis.
+///
+/// This comment previously claimed the store recorded "one date per cycle—not symptoms, flow ...", which
+/// stopped being true when optional flow/symptom logging was added. A privacy-scope comment that lies is
+/// worse than no comment, because it is what the next reader will trust.
 struct CycleTrackerView: View {
     @EnvironmentObject private var repo: Repository
     @EnvironmentObject private var model: AppModel

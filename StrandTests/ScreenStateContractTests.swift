@@ -193,7 +193,7 @@ final class NutritionLocalizationAccessibilityContractTests: XCTestCase {
         XCTAssertFalse(android.contains(#"title = "Nutrition""#))
         XCTAssertFalse(android.contains("NutritionMixedSourceCard"))
 
-        XCTAssertTrue(shell.contains("expandedReservedHeight: CGFloat = 88"))
+        XCTAssertTrue(shell.contains("expandedReservedHeight: CGFloat = 76"))
         XCTAssertTrue(shell.contains(
             ".contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)"
         ))
@@ -360,6 +360,61 @@ final class SafetyCenterLocalizationContractTests: XCTestCase {
 }
 
 /// Pins shared app-wide copy to one complete nine-locale source on Apple and Android.
+/// Pins the ten-reference consolidation to existing data-backed NOOP surfaces.
+final class ReferenceSurfaceContractTests: XCTestCase {
+    private var repoRoot: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    private func text(_ relativePath: String) throws -> String {
+        try String(
+            contentsOf: repoRoot.appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
+    }
+
+    func testMonthOffersEveryReferenceDomainWithoutInventingEnergyScore() throws {
+        let calendar = try text("Strand/Screens/CalendarMonthView.swift")
+
+        XCTAssertTrue(calendar.contains("case effort, recovery, sleep, stress, energy, nutrition"))
+        XCTAssertTrue(calendar.contains(#".accessibilityIdentifier("noop.calendar.metric.\(m.rawValue)")"#))
+        XCTAssertTrue(calendar.contains(#"key: "active_kcal", source: "apple-health""#))
+        XCTAssertTrue(calendar.contains(#"key: "energy_kcal", source: "my-whoop""#))
+        XCTAssertTrue(calendar.contains(#"key: "calories_in", source: "nutrition-log""#))
+        XCTAssertTrue(calendar.contains("relativeProgress(value, values: Array(energyByDay.values))"))
+        XCTAssertFalse(calendar.contains("bodyBattery"))
+    }
+
+    func testHealthMonitorKeepsRawOpticsOutAndAddsRecordedTimelineAndBiomarkers() throws {
+        let health = try text("Strand/Screens/HealthView.swift")
+        let vitals = try text("Strand/Screens/VitalSignsSummary.swift")
+
+        XCTAssertTrue(health.contains(#").filter { $0.key != "spo2raw" }"#))
+        XCTAssertTrue(health.contains("HealthTimelineSection()"))
+        XCTAssertTrue(health.contains("BiomarkerTrendsSection()"))
+        XCTAssertTrue(health.contains("Missing wear time stays blank."))
+        XCTAssertTrue(vitals.contains(#"key: "sleep""#))
+        XCTAssertTrue(vitals.contains("populationRange: 7...9"))
+        XCTAssertTrue(health.contains(#"MetricCatalog.metric(key: "vo2max", source: "apple-health")"#))
+        XCTAssertFalse(health.contains(#"title: "Biological Age""#))
+    }
+
+    func testFitnessCalendarAndReferenceDestinationsStayDiscoverable() throws {
+        let fitness = try text("Strand/Screens/WorkoutsView.swift")
+        let shell = try text("StrandiOS/App/RootTabView.swift")
+
+        XCTAssertTrue(fitness.contains("activityCalendarSection(rows: allRows)"))
+        XCTAssertTrue(fitness.contains("WorkoutDateWindow.trailingCalendarDays(30)"))
+        XCTAssertTrue(fitness.contains("count == 1 ? \"1 recorded activity\""))
+        XCTAssertTrue(shell.contains(#"tab(WorkoutsView(), "Fitness""#))
+        XCTAssertTrue(shell.contains(#"MoreRow("Month", "calendar", .calendar)"#))
+        XCTAssertTrue(shell.contains(#"MoreRow("Journal & Insights", "book.closed.fill", .insights)"#))
+        XCTAssertTrue(shell.contains(#"MoreRow("Health & Biology", "heart.text.square.fill", .health)"#))
+    }
+}
+
 final class AppWideLocalizationContractTests: XCTestCase {
     private var repoRoot: URL {
         URL(fileURLWithPath: #filePath)
@@ -393,7 +448,7 @@ final class AppWideLocalizationContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: sourceData) as? [String: [String: String]]
         )
         let locales = Set(["en", "de", "es", "fr", "it", "pt-PT", "ru", "zh-Hans", "zh-Hant"])
-        XCTAssertEqual(source.count, 71)
+        XCTAssertEqual(source.count, 87)
         for (key, translations) in source {
             XCTAssertTrue(key.hasPrefix("appwide."), key)
             XCTAssertEqual(Set(translations.keys), locales, key)

@@ -10,7 +10,9 @@ import Foundation
 // Do not change a constant or a rule on one platform without the other.
 //
 //   GOAL(ml) = roundToNearest( sexBaseline + effortBump, 50 )
-//     sexBaseline : male 3700, female 2700, unspecified/other 3200 ml
+//     sexBaseline : male 2960, female 2160, unspecified/other 2560 ml (DRINK water: the
+//                   EFSA/IOM total-water references 3700/2700/3200 minus the ~20% that
+//                   comes from food, so this is what you must actually DRINK)
 //     effortBump  : clamp(round(effort/100 · 700), 0…700); 0 when no Effort is available
 //
 // `effort` is the day's Effort/strain score on NOOP's native 0…100 scale (the value stored as

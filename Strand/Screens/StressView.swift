@@ -912,7 +912,7 @@ struct StressModel {
         }
     }
 
-    /// The assessment used for either the loaded model or the calibration card. Direct NOOP strap
+    /// The assessment used for either the loaded model or the calibration card. Direct Noop Band
     /// data wins only once it is actually scorable; until then a complete Apple Health reference
     /// can be used without blending its values with the strap. When nothing is scorable, show the
     /// candidate with the most real prior support instead of implying all history is absent.

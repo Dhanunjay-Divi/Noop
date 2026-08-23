@@ -46,7 +46,10 @@ import kotlin.math.roundToInt
  * Each metric is standardized to a robust z-score against the personal baseline
  * (mean + EWMA-abs-dev spread). Missing terms are dropped and the weights
  * renormalized. The composite z is squashed through a logistic anchored so that
- * Z = 0 → ~58% (WHOOP's published population-average recovery).
+ * Z = 0 → ~58%. The 58% anchor is an INTERNAL, UNCITED product choice (it centres the
+ * distribution slightly above the midpoint so a typical day reads "moderate" rather than
+ * "poor"). It is NOT a WHOOP-published figure — that attribution was withdrawn because no
+ * such published population average could be verified. See the populationMean honesty note.
  *
  * Cold-start: if the HRV baseline (dominant driver) is not yet usable
  * (< MIN_NIGHTS_SEED valid nights), recovery() returns null. Callers may use

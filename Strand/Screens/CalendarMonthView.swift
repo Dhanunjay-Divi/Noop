@@ -21,46 +21,148 @@ struct CalendarMonthView: View {
 
     /// Which metric colours the grid.
     private enum Metric: String, CaseIterable, Identifiable {
-        case recovery, sleep, effort, load
+        case effort, recovery, sleep, stress, energy, nutrition
         var id: String { rawValue }
+
+        /// How to read a HIGH value for this metric. This is the whole reason `stepColor` is not one
+        /// shared ramp: painting every metric "low = red, high = green" was actively misleading. A rest
+        /// day (low Effort) is not a red-alert day, and a high-autonomic-load day is not a good day —
+        /// yet a single ramp said exactly that.
+        enum Valence {
+            /// Higher is better (Recovery, Sleep): low = red, middling = amber, high = the metric tint.
+            case higherIsBetter
+            /// Higher is worse (Load): the ramp inverts — calm reads positive, high load reads red.
+            case higherIsWorse
+            /// Neither good nor bad, just a quantity (Effort). No red/amber valence at all; a single-hue
+            /// intensity ramp, so a hard day looks BIGGER, not WORSE.
+            case neutralQuantity
+        }
+
+        var valence: Valence {
+            switch self {
+            case .recovery, .sleep: return .higherIsBetter
+            case .stress:           return .higherIsWorse
+            case .effort, .energy, .nutrition:
+                return .neutralQuantity
+            }
+        }
+
         var title: String {
             switch self {
+            case .effort:    return String(localized: "Effort")
             case .recovery: return String(localized: "Recovery")
             case .sleep:    return String(localized: "Sleep")
-            case .effort:   return String(localized: "Effort")
-            case .load:     return String(localized: "Load")
+            case .stress:   return String(localized: "Stress")
+            case .energy:   return String(localized: "Energy use")
+            case .nutrition:return String(localized: "Nutrition")
             }
         }
         var tint: Color {
             switch self {
+            case .effort:   return StrandPalette.effortColor
             case .recovery: return StrandPalette.chargeColor
             case .sleep:    return StrandPalette.restColor
-            case .effort:   return StrandPalette.effortColor
-            case .load:     return StrandPalette.metricPurple
+            case .stress:   return StrandPalette.metricAmber
+            case .energy:   return StrandPalette.statusWarning
+            case .nutrition:return StrandPalette.statusPositive
             }
         }
         var glyph: String {
             switch self {
+            case .effort:   return "flame.fill"
             case .recovery: return "bolt.heart.fill"
             case .sleep:    return "moon.zzz.fill"
-            case .effort:   return "flame.fill"
-            case .load:     return "gauge.with.dots.needle.50percent"
+            case .stress:   return "gauge.with.dots.needle.50percent"
+            case .energy:   return "bolt.fill"
+            case .nutrition:return "fork.knife"
+            }
+        }
+
+        /// The three legend words, lowest bucket first, matching this metric's valence.
+        var legendWords: [String] {
+            switch valence {
+            case .higherIsBetter:
+                return [String(localized: "appwide.calendar.legend.low"),
+                        String(localized: "appwide.calendar.legend.middling"),
+                        String(localized: "appwide.calendar.legend.strong")]
+            case .neutralQuantity:
+                if self == .effort {
+                    return [String(localized: "appwide.calendar.legend.easy"),
+                            String(localized: "appwide.calendar.legend.moderate"),
+                            String(localized: "appwide.calendar.legend.hard")]
+                }
+                return [String(localized: "Lower"),
+                        String(localized: "Middle"),
+                        String(localized: "Higher")]
+            case .higherIsWorse:
+                return [String(localized: "appwide.calendar.legend.calm"),
+                        String(localized: "appwide.calendar.legend.elevated"),
+                        String(localized: "appwide.calendar.legend.high")]
+            }
+        }
+
+        var provenance: String? {
+            switch self {
+            case .stress:
+                return String(localized: "Imported daily stress is used when available. Other days use an experimental autonomic proxy from resting heart rate and HRV.")
+            case .energy:
+                return String(localized: "Active energy comes from Apple Health when available, otherwise Noop Band's HR-based estimate. Sources are never added together.")
+            case .nutrition:
+                return String(localized: "Nutrition shows calories you logged. A blank day means not logged, never zero intake.")
+            default:
+                return nil
+            }
+        }
+
+        var unit: String {
+            switch self {
+            case .effort: return "/100"
+            case .recovery, .sleep: return "%"
+            case .stress: return "/3"
+            case .energy, .nutrition: return "kcal"
+            }
+        }
+
+        func format(_ value: Double) -> String {
+            switch self {
+            case .stress:
+                return String(format: "%.1f %@", value, unit)
+            default:
+                return "\(Int(value.rounded())) \(unit)"
             }
         }
     }
 
-    @State private var metric: Metric = .recovery
+    @State private var metric: Metric = Self.demoMetric ?? .recovery
+
+    /// Screenshot/visual-regression hook: `--demo-calendar-metric <effort|recovery|sleep|stress|energy|nutrition>` preselects
+    /// the metric so each ramp's VALENCE can be captured and reviewed. Matches the existing
+    /// `--demo-compact-tab-bar` / `--demo-scroll` convention. DEBUG only; production always starts on
+    /// Recovery.
+    private static var demoMetric: Metric? {
+        #if DEBUG
+        let args = CommandLine.arguments
+        guard let i = args.firstIndex(of: "--demo-calendar-metric"), i + 1 < args.count else { return nil }
+        return Metric(rawValue: args[i + 1])
+        #else
+        return nil
+        #endif
+    }
     @State private var monthAnchor = Date()
     @State private var rows: [DailyMetric] = []
-    @State private var loadByDay: [String: Double] = [:]
+    @State private var stressByDay: [String: Double] = [:]
+    @State private var energyByDay: [String: Double] = [:]
+    @State private var nutritionByDay: [String: Double] = [:]
     @State private var loading = true
 
     private let cal = Calendar.current
 
     var body: some View {
         ScreenScaffold(
-            title: "Your month",
-            subtitle: "One ring per day",
+            // C3: these were hardcoded English literals, so 8 of 9 locales showed English here even
+            // though the translations already existed in the catalog.
+            title: "appwide.calendar.your_month",
+            subtitle: "appwide.calendar.subtitle",
             topBackground: AnyView(calendarHeaderBackdrop),
             topBackgroundUsesDarkHeader: true
         ) {
@@ -207,17 +309,18 @@ struct CalendarMonthView: View {
     }
 
     private func dayCell(_ day: Int) -> some View {
-        let v = value(forDay: day)
+        let raw = value(forDay: day)
+        let progress = raw.map { normalizedProgress($0, metric: metric) }
         let isToday = isToday(day)
         return VStack(spacing: 3) {
             ZStack {
                 Circle()
                     .stroke(StrandPalette.hairlineStrong.opacity(0.48), lineWidth: 4)
-                if let v {
+                if let progress {
                     Circle()
-                        .trim(from: 0, to: max(0.025, min(v / 100, 1)))
+                        .trim(from: 0, to: max(0.025, min(progress / 100, 1)))
                         .stroke(
-                            Self.stepColor(v, tint: metric.tint),
+                            Self.stepColor(progress, metric: metric),
                             style: StrokeStyle(lineWidth: 4, lineCap: .round)
                         )
                         .rotationEffect(.degrees(-90))
@@ -237,28 +340,73 @@ struct CalendarMonthView: View {
         .frame(height: 44)                                  // ≥44 pt target
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(spoken(day: day, value: v, isToday: isToday)))
+        .accessibilityLabel(Text(spoken(day: day, value: raw, isToday: isToday)))
     }
 
-    /// Strong hue steps so a low day is RED, not "slightly less green" - arc length is unreadable at this
-    /// size, hue is not. Ordered by lightness too, so the month still reads for colour-vision deficiency.
-    static func stepColor(_ pct: Double, tint: Color) -> Color {
+    /// Strong hue steps so a low day is unmistakable at 28 pt, where arc length alone is hard to read.
+    ///
+    /// The cut points are NOT local literals: they are `RecoveryScorer.bandRedMax` / `bandYellowMax`
+    /// (34 / 67), the same constants the recovery band uses everywhere else, so the calendar can never
+    /// drift from the rest of the app.
+    ///
+    /// Valence decides the DIRECTION of the ramp (see `Metric.Valence`). Recovery/Sleep run red → amber →
+    /// tint; Load runs the other way, because a high autonomic-load day is a bad day; Effort gets no
+    /// red/amber at all — it is a quantity, and a rest day must not be painted as an alarm.
+    private static func stepColor(_ pct: Double, metric: Metric) -> Color {
         let v = min(100, max(0, pct))
-        if v < 34 { return StrandPalette.statusCritical.opacity(0.85) }
-        if v < 67 { return StrandPalette.statusWarning.opacity(0.85) }
-        return tint.opacity(0.9)
+        let low = v < RecoveryScorer.bandRedMax
+        let mid = v < RecoveryScorer.bandYellowMax
+
+        switch metric.valence {
+        case .higherIsBetter:
+            if low { return StrandPalette.statusCritical.opacity(0.85) }
+            if mid { return StrandPalette.statusWarning.opacity(0.85) }
+            return metric.tint.opacity(0.9)
+        case .higherIsWorse:
+            if low { return metric.tint.opacity(0.9) }
+            if mid { return StrandPalette.statusWarning.opacity(0.85) }
+            return StrandPalette.statusCritical.opacity(0.85)
+        case .neutralQuantity:
+            // One hue, three intensities: bigger day = stronger colour, never "worse". The floor is 0.55,
+            // not 0.38: on the near-black canvas a 0.38-alpha stroke fell under the ~3:1 contrast a
+            // non-text UI element needs, which made an easy day (and its legend swatch) almost invisible
+            // rather than merely quiet.
+            if low { return metric.tint.opacity(0.55) }
+            if mid { return metric.tint.opacity(0.75) }
+            return metric.tint.opacity(0.95)
+        }
+    }
+
+    /// The legend swatch colours, lowest bucket first — derived from the SAME function the cells use, so
+    /// the legend can never disagree with the grid.
+    private var legendColors: [Color] {
+        [Self.stepColor(10, metric: metric),
+         Self.stepColor(50, metric: metric),
+         Self.stepColor(90, metric: metric)]
     }
 
     // MARK: Legend + summary
 
     private var legend: some View {
-        HStack(spacing: 14) {
-            legendChip(String(localized: "Low"), StrandPalette.statusCritical)
-            legendChip(String(localized: "Middling"), StrandPalette.statusWarning)
-            legendChip(String(localized: "Strong"), metric.tint)
-            legendChip(String(localized: "No data"), .clear, outlined: true)
+        let words = metric.legendWords
+        let colors = legendColors
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 14) {
+                ForEach(Array(words.enumerated()), id: \.offset) { idx, word in
+                    legendChip(word, colors[idx])
+                }
+                legendChip(String(localized: "appwide.calendar.legend.no_data"), .clear, outlined: true)
+            }
+            if let provenance = metric.provenance {
+                Text(provenance)
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .accessibilityHidden(true)
+        // The swatch row is decorative (VoiceOver reads each day's value directly), but the provenance
+        // sentence is information, so the legend as a whole must NOT be hidden from assistive tech.
+        .accessibilityElement(children: .combine)
     }
 
     private func legendChip(_ t: String, _ c: Color, outlined: Bool = false) -> some View {
@@ -291,13 +439,7 @@ struct CalendarMonthView: View {
                         .font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
                 } else {
                     let mean = vals.reduce(0, +) / Double(vals.count)
-                    Text(
-                        String(
-                            format: String(localized: "appwide.calendar.summary.scored_format"),
-                            vals.count,
-                            Int(mean.rounded())
-                        )
-                    )
+                    Text("\(vals.count) recorded days · average \(metric.format(mean))")
                         .font(StrandFont.subhead).foregroundStyle(StrandPalette.textSecondary)
                     Text("appwide.calendar.summary.gaps")
                         .font(StrandFont.caption).foregroundStyle(StrandPalette.textTertiary)
@@ -343,21 +485,54 @@ struct CalendarMonthView: View {
     }
 
     private func value(forDay day: Int) -> Double? {
-        guard let key = dayKey(day), let row = rows.first(where: { $0.day == key }) else { return nil }
+        guard let key = dayKey(day) else { return nil }
+        let row = rows.first(where: { $0.day == key })
         switch metric {
-        case .recovery: return row.recovery
-        case .sleep:    return AnalyticsEngineBridge.restScore(for: row)
-        case .effort:   return row.strain
-        case .load:     return loadByDay[key].map { min(max($0 / 3.0 * 100.0, 0), 100) }
+        case .effort:   return row?.strain
+        case .recovery: return row?.recovery
+        case .sleep:    return row.flatMap(AnalyticsEngineBridge.restScore)
+        case .stress:   return stressByDay[key]
+        case .energy:   return energyByDay[key]
+        case .nutrition:return nutritionByDay[key]
         }
     }
 
-    private func spoken(day: Int, value: Double?, isToday: Bool) -> String {
-        let prefix = isToday ? String(localized: "Today, ") : ""
-        guard let value else {
-            return prefix + String(localized: "day \(day), no data")
+    /// Score-like metrics already own a fixed scale. Quantity metrics are drawn relative to the
+    /// selected month's largest observed day, so ring length means "more of this quantity", not
+    /// "healthier" or "closer to a target".
+    private func normalizedProgress(_ value: Double, metric: Metric) -> Double {
+        switch metric {
+        case .effort, .recovery, .sleep:
+            return min(100, max(0, value))
+        case .stress:
+            return min(100, max(0, value / 3.0 * 100.0))
+        case .energy:
+            return relativeProgress(value, values: Array(energyByDay.values))
+        case .nutrition:
+            return relativeProgress(value, values: Array(nutritionByDay.values))
         }
-        return prefix + String(localized: "day \(day), \(metric.title) \(Int(value.rounded()))")
+    }
+
+    private func relativeProgress(_ value: Double, values: [Double]) -> Double {
+        let ceiling = values.filter { $0.isFinite && $0 > 0 }.max() ?? 0
+        guard ceiling > 0 else { return 0 }
+        return min(100, max(0, value / ceiling * 100))
+    }
+
+    private func spoken(day: Int, value: Double?, isToday: Bool) -> String {
+        // C4: this used String(localized:) on an INTERPOLATED string, which produces a throwaway key
+        // that is in no catalog — so every day cell spoke English regardless of locale, and the
+        // "Today, " prefix was glued on in a word order that does not hold in other languages.
+        guard let value else {
+            return String(
+                format: String(localized: isToday
+                               ? "appwide.calendar.a11y.today_no_data_format"
+                               : "appwide.calendar.a11y.day_no_data_format"),
+                day
+            )
+        }
+        let prefix = isToday ? String(localized: "Today") : String(localized: "Day \(day)")
+        return "\(prefix), \(metric.title) \(metric.format(value))"
     }
 
     private func load() async {
@@ -373,13 +548,27 @@ struct CalendarMonthView: View {
             value: -(DailyAutonomicLoad.baselineWindowDays + 7),
             to: first
         ) ?? first
-        let history = await model.repo.dailyMetrics(
+        async let historyA = model.repo.dailyMetrics(
             fromDay: Repository.localDayKey(baselineStart),
             toDay: Repository.localDayKey(last)
         )
+        async let importedStressA = model.repo.exploreSeries(
+            key: "stress", source: "my-whoop", fullHistory: true
+        )
+        async let appleEnergyA = model.repo.exploreSeries(
+            key: "active_kcal", source: "apple-health", fullHistory: true
+        )
+        async let noopEnergyA = model.repo.exploreSeries(
+            key: "energy_kcal", source: "my-whoop", fullHistory: true
+        )
+        async let nutritionA = model.repo.exploreSeries(
+            key: "calories_in", source: "nutrition-log", fullHistory: true
+        )
+        let history = await historyA
         let firstKey = Repository.localDayKey(first)
+        let lastKey = Repository.localDayKey(last)
         rows = history.filter { $0.day >= firstKey }
-        loadByDay = Dictionary(
+        let proxyStress: [String: Double] = Dictionary(
             uniqueKeysWithValues: DailyAutonomicLoad.causalTrend(
                 days: history.map {
                     DailyAutonomicLoad.Day(
@@ -388,11 +577,44 @@ struct CalendarMonthView: View {
                         hrv: $0.avgHrv
                     )
                 }
-            ).compactMap { readout in
+            ).compactMap { readout -> (String, Double)? in
                 guard let day = readout.asOf, let value = readout.value else { return nil }
                 return (day, value)
             }
         )
+        stressByDay = Self.mergeByDay(
+            fallback: proxyStress,
+            preferred: await importedStressA,
+            from: firstKey,
+            through: lastKey
+        )
+        energyByDay = Self.mergeByDay(
+            fallback: Dictionary(uniqueKeysWithValues: (await noopEnergyA).map { ($0.day, $0.value) }),
+            preferred: await appleEnergyA,
+            from: firstKey,
+            through: lastKey
+        )
+        nutritionByDay = Dictionary(
+            uniqueKeysWithValues: (await nutritionA)
+                .filter { $0.day >= firstKey && $0.day <= lastKey && $0.value.isFinite && $0.value >= 0 }
+                .map { ($0.day, $0.value) }
+        )
+    }
+
+    private static func mergeByDay(
+        fallback: [String: Double],
+        preferred: [(day: String, value: Double)],
+        from firstDay: String,
+        through lastDay: String
+    ) -> [String: Double] {
+        var merged = fallback.filter {
+            $0.key >= firstDay && $0.key <= lastDay && $0.value.isFinite && $0.value >= 0
+        }
+        for point in preferred where point.day >= firstDay && point.day <= lastDay
+            && point.value.isFinite && point.value >= 0 {
+            merged[point.day] = point.value
+        }
+        return merged
     }
 }
 

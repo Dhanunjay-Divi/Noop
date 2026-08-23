@@ -103,7 +103,7 @@ struct RootTabView: View {
         if let i = args.firstIndex(of: "--demo-tab"), i + 1 < args.count {
             switch args[i + 1].lowercased() {
             case "trends":  return IPhonePrimaryTab.trends.rawValue
-            case "activity", "workouts": return IPhonePrimaryTab.activity.rawValue
+            case "activity", "workouts", "fitness": return IPhonePrimaryTab.activity.rawValue
             case "sleep":   return IPhonePrimaryTab.sleep.rawValue
             case "more":    return IPhonePrimaryTab.more.rawValue
             default:        return IPhonePrimaryTab.today.rawValue
@@ -185,7 +185,7 @@ struct RootTabView: View {
                     path: $tabPaths[IPhonePrimaryTab.trends.rawValue],
                     scrollSignal: scrollTop[IPhonePrimaryTab.trends.rawValue])
                     .tag(IPhonePrimaryTab.trends.rawValue)
-                tab(WorkoutsView(), "Workouts", "figure.run", tag: IPhonePrimaryTab.activity.rawValue,
+                tab(WorkoutsView(), "Fitness", "figure.run", tag: IPhonePrimaryTab.activity.rawValue,
                     path: $tabPaths[IPhonePrimaryTab.activity.rawValue],
                     scrollSignal: scrollTop[IPhonePrimaryTab.activity.rawValue])
                     .tag(IPhonePrimaryTab.activity.rawValue)
@@ -209,7 +209,7 @@ struct RootTabView: View {
             .contentMargins(.bottom, visibleTabBarHeight, for: .scrollContent)
 
             if !keyboardVisible {
-                HStack(alignment: .bottom, spacing: 6) {
+                HStack(alignment: .center, spacing: 8) {
                     FloatingTabBar(
                         selection: $selectedTab,
                         compact: tabBarCompact,
@@ -239,8 +239,9 @@ struct RootTabView: View {
                         withAnimation(Self.sheetEase) { quickAction = .menu }
                     }
                 }
-                .padding(.horizontal, 6)
-                .padding(.bottom, tabBarCompact ? 3 : 4)
+                .frame(height: 48)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
                 .background {
                     GeometryReader { geometry in
                         Color.clear.preference(
@@ -422,10 +423,10 @@ struct RootTabView: View {
         if offset >= -10 {
             if tabBarCompact { tabBarCompact = false }
             tracker.directionalTravel = 0
-        } else if !tabBarCompact, offset <= -36, tracker.directionalTravel <= -18 {
+        } else if !tabBarCompact, offset <= -24, tracker.directionalTravel <= -12 {
             tabBarCompact = true
             tracker.directionalTravel = 0
-        } else if tabBarCompact, tracker.directionalTravel >= 26 {
+        } else if tabBarCompact, tracker.directionalTravel >= 18 {
             tabBarCompact = false
             tracker.directionalTravel = 0
         }
@@ -676,10 +677,11 @@ struct RootTabView: View {
                            trailing: { appearanceQuickMenu }) {
                 moreQuickAccess
                 moreSection("Insights") {
+                    MoreRow("Month", "calendar", .calendar)
                     MoreRow("What Moves You", "wand.and.sparkles", .insightsHub)
                     MoreRow("Intelligence", "brain.head.profile", .intelligence)
                     MoreRow("Coach", "sparkles", .coach)
-                    MoreRow("Insights", "lightbulb.fill", .insights)
+                    MoreRow("Journal & Insights", "book.closed.fill", .insights)
                     MoreRow("Explore", "square.grid.2x2.fill", .explore)
                     MoreRow("Compare", "rectangle.split.2x1.fill", .compare)
                 }
@@ -691,7 +693,7 @@ struct RootTabView: View {
                     MoreRow("Devices", "applewatch.side.right", .devices)
                     MoreRow("Band", "waveform.path.ecg", .live)
                     MoreRow("Nutrition", "fork.knife", .nutrition)
-                    MoreRow("Health", "heart.text.square.fill", .health)
+                    MoreRow("Health & Biology", "heart.text.square.fill", .health)
                     MoreRow("Lab Book", "books.vertical.fill", .labBook)
                     MoreRow("Stress", "bolt.heart.fill", .stress)
                     MoreRow("Breathe", "wind", .breathe)
@@ -1098,13 +1100,14 @@ private final class StatusBarContrastOverlayView: UIView {
 /// per-screen chrome the old inline links applied lives at the single `navigationDestination(for:)`
 /// registration in `moreTab`.
 private enum MoreDestination: Hashable {
-    case insightsHub, intelligence, coach, insights, explore, compare
+    case calendar, insightsHub, intelligence, coach, insights, explore, compare
     case profile, friends, devices, live, workouts, nutrition, health, labBook, stress, breathe, intervals, rhythm
     case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport
     case safety, alarms, automations, widgets, testCentre, siriShortcuts, settings
 
     @MainActor @ViewBuilder var destination: some View {
         switch self {
+        case .calendar:        CalendarMonthView()
         case .insightsHub:     InsightsHubView()
         case .intelligence:    IntelligenceView()
         case .coach:           CoachView()
@@ -1143,6 +1146,7 @@ private enum MoreDestination: Hashable {
     /// Deterministic screenshot routing for the real More navigation stack.
     static func demo(named rawName: String) -> Self? {
         switch rawName.lowercased() {
+        case "calendar", "month": return .calendar
         case "coach": return .coach
         case "profile": return .profile
         case "friends": return .friends
@@ -1385,12 +1389,12 @@ private struct FloatingTabBarHeightPreferenceKey: PreferenceKey {
 /// The selected capsule moves inside the rail, then becomes the current-tab button when scrolling
 /// compacts navigation. Real iOS 26 Liquid Glass is used where available, with a material fallback.
 private struct FloatingTabBar: View {
-    /// Reserve the expanded bar from the first layout pass. Its fixed 62pt body plus 4pt breathing room
-    /// measures about 66pt; 88pt leaves an optical/touch margin and keeps the next card's rounded edge
+    /// Reserve the expanded bar from the first layout pass. Its 48pt body plus bottom breathing room
+    /// measures about 56pt; 76pt leaves an optical/touch margin and keeps the next card's rounded edge
     /// fully below the fold instead of peeking into the navigation mask at the initial scroll position.
     /// A larger Dynamic Type measurement can still raise this value, and the shell intentionally preserves
     /// that largest value when the bar compacts.
-    static let expandedReservedHeight: CGFloat = 88
+    static let expandedReservedHeight: CGFloat = 76
 
     @Binding var selection: Int
     /// Scroll-reactive presentation supplied by the shell. Accessibility Dynamic Type deliberately
@@ -1414,7 +1418,7 @@ private struct FloatingTabBar: View {
     private let nav = [
         Item(title: "Today", icon: "square.grid.2x2", tag: IPhonePrimaryTab.today.rawValue),
         Item(title: "Trends", icon: "chart.line.uptrend.xyaxis", tag: IPhonePrimaryTab.trends.rawValue),
-        Item(title: "Workouts", icon: "figure.run", tag: IPhonePrimaryTab.activity.rawValue),
+        Item(title: "Fitness", icon: "figure.run", tag: IPhonePrimaryTab.activity.rawValue),
         Item(title: "Sleep", icon: "bed.double", tag: IPhonePrimaryTab.sleep.rawValue),
         Item(title: "More", icon: "ellipsis", tag: IPhonePrimaryTab.more.rawValue),
     ]
@@ -1423,8 +1427,12 @@ private struct FloatingTabBar: View {
     private var currentItem: Item {
         nav.first(where: { $0.tag == selection }) ?? nav[0]
     }
+    /// The label drawn in the rail. Deliberately the same localized title VoiceOver announces: a
+    /// visible/spoken mismatch has to earn itself, and the previous hard-coded English shortening could
+    /// not (it was untranslated). Kept as a seam so a FUTURE concise label can be introduced properly -
+    /// i.e. as a translated String Catalog key, not a literal.
     private func visualTitle(for item: Item) -> LocalizedStringKey {
-        item.tag == IPhonePrimaryTab.activity.rawValue ? "Train" : item.title
+        item.title
     }
     private var navigationGlassTint: Color {
         // OLED black uses a smoked clear lens so page context remains visible without letting labels
@@ -1489,8 +1497,8 @@ private struct FloatingTabBar: View {
             }
         }
         .frame(width: visuallyCompact ? IPhonePrimaryTab.compactControlDimension : nil,
-               height: visuallyCompact ? IPhonePrimaryTab.compactControlDimension : 56,
-               alignment: .bottomLeading)
+               height: 48,
+               alignment: .leading)
         .background {
             if visuallyCompact {
                 Circle()
@@ -1533,7 +1541,7 @@ private struct FloatingTabBar: View {
         .shadow(color: .black.opacity(colorScheme == .dark
                                      ? (appearanceMode == .black ? 0.18 : 0.26)
                                      : 0.075),
-                radius: visuallyCompact ? 10 : 14, x: 0, y: visuallyCompact ? 4 : 7)
+                radius: visuallyCompact ? 8 : 11, x: 0, y: visuallyCompact ? 3 : 5)
         // Native tab bars keep their labels compact while destination content honors Larger Text.
         // Cap only this navigation chrome so five stable destinations never truncate or overlap.
         .dynamicTypeSize(...DynamicTypeSize.xxLarge)
@@ -1547,9 +1555,8 @@ private struct FloatingTabBar: View {
         HStack(spacing: IPhonePrimaryTab.itemSpacing) {
             ForEach(nav) { item in tabButton(item) }
         }
-        .padding(.vertical, 3)
-        .padding(.horizontal, 8)
-        .frame(height: 56)
+        .padding(.horizontal, 6)
+        .frame(height: 48)
         .animation(
             reduceMotion ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.26),
             value: selection
@@ -1606,8 +1613,11 @@ private struct FloatingTabBar: View {
                     .offset(y: active ? -1 : 0)
                 Text(visualTitle(for: item))
                     // Native tab labels remain optically stable while destination content follows
-                    // Dynamic Type. The concise visible "Train" label keeps the five-item rail whole;
-                    // VoiceOver and the destination title continue to identify it as Workouts.
+                    // Dynamic Type. The visible label is the LOCALIZED destination title; the five-item
+                    // rail stays whole via lineLimit(1) + minimumScaleFactor(0.8) rather than by
+                    // hard-coding a shorter English word. The previous "Train" shortening was a bare
+                    // English literal with no String Catalog entry, so it shipped untranslated in all
+                    // nine locales - a worse defect than a slightly tighter label.
                     .font(.system(size: 11, weight: active ? .semibold : .medium, design: .rounded))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -1656,9 +1666,9 @@ private struct FloatingQuickAddButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "plus")
-                .font(.system(size: visuallyCompact ? 18 : 20, weight: .semibold))
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(colorScheme == .dark ? StrandPalette.chargeColor : Color.black.opacity(0.9))
-                .frame(width: visuallyCompact ? 44 : 48, height: visuallyCompact ? 44 : 48)
+                .frame(width: 48, height: 48)
                 .background {
                     Circle()
                         .fill(.clear)
@@ -1682,9 +1692,9 @@ private struct FloatingQuickAddButton: View {
                 )
                 .shadow(
                     color: .black.opacity(colorScheme == .dark ? 0.20 : 0.10),
-                    radius: 12,
+                    radius: 9,
                     x: 0,
-                    y: 6
+                    y: 4
                 )
                 .contentShape(Circle())
         }

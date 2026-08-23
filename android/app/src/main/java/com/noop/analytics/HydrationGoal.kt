@@ -10,8 +10,10 @@ import kotlin.math.roundToInt
  * function over the user's biological sex and today's Effort/strain score, unit-tested on the JVM.
  *
  * Daily GOAL (ml) = sexBaseline + effortBump, rounded to the nearest 50.
- *   - sexBaseline: male 3700, female 2700, unspecified/other 3200 (read from the profile sex field;
- *     `UserProfile.sex` carries "male" | "female" | "nonbinary").
+ *   - sexBaseline: male 2960, female 2160, unspecified/other 2560 (read from the profile sex field;
+ *     `UserProfile.sex` carries "male" | "female" | "nonbinary"). These are DRINK-water targets: the
+ *     EFSA/IOM total-water references (3700/2700/3200) minus the ~20% obtained from food, so the number
+ *     shown is what the user must actually drink. Do not restore the raw total-water figures here.
  *   - effortBump: when today's Effort/strain (0..100) is available, round(effort / 100 * 700), capped
  *     to 0..700; when there's no Effort yet, 0.
  *
@@ -65,9 +67,14 @@ object HydrationGoal {
      * The effort bump (ml) for an Effort/strain score in 0..100, or 0 when [effort] is null (no Effort
      * scored yet). `round(effort / 100 * 700)`, then clamped into 0..[MAX_EFFORT_BUMP] so an out-of-range
      * input can't push the goal past the cap or below the baseline.
+     *
+     * A non-finite effort (NaN/Inf) is treated as "no Effort" (0), matching the Swift twin's
+     * `guard let effort, effort.isFinite`. Without this, NaN reaches `roundToInt()`, which throws
+     * IllegalArgumentException on Kotlin/JVM — the same input Swift absorbs and returns 0 for. That was
+     * both an Android-only crash and a parity break.
      */
     fun effortBump(effort: Double?): Int {
-        if (effort == null) return 0
+        if (effort == null || !effort.isFinite()) return 0
         val raw = (effort / 100.0 * MAX_EFFORT_BUMP).roundToInt()
         return raw.coerceIn(0, MAX_EFFORT_BUMP)
     }
