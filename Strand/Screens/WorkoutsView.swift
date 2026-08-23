@@ -74,6 +74,46 @@ struct WorkoutDateWindow: Equatable, Sendable {
     func filter(_ rows: [WorkoutRow]) -> [WorkoutRow] { rows.filter(intersects) }
 }
 
+struct WorkoutActivityCalendarSummary: Equatable {
+    let countsByDay: [Date: Int]
+    let activeDays: Int
+    let totalMinutes: Int
+
+    /// The calendar attributes a session to the local day it starts. A workout that only overlaps the
+    /// leading boundary therefore stays outside both the header total and the visible cells.
+    static func resolve(
+        rows: [WorkoutRow],
+        firstDay: Date,
+        lastDay: Date,
+        calendar: Calendar = .current
+    ) -> Self {
+        let lower = calendar.startOfDay(for: firstDay)
+        let final = calendar.startOfDay(for: lastDay)
+        let upper = calendar.date(byAdding: .day, value: 1, to: final)
+            ?? final.addingTimeInterval(86_400)
+        let lowerTs = Int(lower.timeIntervalSince1970)
+        let upperTs = Int(upper.timeIntervalSince1970)
+        let included = rows.filter { $0.startTs >= lowerTs && $0.startTs < upperTs }
+        let counts = Dictionary(grouping: included) {
+            calendar.startOfDay(
+                for: Date(timeIntervalSince1970: TimeInterval($0.startTs))
+            )
+        }
+        .mapValues(\.count)
+        let seconds = included.reduce(0.0) { total, row in
+            if let duration = row.durationS, duration.isFinite, duration >= 0 {
+                return total + duration
+            }
+            return total + Double(max(0, row.endTs - row.startTs))
+        }
+        return Self(
+            countsByDay: counts,
+            activeDays: counts.count,
+            totalMinutes: Int(seconds / 60)
+        )
+    }
+}
+
 // MARK: - Workouts
 //
 // The activity log, instrument-grade and uniform. Built ONLY from the locked Noop
@@ -259,6 +299,7 @@ struct WorkoutsView: View {
                             }
                             strengthTrainerButton
                         }
+                        activityCalendarSection(rows: [])
                     }
                 }
             } else {
@@ -285,6 +326,7 @@ struct WorkoutsView: View {
                     }
                 }
                 rangeBar(rows: windowRows)
+                activityCalendarSection(rows: allRows)
                 if let postLogNote { postLogBanner(postLogNote) }
                 if windowRows.isEmpty {
                     emptySelectedRange
@@ -609,6 +651,133 @@ struct WorkoutsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityLabel(caption)
         }
+    }
+
+    /// Fixed trailing-30-day activity calendar. It counts persisted sessions only; an empty day is
+    /// rendered as empty rather than assumed rest, and multiple sessions remain visibly distinct.
+    private func activityCalendarSection(rows: [WorkoutRow]) -> some View {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let first = calendar.date(byAdding: .day, value: -29, to: today) ?? today
+        let dates = (0..<30).compactMap { calendar.date(byAdding: .day, value: $0, to: first) }
+        let startWeekday = calendar.component(.weekday, from: first)
+        let leading = (startWeekday - calendar.firstWeekday + 7) % 7
+        let summary = WorkoutActivityCalendarSummary.resolve(
+            rows: rows,
+            firstDay: first,
+            lastDay: today,
+            calendar: calendar
+        )
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
+
+        return VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader(
+                "Activity calendar",
+                overline: "Last 30 days",
+                trailing: summary.activeDays == 1
+                    ? "1 active day"
+                    : "\(summary.activeDays) active days"
+            )
+            NoopCard {
+                VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(first.formatted(.dateTime.month(.abbreviated)))
+                            .font(StrandFont.headline)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Spacer()
+                        Text(today.formatted(.dateTime.month(.abbreviated).year()))
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+
+                    LazyVGrid(columns: columns, spacing: 7) {
+                        ForEach(
+                            Array(weekdayInitials(calendar).enumerated()),
+                            id: \.offset
+                        ) { entry in
+                            Text(entry.element)
+                                .font(StrandFont.overlineScaled(9))
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .frame(maxWidth: .infinity)
+                        }
+                        ForEach(0..<leading, id: \.self) { _ in
+                            Color.clear.frame(height: 36)
+                        }
+                        ForEach(dates, id: \.self) { date in
+                            activityDay(
+                                date,
+                                count: summary.countsByDay[
+                                    calendar.startOfDay(for: date),
+                                    default: 0
+                                ],
+                                isToday: calendar.isDate(date, inSameDayAs: today)
+                            )
+                        }
+                    }
+
+                    Divider().overlay(StrandPalette.hairline)
+
+                    HStack(spacing: NoopMetrics.space4) {
+                        calendarLegend("1", color: StrandPalette.chargeColor.opacity(0.75))
+                        calendarLegend("2", color: StrandPalette.statusPositive)
+                        calendarLegend("3+", color: StrandPalette.metricCyan)
+                        Spacer(minLength: 4)
+                        Text(
+                            summary.totalMinutes == 1
+                                ? "1 min"
+                                : "\(summary.totalMinutes) min"
+                        )
+                            .font(StrandFont.captionNumber)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func activityDay(_ date: Date, count: Int, isToday: Bool) -> some View {
+        let color: Color = {
+            switch count {
+            case 1: return StrandPalette.chargeColor.opacity(0.75)
+            case 2: return StrandPalette.statusPositive
+            case 3...: return StrandPalette.metricCyan
+            default: return StrandPalette.surfaceInset
+            }
+        }()
+        return ZStack {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(color)
+            if isToday {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(StrandPalette.textPrimary.opacity(0.9), lineWidth: 1.2)
+            }
+            Text("\(Calendar.current.component(.day, from: date))")
+                .font(StrandFont.captionNumber)
+                .foregroundStyle(count > 0 ? Color.black.opacity(0.82) : StrandPalette.textTertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 36)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "\(date.formatted(date: .long, time: .omitted)), "
+            + (count == 1 ? "1 recorded activity" : "\(count) recorded activities")
+        )
+    }
+
+    private func calendarLegend(_ label: String, color: Color) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(color).frame(width: 8, height: 8)
+            Text(label)
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+        }
+        .accessibilityLabel(label == "3+" ? "3 or more activities" : "\(label) activities")
+    }
+
+    private func weekdayInitials(_ calendar: Calendar) -> [String] {
+        let symbols = calendar.veryShortStandaloneWeekdaySymbols
+        let start = calendar.firstWeekday - 1
+        return (0..<7).map { symbols[(start + $0) % 7] }
     }
 
     private var accessibleRangeMenu: some View {

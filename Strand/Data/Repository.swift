@@ -288,6 +288,9 @@ final class Repository: ObservableObject {
     @Published var days: [DailyMetric] = []
     /// Cached sleep sessions over the recent window, oldest→newest.
     @Published var sleeps: [CachedSleepSession] = []
+    /// Local wake-days carrying a user edit in the computed namespace. Kept separately because the
+    /// presentation merge can legitimately select an imported session and drop the edited row itself.
+    @Published private(set) var editedSleepDays: Set<String> = []
     /// Imported (export-verbatim) sleep figures by day. Empty until a WHOOP import lands.
     @Published var importedSleep: [String: ImportedSleepFigures] = [:]
     @Published var loaded = false
@@ -762,6 +765,7 @@ final class Repository: ObservableObject {
         let importedSleep: [String: ImportedSleepFigures]
         let days: [DailyMetric]
         let sleeps: [CachedSleepSession]
+        let editedSleepDays: Set<String>
         let vitalRows: [SourcedDailyMetric]
         let freshness: RepositoryFreshness
     }
@@ -897,6 +901,7 @@ final class Repository: ObservableObject {
                     activityFile
                 ),
                 sleeps: Self.mergeSleep(imported: impSleep, computed: compSleep),
+                editedSleepDays: editedDays,
                 vitalRows: Self.sourceRows(imported: imported, computed: computed, apple: apple),
                 freshness: Self.computeFreshness(imported: imported, computed: computed, apple: apple,
                                                  importedSleeps: impSleep, computedSleeps: compSleep))
@@ -913,6 +918,7 @@ final class Repository: ObservableObject {
         let unchanged = loaded
             && merged.days == days
             && merged.sleeps == sleeps
+            && merged.editedSleepDays == editedSleepDays
             && merged.importedSleep == importedSleep
             && merged.vitalRows == vitalRows
             && merged.freshness == freshness
@@ -923,6 +929,7 @@ final class Repository: ObservableObject {
         self.importedSleep = merged.importedSleep
         self.days = merged.days
         self.sleeps = merged.sleeps
+        self.editedSleepDays = merged.editedSleepDays
         self.vitalRows = merged.vitalRows
         self.freshness = merged.freshness
         self.loaded = true

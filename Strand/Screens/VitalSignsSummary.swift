@@ -35,12 +35,17 @@ struct BodyVitalReading: Identifiable {
         case "rhr":     return "heart.text.square.fill"
         case "hrv":     return "waveform.path.ecg"
         case "skin":    return "thermometer.medium"
+        case "sleep":   return "bed.double.fill"
         default:        return "waveform.path"
         }
     }
 
     var formattedValue: String? {
-        value.map { "\(format($0)) \(unit)" }
+        value.map(displayValue)
+    }
+
+    func displayValue(_ value: Double) -> String {
+        unit.isEmpty ? format(value) : "\(format(value)) \(unit)"
     }
 
     /// Colour communicates state: in-range = the metric's category colour,
@@ -128,19 +133,31 @@ enum BodyVitalSigns {
 
     static func readings(sourceRows: [SourcedDailyMetric],
                          temperatureUnit: TemperatureUnit,
-                         now: Date = Date()) -> [BodyVitalReading] {
+                         now: Date = Date(),
+                         sleepOverrideDays: Set<String> = []) -> [BodyVitalReading] {
         let logicalDay = logicalDayKey(now)
 
-        // Resolve one metric to a per-day series, taking the FIRST source (by precedence) that carries
-        // a value for each day — imported wins over computed wins over Apple, per `vitalPrecedence`.
+        // Resolve one metric to a per-day series using explicit source precedence. Sleep is the one
+        // deliberate exception: a user-edited day uses the recomputed daily sleep aggregate ahead of
+        // the imported value so the Health card matches the corrected session and the rest of NOOP.
         func points(key: String, _ value: (DailyMetric) -> Double?) -> [VitalPoint] {
-            let allowedSources = DailyMetricSource.vitalPrecedence(for: key)
             var byDay: [String: VitalPoint] = [:]
-            for source in allowedSources {
-                for row in sourceRows where row.source == source {
-                    guard let v = value(row.metric), byDay[row.metric.day] == nil else { continue }
-                    byDay[row.metric.day] = VitalPoint(day: row.metric.day, value: v, source: row.source)
+            for row in sourceRows {
+                guard let v = value(row.metric) else { continue }
+                let precedence = key == "sleep" && sleepOverrideDays.contains(row.metric.day)
+                    ? DailyMetricSource.editedSleepPrecedence
+                    : DailyMetricSource.vitalPrecedence(for: key)
+                guard let candidateRank = precedence.firstIndex(of: row.source) else { continue }
+                if let existing = byDay[row.metric.day],
+                   let existingRank = precedence.firstIndex(of: existing.source),
+                   existingRank <= candidateRank {
+                    continue
                 }
+                byDay[row.metric.day] = VitalPoint(
+                    day: row.metric.day,
+                    value: v,
+                    source: row.source
+                )
             }
             return byDay.values.sorted { $0.day < $1.day }
         }
@@ -169,6 +186,9 @@ enum BodyVitalSigns {
         let rhrPoints = points(key: "rhr") { $0.restingHr.map(Double.init) }
         let hrvPoints = points(key: "hrv", \.avgHrv)
         let skinPoints = points(key: "skin", \.skinTempDevC)
+        let sleepPoints = points(key: "sleep") { metric in
+            metric.totalSleepMin.map { $0 / 60.0 }
+        }
 
         let respRow = latest(respPoints)
         let spo2Row = latest(spo2Points)
@@ -176,6 +196,7 @@ enum BodyVitalSigns {
         let rhrRow = latest(rhrPoints)
         let hrvRow = latest(hrvPoints)
         let skinRow = latest(skinPoints)
+        let sleepRow = latest(sleepPoints)
 
         // Trailing values (oldest → newest) feeding each tile's sparkline trail. A 2+ point series
         // draws; the tile hides the trail otherwise. Presentation-only — built from the same resolved
@@ -323,7 +344,34 @@ enum BodyVitalSigns {
                 // mix on one sparkline (matches the banding partition above).
                 sparkline: trail(skinPoints.filter { VitalBands.isAbsoluteSkinTemp($0.value) == skinIsAbsolute })
             ),
+            BodyVitalReading(
+                key: "sleep",
+                label: String(localized: "Sleep"),
+                unit: "",
+                value: sleepRow?.value,
+                format: Self.sleepDuration,
+                // Sleep duration remains population-banded. A personal baseline can faithfully say
+                // "usual", but it cannot make chronically short sleep "healthy".
+                banding: VitalBands.band(
+                    value: sleepRow?.value,
+                    history: [],
+                    populationRange: 7...9,
+                    cfg: nil
+                ),
+                metricColor: StrandPalette.restColor,
+                day: sleepRow?.day,
+                source: sleepRow?.source,
+                missingCaption: String(localized: "No primary sleep duration"),
+                sparkline: trail(sleepPoints)
+            ),
         ]
+    }
+
+    private static func sleepDuration(_ hours: Double) -> String {
+        let totalMinutes = max(0, Int((hours * 60).rounded()))
+        let h = totalMinutes / 60
+        let m = totalMinutes % 60
+        return m == 0 ? "\(h)h" : "\(h)h \(m)m"
     }
 
     /// The newest day any resolved reading was sourced from - drives the section's "Latest" trailing label.
@@ -355,6 +403,9 @@ enum BodyVitalSigns {
     static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
+        // `day` is a calendar-only key parsed at UTC midnight. Format it in UTC as well so users west
+        // of Greenwich do not see a measurement recorded on the 22nd labelled as the 21st.
+        f.timeZone = TimeZone(identifier: "UTC")
         f.dateFormat = "d MMM"
         return f
     }()
@@ -367,6 +418,10 @@ private struct VitalPoint: Equatable {
 }
 
 private extension DailyMetricSource {
+    static let editedSleepPrecedence: [DailyMetricSource] = [
+        .noopComputed, .whoopImport, .appleHealth, .localCache,
+    ]
+
     /// Source precedence for a vital, highest first. Skin temp deliberately omits Apple Health — it
     /// has no 1:1 Apple equivalent for the strap's ±deviation reading, so an Apple absolute value must
     /// not stand in for it. localCache is always last (previews/tests).

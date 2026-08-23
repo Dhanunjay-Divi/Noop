@@ -103,4 +103,39 @@ final class WorkoutDateWindowTests: XCTestCase {
         XCTAssertEqual(window.lowerBound, Int(date(2026, 8, 6).timeIntervalSince1970))
         XCTAssertEqual(window.upperBound, Int(date(2026, 8, 13).timeIntervalSince1970))
     }
+
+    func testActivityCalendarCountsStartDayAndFallsBackToRecordedTimestamps() {
+        let crossingBoundary = row(
+            start: date(2026, 7, 31, hour: 23, minute: 50),
+            end: date(2026, 8, 1, hour: 0, minute: 10)
+        )
+        let missingStoredDuration = WorkoutRow(
+            startTs: Int(date(2026, 8, 1, hour: 9).timeIntervalSince1970),
+            endTs: Int(date(2026, 8, 1, hour: 9, minute: 45).timeIntervalSince1970),
+            sport: "Walking",
+            source: "manual",
+            durationS: nil,
+            energyKcal: nil,
+            avgHr: nil,
+            maxHr: nil,
+            strain: nil,
+            distanceM: nil,
+            zonesJSON: nil,
+            notes: nil
+        )
+
+        let summary = WorkoutActivityCalendarSummary.resolve(
+            rows: [crossingBoundary, missingStoredDuration],
+            firstDay: date(2026, 8, 1),
+            lastDay: date(2026, 8, 30),
+            calendar: calendar
+        )
+
+        XCTAssertEqual(summary.activeDays, 1)
+        XCTAssertEqual(summary.totalMinutes, 45)
+        XCTAssertEqual(
+            summary.countsByDay[calendar.startOfDay(for: date(2026, 8, 1))],
+            1
+        )
+    }
 }

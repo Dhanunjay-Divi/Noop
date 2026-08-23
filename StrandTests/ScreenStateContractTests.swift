@@ -381,7 +381,8 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         XCTAssertTrue(calendar.contains("case effort, recovery, sleep, stress, energy, nutrition"))
         XCTAssertTrue(calendar.contains(#".accessibilityIdentifier("noop.calendar.metric.\(m.rawValue)")"#))
         XCTAssertTrue(calendar.contains(#"key: "active_kcal", source: "apple-health""#))
-        XCTAssertTrue(calendar.contains(#"key: "energy_kcal", source: "my-whoop""#))
+        XCTAssertFalse(calendar.contains(#"key: "energy_kcal", source: "my-whoop""#))
+        XCTAssertTrue(calendar.contains("readout.confidence == .reliable"))
         XCTAssertTrue(calendar.contains(#"key: "calories_in", source: "nutrition-log""#))
         XCTAssertTrue(calendar.contains("relativeProgress(value, values: Array(energyByDay.values))"))
         XCTAssertFalse(calendar.contains("bodyBattery"))
@@ -397,6 +398,9 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         XCTAssertTrue(health.contains("Missing wear time stays blank."))
         XCTAssertTrue(vitals.contains(#"key: "sleep""#))
         XCTAssertTrue(vitals.contains("populationRange: 7...9"))
+        XCTAssertTrue(health.contains("sleepOverrideDays: repo.editedSleepDays"))
+        XCTAssertTrue(health.contains("duration(sleep.durationSeconds)"))
+        XCTAssertFalse(health.contains("let seconds = daily?.totalSleepMin"))
         XCTAssertTrue(health.contains(#"MetricCatalog.metric(key: "vo2max", source: "apple-health")"#))
         XCTAssertFalse(health.contains(#"title: "Biological Age""#))
     }
@@ -406,12 +410,28 @@ final class ReferenceSurfaceContractTests: XCTestCase {
         let shell = try text("StrandiOS/App/RootTabView.swift")
 
         XCTAssertTrue(fitness.contains("activityCalendarSection(rows: allRows)"))
-        XCTAssertTrue(fitness.contains("WorkoutDateWindow.trailingCalendarDays(30)"))
+        XCTAssertTrue(fitness.contains("WorkoutActivityCalendarSummary.resolve("))
         XCTAssertTrue(fitness.contains("count == 1 ? \"1 recorded activity\""))
         XCTAssertTrue(shell.contains(#"tab(WorkoutsView(), "Fitness""#))
         XCTAssertTrue(shell.contains(#"MoreRow("Month", "calendar", .calendar)"#))
         XCTAssertTrue(shell.contains(#"MoreRow("Journal & Insights", "book.closed.fill", .insights)"#))
         XCTAssertTrue(shell.contains(#"MoreRow("Health & Biology", "heart.text.square.fill", .health)"#))
+    }
+
+    func testTodayHonorsTheSavedThreeToFiveMetricSelection() throws {
+        let classic = try text("Strand/Screens/TodayView.swift")
+        let liquid = try text("Strand/Liquid/LiquidTodayView.swift")
+
+        XCTAssertTrue(classic.contains("private var visibleKeyMetrics: [KeyMetric]"))
+        XCTAssertTrue(classic.contains("ForEach(visibleKeyMetrics)"))
+        XCTAssertFalse(classic.contains(
+            "KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)"
+        ))
+        XCTAssertTrue(liquid.contains("private var visibleKeyMetrics: [KeyMetric]"))
+        XCTAssertTrue(liquid.contains("ForEach(visibleKeyMetrics)"))
+        XCTAssertFalse(liquid.contains(
+            "KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)"
+        ))
     }
 }
 

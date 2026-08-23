@@ -438,11 +438,6 @@ struct TodayView: View {
     // persisted) so a relaunch starts collapsed again.
     @State private var synthesisExpanded = false
 
-    // The compact Key Metrics grid shows the user's three-to-five pinned tiles. "Show all metrics" appends
-    // the rest of the ten-tile catalog without mutating that saved choice. @State (not persisted) so the
-    // home screen reopens focused.
-    @State private var metricsExpanded = false
-
     // S5: the Data Sources footer collapses to a single "Synced from: …" summary line that expands inline
     // to the full per-source rows + strap battery/sync on tap. Default collapsed so the home screen ends
     // tight; nothing is removed, only folded behind a tap. @State (not persisted) so it reopens collapsed.
@@ -3224,8 +3219,8 @@ struct TodayView: View {
                 .accessibilityLabel("Edit Key Metrics")
                 .help("Choose which Key Metrics show and reorder them")
             }
-            // At rest, render the three-to-five pins in saved order. Expansion appends every unpinned
-            // catalog metric, so the focused dashboard never makes the prior tiles inaccessible.
+            // The editor owns both visibility and order. Keep the dashboard to the user's three-to-five
+            // selected metrics; the complete catalog remains visible in the editor and Metric Explorer.
             LazyVGrid(columns: grid, alignment: .leading, spacing: NoopMetrics.gap) {
                 ForEach(visibleKeyMetrics) { metric in
                     // Pin every tile to one height so the grid reads as an even matrix. A LazyVGrid only
@@ -3238,50 +3233,15 @@ struct TodayView: View {
                         .frame(height: NoopMetrics.keyMetricTileHeight)
                 }
             }
-            if metricsHasOverflow {
-                metricsExpander
-            }
         }
         .sheet(isPresented: $showingMetricsEditor) {
             KeyMetricsEditorSheet(layoutRaw: $keyMetricsRaw)
         }
     }
 
-    /// Pinned metrics stay first. The expanded list appends the unselected catalog without changing storage.
+    /// The persisted list is the visible dashboard, not merely a pin order.
     private var visibleKeyMetrics: [KeyMetric] {
-        metricsExpanded
-            ? KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)
-            : enabledKeyMetrics
-    }
-
-    private var metricsHasOverflow: Bool {
-        KeyMetric.defaultOrder.count > enabledKeyMetrics.count
-    }
-
-    /// Toggles catalog visibility only; the editor remains the sole owner of the saved three-to-five pins.
-    private var metricsExpander: some View {
-        let hidden = max(0, KeyMetric.defaultOrder.count - enabledKeyMetrics.count)
-        return Button {
-            withAnimation(StrandMotion.interactive) { metricsExpanded.toggle() }
-        } label: {
-            HStack(spacing: 6) {
-                Text(metricsExpanded ? "Show selected metrics" : "Show all metrics")
-                    .font(StrandFont.footnote)
-                if !metricsExpanded {
-                    Text("\(hidden)")
-                        .font(StrandFont.captionNumber)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                }
-                Image(systemName: metricsExpanded ? "chevron.up" : "chevron.down")
-                    .font(.system(size: 11, weight: .bold))
-            }
-            .foregroundStyle(StrandPalette.accent)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(metricsExpanded ? "Show selected metrics" : "Show all metrics, \(hidden) more")
+        enabledKeyMetrics
     }
 
     /// A carried recovery-vital tile's (value, caption): today's own value wins (with the metric's

@@ -53,7 +53,7 @@ struct CalendarMonthView: View {
             case .recovery: return String(localized: "Recovery")
             case .sleep:    return String(localized: "Sleep")
             case .stress:   return String(localized: "Stress")
-            case .energy:   return String(localized: "Energy use")
+            case .energy:   return String(localized: "Active energy")
             case .nutrition:return String(localized: "Nutrition")
             }
         }
@@ -104,9 +104,9 @@ struct CalendarMonthView: View {
         var provenance: String? {
             switch self {
             case .stress:
-                return String(localized: "Imported daily stress is used when available. Other days use an experimental autonomic proxy from resting heart rate and HRV.")
+                return String(localized: "Imported daily stress is used when available. Other days require a reliable two-signal experimental autonomic estimate from resting heart rate and HRV; limited estimates stay blank.")
             case .energy:
-                return String(localized: "Active energy comes from Apple Health when available, otherwise Noop Band's HR-based estimate. Sources are never added together.")
+                return String(localized: "Active energy comes from Apple Health. Noop Band's combined HR-based calorie estimate is a different quantity and is not mixed into this calendar.")
             case .nutrition:
                 return String(localized: "Nutrition shows calories you logged. A blank day means not logged, never zero intake.")
             default:
@@ -276,8 +276,8 @@ struct CalendarMonthView: View {
         NoopCard {
             VStack(spacing: 10) {
                 HStack(spacing: 6) {
-                    ForEach(weekdayInitials, id: \.self) { d in
-                        Text(d)
+                    ForEach(Array(weekdayInitials.enumerated()), id: \.offset) { entry in
+                        Text(entry.element)
                             .font(StrandFont.overline)
                             .foregroundStyle(StrandPalette.textTertiary)
                             .frame(maxWidth: .infinity)
@@ -558,9 +558,6 @@ struct CalendarMonthView: View {
         async let appleEnergyA = model.repo.exploreSeries(
             key: "active_kcal", source: "apple-health", fullHistory: true
         )
-        async let noopEnergyA = model.repo.exploreSeries(
-            key: "energy_kcal", source: "my-whoop", fullHistory: true
-        )
         async let nutritionA = model.repo.exploreSeries(
             key: "calories_in", source: "nutrition-log", fullHistory: true
         )
@@ -568,8 +565,8 @@ struct CalendarMonthView: View {
         let firstKey = Repository.localDayKey(first)
         let lastKey = Repository.localDayKey(last)
         rows = history.filter { $0.day >= firstKey }
-        let proxyStress: [String: Double] = Dictionary(
-            uniqueKeysWithValues: DailyAutonomicLoad.causalTrend(
+        let proxyStress = CalendarMonthSeries.reliableStress(
+            DailyAutonomicLoad.causalTrend(
                 days: history.map {
                     DailyAutonomicLoad.Day(
                         day: $0.day,
@@ -577,10 +574,7 @@ struct CalendarMonthView: View {
                         hrv: $0.avgHrv
                     )
                 }
-            ).compactMap { readout -> (String, Double)? in
-                guard let day = readout.asOf, let value = readout.value else { return nil }
-                return (day, value)
-            }
+            )
         )
         stressByDay = Self.mergeByDay(
             fallback: proxyStress,
@@ -589,7 +583,7 @@ struct CalendarMonthView: View {
             through: lastKey
         )
         energyByDay = Self.mergeByDay(
-            fallback: Dictionary(uniqueKeysWithValues: (await noopEnergyA).map { ($0.day, $0.value) }),
+            fallback: [:],
             preferred: await appleEnergyA,
             from: firstKey,
             through: lastKey
@@ -615,6 +609,23 @@ struct CalendarMonthView: View {
             merged[point.day] = point.value
         }
         return merged
+    }
+}
+
+/// Data-integrity gates for month-level reference series. Kept pure so limited autonomic estimates
+/// cannot silently re-enter the red/amber Stress calendar during a presentation refactor.
+enum CalendarMonthSeries {
+    static func reliableStress(
+        _ readouts: [DailyAutonomicLoad.Readout]
+    ) -> [String: Double] {
+        readouts.reduce(into: [:]) { values, readout in
+            guard readout.confidence == .reliable,
+                  let day = readout.asOf,
+                  let value = readout.value,
+                  value.isFinite,
+                  value >= 0 else { return }
+            values[day] = value
+        }
     }
 }
 

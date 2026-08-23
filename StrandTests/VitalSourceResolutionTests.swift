@@ -1,5 +1,6 @@
 import XCTest
 import WhoopStore
+import StrandAnalytics
 @testable import Strand
 
 /// Pins the source-aware vital-sign resolution (PR#261): the field-by-field daily merge, the per-metric
@@ -129,6 +130,121 @@ final class VitalSourceResolutionTests: XCTestCase {
         XCTAssertEqual(BodyVitalSigns.latestDayLabel(readings), BodyVitalReading.dayLabel("2026-06-12"))
     }
 
+    func testSleepVitalUsesObservedDurationAndTypicalRange() {
+        let readings = BodyVitalSigns.readings(
+            sourceRows: [
+                SourcedDailyMetric(
+                    metric: daily(day: "2026-06-12", totalSleepMin: 500),
+                    source: .whoopImport
+                )
+            ],
+            temperatureUnit: .celsius,
+            now: localNoon(day: "2026-06-13")
+        )
+
+        let sleep = readings.first { $0.key == "sleep" }
+        XCTAssertEqual(sleep?.value ?? -1, 500.0 / 60.0, accuracy: 0.0001)
+        XCTAssertEqual(sleep?.formattedValue, "8h 20m")
+        XCTAssertEqual(sleep?.source, .whoopImport)
+        XCTAssertEqual(sleep?.banding.basis, .population)
+        XCTAssertEqual(sleep?.banding.range, 7...9)
+        XCTAssertEqual(sleep?.banding.band, .inRange)
+    }
+
+    func testEditedSleepDayUsesCorrectedComputedDurationAheadOfImport() {
+        let readings = BodyVitalSigns.readings(
+            sourceRows: [
+                SourcedDailyMetric(
+                    metric: daily(day: "2026-06-12", totalSleepMin: 500),
+                    source: .whoopImport
+                ),
+                SourcedDailyMetric(
+                    metric: daily(day: "2026-06-12", totalSleepMin: 420),
+                    source: .noopComputed
+                ),
+            ],
+            temperatureUnit: .celsius,
+            now: localNoon(day: "2026-06-13"),
+            sleepOverrideDays: ["2026-06-12"]
+        )
+
+        let sleep = readings.first { $0.key == "sleep" }
+        XCTAssertEqual(sleep?.formattedValue, "7h")
+        XCTAssertEqual(sleep?.source, .noopComputed)
+    }
+
+    @MainActor
+    func testRepositoryRetainsEditedWakeDayWhenSleepMergeSelectsImport() async throws {
+        let store = try await WhoopStore.inMemory()
+        let repo = Repository(deviceId: Repository.whoopSource)
+        repo.setStoreForTesting(store)
+
+        let calendar = Calendar.current
+        let wakeDay = calendar.date(
+            byAdding: .day,
+            value: -2,
+            to: calendar.startOfDay(for: Date())
+        )!
+        let wake = calendar.date(byAdding: .hour, value: 8, to: wakeDay)!
+        let wakeTs = Int(wake.timeIntervalSince1970)
+        let editedSession = CachedSleepSession(
+            startTs: wakeTs - 7 * 3_600,
+            endTs: wakeTs,
+            efficiency: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            stagesJSON: nil,
+            userEdited: true
+        )
+        let day = Repository.userEditedDays([editedSession]).first!
+
+        _ = try await store.upsertDailyMetrics(
+            [daily(day: day, totalSleepMin: 500)],
+            deviceId: Repository.whoopSource
+        )
+        _ = try await store.upsertDailyMetrics(
+            [daily(day: day, totalSleepMin: 420)],
+            deviceId: Repository.whoopSource + "-noop"
+        )
+        try await store.upsertSleepSessions(
+            [
+                CachedSleepSession(
+                    startTs: wakeTs - 8 * 3_600,
+                    endTs: wakeTs,
+                    efficiency: nil,
+                    restingHr: nil,
+                    avgHrv: nil,
+                    stagesJSON: nil,
+                    userEdited: false
+                )
+            ],
+            deviceId: Repository.whoopSource
+        )
+        try await store.upsertSleepSessions(
+            [editedSession],
+            deviceId: Repository.whoopSource + "-noop"
+        )
+
+        await repo.refresh(days: 30)
+
+        XCTAssertEqual(repo.editedSleepDays, [day])
+        XCTAssertFalse(
+            repo.sleeps.contains(where: \.userEdited),
+            "The fixture must prove the display merge selected the imported session."
+        )
+        let sleep = BodyVitalSigns.readings(
+            sourceRows: repo.vitalMetricRows,
+            temperatureUnit: .celsius,
+            sleepOverrideDays: repo.editedSleepDays
+        ).first { $0.key == "sleep" }
+        XCTAssertEqual(sleep?.formattedValue, "7h")
+        XCTAssertEqual(sleep?.source, .noopComputed)
+    }
+
+    func testRecordedDayLabelDoesNotShiftWestOfUTC() {
+        XCTAssertEqual(BodyVitalReading.dayLabel("2026-08-22"), "22 Aug")
+    }
+
     // MARK: - Fixtures
 
     private func daily(
@@ -170,5 +286,138 @@ final class VitalSourceResolutionTests: XCTestCase {
             day: parts[2],
             hour: 12
         ))!
+    }
+}
+
+final class ReferenceDataIntegrityTests: XCTestCase {
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "en_US_POSIX")
+        calendar.timeZone = TimeZone(identifier: "America/New_York")!
+        return calendar
+    }
+
+    private func date(
+        _ year: Int,
+        _ month: Int,
+        _ day: Int,
+        hour: Int = 0,
+        minute: Int = 0
+    ) -> Date {
+        calendar.date(from: DateComponents(
+            year: year,
+            month: month,
+            day: day,
+            hour: hour,
+            minute: minute
+        ))!
+    }
+
+    private func sleep(
+        start: Date,
+        end: Date,
+        adjustedStart: Date? = nil
+    ) -> CachedSleepSession {
+        CachedSleepSession(
+            startTs: Int(start.timeIntervalSince1970),
+            endTs: Int(end.timeIntervalSince1970),
+            efficiency: nil,
+            restingHr: nil,
+            avgHrv: nil,
+            stagesJSON: nil,
+            userEdited: adjustedStart != nil,
+            startTsAdjusted: adjustedStart.map { Int($0.timeIntervalSince1970) }
+        )
+    }
+
+    func testStressCalendarOmitsLimitedSingleSignalEstimate() {
+        let values = CalendarMonthSeries.reliableStress([
+            DailyAutonomicLoad.Readout(
+                value: 2.6,
+                band: .high,
+                confidence: .limited,
+                asOf: "2026-08-20",
+                baselineDays: 14,
+                observedSignals: [.restingHeartRate],
+                limitations: [.singleSignalEstimate]
+            ),
+            DailyAutonomicLoad.Readout(
+                value: 0.8,
+                band: .low,
+                confidence: .reliable,
+                asOf: "2026-08-21",
+                baselineDays: 14,
+                observedSignals: [.restingHeartRate, .heartRateVariability],
+                limitations: [.experimentalNonClinicalProxy]
+            ),
+        ])
+
+        XCTAssertNil(values["2026-08-20"])
+        XCTAssertEqual(values["2026-08-21"], 0.8)
+    }
+
+    func testTimelineCollapsesEditedSplitNightAndExcludesNap() {
+        let editedOnset = date(2026, 8, 20, hour: 22, minute: 15)
+        let events = HealthSleepTimelineResolver.primaryEvents(
+            sessions: [
+                sleep(
+                    start: date(2026, 8, 20, hour: 22),
+                    end: date(2026, 8, 21, hour: 2),
+                    adjustedStart: editedOnset
+                ),
+                sleep(
+                    start: date(2026, 8, 21, hour: 2, minute: 30),
+                    end: date(2026, 8, 21, hour: 6, minute: 30)
+                ),
+                sleep(
+                    start: date(2026, 8, 21, hour: 14),
+                    end: date(2026, 8, 21, hour: 15)
+                ),
+            ],
+            calendar: calendar
+        )
+
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.day, "2026-08-21")
+        XCTAssertEqual(events.first?.startTs, Int(editedOnset.timeIntervalSince1970))
+        XCTAssertEqual(
+            events.first?.endTs,
+            Int(date(2026, 8, 21, hour: 6, minute: 30).timeIntervalSince1970)
+        )
+        XCTAssertEqual(events.first?.durationSeconds, 8 * 3_600 + 15 * 60)
+    }
+
+    func testBiomarkerSparklineRequiresRecentCloselySpacedObservations() {
+        let now = date(2026, 8, 23, hour: 12)
+        let dense = BiomarkerTrendIntegrity.snapshot(
+            points: [
+                ("2026-08-20", 80),
+                ("2026-08-21", 82),
+                ("2026-08-22", 81),
+            ],
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(dense.sparklineValues, [80, 82, 81])
+        XCTAssertFalse(dense.isStale)
+
+        let sparse = BiomarkerTrendIntegrity.snapshot(
+            points: [
+                ("2026-06-01", 75),
+                ("2026-08-22", 81),
+            ],
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertNil(sparse.sparklineValues)
+        XCTAssertEqual(sparse.latestDay, "2026-08-22")
+
+        let stale = BiomarkerTrendIntegrity.snapshot(
+            points: [("2026-06-01", 75)],
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertTrue(stale.isStale)
+        XCTAssertNil(stale.sparklineValues)
     }
 }

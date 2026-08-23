@@ -122,9 +122,7 @@ struct LiquidTodayView: View {
     @AppStorage(KeyMetricPrefs.layoutKey) private var keyMetricsRaw = ""
     @State private var showKeyMetricsEditor = false
     private var enabledKeyMetrics: [KeyMetric] { KeyMetricPrefs.decodeEnabled(keyMetricsRaw) }
-    private var allKeyMetricsInDisplayOrder: [KeyMetric] {
-        KeyMetricPrefs.catalogOrder(startingWith: enabledKeyMetrics)
-    }
+    private var visibleKeyMetrics: [KeyMetric] { enabledKeyMetrics }
     /// One shared, selected-day-anchored history cache for the compact tile traces. Building this in
     /// `load()` keeps the grid body O(1), and prevents an older selected day from seeing future readings.
     @State private var keyMetricTrends: [KeyMetric: [Double]] = [:]
@@ -1907,9 +1905,8 @@ struct LiquidTodayView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Edit Key Metrics")
             }
-            // Always render the complete catalog. The editor still owns which three-to-five metrics lead
-            // the grid and their order; unpinned metrics follow immediately instead of hiding behind a
-            // disclosure control.
+            // The editor owns both visibility and order. The dashboard renders only the selected
+            // three-to-five metrics; every other metric remains available in the editor and history.
             // Two columns give values and units enough room to breathe on a phone. Three columns
             // made long labels and five-digit values compete for the same narrow sliver, which looked
             // like a diagnostic table rather than a premium daily dashboard.
@@ -1917,7 +1914,7 @@ struct LiquidTodayView: View {
                 columns: Array(repeating: GridItem(.flexible(), spacing: NoopMetrics.space3), count: 2),
                 spacing: NoopMetrics.space3
             ) {
-                ForEach(allKeyMetricsInDisplayOrder) { metric in
+                ForEach(visibleKeyMetrics) { metric in
                     ktileFor(metric, hrv: hrv, rhr: rhr)
                 }
             }

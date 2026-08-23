@@ -65,6 +65,11 @@ private struct HealthSectionsStack: View {
             // so the ~1Hz HR stream re-renders only this subtree — the static
             // vitals grid below does not re-render on each HR tick.
             HeartRateSection()
+            // Six useful headline readings. Raw optical ADC stays in diagnostics instead of
+            // masquerading as a calibrated health vital.
+            VitalsSection()
+            // Factual recorded sleep/workout chronology. Wear gaps remain gaps.
+            HealthTimelineSection()
             // Fitness Age (weekly, computed by IntelligenceEngine and read back from the
             // "fitness_age" metricSeries). Its own view depending only on `repo`/`profile`,
             // so the live HR stream never re-renders it.
@@ -76,9 +81,8 @@ private struct HealthSectionsStack: View {
             // labelled progress bars (HRV / Resting HR / Sleep / Respiratory), each
             // scored against the on-device baseline. Depends only on `repo`.
             RecoveryContributorsSection()
-            // The static vitals grid is its own view depending only on `repo`,
-            // so it is unaffected by live HR ticks.
-            VitalsSection()
+            // Measured body-composition and cardio history, separate from age-shaped estimates.
+            BiomarkerTrendsSection()
             // v5 skin-temperature suite: the illness "heads-up", body clock, and (opt-in) cycle
             // awareness, each driven by a pure StrandAnalytics engine result the analytics pass
             // computed and AppModel publishes. Its own view depending on `model` + `repo`.
@@ -1389,10 +1393,11 @@ private struct VitalsSection: View {
     var body: some View {
         let readings = BodyVitalSigns.readings(
             sourceRows: repo.vitalMetricRows,
-            temperatureUnit: temperatureUnit
-        )
+            temperatureUnit: temperatureUnit,
+            sleepOverrideDays: repo.editedSleepDays
+        ).filter { $0.key != "spo2raw" }
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Vital Signs", overline: "Latest", trailing: BodyVitalSigns.latestDayLabel(readings))
+            SectionHeader("Health Monitor", overline: "Latest", trailing: BodyVitalSigns.latestDayLabel(readings))
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 168), spacing: NoopMetrics.gap)],
                 alignment: .leading,
@@ -1405,7 +1410,7 @@ private struct VitalsSection: View {
                         .staggeredAppear(index: idx)
                 }
             }
-            Text("Once NOOP has 14 nights of history, in-range compares each vital to your own baseline (approximate, not medical advice); until then, typical adult ranges apply.")
+            Text("Some vitals compare with your personal baseline after 14 nights. Blood oxygen and sleep continue to use typical adult ranges. These ranges are approximate, not medical advice.")
                 .font(StrandFont.footnote)
                 .foregroundStyle(StrandPalette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1440,7 +1445,7 @@ private struct LiquidVitalTile: View {
                         // The value counts up on appear (snaps under Reduce Motion), formatted exactly as
                         // the classic tile did (the reading's own formatter + unit), so it's byte-identical.
                         CountUpText(value: value,
-                                    format: { "\(reading.format($0)) \(reading.unit)" },
+                                    format: reading.displayValue,
                                     font: StrandFont.number(24),
                                     color: reading.accent)
                             .lineLimit(1)
@@ -1483,7 +1488,7 @@ private struct LiquidVitalTile: View {
     }
 
     private func rangeLabel(_ range: ClosedRange<Double>) -> String {
-        "\(reading.format(range.lowerBound))–\(reading.format(range.upperBound)) \(reading.unit)"
+        "\(reading.displayValue(range.lowerBound))–\(reading.displayValue(range.upperBound))"
     }
 
     /// The vessel's fill (0…1): the vital's value mapped onto its physiological span, matching Today's
@@ -1496,15 +1501,484 @@ private struct LiquidVitalTile: View {
         switch reading.key {
         case "hrv":        return over(120)
         case "rhr":        return over(100)
-        case "resp_rate":  return over(24)
+        case "resp":       return over(24)
         case "spo2":       return across(90, 100)
         case "spo2raw":    return across(0, 65535)   // raw PPG ADC mean over the u16 sensor span (#93)
-        case "skin_temp":
+        case "skin":
             // Absolute skin temp (>= 20 °C) maps across a plausible wrist band; a small ±deviation
             // maps around a half-full centre so a normal night reads mid-gauge, not empty.
             return VitalBands.isAbsoluteSkinTemp(v) ? across(33, 38) : max(0.02, min(1, 0.5 + v / 4))
+        case "sleep":      return across(4, 10)
         default:           return across(0, max(1, v * 1.5))
         }
+    }
+}
+
+// MARK: - Recent health timeline
+
+struct HealthSleepTimelineEvent: Equatable {
+    let day: String
+    let startTs: Int
+    let endTs: Int
+
+    var durationSeconds: Int { max(0, endTs - startTs) }
+}
+
+/// Collapses persisted sleep fragments into one canonical primary-sleep event per wake day. It uses the
+/// same main-night grouping as Sleep, honors an edited effective onset, and never promotes a short nap-only
+/// day into a primary event.
+enum HealthSleepTimelineResolver {
+    static func primaryEvents(
+        sessions: [CachedSleepSession],
+        habitualMidsleepSec: Int? = nil,
+        calendar: Calendar = .current
+    ) -> [HealthSleepTimelineEvent] {
+        let valid = sessions.filter { $0.endTs > $0.effectiveStartTs }
+        let byDay = Dictionary(grouping: valid) { session in
+            dayKey(
+                Date(timeIntervalSince1970: TimeInterval(session.endTs)),
+                calendar: calendar
+            )
+        }
+        return byDay.compactMap { day, sessions in
+            let main = SleepView.mainNightGroup(
+                sessions,
+                habitualMidsleepSec: habitualMidsleepSec
+            )
+            guard let first = main.first,
+                  let last = main.last,
+                  last.endTs - first.effectiveStartTs >= 3 * 60 * 60 else {
+                return nil
+            }
+            return HealthSleepTimelineEvent(
+                day: day,
+                startTs: first.effectiveStartTs,
+                endTs: last.endTs
+            )
+        }
+        .sorted { $0.endTs > $1.endTs }
+    }
+
+    private static func dayKey(_ date: Date, calendar: Calendar) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            parts.year ?? 0,
+            parts.month ?? 0,
+            parts.day ?? 0
+        )
+    }
+}
+
+/// A compact chronology built only from persisted primary sleep and workout rows. It deliberately
+/// excludes inferred events and leaves wear gaps empty.
+private struct HealthTimelineSection: View {
+    private enum Kind {
+        case sleep(HealthSleepTimelineEvent)
+        case workout(WorkoutRow)
+    }
+
+    private struct Item: Identifiable {
+        let id: String
+        let timestamp: Int
+        let kind: Kind
+    }
+
+    @EnvironmentObject private var repo: Repository
+    @State private var workouts: [WorkoutRow] = []
+    @State private var habitualMidsleepSec: Int?
+    @State private var loaded = false
+
+    private var items: [Item] {
+        let sleepItems = HealthSleepTimelineResolver.primaryEvents(
+            sessions: repo.sleeps,
+            habitualMidsleepSec: habitualMidsleepSec
+        )
+            .prefix(4)
+            .map {
+                Item(id: "sleep:\($0.day)", timestamp: $0.endTs, kind: .sleep($0))
+            }
+        let workoutItems = workouts.prefix(6).map {
+            Item(id: "workout:\($0.startTs):\($0.sport)",
+                 timestamp: max($0.endTs, $0.startTs),
+                 kind: .workout($0))
+        }
+        return Array((sleepItems + workoutItems).sorted { $0.timestamp > $1.timestamp }.prefix(6))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader("Timeline", overline: "Recorded events", trailing: items.isEmpty ? nil : "\(items.count)")
+            if items.isEmpty {
+                ScreenStateCard(
+                    kind: loaded ? .empty : .loading,
+                    title: loaded ? "No recent events" : "Reading recent events",
+                    message: loaded
+                        ? "Primary sleep and recorded workouts will appear here. Missing wear time stays blank."
+                        : "Loading saved sleep and workout history.",
+                    symbol: "clock.arrow.circlepath"
+                )
+            } else {
+                NoopCard(padding: 0) {
+                    VStack(spacing: 0) {
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                            NavigationLink {
+                                destination(for: item)
+                            } label: {
+                                timelineRow(item)
+                            }
+                            .buttonStyle(.plain)
+                            if index < items.count - 1 {
+                                Divider()
+                                    .padding(.leading, 66)
+                                    .foregroundStyle(StrandPalette.hairline)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .task(id: repo.refreshSeq) {
+            async let workoutRows = repo.workoutRows(days: 30)
+            async let habitual = repo.habitualMidsleepSec()
+            workouts = await workoutRows
+            habitualMidsleepSec = await habitual
+            loaded = true
+        }
+    }
+
+    @ViewBuilder private func destination(for item: Item) -> some View {
+        switch item.kind {
+        case .sleep:
+            SleepView()
+        case .workout(let workout):
+            WorkoutDetailView(row: workout)
+                .environmentObject(repo)
+        }
+    }
+
+    private func timelineRow(_ item: Item) -> some View {
+        let presentation = presentation(for: item)
+        return HStack(spacing: NoopMetrics.space3) {
+            Image(systemName: presentation.symbol)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(presentation.tint)
+                .frame(width: 40, height: 40)
+                .background(presentation.tint.opacity(0.12),
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(presentation.title)
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(presentation.subtitle)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if let value = presentation.value {
+                Text(value)
+                    .font(StrandFont.captionNumber)
+                    .foregroundStyle(presentation.tint)
+            }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(StrandPalette.textTertiary)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, NoopMetrics.space4)
+        .frame(minHeight: 66)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    private func presentation(for item: Item) -> (
+        title: String, subtitle: String, value: String?, symbol: String, tint: Color
+    ) {
+        switch item.kind {
+        case .sleep(let sleep):
+            let wake = Date(timeIntervalSince1970: TimeInterval(sleep.endTs))
+            let daily = repo.days.last(where: { $0.day == sleep.day })
+            let score = daily
+                .flatMap { AnalyticsEngine.Rest.composite(daily: $0) }
+                .map { "\(Int($0.rounded()))%" }
+            return (
+                String(localized: "Primary sleep"),
+                "\(wake.formatted(date: .abbreviated, time: .shortened)) · \(duration(sleep.durationSeconds))",
+                score,
+                "moon.stars.fill",
+                StrandPalette.restColor
+            )
+        case .workout(let workout):
+            let start = Date(timeIntervalSince1970: TimeInterval(workout.startTs))
+            let seconds = Int((workout.durationS ?? Double(max(0, workout.endTs - workout.startTs))).rounded())
+            return (
+                WorkoutSource.displaySport(workout.sport),
+                "\(start.formatted(date: .abbreviated, time: .shortened)) · \(duration(seconds))",
+                workout.strain.map { UnitFormatter.effortDisplay($0, scale: .hundred) },
+                sportSymbol(workout.sport),
+                StrandPalette.effortColor
+            )
+        }
+    }
+
+    private func duration(_ seconds: Int) -> String {
+        let minutes = max(0, seconds / 60)
+        let hours = minutes / 60
+        let remainder = minutes % 60
+        if hours == 0 { return "\(minutes)m" }
+        return remainder == 0 ? "\(hours)h" : "\(hours)h \(remainder)m"
+    }
+}
+
+// MARK: - Biomarker trends
+
+struct BiomarkerTrendSnapshot: Equatable {
+    let latestDay: String?
+    let latestValue: Double?
+    let sparklineValues: [Double]?
+    let isStale: Bool
+}
+
+/// Preserves calendar spacing semantics before a compact biomarker sparkline is allowed. Sparse or old
+/// measurements still show their exact last-recorded date, but are never connected into a continuous line.
+enum BiomarkerTrendIntegrity {
+    static let staleAfterDays = 30
+    static let sparklineWindowDays = 90
+    static let maximumConnectedGapDays = 3
+
+    static func snapshot(
+        points: [(day: String, value: Double)],
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> BiomarkerTrendSnapshot {
+        let today = calendar.startOfDay(for: now)
+        let dated = points.compactMap { point -> (day: String, value: Double, date: Date)? in
+            guard point.value.isFinite,
+                  let date = date(for: point.day, calendar: calendar),
+                  date <= today else { return nil }
+            return (point.day, point.value, date)
+        }
+        .sorted { $0.date < $1.date }
+
+        guard let latest = dated.last else {
+            return BiomarkerTrendSnapshot(
+                latestDay: nil,
+                latestValue: nil,
+                sparklineValues: nil,
+                isStale: false
+            )
+        }
+
+        let ageDays = max(
+            0,
+            calendar.dateComponents([.day], from: latest.date, to: today).day ?? 0
+        )
+        let stale = ageDays > staleAfterDays
+        let windowStart = calendar.date(
+            byAdding: .day,
+            value: -sparklineWindowDays,
+            to: today
+        ) ?? today
+        let recent = dated.filter { $0.date >= windowStart }
+        let gaps = zip(recent, recent.dropFirst()).map { pair in
+            calendar.dateComponents([.day], from: pair.0.date, to: pair.1.date).day
+                ?? Int.max
+        }
+        let canConnect = !stale
+            && recent.count > 1
+            && gaps.allSatisfy { $0 >= 0 && $0 <= maximumConnectedGapDays }
+
+        return BiomarkerTrendSnapshot(
+            latestDay: latest.day,
+            latestValue: latest.value,
+            sparklineValues: canConnect ? recent.map(\.value) : nil,
+            isStale: stale
+        )
+    }
+
+    private static func date(for day: String, calendar: Calendar) -> Date? {
+        let parts = day.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
+        return gregorian.date(from: DateComponents(
+            calendar: gregorian,
+            timeZone: gregorian.timeZone,
+            year: parts[0],
+            month: parts[1],
+            day: parts[2]
+        ))
+    }
+}
+
+/// Source-aware measured markers inspired by the Biology reference. NOOP's Fitness Age and Wellness
+/// Age remain separate sections above; this list never relabels either as "biological age".
+private struct BiomarkerTrendsSection: View {
+    private struct Trend: Identifiable {
+        let metric: MetricDescriptor
+        let title: String
+        let points: [(day: String, value: Double)]
+        var id: String { metric.id }
+    }
+
+    @EnvironmentObject private var repo: Repository
+    @AppStorage(UnitPrefs.systemKey) private var unitSystemRaw = UnitSystem.metric.rawValue
+    @AppStorage(UnitPrefs.massKey) private var massUnitRaw = ""
+    @AppStorage(UnitPrefs.temperatureKey) private var temperatureRaw = ""
+    @State private var trends: [Trend] = []
+    @State private var loaded = false
+
+    private var unitSystem: UnitSystem {
+        UnitSystem(rawValue: unitSystemRaw) ?? .metric
+    }
+
+    private var massUnit: MassUnit {
+        UnitPrefs.resolveMass(system: unitSystem, override: massUnitRaw)
+    }
+
+    private var temperatureUnit: TemperatureUnit {
+        UnitPrefs.resolveTemperature(system: unitSystem, override: temperatureRaw)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            SectionHeader("Biomarker trends", overline: "Measured history")
+            NoopCard(padding: 0) {
+                VStack(spacing: 0) {
+                    ForEach(Array(trends.enumerated()), id: \.element.id) { index, trend in
+                        NavigationLink {
+                            MetricDetailView(metric: trend.metric)
+                        } label: {
+                            biomarkerRow(trend)
+                        }
+                        .buttonStyle(.plain)
+                        if index < trends.count - 1 {
+                            Divider()
+                                .padding(.leading, 62)
+                                .foregroundStyle(StrandPalette.hairline)
+                        }
+                    }
+                }
+            }
+            Text("Values retain their original source and recorded date. Sparklines appear only for recent, closely spaced observations; missing periods are not connected. These are not diagnoses or targets.")
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .redacted(reason: loaded ? RedactionReasons() : .placeholder)
+        .task(id: repo.refreshSeq) { await load() }
+    }
+
+    private func biomarkerRow(_ trend: Trend) -> some View {
+        let snapshot = BiomarkerTrendIntegrity.snapshot(points: trend.points)
+        return HStack(spacing: NoopMetrics.space3) {
+            Image(systemName: trend.metric.icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(color(for: trend.metric))
+                .frame(width: 36, height: 36)
+                .background(StrandPalette.surfaceInset,
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(trend.title)
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(biomarkerSubtitle(snapshot, metric: trend.metric))
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(
+                        snapshot.latestValue == nil
+                            ? StrandPalette.textTertiary
+                            : StrandPalette.textSecondary
+                    )
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            Spacer(minLength: 8)
+            if let values = snapshot.sparklineValues {
+                Sparkline(
+                    values: values,
+                    gradient: Gradient(colors: [color(for: trend.metric).opacity(0.4), color(for: trend.metric)])
+                )
+                .frame(width: 82, height: 30)
+                .accessibilityHidden(true)
+            } else {
+                Capsule()
+                    .fill(StrandPalette.hairlineStrong)
+                    .frame(width: 64, height: 2)
+                    .accessibilityHidden(true)
+            }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(StrandPalette.textTertiary)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, NoopMetrics.space4)
+        .frame(minHeight: 72)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    private func biomarkerSubtitle(
+        _ snapshot: BiomarkerTrendSnapshot,
+        metric: MetricDescriptor
+    ) -> String {
+        guard let value = snapshot.latestValue, let day = snapshot.latestDay else {
+            return String(localized: "No recorded value")
+        }
+        let formatted = metric.format(
+            value,
+            system: unitSystem,
+            temperature: temperatureUnit,
+            mass: massUnit
+        )
+        let date = BodyVitalReading.dayLabel(day)
+        return snapshot.isStale
+            ? "\(formatted) · \(String(localized: "Last recorded")) \(date)"
+            : "\(formatted) · \(date)"
+    }
+
+    private func color(for metric: MetricDescriptor) -> Color {
+        switch metric.key {
+        case "hrv": return StrandPalette.metricPurple
+        case "rhr": return StrandPalette.metricRose
+        case "vo2max": return StrandPalette.metricCyan
+        case "body_fat": return StrandPalette.statusWarning
+        case "lean_mass": return StrandPalette.statusPositive
+        default: return StrandPalette.accent
+        }
+    }
+
+    private func load() async {
+        guard
+            let hrv = MetricCatalog.metric(key: "hrv", source: "my-whoop"),
+            let rhr = MetricCatalog.metric(key: "rhr", source: "my-whoop"),
+            let weight = MetricCatalog.metric(key: "weight", source: "apple-health"),
+            let bodyFat = MetricCatalog.metric(key: "body_fat", source: "apple-health"),
+            let leanMass = MetricCatalog.metric(key: "lean_mass", source: "apple-health"),
+            let vo2 = MetricCatalog.metric(key: "vo2max", source: "apple-health")
+        else {
+            loaded = true
+            return
+        }
+
+        async let hrvA = repo.exploreSeries(key: hrv.key, source: hrv.source, fullHistory: true)
+        async let rhrA = repo.exploreSeries(key: rhr.key, source: rhr.source, fullHistory: true)
+        async let weightA = repo.exploreSeries(key: weight.key, source: weight.source, fullHistory: true)
+        async let bodyFatA = repo.exploreSeries(key: bodyFat.key, source: bodyFat.source, fullHistory: true)
+        async let leanMassA = repo.exploreSeries(key: leanMass.key, source: leanMass.source, fullHistory: true)
+        async let vo2A = repo.exploreSeries(key: vo2.key, source: vo2.source, fullHistory: true)
+
+        trends = [
+            Trend(metric: weight, title: String(localized: "Weight"), points: await weightA),
+            Trend(metric: hrv, title: String(localized: "HRV"), points: await hrvA),
+            Trend(metric: rhr, title: String(localized: "Resting HR"), points: await rhrA),
+            Trend(metric: bodyFat, title: String(localized: "Body Fat"), points: await bodyFatA),
+            Trend(metric: leanMass, title: String(localized: "Lean Body Mass"), points: await leanMassA),
+            Trend(metric: vo2, title: String(localized: "VO₂ Max"), points: await vo2A),
+        ]
+        loaded = true
     }
 }
 

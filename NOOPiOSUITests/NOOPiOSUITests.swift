@@ -86,7 +86,10 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(recovery.isSelected)
         XCTAssertTrue(app.buttons["noop.calendar.metric.sleep"].exists)
         XCTAssertTrue(app.buttons["noop.calendar.metric.effort"].exists)
-        XCTAssertFalse(app.buttons["noop.calendar.metric.load"].isSelected)
+        XCTAssertTrue(app.buttons["noop.calendar.metric.stress"].exists)
+        XCTAssertTrue(app.buttons["noop.calendar.metric.energy"].exists)
+        XCTAssertTrue(app.buttons["noop.calendar.metric.nutrition"].exists)
+        XCTAssertFalse(app.buttons["noop.calendar.metric.stress"].isSelected)
 
         let formatter = DateFormatter()
         formatter.dateFormat = "MMMM yyyy"
