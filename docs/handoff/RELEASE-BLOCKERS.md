@@ -58,6 +58,16 @@ licence is not yours to relicense**, and "no licence" means no permission to red
 commercially. A free App Store listing is a weaker version of the same question; a paid product or bundled
 hardware makes it sharper.
 
+**Scope (corrected 2026-08-23):** the inherited surface is `Packages/WhoopProtocol/Sources` (6,425 lines) +
+`Packages/WhoopStore/Sources` (9,555 lines) = **15,980 lines of source**, plus a per-file assessment of
+`Strand/BLE` (12,154) and `Strand/Collect` (1,510). An earlier figure of ~209,000 lines in this document's
+history was wrong: it counted `.build/checkouts/` SwiftPM dependencies (GRDB and friends), which are not
+inherited code. A rewrite is a finite project, and every BLE UUID, frame layout, CRC parameter and byte
+offset is reusable free of charge because those are uncopyrightable facts (as `LICENSE` already states).
+
+A rewrite of those packages does **not** by itself clear the fork lineage: the app is multi-author under
+PolyForm Noncommercial with no CLA. See `docs/handoff/OWNERSHIP-CLEANUP-CHECKLIST.md` §2.
+
 ### What must happen before a commercial release
 
 1. **Decide the posture**: stay noncommercial (revert the TERMS wording) *or* go commercial (then §2 below).
