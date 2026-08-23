@@ -2,6 +2,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 import StrandDesign
 import WhoopStore
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - OnboardingWizard
 //
@@ -839,6 +842,14 @@ private struct ProfileStep: View {
                     normalizeMeasurementDrafts()
                 }
             }
+            #if os(iOS)
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                guard focusedField != nil else { return }
+                withAnimation(StrandMotion.gentle) {
+                    revealMeasurements(using: scrollProxy)
+                }
+            }
+            #endif
             .onDisappear { isEditing = false }
             #if os(iOS)
             .toolbar {
@@ -1059,12 +1070,6 @@ private struct ProfileStep: View {
     private func revealMeasurements(using proxy: ScrollViewProxy) {
         #if os(iOS)
         proxy.scrollTo(ScrollAnchor.height, anchor: .center)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            guard focusedField != nil else { return }
-            withAnimation(StrandMotion.gentle) {
-                proxy.scrollTo(ScrollAnchor.height, anchor: .center)
-            }
-        }
         #endif
     }
 
