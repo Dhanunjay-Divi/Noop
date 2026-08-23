@@ -4,6 +4,28 @@ import WhoopStore
 @testable import Strand
 
 final class AppleDemoSeederTests: XCTestCase {
+    @MainActor
+    func testLiveChargingFixtureDoesNotWaitForDatabaseSeed() {
+        let live = LiveState()
+        AppleDemoSeeder.applyLiveFixtureIfRequested(
+            to: live,
+            arguments: ["--demo-seed", "--demo-band-charging"]
+        )
+
+        XCTAssertTrue(live.connected)
+        XCTAssertEqual(live.batteryPct, 68)
+        XCTAssertEqual(live.charging, true)
+
+        let inert = LiveState()
+        AppleDemoSeeder.applyLiveFixtureIfRequested(
+            to: inert,
+            arguments: ["--demo-band-charging"]
+        )
+        XCTAssertFalse(inert.connected)
+        XCTAssertNil(inert.batteryPct)
+        XCTAssertNil(inert.charging)
+    }
+
     func testExistingFixtureRepairsFitnessAgeV2MarkersIdempotently() async throws {
         let store = try await WhoopStore.inMemory()
         try await store.upsertMetricSeries([

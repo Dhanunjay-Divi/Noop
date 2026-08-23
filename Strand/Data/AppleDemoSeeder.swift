@@ -37,6 +37,24 @@ enum AppleDemoSeeder {
         CommandLine.arguments.contains("--demo-nutrition")
     }
 
+    /// Live-only values must exist before the first frame. The database seed can take several seconds on
+    /// a clean simulator, while the Today masthead renders immediately.
+    @MainActor
+    static func applyLiveFixtureIfRequested(
+        to live: LiveState,
+        arguments: [String] = CommandLine.arguments
+    ) {
+        guard arguments.contains("--demo-seed") else { return }
+        live.batteryPct = 68
+        if arguments.contains("--demo-band-connected") {
+            live.connected = true
+        }
+        if arguments.contains("--demo-band-charging") {
+            live.connected = true
+            live.charging = true
+        }
+    }
+
     /// Seed only if requested AND the store is empty. Safe to call on every launch.
     static func seedIfRequested(
         into store: WhoopStore,

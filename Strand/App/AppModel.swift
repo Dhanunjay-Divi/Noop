@@ -506,6 +506,12 @@ final class AppModel: ObservableObject {
         // actor; no-op on macOS for the Inbox part.
         Task.detached { AppModel.purgeImportInbox(); AppModel.purgeImportTemp() }
 
+        #if DEBUG
+        // Live fixture state is independent of the database and must be available to the first frame.
+        // Reapply it after seeding below in case a restored Bluetooth callback changed the live snapshot.
+        AppleDemoSeeder.applyLiveFixtureIfRequested(to: live)
+        #endif
+
         // FIX 2(b): the launch sequence runs at `.utility` so its heavy one-shot 4000-day heal/rescore
         // yields to UI rendering instead of contending at the inherited user-initiated QoS. The reads are
         // already off the main actor (analyzeRecent , FIX 1), and at `.utility` the scheduler keeps the
@@ -522,18 +528,7 @@ final class AppModel: ObservableObject {
                     profileAge: self.profile.age,
                     profileSex: self.profile.sex
                 )
-                // Give the demo a plausible strap battery so the Today header badge renders (the live
-                // battery is runtime-only and nil without a connected strap).
-                self.live.batteryPct = 68
-                // Optional screenshot-only live fixture. Keeping this behind its own argument preserves
-                // the production truth gate (a stale percentage is never shown while disconnected).
-                if CommandLine.arguments.contains("--demo-band-connected") {
-                    self.live.connected = true
-                }
-                if CommandLine.arguments.contains("--demo-band-charging") {
-                    self.live.connected = true
-                    self.live.charging = true
-                }
+                AppleDemoSeeder.applyLiveFixtureIfRequested(to: self.live)
             }
             #endif
             await self.repo.refresh()                          // surface any imported data at once
