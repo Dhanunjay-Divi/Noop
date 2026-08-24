@@ -116,6 +116,7 @@ Apple/Android work before consolidating it on canonical `main`.
 | Health-claims gate | Clear across 1,049 files | Prohibited release claims were not introduced | Regulatory approval |
 | Legal inventory | 152 runtime components and 3 container inputs verified | Runtime dependency inventory remains exact | Commercial source rights |
 | Distribution gate | Failed on exactly three documented rights blockers | Release remains fail-closed | Blockers are resolved |
+| Hosted GitHub Actions | No job scheduled; push run `32784344944` and manual run `32784502269` ended in `startup_failure` because the account Actions budget prevents further use | The hosted failure is external to test execution | Hosted CI passes |
 | Private-data and ops gates | Passed | No tracked private filename and valid round structure | Full privacy audit |
 | `git diff --check` | Passed | Whitespace-clean final diff | Runtime behavior |
 

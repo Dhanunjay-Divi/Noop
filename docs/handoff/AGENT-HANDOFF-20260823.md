@@ -125,6 +125,10 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
 - i18n: focus-locale completeness and the no-new-literal regression gate pass.
 - Shared app-wide localization has exact 278-key parity across nine locales;
   Daily Plan has 59-key parity, and canonical generator reruns are idempotent.
+- Hosted GitHub Actions is externally blocked by the account Actions budget.
+  Push run `32784344944` and manual health-claims run `32784502269` both ended
+  in `startup_failure` before creating a job. Restore the Actions budget, then
+  rerun the workflows for the current `main`.
 - Server: pinned Ruff checks pass; local tests pass 59 with 4
   database-dependent skips.
 - Round 14 iOS production shell: 17/17 tests passed locally, including the

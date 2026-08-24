@@ -100,6 +100,10 @@ change.
 - Distribution correctly remains blocked on exactly
   `contributor-relicensing-rights`, `polyform-upstream-lineage`, and
   `unlicensed-whoop4-expression`.
+- Hosted GitHub Actions did not execute. Push run `32784344944` and manual
+  health-claims run `32784502269` both ended in `startup_failure` with no jobs;
+  GitHub's existing job annotation identifies the account Actions budget as
+  preventing further use.
 - Private-data filename guard and ops-record validation: **passed**.
 - `git diff --check`: **passed**.
 

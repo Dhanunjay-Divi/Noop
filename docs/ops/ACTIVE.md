@@ -33,6 +33,12 @@ with 6 skips and no failures, the Full Debug APK, Android instrumentation with
 localization parity, clean i18n/health-claims/legal inventory gates, and the
 expected fail-closed distribution result.
 
+Hosted verification is externally blocked by the account Actions budget.
+Push run `32784344944` and manual health-claims run `32784502269` both ended in
+`startup_failure` before scheduling a job. Restore the budget and rerun the
+workflows for current `main`; this does not invalidate the recorded local
+results, but it means there is no hosted result for the current commit.
+
 The preceding
 [cycle tracking and profile metric reconciliation round](rounds/2026-08-24-cycle-tracking-metric-reconciliation.md)
 makes private cycle setup discoverable from Profile and Health before the first
