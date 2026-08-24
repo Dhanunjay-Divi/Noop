@@ -207,7 +207,7 @@ struct CycleAwarenessCard: View {
         return lo == hi ? String(localized: "· ~day \(lo)") : String(localized: "· ~day \(lo)-\(hi)")
     }
 
-    private var statusLine: String { result.note }
+    private var statusLine: String { localizedCycleNote(result) }
 
     private var confidenceLabel: LocalizedStringKey {
         switch result.confidence {
@@ -270,6 +270,225 @@ struct CycleAwarenessOptInCard: View {
     }
 }
 
+/// Honest placeholder used while the opt-in recompute is opening the tracker. It never invents a
+/// cycle day, phase, cadence, or forecast.
+func cycleTrackingLearningResult() -> CyclePhaseEngine.Result {
+    CyclePhaseEngine.Result(
+        phase: .learning,
+        confidence: .learning,
+        cycleDayLow: nil,
+        cycleDayHigh: nil,
+        cycleLengthDays: nil,
+        nextPeriodWindow: nil,
+        shiftMarkers: [],
+        note: "Log a period start and wear Noop Band overnight to begin a private estimate.",
+        noteKinds: [.startLogging]
+    )
+}
+
+/// Circular presentation of the awareness model. The arcs are a phase guide, not fertile/safe days:
+/// the only period mark is the user-confirmed day-1 anchor, and the current marker is shown only when
+/// the engine has a bounded cycle-day range.
+private struct CycleTimelineRing: View {
+    let result: CyclePhaseEngine.Result
+    let hasLoggedStart: Bool
+
+    private struct Segment {
+        let start: Double
+        let end: Double
+        let color: Color
+    }
+
+    private var cycleLength: Int {
+        max(result.cycleLengthDays ?? CyclePhaseEngine.defaultCycleDays,
+            result.cycleDayHigh ?? 1)
+    }
+
+    private var shiftCenter: Int {
+        min(max(8, cycleLength - 13), max(8, cycleLength - 7))
+    }
+
+    private var segments: [Segment] {
+        let midStart = max(2, shiftCenter - 2)
+        let midEnd = min(cycleLength - 1, shiftCenter + 2)
+        let total = Double(cycleLength)
+        return [
+            Segment(start: 0, end: Double(midStart - 1) / total,
+                    color: StrandPalette.metricCyan),
+            Segment(start: Double(midStart - 1) / total, end: Double(midEnd) / total,
+                    color: StrandPalette.statusWarning),
+            Segment(start: Double(midEnd) / total, end: 1,
+                    color: StrandPalette.restColor),
+        ]
+    }
+
+    private var currentFraction: Double? {
+        guard let low = result.cycleDayLow, let high = result.cycleDayHigh else { return nil }
+        let midpoint = Double(low + high) / 2
+        return min(1, max(0, (midpoint - 1) / Double(cycleLength)))
+    }
+
+    private var dayValue: String {
+        guard let low = result.cycleDayLow, let high = result.cycleDayHigh else {
+            return String(localized: "appwide.cycle.status.learning")
+        }
+        return low == high ? "\(low)" : "\(low)-\(high)"
+    }
+
+    private var phaseTitle: String {
+        switch result.phase {
+        case .follicular: return String(localized: "appwide.cycle.phase.follicular")
+        case .periOvulatory: return String(localized: "appwide.cycle.phase.mid_cycle_shift")
+        case .luteal: return String(localized: "appwide.cycle.phase.luteal")
+        case .unknown: return String(localized: "appwide.cycle.phase.no_clear_pattern")
+        case .learning: return String(localized: "appwide.cycle.phase.building_pattern")
+        }
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+            let center = CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2)
+            let radius = max(0, side / 2 - 14)
+
+            ZStack {
+                Circle()
+                    .stroke(StrandPalette.hairline.opacity(0.7), lineWidth: 18)
+
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                    Circle()
+                        .trim(from: min(segment.end, segment.start + 0.008),
+                              to: max(segment.start, segment.end - 0.008))
+                        .stroke(segment.color,
+                                style: StrokeStyle(lineWidth: 18, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+
+                if hasLoggedStart {
+                    // A rose day-1 mark identifies a confirmed log without guessing period duration.
+                    Circle()
+                        .fill(StrandPalette.metricRose)
+                        .frame(width: 9, height: 9)
+                        .position(x: center.x, y: center.y - radius)
+                }
+
+                if let fraction = currentFraction {
+                    let angle = 2 * Double.pi * fraction - Double.pi / 2
+                    Circle()
+                        .fill(StrandPalette.surfaceBase)
+                        .overlay(Circle().stroke(StrandPalette.textPrimary, lineWidth: 2))
+                        .frame(width: 14, height: 14)
+                        .position(
+                            x: center.x + CGFloat(cos(angle)) * radius,
+                            y: center.y + CGFloat(sin(angle)) * radius
+                        )
+                }
+
+                VStack(spacing: 4) {
+                    Text(result.cycleDayLow == nil
+                         ? String(localized: "appwide.cycle.ring.cycle")
+                         : String(localized: "appwide.cycle.ring.estimated_day"))
+                        .font(StrandFont.overline)
+                        .tracking(0)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                    Text(dayValue)
+                        .font(StrandFont.rounded(result.cycleDayLow == nil ? 22 : 32))
+                        .foregroundStyle(StrandPalette.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    Text(phaseTitle)
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .frame(maxWidth: side * 0.52)
+                }
+            }
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .frame(maxWidth: 228)
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        var label = String(
+            format: String(localized: "appwide.cycle.ring.a11y.phase_format"),
+            locale: .current,
+            phaseTitle
+        )
+        if let low = result.cycleDayLow, let high = result.cycleDayHigh {
+            label = low == high
+                ? String(
+                    format: String(localized: "appwide.cycle.ring.a11y.day_format"),
+                    locale: .current,
+                    label,
+                    low
+                )
+                : String(
+                    format: String(localized: "appwide.cycle.ring.a11y.day_range_format"),
+                    locale: .current,
+                    label,
+                    low,
+                    high
+                )
+        }
+        if let length = result.cycleLengthDays {
+            label = String(
+                format: String(localized: "appwide.cycle.ring.a11y.cadence_format"),
+                locale: .current,
+                label,
+                length
+            )
+        }
+        return label
+    }
+}
+
+private struct CycleTimelineLegend: View {
+    let hasLoggedStart: Bool
+
+    private var items: [(String, Color)] {
+        var values: [(String, Color)] = [
+            (String(localized: "appwide.cycle.phase.follicular"), StrandPalette.metricCyan),
+            (String(localized: "appwide.cycle.phase.mid_cycle_shift"), StrandPalette.statusWarning),
+            (String(localized: "appwide.cycle.phase.luteal"), StrandPalette.restColor),
+        ]
+        if hasLoggedStart {
+            values.append((String(localized: "appwide.cycle.ring.logged_day_one"),
+                           StrandPalette.metricRose))
+        }
+        return values
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("appwide.cycle.ring.guide")
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), alignment: .leading)],
+                      alignment: .leading, spacing: 8) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(spacing: 7) {
+                        Circle()
+                            .fill(item.1)
+                            .frame(width: 7, height: 7)
+                        Text(item.0)
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textSecondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 // MARK: - Cycle tracker detail
 
 /// Local period-start history used to anchor the awareness engine, plus OPTIONAL per-day detail the user
@@ -281,7 +500,7 @@ struct CycleAwarenessOptInCard: View {
 ///   • OPTIONAL, user-entered only: flow level and symptoms (`CycleTrackingStore.DailyLog`, surfaced by
 ///     `selectedFlow` / `selectedSymptoms` below). Never imported, never inferred from the wearable, and
 ///     independently erasable via the "delete flow and symptom entries" control.
-///   • NEVER: fertility windows, contraception data, or any diagnosis.
+///   • NEVER: fertility predictions, contraception data, or any diagnosis.
 ///
 /// This comment previously claimed the store recorded "one date per cycle—not symptoms, flow ...", which
 /// stopped being true when optional flow/symptom logging was added. A privacy-scope comment that lies is
@@ -339,7 +558,7 @@ struct CycleTrackerView: View {
                 }
             }
             .task(id: repo.cycleTrackingSeq) { await reload() }
-            .onChange(of: selectedDate) { _ in loadSelectedDetails() }
+            .onChangeCompat(of: selectedDate) { _ in loadSelectedDetails() }
             .confirmationDialog("Delete all manually logged period starts?",
                                 isPresented: $confirmDeleteAll,
                                 titleVisibility: .visible) {
@@ -371,18 +590,26 @@ struct CycleTrackerView: View {
     private var statusCard: some View {
         NoopCard(tint: StrandPalette.restColor) {
             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-                Text("Current estimate").strandOverline()
-                HStack(alignment: .firstTextBaseline) {
-                    Text(phaseTitle(currentResult.phase))
-                        .font(StrandFont.title2)
-                        .foregroundStyle(StrandPalette.textPrimary)
-                    Spacer()
-                    if let lo = currentResult.cycleDayLow, let hi = currentResult.cycleDayHigh {
-                        Text(lo == hi ? "~day \(lo)" : "~day \(lo)–\(hi)")
-                            .font(StrandFont.bodyNumber)
-                            .foregroundStyle(StrandPalette.textSecondary)
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("appwide.cycle.ring.current_estimate")
+                            .strandOverline()
+                            .lineLimit(1)
+                        Spacer(minLength: 12)
+                        ScoreStatePill(confidenceState, text: confidenceTitle)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("appwide.cycle.ring.current_estimate").strandOverline()
+                        ScoreStatePill(confidenceState, text: confidenceTitle)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
+
+                CycleTimelineRing(result: currentResult, hasLoggedStart: !entries.isEmpty)
+                CycleTimelineLegend(hasLoggedStart: !entries.isEmpty)
+
                 if curve.count > 1 {
                     Sparkline(values: curve,
                               gradient: Gradient(colors: [StrandPalette.restColor.opacity(0.4),
@@ -391,17 +618,47 @@ struct CycleTrackerView: View {
                         .frame(height: 40)
                         .accessibilityHidden(true)
                 }
-                Text(currentResult.note)
+                Text(localizedCycleNote(currentResult))
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let window = currentResult.nextPeriodWindow {
-                    Text("Likely period window: \(prettyDay(window.earliestDay))–\(prettyDay(window.latestDay)). This is a range, not a fixed date.")
-                        .font(StrandFont.footnote)
-                        .foregroundStyle(StrandPalette.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(StrandPalette.metricRose)
+                            .accessibilityHidden(true)
+                        Text(
+                            String(
+                                format: String(localized: "appwide.cycle.period_window_format"),
+                                locale: .current,
+                                prettyDay(window.earliestDay),
+                                prettyDay(window.latestDay)
+                            )
+                        )
+                            .font(StrandFont.footnote)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .accessibilityElement(children: .combine)
                 }
             }
+        }
+    }
+
+    private var confidenceState: ScoreState {
+        switch currentResult.confidence {
+        case .learning: return .calibrating
+        case .building: return .building
+        case .solid: return .solid
+        }
+    }
+
+    private var confidenceTitle: LocalizedStringKey {
+        switch currentResult.confidence {
+        case .learning: return "appwide.cycle.status.learning"
+        case .building: return "appwide.cycle.status.building"
+        case .solid: return "appwide.cycle.status.solid"
         }
     }
 
@@ -995,6 +1252,44 @@ private struct FlowChips: View {
                 .padding(.horizontal, 7).padding(.vertical, 2)
                 .background(tint.opacity(0.14), in: Capsule(style: .continuous))
         }
+    }
+}
+
+private func localizedCycleNote(_ result: CyclePhaseEngine.Result) -> String {
+    guard !result.noteKinds.isEmpty else { return result.note }
+    return result.noteKinds.map(localizedCycleNote).joined(separator: " ")
+}
+
+private func localizedCycleNote(_ kind: CyclePhaseEngine.NoteKind) -> String {
+    switch kind {
+    case .learningNightly:
+        return String(localized: "appwide.cycle.note.learning_nightly")
+    case .noClearPattern:
+        return String(localized: "appwide.cycle.note.no_clear_pattern")
+    case .noClearContext:
+        return String(localized: "appwide.cycle.note.no_clear_context")
+    case .logShiftMismatch:
+        return String(localized: "appwide.cycle.note.log_shift_mismatch")
+    case .phaseFollicular:
+        return String(localized: "appwide.cycle.note.phase_follicular")
+    case .phaseMidCycle:
+        return String(localized: "appwide.cycle.note.phase_mid_cycle")
+    case .phaseLuteal:
+        return String(localized: "appwide.cycle.note.phase_luteal")
+    case .staleLog:
+        return String(localized: "appwide.cycle.note.stale_log")
+    case .unreliableLogs:
+        return String(localized: "appwide.cycle.note.unreliable_logs")
+    case .forecastPassed:
+        return String(localized: "appwide.cycle.note.forecast_passed")
+    case .broadPrior:
+        return String(localized: "appwide.cycle.note.broad_prior")
+    case .personalIntervals:
+        return String(localized: "appwide.cycle.note.personal_intervals")
+    case .startLogging:
+        return String(localized: "appwide.cycle.note.start_logging")
+    case .turnOnAwareness:
+        return String(localized: "appwide.cycle.note.turn_on_awareness")
     }
 }
 

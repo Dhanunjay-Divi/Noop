@@ -212,6 +212,7 @@ object CaptureImporter {
         hr = hr + o.hr, rr = rr + o.rr, events = events + o.events, battery = battery + o.battery,
         spo2 = spo2 + o.spo2, skinTemp = skinTemp + o.skinTemp, steps = steps + o.steps,
         resp = resp + o.resp, gravity = gravity + o.gravity,
+        sleepState = sleepState + o.sleepState, ppgWaveform = ppgWaveform + o.ppgWaveform,
     )
 
     // ---- pure: import-rescore window ----

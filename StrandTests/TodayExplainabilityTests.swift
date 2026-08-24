@@ -346,4 +346,18 @@ final class TodayExplainabilityTests: XCTestCase {
     func testLiquidHeroSourceLabel_hidesWhenNoScoreHasAResolvedSource() {
         XCTAssertNil(LiquidTodayView.heroSourceLabel(rawSources: [], deviceId: "my-whoop"))
     }
+
+    func testMixedNoopBandSourceStillQualifiesForSyncFeedback() {
+        XCTAssertTrue(LiquidTodayView.sourceLabelIncludesNoopBand("Noop Band"))
+        XCTAssertTrue(LiquidTodayView.sourceLabelIncludesNoopBand("Noop Band + Apple Watch"))
+        XCTAssertFalse(LiquidTodayView.sourceLabelIncludesNoopBand("Apple Watch"))
+    }
+
+    func testBandSyncConfirmationRequiresAdvancedCompletionEvidence() {
+        XCTAssertFalse(LiquidTodayView.bandSyncCompletionAdvanced(from: nil, to: nil))
+        XCTAssertTrue(LiquidTodayView.bandSyncCompletionAdvanced(from: nil, to: 1_000))
+        XCTAssertFalse(LiquidTodayView.bandSyncCompletionAdvanced(from: 1_000, to: 1_000))
+        XCTAssertFalse(LiquidTodayView.bandSyncCompletionAdvanced(from: 1_000, to: nil))
+        XCTAssertTrue(LiquidTodayView.bandSyncCompletionAdvanced(from: 1_000, to: 1_001))
+    }
 }

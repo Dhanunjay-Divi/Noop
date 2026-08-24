@@ -478,7 +478,13 @@ class Backfiller(
                 committed = decoded
                 // Success-side observability (#150): tally what actually persisted so the session can emit
                 // "persisted N rows (M with motion) across K night(s)" - the win-rate signal we never logged.
-                val (rows, motion, nights) = chunkTally(counts, decoded.gravity.map { it.ts } + decoded.hr.map { it.ts })
+                val scoreBearingTimestamps =
+                    decoded.hr.map { it.ts } + decoded.rr.map { it.ts } + decoded.events.map { it.ts } +
+                        decoded.spo2.map { it.ts } + decoded.skinTemp.map { it.ts } +
+                        decoded.steps.map { it.ts } + decoded.resp.map { it.ts } +
+                        decoded.gravity.map { it.ts } + decoded.sleepState.map { it.ts } +
+                        decoded.ppgHr.map { it.ts } + decoded.ppgWaveform.map { it.ts }
+                val (rows, motion, nights) = chunkTally(counts, scoreBearingTimestamps)
                 sessionRowsPersisted += rows
                 sessionMotionRows += motion
                 sessionSkinTempRows += counts.skinTemp
@@ -593,15 +599,12 @@ class Backfiller(
         }
 
         /**
-         * Pure per-chunk persistence tally (#150). [rows] = biometric rows inserted (HR, R-R, SpO2,
-         * skin-temp, resp, gravity — battery/events/steps are housekeeping, NOT biometric history, so
-         * they must not inflate the count; matches the Swift tuple, which has no steps). [motion] =
-         * gravity rows (the sleep-critical signal). nights = distinct day-keys (ts / 86400). Summed
-         * across a session by [finishChunk] to drive the success summary line.
+         * Pure per-chunk persistence tally (#150). [rows] includes all score-bearing streams and durable
+         * physiological history, including events, steps, band sleep-state and raw PPG waveform. Battery is
+         * housekeeping. [motion] is gravity rows. nights = distinct day-keys (ts / 86400).
          */
         fun chunkTally(counts: InsertCounts, timestamps: List<Long>): Triple<Int, Int, Set<Long>> {
-            val rows = counts.hr + counts.rr + counts.spo2 + counts.skinTemp + counts.resp + counts.gravity
-            return Triple(rows, counts.gravity, timestamps.map { it / 86400L }.toSet())
+            return Triple(counts.scoreBearingRows, counts.gravity, timestamps.map { it / 86400L }.toSet())
         }
 
         /**

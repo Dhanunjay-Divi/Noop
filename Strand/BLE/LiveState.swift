@@ -381,6 +381,17 @@ public final class LiveState: ObservableObject {
     /// came — i.e. caught up). Drives the sync tile + the staleness nudge.
     @Published public var lastSyncedAt: TimeInterval?
 
+    /// Monotonic receipt for newly inserted historical sensor rows. Unlike `lastSyncedAt`, this advances
+    /// only when data actually landed, and it also advances when a productive session ends by idle timeout
+    /// or disconnect. AppModel observes it to score a just-offloaded night without waiting for the backstop.
+    @Published public private(set) var historyDataRevision: UInt64 = 0
+    @Published public private(set) var lastHistoryDataAt: TimeInterval?
+
+    func notePersistedHistoryData(at timestamp: TimeInterval = Date().timeIntervalSince1970) {
+        historyDataRevision &+= 1
+        lastHistoryDataAt = timestamp
+    }
+
     /// Set when an offload ended abnormally (the idle watchdog fired — the strap went quiet mid-sync),
     /// so a stalled history download isn't silent. Cleared by the next successful HISTORY_COMPLETE.
     /// Process-local on purpose (mirrors Android, ed6a31d): the next connect / 15-min tick re-offloads

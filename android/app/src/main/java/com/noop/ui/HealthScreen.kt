@@ -114,6 +114,8 @@ fun HealthScreen(
 ) {
     val context = LocalContext.current
     val profile = remember { ProfileStore.from(context.applicationContext) }
+    val profileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
+    val cycleProfileEligible = remember(profileVersion) { cycleOptInApplies(profile.sex) }
     val today by vm.today.collectAsStateWithLifecycle()
     // Full merged daily history — feeds the personal-baseline banding of the vitals grid.
     val days by vm.recentDays.collectAsStateWithLifecycle()
@@ -165,6 +167,31 @@ fun HealthScreen(
             item { SyncStatusSection(vm = vm, onSyncNow = { vm.syncNow() }) }
             item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
             item { HealthEmptyState() }
+            // Cycle setup is profile data, not wearable data. Keep it reachable before the first sync.
+            if (cycleProfileEligible || cycleEnabled) {
+                item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
+                item {
+                    SkinTempSuiteSection(
+                        signals = v5Signals,
+                        cycleEnabled = cycleEnabled,
+                        cycleOptInApplies = cycleProfileEligible,
+                        onEnableCycle = { vm.setCycleTrackingEnabled(true) },
+                        onTurnOffCycle = { vm.setCycleTrackingEnabled(false) },
+                        onLogPeriod = {
+                            cycleScope.launch {
+                                if (!vm.logPeriodStart(LocalDate.now().toString())) {
+                                    Toast.makeText(
+                                        context,
+                                        "Couldn’t log the period start. Please try again.",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            }
+                        },
+                        onOpenCycleTracker = { cycleTrackerPresented = true },
+                    )
+                }
+            }
         } else {
             // Manual "Sync now" + honest sync status (#364) - the first section so the strap-history
             // control is reachable above the live hero. Mirrors HealthView.swift's top Sync section.
@@ -201,7 +228,7 @@ fun HealthScreen(
                     // #801: gate the cycle-awareness OPT-IN to profiles it can apply to (sex-gated, pure
                     // helper). Cycle phase is read from the menstrual skin-temperature shift, so the
                     // invitation is NOT offered for male profiles. Matches iOS SkinTempSection.cycleOptInApplies.
-                    cycleOptInApplies = cycleOptInApplies(profile.sex),
+                    cycleOptInApplies = cycleProfileEligible,
                     onEnableCycle = { vm.setCycleTrackingEnabled(true) },
                     // #801: symmetric off-control. Cycle awareness could be turned ON here but only OFF from
                     // Automations; let the user turn it off in-place where they turned it on.
@@ -233,22 +260,20 @@ fun HealthScreen(
     }
 
     if (cycleTrackerPresented) {
-        v5Signals?.cycle?.let { cycle ->
-            CycleTrackerSheet(
-                result = cycle,
-                periodStarts = periodStarts,
-                dailyLogs = cycleDailyLogs,
-                onLogPeriodStart = { vm.logPeriodStart(it) },
-                onDeletePeriodStart = { vm.deletePeriodStart(it) },
-                onDeleteAllPeriodStarts = { vm.deleteAllPeriodStarts() },
-                onSaveDailyLog = { day, flow, symptoms ->
-                    vm.saveCycleDailyLog(day, flow, symptoms)
-                },
-                onDeleteDailyLog = { vm.deleteCycleDailyLog(it) },
-                onDeleteAllDailyLogs = { vm.deleteAllCycleDailyLogs() },
-                onDismiss = { cycleTrackerPresented = false },
-            )
-        }
+        CycleTrackerSheet(
+            result = v5Signals?.cycle ?: cycleTrackingLearningResult(),
+            periodStarts = periodStarts,
+            dailyLogs = cycleDailyLogs,
+            onLogPeriodStart = { vm.logPeriodStart(it) },
+            onDeletePeriodStart = { vm.deletePeriodStart(it) },
+            onDeleteAllPeriodStarts = { vm.deleteAllPeriodStarts() },
+            onSaveDailyLog = { day, flow, symptoms ->
+                vm.saveCycleDailyLog(day, flow, symptoms)
+            },
+            onDeleteDailyLog = { vm.deleteCycleDailyLog(it) },
+            onDeleteAllDailyLogs = { vm.deleteAllCycleDailyLogs() },
+            onDismiss = { cycleTrackerPresented = false },
+        )
     }
 }
 
@@ -468,34 +493,47 @@ private fun SkinTempSuiteSection(
     onLogPeriod: () -> Unit,
     onOpenCycleTracker: () -> Unit,
 ) {
+    val showsCycleSection = cycleEnabled || cycleOptInApplies
+    val hasTemperatureResult =
+        signals?.illness?.level?.let { it != IllnessSignalEngine.Level.QUIET } == true ||
+            signals?.bodyClock != null
+
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+        if (showsCycleSection) {
+            SectionHeader(
+                stringResource(R.string.appwide_cycle_health_section_title),
+                overline = stringResource(R.string.appwide_cycle_health_overline),
+            )
+
+            if (cycleEnabled) {
+                CycleAwarenessCard(
+                    result = signals?.cycle ?: cycleTrackingLearningResult(),
+                    onLogPeriod = onLogPeriod,
+                    onOpenDetail = onOpenCycleTracker,
+                    onTurnOff = onTurnOffCycle,
+                )
+            } else {
+                CycleAwarenessOptInCard(onEnable = onEnableCycle)
+            }
+        }
+
         SectionHeader("Skin Temperature", overline = "From your nightly readings")
 
-        // Illness heads-up first when it has something to say (it's the most time-sensitive card).
         signals?.illness?.let { illness ->
             if (illness.level != IllnessSignalEngine.Level.QUIET) {
                 HeadsUpCard(result = illness, distance = signals.illnessDistance)
             }
         }
 
-        // Cycle awareness (#801): when ON, the live result carries a symmetric off-control. When OFF, the
-        // opt-in invitation is shown ONLY for profiles it can apply to (sex-gated); a male profile that
-        // previously enabled it still sees its existing card, only the invitation is gated.
-        if (cycleEnabled) {
-            signals?.cycle?.let {
-                CycleAwarenessCard(
-                    result = it,
-                    onLogPeriod = onLogPeriod,
-                    onOpenDetail = onOpenCycleTracker,
-                    onTurnOff = onTurnOffCycle,
-                )
-            }
-        } else if (cycleOptInApplies) {
-            CycleAwarenessOptInCard(onEnable = onEnableCycle)
-        }
-
-        // Body clock: only when the engine produced an estimate (no faked card while the input pipe is empty).
         signals?.bodyClock?.let { BodyClockCard(estimate = it) }
+
+        if (!hasTemperatureResult) {
+            Text(
+                stringResource(R.string.appwide_cycle_health_missing_temperature),
+                style = NoopType.subhead,
+                color = Palette.textSecondary,
+            )
+        }
 
         Text(
             uiString(R.string.l10n_health_screen_cycle_phase_body_clock_and_illness_59e2d9a4) +
@@ -662,9 +700,10 @@ private fun FitnessAgeSection(vm: AppViewModel, days: List<DailyMetric>, profile
     var refreshTick by remember { mutableStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
     val profileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
+    val ageMetricDataVersion by vm.ageMetricDataVersion.collectAsStateWithLifecycle()
     val profileState = remember(profileVersion) { profile.ageMetricStateToken }
     var loadedProfileState by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(days, refreshTick, profileVersion) {
+    LaunchedEffect(days, refreshTick, profileVersion, ageMetricDataVersion) {
         if (!profile.fitnessInputsConfirmed ||
             !FitnessAgeEngine.supportsAge(profile.age.toDouble()) ||
             !FitnessAgeEngine.supportsSex(profile.sex)
@@ -756,9 +795,10 @@ private fun VitalitySection(vm: AppViewModel, days: List<DailyMetric>, profile: 
     var vitality by remember { mutableStateOf<Double?>(null) }
     var bodyAge by remember { mutableStateOf<Double?>(null) }
     val profileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
+    val ageMetricDataVersion by vm.ageMetricDataVersion.collectAsStateWithLifecycle()
     val profileState = remember(profileVersion) { profile.ageMetricStateToken }
     var loadedProfileState by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(days, profileVersion) {
+    LaunchedEffect(days, profileVersion, ageMetricDataVersion) {
         if (!profile.ageInputConfirmed || profile.age !in 20..80) {
             vitality = null
             bodyAge = null
@@ -1733,6 +1773,7 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
     // Profile drives the Fitness Age readiness/countdown shown when that vital has no value yet.
     val profile = remember { ProfileStore.from(context.applicationContext) }
     val profileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
+    val ageMetricDataVersion by vm.ageMetricDataVersion.collectAsStateWithLifecycle()
     val ageMetricState = remember(profileVersion) { profile.ageMetricStateToken }
     val isSeriesBacked = key in SERIES_BACKED_VITAL_KEYS
 
@@ -1747,7 +1788,7 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
     var refreshing by remember { mutableStateOf(false) }
     var loadedAgeMetricState by remember(key) { mutableStateOf<String?>(null) }
     if (isSeriesBacked) {
-        LaunchedEffect(key, refreshTick, profileVersion) {
+        LaunchedEffect(key, refreshTick, profileVersion, ageMetricDataVersion) {
             val profileAllowsMetric = when (key) {
                 "fitness_age" -> profile.fitnessInputsConfirmed &&
                     FitnessAgeEngine.supportsAge(profile.age.toDouble()) &&

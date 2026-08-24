@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
@@ -554,6 +555,10 @@ fun SettingsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val live by vm.live.collectAsStateWithLifecycle()
+    val cycleTracking by vm.cycleTrackingEnabled.collectAsStateWithLifecycle()
+    val cycleSignals by vm.v5Signals.collectAsStateWithLifecycle()
+    val periodStarts by vm.periodStarts.collectAsStateWithLifecycle()
+    val cycleDailyLogs by vm.cycleDailyLogs.collectAsStateWithLifecycle()
 
     // The profile store is stable for the lifetime of this screen; a version counter
     // forces recomposition after each mutating write (SharedPreferences isn't reactive).
@@ -602,6 +607,11 @@ fun SettingsScreen(
     // tap-through. Mirrors the macOS StepsCalibrationSheet: honest explainer + current fit + a recent
     // estimated-vs-phone table + a manual coefficient override. Full-screen Dialog like the guide above.
     var showStepsCalibration by remember { mutableStateOf(false) }
+    var showCycleTracking by remember { mutableStateOf(false) }
+    val cycleProfileEligible = cycleOptInApplies(profile.sex)
+    LaunchedEffect(cycleProfileEligible, cycleTracking) {
+        if (!cycleTracking && !cycleProfileEligible) showCycleTracking = false
+    }
 
     // Medication names/notes are loaded only when Settings opens and remain in encrypted preferences.
     // The visible card carries a count, never a medication name.
@@ -672,7 +682,6 @@ fun SettingsScreen(
     // Illness watch routes through the ViewModel so the banner recomputes live; the rest are pref writes
     // the engines pick up on the next analytics pass / offload. All opt-in / safe-default per spec.
     var illnessWatch by remember { mutableStateOf(NoopPrefs.illnessWatch(context)) }
-    var cycleTracking by remember { mutableStateOf(NoopPrefs.cycleTracking(context)) }
     var hydrationTracking by remember { mutableStateOf(NoopPrefs.hydrationTracking(context)) }
     var rhythmEnabled by remember { mutableStateOf(RhythmConsent.isEnabled(context)) }
     var coachSignals by remember { mutableStateOf(NoopPrefs.coachSignals(context)) }
@@ -1055,6 +1064,13 @@ fun SettingsScreen(
                     )
                 }
                 RowDivider()
+                if (cycleTracking || cycleProfileEligible) {
+                    MenstrualCycleSettingsRow(
+                        enabled = cycleTracking,
+                        onClick = { showCycleTracking = true },
+                    )
+                    RowDivider()
+                }
                 FormRow(label = uiString(R.string.l10n_settings_screen_weight_69c0b815)) {
                     // Pounds mode steps in whole pounds and stores the kg equivalent; kg mode steps in
                     // 0.5 kg. The profile is always SI — only the entry unit changes.
@@ -1925,7 +1941,7 @@ fun SettingsScreen(
                             // that fresh re-scored tail. So DON'T re-anchor the baseline epoch: doing so would
                             // drop all history and force a multi-night "calibrating" reset for someone who already
                             // has plenty of nights (that reset reading as "the setting is broken" was #195). Clear
-                            // the analyze watermark so the re-score runs even though the raw HR fingerprint is
+                            // the analyze watermark so the re-score runs even though the raw input fingerprint is
                             // unchanged. A genuine cold-start user (<4 valid nights) still calibrates honestly.
                             NoopPrefs.setAnalyzeWatermark(context, "")
                             vm.syncNow()
@@ -2462,10 +2478,7 @@ fun SettingsScreen(
                         title = uiString(R.string.l10n_settings_screen_cycle_awareness_ffb94783),
                         detail = "Reads a coarse menstrual-cycle phase from your nightly skin-temperature shift, on this device only. Awareness only: not contraception, not a fertility predictor, not a medical service.",
                         checked = cycleTracking,
-                        onCheckedChange = {
-                            cycleTracking = it
-                            vm.setCycleTrackingEnabled(it)
-                        },
+                        onCheckedChange = vm::setCycleTrackingEnabled,
                     )
                     RowDivider()
                 }
@@ -3295,6 +3308,130 @@ fun SettingsScreen(
                     vm.medicationContextChanged()
                 },
             )
+        }
+
+        if (showCycleTracking && (cycleTracking || cycleProfileEligible)) {
+            if (cycleTracking) {
+                CycleTrackerSheet(
+                    result = cycleSignals?.cycle ?: cycleTrackingLearningResult(),
+                    periodStarts = periodStarts,
+                    dailyLogs = cycleDailyLogs,
+                    onLogPeriodStart = { vm.logPeriodStart(it) },
+                    onDeletePeriodStart = { vm.deletePeriodStart(it) },
+                    onDeleteAllPeriodStarts = { vm.deleteAllPeriodStarts() },
+                    onSaveDailyLog = { day, flow, symptoms ->
+                        vm.saveCycleDailyLog(day, flow, symptoms)
+                    },
+                    onDeleteDailyLog = { vm.deleteCycleDailyLog(it) },
+                    onDeleteAllDailyLogs = { vm.deleteAllCycleDailyLogs() },
+                    onDismiss = { showCycleTracking = false },
+                )
+            } else {
+                CycleTrackingSetupDialog(
+                    onEnable = { vm.setCycleTrackingEnabled(true) },
+                    onDismiss = { showCycleTracking = false },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MenstrualCycleSettingsRow(
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val statusLabel = stringResource(
+        if (enabled) R.string.appwide_cycle_status_on else R.string.appwide_cycle_action_set_up,
+    )
+    val accessibilityDescription = stringResource(
+        R.string.appwide_cycle_profile_a11y_format,
+        statusLabel,
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .liquidPress(interaction)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .semantics { contentDescription = accessibilityDescription }
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            Icons.Filled.CalendarMonth,
+            contentDescription = null,
+            tint = Palette.metricRose,
+            modifier = Modifier.size(20.dp),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                stringResource(R.string.appwide_cycle_profile_title),
+                style = NoopType.body,
+                color = Palette.textPrimary,
+            )
+            Text(
+                stringResource(R.string.appwide_cycle_profile_summary),
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+            )
+        }
+        Text(
+            statusLabel,
+            style = NoopType.footnote,
+            color = if (enabled) Palette.statusPositiveText else Palette.textSecondary,
+        )
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = Palette.textTertiary,
+            modifier = Modifier.size(18.dp),
+        )
+    }
+}
+
+@Composable
+private fun CycleTrackingSetupDialog(
+    onEnable: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(modifier = Modifier.fillMaxSize(), color = Palette.surfaceBase) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = Metrics.screenPadding, vertical = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(Metrics.sectionGap),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.appwide_cycle_profile_title),
+                            style = NoopType.title2,
+                            color = Palette.textPrimary,
+                        )
+                        Text(
+                            stringResource(R.string.appwide_cycle_setup_subtitle),
+                            style = NoopType.footnote,
+                            color = Palette.textTertiary,
+                        )
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.appwide_action_done))
+                    }
+                }
+                CycleAwarenessOptInCard(onEnable = onEnable)
+            }
         }
     }
 }

@@ -1841,13 +1841,15 @@ private fun DailyPlanWhySection(
     modifier: Modifier = Modifier,
 ) {
     val signals = readiness.signals.filter { it.key in setOf("hrv", "rhr", "respRate") }
+    val readinessHeadline = localizedReadinessHeadline(readiness)
+    val readinessSummary = localizedReadinessSummary(readiness)
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(Metrics.space8),
     ) {
         SectionHeader(
             title = stringResource(R.string.daily_plan_why_title),
-            trailing = readiness.headline,
+            trailing = readinessHeadline,
         )
         NoopCard {
             if (signals.isEmpty()) {
@@ -1876,18 +1878,18 @@ private fun DailyPlanWhySection(
                             verticalArrangement = Arrangement.spacedBy(Metrics.space4),
                         ) {
                             Text(
-                                readiness.headline,
+                                readinessHeadline,
                                 style = NoopType.headline,
                                 color = Palette.textPrimary,
                             )
                             Text(
-                                readiness.summary,
+                                readinessSummary,
                                 style = NoopType.subhead,
                                 color = Palette.textSecondary,
                             )
                             readiness.limitations.firstOrNull()?.let { limitation ->
                                 Text(
-                                    limitation,
+                                    localizedReadinessLimitation(limitation, readiness),
                                     style = NoopType.caption,
                                     color = Palette.textTertiary,
                                 )
@@ -6713,6 +6715,8 @@ private fun ReadinessSection(days: List<DailyMetric>, carriedDay: DailyMetric? =
     val anchorKey = carriedDay?.day ?: logicalDayKeyNow()
     val readiness = remember(days, anchorKey) { ReadinessEngine.evaluate(days, today = anchorKey) }
     if (readiness.level == ReadinessEngine.Level.INSUFFICIENT) return
+    val readinessHeadline = localizedReadinessHeadline(readiness)
+    val readinessSummary = localizedReadinessSummary(readiness)
 
     val overline = carriedDay?.let { carriedCaption(it.day) } ?: "How your signals compare"
     SectionHeader("Readiness", overline = overline)
@@ -6728,7 +6732,7 @@ private fun ReadinessSection(days: List<DailyMetric>, carriedDay: DailyMetric? =
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    readiness.headline,
+                    readinessHeadline,
                     style = NoopType.headline,
                     color = Palette.textPrimary,
                     modifier = Modifier.weight(1f),
@@ -6744,7 +6748,7 @@ private fun ReadinessSection(days: List<DailyMetric>, carriedDay: DailyMetric? =
 
             // Plain-English summary.
             Text(
-                readiness.summary,
+                readinessSummary,
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
             )

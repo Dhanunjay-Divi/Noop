@@ -23,6 +23,15 @@
     <string name="daily_plan_evidence_sleep_plan">Votre plan de sommeil actuel</string>
     <string name="daily_plan_evidence_title">ÉLÉMENTS UTILISÉS</string>
     <string name="daily_plan_limitation">Ce plan n’est ni un diagnostic, ni une prescription, ni une limite de sécurité, ni une autorisation médicale.</string>
+    <string name="daily_plan_notification_body">Vous avez atteint %1$d ; la plage prévue aujourd’hui est de %2$d à %3$d. C’est un repère de planification, pas une limite. Évaluez votre état avant d’en faire davantage.</string>
+    <string name="daily_plan_notification_help">Une fois par jour après la synchronisation. Aucune alerte si la plage n’est pas affichée.</string>
+    <string name="daily_plan_notification_title">Plage d’Effort du jour atteinte</string>
+    <string name="daily_plan_notification_toggle">Me prévenir lorsque j’atteins la plage</string>
+    <string name="daily_plan_progress_above">Au-dessus de la plage prévue aujourd’hui. Réévaluez votre état avant d’en faire davantage.</string>
+    <string name="daily_plan_progress_accessibility">Effort actuel %1$d. Plage prévue de %2$d à %3$d.</string>
+    <string name="daily_plan_progress_below">Encore %1$d avant la plage prévue aujourd’hui.</string>
+    <string name="daily_plan_progress_current">Effort actuel</string>
+    <string name="daily_plan_progress_in_range">Dans la plage prévue aujourd’hui. C’est un repère, pas une règle d’arrêt.</string>
     <string name="daily_plan_signal_good">Bien aligné</string>
     <string name="daily_plan_signal_hrv">Variabilité de la fréquence cardiaque</string>
     <string name="daily_plan_signal_load">Rapport de charge récente</string>

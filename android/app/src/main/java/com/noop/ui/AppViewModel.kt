@@ -70,8 +70,10 @@ import com.noop.safety.SafetySosGestureRuntime
 import com.noop.widget.WidgetSnapshotFactory
 import com.noop.widget.WidgetSnapshotStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -84,7 +86,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.math.roundToInt
 
 /**
@@ -145,10 +148,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Make [id] the single active device, then tell the [SourceCoordinator] so it swaps the live source
      *  (a no-op for a single-WHOOP install). Mirrors macOS DevicesView's `registry.setActive`. */
     suspend fun setActiveDevice(id: String) {
+        val changed = id != deviceId
         noopApp.deviceRegistry.setActive(id)
         _selectedDeviceId.value = id
         noopApp.sourceCoordinator.onActiveDeviceChanged(id)
         refreshActiveDeviceName()
+        if (changed) scheduleAgeMetricRecompute()
     }
 
     /** The active band's display name (nickname, else collapsed brand+model), surfaced on the Live screen
@@ -347,6 +352,56 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // Body profile (age/sex/weight/height + HR-max override) — the same SharedPreferences
     // store the Settings screen edits. Feeds the on-device scorer's HRmax/zones/calories.
     private val profileStore = ProfileStore.from(app.applicationContext)
+    private val _ageMetricDataVersion = MutableStateFlow(0L)
+    /** Advances only after profile-dependent Fitness Age/Vitality rows have been reconciled. */
+    val ageMetricDataVersion: StateFlow<Long> = _ageMetricDataVersion.asStateFlow()
+    private var lastAgeMetricReconciliationTarget: AgeMetricReconciliationTarget? =
+        NoopPrefs.of(appContext).let { prefs ->
+            val profileState = prefs.getString(AGE_METRIC_RECONCILED_PROFILE_STATE_KEY, null)
+            val reconciledDeviceId = prefs.getString(AGE_METRIC_RECONCILED_DEVICE_ID_KEY, null)
+            if (profileState != null && reconciledDeviceId != null) {
+                AgeMetricReconciliationTarget(profileState, reconciledDeviceId)
+            } else null
+        }
+    private val ageMetricReconciliationRunner by lazy {
+        AgeMetricReconciliationRunner(
+            scope = viewModelScope,
+            currentTarget = {
+                AgeMetricReconciliationTarget(
+                    profileState = profileStore.ageMetricStateToken,
+                    deviceId = deviceId,
+                )
+            },
+            profileSnapshot = ::currentProfile,
+            recomputeMetrics = { profile, requestedDeviceId ->
+                val outcome = IntelligenceEngine.recomputeAgeMetricsOnly(
+                    repository, profile, requestedDeviceId,
+                )
+                AgeMetricReconciliationOutcome(
+                    fitnessFinished = outcome.fitnessFinished,
+                    vitalityFinished = outcome.vitalityFinished,
+                )
+            },
+            publishCompletedWork = ::noteAgeMetricsChanged,
+            persistCompletedTarget = { target ->
+                withContext(Dispatchers.IO) {
+                    NoopPrefs.of(appContext).edit()
+                        .putString(
+                            AGE_METRIC_RECONCILED_PROFILE_STATE_KEY,
+                            target.profileState,
+                        )
+                        .putString(
+                            AGE_METRIC_RECONCILED_DEVICE_ID_KEY,
+                            target.deviceId,
+                        )
+                        .commit()
+                }
+            },
+            markCompletedTarget = { target ->
+                lastAgeMetricReconciliationTarget = target
+            },
+        )
+    }
 
     /** The currently selected strap source id (raw streams + imported history live under this). Seeded
      *  from [NoopApplication.activeDeviceId], then updated by [setActiveDevice]. Public so the Today screen's
@@ -439,6 +494,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _v5Signals = MutableStateFlow<V5HealthSignals.Snapshot?>(null)
     /** Published engine RESULTS for the Health hub's skin-temp suite (null until the first pass runs). */
     val v5Signals: StateFlow<V5HealthSignals.Snapshot?> = _v5Signals.asStateFlow()
+    /** Keeps the illness banner, cycle history, and v5 snapshot on one completed assessment. */
+    private val healthSignalRefreshMutex = Mutex()
 
     // Battery alerts (low ≤15% + charge-complete 100%). Opt-OUT, default ON; the actual firing
     // happens in BatteryAlertNotifier off the live-state stream — this flag just gates it (#368).
@@ -629,6 +686,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // caught up now. Gated + coalesced downstream, so a healthy resume costs one fingerprint read.
             analyzeKick.trySend(Unit)
             viewModelScope.launch { refreshAdaptiveHydrationContext() }
+            viewModelScope.launch { refreshCycleTracking() }
+            refreshAgeMetricsIfProfileChanged()
         }
         override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {}
         override fun onActivityStarted(activity: android.app.Activity) {}
@@ -729,6 +788,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             combine(today, HydrationStore.mutationSeq) { todayRow, _ -> todayRow }
                 .collectLatest { refreshAdaptiveHydrationContext(it) }
         }
+        // SharedPreferences writes are not observable on their own. ProfileStore emits one process-wide
+        // revision for DOB/sex/waist edits; debounce quick stepper changes, reconcile stored provenance,
+        // then wake every metric-series-only surface with one focused version.
+        viewModelScope.launch {
+            var skippedInitialReplay = false
+            ProfileStore.ageMetricProfileChanges.collect {
+                if (!skippedInitialReplay) {
+                    skippedInitialReplay = true
+                    return@collect
+                }
+                scheduleAgeMetricRecompute()
+            }
+        }
         // Recompute the illness banner + today's row whenever cached days change.
         viewModelScope.launch {
             recentDays.collect { days ->
@@ -749,28 +821,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val localKey = java.time.LocalDate.now().toString()
                 val illnessTodayKey = maxOf(logicalKey, localKey)
                 _today.value = resolveTodayRow(days, logicalKey, localKey)
-                val illnessContext = runCatching {
-                    illnessJournalContext(days, illnessTodayKey)
-                }.getOrElse {
-                    illnessContextWithoutJournal(days, illnessTodayKey)
-                }
-                val illnessAssessment = IllnessWatch.assess(
-                    days = days,
-                    todayKey = illnessTodayKey,
-                    context = illnessContext,
-                )
-                val previousAlert = _healthAlert.value
-                _healthAlert.value =
-                    if (_illnessWatchEnabled.value) {
-                        IllnessWatch.banner(illnessAssessment.result)
-                    } else {
-                        null
-                    }
-                // Banner transition (clear → raised) → real system notification; the notifier's
-                // persisted day gate dedupes against the background-service call site.
-                if (previousAlert == null) {
-                    _healthAlert.value?.let { IllnessAlertNotifier.onEvaluated(appContext, it) }
-                }
+                refreshHealthSignalState()
                 // Optional contextual reviews are independent of the illness score. They consume only
                 // explicit, source-preserving data and have their own restart-safe cooldown gate.
                 runCatching { evaluateContextualVitalInterventions(illnessTodayKey) }
@@ -794,22 +845,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         context = appContext,
                         day = todayRow.day,
                         dayEffort = todayRow.strain,
-                        targetEffort = dailyPlan.target?.lower,
-                    )
-                }
-                // Cycle/body-clock and the already-computed shared illness assessment feed the Health hub.
-                // The banner above and this card therefore publish the exact same engine result.
-                runCatching {
-                    val loggedPeriodStarts = repository.periodStarts()
-                    _periodStarts.value = loggedPeriodStarts
-                    _cycleDailyLogs.value = repository.cycleDailyLogs()
-                    _v5Signals.value = V5HealthSignals.evaluate(
-                        days = days,
-                        cycleOptedIn = _cycleTrackingEnabled.value,
-                        loggedPeriodStarts = loggedPeriodStarts,
-                        journalContext = illnessContext,
-                        todayKey = illnessTodayKey,
-                        illnessAssessment = illnessAssessment,
+                        targetRange = dailyPlan.target,
                     )
                 }
                 // Keep the home-screen widget fresh while the app is open — covers users who turned
@@ -859,6 +895,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     IntelligenceEngine.recomputeVitalityOnly(
                         repo = repository,
                         profile = currentProfile(),
+                        profileProvider = ::currentProfile,
                         importedDeviceId = deviceId,
                     )
                 }.onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
@@ -892,7 +929,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             runCatching {
                 IntelligenceEngine.runEffortRescoreIfNeeded(
                     repo = repository,
-                    profile = currentProfile(),
+                    profileProvider = ::currentProfile,
                     importedDeviceId = deviceId,
                     maxHROverride = profileStore.hrMaxOverride.takeIf { it > 0 }?.toDouble(),
                     flagGet = { NoopPrefs.effortRescoreDone(appContext) },
@@ -917,14 +954,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }.onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
                 // #836 parity (Android): the 15-min tick is a backstop, not a data-driven refresh. Every real
                 // update (sync, import, edit, recalibrate, the #547 heal above) rescores via its own path and
-                // moves the raw-HR fingerprint, so skip the heavy 21-day rescore when the HR stream is unchanged
+                // moves the scoring-input fingerprint, so skip the heavy 21-day rescore when raw inputs are unchanged
                 // since the last COMPLETED run. Mirrors the Swift analyzeRecent(force:false) gate; the watermark
                 // advances only on success (below), so an interrupted run can never hide unscored data.
-                val analyzeFp = repository.hrFingerprint()
+                val analyzeFp = repository.analysisFingerprint(deviceId)
                 if (analyzeFp != NoopPrefs.analyzeWatermark(appContext)) runCatching {
                     IntelligenceEngine.analyzeRecent(
                         repo = repository,
-                        profile = currentProfile(),
+                        profileProvider = ::currentProfile,
                         importedDeviceId = deviceId,
                         maxHROverride = profileStore.hrMaxOverride
                             .takeIf { it > 0 }?.toDouble(),
@@ -1780,7 +1817,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         runCatching {
             IntelligenceEngine.analyzeRecent(
                 repo = repository,
-                profile = currentProfile(),
+                profileProvider = ::currentProfile,
                 importedDeviceId = deviceId,
                 maxHROverride = profileStore.hrMaxOverride
                     .takeIf { it > 0 }?.toDouble(),
@@ -2398,10 +2435,41 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshFitnessAgeNow(onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
             val wrote = runCatching {
-                IntelligenceEngine.recomputeFitnessAgeOnly(repository, currentProfile(), deviceId)
+                IntelligenceEngine.recomputeFitnessAgeOnly(
+                    repo = repository,
+                    profile = currentProfile(),
+                    profileProvider = ::currentProfile,
+                    importedDeviceId = deviceId,
+                )
+            }.onFailure {
+                if (it is CancellationException) throw it
             }.getOrDefault(false)
+            noteAgeMetricsChanged()
             onResult(wrote)
         }
+    }
+
+    private fun scheduleAgeMetricRecompute() {
+        ageMetricReconciliationRunner.schedule()
+    }
+
+    /** Catch a naturally advanced age when the app resumes across a birthday. Profile edits still arrive
+     *  through [ProfileStore.ageMetricProfileChanges], so this comparison adds no polling or duplicate work. */
+    private fun refreshAgeMetricsIfProfileChanged() {
+        val currentTarget = AgeMetricReconciliationTarget(
+            profileState = profileStore.ageMetricStateToken,
+            deviceId = deviceId,
+        )
+        if (currentTarget == lastAgeMetricReconciliationTarget) return
+        scheduleAgeMetricRecompute()
+    }
+
+    private fun noteAgeMetricsChanged() {
+        todayCardsLoadedSig = null
+        todayCardsLoadedProfileSig = null
+        todayFitnessAgeCache = null
+        todayVitalityCache = null
+        _ageMetricDataVersion.value += 1
     }
 
     // --- Smart alarm (persisted; arms the strap's firmware alarm). Port of macOS BehaviorStore +
@@ -2543,21 +2611,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _illnessWatchEnabled.value = enabled
         NoopPrefs.setIllnessWatch(appContext, enabled)
         // Recompute now — the recentDays collector only fires on data changes.
-        if (!enabled) {
-            _healthAlert.value = null
-            return
-        }
-        viewModelScope.launch {
-            val days = recentDays.value
-            val todayKey = maxOf(logicalDayKeyNow(), java.time.LocalDate.now().toString())
-            val context = runCatching {
-                illnessJournalContext(days, todayKey)
-            }.getOrElse {
-                illnessContextWithoutJournal(days, todayKey)
-            }
-            val banner = IllnessWatch.evaluate(days, todayKey, context)
-            if (_illnessWatchEnabled.value) _healthAlert.value = banner
-        }
+        viewModelScope.launch { refreshHealthSignalState() }
     }
 
     fun setContextualVitalReviewEnabled(enabled: Boolean) {
@@ -2668,76 +2722,38 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Re-publish the explanatory medication context after the private list changes. This cannot alter
      *  the anomaly score or level; it only refreshes copy on the banner and Health detail card. */
     fun medicationContextChanged() {
-        viewModelScope.launch {
-            val days = recentDays.value
-            val todayKey = currentIllnessDayKey()
-            val context = runCatching {
-                illnessJournalContext(days, todayKey)
-            }.getOrElse {
-                illnessContextWithoutJournal(days, todayKey)
-            }
-            val assessment = IllnessWatch.assess(days, todayKey, context)
-            _healthAlert.value = if (_illnessWatchEnabled.value) {
-                IllnessWatch.banner(assessment.result)
-            } else {
-                null
-            }
-            runCatching {
-                val starts = repository.periodStarts()
-                _periodStarts.value = starts
-                _cycleDailyLogs.value = repository.cycleDailyLogs()
-                _v5Signals.value = V5HealthSignals.evaluate(
-                    days = days,
-                    cycleOptedIn = _cycleTrackingEnabled.value,
-                    loggedPeriodStarts = starts,
-                    journalContext = context,
-                    todayKey = todayKey,
-                    illnessAssessment = assessment,
-                )
-            }
-        }
+        viewModelScope.launch { refreshHealthSignalState() }
     }
 
     /** Flip cycle awareness (v5 skin-temp suite). Persists and recomputes the v5 signals immediately so
      *  the Health hub's Cycle card flips between its opt-in card and the live result without a data change. */
     fun setCycleTrackingEnabled(enabled: Boolean) {
+        if (enabled && !cycleOptInApplies(ProfileStore.from(appContext).sex)) return
         _cycleTrackingEnabled.value = enabled
         NoopPrefs.setCycleTracking(appContext, enabled)
-        val days = recentDays.value
         viewModelScope.launch {
-            runCatching {
-                val loggedPeriodStarts = repository.periodStarts()
-                _periodStarts.value = loggedPeriodStarts
-                _cycleDailyLogs.value = repository.cycleDailyLogs()
-                _v5Signals.value = V5HealthSignals.evaluate(
-                    days = days,
-                    cycleOptedIn = enabled,
-                    loggedPeriodStarts = loggedPeriodStarts,
-                    journalContext = illnessJournalContext(days, currentIllnessDayKey()),
-                    todayKey = currentIllnessDayKey(),
-                )
-            }
+            refreshCycleTracking()
         }
     }
 
     /** Store a user-confirmed cycle day 1, then immediately republish history + the anchored estimate. */
     suspend fun logPeriodStart(day: String): Boolean {
         val saved = repository.logPeriodStart(day)
-        if (saved) refreshCycleTrackingAfterMutation()
+        if (saved) refreshCycleTracking()
         return saved
     }
 
     /** Physically delete one user-confirmed cycle day 1 and immediately recompute the estimate. */
     suspend fun deletePeriodStart(day: String): Boolean {
         val deleted = repository.deletePeriodStart(day)
-        if (deleted) refreshCycleTrackingAfterMutation()
+        if (deleted) refreshCycleTracking()
         return deleted
     }
 
     /** Physically delete all local period-start history; sensor history and other metrics are untouched. */
     suspend fun deleteAllPeriodStarts(): Boolean {
         val deleted = repository.deleteAllPeriodStarts()
-        if (deleted) refreshCycleTrackingAfterMutation()
+        if (deleted) refreshCycleTracking()
         return deleted
     }
 
@@ -2747,37 +2763,79 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         symptoms: Set<CycleTrackingStore.Symptom>,
     ): Boolean {
         val saved = repository.saveCycleDailyLog(day, flow, symptoms)
-        if (saved) refreshCycleTrackingAfterMutation()
+        if (saved) refreshCycleTracking()
         return saved
     }
 
     suspend fun deleteCycleDailyLog(day: String): Boolean {
         val deleted = repository.deleteCycleDailyLog(day)
-        if (deleted) refreshCycleTrackingAfterMutation()
+        if (deleted) refreshCycleTracking()
         return deleted
     }
 
     suspend fun deleteAllCycleDailyLogs(): Boolean {
         val deleted = repository.deleteAllCycleDailyLogs()
-        if (deleted) refreshCycleTrackingAfterMutation()
+        if (deleted) refreshCycleTracking()
         return deleted
     }
 
-    /** A metricSeries mutation does not invalidate recentDays, so explicitly reload the isolated series
-     *  and rerun the v5 adapter instead of waiting for unrelated daily data to change. */
-    private suspend fun refreshCycleTrackingAfterMutation() {
-        val starts = repository.periodStarts()
-        _periodStarts.value = starts
-        _cycleDailyLogs.value = repository.cycleDailyLogs()
-        val days = recentDays.value
-        runCatching {
-            _v5Signals.value = V5HealthSignals.evaluate(
+    /** Explicitly reevaluate cycle state after a local log mutation or foreground return. `recentDays` may
+     *  remain unchanged across midnight when the band was not worn, but cycle day must still advance. */
+    private suspend fun refreshCycleTracking() = refreshHealthSignalState()
+
+    /**
+     * Publish the illness banner and v5 Health snapshot from one serialized assessment. Foreground,
+     * repository-flow, medication, and cycle-log refreshes can overlap; resolving the latest inputs inside
+     * the mutex prevents an older suspended refresh from leaving the two surfaces on different assessments.
+     * Room failures retain the last cycle history instead of escaping a lifecycle coroutine.
+     */
+    private suspend fun refreshHealthSignalState() {
+        healthSignalRefreshMutex.withLock {
+            val days = recentDays.value
+            val todayKey = currentIllnessDayKey()
+            val context = try {
+                illnessJournalContext(days, todayKey)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                illnessContextWithoutJournal(days, todayKey)
+            }
+            val assessment = IllnessWatch.assess(days, todayKey, context)
+            val starts = try {
+                repository.periodStarts()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                _periodStarts.value
+            }
+            val dailyLogs = try {
+                repository.cycleDailyLogs()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                _cycleDailyLogs.value
+            }
+            val previousAlert = _healthAlert.value
+            val currentAlert = if (_illnessWatchEnabled.value) {
+                IllnessWatch.banner(assessment.result)
+            } else {
+                null
+            }
+            val currentSignals = V5HealthSignals.evaluate(
                 days = days,
                 cycleOptedIn = _cycleTrackingEnabled.value,
                 loggedPeriodStarts = starts,
-                journalContext = illnessJournalContext(days, currentIllnessDayKey()),
-                todayKey = currentIllnessDayKey(),
+                journalContext = context,
+                todayKey = todayKey,
+                illnessAssessment = assessment,
             )
+            _periodStarts.value = starts
+            _cycleDailyLogs.value = dailyLogs
+            _healthAlert.value = currentAlert
+            _v5Signals.value = currentSignals
+            if (previousAlert == null) {
+                currentAlert?.let { IllnessAlertNotifier.onEvaluated(appContext, it) }
+            }
         }
     }
 
@@ -3107,8 +3165,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         const val STRAP_ALARM_REARM_INTERVAL_MS = 24 * 60 * 60 * 1_000L
         /** SharedPreferences key for the persisted double-tap action (stored as the enum NAME). */
         const val DOUBLE_TAP_ACTION_KEY = "noop.doubleTapAction"
+        /** Last profile state fully reconciled into Fitness Age and Vitality rows. */
+        const val AGE_METRIC_RECONCILED_PROFILE_STATE_KEY =
+            "noop.ageMetrics.reconciledProfileState.v2"
+        /** Active source paired with [AGE_METRIC_RECONCILED_PROFILE_STATE_KEY]. */
+        const val AGE_METRIC_RECONCILED_DEVICE_ID_KEY =
+            "noop.ageMetrics.reconciledDeviceId.v3"
     }
 }
+
+/** Immutable scope captured by one Fitness Age/Vitality reconciliation job. */
+internal data class AgeMetricReconciliationTarget(
+    val profileState: String,
+    val deviceId: String,
+)
 
 /**
  * What a strap double-tap does on Android (parity promised since 4.2.8). Mirrors the Apple-applicable

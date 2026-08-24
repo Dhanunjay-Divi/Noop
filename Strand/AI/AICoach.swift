@@ -344,23 +344,39 @@ final class AICoachEngine: ObservableObject {
     /// coach. Exposed (read-only) so the UI's "Reset to default" can restore it and show it when nothing
     /// custom is stored. Editing the live prompt overrides this via `systemPromptKey`.
     static let defaultSystemPrompt = """
-    You are an elite, supportive recovery and performance coach with a real training methodology. \
-    You may be given a summary of the user's own wearable data (Recovery 0-100, Effort 0-100, sleep \
-    duration, HRV, resting heart rate) and recent workouts. Recovery is the daily readiness score, Effort \
-    is the daily cardiovascular-load score, and sleep duration is reported in hours. \
-    Coach using autoregulation:
-    • Readiness → prescription: Recovery 67-100 = green light to build/push, higher Effort is fine; \
-    34-66 = maintain, quality over volume, keep it controlled; 0-33 = active recovery only \
-    (Zone 2, mobility, extra sleep) and protect against accumulating Effort debt.
-    • Workout optimisation: progressive overload, polarised ~80/20 intensity, space hard sessions, \
-    program deloads/periodisation, and treat sleep as the single biggest recovery lever.
-    • Always cite the user's ACTUAL numbers, give a concrete plan (today and the week ahead), and \
-    be specific, punchy and motivating - like a coach who knows them.
-    If no data is provided, coach generally and invite them to turn on data access for personalised \
-    advice. You are NOT a doctor - never diagnose; suggest a professional for genuine health concerns.
-    Format replies in simple Markdown, chat-sized: short paragraphs, **bold** for key numbers, \
-    bullet or numbered lists for plans, ### headings only when structure genuinely helps, and a \
-    small table only for a week-ahead plan. No code blocks.
+    You are a supportive recovery and performance coach. You may receive the user's own wearable \
+    observations, Daily Plan evidence, recent workouts, and explicitly logged nutrition. Recovery and \
+    Effort are wellness estimates, not permission to train. Use autoregulation conservatively:
+    - Start with how the user says they feel. Pain, illness, unusual symptoms, or a withheld Daily Plan \
+    range overrides a favorable wearable trend.
+    - When a Daily Plan range exists, describe current Effort against that range as a planning cue. \
+    Never call a score a green light, clearance, safety limit, or reason to ignore symptoms.
+    - Distinguish observed facts from personal associations and general education. Cite only values and \
+    dates present in the evidence, state important coverage gaps, and never invent missing data.
+    - Offer specific training options only when supported by the self-check and Daily Plan evidence. \
+    Keep them optional, include a self-check, and avoid pretending one score determines the week.
+    - Discuss personalized food changes only when explicit nutrition logs and a user-stated goal support \
+    them. State logging coverage. Do not infer intake, deficiency, or nutrient needs from wearable data.
+    If data is unavailable, say so and give general education. Never diagnose, prescribe supplements, \
+    or recommend medication changes. Suggest a qualified professional for individualized medical or \
+    nutrition care, and appropriate urgent help for urgent symptoms.
+    Format replies in concise Markdown with short paragraphs and simple lists. No code blocks.
+    """
+
+    /// Appended after any editable persona. Users may change tone and methodology, but an edited prompt
+    /// must not remove the evidence and health boundaries that protect every provider request.
+    static let immutableSafetyPolicy = """
+    REQUIRED EVIDENCE AND SAFETY RULES:
+    - Wearable scores and Daily Plan ranges are wellness planning cues, never diagnosis, treatment, \
+    training clearance, or safety limits.
+    - Never map a score band to permission to push. Respect the user's self-check and say when evidence \
+    is insufficient or stale.
+    - Missing values are unknown, not zero. Separate observed facts, descriptive associations, and \
+    general education; never invent values, causes, or confidence.
+    - Personalized diet guidance requires explicit logged intake and a user-stated goal. State coverage \
+    and do not infer deficiency, prescribe supplements, or recommend medication changes.
+    - For pain, concerning symptoms, or possible emergencies, prioritize stopping and appropriate \
+    professional or emergency help over performance coaching.
     """
 
     /// The system prompt actually sent, read FRESH from UserDefaults on every request so an edit in
@@ -371,6 +387,14 @@ final class AICoachEngine: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if let stored, !stored.isEmpty { return stored }
         return Self.defaultSystemPrompt
+    }
+
+    var requestSystemPrompt: String {
+        Self.composeRequestSystemPrompt(systemPrompt)
+    }
+
+    static func composeRequestSystemPrompt(_ editablePrompt: String) -> String {
+        editablePrompt + "\n\n" + immutableSafetyPolicy
     }
 
     /// The user's stored prompt override, or the default when nothing custom is set. The UI binds its
@@ -662,9 +686,10 @@ final class AICoachEngine: ObservableObject {
     /// A brief remains a normal, explicit user send. Opening Coach or receiving a local check-in
     /// never calls a provider in the background.
     static let todayBriefPrompt = """
-    Give me today's coaching brief in three short parts: (1) readiness in one line, citing Charge, \
-    HRV and sleep when available; (2) exactly what training to do today and what to avoid; \
-    (3) one specific recovery action. Keep it concise.
+    Give me today's coaching brief in three short parts: (1) what the observed recovery signals say, \
+    with coverage; (2) where current Effort sits against the evidence-gated Daily Plan range and one \
+    optional training choice only if that range is available; (3) one recovery action. If evidence is \
+    withheld or incomplete, say so instead of inventing a plan. Keep it concise.
     """
 
     func sendTodayBrief() async {
@@ -675,6 +700,7 @@ final class AICoachEngine: ObservableObject {
     /// when the second consent is on). Used when the user has granted data access.
     func buildFullContext() async -> String {
         var ctx = buildContext()
+        ctx += "\n\n" + (await coachEvidenceBlock())
         let calibration = personalCalibrationBlock()
         if !calibration.isEmpty { ctx += "\n\n" + calibration }
         ctx += "\n\n" + (await recentWorkoutsBlock())
@@ -688,6 +714,109 @@ final class AICoachEngine: ObservableObject {
             if !block.isEmpty { ctx += "\n\n" + block }
         }
         return ctx
+    }
+
+    /// Typed facts + coverage + planner/nutrition boundaries shared by every consented Coach request.
+    /// It is intentionally separate from `buildContext`'s readable table so future model providers can
+    /// consume a stable evidence contract without changing how the existing summary is formatted.
+    func coachEvidenceBlock() async -> String {
+        let day = repo.today?.day ?? Repository.localDayKey(Date())
+        let days = repo.days
+        let checkIn = BehaviorStore.decodeDailyActionCheckIn(
+            today: day,
+            storedDay: UserDefaults.standard.string(
+                forKey: BehaviorStore.dailyActionCheckInDayKey
+            ),
+            storedValue: UserDefaults.standard.string(
+                forKey: BehaviorStore.dailyActionCheckInValueKey
+            )
+        )
+        let plan = DailyActionPlanner.plan(
+            today: day,
+            readiness: ReadinessEngine.evaluate(days: days, today: day),
+            checkIn: checkIn,
+            recentEffort: days.map {
+                DailyActionPlanner.EffortDay(day: $0.day, effort: $0.strain)
+            }
+        )
+        let currentEffort = days.last(where: { $0.day == day })?.strain
+        return CoachEvidenceEnvelope.render(.init(
+            day: day,
+            plan: plan,
+            currentEffort: currentEffort,
+            coverage: Self.coachMetricCoverage(days, through: day),
+            nutrition: await nutritionEvidence(through: day)
+        ))
+    }
+
+    private static func coachMetricCoverage(
+        _ days: [DailyMetric],
+        through day: String
+    ) -> [CoachEvidenceEnvelope.MetricCoverage] {
+        let windowDays = 30
+        let metrics: [(String, (DailyMetric) -> Double?)] = [
+            ("Recovery", { $0.recovery }),
+            ("Effort", { $0.strain }),
+            ("Sleep duration", { $0.totalSleepMin }),
+            ("HRV", { $0.avgHrv }),
+            ("Resting heart rate", { $0.restingHr.map(Double.init) }),
+            ("SpO2", { $0.spo2Pct }),
+            ("Respiratory rate", { $0.respRateBpm }),
+            ("Skin temperature", { $0.skinTempDevC }),
+        ]
+        return metrics.map { label, value in
+            CoachEvidenceEnvelope.metricCoverage(
+                label: label,
+                through: day,
+                windowDays: windowDays,
+                observations: days.map {
+                    .init(day: $0.day, value: value($0))
+                }
+            )
+        }
+    }
+
+    private func nutritionEvidence(
+        through day: String
+    ) async -> CoachEvidenceEnvelope.NutritionAvailability {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let end = formatter.date(from: day),
+              formatter.string(from: end) == day,
+              let start = formatter.calendar.date(byAdding: .day, value: -13, to: end),
+              let store = await repo.storeHandle() else { return .unavailable }
+        let from = formatter.string(from: start)
+        let entries: [NutritionEntryRow]
+        do {
+            entries = try await store.nutritionEntries(from: from, to: day)
+        } catch {
+            return .unavailable
+        }
+        let observedDays = Set(entries.map(\.day))
+        guard let latestDay = observedDays.max() else { return .noEntries }
+        let totals = NutritionLogContract.resolvedTotals(
+            entries: entries,
+            day: latestDay
+        )
+        let hasManual = entries.contains { $0.origin == NutritionLogContract.manualOrigin }
+        let hasImported = entries.contains { $0.origin == NutritionLogContract.csvOrigin }
+        let sourceMix: CoachEvidenceEnvelope.NutritionSourceMix = {
+            if hasManual && hasImported { return .mixed }
+            return hasImported ? .imported : .manual
+        }()
+        return .observed(.init(
+            observedDays: observedDays.count,
+            windowDays: 14,
+            latestDay: latestDay,
+            caloriesKcal: totals.caloriesKcal,
+            proteinG: totals.proteinG,
+            carbsG: totals.carbsG,
+            fatG: totals.fatG,
+            sourceMix: sourceMix
+        ))
     }
 
     /// Presentation-only personal estimates persisted by Compare after chronological holdout validation.
@@ -793,7 +922,7 @@ final class AICoachEngine: ObservableObject {
         try await provider.client.send(
             key: key,
             model: model,
-            systemPrompt: systemPrompt,
+            systemPrompt: requestSystemPrompt,
             messages: messages,
             session: session
         )

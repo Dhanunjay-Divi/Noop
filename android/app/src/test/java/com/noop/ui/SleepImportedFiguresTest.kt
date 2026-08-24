@@ -33,6 +33,39 @@ class SleepImportedFiguresTest {
     }
 
     @Test
+    fun heroUsesNeutralImportedProvenanceForTheDisplayedNight() {
+        val imported = ImportedSleepSeries(performance = mapOf("2026-06-02" to 85.0))
+
+        assertEquals(
+            "Imported",
+            restHeroSource(
+                imported,
+                "2026-06-02",
+                importedLabel = "Imported",
+                onDeviceLabel = "On-device",
+            ),
+        )
+        assertEquals(
+            "On-device",
+            restHeroSource(
+                imported,
+                "2026-06-01",
+                importedLabel = "Imported",
+                onDeviceLabel = "On-device",
+            ),
+        )
+        assertEquals(
+            "On-device",
+            restHeroSource(
+                imported,
+                null,
+                importedLabel = "Imported",
+                onDeviceLabel = "On-device",
+            ),
+        )
+    }
+
+    @Test
     fun importedDebtPassesThroughInMinutes() {
         val days = listOf(day("2026-06-01", 420.0), day("2026-06-02", 410.0))
         val imported = ImportedSleepSeries(debtMin = mapOf("2026-06-02" to 60.0))

@@ -373,10 +373,11 @@ struct SleepView: View {
     /// The Rest world's opening: a scenic indigo backdrop with — when the night carries a 0–100
     /// sleep-performance score — the canonical liquid `LiquidVessel` in the Rest tint with the score
     /// counting up over it (the SAME hero language Today's score cells and the Trends headline use);
-    /// otherwise a big SF-Rounded hours-slept headline over the same backdrop. A `SourceBadge` states
-    /// whether the score is WHOOP's own imported figure or NOOP's on-device estimate. Presentation-only
-    /// — the score is `performanceScore(for:)` on the ◀/▶-navigated `heroNight`, so the hero tracks the
-    /// same night the hypnogram shows (was pinned to `performance.latest` = last night regardless).
+    /// otherwise a big SF-Rounded hours-slept headline over the same backdrop. Imported scores use one
+    /// neutral provenance badge; on-device scores pair their source with the local confidence read.
+    /// Presentation-only — the score is `performanceScore(for:)` on the ◀/▶-navigated `heroNight`, so
+    /// the hero tracks the same night the hypnogram shows (was pinned to `performance.latest` = last
+    /// night regardless).
     @ViewBuilder
     private func restHero(_ model: SleepModel) -> some View {
         let night = heroNight(model)
@@ -438,11 +439,15 @@ struct SleepView: View {
                     .accessibilityElement(children: .combine)
                 }
                 HStack(spacing: NoopMetrics.space2) {
-                    SourceBadge(score != nil ? heroSource(for: night) : "On-device", tint: StrandPalette.restColor)
-                    SourceBadge(isProviderScore ? "Provider score" : restConfidenceLabel(assessment.confidence),
-                                tint: !isProviderScore && assessment.confidence == .solid
-                                    ? StrandPalette.statusPositive
-                                    : StrandPalette.statusWarning)
+                    if isProviderScore {
+                        SourceBadge("Imported", tint: StrandPalette.restColor)
+                    } else {
+                        SourceBadge("appwide.source.on_device", tint: StrandPalette.restColor)
+                        SourceBadge(restConfidenceLabel(assessment.confidence),
+                                    tint: assessment.confidence == .solid
+                                        ? StrandPalette.statusPositive
+                                        : StrandPalette.statusWarning)
+                    }
                 }
                 Text("As of \(night.spanLabel)")
                     .font(StrandFont.footnote)
@@ -554,15 +559,6 @@ struct SleepView: View {
         case .implausibleStageMix: return String(localized: "The stage mix may be an estimation miss; interpret deep and REM with care.")
         case nil: return nil
         }
-    }
-
-    /// Whether a SPECIFIC night's sleep-performance score is WHOOP's own imported figure or NOOP's
-    /// on-device approximation — so the hero is honest about provenance, like Today's badges. Keyed
-    /// by the night's wake-day (matching `performanceScore(for:)`) so a navigated night's badge
-    /// tracks ITS OWN score's provenance, not last night's. LocalizedStringKey to match `SourceBadge`.
-    private func heroSource(for night: Night) -> LocalizedStringKey {
-        let wakeDay = Repository.localDayKey(Date(timeIntervalSince1970: TimeInterval(night.session.endTs)))
-        return repo.importedSleep[wakeDay]?.performancePct != nil ? "Whoop" : "On-device"
     }
 
     // MARK: - Provenance for the displayed night (COMPONENT 4, spec 2026-06-20)

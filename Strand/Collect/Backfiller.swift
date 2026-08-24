@@ -10,8 +10,7 @@ import StrandAnalytics
 protocol BackfillStoreWriting: AnyObject {
     @discardableResult
     func insert(_ streams: Streams, deviceId: String) async throws
-        -> (hr: Int, rr: Int, events: Int, battery: Int,
-            spo2: Int, skinTemp: Int, resp: Int, gravity: Int)
+        -> StreamInsertCounts
     func enqueueRawBatch(_ meta: RawBatchMeta, frames: [[UInt8]]) async throws
     func setCursor(_ name: String, _ value: Int) async throws
     func cursor(_ name: String) async throws -> Int?
@@ -158,6 +157,10 @@ final class Backfiller {
     /// tally a session so a COMPLETED-but-empty offload (all console, no sensor records) can tell the
     /// user their strap isn't banking, without false-positiving a normal caught-up sync.
     private let onChunk: ((_ decoded: Bool, _ console: Bool) -> Void)?
+    /// Fires on the main actor immediately after score-bearing rows are durably inserted. This is the
+    /// authoritative freshness receipt: timeout/disconnect teardown can run while an async insert is
+    /// suspended, so reading a session counter only at teardown can miss rows that commit moments later.
+    private let onRowsPersisted: ((_ rows: Int) -> Void)?
 
     /// Connection & Sync test mode (Test Centre): the cheap gate + tagged sink for the .connection
     /// diagnostic lines (offload progress / firmware layout / trim sentinel). `connectionActive` is one
@@ -179,6 +182,7 @@ final class Backfiller {
          log: ((String) -> Void)? = nil,
          rejectedSink: ((_ frames: [[UInt8]], _ trim: UInt32, _ family: DeviceFamily) -> Bool)? = nil,
          onChunk: ((_ decoded: Bool, _ console: Bool) -> Void)? = nil,
+         onRowsPersisted: ((_ rows: Int) -> Void)? = nil,
          connectionActive: @escaping () -> Bool = { false },
          connectionLog: ((String) -> Void)? = nil,
          firmwareLayout: ((Int) -> Void)? = nil,
@@ -195,6 +199,7 @@ final class Backfiller {
         self.log = log
         self.rejectedSink = rejectedSink
         self.onChunk = onChunk
+        self.onRowsPersisted = onRowsPersisted
         self.connectionActive = connectionActive
         self.connectionLog = connectionLog
         self.firmwareLayout = firmwareLayout
@@ -270,16 +275,14 @@ final class Backfiller {
         return Array(frame[start..<(start + 8)])
     }
 
-    /// Pure per-chunk persistence tally (#150). `rows` = biometric rows actually inserted (HR, R-R, SpO2,
-    /// skin-temp, resp, gravity — battery/events are housekeeping, not biometric history). `motion` =
-    /// gravity rows (the sleep-critical signal). `nights` = the distinct day-keys (ts / 86400) the chunk's
-    /// records covered. Summed across a session by finishChunk to drive the success summary line.
+    /// Pure per-chunk persistence tally (#150). `rows` includes every score-bearing stream actually
+    /// inserted, including WHOOP 5/MG PPG-HR, steps, band sleep-state and wrist events. Battery is
+    /// housekeeping. `motion` is gravity rows. `nights` is the distinct day-key set covered.
     nonisolated static func chunkTally(
-        counts: (hr: Int, rr: Int, events: Int, battery: Int, spo2: Int, skinTemp: Int, resp: Int, gravity: Int),
+        counts: StreamInsertCounts,
         timestamps: [Int]
     ) -> (rows: Int, motion: Int, nights: Set<Int>) {
-        let rows = counts.hr + counts.rr + counts.spo2 + counts.skinTemp + counts.resp + counts.gravity
-        return (rows, counts.gravity, Set(timestamps.map { $0 / 86400 }))
+        (counts.scoreBearingRows, counts.gravity, Set(timestamps.map { $0 / 86400 }))
     }
 
     /// The one-line session success summary (#150) — the success-side log that never existed. Returns nil
@@ -550,7 +553,7 @@ final class Backfiller {
             // Commit the decoded rows FIRST (durable). Doing this before the reject archive means a
             // rare insert failure — which returns and re-sends the whole chunk next session — can't
             // leave duplicate lines in the append-only reject archive.
-            let counts: (hr: Int, rr: Int, events: Int, battery: Int, spo2: Int, skinTemp: Int, resp: Int, gravity: Int)
+            let counts: StreamInsertCounts
             do { counts = try await store.insert(decoded, deviceId: deviceId) } catch {
                 // Diag (#601): the decoded rows couldn't be written - this is the "history stalls but live HR
                 // works" class. We return WITHOUT acking so the strap keeps this chunk and re-sends it next
@@ -561,11 +564,20 @@ final class Backfiller {
             }
             // Success-side observability (#150): tally what actually persisted so the session can emit
             // "persisted N rows (M with motion) across K night(s)" - the win-rate signal a log never had.
-            let tally = Backfiller.chunkTally(counts: counts, timestamps: decoded.gravity.map(\.ts) + decoded.hr.map(\.ts))
+            let scoreBearingTimestamps =
+                decoded.hr.map(\.ts) + decoded.rr.map(\.ts) + decoded.events.map(\.ts)
+                + decoded.spo2.map(\.ts) + decoded.skinTemp.map(\.ts) + decoded.resp.map(\.ts)
+                + decoded.gravity.map(\.ts) + decoded.steps.map(\.ts)
+                + decoded.sleepState.map(\.ts) + decoded.ppgHr.map(\.ts)
+                + decoded.ppgWaveform.map(\.ts)
+            let tally = Backfiller.chunkTally(counts: counts, timestamps: scoreBearingTimestamps)
             sessionRowsPersisted += tally.rows
             sessionMotionRows += tally.motion
             sessionSkinTempRows += counts.skinTemp
             sessionNightKeys.formUnion(tally.nights)
+            if tally.rows > 0 {
+                onRowsPersisted?(tally.rows)
+            }
 
             // Connection test mode: per-chunk offload PROGRESS (running session totals), so a report shows
             // the offload advancing rather than only its final outcome. Gated zero-cost.

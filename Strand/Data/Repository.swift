@@ -5,6 +5,10 @@ import WhoopProtocol
 import StrandAnalytics
 import StrandDesign   // TrendPoint , the shared chart point type the Deep Timeline series uses
 
+enum RepositoryReadError: Error {
+    case storeUnavailable
+}
+
 /// Stable identity for one suggestion. The endpoint is deliberately excluded: a later sync can extend
 /// the same bout or merge a nearby finalized span, but it must not create a second prompt/notification.
 /// Legacy `start:end` values remain readable so existing dismissals survive the migration.
@@ -316,6 +320,15 @@ final class Repository: ObservableObject {
     @Published private(set) var cycleTrackingSeq = 0
     func noteCycleTrackingChanged() { cycleTrackingSeq += 1 }
 
+    /// Bumped after a profile-triggered Fitness Age/Vitality reconciliation finishes. Metric-series
+    /// writes do not change `days` or `refreshSeq`, so age-shaped surfaces need this focused invalidation.
+    @Published private(set) var ageMetricsSeq = 0
+    func noteAgeMetricsChanged() {
+        ageMetricsSeq += 1
+        todayHistoryWideLoadedSeq = -1
+        todayHistoryWideCache = nil
+    }
+
     /// Workouts & GPS test mode (Test Centre): the tagged sink for the `.workouts` diagnostic lines
     /// (auto-detect inputs/thresholds/why, cross-source dedup decisions). Default nil (inert) so tests +
     /// non-prod inits get the byte-identical untraced path; AppModel wires it to `live.append(log:domain:)`.
@@ -367,6 +380,10 @@ final class Repository: ObservableObject {
     /// Inject a pre-opened store so unit tests can exercise the read facades (e.g. `timelineSeries`)
     /// against an in-memory `WhoopStore` without touching the on-disk path. DEBUG-only test seam.
     func setStoreForTesting(_ s: WhoopStore) { self.store = s }
+    /// Inject a deterministic success/failure into the strict age-metric history read. The production
+    /// path remains the real active/canonical store union.
+    var reconciliationDailyMetricsReaderForTesting:
+        ((String, String) async throws -> [DailyMetric])?
     #endif
 
     // MARK: - Union reads (active strap + canonical)
@@ -385,6 +402,22 @@ final class Repository: ObservableObject {
         for id in importedReadIds {   // active strap FIRST → it claims each column, canonical fills its gaps
             for m in (try? await store.dailyMetrics(deviceId: id, from: from, to: to)) ?? [] {
                 byDay[m.day] = byDay[m.day].map { Self.coalesceDay($0, m) } ?? m
+            }
+        }
+        return byDay.values.sorted { $0.day < $1.day }
+    }
+
+    /// Strict union read for durable reconciliation jobs. Dashboard reads remain best-effort, but a
+    /// watermark must never interpret a failed source query as valid missing history.
+    private func unionDailyMetricsStrict(
+        store: WhoopStore, from: String, to: String
+    ) async throws -> [DailyMetric] {
+        var byDay: [String: DailyMetric] = [:]
+        for id in importedReadIds {
+            for metric in try await store.dailyMetrics(deviceId: id, from: from, to: to) {
+                byDay[metric.day] = byDay[metric.day].map {
+                    Self.coalesceDay($0, metric)
+                } ?? metric
             }
         }
         return byDay.values.sorted { $0.day < $1.day }
@@ -1070,6 +1103,22 @@ final class Repository: ObservableObject {
     func dailyMetrics(fromDay: String, toDay: String) async -> [DailyMetric] {
         guard let store = await ensureStore() else { return [] }
         return await unionDailyMetrics(store: store, from: fromDay, to: toDay)
+    }
+
+    /// Throwing counterpart for jobs that persist a "fully reconciled" marker. An empty result is valid;
+    /// unavailable storage or any failed active/canonical query must be retried later.
+    func dailyMetricsForReconciliation(
+        fromDay: String, toDay: String
+    ) async throws -> [DailyMetric] {
+        #if DEBUG
+        if let reader = reconciliationDailyMetricsReaderForTesting {
+            return try await reader(fromDay, toDay)
+        }
+        #endif
+        guard let store = await ensureStore() else {
+            throw RepositoryReadError.storeUnavailable
+        }
+        return try await unionDailyMetricsStrict(store: store, from: fromDay, to: toDay)
     }
 
     func hrSamples(from: Int, to: Int, limit: Int = 8000) async -> [HRSample] {

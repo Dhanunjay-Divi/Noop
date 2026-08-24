@@ -40,6 +40,8 @@ final class AppModel: ObservableObject {
     /// refreshes each force their own pass, so a 30-minute cadence avoids repeatedly rescoring the full
     /// lookback while live HR advances the fingerprint every second.
     nonisolated static let analysisBackstopNanoseconds: UInt64 = 1_800_000_000_000
+    private static let ageMetricReconciledProfileStateKey =
+        "noop.ageMetrics.reconciledProfileState.v2"
 
     /// Timestamp formatter for the generic-HR strap-log lines routed through `straplog` into the shared
     /// log (issue #421). Mirrors `BLEManager.logTimeFormatter`'s `HH:mm:ss` so WHOOP and HR-strap lines
@@ -234,6 +236,12 @@ final class AppModel: ObservableObject {
     /// Coalesces a burst of repository publications into one contextual-vitals read. A newer refresh
     /// cancels the pending pass; delivery itself remains deduplicated by ContextualInterventionPolicy.
     private var contextualEvaluationTask: Task<Void, Never>?
+    /// Debounced profile reconciliation. A DOB/sex/waist edit invalidates stored provenance immediately;
+    /// this task writes the matching replacement values and then wakes metric-series-only views.
+    private var ageMetricRecomputeTask: Task<Void, Never>?
+    /// Last profile token handed to the focused age-metric reconciler. Unlike the profile publishers,
+    /// this also detects age changing naturally across a birthday when the app returns to foreground.
+    private var lastAgeMetricProfileState: String?
     /// Manual workouts consume the live sensor EVENT stream, never repeated reads of cached display HR.
     private var workoutHeartRateCursor = WorkoutHeartRateCursor(consumedSequence: 0)
     /// Drives the READ spine off the registry's active device (#814 HIGH-1). A Devices-screen
@@ -272,6 +280,8 @@ final class AppModel: ObservableObject {
         Self.applyPendingRestoreAtColdLaunch()
         let profile = ProfileStore()
         self.profile = profile
+        self.lastAgeMetricProfileState = UserDefaults.standard.string(
+            forKey: Self.ageMetricReconciledProfileStateKey)
         self.behavior = BehaviorStore()
         let live = LiveState()
         self.live = live
@@ -316,6 +326,17 @@ final class AppModel: ObservableObject {
                     hrMax: Double(self.profile.hrMax), sex: self.profile.sex)
             }
         }.store(in: &hrCancellables)
+        Publishers.CombineLatest3(profile.$dateOfBirth, profile.$sex, profile.$waistCm)
+            .map { dateOfBirth, sex, waist in
+                "\(dateOfBirth.timeIntervalSinceReferenceDate)|\(sex)|\(waist)"
+            }
+            .removeDuplicates()
+            .dropFirst()
+            .debounce(for: .milliseconds(350), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.scheduleAgeMetricRecompute()
+            }
+            .store(in: &hrCancellables)
         // Every valid standards-level scale indication is first persisted with its source + precise
         // timestamp. Only the explicitly selected scale user (or a single-user packet with no user id)
         // may then project into ProfileStore; the shared freshness API prevents a stored backlog from
@@ -453,12 +474,13 @@ final class AppModel: ObservableObject {
             self.ble.setKeepRealtimeForData(PuffinExperiment.keepRealtimeForDataEnabled)
             self.applyPowerSaving()
         }.store(in: &hrCancellables)
-        // A completed backfill has just written strap history. Refresh the dashboard cache,
-        // but leave heavyweight analysis to its own guarded/background-friendly path.
+        // Newly inserted history has reached durable storage. This receipt is intentionally separate from
+        // `lastSyncedAt`: a session can save valid overnight chunks and then end on the idle watchdog or a
+        // disconnect before HISTORY_COMPLETE. Those rows still need scoring now, not at the next backstop.
         //
-        // #755 COALESCE: a strap whose firmware segments a deep offload into many small HISTORY_COMPLETE
-        // slices stamps `lastSyncedAt` once PER slice (BLEManager.exitBackfilling), seconds apart, for the
-        // whole multi-minute download. Without coalescing each slice fired refreshAfterCompletedBackfill()
+        // #755 COALESCE: a strap whose firmware segments a deep offload into many productive slices bumps
+        // `historyDataRevision` once per slice, seconds apart, for the whole multi-minute download. Without
+        // coalescing each slice fired refreshAfterPersistedHistory()
         // , a full repo.refresh (~50 store reads) + analyzeRecent , and every one re-fired TodayView's
         // ~50-read loadAll, all contending with the backfill's bulk writes on the single-connection store.
         // On a heavy + actively-syncing history that stacked into a ~10s freeze. `.debounce` collapses the
@@ -467,13 +489,12 @@ final class AppModel: ObservableObject {
         // trailing edge, so the dashboard still refreshes with the newly-synced data , freshness is kept,
         // we just stop re-doing it dozens of times mid-download. removeDuplicates() still drops a slice that
         // stamped an identical second; the trailing refresh after a real change is never dropped.
-        live.$lastSyncedAt
+        live.$historyDataRevision
             .dropFirst()
-            .compactMap { $0 }
             .removeDuplicates()
             .debounce(for: .seconds(2), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
-                Task { [weak self] in await self?.refreshAfterCompletedBackfill() }
+                Task { [weak self] in await self?.refreshAfterPersistedHistory() }
             }
             .store(in: &hrCancellables)
 
@@ -533,7 +554,7 @@ final class AppModel: ObservableObject {
             #endif
             await self.repo.refresh()                          // surface any imported data at once
             // Vitality v2 is a provenance/model boundary, so reconcile it once per launch even when the
-            // raw-HR fingerprint is unchanged and the normal analysis backstop will short-circuit. This
+            // raw scoring-input fingerprint is unchanged and the normal analysis backstop will short-circuit. This
             // removes only legacy computed vitality/body-age rows; imported/vendor metrics are untouched.
             #if DEBUG
             // The screenshot fixture has no confirmed onboarding profile; its synthetic scores carry an
@@ -589,6 +610,39 @@ final class AppModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: Self.analysisBackstopNanoseconds)
             }
         }
+    }
+
+    private func scheduleAgeMetricRecompute() {
+        ageMetricRecomputeTask?.cancel()
+        let requestedProfileState = profile.ageMetricStateToken
+        ageMetricRecomputeTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            async let fitnessAge = intelligence.recomputeFitnessAgeOutcome()
+            async let vitality = intelligence.recomputeVitalityOutcome()
+            let outcomes = await (fitnessAge, vitality)
+            guard !Task.isCancelled,
+                  requestedProfileState == profile.ageMetricStateToken else { return }
+            // Publish successful writes or cleanups immediately, but retain the old watermark unless both
+            // passes reached storage. A failed half then retries on the next foreground/unlock boundary.
+            if outcomes.0.completed || outcomes.1.completed {
+                repo.noteAgeMetricsChanged()
+            }
+            if outcomes.0.completed && outcomes.1.completed {
+                lastAgeMetricProfileState = requestedProfileState
+                UserDefaults.standard.set(
+                    requestedProfileState,
+                    forKey: Self.ageMetricReconciledProfileStateKey
+                )
+            }
+        }
+    }
+
+    /// Reconcile profile-dependent metrics only when the derived profile token actually changed. Called
+    /// after onboarding confirmation and whenever the app becomes active, which catches a birthday without
+    /// polling or requiring the user to edit their date of birth.
+    func refreshAgeMetricsIfProfileChanged() {
+        guard profile.ageMetricStateToken != lastAgeMetricProfileState else { return }
+        scheduleAgeMetricRecompute()
     }
 
     /// Build the device registry + source coordinator once the store is open, then start observing.
@@ -684,14 +738,14 @@ final class AppModel: ObservableObject {
     var healthWriteBack: (() async -> Void)?
     #endif
 
-    private func refreshAfterCompletedBackfill() async {
-        live.append(log: "Backfill: refreshing dashboard cache from completed sync")
+    private func refreshAfterPersistedHistory() async {
+        live.append(log: "Backfill: scoring newly persisted history")
         await repo.refresh(days: 120)
         // Score the freshly-offloaded raw data RIGHT NOW rather than waiting for the next 15-minute
         // analyzeRecent tick , otherwise a just-synced night's Charge / Effort / Rest can take up to
         // 15 minutes to appear on a strap-only (no-import) dashboard. analyzeRecent no-ops if a tick is
         // already running and refreshes the dashboard itself once the new scores persist. (PR #218)
-        await intelligence.analyzeRecent(force: true, skipIfUnchanged: true)
+        await intelligence.analyzeRecent(force: true)
         await refreshV5Signals()
         // A completed sync is the earliest reliable moment to inspect an offloaded session. Existing
         // users keep their chosen mode; fresh installs default to Ask until the classifier has real-world
@@ -2180,7 +2234,7 @@ final class AppModel: ObservableObject {
         StrainTargetNotifier.onDayUpdate(
             day: row.day,
             dayEffort: row.strain,
-            targetEffort: plan.target?.lower,
+            targetRange: plan.target,
             enabled: behavior.strainTargetNudge)
     }
 
@@ -2361,7 +2415,8 @@ final class AppModel: ObservableObject {
         let loggedPeriodStarts = await repo.periodStarts()
         cyclePhase = CyclePhaseEngine.classify(nights,
                                                baselineUsable: latestSkinAssessment?.baselineTrusted == true,
-                                               loggedPeriodStarts: loggedPeriodStarts)
+                                               loggedPeriodStarts: loggedPeriodStarts,
+                                               asOfDay: Repository.localDayKey(Date()))
         cycleCurve = curve
     }
 

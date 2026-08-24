@@ -51,19 +51,72 @@ extension WhoopStore {
         }
     }
 
-    /// Cheap change-detector for the raw HR stream: `(count, maxTs)` over `[from, to]`, computed in
-    /// SQLite over the `(deviceId, ts)` index WITHOUT materializing any rows (#836). Lets a caller decide
-    /// "nothing was inserted since last time, skip the expensive re-read" for pennies, `COUNT(*)` moves on
-    /// any insert (including a backfilled OLD night whose `maxTs` wouldn't change), and `maxTs` distinguishes
-    /// fresh appends. COALESCE so an empty window is `(0, 0)`, never nil.
+    /// Cheap change-detector for every raw HR input: measured `hrSample` plus WHOOP 5/MG PPG-derived HR.
+    /// The count is an input-row count, so an overlapping measured/PPG second counts twice; that is
+    /// intentional because this is a change token, not a displayed-sample count. Any newly backfilled PPG
+    /// night must move the token even when no measured HR row was written. COALESCE keeps empty `(0, 0)`.
     public func hrFingerprint(deviceId: String, from: Int, to: Int) async throws -> (count: Int, maxTs: Int) {
         try syncRead { db in
-            // COUNT(*) and COALESCE(MAX(ts),0) are both NON-NULL, and the aggregate query always returns
-            // exactly one row, so fetchOne is non-nil and the columns read straight into Int. The guard is
-            // belt-and-suspenders.
             guard let row = try Row.fetchOne(db, sql: """
-                SELECT COUNT(*) AS c, COALESCE(MAX(ts), 0) AS m FROM hrSample
-                WHERE deviceId = ? AND ts >= ? AND ts <= ?
+                SELECT COALESCE(SUM(c), 0) AS c, COALESCE(MAX(m), 0) AS m
+                FROM (
+                    SELECT COUNT(*) AS c, MAX(ts) AS m FROM hrSample
+                    WHERE deviceId = ? AND ts >= ? AND ts <= ?
+                    UNION ALL
+                    SELECT COUNT(*) AS c, MAX(ts) AS m FROM ppgHrSample
+                    WHERE deviceId = ? AND ts >= ? AND ts <= ?
+                )
+                """, arguments: [deviceId, from, to, deviceId, from, to]) else { return (0, 0) }
+            let c: Int = row["c"]
+            let m: Int = row["m"]
+            return (c, m)
+        }
+    }
+
+    /// Cheap change token for every raw stream that can alter daily scoring. A history chunk can deliver
+    /// HR before motion or R-R intervals; watching HR alone would let a later sleep-critical chunk match
+    /// the prior watermark and remain unscored after an interruption. Battery and raw waveform storage do
+    /// not directly feed `analyzeRecent`, so they are intentionally excluded.
+    public func analysisFingerprint(
+        deviceId: String, from: Int, to: Int
+    ) async throws -> (count: Int, maxTs: Int) {
+        try syncRead { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                WITH bounds AS (
+                    SELECT ? AS deviceId, ? AS lo, ? AS hi
+                )
+                SELECT COALESCE(SUM(c), 0) AS c, COALESCE(MAX(m), 0) AS m
+                FROM (
+                    SELECT COUNT(*) AS c, MAX(ts) AS m FROM hrSample, bounds
+                    WHERE hrSample.deviceId = bounds.deviceId AND ts >= lo AND ts <= hi
+                    UNION ALL
+                    SELECT COUNT(*) AS c, MAX(ts) AS m FROM ppgHrSample, bounds
+                    WHERE ppgHrSample.deviceId = bounds.deviceId AND ts >= lo AND ts <= hi
+                    UNION ALL
+                    SELECT COUNT(*) AS c, MAX(ts) AS m FROM rrInterval, bounds
+                    WHERE rrInterval.deviceId = bounds.deviceId AND ts >= lo AND ts <= hi
+                    UNION ALL
+                    SELECT COUNT(*) AS c, MAX(ts) AS m FROM gravitySample, bounds
+                    WHERE gravitySample.deviceId = bounds.deviceId AND ts >= lo AND ts <= hi
+                    UNION ALL
+                    SELECT COUNT(*) AS c, MAX(ts) AS m FROM respSample, bounds
+                    WHERE respSample.deviceId = bounds.deviceId AND ts >= lo AND ts <= hi
+                    UNION ALL
+                    SELECT COUNT(*) AS c, MAX(ts) AS m FROM skinTempSample, bounds
+                    WHERE skinTempSample.deviceId = bounds.deviceId AND ts >= lo AND ts <= hi
+                    UNION ALL
+                    SELECT COUNT(*) AS c, MAX(ts) AS m FROM spo2Sample, bounds
+                    WHERE spo2Sample.deviceId = bounds.deviceId AND ts >= lo AND ts <= hi
+                    UNION ALL
+                    SELECT COUNT(*) AS c, MAX(ts) AS m FROM stepSample, bounds
+                    WHERE stepSample.deviceId = bounds.deviceId AND ts >= lo AND ts <= hi
+                    UNION ALL
+                    SELECT COUNT(*) AS c, MAX(ts) AS m FROM sleepStateSample, bounds
+                    WHERE sleepStateSample.deviceId = bounds.deviceId AND ts >= lo AND ts <= hi
+                    UNION ALL
+                    SELECT COUNT(*) AS c, MAX(ts) AS m FROM event, bounds
+                    WHERE event.deviceId = bounds.deviceId AND ts >= lo AND ts <= hi
+                )
                 """, arguments: [deviceId, from, to]) else { return (0, 0) }
             let c: Int = row["c"]
             let m: Int = row["m"]

@@ -170,6 +170,8 @@ class WhoopConnectionService : Service() {
     /** True once [bluetoothStateReceiver] is registered, so repeat onStartCommands don't double-register
      *  (which would later throw on a single unregister). */
     private var bluetoothReceiverRegistered = false
+    /** Service-instance gate for the durable post-backfill fingerprint reconciliation. */
+    private var postBackfillReconciled = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -214,6 +216,13 @@ class WhoopConnectionService : Service() {
             if (decision.reconnect && saved != null && !ble.state.value.connected) {
                 ble.reconnectToAddress(saved.first, saved.second)
             }
+        }
+
+        if (!postBackfillReconciled) {
+            postBackfillReconciled = true
+            // A prior process may have committed history and then been cancelled before scoring it.
+            // Reconcile durable sources on every service creation, including ordinary non-sticky starts.
+            ble.reconcilePersistedHistory()
         }
 
         // Keep the ongoing notification in step with the live connection state AND today's recovery

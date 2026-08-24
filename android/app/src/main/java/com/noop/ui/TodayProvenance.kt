@@ -1,11 +1,64 @@
 package com.noop.ui
 
+import androidx.annotation.StringRes
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import com.noop.R
 import com.noop.analytics.FusionSource
 import com.noop.analytics.ReadinessEngine
 import com.noop.ble.WhoopBleClient
 import com.noop.ble.WhoopModel
 import com.noop.data.WhoopRepository
+
+@StringRes
+internal fun readinessHeadlineResource(level: ReadinessEngine.Level): Int = when (level) {
+    ReadinessEngine.Level.INSUFFICIENT -> R.string.appwide_readiness_insufficient_headline
+    ReadinessEngine.Level.RUNDOWN -> R.string.appwide_readiness_rundown_headline
+    ReadinessEngine.Level.STRAINED -> R.string.appwide_readiness_strained_headline
+    ReadinessEngine.Level.PRIMED -> R.string.appwide_readiness_primed_headline
+    ReadinessEngine.Level.BALANCED -> R.string.appwide_readiness_balanced_headline
+}
+
+@Composable
+internal fun localizedReadinessHeadline(readiness: ReadinessEngine.Readiness): String =
+    stringResource(readinessHeadlineResource(readiness.level))
+
+@Composable
+internal fun localizedReadinessSummary(readiness: ReadinessEngine.Readiness): String {
+    val resource = when (readiness.level) {
+        ReadinessEngine.Level.INSUFFICIENT -> {
+            if (readiness.limitations.any { it == "No daily recovery row is available for this date." }) {
+                R.string.appwide_readiness_insufficient_current_summary
+            } else {
+                R.string.appwide_readiness_insufficient_summary
+            }
+        }
+        ReadinessEngine.Level.RUNDOWN -> R.string.appwide_readiness_rundown_summary
+        ReadinessEngine.Level.STRAINED -> R.string.appwide_readiness_strained_summary
+        ReadinessEngine.Level.PRIMED -> R.string.appwide_readiness_primed_summary
+        ReadinessEngine.Level.BALANCED -> R.string.appwide_readiness_balanced_summary
+    }
+    return stringResource(resource)
+}
+
+@Composable
+internal fun localizedReadinessLimitation(
+    raw: String,
+    readiness: ReadinessEngine.Readiness,
+): String = when {
+    raw == "No daily recovery row is available for this date." ->
+        stringResource(R.string.appwide_readiness_limitation_no_daily_row)
+    raw == "No current recovery signal has enough prior variation for comparison." ->
+        stringResource(R.string.appwide_readiness_limitation_no_current_signal)
+    raw == "This read is based on one current recovery signal." ->
+        stringResource(R.string.appwide_readiness_limitation_one_signal)
+    raw == "The recent-load ratio is descriptive and does not affect readiness." ->
+        stringResource(R.string.appwide_readiness_limitation_recent_load)
+    raw.startsWith("The personal baseline has ") ->
+        stringResource(R.string.appwide_readiness_limitation_baseline_building, readiness.baselineDays)
+    else -> raw
+}
 
 /**
  * The Today provenance label for the day's REAL merge winner, extends the existing By-Day badge
@@ -88,6 +141,14 @@ internal fun heroSourceLabel(
     }
     return labels.takeIf { it.isNotEmpty() }?.joinToString(" + ")
 }
+
+/** A mixed hero label still represents a live Noop Band source and must retain sync feedback. */
+internal fun sourceLabelIncludesNoopBand(label: String): Boolean =
+    label.split("+").any { it.trim().equals(WhoopModel.CUSTOMER_NAME, ignoreCase = true) }
+
+/** Transfer activity ending can also mean timeout or disconnect. Confirm only when completion advanced. */
+internal fun bandSyncCompletionAdvanced(startedAt: Long?, completedAt: Long?): Boolean =
+    completedAt != null && (startedAt == null || completedAt > startedAt)
 
 /**
  * Source label for the three visible hero scores. Today can show a carried Charge from the previous

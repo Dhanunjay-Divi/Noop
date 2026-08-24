@@ -33,6 +33,7 @@ final class CyclePhaseEngineTests: XCTestCase {
         XCTAssertEqual(r.phase, .luteal)
         XCTAssertNotEqual(r.confidence, .learning)
         XCTAssertFalse(r.shiftMarkers.isEmpty)
+        XCTAssertEqual(r.noteKinds, [.phaseLuteal])
     }
 
     func testFollicularNightClassifiesFollicular() {
@@ -94,6 +95,21 @@ final class CyclePhaseEngineTests: XCTestCase {
         XCTAssertNil(r.nextPeriodWindow)
     }
 
+    func testIsolatedElevatedNightsDoNotCreateCycleShifts() {
+        let nights = (0..<70).map { index in
+            let spike = index == 17 || index == 43
+            return CyclePhaseEngine.Night(
+                day: CyclePhaseEngine.shiftDay("2026-01-01", by: index)!,
+                tempZ: spike ? 2.0 : -0.2,
+                rhrZ: spike ? 1.5 : -0.1,
+                hrvZ: spike ? -1.5 : 0.1
+            )
+        }
+        let r = CyclePhaseEngine.classify(nights, baselineUsable: true)
+        XCTAssertEqual(r.phase, .unknown)
+        XCTAssertTrue(r.shiftMarkers.isEmpty)
+    }
+
     // MARK: - Gates: < 1.5 cycles, untrusted baseline → learning
 
     func testInsufficientDataIsLearning() {
@@ -128,6 +144,20 @@ final class CyclePhaseEngineTests: XCTestCase {
         XCTAssertNil(r.cycleLengthDays)
         XCTAssertNotNil(r.nextPeriodWindow)
         XCTAssertTrue(r.note.contains("28-day prior"))
+        XCTAssertEqual(r.noteKinds, [.broadPrior])
+    }
+
+    func testExplicitAsOfDayAdvancesLogWithoutWearableNights() {
+        let r = CyclePhaseEngine.classify(
+            [],
+            baselineUsable: false,
+            loggedPeriodStarts: ["2026-05-01"],
+            asOfDay: "2026-05-10"
+        )
+        XCTAssertEqual(r.phase, .learning)
+        XCTAssertEqual(r.cycleDayLow, 9)
+        XCTAssertEqual(r.cycleDayHigh, 11)
+        XCTAssertNotNil(r.nextPeriodWindow)
     }
 
     func testLoggedCadenceUsesPlausiblePersonalMedianBeforeSensorCalibration() {
@@ -147,7 +177,80 @@ final class CyclePhaseEngineTests: XCTestCase {
         XCTAssertEqual(r.cycleDayLow, 12)
         XCTAssertEqual(r.cycleDayHigh, 14)
         XCTAssertNotNil(r.nextPeriodWindow)
-        XCTAssertTrue(r.note.contains("logged starts"))
+        XCTAssertTrue(r.note.contains("recent logged intervals"))
+        XCTAssertEqual(r.noteKinds, [.personalIntervals])
+    }
+
+    func testLoggedVariabilityWidensTheForecastWindow() {
+        let stable = CyclePhaseEngine.classify(
+            [.init(day: "2026-05-10", tempZ: nil, rhrZ: nil, hrvZ: nil)],
+            baselineUsable: false,
+            loggedPeriodStarts: ["2026-01-17", "2026-02-14", "2026-03-14", "2026-04-11"]
+        )
+        let variable = CyclePhaseEngine.classify(
+            [.init(day: "2026-05-10", tempZ: nil, rhrZ: nil, hrvZ: nil)],
+            baselineUsable: false,
+            loggedPeriodStarts: ["2026-01-17", "2026-02-10", "2026-03-14", "2026-04-11"]
+        )
+        let stableWindow = stable.nextPeriodWindow!
+        let variableWindow = variable.nextPeriodWindow!
+        let stableWidth = CyclePhaseEngine.daysBetween(
+            stableWindow.earliestDay, stableWindow.latestDay)!
+        let variableWidth = CyclePhaseEngine.daysBetween(
+            variableWindow.earliestDay, variableWindow.latestDay)!
+        XCTAssertGreaterThan(variableWidth, stableWidth)
+    }
+
+    func testHighlyVariableLoggedIntervalsSuppressForecastWithoutLosingCurrentDay() {
+        let r = CyclePhaseEngine.classify(
+            [.init(day: "2026-05-02", tempZ: nil, rhrZ: nil, hrvZ: nil)],
+            baselineUsable: false,
+            loggedPeriodStarts: ["2026-01-01", "2026-01-23", "2026-03-03", "2026-03-27"]
+        )
+        XCTAssertNotNil(r.cycleDayLow)
+        XCTAssertNil(r.cycleLengthDays)
+        XCTAssertNil(r.nextPeriodWindow)
+        XCTAssertTrue(r.note.contains("vary too much"))
+        XCTAssertEqual(r.noteKinds, [.unreliableLogs])
+    }
+
+    func testRecentOutOfRangeIntervalSuppressesForecastInsteadOfBeingDiscarded() {
+        let starts = ["2026-01-01", "2026-01-29", "2026-03-11", "2026-03-31"]
+        let r = CyclePhaseEngine.classify(
+            [.init(day: "2026-04-05", tempZ: nil, rhrZ: nil, hrvZ: nil)],
+            baselineUsable: false,
+            loggedPeriodStarts: starts
+        )
+        XCTAssertNotNil(r.cycleDayLow)
+        XCTAssertNil(r.cycleLengthDays)
+        XCTAssertNil(r.nextPeriodWindow)
+        XCTAssertTrue(r.note.contains("outside the supported range"))
+    }
+
+    func testLoggedCadenceWinsOverSensorShiftSpacingForPeriodForecast() {
+        let nights = biphasic(cycles: 4, cycleLen: 30)
+        let lastDay = nights.last!.day
+        let latestLog = CyclePhaseEngine.shiftDay(lastDay, by: -10)!
+        let priorLog = CyclePhaseEngine.shiftDay(latestLog, by: -27)!
+        let r = CyclePhaseEngine.classify(
+            nights,
+            baselineUsable: true,
+            loggedPeriodStarts: [priorLog, latestLog]
+        )
+        XCTAssertEqual(r.cycleLengthDays, 27)
+    }
+
+    func testCurrentLogAnchorsDayEvenWhenLatestSensorNightIsYesterday() {
+        let nights = biphasic(cycles: 3)
+        let today = CyclePhaseEngine.shiftDay(nights.last!.day, by: 1)!
+        let r = CyclePhaseEngine.classify(
+            nights,
+            baselineUsable: true,
+            loggedPeriodStarts: [today],
+            asOfDay: today
+        )
+        XCTAssertEqual(r.cycleDayLow, 1)
+        XCTAssertEqual(r.cycleDayHigh, 2)
     }
 
     func testStaleOrFutureLoggedStartDoesNotFabricateCurrentCycle() {
@@ -164,6 +267,7 @@ final class CyclePhaseEngineTests: XCTestCase {
         XCTAssertNil(r.cycleDayHigh)
         XCTAssertNil(r.nextPeriodWindow)
         XCTAssertTrue(r.note.contains("over 40 days old"))
+        XCTAssertEqual(r.noteKinds, [.staleLog])
     }
 
     // MARK: - Logged-period mode: agrees, and a mistimed log is flagged

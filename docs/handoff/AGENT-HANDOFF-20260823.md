@@ -6,13 +6,16 @@ blocked.
 ## Read first
 
 1. [`../ops/ACTIVE.md`](../ops/ACTIVE.md)
-2. [`../ops/rounds/2026-08-23-explainable-trends-profile-rhythm.md`](../ops/rounds/2026-08-23-explainable-trends-profile-rhythm.md)
-3. [`../ops/rounds/2026-08-23-today-metrics-recovery.md`](../ops/rounds/2026-08-23-today-metrics-recovery.md)
-4. [`../ops/rounds/2026-08-23-repository-independence.md`](../ops/rounds/2026-08-23-repository-independence.md)
-5. [`../REPOSITORY_INDEPENDENCE.md`](../REPOSITORY_INDEPENDENCE.md)
-6. [`../provenance/rights-status.json`](../provenance/rights-status.json)
-7. [`RELEASE-BLOCKERS.md`](RELEASE-BLOCKERS.md)
-8. [`ROUND-14-today-metrics-recovery.md`](ROUND-14-today-metrics-recovery.md)
+2. [`../ops/rounds/2026-08-24-overnight-calibration-effort-coach.md`](../ops/rounds/2026-08-24-overnight-calibration-effort-coach.md)
+3. [`ROUND-17-overnight-calibration-effort-coach.md`](ROUND-17-overnight-calibration-effort-coach.md)
+4. [`../ops/rounds/2026-08-24-cycle-tracking-metric-reconciliation.md`](../ops/rounds/2026-08-24-cycle-tracking-metric-reconciliation.md)
+5. [`ROUND-16-cycle-tracking-and-metric-reconciliation.md`](ROUND-16-cycle-tracking-and-metric-reconciliation.md)
+6. [`../ops/rounds/2026-08-23-explainable-trends-profile-rhythm.md`](../ops/rounds/2026-08-23-explainable-trends-profile-rhythm.md)
+7. [`../ops/rounds/2026-08-23-today-metrics-recovery.md`](../ops/rounds/2026-08-23-today-metrics-recovery.md)
+8. [`../ops/rounds/2026-08-23-repository-independence.md`](../ops/rounds/2026-08-23-repository-independence.md)
+9. [`../REPOSITORY_INDEPENDENCE.md`](../REPOSITORY_INDEPENDENCE.md)
+10. [`../provenance/rights-status.json`](../provenance/rights-status.json)
+11. [`RELEASE-BLOCKERS.md`](RELEASE-BLOCKERS.md)
 
 ## Current repository truth
 
@@ -21,7 +24,7 @@ blocked.
 - Default and only active remote branch: `main`.
 - GitHub metadata: `isFork=false`, no parent repository.
 - Local and remote `main` must resolve to the same commit after a fresh fetch.
-- Current round baseline before its direct-to-main commit: `d3b741dc`.
+- Current round baseline before its direct-to-main commit: `d1f238f8`.
 - This source tree remains the auditable, noncommercial reference codebase.
   Standalone hosting does not make inherited source commercially independent.
 
@@ -68,6 +71,39 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
   precedence. SOS wording reflects immediate SMS-first paging and location
   sharing when available, with voice remaining a delayed fallback.
 - Paced breathing uses restrained phone haptics when no band is bonded.
+- Sleep now shows one neutral `Imported` hero badge for imported scores instead
+  of provider brand plus `PROVIDER SCORE`; detailed stored provenance remains.
+- Menstrual-cycle setup sits directly below Sex in Profile and remains
+  available from Health before the first wearable reading. The private tracker,
+  conservative cadence/temperature model, and all presentation strings are
+  mirrored across Apple and Android.
+- Cycle forecasts widen with recent logged variability and fail closed on stale,
+  out-of-range, or highly variable history. The UI makes no fertility,
+  contraception, safe-day, exact ovulation, or diagnostic claim.
+- Fitness Age and Vitality reconcile after relevant profile, birthday, and
+  active-device changes. Failed reads, writes, or completion-marker persistence
+  retain a retry path, and stale asynchronous reads cannot publish for a newer
+  profile.
+- Daily Signal keeps its identity, source, and state aligned at compact widths.
+  Noop Band history sync uses an indeterminate reduced-motion-aware sweep and a
+  brief completion confirmation rather than a fabricated percentage.
+- Overnight calibration now fingerprints PPG-derived HR and every
+  score-bearing history stream. A PPG-only persisted overnight fixture advances
+  the canonical calibration count from `0/4` to `1/4`.
+- Post-backfill scoring is durable and source-bound. Commits during a pass,
+  device switches, cancellation, transient failures, and service recreation
+  retain a coalesced retry path; the success watermark cannot advance after a
+  failed pass.
+- Daily Effort exposes a conservative 0-100 personal range only from current
+  evidence and a same-day self-check. Its notification is explicit opt-in,
+  current-local-day only, once daily, and never clearance or a stopping rule.
+- Coach now receives a typed evidence envelope that separates unavailable,
+  empty, observed, and missing states, bounds distinct-day coverage, sanitizes
+  user text/dates, and prevents unsupported personalized nutrition claims.
+- Android metric education now has specific localized guidance for heart-rate
+  summaries, calories/macronutrients, mood, and body/basal-body temperature.
+- The iPhone visual harness supports real iPhone SE dimensions and waits for
+  the cold fixture state before recording the first frame.
 
 ## Verified gates
 
@@ -75,14 +111,20 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
 - Legal inventory: 152 runtime components and 3 container inputs verified.
 - Distribution gate: blocked on exactly the three unresolved rights entries, as
   intended.
-- Current health-claims scan: clear across 1,041 files.
-- Android: 3,573 Full Debug unit tests executed with 0 failures and 6 skips;
-  `assembleFullDebug` passed.
-- Apple: final unsigned generic iOS simulator and macOS Debug app builds passed.
-- StrandAnalytics: 1,323 tests passed; StrandDesign: 44 tests passed.
+- Current health-claims scan: clear across 1,049 files.
+- Android: 3,627 Full Debug unit tests executed with 0 failures and 6 skips;
+  `assembleFullDebug` and instrumentation compilation passed, and managed Pixel
+  API 35 instrumentation passed 4/4 tests.
+- Apple: unsigned generic iOS simulator build passed; the production shell
+  passed 21/21 UI tests, and 40/40 visual scenarios passed across iPhone SE and
+  iPhone 14 Pro.
+- Current macOS app suite: 1,410 passed, 1 intentional skip, 0 failures.
+- All nine Swift packages: 2,596 tests, 0 failures, 2 intentional skips.
+- StrandAnalytics: 1,360 tests passed; StrandDesign: 44 tests passed.
 - Focused profile and brand-literal-ratchet macOS tests passed.
 - i18n: focus-locale completeness and the no-new-literal regression gate pass.
-- Shared app-wide localization has exact 122-key parity across nine locales.
+- Shared app-wide localization has exact 278-key parity across nine locales;
+  Daily Plan has 59-key parity, and canonical generator reruns are idempotent.
 - Server: pinned Ruff checks pass; local tests pass 59 with 4
   database-dependent skips.
 - Round 14 iOS production shell: 17/17 tests passed locally, including the
@@ -111,6 +153,9 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
 - Independent source review found and then confirmed fixes for translated SOS
   semantics, Unicode graphemes, sparse/noisy R-R selection, dismissed workouts,
   canonical re-pair history, half-open tie-breaking, and gravity-source parity.
+- Current independent reconciliation review found one Android completion-marker
+  durability issue. Checked background persistence and failed-write retry
+  coverage resolved it; follow-up review found no additional concrete issue.
 
 These checks do not establish store readiness, physical-device behavior,
 medical accuracy, clinical safety, or commercial source rights.
@@ -137,6 +182,17 @@ that machine-translated reproductive-health copy has native-speaker approval.
   workout, consent, and source-separation gates without a new validation round.
 - Do not add the local display name to Friends, sync, or backups without an
   explicit privacy/product decision and migration review.
+- Do not present cycle awareness as fertility, contraception, safe-day,
+  ovulation-date, pregnancy, diagnosis, or medical guidance.
+- Do not advance an age-metric completion watermark when any required read,
+  write, or marker-persistence step failed.
+- Do not replace source-bound post-backfill revisions with one process-local
+  boolean, clear durable pending work after failure, or advance its fingerprint
+  watermark before the pass reaches success.
+- Do not notify from a historical Effort row, a withheld range, or a disabled
+  preference. Effort remains a planning cue, not training clearance.
+- Do not render a failed Coach data read as an empty log or turn missing
+  evidence into zero, a trend, or personalized diet advice.
 
 ## Ordered next work
 
@@ -156,8 +212,14 @@ that machine-translated reproductive-health copy has native-speaker approval.
 7. Validate tap precedence, phone/band haptics, re-paired canonical history,
    overnight Rhythm refresh, and workout overlap on representative physical
    devices without resetting local data.
-8. Start a new dated ops round for any material source, device, release, or
+8. Obtain native-speaker review for the 47 new app-wide cycle/source/sync keys,
+   then validate cycle, age-metric, and Noop Band sync behavior on
+   representative physical devices without resetting local data.
+9. Start a new dated ops round for any material source, device, release, or
    repository change and update `docs/ops/ACTIVE.md` before handing off.
+10. Validate the source-bound overnight scoring queue, Daily Effort nudge, and
+    Coach evidence states on representative physical devices and real user
+    histories without resetting local data.
 
 ## Fast verification
 

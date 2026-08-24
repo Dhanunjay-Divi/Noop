@@ -1,4 +1,6 @@
 import XCTest
+import Combine
+import WhoopStore
 @testable import Strand
 
 /// Pins the #899-A forced-rescore re-arm contract in `IntelligenceEngine.analyzeRecent`.
@@ -14,14 +16,74 @@ import XCTest
 /// so a quiet pass cannot recurse and a forced call landing DURING the re-invoke re-arms it again , exactly
 /// once per genuinely-dropped force.
 ///
-/// The engine's re-arm is a tiny `(computing, force) → drop | rearm` state machine plus a "rerun once when
-/// the flag is set at defer time" rule. `IntelligenceEngine` is `@MainActor` and needs a live store/repo to
-/// run a real pass (not constructible in a unit context), so this models the SAME decision rules the engine
-/// implements and pins the contract: a forced call during an in-flight pass schedules EXACTLY ONE rerun, a
-/// non-forced one schedules NONE, and the re-arm can never loop. Mirrors the Android no-op rationale: Android
-/// has no shared `computing` lock (the forced post-backfill rescore runs on its own ioScope coroutine and is
-/// never dropped), so there is nothing to re-arm there.
+/// The production test below runs the real engine against an in-memory store. The smaller state-model tests
+/// retain exhaustive coverage of the latch's quiet/non-forced edges. Mirrors the Android no-op rationale:
+/// Android has no shared `computing` lock (the forced post-backfill rescore runs on its own ioScope coroutine
+/// and is never dropped), so there is nothing to re-arm there.
 final class IntelligenceForcedRescoreRearmTests: XCTestCase {
+
+    /// Queue several real forced calls while the first production pass is suspended in its detached scan.
+    /// Every overlapping call must be dropped, while their shared latch creates exactly one follow-up pass.
+    @MainActor
+    func testProductionForcedCallsDuringActivePassCollapseToOneRuntimeRerun() async throws {
+        let defaults = UserDefaults.standard
+        let watermarkKey = "noop.analyzeWatermark"
+        let priorWatermark = defaults.object(forKey: watermarkKey)
+        defer {
+            if let priorWatermark {
+                defaults.set(priorWatermark, forKey: watermarkKey)
+            } else {
+                defaults.removeObject(forKey: watermarkKey)
+            }
+        }
+
+        let store = try await WhoopStore.inMemory()
+        let repo = Repository(deviceId: "my-whoop")
+        repo.setStoreForTesting(store)
+        let engine = IntelligenceEngine(
+            repo: repo, profile: ProfileStore(), deviceId: "my-whoop")
+
+        let firstStarted = expectation(description: "first scoring pass acquired the gate")
+        let rerunFinished = expectation(description: "single forced rerun finished")
+        var transitions: [Bool] = []
+        var passStarts = 0
+        let cancellable = engine.$computing.dropFirst().sink { computing in
+            transitions.append(computing)
+            if computing {
+                passStarts += 1
+                if passStarts == 1 { firstStarted.fulfill() }
+            } else if passStarts == 2 {
+                rerunFinished.fulfill()
+            }
+        }
+
+        // A wider empty-store scan guarantees a real detached suspension without adding fixture data.
+        let firstPass = Task { @MainActor in
+            await engine.analyzeRecent(maxDays: 365, force: true)
+        }
+        await fulfillment(of: [firstStarted], timeout: 2)
+        XCTAssertTrue(engine.computing)
+
+        let overlappingCalls = (0..<5).map { _ in
+            Task { @MainActor in
+                await engine.analyzeRecent(maxDays: 365, force: true)
+            }
+        }
+        for call in overlappingCalls {
+            let receipt = await call.value
+            XCTAssertNil(receipt, "an overlapping forced call must re-arm instead of starting concurrently")
+        }
+
+        let firstReceipt = await firstPass.value
+        XCTAssertNotNil(firstReceipt)
+        await fulfillment(of: [rerunFinished], timeout: 10)
+        for _ in 0..<10 { await Task.yield() }
+
+        XCTAssertEqual(
+            transitions, [true, false, true, false],
+            "five dropped forces must produce one bounded follow-up pass")
+        withExtendedLifetime(cancellable) {}
+    }
 
     /// A faithful model of the engine's re-arm state machine. Each method mirrors one decision in
     /// `analyzeRecent`: the entry guard and the `defer`. `reruns` counts how many times the `defer` would

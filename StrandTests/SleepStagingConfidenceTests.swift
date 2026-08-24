@@ -12,6 +12,19 @@ import WhoopStore
 /// gate delegates to `ScoreConfidence.rest(...)`, so these pin the UI side against the same thresholds the
 /// daily pass uses. Pure → no view, no BLE.
 final class SleepStagingConfidenceTests: XCTestCase {
+    func testImportedRestHeroUsesOneNeutralBadge() throws {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: repoRoot.appendingPathComponent("Strand/Screens/SleepView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains(#"if isProviderScore {"#))
+        XCTAssertTrue(source.contains(#"SourceBadge("Imported", tint: StrandPalette.restColor)"#))
+        XCTAssertFalse(source.contains(#"SourceBadge(isProviderScore ? "Provider score""#))
+    }
 
     /// A high-efficiency night with near-zero deep+REM → flagged low-confidence (likely staging miss).
     func testHighEfficiencyLowRestorative_isLowConfidence() {

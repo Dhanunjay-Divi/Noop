@@ -40,10 +40,18 @@ internal fun heroPerformanceScore(
 }
 
 /**
- * Whether a SPECIFIC night's sleep-performance score is WHOOP's own imported figure or NOOP's
- * on-device approximation — so the hero is honest about provenance, like Today's badges. Keyed by the
- * night's wake-day (matching [heroPerformanceScore]) so a navigated night's badge tracks ITS OWN
- * score's provenance, not last night's. Mirrors the macOS SleepView.heroSource.
+ * Visible provenance for a SPECIFIC night's sleep-performance score. Imported scores use a neutral,
+ * caller-localized label; local scores remain "On-device". Keyed by the night's wake-day (matching
+ * [heroPerformanceScore]) so a navigated night's badge tracks ITS OWN score's provenance, not last
+ * night's. Detailed provider identity remains in the stored import metadata and detail surfaces.
  */
-internal fun restHeroSource(imported: ImportedSleepSeries, wakeDay: String?): String =
-    if (wakeDay != null && imported.performance[wakeDay] != null) "Whoop" else "On-device"
+internal fun restHeroSource(
+    imported: ImportedSleepSeries,
+    wakeDay: String?,
+    importedLabel: String,
+    onDeviceLabel: String,
+): String = if (wakeDay != null && imported.performance[wakeDay] != null) {
+    importedLabel
+} else {
+    onDeviceLabel
+}

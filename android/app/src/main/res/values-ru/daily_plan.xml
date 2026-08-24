@@ -23,6 +23,15 @@
     <string name="daily_plan_evidence_sleep_plan">Ваш текущий план сна</string>
     <string name="daily_plan_evidence_title">ИСПОЛЬЗОВАННЫЕ ДАННЫЕ</string>
     <string name="daily_plan_limitation">Этот план не является диагнозом, назначением, безопасным пределом или медицинским допуском.</string>
+    <string name="daily_plan_notification_body">Вы достигли %1$d; запланированный на сегодня диапазон: %2$d-%3$d. Это ориентир для планирования, а не предел. Оцените самочувствие, прежде чем добавлять нагрузку.</string>
+    <string name="daily_plan_notification_help">Один раз в день после синхронизации. Если диапазон скрыт, уведомление не отправляется.</string>
+    <string name="daily_plan_notification_title">Сегодняшний диапазон Effort достигнут</string>
+    <string name="daily_plan_notification_toggle">Уведомить при достижении диапазона</string>
+    <string name="daily_plan_progress_above">Выше запланированного на сегодня диапазона. Оцените самочувствие, прежде чем добавлять нагрузку.</string>
+    <string name="daily_plan_progress_accessibility">Текущий Effort: %1$d. Запланированный диапазон: от %2$d до %3$d.</string>
+    <string name="daily_plan_progress_below">До запланированного на сегодня диапазона: %1$d.</string>
+    <string name="daily_plan_progress_current">Текущий Effort</string>
+    <string name="daily_plan_progress_in_range">В запланированном на сегодня диапазоне. Это ориентир, а не правило остановки.</string>
     <string name="daily_plan_signal_good">Согласовано</string>
     <string name="daily_plan_signal_hrv">Вариабельность сердечного ритма</string>
     <string name="daily_plan_signal_load">Соотношение недавней нагрузки</string>

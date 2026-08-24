@@ -471,7 +471,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
         ) {
             val hasHc = (hcDays ?: 0) > 0 || (hcWorkouts ?: 0) > 0 || (hcTemperaturePoints ?: 0) > 0
             if (hasHc) {
-                StatePill(title = uiString(R.string.l10n_data_sources_screen_imported_434eb26f), tone = StrandTone.Accent, showsDot = true)
+                StatePill(title = uiString(R.string.appwide_source_imported), tone = StrandTone.Accent, showsDot = true)
                 CountLine(
                     primary = hcDays?.let { "$it days" } ?: "-",
                     secondary = if (hcWorkouts != null && hcTemperaturePoints != null) {

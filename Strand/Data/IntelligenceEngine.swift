@@ -27,6 +27,24 @@ final class IntelligenceEngine: ObservableObject {
     @Published var computing = false
     @Published var note: String?
 
+    /// Completion state for the lightweight profile-dependent metric passes. A missing eligible value is
+    /// a successful reconciliation (stale rows may have been removed); unavailable storage or a failed
+    /// mutation is not. AppModel persists its profile watermark only after both passes complete.
+    enum AgeMetricReconciliationOutcome: Equatable, Sendable {
+        case reconciled(wroteValue: Bool)
+        case failed
+
+        var completed: Bool {
+            if case .reconciled = self { return true }
+            return false
+        }
+
+        var wroteValue: Bool {
+            if case .reconciled(let wroteValue) = self { return wroteValue }
+            return false
+        }
+    }
+
     /// Evidence returned only after a scoring pass reaches its persistence boundary.
     ///
     /// `whoopStrapDays` is deliberately narrower than `results`: it contains only days whose completed
@@ -373,6 +391,21 @@ final class IntelligenceEngine: ObservableObject {
         return best?.value
     }
 
+    /// Strict counterpart used by the persisted reconciliation watermark. A failed read must leave the
+    /// watermark unchanged so the next foreground pass retries instead of treating "unknown" as absent.
+    private func latestComputedProfileTokenStrict(
+        store: WhoopStore, key: String
+    ) async throws -> Double? {
+        var best: MetricPoint?
+        for id in repo.computedReadIds {
+            let rows = try await store.metricSeries(
+                deviceId: id, key: key, from: "0000-01-01", to: "9999-12-31")
+            guard let row = rows.last else { continue }
+            if best == nil || row.day > best!.day { best = row }
+        }
+        return best?.value
+    }
+
     /// Purge every computed-union copy, not just the current write id. This matters after a strap is
     /// removed/re-added: an old canonical row can otherwise win a later union read after the active copy
     /// is deleted.
@@ -384,6 +417,21 @@ final class IntelligenceEngine: ObservableObject {
         // A partial storage failure therefore leaves readers closed instead of blessing a stale sibling.
         for key in keys {
             for id in ids { _ = try? await store.deleteMetricSeries(deviceId: id, key: key) }
+        }
+    }
+
+    /// Strict counterpart used by the persisted reconciliation watermark. Key-major ordering preserves
+    /// the same fail-closed marker semantics, while propagating any mutation failure to the caller.
+    private func purgeComputedMetricKeysStrict(
+        store: WhoopStore, keys: [String]
+    ) async throws {
+        var ids = repo.computedReadIds
+        let writeId = deviceId + "-noop"
+        if !ids.contains(writeId) { ids.append(writeId) }
+        for key in keys {
+            for id in ids {
+                _ = try await store.deleteMetricSeries(deviceId: id, key: key)
+            }
         }
     }
 
@@ -401,6 +449,28 @@ final class IntelligenceEngine: ObservableObject {
         inputsUsable: Bool,
         saturdayKey: String
     ) async -> Bool {
+        await reconcileVitalityV2Outcome(
+            store: store,
+            computedReadIds: computedReadIds,
+            writeId: writeId,
+            days: days,
+            age: age,
+            inputsUsable: inputsUsable,
+            saturdayKey: saturdayKey
+        ).wroteValue
+    }
+
+    /// Strict Vitality reconciliation used by AppModel's retry watermark. Unlike the public Bool-shaped
+    /// compatibility helper, this distinguishes a valid no-score result from a storage failure.
+    nonisolated static func reconcileVitalityV2Outcome(
+        store: WhoopStore,
+        computedReadIds: [String],
+        writeId: String,
+        days: [DailyMetric],
+        age: Int,
+        inputsUsable: Bool,
+        saturdayKey: String
+    ) async -> AgeMetricReconciliationOutcome {
         var computedIds = computedReadIds
         if !computedIds.contains(writeId) { computedIds.append(writeId) }
         var seenIds = Set<String>()
@@ -409,17 +479,26 @@ final class IntelligenceEngine: ObservableObject {
         var newestToken: MetricPoint?
         var hasLegacyToken = false
         for id in computedIds {
-            let rows = (try? await store.metricSeries(
-                deviceId: id, key: AgeMetricProfile.vitalityKey,
-                from: "0000-01-01", to: "9999-12-31")) ?? []
+            let rows: [MetricPoint]
+            do {
+                rows = try await store.metricSeries(
+                    deviceId: id, key: AgeMetricProfile.vitalityKey,
+                    from: "0000-01-01", to: "9999-12-31")
+            } catch {
+                return .failed
+            }
             if let row = rows.last,
                newestToken == nil || row.day > newestToken!.day {
                 newestToken = row
             }
             if !hasLegacyToken {
-                hasLegacyToken = !((try? await store.metricSeries(
-                    deviceId: id, key: AgeMetricProfile.legacyVitalityKey,
-                    from: "0000-01-01", to: "9999-12-31")) ?? []).isEmpty
+                do {
+                    hasLegacyToken = !(try await store.metricSeries(
+                        deviceId: id, key: AgeMetricProfile.legacyVitalityKey,
+                        from: "0000-01-01", to: "9999-12-31")).isEmpty
+                } catch {
+                    return .failed
+                }
             }
         }
 
@@ -444,22 +523,22 @@ final class IntelligenceEngine: ObservableObject {
                     do {
                         _ = try await store.deleteMetricSeries(deviceId: id, key: key)
                     } catch {
-                        return false
+                        return .failed
                     }
                 }
             }
         }
 
-        guard let result else { return false }
+        guard let result else { return .reconciled(wroteValue: false) }
         do {
             _ = try await store.upsertMetricSeries([
                 MetricPoint(day: saturdayKey, key: "vitality", value: result.vitality),
                 MetricPoint(day: saturdayKey, key: "body_age", value: result.bodyAge),
                 MetricPoint(day: saturdayKey, key: AgeMetricProfile.vitalityKey, value: currentToken),
             ], deviceId: writeId)
-            return true
+            return .reconciled(wroteValue: true)
         } catch {
-            return false
+            return .failed
         }
     }
 
@@ -470,16 +549,29 @@ final class IntelligenceEngine: ObservableObject {
     /// outside this migration.
     @discardableResult
     func recomputeVitalityOnly(maxDays: Int = 21) async -> Bool {
-        guard let store = await repo.storeHandle() else { return false }
+        await recomputeVitalityOutcome(maxDays: maxDays).wroteValue
+    }
+
+    /// Recompute Vitality while retaining enough state for AppModel to decide whether a retry is needed.
+    func recomputeVitalityOutcome(
+        maxDays: Int = 21
+    ) async -> AgeMetricReconciliationOutcome {
+        guard let store = await repo.storeHandle() else { return .failed }
         let now = Int(Date().timeIntervalSince1970)
         let offset = TimeZone.current.secondsFromGMT()
         let midnight = Self.midnightLocal(now, offsetSec: offset)
         let newestDay = AnalyticsEngine.dayString(midnight, offsetSec: offset)
         let oldestDay = AnalyticsEngine.dayString(
             midnight - (maxDays - 1) * 86_400, offsetSec: offset)
-        let days = Array((await repo.dailyMetrics(fromDay: oldestDay, toDay: newestDay))
-            .sorted { $0.day < $1.day }.suffix(maxDays))
-        return await Self.reconcileVitalityV2(
+        let persistedDays: [DailyMetric]
+        do {
+            persistedDays = try await repo.dailyMetricsForReconciliation(
+                fromDay: oldestDay, toDay: newestDay)
+        } catch {
+            return .failed
+        }
+        let days = Array(persistedDays.sorted { $0.day < $1.day }.suffix(maxDays))
+        return await Self.reconcileVitalityV2Outcome(
             store: store,
             computedReadIds: repo.computedReadIds,
             writeId: deviceId + "-noop",
@@ -495,76 +587,97 @@ final class IntelligenceEngine: ObservableObject {
     /// card shows. Light + works offline (stored data only). Returns true if a value was written. Mirrors
     /// the Android `recomputeFitnessAgeOnly`.
     func recomputeFitnessAgeOnly(maxDays: Int = 21) async -> Bool {
-        guard let store = await repo.storeHandle() else { return false }
+        await recomputeFitnessAgeOutcome(maxDays: maxDays).wroteValue
+    }
+
+    /// Recompute Fitness Age while distinguishing successful not-ready cleanup from storage failure.
+    func recomputeFitnessAgeOutcome(
+        maxDays: Int = 21
+    ) async -> AgeMetricReconciliationOutcome {
+        guard let store = await repo.storeHandle() else { return .failed }
         let computedId = deviceId + "-noop"
         let now = Int(Date().timeIntervalSince1970)
         let tzOffset = TimeZone.current.secondsFromGMT()
         let nowLocalMidnight = Self.midnightLocal(now, offsetSec: tzOffset)
         let newestDay = AnalyticsEngine.dayString(nowLocalMidnight, offsetSec: tzOffset)
         let oldestDay = AnalyticsEngine.dayString(nowLocalMidnight - (maxDays - 1) * 86_400, offsetSec: tzOffset)
-        let gate7 = Array((await repo.dailyMetrics(fromDay: oldestDay, toDay: newestDay))
-            .sorted { $0.day < $1.day }.suffix(7))
-        let storedLegacyFitnessToken = await latestComputedProfileToken(
-            store: store, key: AgeMetricProfile.legacyFitnessAgeKey)
-        let storedFitnessToken = await latestComputedProfileToken(
-            store: store, key: AgeMetricProfile.fitnessAgeKey)
-        let storedLegacyVO2Token = await latestComputedProfileToken(
-            store: store, key: AgeMetricProfile.legacyVO2maxEstimateKey)
-        let storedVO2Token = await latestComputedProfileToken(
-            store: store, key: AgeMetricProfile.vo2maxEstimateKey)
-        if storedLegacyFitnessToken != nil
-            || !profile.acceptsFitnessAge(provenance: storedFitnessToken) {
-            await purgeComputedMetricKeys(
-                store: store, keys: [
-                    AgeMetricProfile.fitnessAgeKey,
-                    AgeMetricProfile.legacyFitnessAgeKey,
-                    "fitness_age",
-                ])
+        let persistedDays: [DailyMetric]
+        do {
+            persistedDays = try await repo.dailyMetricsForReconciliation(
+                fromDay: oldestDay, toDay: newestDay)
+        } catch {
+            return .failed
         }
-        if storedLegacyVO2Token != nil
-            || !profile.acceptsVO2maxEstimate(provenance: storedVO2Token) {
-            await purgeComputedMetricKeys(
-                store: store, keys: [
-                    AgeMetricProfile.vo2maxEstimateKey,
-                    AgeMetricProfile.legacyVO2maxEstimateKey,
-                    "vo2max_est",
-                ])
-        }
+        let gate7 = Array(persistedDays.sorted { $0.day < $1.day }.suffix(7))
+        do {
+            let storedLegacyFitnessToken = try await latestComputedProfileTokenStrict(
+                store: store, key: AgeMetricProfile.legacyFitnessAgeKey)
+            let storedFitnessToken = try await latestComputedProfileTokenStrict(
+                store: store, key: AgeMetricProfile.fitnessAgeKey)
+            let storedLegacyVO2Token = try await latestComputedProfileTokenStrict(
+                store: store, key: AgeMetricProfile.legacyVO2maxEstimateKey)
+            let storedVO2Token = try await latestComputedProfileTokenStrict(
+                store: store, key: AgeMetricProfile.vo2maxEstimateKey)
+            if storedLegacyFitnessToken != nil
+                || !profile.acceptsFitnessAge(provenance: storedFitnessToken) {
+                try await purgeComputedMetricKeysStrict(
+                    store: store, keys: [
+                        AgeMetricProfile.fitnessAgeKey,
+                        AgeMetricProfile.legacyFitnessAgeKey,
+                        "fitness_age",
+                    ])
+            }
+            if storedLegacyVO2Token != nil
+                || !profile.acceptsVO2maxEstimate(provenance: storedVO2Token) {
+                try await purgeComputedMetricKeysStrict(
+                    store: store, keys: [
+                        AgeMetricProfile.vo2maxEstimateKey,
+                        AgeMetricProfile.legacyVO2maxEstimateKey,
+                        "vo2max_est",
+                    ])
+            }
 
-        var rows = Self.fitnessAgeRows(
-            gateDays: gate7, age: profile.age, sex: profile.sex, waistCm: profile.waistCm,
-            computedId: computedId,
-            satKey: Self.saturdayKey(onOrBefore: newestDay),
-            ageConfirmed: profile.ageInputConfirmed, sexConfirmed: profile.sexInputConfirmed)
-        if rows.contains(where: { $0.key == "fitness_age" }), let token = profile.fitnessAgeProfileToken {
-            rows.append(MetricPoint(day: Self.saturdayKey(onOrBefore: newestDay),
-                                    key: AgeMetricProfile.fitnessAgeKey, value: token))
-        }
-        if rows.contains(where: { $0.key == "vo2max_est" }), let token = profile.vo2maxProfileToken {
-            rows.append(MetricPoint(day: Self.saturdayKey(onOrBefore: newestDay),
-                                    key: AgeMetricProfile.vo2maxEstimateKey, value: token))
-        } else {
-            // Upsert does not remove an omitted optional row. Clearing/invalidating waist must remove
-            // the previous estimate immediately while leaving a measured `vo2max` import untouched.
-            await purgeComputedMetricKeys(
-                store: store, keys: [
-                    AgeMetricProfile.vo2maxEstimateKey,
-                    AgeMetricProfile.legacyVO2maxEstimateKey,
-                    "vo2max_est",
+            var rows = Self.fitnessAgeRows(
+                gateDays: gate7, age: profile.age, sex: profile.sex, waistCm: profile.waistCm,
+                computedId: computedId,
+                satKey: Self.saturdayKey(onOrBefore: newestDay),
+                ageConfirmed: profile.ageInputConfirmed, sexConfirmed: profile.sexInputConfirmed)
+            if rows.contains(where: { $0.key == "fitness_age" }),
+               let token = profile.fitnessAgeProfileToken {
+                rows.append(MetricPoint(day: Self.saturdayKey(onOrBefore: newestDay),
+                                        key: AgeMetricProfile.fitnessAgeKey, value: token))
+            }
+            if rows.contains(where: { $0.key == "vo2max_est" }),
+               let token = profile.vo2maxProfileToken {
+                rows.append(MetricPoint(day: Self.saturdayKey(onOrBefore: newestDay),
+                                        key: AgeMetricProfile.vo2maxEstimateKey, value: token))
+            } else {
+                // Upsert does not remove an omitted optional row. Clearing/invalidating waist must remove
+                // the previous estimate immediately while leaving a measured `vo2max` import untouched.
+                try await purgeComputedMetricKeysStrict(
+                    store: store, keys: [
+                        AgeMetricProfile.vo2maxEstimateKey,
+                        AgeMetricProfile.legacyVO2maxEstimateKey,
+                        "vo2max_est",
+                    ])
+            }
+            if !rows.isEmpty {
+                _ = try await store.upsertMetricSeries(rows, deviceId: computedId)
+            }
+            if !profile.fitnessInputsConfirmed
+                || !FitnessAgeEngine.supports(age: Double(profile.age))
+                || !FitnessAgeEngine.supports(sex: profile.sex) {
+                // Never let a score computed from an old/seed profile survive as the current headline.
+                try await purgeComputedMetricKeysStrict(store: store, keys: [
+                    AgeMetricProfile.fitnessAgeKey, AgeMetricProfile.legacyFitnessAgeKey,
+                    AgeMetricProfile.vo2maxEstimateKey, AgeMetricProfile.legacyVO2maxEstimateKey,
+                    "fitness_age", "vo2max_est",
                 ])
+            }
+            return .reconciled(wroteValue: rows.contains { $0.key == "fitness_age" })
+        } catch {
+            return .failed
         }
-        if !rows.isEmpty { _ = try? await store.upsertMetricSeries(rows, deviceId: computedId) }
-        if !profile.fitnessInputsConfirmed
-            || !FitnessAgeEngine.supports(age: Double(profile.age))
-            || !FitnessAgeEngine.supports(sex: profile.sex) {
-            // Never let a score computed from an old/seed profile survive as the current headline.
-            await purgeComputedMetricKeys(store: store, keys: [
-                AgeMetricProfile.fitnessAgeKey, AgeMetricProfile.legacyFitnessAgeKey,
-                AgeMetricProfile.vo2maxEstimateKey, AgeMetricProfile.legacyVO2maxEstimateKey,
-                "fitness_age", "vo2max_est",
-            ])
-        }
-        return rows.contains { $0.key == "fitness_age" }
     }
 
     /// UserDefaults flag guarding the one-shot #313 full-history Effort rescore (below). Set once the
@@ -652,13 +765,24 @@ final class IntelligenceEngine: ObservableObject {
     /// Personal baselines (HRV / resting HR) are folded from the imported history, so even the first
     /// live night can be scored against your norm.
     @discardableResult
-    func analyzeRecent(maxDays: Int = 21, force: Bool = true,
-                       skipIfUnchanged: Bool = false) async -> ScoreRunReceipt? {
+    func analyzeRecent(maxDays: Int = 21, force: Bool = true) async -> ScoreRunReceipt? {
         // #899-A: a concurrent pass already holds the lock. A NON-forced idle tick is safe to drop (the
         // in-flight pass already covers the same window). But a FORCED call is a real update path (a
         // post-backfill rescore after a sync) , dropping it would leave a freshly-synced night unscored
         // until the next cycle. Re-arm instead: flag it so the running pass's `defer` re-invokes once.
         guard !computing else { if force { pendingForcedRescore = true }; return nil }
+        // Acquire before the first await. Main-actor isolation does not prevent reentrancy while an async
+        // store/fingerprint read is suspended; taking the gate later allowed two scoring passes to overlap.
+        computing = true
+        defer {
+            computing = false
+            if pendingForcedRescore {
+                pendingForcedRescore = false
+                // Carry THIS pass's window into the re-pass. The new Task starts after this defer releases
+                // the gate; another force arriving during that pass can arm one further bounded re-pass.
+                Task { await self.analyzeRecent(maxDays: maxDays, force: true) }
+            }
+        }
         guard let store = await repo.storeHandle() else {
             note = String(localized: "No on-device store yet.")
             return nil
@@ -668,48 +792,32 @@ final class IntelligenceEngine: ObservableObject {
               let respCfg = Baselines.metricCfg["resp"],
               let skinCfg = Baselines.metricCfg["skin_temp"] else { return nil }
 
+        // Snapshot the registry before the change gate and reuse it for per-day owner resolution below.
+        // A removed/re-added band writes under a fresh "whoop-<uuid>" id while the canonical import/score
+        // target remains "my-whoop"; the watermark must therefore cover every live owner, not only the
+        // canonical id. Repository read ids are included as a fail-safe if the registry is temporarily
+        // unreadable during startup.
+        let registry = DeviceRegistryStore(dbQueue: store.registryWriter)
+        let regDevices = (try? registry.all()) ?? []
+        let regActiveId = (try? registry.activeDeviceId()) ?? deviceId
+        let watermarkIds = Self.analysisFingerprintDeviceIds(
+            registered: regDevices, readIds: repo.importedReadIds, fallbackDeviceId: deviceId)
+
         // #836 (idle-tick gate): re-scoring a 21-day window re-reads ~21×54 h of raw HR and re-runs
         // analyzeDay over it. After a big Apple Health import (a reporter's: 2.1 M rows, ~190 k HR/day) that
         // is multi-second, memory-heavy work, and the 15-minute steady-state tick (AppModel) repeats it
-        // every tick even when NOTHING new landed — the ongoing lag/crash in #836. A cheap whole-history HR
-        // fingerprint (count+maxTs, indexed, no rows materialized) lets a NON-forced caller short-circuit
-        // when the raw stream is byte-for-byte unchanged since the last successful run. All-or-nothing: it
+        // every tick even when NOTHING new landed — the ongoing lag/crash in #836. A cheap whole-history
+        // scoring-input fingerprint (count+maxTs per source, no rows materialized) lets a NON-forced caller
+        // short-circuit when no score-bearing stream changed since the last successful run. All-or-nothing: it
         // never produces a PARTIAL pass, so the window-wide reconciliation (stale-day eviction, detected-
         // workout delete) is untouched and no computed history is dropped. Every real update path (sync
         // backfill, import, sleep/workout edit, baseline recalibrate, timestamp heal) calls with the default
         // `force: true` and always rescores, so a skipped tick can never hide new data.
-        let wmKey: String = (try? await store.hrFingerprint(deviceId: deviceId, from: 0, to: 9_999_999_999))
-            .map { "\($0.count):\($0.maxTs)" } ?? ""
+        let wmKey = await Self.analysisFingerprintKey(
+            store: store, deviceIds: watermarkIds, from: 0, to: 9_999_999_999)
         if !force, !wmKey.isEmpty,
            UserDefaults.standard.string(forKey: Self.analyzeWatermarkKey) == wmKey {
             return nil
-        }
-        // #1196/#1146: the post-offload caller may opt into the same fingerprint gate even though it is
-        // otherwise a forced refresh. Empty/duplicate offloads do not change raw HR, so replaying the
-        // whole scoring window is pure churn and can expose a transient sparse/empty window to reactive
-        // readers. Other forced paths (edits, imports, settings and recalibration) keep the default false
-        // because they can legitimately change scores without changing the HR fingerprint.
-        if force, skipIfUnchanged, !wmKey.isEmpty,
-           UserDefaults.standard.string(forKey: Self.analyzeWatermarkKey) == wmKey {
-            diagnosticSink?("re-score: trigger=post-offload newData=no - skipped (nothing changed since last run)", nil)
-            return nil
-        }
-
-        computing = true
-        // #899-A re-arm: clear the lock, then if a forced rescore was dropped while this pass held it,
-        // run it ONCE. The flag is cleared BEFORE the re-invoke (a single re-arm), so a forced call landing
-        // DURING the re-invoke re-arms it again but a quiet one does not , this can never recurse unbounded.
-        // The re-invoke is launched on a fresh `Task` because `defer` is synchronous; by the time it runs
-        // `computing` is already false, so its own `guard !computing` passes and it rescores the new data.
-        defer {
-            computing = false
-            if pendingForcedRescore {
-                pendingForcedRescore = false
-                // Carry THIS pass's window into the re-pass: a heal firing during a wide one-shot pass
-                // must re-score the same width, not the default 21 days (Kotlin re-passes with the same
-                // maxDays; keep the platforms in lockstep).
-                Task { await self.analyzeRecent(maxDays: maxDays, force: true) }
-            }
         }
 
         let up = UserProfile(weightKg: profile.weightKg, heightCm: profile.heightCm,
@@ -771,10 +879,6 @@ final class IntelligenceEngine: ObservableObject {
         // stable for the run. With only the seeded 'my-whoop' row paired (the default and every
         // single-WHOOP install) the active strap is `deviceId`, so `resolveDayOwner` below returns
         // `deviceId` for every day and the per-day reads are byte-identical to the pre-I2 behaviour.
-        let registry = DeviceRegistryStore(dbQueue: store.registryWriter)
-        let regDevices = (try? registry.all()) ?? []
-        let regActiveId = (try? registry.activeDeviceId()) ?? deviceId
-
         // Floor `now` to LOCAL midnight (#277) so each `dayStart` lands on a local-day boundary and the
         // day keys are LOCAL calendar days, consistent with the dashboard's local "today" lookup. A
         // west-of-UTC user's evening crosses midnight UTC; bucketing by UTC put it in the next UTC day,
@@ -1830,10 +1934,10 @@ final class IntelligenceEngine: ObservableObject {
         // Sleep tab stops showing the removed duplicates right away.
         if !dailies.isEmpty || !healDropped.isEmpty { await repo.refresh() }
 
-        // #836: record the raw-HR fingerprint this run scored against, so a later NON-forced tick can
+        // #836: record the scoring-input fingerprint this run scored against, so a later NON-forced tick can
         // short-circuit while it's unchanged. Written ONLY here at the end of a completed run (never on an
         // early guard-return), so an interrupted/failed run can't advance the watermark past unscored data.
-        // A repair I/O failure leaves the HR fingerprint unchanged. Clear even an older matching watermark
+        // A repair I/O failure leaves the input fingerprint unchanged. Clear even an older matching watermark
         // so the next idle pass retries instead of treating the incomplete destructive repair as complete.
         if healResult.hasFailures {
             UserDefaults.standard.removeObject(forKey: Self.analyzeWatermarkKey)
@@ -1843,10 +1947,45 @@ final class IntelligenceEngine: ObservableObject {
         return ScoreRunReceipt(whoopStrapDays: persistedWhoopStrapDays)
     }
 
-    /// UserDefaults key for the #836 idle-tick gate: the `(count:maxTs)` HR fingerprint the last completed
+    /// UserDefaults key for the #836 idle-tick gate: the scoring-input fingerprint the last completed
     /// `analyzeRecent` scored against. A non-forced tick whose current fingerprint equals this skips the
-    /// 21-day rescore; cleared implicitly by any HR insert/delete (the fingerprint moves), so it self-heals.
+    /// 21-day rescore.
     private static let analyzeWatermarkKey = "noop.analyzeWatermark"
+
+    /// Stable source set for the idle scoring watermark. Archived devices cannot own a new day; active and
+    /// paired sources can. `readIds` keeps the active/canonical union covered even if the registry read fails.
+    nonisolated static func analysisFingerprintDeviceIds(
+        registered: [PairedDevice], readIds: [String], fallbackDeviceId: String
+    ) -> [String] {
+        var ids = Set(
+            registered.lazy
+                .filter { $0.status != .archived }
+                .map(\.id)
+                .filter { !$0.isEmpty }
+        )
+        ids.formUnion(readIds.filter { !$0.isEmpty })
+        if !fallbackDeviceId.isEmpty { ids.insert(fallbackDeviceId) }
+        return ids.sorted()
+    }
+
+    /// One cheap, deterministic token across every raw-stream owner the scorer may select. Include the id and
+    /// its length so a source switch cannot collide with an equal `(count,maxTs)` pair. Any failed source
+    /// read returns an empty key, which fails open into a real scoring pass instead of skipping unknown data.
+    nonisolated static func analysisFingerprintKey(
+        store: WhoopStore, deviceIds: [String], from: Int, to: Int
+    ) async -> String {
+        var parts: [String] = []
+        for id in Set(deviceIds.filter { !$0.isEmpty }).sorted() {
+            guard let fingerprint = try? await store.analysisFingerprint(
+                deviceId: id, from: from, to: to
+            ) else {
+                return ""
+            }
+            parts.append(
+                "\(id.utf8.count):\(id):\(fingerprint.count):\(fingerprint.maxTs)")
+        }
+        return parts.joined(separator: "|")
+    }
 
     /// Whether a raw-stream owner is a WHOOP device eligible for official-reference comparison.
     ///

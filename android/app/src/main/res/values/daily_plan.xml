@@ -23,6 +23,15 @@
     <string name="daily_plan_evidence_sleep_plan">Your current sleep plan</string>
     <string name="daily_plan_evidence_title">EVIDENCE USED</string>
     <string name="daily_plan_limitation">This plan is not a diagnosis, prescription, safety limit, or medical clearance.</string>
+    <string name="daily_plan_notification_body">You reached %1$d; today\'s planned range is %2$d-%3$d. This is a planning cue, not a limit. Check how you feel before adding more.</string>
+    <string name="daily_plan_notification_help">Once per day after data syncs. No alert is sent when the range is withheld.</string>
+    <string name="daily_plan_notification_title">Today\'s Effort range reached</string>
+    <string name="daily_plan_notification_toggle">Notify me when I reach the range</string>
+    <string name="daily_plan_progress_above">Above today\'s planned range. Recheck how you feel before adding more.</string>
+    <string name="daily_plan_progress_accessibility">Current Effort %1$d. Planned range %2$d to %3$d.</string>
+    <string name="daily_plan_progress_below">%1$d to today\'s planned range.</string>
+    <string name="daily_plan_progress_current">Current Effort</string>
+    <string name="daily_plan_progress_in_range">Within today\'s planned range. This is a cue, not a stopping rule.</string>
     <string name="daily_plan_signal_good">Aligned</string>
     <string name="daily_plan_signal_hrv">Heart-rate variability</string>
     <string name="daily_plan_signal_load">Recent-load ratio</string>

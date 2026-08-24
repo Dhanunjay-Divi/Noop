@@ -44,6 +44,16 @@ public enum CyclePhaseEngine {
     /// Half-width (days) of the peri-ovulatory band around the estimated elevation onset — the days
     /// straddling the follicular→luteal temperature shift.
     public static let periOvulatoryHalfWidth: Int = 2
+    /// Reject a one-night heat, illness, fit, or sleep artifact: a shift needs at least two of the
+    /// trailing three nights above the personal threshold.
+    public static let elevationConfirmationNights: Int = 3
+    public static let elevationRequiredNights: Int = 2
+    /// Forecast windows expand from the person's observed interval spread, within honest bounds.
+    public static let minPersonalWindowHalfWidth: Int = 2
+    public static let maxPersonalWindowHalfWidth: Int = 7
+    /// With at least three intervals, a wider range is not precise enough for a useful forecast.
+    /// This is an uncertainty gate, not a diagnosis or an "irregular cycle" label.
+    public static let maxForecastableIntervalRange: Int = 12
 
     // MARK: - Inputs
 
@@ -77,6 +87,64 @@ public enum CyclePhaseEngine {
         case solid          // a stable repeating shift detected
     }
 
+    public enum NoteKind: String, Equatable, Sendable, Codable {
+        case learningNightly
+        case noClearPattern
+        case noClearContext
+        case logShiftMismatch
+        case phaseFollicular
+        case phaseMidCycle
+        case phaseLuteal
+        case staleLog
+        case unreliableLogs
+        case forecastPassed
+        case broadPrior
+        case personalIntervals
+        case startLogging
+        case turnOnAwareness
+
+        public var english: String {
+            switch self {
+            case .learningNightly:
+                return "Learning your pattern from your nightly temperature - keep wearing it overnight."
+            case .noClearPattern:
+                return "No clear temperature pattern yet."
+            case .noClearContext:
+                return "No clear temperature pattern yet - this can happen with irregular cycles, "
+                    + "hormonal birth control, or shift work."
+            case .logShiftMismatch:
+                return "Your temperature shift came at a different time than your logged date - "
+                    + "the logged start may be off."
+            case .phaseFollicular:
+                return "Follicular range - temperature sitting at your baseline."
+            case .phaseMidCycle:
+                return "Around your mid-cycle shift - temperature is turning."
+            case .phaseLuteal:
+                return "Luteal range - temperature is running above your baseline."
+            case .staleLog:
+                return "Your last logged start is over 40 days old. Log the latest start to refresh "
+                    + "this estimate; NOOP will not roll an old date forward."
+            case .unreliableLogs:
+                return "Recent logged cycle lengths vary too much or include an interval outside the "
+                    + "supported range for a useful period forecast. "
+                    + "Cycle day still counts from your latest start."
+            case .forecastPassed:
+                return "The estimated window from your last log has passed. Log the next start when it happens; "
+                    + "NOOP will not roll an old date forward."
+            case .broadPrior:
+                return "Cycle day is anchored to your logged start. The broad period window uses a 28-day prior "
+                    + "while nightly temperature calibration continues."
+            case .personalIntervals:
+                return "Cycle day is anchored to your latest start. The period window uses your recent logged "
+                    + "intervals and expands with their variability."
+            case .startLogging:
+                return "Log a period start and wear Noop Band overnight to begin a private estimate."
+            case .turnOnAwareness:
+                return "Turn on cycle awareness to read a coarse phase from your nightly temperature."
+            }
+        }
+    }
+
     /// A detected follicular→luteal temperature shift onset (for the curve markers).
     public struct ShiftMarker: Equatable, Sendable {
         public let day: String
@@ -106,14 +174,16 @@ public enum CyclePhaseEngine {
         public let shiftMarkers: [ShiftMarker]
         /// A short, non-clinical status line.
         public let note: String
+        /// Stable presentation categories. UI localizes these and falls back to `note` for custom/debug data.
+        public let noteKinds: [NoteKind]
 
         public init(phase: Phase, confidence: Confidence, cycleDayLow: Int?, cycleDayHigh: Int?,
                     cycleLengthDays: Int?, nextPeriodWindow: NextPeriodWindow?,
-                    shiftMarkers: [ShiftMarker], note: String) {
+                    shiftMarkers: [ShiftMarker], note: String, noteKinds: [NoteKind] = []) {
             self.phase = phase; self.confidence = confidence
             self.cycleDayLow = cycleDayLow; self.cycleDayHigh = cycleDayHigh
             self.cycleLengthDays = cycleLengthDays; self.nextPeriodWindow = nextPeriodWindow
-            self.shiftMarkers = shiftMarkers; self.note = note
+            self.shiftMarkers = shiftMarkers; self.note = note; self.noteKinds = noteKinds
         }
     }
 
@@ -132,14 +202,19 @@ public enum CyclePhaseEngine {
     ///   - loggedPeriodStarts: optional "yyyy-MM-dd" period-start days the user logged. When present, the
     ///     most recent one anchors cycle-day 1 and we CROSS-VALIDATE it against the detected shift, flagging
     ///     a mistimed log rather than trusting it blindly. Optional — the engine works temperature-only.
+    ///   - asOfDay: optional current civil day. Sensor classification still uses the latest measured night,
+    ///     while logged cycle-day/window calculations advance to this date even when no wearable night exists.
     public static func classify(_ nights: [Night],
                                 baselineUsable: Bool,
-                                loggedPeriodStarts: [String] = []) -> Result {
+                                loggedPeriodStarts: [String] = [],
+                                asOfDay explicitAsOfDay: String? = nil) -> Result {
         // Explicitly logged starts can provide a bounded cycle-day range and a broad next-period window
         // before temperature calibration completes. They never create a sensor-derived phase: phase stays
         // `learning` until the baseline + night-count gate below is satisfied.
-        let asOfDay = nights.map(\.day).filter { parseDay($0) != nil }.max()
+        let fallbackAsOfDay = nights.map(\.day).filter { parseDay($0) != nil }.max()
             ?? loggedPeriodStarts.filter { parseDay($0) != nil }.max()
+        let asOfDay = explicitAsOfDay.flatMap { parseDay($0) == nil ? nil : $0 }
+            ?? fallbackAsOfDay
         let loggedEstimate = asOfDay.flatMap {
             estimateFromLoggedStarts(loggedPeriodStarts, asOfDay: $0)
         }
@@ -155,12 +230,14 @@ public enum CyclePhaseEngine {
                     cycleLengthDays: loggedEstimate.cycleLengthDays,
                     nextPeriodWindow: loggedEstimate.nextPeriodWindow,
                     shiftMarkers: [],
-                    note: loggedEstimate.note
+                    note: loggedEstimate.note,
+                    noteKinds: [loggedEstimate.noteKind]
                 )
             }
+            let noteKinds: [NoteKind] = [.learningNightly]
             return Result(phase: .learning, confidence: .learning, cycleDayLow: nil, cycleDayHigh: nil,
                           cycleLengthDays: nil, nextPeriodWindow: nil, shiftMarkers: [],
-                          note: "Learning your pattern from your nightly temperature - keep wearing it overnight.")
+                          note: noteText(noteKinds), noteKinds: noteKinds)
         }
 
         // Fuse each night into a single luteal index; nil where no signal at all.
@@ -178,24 +255,33 @@ public enum CyclePhaseEngine {
                     cycleLengthDays: loggedEstimate.cycleLengthDays,
                     nextPeriodWindow: loggedEstimate.nextPeriodWindow,
                     shiftMarkers: [],
-                    note: loggedEstimate.note
+                    note: loggedEstimate.note,
+                    noteKinds: [loggedEstimate.noteKind]
                 )
             }
+            let noteKinds: [NoteKind] = [.learningNightly]
             return Result(phase: .learning, confidence: .learning, cycleDayLow: nil, cycleDayHigh: nil,
                           cycleLengthDays: nil, nextPeriodWindow: nil, shiftMarkers: [],
-                          note: "Learning your pattern from your nightly temperature - keep wearing it overnight.")
+                          note: noteText(noteKinds), noteKinds: noteKinds)
         }
 
         let center = median(values)
         let spread = max(1e-9, medianAbsoluteDeviation(values, center: center))
 
-        // Per-night elevated flag (luteal-ward run detection).
-        let elevated: [Bool] = fused.map { row in
+        // Per-night elevated evidence.
+        let rawElevated: [Bool] = fused.map { row in
             guard let v = row.value else { return false }
             return (v - center) >= elevationK * spread
         }
 
-        // Detect rising EDGES (follicular→luteal onsets) — the temperature-shift markers.
+        // Confirm with a trailing majority. This costs at most one night at a sustained transition and
+        // prevents a single hot or restless night from becoming a cycle shift.
+        let elevated: [Bool] = rawElevated.indices.map { index in
+            let lower = max(0, index - elevationConfirmationNights + 1)
+            return rawElevated[lower...index].filter { $0 }.count >= elevationRequiredNights
+        }
+
+        // Detect rising EDGES (follicular→luteal onsets) from the confirmed state.
         var onsets: [Int] = []
         for i in fused.indices {
             if elevated[i] && (i == 0 || !elevated[i - 1]) { onsets.append(i) }
@@ -213,13 +299,14 @@ public enum CyclePhaseEngine {
                     cycleLengthDays: loggedEstimate.cycleLengthDays,
                     nextPeriodWindow: loggedEstimate.nextPeriodWindow,
                     shiftMarkers: shiftMarkers,
-                    note: "No clear temperature pattern yet. \(loggedEstimate.note)"
+                    note: noteText([.noClearPattern, loggedEstimate.noteKind]),
+                    noteKinds: [.noClearPattern, loggedEstimate.noteKind]
                 )
             }
+            let noteKinds: [NoteKind] = [.noClearContext]
             return Result(phase: .unknown, confidence: .building, cycleDayLow: nil, cycleDayHigh: nil,
                           cycleLengthDays: nil, nextPeriodWindow: nil, shiftMarkers: shiftMarkers,
-                          note: "No clear temperature pattern yet - this can happen with irregular cycles, "
-                              + "hormonal birth control, or shift work.")
+                          note: noteText(noteKinds), noteKinds: noteKinds)
         }
 
         // Personal cycle length from the median gap between successive onsets (in calendar days).
@@ -230,29 +317,27 @@ public enum CyclePhaseEngine {
             }
         }
         let medianGap = onsetGaps.isEmpty ? nil : Int(median(onsetGaps.map(Double.init)).rounded())
-        let cycleLength: Int? = {
+        let sensorCycleLength: Int? = {
             guard let g = medianGap, g >= minCycleDays, g <= maxCycleDays else { return nil }
             return g
         }()
-        let confidence: Confidence = cycleLength != nil ? .solid : .building
+        let confidence: Confidence = sensorCycleLength != nil ? .solid : .building
 
         // Optional logged-period cross-validation (better mode). The most recent logged start that falls
         // on/before the latest night anchors cycle-day 1; we compare it to the detected onset.
         let lastNightDay = fused.last!.day
-        var note = ""
-        var anchorDay = fused[lastOnsetIdx].day      // default anchor = the temperature shift onset
-        var anchoredByLog = false
-        if let loggedStart = mostRecentOnOrBefore(loggedPeriodStarts, day: lastNightDay) {
-            anchorDay = loggedStart
-            anchoredByLog = true
+        var noteKinds: [NoteKind] = []
+        let anchorDay = fused[lastOnsetIdx].day      // sensor-only anchor = the temperature shift onset
+        let anchoredByLog = loggedEstimate?.cycleDayLow != nil
+        if let loggedStart = mostRecentOnOrBefore(loggedPeriodStarts, day: lastNightDay),
+           anchoredByLog {
             let delta = daysBetween(loggedStart, fused[lastOnsetIdx].day)
             // The temperature SHIFT (luteal onset) sits well after period-start in a normal cycle; an
             // implausible offset OR a logged start older than a full cycle before the latest night (a
             // newer period is overdue) means the log is likely mistimed — FLAG it, don't silently trust.
             let sinceLog = daysBetween(loggedStart, lastNightDay) ?? 0
             if (delta.map { $0 < 0 || $0 > maxCycleDays } ?? false) || sinceLog > maxCycleDays {
-                note = "Your temperature shift came at a different time than your logged date - "
-                    + "the logged start may be off."
+                noteKinds = [.logShiftMismatch]
             }
         }
 
@@ -262,11 +347,10 @@ public enum CyclePhaseEngine {
         let daysSinceAnchor = daysBetween(anchorDay, lastNightDay) ?? 0
         let (cycleDayLow, cycleDayHigh): (Int?, Int?) = {
             if anchoredByLog {
-                let d = max(1, daysSinceAnchor + 1)
-                return (max(1, d - 1), d + 1)             // ±1 day band
+                return (loggedEstimate?.cycleDayLow, loggedEstimate?.cycleDayHigh)
             } else {
                 // Shift onset ≈ luteal start; place it near a typical follicular length, widen the band.
-                let lutealStartDay = (cycleLength ?? defaultCycleDays) / 2
+                let lutealStartDay = (sensorCycleLength ?? defaultCycleDays) / 2
                 let d = lutealStartDay + daysSinceAnchor
                 return (max(1, d - 2), d + 2)             // ±2 day band (coarser without a log)
             }
@@ -285,8 +369,8 @@ public enum CyclePhaseEngine {
 
         // Probabilistic next-period WINDOW: the luteal→follicular temperature drop precedes menses, so a
         // period is likely roughly one cycle length on from the anchor. Always a RANGE, never a date.
-        var window: NextPeriodWindow? = nil
-        if let len = cycleLength {
+        var window = loggedEstimate?.nextPeriodWindow
+        if loggedEstimate == nil, let len = sensorCycleLength {
             // Next expected onset of menses ≈ anchor + cycle length. Window = ±2 days around it, but only
             // surfaced once we're within range and on/after the anchor.
             if let earliest = shiftDay(anchorDay, by: len - 2),
@@ -296,14 +380,24 @@ public enum CyclePhaseEngine {
             }
         }
 
-        if note.isEmpty {
-            note = phaseNote(phase)
+        if noteKinds.isEmpty {
+            noteKinds = [phaseNoteKind(phase)]
+            if let loggedEstimate, loggedEstimate.forecastSuppressed {
+                noteKinds.append(loggedEstimate.noteKind)
+            }
         }
 
+        // Period starts directly observe period cadence, so a usable logged cadence wins over spacing
+        // between temperature shifts. When logs are stale or too variable, keep this nil rather than
+        // falling back to a sensor interval and implying precision the direct history does not support.
+        let cycleLength = loggedEstimate != nil
+            ? loggedEstimate?.cycleLengthDays
+            : sensorCycleLength
         return Result(phase: phase, confidence: confidence,
                       cycleDayLow: cycleDayLow, cycleDayHigh: cycleDayHigh,
                       cycleLengthDays: cycleLength, nextPeriodWindow: window,
-                      shiftMarkers: shiftMarkers, note: note)
+                      shiftMarkers: shiftMarkers, note: noteText(noteKinds),
+                      noteKinds: noteKinds)
     }
 
     // MARK: - Fusion
@@ -324,17 +418,27 @@ public enum CyclePhaseEngine {
 
     static func phaseNote(_ phase: Phase) -> String {
         switch phase {
-        case .follicular:
-            return "Follicular range - temperature sitting at your baseline."
-        case .periOvulatory:
-            return "Around your mid-cycle shift - temperature is turning."
-        case .luteal:
-            return "Luteal range - temperature is running above your baseline."
         case .unknown:
             return "No clear pattern yet."
         case .learning:
             return "Learning your pattern - keep wearing it overnight."
+        default:
+            return phaseNoteKind(phase).english
         }
+    }
+
+    private static func phaseNoteKind(_ phase: Phase) -> NoteKind {
+        switch phase {
+        case .follicular: return .phaseFollicular
+        case .periOvulatory: return .phaseMidCycle
+        case .luteal: return .phaseLuteal
+        case .unknown: return .noClearPattern
+        case .learning: return .learningNightly
+        }
+    }
+
+    private static func noteText(_ kinds: [NoteKind]) -> String {
+        kinds.map(\.english).joined(separator: " ")
     }
 
     // MARK: - Logged-start estimate
@@ -344,7 +448,10 @@ public enum CyclePhaseEngine {
         let cycleDayHigh: Int?
         let cycleLengthDays: Int?
         let nextPeriodWindow: NextPeriodWindow?
-        let note: String
+        let noteKind: NoteKind
+        let forecastSuppressed: Bool
+
+        var note: String { noteKind.english }
     }
 
     /// A deliberately bounded estimate from explicit period-start logs. One start uses a broad 28-day
@@ -360,17 +467,32 @@ public enum CyclePhaseEngine {
               let daysSinceStart = daysBetween(latestStart, asOfDay),
               daysSinceStart >= 0 else { return nil }
 
-        var plausibleGaps: [Double] = []
+        var observedGaps: [Int] = []
         if starts.count >= 2 {
             for index in 1..<starts.count {
-                guard let gap = daysBetween(starts[index - 1], starts[index]),
-                      (minCycleDays...maxCycleDays).contains(gap) else { continue }
-                plausibleGaps.append(Double(gap))
+                guard let gap = daysBetween(starts[index - 1], starts[index]) else { continue }
+                observedGaps.append(gap)
             }
         }
-        let personalLength = plausibleGaps.isEmpty
+        // Judge the last six observed intervals before filtering. Silently dropping a recent short or
+        // long interval can turn an irregular history into a falsely narrow forecast based on older,
+        // in-range gaps. An out-of-range interval may represent irregularity or a missed/corrected log;
+        // either way, it is uncertainty and suppresses the forecast until the recent history is coherent.
+        let recentObservedGaps = Array(observedGaps.suffix(6))
+        let recentPlausibleGaps = recentObservedGaps.filter {
+            (minCycleDays...maxCycleDays).contains($0)
+        }
+        let hasOutOfRangeRecentGap = recentPlausibleGaps.count != recentObservedGaps.count
+        let cadence = recentPlausibleGaps.isEmpty
             ? nil
-            : Int(median(plausibleGaps).rounded())
+            : Int(median(recentPlausibleGaps.map(Double.init)).rounded())
+        let intervalRange = recentPlausibleGaps.isEmpty
+            ? 0
+            : (recentPlausibleGaps.max()! - recentPlausibleGaps.min()!)
+        let forecastUnreliable = hasOutOfRangeRecentGap
+            || (recentPlausibleGaps.count >= 3
+                && intervalRange > maxForecastableIntervalRange)
+        let personalLength = forecastUnreliable ? nil : cadence
 
         // A stale start must not be silently rolled forward through guessed cycles. Ask for the current
         // anchor instead of making an old log look current.
@@ -380,35 +502,61 @@ public enum CyclePhaseEngine {
                 cycleDayHigh: nil,
                 cycleLengthDays: personalLength,
                 nextPeriodWindow: nil,
-                note: "Your last logged start is over 40 days old. Log the latest start to refresh this estimate; temperature calibration is still learning."
+                noteKind: .staleLog,
+                forecastSuppressed: true
             )
         }
 
         let cycleDay = daysSinceStart + 1
         let cycleDayLow = max(1, cycleDay - 1)
         let cycleDayHigh = cycleDay + 1
-        let cadence = personalLength ?? defaultCycleDays
-        let uncertainty = personalLength == nil ? 5 : 3
+        if forecastUnreliable {
+            return LoggedEstimate(
+                cycleDayLow: cycleDayLow,
+                cycleDayHigh: cycleDayHigh,
+                cycleLengthDays: nil,
+                nextPeriodWindow: nil,
+                noteKind: .unreliableLogs,
+                forecastSuppressed: true
+            )
+        }
+
+        let forecastCadence = personalLength ?? defaultCycleDays
+        let uncertainty: Int = {
+            guard !recentPlausibleGaps.isEmpty, let personalLength else { return 5 }
+            if recentPlausibleGaps.count == 1 { return 4 }
+            let deviations = recentPlausibleGaps.map { abs($0 - personalLength) }
+            let mad = median(deviations.map(Double.init))
+            let observed = deviations.max() ?? 0
+            let spread = max(Double(observed), 1.5 * mad)
+            return min(maxPersonalWindowHalfWidth,
+                       max(minPersonalWindowHalfWidth, Int(ceil(spread))))
+        }()
 
         var window: NextPeriodWindow?
-        if let earliest = shiftDay(latestStart, by: cadence - uncertainty),
-           let latest = shiftDay(latestStart, by: cadence + uncertainty),
+        let latestForecastDay = shiftDay(latestStart, by: forecastCadence + uncertainty)
+        if let earliest = shiftDay(latestStart, by: forecastCadence - uncertainty),
+           let latest = latestForecastDay,
            latest >= asOfDay {
             window = NextPeriodWindow(earliestDay: max(asOfDay, earliest), latestDay: latest)
         }
 
-        let note: String
-        if personalLength != nil {
-            note = "Cycle day and the broad period window come from your logged starts while nightly temperature calibration continues."
+        let noteKind: NoteKind
+        let forecastPassed = latestForecastDay.map { $0 < asOfDay } ?? true
+        if forecastPassed {
+            noteKind = .forecastPassed
+        } else if personalLength == nil {
+            noteKind = .broadPrior
         } else {
-            note = "Cycle day is anchored to your logged start. The broad period window uses a 28-day prior while nightly temperature calibration continues."
+            noteKind = .personalIntervals
         }
         return LoggedEstimate(
             cycleDayLow: cycleDayLow,
             cycleDayHigh: cycleDayHigh,
             cycleLengthDays: personalLength,
             nextPeriodWindow: window,
-            note: note
+            noteKind: noteKind,
+            forecastSuppressed: forecastPassed
         )
     }
 

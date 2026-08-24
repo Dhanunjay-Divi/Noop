@@ -14,10 +14,9 @@ final class RawHistoryArchiveReplayTests: XCTestCase {
         private(set) var insertedGravity = 0
         @discardableResult
         func insert(_ streams: Streams, deviceId: String) async throws
-            -> (hr: Int, rr: Int, events: Int, battery: Int,
-                spo2: Int, skinTemp: Int, resp: Int, gravity: Int) {
+            -> StreamInsertCounts {
             insertedGravity += streams.gravity.count
-            return (0, 0, 0, 0, 0, 0, 0, streams.gravity.count)
+            return StreamInsertCounts(gravity: streams.gravity.count)
         }
         func enqueueRawBatch(_ meta: RawBatchMeta, frames: [[UInt8]]) async throws {}
         func setCursor(_ name: String, _ value: Int) async throws {}
@@ -28,8 +27,7 @@ final class RawHistoryArchiveReplayTests: XCTestCase {
     private final class ThrowingStore: BackfillStoreWriting {
         struct Boom: Error {}
         func insert(_ streams: Streams, deviceId: String) async throws
-            -> (hr: Int, rr: Int, events: Int, battery: Int,
-                spo2: Int, skinTemp: Int, resp: Int, gravity: Int) { throw Boom() }
+            -> StreamInsertCounts { throw Boom() }
         func enqueueRawBatch(_ meta: RawBatchMeta, frames: [[UInt8]]) async throws {}
         func setCursor(_ name: String, _ value: Int) async throws {}
         func cursor(_ name: String) async throws -> Int? { nil }

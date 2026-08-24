@@ -23,6 +23,15 @@
     <string name="daily_plan_evidence_sleep_plan">目前睡眠計畫</string>
     <string name="daily_plan_evidence_title">採用的資料</string>
     <string name="daily_plan_limitation">此計畫不是診斷、處方、安全上限或醫療許可。</string>
+    <string name="daily_plan_notification_body">你已達到 %1$d；今日計畫範圍為 %2$d-%3$d。這只是規劃參考，並非上限。增加活動前請確認自己的感受。</string>
+    <string name="daily_plan_notification_help">每天在資料同步後最多提醒一次。範圍暫不顯示時不會傳送提醒。</string>
+    <string name="daily_plan_notification_title">已達到今日 Effort 範圍</string>
+    <string name="daily_plan_notification_toggle">達到範圍時通知我</string>
+    <string name="daily_plan_progress_above">已高於今日計畫範圍。增加活動前請重新評估自己的感受。</string>
+    <string name="daily_plan_progress_accessibility">目前 Effort 為 %1$d。計畫範圍為 %2$d 到 %3$d。</string>
+    <string name="daily_plan_progress_below">距離今日計畫範圍還差 %1$d。</string>
+    <string name="daily_plan_progress_current">目前 Effort</string>
+    <string name="daily_plan_progress_in_range">處於今日計畫範圍內。這只是參考，並非停止規則。</string>
     <string name="daily_plan_signal_good">良好一致</string>
     <string name="daily_plan_signal_hrv">心率變異性</string>
     <string name="daily_plan_signal_load">近期負荷比</string>

@@ -388,6 +388,7 @@ struct StrandiOSApp: App {
             }
             model.setRealtimeForeground(phase == .active)
             if phase == .active {
+                model.refreshAgeMetricsIfProfileChanged()
                 // Re-check packet age and ActivityKit's persisted list whenever NOOP returns. This ends a
                 // stale activity even when iOS suspended the in-process expiry task while in background.
                 reconcileLiveActivity(repairHydration: true)
@@ -463,6 +464,7 @@ struct StrandiOSApp: App {
         reconcileLiveActivity(repairHydration: true)
         model.drainPendingIntents()
         model.applySmartAlarm()
+        model.refreshAgeMetricsIfProfileChanged()
         model.ble.requestSync(.foreground)
         Task {
             await model.reconcileAutomaticWorkoutSurfaces()
@@ -484,6 +486,7 @@ struct StrandiOSApp: App {
 /// `WhatsNewView`, `AppChangelog`, and `Terms` symbols all compile into the iOS target unchanged.
 private struct iOSRootView: View {
     @EnvironmentObject private var launchAccess: LaunchAccessController
+    @EnvironmentObject private var model: AppModel
     @AppStorage("noop.onboarded") private var onboarded = false
     @AppStorage("noop.lastSeenChangelogVersion") private var lastSeenChangelog = ""
     @AppStorage("noop.acceptedTermsVersion") private var acceptedTerms = ""
@@ -526,6 +529,7 @@ private struct iOSRootView: View {
             if hasLaunchAccess && acceptedTerms == Terms.currentVersion && !onboarded && !demoBypass {
                 OnboardingWizard(onFinished: {
                     onboarded = true
+                    model.refreshAgeMetricsIfProfileChanged()
                     // A brand-new user just saw the expectations in onboarding — don't also pop the
                     // changelog at them; mark them current.
                     lastSeenChangelog = AppChangelog.currentVersion

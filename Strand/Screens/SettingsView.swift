@@ -25,6 +25,9 @@ struct SettingsView: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var live: LiveState
     @EnvironmentObject var profile: ProfileStore
+    #if os(iOS)
+    @EnvironmentObject private var health: HealthKitBridge
+    #endif
 
     /// Nil presents the complete Settings index. `.profile` presents only the existing local profile,
     /// photo and independent measurement-unit editors as a clearly named destination.
@@ -130,6 +133,10 @@ struct SettingsView: View {
     // Hydration tracker (opt-in, MVP). Default OFF — when off the hydration dashboard card + detail are
     // hidden. Mirrors the Android pref so the toggle reads the same on both platforms.
     @AppStorage(HydrationStore.enabledKey) private var hydrationEnabled = false
+    /// Sensitive and default-off. The profile row opens the same local tracker as Health; it never turns
+    /// tracking on merely because Sex changed.
+    @AppStorage(AppModel.cycleAwarenessKey) private var cycleAwarenessEnabled = false
+    @State private var showCycleTracking = false
 
     /// Observes the persisted value so Settings refreshes after the legacy-safe migration
     /// (old true/Auto-save → Ask, old false → Off, fresh install → Ask).
@@ -282,6 +289,31 @@ struct SettingsView: View {
         .sheet(isPresented: $showStepsCalibration) {
             StepsCalibrationSheet(repo: model.repo, onClose: { showStepsCalibration = false })
                 .environmentObject(profile)
+        }
+        .sheet(isPresented: $showCycleTracking) {
+            if cycleAwarenessEnabled {
+                CycleTrackerView(
+                    result: model.cyclePhase ?? cycleTrackingLearningResult(),
+                    curve: model.cycleCurve
+                )
+                .environmentObject(model.repo)
+                .environmentObject(model)
+                .task { await model.refreshV5Signals() }
+            } else {
+                NavigationStack {
+                    ScrollView {
+                        CycleAwarenessOptInCard(onEnable: enableCycleTracking)
+                            .padding(NoopMetrics.screenPadding)
+                    }
+                    .background(StrandPalette.surfaceBase)
+                    .navigationTitle("appwide.cycle.profile.title")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("appwide.action.done") { showCycleTracking = false }
+                        }
+                    }
+                }
+            }
         }
         .sheet(isPresented: $showMedicationSettings) {
             MedicationSettingsView {
@@ -447,6 +479,10 @@ struct SettingsView: View {
                     .tint(StrandPalette.accent)
                     .accessibilityLabel("Sex")
                 }
+                if profile.cycleAwarenessApplies || cycleAwarenessEnabled {
+                    rowDivider
+                    menstrualCycleRow
+                }
                 rowDivider
                 FormRow(label: "Weight") {
                     if massUnit == .pounds {
@@ -561,6 +597,65 @@ struct SettingsView: View {
             if displayNameDraft.isEmpty { displayNameDraft = profile.displayName }
         }
         .onDisappear { commitDisplayName() }
+    }
+
+    private var menstrualCycleRow: some View {
+        Button { showCycleTracking = true } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "calendar.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(StrandPalette.metricRose)
+                    .frame(width: 24)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("appwide.cycle.profile.title")
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text("appwide.cycle.profile.summary")
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                }
+                Spacer(minLength: 8)
+                Text(cycleStatusLabel)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(cycleAwarenessEnabled
+                                     ? StrandPalette.statusPositiveText
+                                     : StrandPalette.textSecondary)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(StrandPalette.textTertiary)
+                    .accessibilityHidden(true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(cycleAccessibilityLabel))
+    }
+
+    private var cycleStatusLabel: String {
+        cycleAwarenessEnabled
+            ? String(localized: "appwide.cycle.status.on")
+            : String(localized: "appwide.cycle.action.set_up")
+    }
+
+    private var cycleAccessibilityLabel: String {
+        String(
+            format: String(localized: "appwide.cycle.profile.a11y_format"),
+            locale: .current,
+            cycleStatusLabel
+        )
+    }
+
+    private func enableCycleTracking() {
+        cycleAwarenessEnabled = true
+        model.cycleAwarenessEnabled = true
+        Task {
+            #if os(iOS)
+            await health.requestCycleDataAccessAndImport()
+            #endif
+            await model.refreshV5Signals()
+        }
     }
 
     private func commitDisplayName() {

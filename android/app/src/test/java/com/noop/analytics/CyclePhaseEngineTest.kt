@@ -38,6 +38,7 @@ class CyclePhaseEngineTest {
         assertEquals(CyclePhaseEngine.Phase.LUTEAL, r.phase)
         assertFalse(r.confidence == CyclePhaseEngine.Confidence.LEARNING)
         assertFalse(r.shiftMarkers.isEmpty())
+        assertEquals(listOf(CyclePhaseEngine.NoteKind.PHASE_LUTEAL), r.noteKinds)
     }
 
     @Test fun follicularNightClassifiesFollicular() {
@@ -86,6 +87,21 @@ class CyclePhaseEngineTest {
         assertNull(r.nextPeriodWindow)
     }
 
+    @Test fun isolatedElevatedNightsDoNotCreateCycleShifts() {
+        val nights = (0 until 70).map { index ->
+            val spike = index == 17 || index == 43
+            CyclePhaseEngine.Night(
+                CyclePhaseEngine.shiftDay("2026-01-01", index)!!,
+                if (spike) 2.0 else -0.2,
+                if (spike) 1.5 else -0.1,
+                if (spike) -1.5 else 0.1,
+            )
+        }
+        val r = CyclePhaseEngine.classify(nights, baselineUsable = true)
+        assertEquals(CyclePhaseEngine.Phase.UNKNOWN, r.phase)
+        assertTrue(r.shiftMarkers.isEmpty())
+    }
+
     @Test fun insufficientDataIsLearning() {
         val r = CyclePhaseEngine.classify(biphasic(1, 28), baselineUsable = true)
         assertEquals(CyclePhaseEngine.Phase.LEARNING, r.phase)
@@ -116,6 +132,20 @@ class CyclePhaseEngineTest {
         assertNull(r.cycleLengthDays)
         assertNotNull(r.nextPeriodWindow)
         assertTrue(r.note.contains("28-day prior"))
+        assertEquals(listOf(CyclePhaseEngine.NoteKind.BROAD_PRIOR), r.noteKinds)
+    }
+
+    @Test fun explicitAsOfDayAdvancesLogWithoutWearableNights() {
+        val r = CyclePhaseEngine.classify(
+            emptyList(),
+            baselineUsable = false,
+            loggedPeriodStarts = listOf("2026-05-01"),
+            asOfDay = "2026-05-10",
+        )
+        assertEquals(CyclePhaseEngine.Phase.LEARNING, r.phase)
+        assertEquals(9, r.cycleDayLow)
+        assertEquals(11, r.cycleDayHigh)
+        assertNotNull(r.nextPeriodWindow)
     }
 
     @Test fun loggedCadenceUsesPlausiblePersonalMedianBeforeSensorCalibration() {
@@ -135,7 +165,86 @@ class CyclePhaseEngineTest {
         assertEquals(12, r.cycleDayLow)
         assertEquals(14, r.cycleDayHigh)
         assertNotNull(r.nextPeriodWindow)
-        assertTrue(r.note.contains("logged starts"))
+        assertTrue(r.note.contains("recent logged intervals"))
+        assertEquals(listOf(CyclePhaseEngine.NoteKind.PERSONAL_INTERVALS), r.noteKinds)
+    }
+
+    @Test fun loggedVariabilityWidensTheForecastWindow() {
+        val stable = CyclePhaseEngine.classify(
+            listOf(CyclePhaseEngine.Night("2026-05-10", null, null, null)),
+            baselineUsable = false,
+            loggedPeriodStarts = listOf("2026-01-17", "2026-02-14", "2026-03-14", "2026-04-11"),
+        )
+        val variable = CyclePhaseEngine.classify(
+            listOf(CyclePhaseEngine.Night("2026-05-10", null, null, null)),
+            baselineUsable = false,
+            loggedPeriodStarts = listOf("2026-01-17", "2026-02-10", "2026-03-14", "2026-04-11"),
+        )
+        val stableWindow = stable.nextPeriodWindow!!
+        val variableWindow = variable.nextPeriodWindow!!
+        val stableWidth = CyclePhaseEngine.daysBetween(
+            stableWindow.earliestDay, stableWindow.latestDay,
+        )!!
+        val variableWidth = CyclePhaseEngine.daysBetween(
+            variableWindow.earliestDay, variableWindow.latestDay,
+        )!!
+        assertTrue(variableWidth > stableWidth)
+    }
+
+    @Test fun highlyVariableLoggedIntervalsSuppressForecastWithoutLosingCurrentDay() {
+        val r = CyclePhaseEngine.classify(
+            listOf(CyclePhaseEngine.Night("2026-05-02", null, null, null)),
+            baselineUsable = false,
+            loggedPeriodStarts = listOf("2026-01-01", "2026-01-23", "2026-03-03", "2026-03-27"),
+        )
+        assertNotNull(r.cycleDayLow)
+        assertNull(r.cycleLengthDays)
+        assertNull(r.nextPeriodWindow)
+        assertTrue(r.note.contains("vary too much"))
+        assertEquals(listOf(CyclePhaseEngine.NoteKind.UNRELIABLE_LOGS), r.noteKinds)
+    }
+
+    @Test fun recentOutOfRangeIntervalSuppressesForecastInsteadOfBeingDiscarded() {
+        val r = CyclePhaseEngine.classify(
+            listOf(CyclePhaseEngine.Night("2026-04-05", null, null, null)),
+            baselineUsable = false,
+            loggedPeriodStarts = listOf(
+                "2026-01-01",
+                "2026-01-29",
+                "2026-03-11",
+                "2026-03-31",
+            ),
+        )
+        assertNotNull(r.cycleDayLow)
+        assertNull(r.cycleLengthDays)
+        assertNull(r.nextPeriodWindow)
+        assertTrue(r.note.contains("outside the supported range"))
+    }
+
+    @Test fun loggedCadenceWinsOverSensorShiftSpacingForPeriodForecast() {
+        val nights = biphasic(4, cycleLen = 30)
+        val lastDay = nights.last().day
+        val latestLog = CyclePhaseEngine.shiftDay(lastDay, -10)!!
+        val priorLog = CyclePhaseEngine.shiftDay(latestLog, -27)!!
+        val r = CyclePhaseEngine.classify(
+            nights,
+            baselineUsable = true,
+            loggedPeriodStarts = listOf(priorLog, latestLog),
+        )
+        assertEquals(27, r.cycleLengthDays)
+    }
+
+    @Test fun currentLogAnchorsDayEvenWhenLatestSensorNightIsYesterday() {
+        val nights = biphasic(3)
+        val today = CyclePhaseEngine.shiftDay(nights.last().day, 1)!!
+        val r = CyclePhaseEngine.classify(
+            nights,
+            baselineUsable = true,
+            loggedPeriodStarts = listOf(today),
+            asOfDay = today,
+        )
+        assertEquals(1, r.cycleDayLow)
+        assertEquals(2, r.cycleDayHigh)
     }
 
     @Test fun staleOrFutureLoggedStartDoesNotFabricateCurrentCycle() {
@@ -152,6 +261,7 @@ class CyclePhaseEngineTest {
         assertNull(r.cycleDayHigh)
         assertNull(r.nextPeriodWindow)
         assertTrue(r.note.contains("over 40 days old"))
+        assertEquals(listOf(CyclePhaseEngine.NoteKind.STALE_LOG), r.noteKinds)
     }
 
     @Test fun loggedPeriodMistimedIsFlagged() {

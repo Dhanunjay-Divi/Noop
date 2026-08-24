@@ -2,6 +2,7 @@ import XCTest
 import Foundation
 import WhoopStore
 import WhoopProtocol
+import StrandAnalytics
 @testable import Strand
 
 /// #814 READ SPINE + UNION MODEL: after a remove+re-add the strap gets a FRESH registry id ("whoop-<uuid>"),
@@ -167,6 +168,102 @@ final class ReadSpineActiveDeviceTests: XCTestCase {
         let landDay = await repo.latestDataDayStart()
         XCTAssertEqual(landDay, Repository.logicalDayStart(Date(timeIntervalSince1970: TimeInterval(liveBase + 599))),  // 600-sample seed → latest sample = liveBase+599 (MAX ts); avoids the 04:00 straddle flake
                        "Today must anchor on the fresh live day, not a stale imported day")
+    }
+
+    /// Regression for the real "slept last night, still 0/4" failure: after remove/re-add, overnight
+    /// history is written under the fresh active id and a WHOOP 5/MG night may carry only PPG-derived HR.
+    /// The idle watermark must move, the active source must own the day, and scoring must bank Sleep/RHR/HRV
+    /// under the stable canonical computed id.
+    @MainActor
+    func testReAddedBandPpgOnlyNightAdvancesCalibration() async throws {
+        let defaults = UserDefaults.standard
+        let watermarkKey = "noop.analyzeWatermark"
+        let priorWatermark = defaults.object(forKey: watermarkKey)
+        defaults.removeObject(forKey: watermarkKey)
+        defer {
+            if let priorWatermark {
+                defaults.set(priorWatermark, forKey: watermarkKey)
+            } else {
+                defaults.removeObject(forKey: watermarkKey)
+            }
+        }
+
+        let store = try await WhoopStore.inMemory()
+        let registry = DeviceRegistryStore(dbQueue: store.registryWriter)
+        try registry.add(PairedDevice(
+            id: newId, brand: "WHOOP", model: "WHOOP 5.0",
+            sourceKind: .liveBLE, capabilities: [.hr, .hrv, .sleep],
+            status: .paired, addedAt: 1, lastSeenAt: 1
+        ))
+        try registry.setActive(newId)
+
+        let repo = Repository(deviceId: canonicalId)
+        repo.setStoreForTesting(store)
+        XCTAssertTrue(repo.adoptActiveDeviceId(newId))
+        let engine = IntelligenceEngine(
+            repo: repo, profile: ProfileStore(), deviceId: canonicalId)
+
+        // Bank the empty multi-source watermark first. The old implementation watched only canonicalId,
+        // so the second non-forced pass incorrectly saw the same "0:0" and returned without scoring.
+        _ = await engine.analyzeRecent(maxDays: 1, force: true)
+
+        let calendar = Calendar.current
+        let midnight = calendar.startOfDay(for: Date())
+        let endDate = try XCTUnwrap(calendar.date(byAdding: .hour, value: 7, to: midnight))
+        let end = Int(endDate.timeIntervalSince1970)
+        let start = end - 7 * 3_600
+        let ppg = (start..<end).map {
+            PpgHrSample(ts: $0, bpm: 50, conf: 0.92)
+        }
+        let gravity = (start..<end).map {
+            GravitySample(ts: $0, x: 0, y: 0, z: 1)
+        }
+        let rr = stride(from: start, to: end, by: 2).enumerated().map { index, ts in
+            RRInterval(ts: ts, rrMs: index.isMultiple(of: 2) ? 1_195 : 1_205)
+        }
+        let inserted = try await store.insert(
+            Streams(rr: rr, gravity: gravity, ppgHr: ppg), deviceId: newId)
+        XCTAssertEqual(inserted.ppgHr, ppg.count)
+        XCTAssertEqual(inserted.gravity, gravity.count)
+
+        let receipt = await engine.analyzeRecent(maxDays: 1, force: false)
+        XCTAssertNotNil(receipt, "PPG history on the active re-added source must invalidate the watermark")
+
+        let day = Repository.localDayKey(endDate)
+        let rows = try await store.dailyMetrics(
+            deviceId: canonicalId + "-noop", from: day, to: day)
+        let scored = try XCTUnwrap(rows.first)
+        XCTAssertGreaterThan(try XCTUnwrap(scored.totalSleepMin), 0)
+        XCTAssertEqual(scored.restingHr, 50)
+        XCTAssertNotNil(scored.avgHrv)
+        XCTAssertEqual(
+            RecoveryScorer.calibrationNights(
+                nightlyHrv: [scored.avgHrv], dayKeys: [scored.day], hasRecovery: false),
+            1,
+            "one valid slept night must advance Recovery from 0/4 to 1/4"
+        )
+    }
+
+    func testAnalysisFingerprintSourcesIncludeActiveAndCanonicalButNotArchived() {
+        let devices = [
+            PairedDevice(
+                id: newId, brand: "WHOOP", model: "WHOOP 5.0",
+                sourceKind: .liveBLE, capabilities: [.hr], status: .active,
+                addedAt: 1, lastSeenAt: 1
+            ),
+            PairedDevice(
+                id: "old-band", brand: "WHOOP", model: "WHOOP 4.0",
+                sourceKind: .liveBLE, capabilities: [.hr], status: .archived,
+                addedAt: 0, lastSeenAt: 0
+            ),
+        ]
+
+        XCTAssertEqual(
+            IntelligenceEngine.analysisFingerprintDeviceIds(
+                registered: devices, readIds: [newId, canonicalId],
+                fallbackDeviceId: canonicalId),
+            [canonicalId, newId]
+        )
     }
 
     // MARK: - #316 / @63 step activity-class union (the Steps tile icon)

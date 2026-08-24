@@ -39,20 +39,14 @@ import kotlinx.coroutines.withContext
 object IntelligenceEngine {
 
     /**
-     * Serialises [analyzeRecent] against itself. The pass is launched from four independent coroutines: the
-     * 15-min backstop loop and rescoreAfterEdit (both AppViewModel), the post-offload analyze
-     * (WhoopBleClient), plus the one-shot Effort rescore ([runEffortRescoreIfNeeded]). These can overlap:
-     * two parallel 21-night passes double the CPU/battery AND race the #899 self-heal, whose concurrent
-     * overlapping-session deletes can pick different survivors. This mirrors the intent of the Swift
-     * `computing` guard, but SERIALISES rather than coalesces on purpose: Android's callers pass
-     * heterogeneous windows , the Effort rescore uses maxDays=4000, not 21, and can overlap the *independent*
-     * BLE-offload analyze. A drop-guard would skip that full-history rescore while its unconditional flagSet
-     * marks it permanently done, and would re-run the holder's 21-day window in its place. withLock lets
-     * every caller run its OWN pass, queued and never parallel, so nothing is dropped and no window is
-     * silently lost. Suspending (not thread-blocking) and cancellation-cooperative, matching the callers'
-     * #125 CancellationException handling. No re-entrancy: nothing analyzeRecent calls re-enters it
-     * ([runEffortRescoreIfNeeded] delegates to analyzeRecent and does NOT take the lock itself, so the
-     * Mutex is acquired exactly once per Effort pass, never nested).
+     * Serialises every writer that can replace the computed age-metric rows. The heavy scorer is launched
+     * from independent UI, post-offload, edit, and upgrade coroutines; focused Fitness Age/Vitality refreshes
+     * can run at the same time after a profile edit. Letting either focused writer bypass this gate allows an
+     * old-profile scorer to overwrite its result before the new profile target is marked complete.
+     *
+     * This also prevents parallel 21-night passes from doubling CPU/battery and racing the #899 sleep heal.
+     * A suspending mutex queues each caller's own window rather than dropping it, which is required for the
+     * 4,000-day Effort migration. No gated function re-enters another gated function.
      */
     private val analyzeGate = Mutex()
 
@@ -182,16 +176,34 @@ object IntelligenceEngine {
     /**
      * Cheap launch/update reconciliation for the weekly Vitality projection. Unlike [analyzeRecent], this
      * reads only persisted merged daily rows, so it can invalidate or refresh a steps-era score even when
-     * the raw-HR fingerprint is unchanged and the heavy scoring pass correctly skips. Idempotent and
+     * the raw scoring-input fingerprint is unchanged and the heavy scoring pass correctly skips. Idempotent and
      * computed-source-only; no imported/raw/vendor row is rewritten.
      */
     suspend fun recomputeVitalityOnly(
         repo: WhoopRepository,
         profile: UserProfile,
+        profileProvider: (() -> UserProfile)? = null,
         importedDeviceId: String = "my-whoop",
         maxDays: Int = 21,
         nowSeconds: Long = System.currentTimeMillis() / 1_000L,
     ): Boolean = analyzeGate.withLock {
+        val resolvedProfile = profileProvider?.invoke() ?: profile
+        recomputeVitalityOnlyInsideGate(
+            repo = repo,
+            profile = resolvedProfile,
+            importedDeviceId = importedDeviceId,
+            maxDays = maxDays,
+            nowSeconds = nowSeconds,
+        )
+    }
+
+    private suspend fun recomputeVitalityOnlyInsideGate(
+        repo: WhoopRepository,
+        profile: UserProfile,
+        importedDeviceId: String,
+        maxDays: Int,
+        nowSeconds: Long,
+    ): Boolean {
         val computedId = "$importedDeviceId-noop"
         val boundedDays = maxDays.coerceAtLeast(1)
         val tzOffsetSeconds = java.util.TimeZone.getDefault().getOffset(nowSeconds * 1_000L) / 1_000L
@@ -205,7 +217,7 @@ object IntelligenceEngine {
             .filter { it.day in oldestDay..newestDay }
             .sortedBy { it.day }
             .takeLast(boundedDays)
-        persistVitalityOrInvalidate(
+        return persistVitalityOrInvalidate(
             repo = repo,
             profile = profile,
             days = days,
@@ -214,6 +226,55 @@ object IntelligenceEngine {
             newestDay = newestDay,
         )
     }
+
+    data class AgeMetricRecomputeOutcome(
+        val fitnessFinished: Boolean,
+        val vitalityFinished: Boolean,
+    )
+
+    /**
+     * Reconcile both profile-dependent projections as one serialized unit. A queued old-profile
+     * [analyzeRecent] pass cannot run between these writes and leave Fitness Age stale while the caller marks
+     * the new target complete. Each projection still reports completion independently so a partial storage
+     * failure remains publishable but retryable.
+     */
+    suspend fun recomputeAgeMetricsOnly(
+        repo: WhoopRepository,
+        profile: UserProfile,
+        importedDeviceId: String,
+        maxDays: Int = 21,
+        nowSeconds: Long = System.currentTimeMillis() / 1_000L,
+    ): AgeMetricRecomputeOutcome = analyzeGate.withLock {
+        val fitnessFinished = ageMetricOperationFinished {
+            recomputeFitnessAgeOnlyInsideGate(
+                repo = repo,
+                profile = profile,
+                importedDeviceId = importedDeviceId,
+                maxDays = maxDays,
+                nowSeconds = nowSeconds,
+            )
+        }
+        val vitalityFinished = ageMetricOperationFinished {
+            recomputeVitalityOnlyInsideGate(
+                repo = repo,
+                profile = profile,
+                importedDeviceId = importedDeviceId,
+                maxDays = maxDays,
+                nowSeconds = nowSeconds,
+            )
+        }
+        AgeMetricRecomputeOutcome(fitnessFinished, vitalityFinished)
+    }
+
+    private suspend fun ageMetricOperationFinished(block: suspend () -> Unit): Boolean =
+        try {
+            block()
+            true
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            false
+        }
 
     /** Imported wearable-export source ids whose DAILY aggregates can be scored for a NOOP Charge/Rest on
      *  an import-only day (#823). Matches WearableExportImporter.Brand.deviceId. Mirrors the Swift
@@ -262,6 +323,7 @@ object IntelligenceEngine {
     suspend fun analyzeRecent(
         repo: WhoopRepository,
         profile: UserProfile = UserProfile(),
+        profileProvider: (() -> UserProfile)? = null,
         maxDays: Int = 21,
         importedDeviceId: String = "my-whoop",
         maxHROverride: Double? = null,
@@ -347,7 +409,11 @@ object IntelligenceEngine {
         // [analyzeGate]). The heavy scoring already ran off the caller's thread via withContext above; the
         // lock is held only for this engine's own passes, never across an unrelated suspension.
         analyzeGate.withLock {
-            val (out, healed) = analyzeRecentOnCpu(repo, profile, maxDays, importedDeviceId, maxHROverride,
+            // Runtime callers supply a live provider so a pass queued behind profile reconciliation cannot
+            // retain an older age/sex snapshot and overwrite newly reconciled Fitness Age/Vitality rows.
+            // A profile edit after this read queues reconciliation behind this same gate, preserving order.
+            val resolvedProfile = profileProvider?.invoke() ?: profile
+            val (out, healed) = analyzeRecentOnCpu(repo, resolvedProfile, maxDays, importedDeviceId, maxHROverride,
                 nowSeconds, ownerSource, manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
                 stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow)
@@ -357,7 +423,7 @@ object IntelligenceEngine {
             // detections weren't banked yet), so its survivor can differ from the heal's. ONE bounded re-pass
             // re-scores the window against the cleaned store; its own heal then finds nothing (the duplicates
             // are gone), so this can never loop. Mirrors the Swift pendingForcedRescore re-arm.
-            else analyzeRecentOnCpu(repo, profile, maxDays, importedDeviceId, maxHROverride,
+            else analyzeRecentOnCpu(repo, resolvedProfile, maxDays, importedDeviceId, maxHROverride,
                 nowSeconds, ownerSource, manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
                 stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow).first
@@ -389,6 +455,7 @@ object IntelligenceEngine {
     suspend fun runEffortRescoreIfNeeded(
         repo: WhoopRepository,
         profile: UserProfile = UserProfile(),
+        profileProvider: (() -> UserProfile)? = null,
         importedDeviceId: String = "my-whoop",
         maxHROverride: Double? = null,
         flagGet: () -> Boolean,
@@ -399,6 +466,7 @@ object IntelligenceEngine {
         analyzeRecent(
             repo = repo,
             profile = profile,
+            profileProvider = profileProvider,
             maxDays = historyDays,
             importedDeviceId = importedDeviceId,
             maxHROverride = maxHROverride,
@@ -1747,10 +1815,31 @@ object IntelligenceEngine {
      *  readiness card shows. Light + connection-independent (stored data only), so it works even when the
      *  strap is offline. Returns true if a value was written. */
     suspend fun recomputeFitnessAgeOnly(
-        repo: WhoopRepository, profile: UserProfile, importedDeviceId: String, maxDays: Int = 21,
+        repo: WhoopRepository,
+        profile: UserProfile,
+        profileProvider: (() -> UserProfile)? = null,
+        importedDeviceId: String,
+        maxDays: Int = 21,
+        nowSeconds: Long = System.currentTimeMillis() / 1_000L,
+    ): Boolean = analyzeGate.withLock {
+        val resolvedProfile = profileProvider?.invoke() ?: profile
+        recomputeFitnessAgeOnlyInsideGate(
+            repo = repo,
+            profile = resolvedProfile,
+            importedDeviceId = importedDeviceId,
+            maxDays = maxDays,
+            nowSeconds = nowSeconds,
+        )
+    }
+
+    private suspend fun recomputeFitnessAgeOnlyInsideGate(
+        repo: WhoopRepository,
+        profile: UserProfile,
+        importedDeviceId: String,
+        maxDays: Int,
+        nowSeconds: Long,
     ): Boolean {
         val computedId = importedDeviceId + "-noop"
-        val nowSeconds = System.currentTimeMillis() / 1_000L
         val tzOffsetSeconds = java.util.TimeZone.getDefault().getOffset(nowSeconds * 1_000L) / 1_000L
         val nowLocalMidnight = midnightLocal(nowSeconds, tzOffsetSeconds)
         val newestDay = AnalyticsEngine.dayString(nowLocalMidnight, tzOffsetSeconds)

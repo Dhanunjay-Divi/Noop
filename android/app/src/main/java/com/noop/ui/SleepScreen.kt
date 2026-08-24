@@ -504,7 +504,12 @@ fun SleepScreen(
                     score = if (night != null) heroPerformanceScore(night, days, imported)
                             else tilesModel?.performance?.latest,
                     asleepMin = model?.stages?.asleep,
-                    source = restHeroSource(imported, night?.dayKey ?: days.lastOrNull()?.day),
+                    source = restHeroSource(
+                        imported = imported,
+                        wakeDay = night?.dayKey ?: days.lastOrNull()?.day,
+                        importedLabel = uiString(R.string.appwide_source_imported),
+                        onDeviceLabel = uiString(R.string.appwide_source_on_device),
+                    ),
                     overline = nightRelativeLabel(nightOffset),
                 )
             }
@@ -848,8 +853,9 @@ private val LIQUID_HERO_RADIUS: Dp = 26.dp
 // the screen-level liquid sky (the scaffold's topBackground), carrying — when the night has a 0–100
 // sleep-performance score — a [LiquidVessel] filled to score/100 in the Rest colour with the number counting
 // up over it (the Today HeroScoreVessel idiom). No score → the big count-up hours-slept headline. A
-// [SourceBadge] states whether the score is WHOOP's imported figure or NOOP's on-device estimate. The
-// figures, fraction math and Rest tint are UNCHANGED from the BevelGauge this replaced — presentation-only.
+// [SourceBadge] uses one neutral "Imported" label for an imported score or "On-device" for a local
+// estimate. Detailed provider provenance remains in the imported record and detail surfaces. The figures,
+// fraction math and Rest tint are UNCHANGED from the BevelGauge this replaced — presentation-only.
 
 @Composable
 private fun RestHero(score: Double?, asleepMin: Double?, source: String, overline: String) {

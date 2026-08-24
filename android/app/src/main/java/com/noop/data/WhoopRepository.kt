@@ -147,7 +147,13 @@ data class InsertCounts(
     val steps: Int = 0,
     val resp: Int = 0,
     val gravity: Int = 0,
-)
+    val sleepState: Int = 0,
+    val ppgWaveform: Int = 0,
+) {
+    /** Rows that can alter scoring or are durable physiological history. Battery is housekeeping. */
+    val scoreBearingRows: Int
+        get() = hr + rr + events + spo2 + skinTemp + steps + resp + gravity + sleepState + ppgWaveform
+}
 
 /**
  * A compact snapshot of how much history each source holds, for the Data Sources "Freshness
@@ -357,13 +363,12 @@ class WhoopRepository private constructor(
         // it.activityClass is null when the @63 byte was 0xFF/invalid/absent → stored as SQL NULL.
         val stepIds = if (streams.steps.isEmpty()) emptyList() else
             dao.insertSteps(streams.steps.map { StepSample(deviceId, it.ts, it.counter, it.activityClass) })
-        // Band sleep_state (#175). Persist-only, same as steps — the strap's OWN @81 high-nibble state
+        // Band sleep_state (#175). The strap's OWN @81 high-nibble state
         // (0 wake/1 still/2 asleep/3 up), decoded and streamed but dropped at storage until now. Idempotent
-        // by (deviceId, ts); not counted into InsertCounts (no consumer reads a count). The raw 0-3 code is
-        // stored verbatim — a strap that never reports it inserts nothing.
-        if (streams.sleepState.isNotEmpty()) {
+        // by (deviceId, ts); included in InsertCounts so persistence diagnostics and scoring fingerprints
+        // account for sleep-state-only chunks. The raw 0-3 code is stored verbatim.
+        val sleepStateIds = if (streams.sleepState.isEmpty()) emptyList() else
             dao.insertSleepState(streams.sleepState.map { SleepStateSampleEntity(deviceId, it.ts, it.state) })
-        }
         val respIds = if (streams.resp.isEmpty()) emptyList() else
             dao.insertResp(streams.resp.map { RespSample(deviceId, it.ts, it.raw) })
         val gravIds = if (streams.gravity.isEmpty()) emptyList() else
@@ -373,16 +378,15 @@ class WhoopRepository private constructor(
         val ppgHrIds = if (streams.ppgHr.isEmpty()) emptyList() else
             dao.insertPpgHr(streams.ppgHr.map { PpgHrSample(deviceId, it.ts, it.bpm, it.conf) })
         // RAW v26 optical PPG waveform (#156 follow-up) — the samples ppgHr above is derived FROM.
-        // Persist-only, same as steps/sleepState: not added to the InsertCounts return. Idempotent by
+        // Included in InsertCounts so PPG-only nights advance persistence diagnostics. Idempotent by
         // (deviceId, ts), IGNORE-on-conflict keeps the FIRST-seen waveform for a second (mirrors every
         // other per-second stream). Packed into one compact i16 BLOB per row (see packPpgSamples).
-        if (streams.ppgWaveform.isNotEmpty()) {
+        val ppgWaveformIds = if (streams.ppgWaveform.isEmpty()) emptyList() else
             dao.insertPpgWaveform(
                 streams.ppgWaveform.map {
                     PpgWaveformSampleEntity(deviceId, it.ts, StreamPersistence.packPpgSamples(it.samples))
                 },
             )
-        }
 
         // OnConflictStrategy.IGNORE returns -1 for skipped (already-present) rows; count the inserts.
         return InsertCounts(
@@ -395,13 +399,17 @@ class WhoopRepository private constructor(
             steps = stepIds.countInserted(),
             resp = respIds.countInserted(),
             gravity = gravIds.countInserted(),
+            sleepState = sleepStateIds.countInserted(),
+            ppgWaveform = ppgWaveformIds.countInserted(),
         )
     }
 
-    /** #836 - cheap whole-history raw-HR change fingerprint `"count:maxTs"`. The idle 15-min rescore (the
-     *  AppViewModel backstop) skips when this is unchanged since the last completed run. Any HR insert/delete
-     *  moves it (count or maxTs), so a real change always rescores; mirrors Swift WhoopStore.hrFingerprint. */
-    suspend fun hrFingerprint(): String = "${dao.countHr()}:${dao.maxHrTs()}"
+    /** #836/#1196 - cheap whole-history scoring-input token. It covers every raw stream consumed by daily
+     * analysis and includes the active source identity, so switching bands invalidates an otherwise equal
+     * row watermark. The length prefix keeps the token unambiguous. */
+    suspend fun analysisFingerprint(activeSourceId: String): String =
+        "${activeSourceId.toByteArray(Charsets.UTF_8).size}:$activeSourceId:" +
+            "${dao.countAnalysisFingerprintRows()}:${dao.maxAnalysisFingerprintTs()}"
 
     // MARK: - Server-derived caches (latest value wins on conflict)
 
@@ -1362,11 +1370,11 @@ class WhoopRepository private constructor(
 
     // MARK: - Local cycle-day-1 history
 
-    /** Logged period-start days, oldest first. Database/read failures stay an honest empty list. */
+    /** Logged period-start days, oldest first. Read failures propagate so callers can retain known history. */
     suspend fun periodStarts(
         from: String = CycleTrackingStore.EARLIEST_DAY,
         to: String = CycleTrackingStore.LATEST_DAY,
-    ): List<String> = runCatching {
+    ): List<String> =
         dao.metricSeries(CycleTrackingStore.SOURCE_ID, CycleTrackingStore.PERIOD_START_KEY, from, to)
             .asSequence()
             .filter { it.value >= CycleTrackingStore.LOGGED_VALUE }
@@ -1375,7 +1383,6 @@ class WhoopRepository private constructor(
             .distinct()
             .sorted()
             .toList()
-    }.getOrDefault(emptyList())
 
     /** Log (or idempotently re-log) one local calendar day as cycle day 1. */
     suspend fun logPeriodStart(day: String): Boolean {
@@ -1414,14 +1421,13 @@ class WhoopRepository private constructor(
         true
     }.getOrDefault(false)
 
-    /** Private per-day flow and symptom logs, oldest first. Unknown/corrupt rows fail closed. */
+    /** Private per-day flow and symptom logs, oldest first. Corrupt rows are skipped; read failures propagate. */
     suspend fun cycleDailyLogs(
         from: String = CycleTrackingStore.EARLIEST_DAY,
         to: String = CycleTrackingStore.LATEST_DAY,
-    ): List<CycleTrackingStore.DailyLog> = runCatching {
+    ): List<CycleTrackingStore.DailyLog> =
         dao.metricSeries(CycleTrackingStore.SOURCE_ID, CycleTrackingStore.DAILY_LOG_KEY, from, to)
             .mapNotNull { CycleTrackingStore.decode(it.day, it.value) }
-    }.getOrDefault(emptyList())
 
     /**
      * Save one complete daily entry. Empty input physically deletes the point, leaving no sensitive

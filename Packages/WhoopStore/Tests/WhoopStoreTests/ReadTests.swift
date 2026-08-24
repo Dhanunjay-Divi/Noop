@@ -53,6 +53,52 @@ final class ReadTests: XCTestCase {
         XCTAssertEqual(empty.maxTs, 0)
     }
 
+    func testHrFingerprintAdvancesForPpgOnlyWhoop5History() async throws {
+        let store = try await WhoopStore.inMemory()
+        _ = try await store.insert(
+            Streams(ppgHr: [
+                PpgHrSample(ts: 100, bpm: 58, conf: 0.9),
+                PpgHrSample(ts: 200, bpm: 57, conf: 0.9),
+            ]),
+            deviceId: "whoop-5"
+        )
+
+        let ppgOnly = try await store.hrFingerprint(deviceId: "whoop-5", from: 0, to: 1_000)
+        XCTAssertEqual(ppgOnly.count, 2)
+        XCTAssertEqual(ppgOnly.maxTs, 200)
+
+        // An overlapping measured second is another raw input and must move the change token, even though
+        // `hrSamples` correctly lets measured HR shadow that PPG estimate on display.
+        _ = try await store.insert(
+            Streams(hr: [HRSample(ts: 200, bpm: 59)]), deviceId: "whoop-5")
+        let withMeasured = try await store.hrFingerprint(deviceId: "whoop-5", from: 0, to: 1_000)
+        XCTAssertEqual(withMeasured.count, 3)
+        XCTAssertEqual(withMeasured.maxTs, 200)
+    }
+
+    func testAnalysisFingerprintAdvancesWhenSleepInputsArriveAfterHr() async throws {
+        let store = try await WhoopStore.inMemory()
+        _ = try await store.insert(
+            Streams(hr: [HRSample(ts: 100, bpm: 58)]), deviceId: "whoop-5")
+        let hrOnly = try await store.analysisFingerprint(
+            deviceId: "whoop-5", from: 0, to: 1_000)
+        XCTAssertEqual(hrOnly.count, 1)
+        XCTAssertEqual(hrOnly.maxTs, 100)
+
+        _ = try await store.insert(
+            Streams(
+                rr: [RRInterval(ts: 101, rrMs: 1_000)],
+                gravity: [GravitySample(ts: 102, x: 0, y: 0, z: 1)],
+                sleepState: [SleepStateSample(ts: 103, state: 2)]
+            ),
+            deviceId: "whoop-5"
+        )
+        let complete = try await store.analysisFingerprint(
+            deviceId: "whoop-5", from: 0, to: 1_000)
+        XCTAssertEqual(complete.count, 4)
+        XCTAssertEqual(complete.maxTs, 103)
+    }
+
     func testHrBucketsAveragePerBucketOrderedAndDeviceScoped() async throws {
         let store = try await seeded()
         // 200s buckets over dev1's ts 100/200/300 (bpm 60/61/62):

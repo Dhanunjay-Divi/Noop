@@ -320,10 +320,12 @@ final class NOOPiOSUITests: XCTestCase {
         let metricReminder = app.staticTexts["Metric review"]
         for _ in 0..<6 where !metricReminder.exists { app.swipeUp() }
         XCTAssertTrue(metricReminder.waitForExistence(timeout: 3))
+        let metricReminderToggle = app.switches.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "noop.metric.reminder.")
+        ).firstMatch
         XCTAssertTrue(
-            app.switches.matching(
-                NSPredicate(format: "identifier BEGINSWITH %@", "noop.metric.reminder.")
-            ).firstMatch.exists
+            metricReminderToggle.waitForExistence(timeout: 3),
+            app.debugDescription
         )
         keepScreenshot(app, name: "metric-detail-reminder")
     }
@@ -522,7 +524,10 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(coverage.isHittable)
         XCTAssertTrue(rangeLabel.label.localizedCaseInsensitiveContains("last 3 months"))
         XCTAssertTrue(coverage.label.localizedCaseInsensitiveContains("recovery scores"))
-        XCTAssertTrue(coverage.label.localizedCaseInsensitiveContains("90 of 90 days"))
+        XCTAssertTrue(
+            coverage.label.localizedCaseInsensitiveContains("90 of 90 days"),
+            "Unexpected coverage copy: \(coverage.label)"
+        )
         XCTAssertTrue(coverage.label.localizedCaseInsensitiveContains("one score per day"))
         XCTAssertFalse(coverage.label.localizedCaseInsensitiveContains("readings"))
         XCTAssertFalse(coverage.label.localizedCaseInsensitiveContains("average across"))

@@ -29,6 +29,11 @@ object CyclePhaseEngine {
     const val defaultCycleDays: Int = 28
     const val minNightsToClassify: Int = 42
     const val periOvulatoryHalfWidth: Int = 2
+    const val elevationConfirmationNights: Int = 3
+    const val elevationRequiredNights: Int = 2
+    const val minPersonalWindowHalfWidth: Int = 2
+    const val maxPersonalWindowHalfWidth: Int = 7
+    const val maxForecastableIntervalRange: Int = 12
 
     /** Standing awareness-only line shown on every cycle surface (legal/ethical framing). */
     const val awarenessLine =
@@ -64,6 +69,51 @@ object CyclePhaseEngine {
         SOLID("solid"),
     }
 
+    enum class NoteKind(val english: String) {
+        LEARNING_NIGHTLY(
+            "Learning your pattern from your nightly temperature - keep wearing it overnight.",
+        ),
+        NO_CLEAR_PATTERN("No clear temperature pattern yet."),
+        NO_CLEAR_CONTEXT(
+            "No clear temperature pattern yet - this can happen with irregular cycles, " +
+                "hormonal birth control, or shift work.",
+        ),
+        LOG_SHIFT_MISMATCH(
+            "Your temperature shift came at a different time than your logged date - " +
+                "the logged start may be off.",
+        ),
+        PHASE_FOLLICULAR("Follicular range - temperature sitting at your baseline."),
+        PHASE_MID_CYCLE("Around your mid-cycle shift - temperature is turning."),
+        PHASE_LUTEAL("Luteal range - temperature is running above your baseline."),
+        STALE_LOG(
+            "Your last logged start is over 40 days old. Log the latest start to refresh " +
+                "this estimate; NOOP will not roll an old date forward.",
+        ),
+        UNRELIABLE_LOGS(
+            "Recent logged cycle lengths vary too much or include an interval outside the " +
+                "supported range for a useful period forecast. " +
+                "Cycle day still counts from your latest start.",
+        ),
+        FORECAST_PASSED(
+            "The estimated window from your last log has passed. Log the next start when it happens; " +
+                "NOOP will not roll an old date forward.",
+        ),
+        BROAD_PRIOR(
+            "Cycle day is anchored to your logged start. The broad period window uses a 28-day prior " +
+                "while nightly temperature calibration continues.",
+        ),
+        PERSONAL_INTERVALS(
+            "Cycle day is anchored to your latest start. The period window uses your recent logged " +
+                "intervals and expands with their variability.",
+        ),
+        START_LOGGING(
+            "Log a period start and wear Noop Band overnight to begin a private estimate.",
+        ),
+        TURN_ON_AWARENESS(
+            "Turn on cycle awareness to read a coarse phase from your nightly temperature.",
+        ),
+    }
+
     data class ShiftMarker(val day: String)
 
     data class NextPeriodWindow(val earliestDay: String, val latestDay: String)
@@ -77,6 +127,7 @@ object CyclePhaseEngine {
         val nextPeriodWindow: NextPeriodWindow?,
         val shiftMarkers: List<ShiftMarker>,
         val note: String,
+        val noteKinds: List<NoteKind> = emptyList(),
     )
 
     // ── Classify ──
@@ -84,18 +135,21 @@ object CyclePhaseEngine {
     /**
      * Classify the most recent night from the trailing series. [baselineUsable] is the caller's
      * BaselineState.usable. [loggedPeriodStarts] are optional "yyyy-MM-dd" period-start days; the most
-     * recent anchors cycle-day 1 and is CROSS-VALIDATED against the detected shift.
+     * recent anchors cycle-day 1 and is CROSS-VALIDATED against the detected shift. [asOfDay] may supply
+     * the current civil day so a log advances even when no wearable night exists.
      */
     fun classify(
         nights: List<Night>,
         baselineUsable: Boolean,
         loggedPeriodStarts: List<String> = emptyList(),
+        asOfDay: String? = null,
     ): Result {
         // Explicit logs can anchor a bounded day range and broad period window while temperature is
         // still calibrating. They never create a sensor-derived phase.
-        val asOfDay = nights.map { it.day }.filter { parseDay(it) != null }.maxOrNull()
+        val fallbackAsOfDay = nights.map { it.day }.filter { parseDay(it) != null }.maxOrNull()
             ?: loggedPeriodStarts.filter { parseDay(it) != null }.maxOrNull()
-        val loggedEstimate = asOfDay?.let {
+        val effectiveAsOfDay = asOfDay?.takeIf { parseDay(it) != null } ?: fallbackAsOfDay
+        val loggedEstimate = effectiveAsOfDay?.let {
             estimateFromLoggedStarts(loggedPeriodStarts, it)
         }
 
@@ -110,10 +164,12 @@ object CyclePhaseEngine {
                     loggedEstimate.nextPeriodWindow,
                     emptyList(),
                     loggedEstimate.note,
+                    listOf(loggedEstimate.noteKind),
                 )
             }
+            val noteKinds = listOf(NoteKind.LEARNING_NIGHTLY)
             return Result(Phase.LEARNING, Confidence.LEARNING, null, null, null, null, emptyList(),
-                "Learning your pattern from your nightly temperature - keep wearing it overnight.")
+                noteText(noteKinds), noteKinds)
         }
 
         val fused: List<Pair<String, Double?>> = nights.map { n ->
@@ -131,18 +187,24 @@ object CyclePhaseEngine {
                     loggedEstimate.nextPeriodWindow,
                     emptyList(),
                     loggedEstimate.note,
+                    listOf(loggedEstimate.noteKind),
                 )
             }
+            val noteKinds = listOf(NoteKind.LEARNING_NIGHTLY)
             return Result(Phase.LEARNING, Confidence.LEARNING, null, null, null, null, emptyList(),
-                "Learning your pattern from your nightly temperature - keep wearing it overnight.")
+                noteText(noteKinds), noteKinds)
         }
 
         val center = median(values)
         val spread = maxOf(1e-9, medianAbsoluteDeviation(values, center))
 
-        val elevated: List<Boolean> = fused.map { row ->
+        val rawElevated: List<Boolean> = fused.map { row ->
             val v = row.second ?: return@map false
             (v - center) >= elevationK * spread
+        }
+        val elevated: List<Boolean> = rawElevated.indices.map { index ->
+            val lower = maxOf(0, index - elevationConfirmationNights + 1)
+            rawElevated.subList(lower, index + 1).count { it } >= elevationRequiredNights
         }
 
         val onsets = mutableListOf<Int>()
@@ -161,13 +223,15 @@ object CyclePhaseEngine {
                     loggedEstimate.cycleLengthDays,
                     loggedEstimate.nextPeriodWindow,
                     shiftMarkers,
-                    "No clear temperature pattern yet. ${loggedEstimate.note}",
+                    noteText(listOf(NoteKind.NO_CLEAR_PATTERN, loggedEstimate.noteKind)),
+                    listOf(NoteKind.NO_CLEAR_PATTERN, loggedEstimate.noteKind),
                 )
             }
+            val noteKinds = listOf(NoteKind.NO_CLEAR_CONTEXT)
             return Result(
                 Phase.UNKNOWN, Confidence.BUILDING, null, null, null, null, shiftMarkers,
-                "No clear temperature pattern yet - this can happen with irregular cycles, " +
-                    "hormonal birth control, or shift work.",
+                noteText(noteKinds),
+                noteKinds,
             )
         }
 
@@ -178,23 +242,22 @@ object CyclePhaseEngine {
             }
         }
         val medianGap = if (onsetGaps.isEmpty()) null else median(onsetGaps.map { it.toDouble() }).roundToInt()
-        val cycleLength: Int? = medianGap?.takeIf { it in minCycleDays..maxCycleDays }
-        val confidence = if (cycleLength != null) Confidence.SOLID else Confidence.BUILDING
+        val sensorCycleLength: Int? = medianGap?.takeIf { it in minCycleDays..maxCycleDays }
+        val confidence = if (sensorCycleLength != null) Confidence.SOLID else Confidence.BUILDING
 
         val lastNightDay = fused.last().first
-        var note = ""
-        var anchorDay = fused[lastOnsetIdx].first
-        var anchoredByLog = false
-        mostRecentOnOrBefore(loggedPeriodStarts, lastNightDay)?.let { loggedStart ->
-            anchorDay = loggedStart
-            anchoredByLog = true
+        var noteKinds = emptyList<NoteKind>()
+        val anchorDay = fused[lastOnsetIdx].first
+        val anchoredByLog = loggedEstimate?.cycleDayLow != null
+        mostRecentOnOrBefore(loggedPeriodStarts, lastNightDay)
+            ?.takeIf { anchoredByLog }
+            ?.let { loggedStart ->
             // Implausible onset offset OR a logged start older than a full cycle before the latest night
             // (a newer period is overdue) means the log is likely mistimed — FLAG it, don't trust blindly.
             val delta = daysBetween(loggedStart, fused[lastOnsetIdx].first)
             val sinceLog = daysBetween(loggedStart, lastNightDay) ?: 0
             if ((delta != null && (delta < 0 || delta > maxCycleDays)) || sinceLog > maxCycleDays) {
-                note = "Your temperature shift came at a different time than your logged date - " +
-                    "the logged start may be off."
+                noteKinds = listOf(NoteKind.LOG_SHIFT_MISMATCH)
             }
         }
 
@@ -202,10 +265,10 @@ object CyclePhaseEngine {
         val cycleDayLow: Int?
         val cycleDayHigh: Int?
         if (anchoredByLog) {
-            val d = maxOf(1, daysSinceAnchor + 1)
-            cycleDayLow = maxOf(1, d - 1); cycleDayHigh = d + 1
+            cycleDayLow = loggedEstimate?.cycleDayLow
+            cycleDayHigh = loggedEstimate?.cycleDayHigh
         } else {
-            val lutealStartDay = (cycleLength ?: defaultCycleDays) / 2
+            val lutealStartDay = (sensorCycleLength ?: defaultCycleDays) / 2
             val d = lutealStartDay + daysSinceAnchor
             cycleDayLow = maxOf(1, d - 2); cycleDayHigh = d + 2
         }
@@ -217,18 +280,38 @@ object CyclePhaseEngine {
             if (daysSinceOnset <= periOvulatoryHalfWidth) Phase.PERI_OVULATORY else Phase.FOLLICULAR
         }
 
-        var window: NextPeriodWindow? = null
-        if (cycleLength != null) {
-            val earliest = shiftDay(anchorDay, cycleLength - 2)
-            val latest = shiftDay(anchorDay, cycleLength + 2)
+        var window: NextPeriodWindow? = loggedEstimate?.nextPeriodWindow
+        if (loggedEstimate == null && sensorCycleLength != null) {
+            val earliest = shiftDay(anchorDay, sensorCycleLength - 2)
+            val latest = shiftDay(anchorDay, sensorCycleLength + 2)
             if (earliest != null && latest != null && latest >= lastNightDay) {
                 window = NextPeriodWindow(maxOf(lastNightDay, earliest), latest)
             }
         }
 
-        if (note.isEmpty()) note = phaseNote(phase)
+        if (noteKinds.isEmpty()) {
+            noteKinds = listOf(phaseNoteKind(phase))
+            if (loggedEstimate?.forecastSuppressed == true) {
+                noteKinds = noteKinds + loggedEstimate.noteKind
+            }
+        }
 
-        return Result(phase, confidence, cycleDayLow, cycleDayHigh, cycleLength, window, shiftMarkers, note)
+        val cycleLength = if (loggedEstimate != null) {
+            loggedEstimate.cycleLengthDays
+        } else {
+            sensorCycleLength
+        }
+        return Result(
+            phase,
+            confidence,
+            cycleDayLow,
+            cycleDayHigh,
+            cycleLength,
+            window,
+            shiftMarkers,
+            noteText(noteKinds),
+            noteKinds,
+        )
     }
 
     // ── Fusion ──
@@ -247,12 +330,20 @@ object CyclePhaseEngine {
     // ── Copy ──
 
     internal fun phaseNote(phase: Phase): String = when (phase) {
-        Phase.FOLLICULAR -> "Follicular range - temperature sitting at your baseline."
-        Phase.PERI_OVULATORY -> "Around your mid-cycle shift - temperature is turning."
-        Phase.LUTEAL -> "Luteal range - temperature is running above your baseline."
         Phase.UNKNOWN -> "No clear pattern yet."
         Phase.LEARNING -> "Learning your pattern - keep wearing it overnight."
+        else -> phaseNoteKind(phase).english
     }
+
+    private fun phaseNoteKind(phase: Phase): NoteKind = when (phase) {
+        Phase.FOLLICULAR -> NoteKind.PHASE_FOLLICULAR
+        Phase.PERI_OVULATORY -> NoteKind.PHASE_MID_CYCLE
+        Phase.LUTEAL -> NoteKind.PHASE_LUTEAL
+        Phase.UNKNOWN -> NoteKind.NO_CLEAR_PATTERN
+        Phase.LEARNING -> NoteKind.LEARNING_NIGHTLY
+    }
+
+    private fun noteText(kinds: List<NoteKind>): String = kinds.joinToString(" ") { it.english }
 
     // ── Logged-start estimate ──
 
@@ -261,8 +352,11 @@ object CyclePhaseEngine {
         val cycleDayHigh: Int?,
         val cycleLengthDays: Int?,
         val nextPeriodWindow: NextPeriodWindow?,
-        val note: String,
-    )
+        val noteKind: NoteKind,
+        val forecastSuppressed: Boolean,
+    ) {
+        val note: String get() = noteKind.english
+    }
 
     /**
      * Bounded estimate from explicit period-start logs. One start uses a broad 28-day population prior
@@ -280,14 +374,26 @@ object CyclePhaseEngine {
         val latestStart = starts.lastOrNull() ?: return null
         val daysSinceStart = daysBetween(latestStart, asOfDay)?.takeIf { it >= 0 } ?: return null
 
-        val plausibleGaps = mutableListOf<Double>()
+        val observedGaps = mutableListOf<Int>()
         for (index in 1 until starts.size) {
             val gap = daysBetween(starts[index - 1], starts[index]) ?: continue
-            if (gap in minCycleDays..maxCycleDays) plausibleGaps.add(gap.toDouble())
+            observedGaps.add(gap)
         }
-        val personalLength = plausibleGaps
+        // Inspect the recent raw intervals before filtering. Discarding a 20- or 45-day interval can
+        // make older 28-day intervals look falsely stable. It may reflect real irregularity or a missed
+        // or corrected log; either interpretation is uncertainty, so suppress the forecast.
+        val recentObservedGaps = observedGaps.takeLast(6)
+        val recentPlausibleGaps = recentObservedGaps.filter { it in minCycleDays..maxCycleDays }
+        val hasOutOfRangeRecentGap = recentPlausibleGaps.size != recentObservedGaps.size
+        val cadence = recentPlausibleGaps
             .takeIf { it.isNotEmpty() }
-            ?.let { median(it).roundToInt() }
+            ?.let { median(it.map(Int::toDouble)).roundToInt() }
+        val intervalRange = if (recentPlausibleGaps.isEmpty()) 0 else {
+            recentPlausibleGaps.maxOrNull()!! - recentPlausibleGaps.minOrNull()!!
+        }
+        val forecastUnreliable = hasOutOfRangeRecentGap ||
+            (recentPlausibleGaps.size >= 3 && intervalRange > maxForecastableIntervalRange)
+        val personalLength = cadence?.takeUnless { forecastUnreliable }
 
         // Never roll an old log through guessed cycles. Ask for a fresh anchor instead.
         if (daysSinceStart >= maxCycleDays) {
@@ -296,33 +402,59 @@ object CyclePhaseEngine {
                 cycleDayHigh = null,
                 cycleLengthDays = personalLength,
                 nextPeriodWindow = null,
-                note = "Your last logged start is over 40 days old. Log the latest start to refresh " +
-                    "this estimate; temperature calibration is still learning.",
+                noteKind = NoteKind.STALE_LOG,
+                forecastSuppressed = true,
             )
         }
 
         val cycleDay = daysSinceStart + 1
-        val cadence = personalLength ?: defaultCycleDays
-        val uncertainty = if (personalLength == null) 5 else 3
-        val earliest = shiftDay(latestStart, cadence - uncertainty)
-        val latest = shiftDay(latestStart, cadence + uncertainty)
+        val cycleDayLow = maxOf(1, cycleDay - 1)
+        val cycleDayHigh = cycleDay + 1
+        if (forecastUnreliable) {
+            return LoggedEstimate(
+                cycleDayLow = cycleDayLow,
+                cycleDayHigh = cycleDayHigh,
+                cycleLengthDays = null,
+                nextPeriodWindow = null,
+                noteKind = NoteKind.UNRELIABLE_LOGS,
+                forecastSuppressed = true,
+            )
+        }
+
+        val forecastCadence = personalLength ?: defaultCycleDays
+        val uncertainty = when {
+            recentPlausibleGaps.isEmpty() || personalLength == null -> 5
+            recentPlausibleGaps.size == 1 -> 4
+            else -> {
+                val deviations = recentPlausibleGaps.map { abs(it - personalLength) }
+                val mad = median(deviations.map(Int::toDouble))
+                val observed = deviations.maxOrNull() ?: 0
+                val spread = maxOf(observed.toDouble(), 1.5 * mad)
+                kotlin.math.ceil(spread).toInt()
+                    .coerceIn(minPersonalWindowHalfWidth, maxPersonalWindowHalfWidth)
+            }
+        }
+        val earliest = shiftDay(latestStart, forecastCadence - uncertainty)
+        val latest = shiftDay(latestStart, forecastCadence + uncertainty)
         val window = if (earliest != null && latest != null && latest >= asOfDay) {
             NextPeriodWindow(maxOf(asOfDay, earliest), latest)
         } else null
 
-        val note = if (personalLength != null) {
-            "Cycle day and the broad period window come from your logged starts while nightly " +
-                "temperature calibration continues."
+        val forecastPassed = latest == null || latest < asOfDay
+        val noteKind = if (forecastPassed) {
+            NoteKind.FORECAST_PASSED
+        } else if (personalLength == null) {
+            NoteKind.BROAD_PRIOR
         } else {
-            "Cycle day is anchored to your logged start. The broad period window uses a 28-day prior " +
-                "while nightly temperature calibration continues."
+            NoteKind.PERSONAL_INTERVALS
         }
         return LoggedEstimate(
-            cycleDayLow = maxOf(1, cycleDay - 1),
-            cycleDayHigh = cycleDay + 1,
+            cycleDayLow = cycleDayLow,
+            cycleDayHigh = cycleDayHigh,
             cycleLengthDays = personalLength,
             nextPeriodWindow = window,
-            note = note,
+            noteKind = noteKind,
+            forecastSuppressed = forecastPassed,
         )
     }
 

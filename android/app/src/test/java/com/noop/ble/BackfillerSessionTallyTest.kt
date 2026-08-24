@@ -16,12 +16,24 @@ import org.junit.Test
  */
 class BackfillerSessionTallyTest {
 
-    // rows = biometric streams only (HR, R-R, SpO2, skin-temp, resp, gravity); events/battery/steps are
-    // housekeeping and must NOT inflate the count (matches the Swift tuple, which has no steps). motion = gravity.
-    @Test fun chunkTallySumsBiometricRowsAndGravityOnly() {
-        val counts = InsertCounts(hr = 10, rr = 4, events = 99, battery = 7, spo2 = 3, skinTemp = 2, steps = 50, resp = 1, gravity = 5)
+    // Rows include every score-bearing stream and durable physiological history. Battery is housekeeping;
+    // motion remains the gravity subset.
+    @Test fun chunkTallySumsAllDurablePhysiologicalRows() {
+        val counts = InsertCounts(
+            hr = 10,
+            rr = 4,
+            events = 9,
+            battery = 7,
+            spo2 = 3,
+            skinTemp = 2,
+            steps = 8,
+            resp = 1,
+            gravity = 5,
+            sleepState = 6,
+            ppgWaveform = 7,
+        )
         val (rows, motion, nights) = Backfiller.chunkTally(counts, emptyList())
-        assertEquals(10 + 4 + 3 + 2 + 1 + 5, rows) // 25 — events(99)/battery(7)/steps(50) excluded
+        assertEquals(10 + 4 + 9 + 3 + 2 + 8 + 1 + 5 + 6 + 7, rows)
         assertEquals(5, motion)
         assertTrue(nights.isEmpty())
     }

@@ -4,6 +4,88 @@ import StrandAnalytics
 import WhoopStore
 import Foundation
 
+/// Localized presentation for the analytics engine's semantic readiness result. The engine deliberately
+/// remains locale-free and deterministic; views must never render its English diagnostic prose verbatim.
+enum ReadinessPresentation {
+    static func headline(for readiness: ReadinessEngine.Readiness) -> String {
+        switch readiness.level {
+        case .insufficient: return String(localized: "appwide.readiness.insufficient.headline")
+        case .rundown: return String(localized: "appwide.readiness.rundown.headline")
+        case .strained: return String(localized: "appwide.readiness.strained.headline")
+        case .primed: return String(localized: "appwide.readiness.primed.headline")
+        case .balanced: return String(localized: "appwide.readiness.balanced.headline")
+        }
+    }
+
+    static func summary(for readiness: ReadinessEngine.Readiness) -> String {
+        switch readiness.level {
+        case .insufficient:
+            let hasNoDailyRow = readiness.limitations.contains {
+                $0 == "No daily recovery row is available for this date."
+            }
+            return String(localized: hasNoDailyRow
+                ? "appwide.readiness.insufficient.current_summary"
+                : "appwide.readiness.insufficient.summary")
+        case .rundown: return String(localized: "appwide.readiness.rundown.summary")
+        case .strained: return String(localized: "appwide.readiness.strained.summary")
+        case .primed: return String(localized: "appwide.readiness.primed.summary")
+        case .balanced: return String(localized: "appwide.readiness.balanced.summary")
+        }
+    }
+
+    static func limitation(_ raw: String, for readiness: ReadinessEngine.Readiness) -> String {
+        switch raw {
+        case "No daily recovery row is available for this date.":
+            return String(localized: "appwide.readiness.limitation.no_daily_row")
+        case "No current recovery signal has enough prior variation for comparison.":
+            return String(localized: "appwide.readiness.limitation.no_current_signal")
+        case "This read is based on one current recovery signal.":
+            return String(localized: "appwide.readiness.limitation.one_signal")
+        case "The recent-load ratio is descriptive and does not affect readiness.":
+            return String(localized: "appwide.readiness.limitation.recent_load")
+        default:
+            if raw.hasPrefix("The personal baseline has ") {
+                return String.localizedStringWithFormat(
+                    String(localized: "appwide.readiness.limitation.baseline_building"),
+                    readiness.baselineDays
+                )
+            }
+            // Retain an unexpected diagnostic rather than silently hiding evidence. Tests enumerate every
+            // current engine path, so reaching this fallback flags newly introduced copy for localization.
+            return raw
+        }
+    }
+}
+
+/// One locale-aware Fitness Age formatter shared by Today and the metric explorer.
+enum FitnessAgePresentation {
+    static func value(_ estimate: Double) -> String {
+        return String.localizedStringWithFormat(
+            String(localized: "appwide.fitness_age.value_format"),
+            Int(estimate.rounded())
+        )
+    }
+
+    static func comparison(estimate: Double, profileAge: Int) -> String {
+        let delta = Double(profileAge) - estimate
+        let years = Int(abs(delta).rounded())
+        if years == 0 {
+            return String(localized: "appwide.fitness_age.same_profile_age")
+        }
+        let key: String
+        if delta > 0 {
+            key = years == 1
+                ? "appwide.fitness_age.younger_one_profile_age"
+                : "appwide.fitness_age.younger_many_profile_age"
+        } else {
+            key = years == 1
+                ? "appwide.fitness_age.older_one_profile_age"
+                : "appwide.fitness_age.older_many_profile_age"
+        }
+        return String.localizedStringWithFormat(String(localized: String.LocalizationValue(key)), years)
+    }
+}
+
 // MARK: - Control Center (the home dashboard), HomeDensity rewrite
 //
 // The owner's complaint was "cards then random space". This rebuild is a tight,
@@ -1377,7 +1459,8 @@ struct TodayView: View {
         }
         // Reload when the data refreshes OR the selected day changes, the HR trend and Rest score are
         // day-scoped, so navigating must re-fetch them for the newly selected window.
-        .task(id: TodayLoadKey(seq: repo.refreshSeq, offset: selectedDayOffset,
+        .task(id: TodayLoadKey(seq: repo.refreshSeq, ageMetricsSeq: repo.ageMetricsSeq,
+                               offset: selectedDayOffset,
                                ageMetricState: profile.ageMetricStateToken)) { await loadAll() }
         // #989: hydration writes don't bump refreshSeq, so the card needs its own triggers, a logged /
         // edited / deleted drink (hydrationSeq) and the Settings feature toggle both re-read just the two
@@ -3884,6 +3967,7 @@ struct TodayView: View {
     /// does NOT depend on `selectedDayOffset`. The bulk of the dashboard's reads; deferred during an active
     /// backfill (see `loadAll`). Same reads, same derivations, same assignment order as before.
     private func loadHistoryWide() async {
+        let requestedAgeMetricState = profile.ageMetricStateToken
         // 14-day sparklines, Whoop + Apple Health. These reads are mutually independent (distinct
         // metric keys/sources), so kick them all off concurrently with `async let` and await the
         // results below. Each hits the @MainActor Repository, fires its `await store.*` on the
@@ -3961,11 +4045,15 @@ struct TodayView: View {
         stressToday = stressModel?.asOfDay == selectedDayKey ? stressModel?.score : nil
         let fitnessProfileToken = (await fitnessAgeProfileA).last?.value
         let vitalityProfileToken = (await vitalityProfileA).last?.value
+        let readFitnessAge = (await fitnessAgeSeriesA).last?.value
+        let readVitality = (await vitalitySeriesA).last?.value
+        guard !Task.isCancelled,
+              requestedAgeMetricState == profile.ageMetricStateToken else { return }
         fitnessAgeToday = profile.acceptsFitnessAge(provenance: fitnessProfileToken)
-            ? (await fitnessAgeSeriesA).last?.value : nil
+            ? readFitnessAge : nil
         vitalityToday = profile.acceptsVitality(provenance: vitalityProfileToken)
-            ? (await vitalitySeriesA).last?.value : nil
-        ageMetricsLoadedProfileState = profile.ageMetricStateToken
+            ? readVitality : nil
+        ageMetricsLoadedProfileState = requestedAgeMetricState
         // Hydration card (opt-in): today's stored total + the sex/Effort goal. Only loaded when the
         // feature is on, so a disabled feature does zero work and the card stays hidden.
         await reloadHydration()
@@ -3992,7 +4080,7 @@ struct TodayView: View {
             stressToday: stressToday,
             fitnessAgeToday: fitnessAgeToday,
             vitalityToday: vitalityToday,
-            ageMetricStateToken: profile.ageMetricStateToken
+            ageMetricStateToken: requestedAgeMetricState
         )
     }
 
@@ -4639,6 +4727,7 @@ struct TodayView: View {
 /// either a data change or a day-navigation change (the HR trend + Rest score are day-scoped).
 private struct TodayLoadKey: Equatable {
     let seq: Int
+    let ageMetricsSeq: Int
     let offset: Int
     let ageMetricState: String
 }

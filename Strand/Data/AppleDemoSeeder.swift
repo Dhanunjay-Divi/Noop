@@ -53,6 +53,11 @@ enum AppleDemoSeeder {
             live.connected = true
             live.charging = true
         }
+        if arguments.contains("--demo-band-syncing") {
+            live.connected = true
+            live.backfilling = true
+            live.syncChunksThisSession = 7
+        }
     }
 
     /// Seed only if requested AND the store is empty. Safe to call on every launch.

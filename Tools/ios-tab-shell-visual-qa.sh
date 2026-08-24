@@ -188,7 +188,9 @@ validate_capture() {
     width=$(sips -g pixelWidth "$screenshot" 2>/dev/null | awk '/pixelWidth:/ { print $2 }')
     height=$(sips -g pixelHeight "$screenshot" 2>/dev/null | awk '/pixelHeight:/ { print $2 }')
 
-    if [[ "$format" != "png" ]] || (( bytes < 10000 || width < 1000 || height < 2000 )); then
+    # The 4.7-inch iPhone SE simulator renders at 750x1334. Validate real compact captures instead
+    # of assuming every supported phone has a 3x, 1000-pixel-wide display.
+    if [[ "$format" != "png" ]] || (( bytes < 10000 || width < 640 || height < 1100 )); then
         print -u2 -r -- \
             "Invalid screenshot: $screenshot (format=$format bytes=$bytes size=${width}x${height})"
         return 1
@@ -291,6 +293,28 @@ wait_for_app_settle() {
     done
 }
 
+wait_for_log_line() {
+    local log="$1"
+    local expected="$2"
+    local pid="$3"
+    local timeout_seconds="$4"
+    local tenths=$(( timeout_seconds * 10 ))
+    local index
+
+    for (( index = 0; index < tenths; index++ )); do
+        if grep -Fq "$expected" "$log"; then
+            return 0
+        fi
+        if ! kill -0 "$pid" >/dev/null 2>&1; then
+            print -u2 -r -- "App process $pid exited while waiting for '$expected'."
+            return 1
+        fi
+        sleep 0.1
+    done
+    print -u2 -r -- "Timed out waiting for '$expected' in ${log:t}."
+    return 1
+}
+
 capture_scenario() {
     local scenario="$1"
     local appearance="$2"
@@ -343,6 +367,12 @@ capture_scenario() {
     fi
     app_pid="${launch_result##*: }"
     wait_for_app_settle "$settle_seconds" "$app_pid"
+    # The first scenario performs a cold 120-day fixture seed. Wait for the actual screen state,
+    # not an arbitrary sleep, so slower compact simulators cannot produce a launch-frame capture.
+    if [[ "$scenario" == "nutrition-expanded" ]]; then
+        wait_for_log_line "$redirected_stderr" "mixed=true" "$app_pid" 30
+        wait_for_app_settle 1 "$app_pid"
+    fi
     xcrun simctl io "$current_udid" screenshot "$screenshot" >/dev/null
     xcrun simctl terminate "$current_udid" "$bundle_id" >/dev/null 2>&1 || true
     mv -f "$redirected_stdout" "$stdout_log"

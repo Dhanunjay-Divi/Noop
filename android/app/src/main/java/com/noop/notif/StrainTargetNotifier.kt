@@ -9,8 +9,13 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.noop.R
+import com.noop.analytics.DailyActionPlanner
+import com.noop.analytics.DailyEffortGuidance
 import com.noop.ui.NoopPrefs
-import com.noop.ui.appLaunchIntent
+import com.noop.ui.NoopNotificationRoute
+import com.noop.ui.NotificationRouteBridge
+import java.time.LocalDate
+import kotlin.math.roundToInt
 
 // MARK: - Target-strain notification (#593)
 //
@@ -29,29 +34,20 @@ import com.noop.ui.appLaunchIntent
  *  logic is pinned by StrainTargetPolicyTest independently of the notification plumbing. */
 object StrainTargetPolicy {
 
-    /** Fire at most once per day: only when enabled, BOTH the day strain and the target are known, the day
-     *  strain has reached the target, and we haven't already posted for [today]. [dayStrain] and [target]
-     *  must be on the SAME canonical 0-100 axis. A null target means the planner withheld the range
-     *  (unanswered check-in, stale/thin evidence, or recovery shift) ⇒ never fires. */
+    /** Fire at most once per local calendar day, only for that day's measured Effort and only when it is
+     * within or above the planner's complete range. An unavailable result means the planner withheld the
+     * range or the current value is not trustworthy, so the policy fails closed. */
     fun shouldNotify(
         enabled: Boolean,
-        dayStrain: Double?,
-        target: Double?,
+        guidance: DailyEffortGuidance.Result,
+        dataDay: String,
+        currentLocalDay: String,
         lastNotifiedDay: String?,
-        today: String,
     ): Boolean = enabled &&
-        dayStrain != null && target != null &&
-        dayStrain >= target &&
-        lastNotifiedDay != today
-
-    /** Title + body for the nudge. [target] is the marker on canonical 0-100 Effort. The wording
-     *  deliberately avoids "optimal", "earned", or permission-to-push claims. */
-    fun copy(target: Int): Pair<String, String> {
-        val title = "Effort marker reached"
-        val body = "You've reached today's Effort marker of $target. It is a planning cue, not a limit-" +
-            "check how you feel before adding more."
-        return title to body
-    }
+        dataDay == currentLocalDay &&
+        lastNotifiedDay != currentLocalDay &&
+        (guidance.state == DailyEffortGuidance.State.IN_RANGE ||
+            guidance.state == DailyEffortGuidance.State.ABOVE_RANGE)
 }
 
 object StrainTargetNotifier {
@@ -61,29 +57,43 @@ object StrainTargetNotifier {
     private const val STRAIN_TARGET_NOTIF_ID = 4210
 
     /**
-     * Post the marker nudge if enabled and not already posted [day]. [dayEffort]/[targetEffort] are both
+     * Post the range nudge if enabled and not already posted [day]. [dayEffort]/[targetRange] are both
      * canonical 0-100 Effort. No-op on every path that fails the policy, so the caller can invoke it on
      * every days-collector publication.
      */
     @SuppressLint("MissingPermission") // guarded by areNotificationsEnabled() + runCatching
-    fun onStrainTarget(context: Context, day: String, dayEffort: Double?, targetEffort: Int?) {
+    fun onStrainTarget(
+        context: Context,
+        day: String,
+        dayEffort: Double?,
+        targetRange: DailyActionPlanner.EffortRange?,
+    ) {
+        val currentLocalDay = LocalDate.now().toString()
+        val guidance = DailyEffortGuidance.evaluate(dayEffort, targetRange)
         if (!StrainTargetPolicy.shouldNotify(
                 enabled = NoopPrefs.strainTargetEnabled(context),
-                dayStrain = dayEffort,
-                target = targetEffort?.toDouble(),
+                guidance = guidance,
+                dataDay = day,
+                currentLocalDay = currentLocalDay,
                 lastNotifiedDay = NoopPrefs.reportStrainTargetDay(context),
-                today = day,
             )
         ) return
-        // Non-null: shouldNotify above required target != null before returning true.
-        val copy = StrainTargetPolicy.copy(targetEffort!!)
+        val current = guidance.current ?: return
+        val range = guidance.range ?: return
+        val title = context.getString(R.string.daily_plan_notification_title)
+        val body = context.getString(
+            R.string.daily_plan_notification_body,
+            current.roundToInt(),
+            range.lower,
+            range.upper,
+        )
         runCatching {
             if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
             ensureChannel(context)
-            post(context, STRAIN_TARGET_NOTIF_ID, copy.first, copy.second)
+            post(context, STRAIN_TARGET_NOTIF_ID, title, body)
             // Mark fired only after a successful post, so a notifications-disabled day still notifies once
             // they're re-enabled while the same day still shows the reached target.
-            NoopPrefs.setReportStrainTargetDay(context, day)
+            NoopPrefs.setReportStrainTargetDay(context, currentLocalDay)
         }
     }
 
@@ -91,7 +101,7 @@ object StrainTargetNotifier {
     private fun post(context: Context, id: Int, title: String, body: String) {
         val openApp = PendingIntent.getActivity(
             context, 3,
-            appLaunchIntent(context),
+            NotificationRouteBridge.launchIntent(context, NoopNotificationRoute.TODAY),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val n = NotificationCompat.Builder(context, CHANNEL_ID)

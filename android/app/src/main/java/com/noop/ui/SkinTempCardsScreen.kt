@@ -5,6 +5,7 @@ import com.noop.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -60,8 +62,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -76,6 +82,9 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.math.roundToInt
 
 // MARK: - Skin-temperature suite cards (v5 pillar) — Compose twin
@@ -188,7 +197,7 @@ fun CycleAwarenessCard(
                 }
             }
 
-            Text(result.note, style = NoopType.subhead, color = Palette.textSecondary)
+            Text(localizedCycleNote(result), style = NoopType.subhead, color = Palette.textSecondary)
 
             // Probabilistic next-period WINDOW, never a single date.
             result.nextPeriodWindow?.let { w ->
@@ -260,6 +269,199 @@ fun CycleAwarenessOptInCard(onEnable: () -> Unit) {
 }
 
 // MARK: - Private cycle tracker
+
+/** Honest no-data result used while the first local recompute is opening the tracker. */
+internal fun cycleTrackingLearningResult() = CyclePhaseEngine.Result(
+    phase = CyclePhaseEngine.Phase.LEARNING,
+    confidence = CyclePhaseEngine.Confidence.LEARNING,
+    cycleDayLow = null,
+    cycleDayHigh = null,
+    cycleLengthDays = null,
+    nextPeriodWindow = null,
+    shiftMarkers = emptyList(),
+    note = "Log a period start and wear Noop Band overnight to begin a private estimate.",
+    noteKinds = listOf(CyclePhaseEngine.NoteKind.START_LOGGING),
+)
+
+/**
+ * Phase guide only. The arcs do not represent fertile or safe days; the rose marker exists only after
+ * a confirmed day-1 log, and the outlined marker exists only when the engine has a bounded day range.
+ */
+@Composable
+private fun CycleTimelineRing(
+    result: CyclePhaseEngine.Result,
+    hasLoggedStart: Boolean,
+) {
+    val cycleLength = maxOf(
+        result.cycleLengthDays ?: CyclePhaseEngine.defaultCycleDays,
+        result.cycleDayHigh ?: 1,
+    )
+    val shiftCenter = (cycleLength - 13).coerceIn(8, maxOf(8, cycleLength - 7))
+    val midStart = maxOf(2, shiftCenter - 2)
+    val midEnd = minOf(cycleLength - 1, shiftCenter + 2)
+    val segments = listOf(
+        Triple(0f, (midStart - 1f) / cycleLength, Palette.metricCyan),
+        Triple((midStart - 1f) / cycleLength, midEnd.toFloat() / cycleLength, Palette.statusWarning),
+        Triple(midEnd.toFloat() / cycleLength, 1f, Palette.restColor),
+    )
+    val currentFraction = result.cycleDayLow?.let { low ->
+        result.cycleDayHigh?.let { high ->
+            (((low + high) / 2f) - 1f).div(cycleLength).coerceIn(0f, 1f)
+        }
+    }
+    val dayValue = when {
+        result.cycleDayLow == null || result.cycleDayHigh == null ->
+            stringResource(R.string.appwide_cycle_status_learning)
+        result.cycleDayLow == result.cycleDayHigh -> result.cycleDayLow.toString()
+        else -> "${result.cycleDayLow}-${result.cycleDayHigh}"
+    }
+    val phase = cyclePhaseTitle(result.phase)
+    var accessibility = stringResource(R.string.appwide_cycle_ring_a11y_phase_format, phase)
+    if (result.cycleDayLow != null && result.cycleDayHigh != null) {
+        accessibility = if (result.cycleDayLow == result.cycleDayHigh) {
+            stringResource(
+                R.string.appwide_cycle_ring_a11y_day_format,
+                accessibility,
+                result.cycleDayLow,
+            )
+        } else {
+            stringResource(
+                R.string.appwide_cycle_ring_a11y_day_range_format,
+                accessibility,
+                result.cycleDayLow,
+                result.cycleDayHigh,
+            )
+        }
+    }
+    result.cycleLengthDays?.let {
+        accessibility = stringResource(
+            R.string.appwide_cycle_ring_a11y_cadence_format,
+            accessibility,
+            it,
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(228.dp)
+            .semantics { contentDescription = accessibility },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(214.dp)) {
+            val strokeWidth = 18.dp.toPx()
+            val ringSize = Size(size.width - strokeWidth, size.height - strokeWidth)
+            val topLeft = Offset(strokeWidth / 2f, strokeWidth / 2f)
+            val radius = ringSize.width / 2f
+            val center = Offset(size.width / 2f, size.height / 2f)
+
+            drawCircle(
+                color = Palette.hairline.copy(alpha = 0.7f),
+                radius = radius,
+                center = center,
+                style = Stroke(width = strokeWidth),
+            )
+            segments.forEach { (start, end, color) ->
+                val gap = 3f
+                drawArc(
+                    color = color,
+                    startAngle = -90f + start * 360f + gap / 2f,
+                    sweepAngle = ((end - start) * 360f - gap).coerceAtLeast(0f),
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = ringSize,
+                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+                )
+            }
+            if (hasLoggedStart) {
+                drawCircle(
+                    color = Palette.metricRose,
+                    radius = 4.5.dp.toPx(),
+                    center = Offset(center.x, center.y - radius),
+                )
+            }
+            currentFraction?.let { fraction ->
+                val angle = 2.0 * PI * fraction - PI / 2.0
+                val marker = Offset(
+                    center.x + cos(angle).toFloat() * radius,
+                    center.y + sin(angle).toFloat() * radius,
+                )
+                drawCircle(Palette.surfaceBase, radius = 7.dp.toPx(), center = marker)
+                drawCircle(
+                    Palette.textPrimary,
+                    radius = 7.dp.toPx(),
+                    center = marker,
+                    style = Stroke(width = 2.dp.toPx()),
+                )
+            }
+        }
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                stringResource(
+                    if (result.cycleDayLow == null) {
+                        R.string.appwide_cycle_ring_cycle
+                    } else {
+                        R.string.appwide_cycle_ring_estimated_day
+                    },
+                ),
+                style = NoopType.overline,
+                color = Palette.textTertiary,
+            )
+            Text(
+                dayValue,
+                style = NoopType.number(if (result.cycleDayLow == null) 22f else 32f),
+                color = Palette.textPrimary,
+                maxLines = 1,
+            )
+            Text(
+                phase,
+                style = NoopType.footnote,
+                color = Palette.textSecondary,
+                maxLines = 2,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CycleTimelineLegend(hasLoggedStart: Boolean) {
+    val items = buildList {
+        add(stringResource(R.string.appwide_cycle_phase_follicular) to Palette.metricCyan)
+        add(stringResource(R.string.appwide_cycle_phase_mid_cycle_shift) to Palette.statusWarning)
+        add(stringResource(R.string.appwide_cycle_phase_luteal) to Palette.restColor)
+        if (hasLoggedStart) {
+            add(stringResource(R.string.appwide_cycle_ring_logged_day_one) to Palette.metricRose)
+        }
+    }
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            stringResource(R.string.appwide_cycle_ring_guide),
+            style = NoopType.footnote,
+            color = Palette.textTertiary,
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items.forEach { (label, color) ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(7.dp).clip(CircleShape).background(color))
+                    Text(label, style = NoopType.footnote, color = Palette.textSecondary)
+                }
+            }
+        }
+    }
+}
 
 /**
  * On-device cycle history. Period starts anchor [CyclePhaseEngine]; optional daily flow and symptoms
@@ -343,18 +545,42 @@ internal fun CycleTrackerSheet(
 
             NoopCard(tint = Palette.restColor) {
                 Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-                    Overline("Current estimate")
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.Bottom,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(cyclePhaseTitle(result.phase), style = NoopType.title2, color = Palette.textPrimary)
+                        Overline(stringResource(R.string.appwide_cycle_ring_current_estimate))
                         Spacer(Modifier.weight(1f))
-                        cycleDayText(result)?.let {
-                            Text(it.removePrefix("· "), style = NoopType.bodyNumber, color = Palette.textSecondary)
+                        StatePill(
+                            cycleConfidenceLabel(result.confidence),
+                            tone = cycleConfidenceTone(result.confidence),
+                        )
+                    }
+                    CycleTimelineRing(result, hasLoggedStart = starts.isNotEmpty())
+                    CycleTimelineLegend(hasLoggedStart = starts.isNotEmpty())
+                    Text(localizedCycleNote(result), style = NoopType.subhead, color = Palette.textSecondary)
+                    result.nextPeriodWindow?.let { window ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Icon(
+                                Icons.Filled.CalendarMonth,
+                                contentDescription = null,
+                                tint = Palette.metricRose,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Text(
+                                stringResource(
+                                    R.string.appwide_cycle_period_window_format,
+                                    prettyPeriodStartDay(window.earliestDay),
+                                    prettyPeriodStartDay(window.latestDay),
+                                ),
+                                style = NoopType.footnote,
+                                color = Palette.textTertiary,
+                            )
                         }
                     }
-                    Text(result.note, style = NoopType.subhead, color = Palette.textSecondary)
                 }
             }
 
@@ -872,11 +1098,50 @@ private fun WhyRow(label: String, values: List<String>, tint: Color) {
 // MARK: - Derived copy / presentation (mirror the Swift card exactly)
 
 private fun cyclePhaseTitle(phase: CyclePhaseEngine.Phase): String = when (phase) {
-    CyclePhaseEngine.Phase.FOLLICULAR -> "Follicular"
-    CyclePhaseEngine.Phase.PERI_OVULATORY -> "Mid-cycle shift"
-    CyclePhaseEngine.Phase.LUTEAL -> "Luteal"
-    CyclePhaseEngine.Phase.UNKNOWN -> "No clear pattern"
-    CyclePhaseEngine.Phase.LEARNING -> "Learning your pattern"
+    CyclePhaseEngine.Phase.FOLLICULAR -> uiString(R.string.appwide_cycle_phase_follicular)
+    CyclePhaseEngine.Phase.PERI_OVULATORY -> uiString(R.string.appwide_cycle_phase_mid_cycle_shift)
+    CyclePhaseEngine.Phase.LUTEAL -> uiString(R.string.appwide_cycle_phase_luteal)
+    CyclePhaseEngine.Phase.UNKNOWN -> uiString(R.string.appwide_cycle_phase_no_clear_pattern)
+    CyclePhaseEngine.Phase.LEARNING -> uiString(R.string.appwide_cycle_phase_building_pattern)
+}
+
+@Composable
+private fun localizedCycleNote(result: CyclePhaseEngine.Result): String {
+    if (result.noteKinds.isEmpty()) return result.note
+    val parts = mutableListOf<String>()
+    for (kind in result.noteKinds) {
+        parts += when (kind) {
+            CyclePhaseEngine.NoteKind.LEARNING_NIGHTLY ->
+                stringResource(R.string.appwide_cycle_note_learning_nightly)
+            CyclePhaseEngine.NoteKind.NO_CLEAR_PATTERN ->
+                stringResource(R.string.appwide_cycle_note_no_clear_pattern)
+            CyclePhaseEngine.NoteKind.NO_CLEAR_CONTEXT ->
+                stringResource(R.string.appwide_cycle_note_no_clear_context)
+            CyclePhaseEngine.NoteKind.LOG_SHIFT_MISMATCH ->
+                stringResource(R.string.appwide_cycle_note_log_shift_mismatch)
+            CyclePhaseEngine.NoteKind.PHASE_FOLLICULAR ->
+                stringResource(R.string.appwide_cycle_note_phase_follicular)
+            CyclePhaseEngine.NoteKind.PHASE_MID_CYCLE ->
+                stringResource(R.string.appwide_cycle_note_phase_mid_cycle)
+            CyclePhaseEngine.NoteKind.PHASE_LUTEAL ->
+                stringResource(R.string.appwide_cycle_note_phase_luteal)
+            CyclePhaseEngine.NoteKind.STALE_LOG ->
+                stringResource(R.string.appwide_cycle_note_stale_log)
+            CyclePhaseEngine.NoteKind.UNRELIABLE_LOGS ->
+                stringResource(R.string.appwide_cycle_note_unreliable_logs)
+            CyclePhaseEngine.NoteKind.FORECAST_PASSED ->
+                stringResource(R.string.appwide_cycle_note_forecast_passed)
+            CyclePhaseEngine.NoteKind.BROAD_PRIOR ->
+                stringResource(R.string.appwide_cycle_note_broad_prior)
+            CyclePhaseEngine.NoteKind.PERSONAL_INTERVALS ->
+                stringResource(R.string.appwide_cycle_note_personal_intervals)
+            CyclePhaseEngine.NoteKind.START_LOGGING ->
+                stringResource(R.string.appwide_cycle_note_start_logging)
+            CyclePhaseEngine.NoteKind.TURN_ON_AWARENESS ->
+                stringResource(R.string.appwide_cycle_note_turn_on_awareness)
+        }
+    }
+    return parts.joinToString(" ")
 }
 
 /** "~day 18–22" - always a RANGE, never a single point. */
@@ -887,9 +1152,9 @@ private fun cycleDayText(r: CyclePhaseEngine.Result): String? {
 }
 
 private fun cycleConfidenceLabel(c: CyclePhaseEngine.Confidence): String = when (c) {
-    CyclePhaseEngine.Confidence.LEARNING -> "Learning"
-    CyclePhaseEngine.Confidence.BUILDING -> "Building"
-    CyclePhaseEngine.Confidence.SOLID -> "Solid"
+    CyclePhaseEngine.Confidence.LEARNING -> uiString(R.string.appwide_cycle_status_learning)
+    CyclePhaseEngine.Confidence.BUILDING -> uiString(R.string.appwide_cycle_status_building)
+    CyclePhaseEngine.Confidence.SOLID -> uiString(R.string.appwide_cycle_status_solid)
 }
 
 private fun cycleConfidenceTone(c: CyclePhaseEngine.Confidence): StrandTone = when (c) {

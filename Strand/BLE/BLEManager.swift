@@ -1041,6 +1041,12 @@ public final class BLEManager: NSObject, ObservableObject {
                                     if decoded { self?.state.decodedChunksThisSession += 1 }
                                     if console { self?.state.consoleChunksThisSession += 1 }
                                 },
+                                onRowsPersisted: { [weak self] _ in
+                                    guard let self else { return }
+                                    let landedAt = Date().timeIntervalSince1970
+                                    self.state.notePersistedHistoryData(at: landedAt)
+                                    UserDefaults.standard.set(landedAt, forKey: "sync.lastWriteOkAt")
+                                },
                                 // Connection & Sync test mode (Test Centre): the cheap gate + tagged sink the
                                 // Backfiller checks before building any .connection diagnostic line. The gate is
                                 // one UserDefaults bool; nothing is emitted (or built) when the mode is off.
@@ -2024,6 +2030,11 @@ public final class BLEManager: NSObject, ObservableObject {
         // below must not re-read a live counter that trailing frames or a re-kicked session can mutate.
         let rowsThisSession = backfiller?.sessionRowsPersisted ?? 0
         let persistedSensorRows = rowsThisSession > 0
+        // Durable-data receipts publish at each successful insert, not here. Teardown can interleave with
+        // a suspended insert; the insert callback cannot miss that completion and AppModel coalesces bursts.
+        if backfiller?.persistStalled == true {
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "sync.lastWriteStalledAt")
+        }
         consecutiveEmptyOffloads = EmptyOffloadBackoff.nextStreak(
             currentStreak: consecutiveEmptyOffloads,
             rowsPersisted: rowsThisSession,
@@ -2052,12 +2063,6 @@ public final class BLEManager: NSObject, ObservableObject {
             let sustainedEmpty = productiveBurstTail ? false : emptySyncTracker.recordCompletedSync(
                 bankedSensorRecords: bankedSensorRecords, consoleOnly: banking.bankedNothing)
             state.sustainedEmptyOffload = sustainedEmpty
-            // #57 debug: write-health for the export. Distinguish "rows actually landed" from "an offload
-            // STALLED on a persist failure" - the latter (usually a restore without a restart) is otherwise
-            // invisible in a report that just shows "0 synced".
-            let du = UserDefaults.standard
-            if (backfiller?.sessionRowsPersisted ?? 0) > 0 { du.set(Date().timeIntervalSince1970, forKey: "sync.lastWriteOkAt") }
-            if backfiller?.persistStalled == true { du.set(Date().timeIntervalSince1970, forKey: "sync.lastWriteStalledAt") }
             if unarchived > 0 {
                 state.lastSyncError = "Synced, but \(archived + unarchived) record(s) couldn't be decoded (unrecognised strap firmware layout), and the on-device archive is full - the \(unarchived) newest weren't preserved. Please share a strap log so the layout can be mapped."
             } else if archived > 0 {
@@ -4118,6 +4123,8 @@ extension BLEManager: @preconcurrency CBCentralManagerDelegate {
                                didDisconnectPeripheral peripheral: CBPeripheral,
                                error: Error?) {
         Task { @MainActor in await collector?.flush() }
+        // Each durable insert publishes its own history receipt. Do not infer one from a teardown snapshot:
+        // this delegate can run while the final insert is suspended and would otherwise miss that commit.
         // Reboot trail: if a user reboot is in flight, this drop is the strap acting on it. Log how long
         // the link stayed up (a real reboot drops within ~1-2 s) and cancel the no-disconnect watchdog. The
         // reconnect time is logged separately once the handshake completes. `rebootRequestedAt` stays set so

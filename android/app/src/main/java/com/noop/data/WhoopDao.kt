@@ -1369,8 +1369,48 @@ interface WhoopDao : DeviceRegistryDao {
     suspend fun latestHrSampleTs(deviceId: String): Long?
 
     @Query("SELECT COUNT(*) FROM hrSample") suspend fun countHr(): Int
-    // #836: max raw-HR timestamp across all devices. Paired with countHr() as a cheap whole-history change
-    // fingerprint so the 15-min idle rescore can skip when nothing new has landed (COALESCE → 0 when empty).
+    /** #836/#1196: whole-history token across every raw stream consumed by daily scoring. History can
+     * deliver HR before R-R or motion; every later score-bearing chunk must invalidate the watermark. */
+    @Query(
+        "SELECT " +
+            "(SELECT COUNT(*) FROM hrSample) + " +
+            "(SELECT COUNT(*) FROM ppgHrSample) + " +
+            "(SELECT COUNT(*) FROM rrInterval) + " +
+            "(SELECT COUNT(*) FROM gravitySample) + " +
+            "(SELECT COUNT(*) FROM respSample) + " +
+            "(SELECT COUNT(*) FROM skinTempSample) + " +
+            "(SELECT COUNT(*) FROM spo2Sample) + " +
+            "(SELECT COUNT(*) FROM stepSample) + " +
+            "(SELECT COUNT(*) FROM sleepStateSample) + " +
+            "(SELECT COUNT(*) FROM event)",
+    )
+    suspend fun countAnalysisFingerprintRows(): Int
+
+    @Query(
+        "SELECT COALESCE(MAX(ts), 0) FROM (" +
+            "SELECT ts FROM hrSample " +
+            "UNION ALL " +
+            "SELECT ts FROM ppgHrSample " +
+            "UNION ALL " +
+            "SELECT ts FROM rrInterval " +
+            "UNION ALL " +
+            "SELECT ts FROM gravitySample " +
+            "UNION ALL " +
+            "SELECT ts FROM respSample " +
+            "UNION ALL " +
+            "SELECT ts FROM skinTempSample " +
+            "UNION ALL " +
+            "SELECT ts FROM spo2Sample " +
+            "UNION ALL " +
+            "SELECT ts FROM stepSample " +
+            "UNION ALL " +
+            "SELECT ts FROM sleepStateSample " +
+            "UNION ALL " +
+            "SELECT ts FROM event)",
+    )
+    suspend fun maxAnalysisFingerprintTs(): Long
+
+    // Raw measured-HR aggregate retained for diagnostics and database summaries.
     @Query("SELECT COALESCE(MAX(ts), 0) FROM hrSample") suspend fun maxHrTs(): Long
     @Query("SELECT COUNT(*) FROM rrInterval") suspend fun countRr(): Int
     @Query("SELECT COUNT(*) FROM event") suspend fun countEvents(): Int

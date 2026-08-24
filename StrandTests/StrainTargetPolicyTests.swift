@@ -16,27 +16,39 @@ final class StrainTargetPolicyTests: XCTestCase {
 
     func testFiresWhenEnabledStrainReachedTargetAndNotYetToday() {
         XCTAssertTrue(Policy.shouldNotify(
-            enabled: true, guidance: guidance(40), lastNotifiedDay: "2026-07-17",
-            today: "2026-07-18"))
+            enabled: true, guidance: guidance(40), dataDay: "2026-07-18",
+            currentLocalDay: "2026-07-18", lastNotifiedDay: "2026-07-17"))
         // Overshooting the target still fires (>= gate), once.
         XCTAssertTrue(Policy.shouldNotify(
-            enabled: true, guidance: guidance(72), lastNotifiedDay: nil, today: "2026-07-18"))
+            enabled: true, guidance: guidance(72), dataDay: "2026-07-18",
+            currentLocalDay: "2026-07-18", lastNotifiedDay: nil))
     }
 
     func testSuppressedWhenDisabled() {
         XCTAssertFalse(Policy.shouldNotify(
-            enabled: false, guidance: guidance(50), lastNotifiedDay: nil, today: "2026-07-18"))
+            enabled: false, guidance: guidance(50), dataDay: "2026-07-18",
+            currentLocalDay: "2026-07-18", lastNotifiedDay: nil))
     }
 
     func testSuppressedBeforeTargetIsReached() {
         XCTAssertFalse(Policy.shouldNotify(
-            enabled: true, guidance: guidance(39.9), lastNotifiedDay: nil, today: "2026-07-18"))
+            enabled: true, guidance: guidance(39.9), dataDay: "2026-07-18",
+            currentLocalDay: "2026-07-18", lastNotifiedDay: nil))
     }
 
     func testSuppressedWhenAlreadyFiredToday() {
         XCTAssertFalse(Policy.shouldNotify(
-            enabled: true, guidance: guidance(50), lastNotifiedDay: "2026-07-18",
-            today: "2026-07-18"))
+            enabled: true, guidance: guidance(50), dataDay: "2026-07-18",
+            currentLocalDay: "2026-07-18", lastNotifiedDay: "2026-07-18"))
+    }
+
+    func testSuppressedForHistoricalOrFutureDataDays() {
+        for dataDay in ["2026-07-17", "2026-07-19"] {
+            XCTAssertFalse(Policy.shouldNotify(
+                enabled: true, guidance: guidance(50), dataDay: dataDay,
+                currentLocalDay: "2026-07-18", lastNotifiedDay: nil
+            ), "only the current local calendar day's row may notify")
+        }
     }
 
     func testSuppressedWhenTargetUnknownCalibrating() {
@@ -44,13 +56,43 @@ final class StrainTargetPolicyTests: XCTestCase {
         XCTAssertFalse(Policy.shouldNotify(
             enabled: true,
             guidance: DailyEffortGuidance.evaluate(currentEffort: 50, range: nil),
-            lastNotifiedDay: nil,
-            today: "2026-07-18"))
+            dataDay: "2026-07-18",
+            currentLocalDay: "2026-07-18",
+            lastNotifiedDay: nil))
     }
 
     func testSuppressedWhenNoStrainYet() {
         XCTAssertFalse(Policy.shouldNotify(
-            enabled: true, guidance: guidance(nil), lastNotifiedDay: nil, today: "2026-07-18"))
+            enabled: true, guidance: guidance(nil), dataDay: "2026-07-18",
+            currentLocalDay: "2026-07-18", lastNotifiedDay: nil))
+    }
+
+    func testStaleReadinessCannotProduceNotifiableGuidance() {
+        let staleReadiness = ReadinessEngine.Readiness(
+            level: .balanced,
+            headline: "Readiness",
+            summary: "Stale fixture",
+            signals: [],
+            acwr: nil,
+            monotony: nil,
+            asOfDay: "2026-07-17",
+            confidence: .solid,
+            baselineDays: 14
+        )
+        let plan = DailyActionPlanner.plan(
+            today: "2026-07-18",
+            readiness: staleReadiness,
+            checkIn: .asUsual,
+            recentEffort: []
+        )
+        XCTAssertNil(plan.target, "a prior-day readiness read must withhold today's range")
+        XCTAssertFalse(Policy.shouldNotify(
+            enabled: true,
+            guidance: DailyEffortGuidance.evaluate(currentEffort: 50, range: plan.target),
+            dataDay: "2026-07-18",
+            currentLocalDay: "2026-07-18",
+            lastNotifiedDay: nil
+        ))
     }
 
     func testDailyActionCheckInIsStrictlyDayScopedAndFailClosed() {

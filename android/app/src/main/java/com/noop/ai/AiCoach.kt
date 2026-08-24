@@ -1,14 +1,18 @@
 package com.noop.ai
 
 import android.content.Context
+import com.noop.analytics.CoachEvidenceEnvelope
+import com.noop.analytics.DailyActionPlanner
 import com.noop.analytics.EffectRanker
 import com.noop.analytics.LabMarkerCategory
 import com.noop.analytics.MarkerCatalog
 import com.noop.analytics.StressIndex
 import com.noop.analytics.VitalBands
+import com.noop.analytics.ReadinessEngine
 import com.noop.data.DailyMetric
 import com.noop.data.JournalEntry
 import com.noop.data.LabMarkerRow
+import com.noop.data.NutritionLogContract
 import com.noop.data.WhoopRepository
 import com.noop.ui.NoopPrefs
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +23,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
@@ -104,6 +109,10 @@ class AiCoach(private val repo: WhoopRepository) {
             val signals = if (includeSignals) runCatching { buildSignalsContext() }.getOrNull() else null
             val full = buildString {
                 append(buildContext(days))
+                append("\n\n").append(
+                    runCatching { buildCoachEvidence(ctx, days) }
+                        .getOrElse { buildCoachEvidenceWithoutNutrition(ctx, days) },
+                )
                 if (!stress.isNullOrBlank()) append("\n\n").append(stress)
                 if (!signals.isNullOrBlank()) append("\n\n").append(signals)
                 if (memoryBlock.isNotBlank()) append("\n\n").append(memoryBlock)
@@ -119,7 +128,7 @@ class AiCoach(private val repo: WhoopRepository) {
 
         // Resolve the system prompt fresh (user override or the built-in default) so an edit in the
         // Coach settings takes effect on this very send.
-        val systemPrompt = resolveSystemPrompt(ctx)
+        val systemPrompt = resolveRequestSystemPrompt(ctx)
 
         // Slide a window over a long conversation so the history can't crowd out the reply on a
         // small local context window (e.g. Ollama's 2048-token default). The first user turn carries
@@ -290,6 +299,107 @@ class AiCoach(private val repo: WhoopRepository) {
         return sb.toString().trim()
     }
 
+    /** Typed facts, coverage, planner state, and explicit nutrition evidence for consented requests. */
+    private suspend fun buildCoachEvidence(
+        ctx: Context,
+        days: List<DailyMetric>,
+    ): String {
+        val today = LocalDate.now().toString()
+        val entries = repo.nutritionEntries(
+            from = LocalDate.parse(today).minusDays(13).toString(),
+            to = today,
+        )
+        val observedDays = entries.map { it.day }.toSet()
+        val nutrition = observedDays.maxOrNull()?.let { latestDay ->
+            val totals = NutritionLogContract.resolvedTotals(entries, latestDay)
+            val hasManual = entries.any { it.origin == NutritionLogContract.MANUAL_ORIGIN }
+            val hasImported = entries.any { it.origin == NutritionLogContract.CSV_ORIGIN }
+            val sourceMix = when {
+                hasManual && hasImported -> CoachEvidenceEnvelope.NutritionSourceMix.MIXED
+                hasImported -> CoachEvidenceEnvelope.NutritionSourceMix.IMPORTED
+                else -> CoachEvidenceEnvelope.NutritionSourceMix.MANUAL
+            }
+            CoachEvidenceEnvelope.NutritionAvailability.Observed(
+                CoachEvidenceEnvelope.NutritionEvidence(
+                    observedDays = observedDays.size,
+                    windowDays = 14,
+                    latestDay = latestDay,
+                    caloriesKcal = totals.caloriesKcal,
+                    proteinG = totals.proteinG,
+                    carbsG = totals.carbsG,
+                    fatG = totals.fatG,
+                    sourceMix = sourceMix,
+                ),
+            )
+        } ?: CoachEvidenceEnvelope.NutritionAvailability.NoEntries
+        return coachEvidence(ctx, days, today, nutrition)
+    }
+
+    private fun buildCoachEvidenceWithoutNutrition(
+        ctx: Context,
+        days: List<DailyMetric>,
+    ): String {
+        val today = LocalDate.now().toString()
+        return coachEvidence(
+            ctx,
+            days,
+            today,
+            CoachEvidenceEnvelope.NutritionAvailability.Unavailable,
+        )
+    }
+
+    private fun coachEvidence(
+        ctx: Context,
+        days: List<DailyMetric>,
+        today: String,
+        nutrition: CoachEvidenceEnvelope.NutritionAvailability,
+    ): String {
+        val plan = DailyActionPlanner.plan(
+            today = today,
+            readiness = ReadinessEngine.evaluate(days, today = today),
+            checkIn = NoopPrefs.dailyActionCheckIn(ctx, today),
+            recentEffort = days.map {
+                DailyActionPlanner.EffortDay(day = it.day, effort = it.strain)
+            },
+        )
+        return CoachEvidenceEnvelope.render(
+            CoachEvidenceEnvelope.Input(
+                day = today,
+                plan = plan,
+                currentEffort = days.lastOrNull { it.day == today }?.strain,
+                coverage = coachMetricCoverage(days, through = today),
+                nutrition = nutrition,
+            ),
+        )
+    }
+
+    private fun coachMetricCoverage(
+        days: List<DailyMetric>,
+        through: String,
+    ): List<CoachEvidenceEnvelope.MetricCoverage> {
+        val windowDays = 30
+        val metrics: List<Pair<String, (DailyMetric) -> Double?>> = listOf(
+            "Recovery" to { it.recovery },
+            "Effort" to { it.strain },
+            "Sleep duration" to { it.totalSleepMin },
+            "HRV" to { it.avgHrv },
+            "Resting heart rate" to { it.restingHr?.toDouble() },
+            "SpO2" to { it.spo2Pct },
+            "Respiratory rate" to { it.respRateBpm },
+            "Skin temperature" to { it.skinTempDevC },
+        )
+        return metrics.map { (label, value) ->
+            CoachEvidenceEnvelope.metricCoverage(
+                label = label,
+                through = through,
+                windowDays = windowDays,
+                observations = days.map {
+                    CoachEvidenceEnvelope.MetricObservation(it.day, value(it))
+                },
+            )
+        }
+    }
+
     /**
      * SUMMARY-ONLY on-device signals context (v5): the user's strongest associations (from the same
      * [EffectRanker] the Insights hub surfaces) and a one-line-per-marker Lab Book snapshot. Sent only
@@ -306,6 +416,7 @@ class AiCoach(private val repo: WhoopRepository) {
             val recoveryByDay = days.mapNotNull { d -> d.recovery?.let { d.day to it } }.toMap()
             val ranked = runCatching { EffectRanker.rank(behaviours, recoveryByDay, "Recovery") }
                 .getOrDefault(emptyList())
+                .filter { it.effect.significant }
                 .take(3)
             if (ranked.isNotEmpty()) {
                 sb.append("ON-DEVICE PATTERNS (associations in the user's own logged days - not causes, ")
@@ -823,23 +934,35 @@ class AiCoach(private val repo: WhoopRepository) {
          * stored in NoopPrefs and read fresh per request via [resolveSystemPrompt].
          */
         const val DEFAULT_SYSTEM_PROMPT =
-            "You are an elite, supportive recovery and performance coach with a real training " +
-                "methodology. You may be given a summary of the user's own wearable data (Recovery " +
-                "0-100, Effort 0-100, sleep duration, Sleep Score 0-100 when available, HRV, and resting " +
-                "heart rate) and recent workouts. Recovery is the daily readiness score; Effort is " +
-                "the day's cardiovascular load. Coach using autoregulation: Recovery 67-100 = green " +
-                "light to build/push, " +
-                "higher effort is fine; 34-66 = maintain, quality over volume, keep it controlled; " +
-                "0-33 = active recovery only (Zone 2, mobility, extra sleep) and protect against " +
-                "accumulating effort debt. Optimise workouts with progressive overload, polarised ~80/20 " +
-                "intensity, spacing hard sessions, deloads/periodisation, and treat sleep as the " +
-                "biggest recovery lever. Always cite the user's ACTUAL numbers, give a concrete plan " +
-                "(today and the week), and be specific, punchy and motivating. If no data is " +
-                "provided, coach generally and invite them to enable data access. You are NOT a " +
-                "doctor - never diagnose; suggest a professional for genuine health concerns. " +
-                "Format replies in simple Markdown, chat-sized: short paragraphs, **bold** for key " +
-                "numbers, bullet or numbered lists for plans, and ### headings only when structure " +
-                "genuinely helps. No tables or code blocks."
+            "You are a supportive recovery and performance coach. You may receive the user's own " +
+                "wearable observations, Daily Plan evidence, recent workouts, and explicitly logged " +
+                "nutrition. Recovery and Effort are wellness estimates, not permission to train. " +
+                "Start with how the user says they feel. Pain, illness, unusual symptoms, or a withheld " +
+                "Daily Plan range overrides a favorable wearable trend. When a range exists, describe " +
+                "current Effort against it as a planning cue. Never call a score a green light, clearance, " +
+                "safety limit, or reason to ignore symptoms. Distinguish observed facts from personal " +
+                "associations and general education. Cite only values and dates present in the evidence, " +
+                "state important coverage gaps, and never invent missing data. Offer specific training " +
+                "options only when supported by the self-check and Daily Plan evidence, keep them optional, " +
+                "and include a self-check. Discuss personalized food changes only when explicit nutrition " +
+                "logs and a user-stated goal support them; state logging coverage. Never infer intake, " +
+                "deficiency, or nutrient needs from wearable data. If data is unavailable, say so and give " +
+                "general education. Never diagnose, prescribe supplements, or recommend medication changes. " +
+                "Suggest a qualified professional for individualized medical or nutrition care, and " +
+                "appropriate urgent help for urgent symptoms. Format replies in concise Markdown with " +
+                "short paragraphs and simple lists. No tables or code blocks."
+
+        const val IMMUTABLE_SAFETY_POLICY =
+            "REQUIRED EVIDENCE AND SAFETY RULES: " +
+                "Wearable scores and Daily Plan ranges are wellness planning cues, never diagnosis, " +
+                "treatment, training clearance, or safety limits. Never map a score band to permission " +
+                "to push. Respect the user's self-check and say when evidence is insufficient or stale. " +
+                "Missing values are unknown, not zero. Separate observed facts, descriptive associations, " +
+                "and general education; never invent values, causes, or confidence. Personalized diet " +
+                "guidance requires explicit logged intake and a user-stated goal. State coverage and do not " +
+                "infer deficiency, prescribe supplements, or recommend medication changes. For pain, " +
+                "concerning symptoms, or possible emergencies, prioritize stopping and appropriate " +
+                "professional or emergency help over performance coaching."
 
         /** Used in place of the metrics context when the user has not granted data access. */
         const val NO_CONSENT_NOTE =
@@ -856,6 +979,12 @@ class AiCoach(private val repo: WhoopRepository) {
             val custom = NoopPrefs.coachSystemPrompt(ctx).trim()
             return if (custom.isNotEmpty()) custom else DEFAULT_SYSTEM_PROMPT
         }
+
+        fun resolveRequestSystemPrompt(ctx: Context): String =
+            composeRequestSystemPrompt(resolveSystemPrompt(ctx))
+
+        fun composeRequestSystemPrompt(editablePrompt: String): String =
+            editablePrompt + "\n\n" + IMMUTABLE_SAFETY_POLICY
 
         /**
          * One derived stress line for the coach context: the Baevsky Stress Index over a series of R-R

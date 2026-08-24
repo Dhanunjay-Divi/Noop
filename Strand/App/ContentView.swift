@@ -4,12 +4,17 @@ import StrandDesign
 /// Root — the sidebar shell, with the first-run onboarding/pairing wizard overlaid until complete,
 /// and a "What's New" changelog sheet shown automatically after an update.
 struct ContentView: View {
+    private let onOnboardingFinished: () -> Void
     @AppStorage("noop.onboarded") private var onboarded = false
     @AppStorage("noop.lastSeenChangelogVersion") private var lastSeenChangelog = ""
     @AppStorage("noop.acceptedTermsVersion") private var acceptedTerms = ""
     /// Local timestamp of the last terms acceptance — the on-device consent record (version + when).
     @AppStorage("noop.acceptedTermsAt") private var acceptedTermsAt = ""
     @State private var showWhatsNew = false
+
+    init(onOnboardingFinished: @escaping () -> Void = {}) {
+        self.onOnboardingFinished = onOnboardingFinished
+    }
 
     var body: some View {
         ZStack {
@@ -22,6 +27,7 @@ struct ContentView: View {
             }
             if acceptedTerms == Terms.currentVersion && !onboarded {
                 OnboardingWizard(onFinished: {
+                    onOnboardingFinished()
                     onboarded = true
                     // A brand-new user just saw the expectations in onboarding — don't also pop the
                     // changelog at them; mark them current.

@@ -23,6 +23,15 @@
     <string name="daily_plan_evidence_sleep_plan">Il tuo piano di sonno attuale</string>
     <string name="daily_plan_evidence_title">DATI UTILIZZATI</string>
     <string name="daily_plan_limitation">Questo piano non è una diagnosi, una prescrizione, un limite di sicurezza o un’autorizzazione medica.</string>
+    <string name="daily_plan_notification_body">Hai raggiunto %1$d; l’intervallo previsto per oggi è %2$d-%3$d. È un riferimento per pianificare, non un limite. Valuta come ti senti prima di aggiungere altro.</string>
+    <string name="daily_plan_notification_help">Una volta al giorno dopo la sincronizzazione. Nessun avviso se l’intervallo non viene mostrato.</string>
+    <string name="daily_plan_notification_title">Intervallo Effort di oggi raggiunto</string>
+    <string name="daily_plan_notification_toggle">Avvisami quando raggiungo l’intervallo</string>
+    <string name="daily_plan_progress_above">Sopra l’intervallo previsto per oggi. Rivaluta come ti senti prima di aggiungere altro.</string>
+    <string name="daily_plan_progress_accessibility">Effort attuale %1$d. Intervallo previsto da %2$d a %3$d.</string>
+    <string name="daily_plan_progress_below">Mancano %1$d all’intervallo previsto per oggi.</string>
+    <string name="daily_plan_progress_current">Effort attuale</string>
+    <string name="daily_plan_progress_in_range">Nell’intervallo previsto per oggi. È un riferimento, non una regola per fermarsi.</string>
     <string name="daily_plan_signal_good">Allineato</string>
     <string name="daily_plan_signal_hrv">Variabilità della frequenza cardiaca</string>
     <string name="daily_plan_signal_load">Rapporto del carico recente</string>

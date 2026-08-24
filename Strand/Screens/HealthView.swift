@@ -101,6 +101,7 @@ private struct HealthFirstRunContent: View {
     @EnvironmentObject var repo: Repository
     @EnvironmentObject var live: LiveState
     @EnvironmentObject var model: AppModel
+    @EnvironmentObject var profile: ProfileStore
 
     /// HR to display: the spike-filtered median (model.bpm, #39) when available, else the reported
     /// value, else R-R-derived (the strap streams R-R even when its HR field reads 0).
@@ -119,6 +120,11 @@ private struct HealthFirstRunContent: View {
                 // so the control is reachable before the screen has any data to show.
                 SyncStatusSection()
                 ComingSoon(what: "No biometrics yet. Import your WHOOP export (and Apple Health if you have it) in Data Sources to fill this in.")
+                // Reproductive-health setup must not disappear just because a new user has no band rows.
+                // Profile remains the primary entry point; Health also exposes the same private opt-in.
+                if profile.cycleAwarenessApplies || model.cycleAwarenessEnabled {
+                    SkinTempSection()
+                }
             }
         } else {
             // A connected first-time user must be able to reach the explicit Start Live HR control even
@@ -852,7 +858,9 @@ private struct FitnessAgeSection: View {
             .frame(width: 900, height: 820)
             #endif
         }
-        .task(id: "\(repo.refreshSeq)|\(profile.ageMetricStateToken)") { await load() }
+        .task(id: "\(repo.refreshSeq)|\(repo.ageMetricsSeq)|\(profile.ageMetricStateToken)") {
+            await load()
+        }
     }
 
     @ViewBuilder private var content: some View {
@@ -1006,11 +1014,11 @@ private struct FitnessAgeSection: View {
     /// "my-whoop" (the Repository merges the computed "-noop" rows under any real import). Takes the
     /// freshest point — the weekly value is keyed to the week's Saturday and refines through the week.
     private func load() async {
-        let profileState = profile.ageMetricStateToken
+        let requestedProfileState = profile.ageMetricStateToken
         guard hasEligibleProfile else {
             fitnessAge = nil
             vo2max = nil
-            loadedProfileState = profileState
+            loadedProfileState = requestedProfileState
             loaded = true
             return
         }
@@ -1022,10 +1030,13 @@ private struct FitnessAgeSection: View {
             key: AgeMetricProfile.vo2maxEstimateKey, source: "my-whoop")
         let faProfile = (await faProfileA).last?.value
         let vo2Profile = (await vo2ProfileA).last?.value
-        fitnessAge = profile.acceptsFitnessAge(provenance: faProfile) ? (await faPtsA).last?.value : nil
-        vo2max = profile.acceptsVO2maxEstimate(provenance: vo2Profile) ? (await vo2PtsA).last?.value : nil
-        guard !Task.isCancelled else { return }
-        loadedProfileState = profileState
+        let readFitnessAge = (await faPtsA).last?.value
+        let readVO2max = (await vo2PtsA).last?.value
+        guard !Task.isCancelled,
+              requestedProfileState == profile.ageMetricStateToken else { return }
+        fitnessAge = profile.acceptsFitnessAge(provenance: faProfile) ? readFitnessAge : nil
+        vo2max = profile.acceptsVO2maxEstimate(provenance: vo2Profile) ? readVO2max : nil
+        loadedProfileState = requestedProfileState
         loaded = true
     }
 }
@@ -1265,7 +1276,9 @@ private struct VitalitySection: View {
                 ComingSoon(what: "Reading your Vitality…", symbol: "sparkles")
             }
         }
-        .task(id: "\(repo.refreshSeq)|\(profile.ageMetricStateToken)") { await load() }
+        .task(id: "\(repo.refreshSeq)|\(repo.ageMetricsSeq)|\(profile.ageMetricStateToken)") {
+            await load()
+        }
     }
 
     private func hero(vitality v: Double, bodyAge ba: Double) -> some View {
@@ -1353,11 +1366,11 @@ private struct VitalitySection: View {
     }
 
     private func load() async {
-        let profileState = profile.ageMetricStateToken
+        let requestedProfileState = profile.ageMetricStateToken
         guard hasEligibleAge else {
             vitality = nil
             bodyAge = nil
-            loadedProfileState = profileState
+            loadedProfileState = requestedProfileState
             loaded = true
             return
         }
@@ -1365,11 +1378,14 @@ private struct VitalitySection: View {
         async let bodyAgeA = repo.exploreSeries(key: "body_age", source: "my-whoop")
         let provenance = (await repo.exploreSeries(
             key: AgeMetricProfile.vitalityKey, source: "my-whoop")).last?.value
+        let readVitality = (await vitalityA).last?.value
+        let readBodyAge = (await bodyAgeA).last?.value
+        guard !Task.isCancelled,
+              requestedProfileState == profile.ageMetricStateToken else { return }
         let accepted = profile.acceptsVitality(provenance: provenance)
-        vitality = accepted ? (await vitalityA).last?.value : nil
-        bodyAge = accepted ? (await bodyAgeA).last?.value : nil
-        guard !Task.isCancelled else { return }
-        loadedProfileState = profileState
+        vitality = accepted ? readVitality : nil
+        bodyAge = accepted ? readBodyAge : nil
+        loadedProfileState = requestedProfileState
         loaded = true
     }
 }
@@ -1992,6 +2008,9 @@ private struct BiomarkerTrendsSection: View {
 private struct SkinTempSection: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var repo: Repository
+    // AppModel owns ProfileStore but does not republish its nested changes. Observe the profile directly
+    // so changing Sex to Female reveals cycle tracking in this already-mounted Health screen immediately.
+    @EnvironmentObject private var profile: ProfileStore
     #if os(iOS)
     @EnvironmentObject private var health: HealthKitBridge
     #endif
@@ -2003,77 +2022,80 @@ private struct SkinTempSection: View {
     /// Whether the cycle-awareness opt-in is offered for this profile (#801). Delegates to the shared
     /// ``ProfileStore/cycleAwarenessApplies`` gate so Health + Automations stay in lockstep: cycle phase
     /// is read from the menstrual skin-temperature shift, so the opt-in is NOT shown for male profiles.
-    private var cycleOptInApplies: Bool { model.profile.cycleAwarenessApplies }
+    private var cycleOptInApplies: Bool { profile.cycleAwarenessApplies }
+    private var showsCycleSection: Bool { cycleEnabled || cycleOptInApplies }
+    private var hasTemperatureCard: Bool {
+        (model.illnessSignal.map { $0.level != .quiet } ?? false) || model.circadianPhase != nil
+    }
+    private var visibleCycleResult: CyclePhaseEngine.Result {
+        model.cyclePhase ?? cycleTrackingLearningResult()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
+            if showsCycleSection {
+                SectionHeader("appwide.cycle.health.section_title",
+                              overline: "appwide.cycle.health.overline")
+
+                if cycleEnabled {
+                    CycleAwarenessCard(
+                        result: visibleCycleResult,
+                        curve: model.cycleCurve,
+                        onLogPeriod: {
+                            Task {
+                                _ = await repo.logPeriodStart(day: Repository.localDayKey(Date()))
+                                await model.refreshV5Signals()
+                            }
+                        },
+                        onOpenDetail: { cycleTrackerPresented = true },
+                        onTurnOff: {
+                            cycleEnabled = false
+                            model.cycleAwarenessEnabled = false
+                            Task {
+                                #if os(iOS)
+                                await health.disableCycleDataImport()
+                                #endif
+                                await model.refreshV5Signals()
+                            }
+                        }
+                    )
+                } else {
+                    CycleAwarenessOptInCard(onEnable: {
+                        cycleEnabled = true
+                        model.cycleAwarenessEnabled = true
+                        Task {
+                            #if os(iOS)
+                            await health.requestCycleDataAccessAndImport()
+                            #endif
+                            await model.refreshV5Signals()
+                        }
+                    })
+                }
+            }
+
+            // Keep the temperature observations as their own section. A female-profile change should
+            // reveal a named Cycle Tracking section, not bury reproductive health under this heading.
             SectionHeader("Skin temperature", overline: "From your nightly sensor")
 
-            // 1. Illness heads-up — only when the engine returned something worth surfacing.
             if let illness = model.illnessSignal, illness.level != .quiet {
                 HeadsUpCard(result: illness, distance: model.illnessDistance)
             }
 
-            // 2. Body clock — shows nil-state copy via the engine's own confidence handling.
             if let phase = model.circadianPhase {
                 BodyClockCard(estimate: phase)
             }
 
-            // 3. Cycle awareness: opt-in, and gated on profile sex (#801). Cycle phase is derived
-            // from the menstrual temperature shift, so the opt-in is only offered to profiles it can
-            // apply to (female / nonbinary); it is NOT rendered for male profiles. If a profile that
-            // previously enabled it later switches to male, we still honour the existing awareness card
-            // rather than silently hiding their data; only the OPT-IN invitation is gated.
-            if cycleEnabled, let cycle = model.cyclePhase {
-                CycleAwarenessCard(result: cycle, curve: model.cycleCurve,
-                                   onLogPeriod: {
-                                       Task {
-                                           _ = await repo.logPeriodStart(day: Repository.localDayKey(Date()))
-                                           await model.refreshV5Signals()
-                                       }
-                                   },
-                                   onOpenDetail: { cycleTrackerPresented = true },
-                                   // Symmetric off (#801): turn it off in-place, here in Health, where
-                                   // it was turned on, not only from Automations.
-                                   onTurnOff: {
-                                       cycleEnabled = false
-                                       model.cycleAwarenessEnabled = false
-                                       Task {
-                                           #if os(iOS)
-                                           await health.disableCycleDataImport()
-                                           #endif
-                                           await model.refreshV5Signals()
-                                       }
-                                   })
-            } else if !cycleEnabled && cycleOptInApplies {
-                CycleAwarenessOptInCard(onEnable: {
-                    cycleEnabled = true
-                    model.cycleAwarenessEnabled = true
-                    Task {
-                        #if os(iOS)
-                        await health.requestCycleDataAccessAndImport()
-                        #endif
-                        await model.refreshV5Signals()
-                    }
-                })
-            }
-
-            // Honest empty state when the suite has nothing to show yet. The opt-in card normally fills
-            // the section when cycle is OFF, but it is gated off for male profiles (#801), so the
-            // section can also be blank when the opt-in doesn't apply AND nothing else has data. Show
-            // the empty state in either case (cycle ON but thin, OR opt-in hidden with no other signal).
-            if (cycleEnabled || !cycleOptInApplies)
-                && model.illnessSignal == nil && model.circadianPhase == nil && model.cyclePhase == nil {
-                ComingSoon(what: "Wear the strap overnight and these read from your nightly skin temperature.",
-                           symbol: "thermometer.medium")
+            if !hasTemperatureCard {
+                ComingSoon(
+                    what: "Wear the strap overnight and these read from your nightly skin temperature.",
+                    symbol: "thermometer.medium"
+                )
             }
         }
         .sheet(isPresented: $cycleTrackerPresented) {
-            if let cycle = model.cyclePhase {
-                CycleTrackerView(result: cycle, curve: model.cycleCurve)
-                    .environmentObject(repo)
-                    .environmentObject(model)
-            }
+            CycleTrackerView(result: visibleCycleResult, curve: model.cycleCurve)
+                .environmentObject(repo)
+                .environmentObject(model)
         }
     }
 }

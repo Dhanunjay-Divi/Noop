@@ -9,12 +9,15 @@ import WhoopStore
 /// "Backfill: session persisted N rows (M with motion) across K night(s)" line.
 final class BackfillerSessionTallyTests: XCTestCase {
 
-    // rows = biometric streams only (HR, R-R, SpO2, skin-temp, resp, gravity) — battery/events are
-    // housekeeping, NOT biometric history, so they must not inflate the count. motion = gravity.
-    func testChunkTallySumsBiometricRowsAndGravityOnly() {
-        let counts = (hr: 10, rr: 4, events: 99, battery: 7, spo2: 3, skinTemp: 2, resp: 1, gravity: 5)
+    // Rows include every score-bearing stream. Wrist events can change sleep/wear interpretation;
+    // battery is transport housekeeping and must not inflate the count.
+    func testChunkTallySumsScoreBearingRowsAndGravityOnly() {
+        let counts = StreamInsertCounts(
+            hr: 10, rr: 4, events: 99, battery: 7, spo2: 3, skinTemp: 2, resp: 1,
+            gravity: 5, steps: 6, sleepState: 7, ppgHr: 8, ppgWaveform: 9
+        )
         let tally = Backfiller.chunkTally(counts: counts, timestamps: [])
-        XCTAssertEqual(tally.rows, 10 + 4 + 3 + 2 + 1 + 5)   // 25 — events(99)/battery(7) excluded
+        XCTAssertEqual(tally.rows, 10 + 4 + 99 + 3 + 2 + 1 + 5 + 6 + 7 + 8 + 9)
         XCTAssertEqual(tally.motion, 5)
         XCTAssertTrue(tally.nights.isEmpty)
     }
@@ -25,7 +28,8 @@ final class BackfillerSessionTallyTests: XCTestCase {
         let day0 = 1_700_000_000
         let sameDay = day0 + 3_600
         let nextDay = day0 + 86_400
-        let tally = Backfiller.chunkTally(counts: (0, 0, 0, 0, 0, 0, 0, 0), timestamps: [day0, sameDay, nextDay])
+        let tally = Backfiller.chunkTally(
+            counts: StreamInsertCounts(), timestamps: [day0, sameDay, nextDay])
         XCTAssertEqual(tally.nights, Set([day0 / 86_400, nextDay / 86_400]))
         XCTAssertEqual(tally.nights.count, 2)
     }
@@ -167,11 +171,37 @@ final class BackfillerSessionTallyTests: XCTestCase {
     private final class TallyStore: BackfillStoreWriting {
         @discardableResult
         func insert(_ streams: Streams, deviceId: String) async throws
-            -> (hr: Int, rr: Int, events: Int, battery: Int,
-                spo2: Int, skinTemp: Int, resp: Int, gravity: Int) {
-            (streams.hr.count, streams.rr.count, 0, 0,
-             streams.spo2.count, streams.skinTemp.count, streams.resp.count, streams.gravity.count)
+            -> StreamInsertCounts {
+            StreamInsertCounts(
+                hr: streams.hr.count, rr: streams.rr.count,
+                spo2: streams.spo2.count, skinTemp: streams.skinTemp.count,
+                resp: streams.resp.count, gravity: streams.gravity.count,
+                steps: streams.steps.count, sleepState: streams.sleepState.count,
+                ppgHr: streams.ppgHr.count, ppgWaveform: streams.ppgWaveform.count
+            )
         }
+        func enqueueRawBatch(_ meta: RawBatchMeta, frames: [[UInt8]]) async throws {}
+        func setCursor(_ name: String, _ value: Int) async throws {}
+        func cursor(_ name: String) async throws -> Int? { nil }
+    }
+
+    @MainActor
+    private final class DelayedInsertStore: BackfillStoreWriting {
+        var insertStarted: (() -> Void)?
+        private var insertContinuation: CheckedContinuation<StreamInsertCounts, Error>?
+
+        func insert(_ streams: Streams, deviceId: String) async throws -> StreamInsertCounts {
+            try await withCheckedThrowingContinuation { continuation in
+                insertContinuation = continuation
+                insertStarted?()
+            }
+        }
+
+        func completeInsert(_ counts: StreamInsertCounts) {
+            insertContinuation?.resume(returning: counts)
+            insertContinuation = nil
+        }
+
         func enqueueRawBatch(_ meta: RawBatchMeta, frames: [[UInt8]]) async throws {}
         func setCursor(_ name: String, _ value: Int) async throws {}
         func cursor(_ name: String) async throws -> Int? { nil }
@@ -247,5 +277,37 @@ final class BackfillerSessionTallyTests: XCTestCase {
         XCTAssertTrue(joined.contains("no banked history to offload"),
                       "a truly-empty no-cursor session must still warn the strap has no banked history")
         XCTAssertTrue(joined.contains("fully charge it"))
+    }
+
+    /// The watchdog can tear down a session while its final `store.insert` is suspended. The durable
+    /// completion must still publish the rows so overnight calibration is not left at 0/4.
+    @MainActor func testPersistedRowsCallbackSurvivesTimeoutDuringDelayedFinalInsert() async {
+        let store = DelayedInsertStore()
+        let insertStarted = expectation(description: "insert suspended")
+        store.insertStarted = { insertStarted.fulfill() }
+        var receipts: [Int] = []
+        let backfiller = Backfiller(
+            store: store,
+            deviceId: "test",
+            ackTrim: { _, _ in },
+            onRowsPersisted: { receipts.append($0) })
+        backfiller.begin(family: .whoop4)
+        for frame in v25RecordFrames {
+            await backfiller.ingest(frame)
+        }
+
+        let endTask = Task { @MainActor in
+            await backfiller.ingest(historyEndFrame(trim: 1234))
+        }
+        await fulfillment(of: [insertStarted], timeout: 2)
+        XCTAssertTrue(receipts.isEmpty, "a suspended insert is not yet a durable receipt")
+        backfiller.timeoutFired()
+        XCTAssertFalse(backfiller.isBackfilling, "the watchdog must tear down the active session")
+
+        store.completeInsert(StreamInsertCounts(gravity: 3))
+        await endTask.value
+
+        XCTAssertEqual(receipts, [3], "teardown must not hide rows that commit after its snapshot")
+        XCTAssertEqual(backfiller.sessionRowsPersisted, 3)
     }
 }

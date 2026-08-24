@@ -482,6 +482,10 @@ fun TrendsExploreScreen(vm: AppViewModel) {
             effectiveRange = effectiveRange,
         )
         }
+
+        item {
+            MetricEducationCard(metric = selected)
+        }
     }
 }
 
@@ -862,6 +866,74 @@ private fun StatRow(
                 accent = metric.accent,
             )
         }
+    }
+}
+
+// MARK: - Metric education
+
+/**
+ * A stable explanation contract for every chartable metric. The eight built-in health metrics use
+ * metric-specific copy; a newly discovered long-format series gets an explicit generic fallback so the
+ * UI never invents a sensor method or medical interpretation.
+ */
+@Composable
+private fun MetricEducationCard(metric: MetricSpec) {
+    val education = AndroidMetricKnowledge.educationFor(metric.key)
+    NoopCard(tint = domainTint(metric.category)) {
+        Column(verticalArrangement = Arrangement.spacedBy(Metrics.space16)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Metrics.space4)) {
+                Overline(stringResource(R.string.appwide_metric_education_overline), color = metric.accent)
+                Text(
+                    stringResource(R.string.appwide_metric_education_title),
+                    style = NoopType.title2,
+                    color = Palette.textPrimary,
+                )
+            }
+
+            MetricEducationBlock(
+                title = stringResource(R.string.appwide_metric_education_heading_what),
+                body = stringResource(education.whatItIs),
+            )
+            HorizontalDivider(color = Palette.hairline)
+            MetricEducationBlock(
+                title = stringResource(R.string.appwide_metric_education_heading_why),
+                body = stringResource(education.whyItMatters),
+            )
+            HorizontalDivider(color = Palette.hairline)
+            MetricEducationBlock(
+                title = stringResource(R.string.appwide_metric_education_heading_method),
+                body = stringResource(education.howMeasured),
+            )
+            HorizontalDivider(color = Palette.hairline)
+            MetricEducationBlock(
+                title = stringResource(R.string.appwide_metric_education_heading_limits),
+                body = stringResource(education.limitations),
+                bodyColor = Palette.textTertiary,
+            )
+            HorizontalDivider(color = Palette.hairline)
+            MetricEducationBlock(
+                title = stringResource(R.string.appwide_metric_education_heading_action),
+                body = stringResource(education.whatYouCanTry),
+            )
+
+            Text(
+                stringResource(R.string.appwide_metric_education_safety_boundary),
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MetricEducationBlock(
+    title: String,
+    body: String,
+    bodyColor: Color = Palette.textSecondary,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(Metrics.space4)) {
+        Overline(title)
+        Text(body, style = NoopType.subhead, color = bodyColor)
     }
 }
 

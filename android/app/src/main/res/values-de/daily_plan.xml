@@ -23,6 +23,15 @@
     <string name="daily_plan_evidence_sleep_plan">Dein aktueller Schlafplan</string>
     <string name="daily_plan_evidence_title">VERWENDETE GRUNDLAGEN</string>
     <string name="daily_plan_limitation">Dieser Plan ist keine Diagnose, Verordnung, Sicherheitsgrenze oder medizinische Freigabe.</string>
+    <string name="daily_plan_notification_body">Du hast %1$d erreicht; der heute geplante Bereich liegt bei %2$d-%3$d. Das ist eine Planungshilfe, keine Grenze. Prüfe dein Befinden, bevor du mehr hinzufügst.</string>
+    <string name="daily_plan_notification_help">Einmal täglich nach der Datensynchronisierung. Wenn der Bereich nicht angezeigt wird, erfolgt keine Mitteilung.</string>
+    <string name="daily_plan_notification_title">Heutiger Effort-Bereich erreicht</string>
+    <string name="daily_plan_notification_toggle">Benachrichtige mich beim Erreichen des Bereichs</string>
+    <string name="daily_plan_progress_above">Über dem heute geplanten Bereich. Prüfe dein Befinden, bevor du mehr hinzufügst.</string>
+    <string name="daily_plan_progress_accessibility">Aktueller Effort %1$d. Geplanter Bereich %2$d bis %3$d.</string>
+    <string name="daily_plan_progress_below">Noch %1$d bis zum heutigen geplanten Bereich.</string>
+    <string name="daily_plan_progress_current">Aktueller Effort</string>
+    <string name="daily_plan_progress_in_range">Im heute geplanten Bereich. Das ist eine Orientierung, keine Stoppregel.</string>
     <string name="daily_plan_signal_good">Günstig ausgerichtet</string>
     <string name="daily_plan_signal_hrv">Herzfrequenzvariabilität</string>
     <string name="daily_plan_signal_load">Verhältnis der jüngsten Belastung</string>

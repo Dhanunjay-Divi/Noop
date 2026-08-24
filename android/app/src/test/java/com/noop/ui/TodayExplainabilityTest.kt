@@ -340,6 +340,22 @@ class TodayExplainabilityTest {
     }
 
     @Test
+    fun mixedNoopBandSourceStillQualifiesForSyncFeedback() {
+        assertTrue(sourceLabelIncludesNoopBand("Noop Band"))
+        assertTrue(sourceLabelIncludesNoopBand("Noop Band + Apple Watch"))
+        assertFalse(sourceLabelIncludesNoopBand("Apple Watch"))
+    }
+
+    @Test
+    fun bandSyncConfirmationRequiresAdvancedCompletionEvidence() {
+        assertFalse(bandSyncCompletionAdvanced(startedAt = null, completedAt = null))
+        assertTrue(bandSyncCompletionAdvanced(startedAt = null, completedAt = 1_000))
+        assertFalse(bandSyncCompletionAdvanced(startedAt = 1_000, completedAt = 1_000))
+        assertFalse(bandSyncCompletionAdvanced(startedAt = 1_000, completedAt = null))
+        assertTrue(bandSyncCompletionAdvanced(startedAt = 1_000, completedAt = 1_001))
+    }
+
+    @Test
     fun liquidHeroSourceLabel_usesCarriedChargeSourceWhenTodayRecoveryIsAbsent() {
         assertEquals(
             "On-device",

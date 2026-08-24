@@ -34,7 +34,9 @@ struct StrandApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(onOnboardingFinished: {
+                model.refreshAgeMetricsIfProfileChanged()
+            })
                 .environmentObject(model)
                 .environmentObject(model.ble)   // #334: Today pull-to-sync reads BLEManager (no HR churn)
                 .environmentObject(model.live)
@@ -80,6 +82,7 @@ struct StrandApp: App {
                     }
                     model.setRealtimeForeground(phase == .active)
                     if phase == .active {
+                        model.refreshAgeMetricsIfProfileChanged()
                         model.ble.requestSync(.foreground)
                         Task { await FriendsService.catchUpIfDue(repo: model.repo) }
                     }

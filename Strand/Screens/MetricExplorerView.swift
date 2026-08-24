@@ -563,7 +563,9 @@ struct MetricDetailView: View {
     @State private var correlationsLoading = false
     /// True after the optional catalog-wide scan has completed for this repository generation.
     @State private var correlationSeriesLoaded = false
-    private var loadTaskID: String { "\(metric.id)|\(repo.refreshSeq)|\(profile.ageMetricStateToken)" }
+    private var loadTaskID: String {
+        "\(metric.id)|\(repo.refreshSeq)|\(repo.ageMetricsSeq)|\(profile.ageMetricStateToken)"
+    }
     private var correlationLoadTaskID: String { "\(loadTaskID)|relationships" }
 
     // MARK: Derived
@@ -925,6 +927,7 @@ struct MetricDetailView: View {
     }
 
     private func load() async {
+        let requestedProfileState = profile.ageMetricStateToken
         loaded = false
         correlationsLoading = false
         correlationSeriesLoaded = false
@@ -968,6 +971,8 @@ struct MetricDetailView: View {
         default:
             ageMetricAccepted = true
         }
+        guard !Task.isCancelled,
+              requestedProfileState == profile.ageMetricStateToken else { return }
         guard ageMetricAccepted else {
             series = []
             sourceByDay = [:]
@@ -976,16 +981,19 @@ struct MetricDetailView: View {
         }
 
         let selectedSeries = await repo.exploreSeries(key: metric.key, source: metric.source)
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled,
+              requestedProfileState == profile.ageMetricStateToken else { return }
         // Per-day provenance for the readings table (task #8). resolvedSeries names the source that
         // actually supplied each day (imported strap / on-device / Apple Health / Health Connect); the
         // chart still rides `series` above, so this only ADDS the source column, never moves the line.
         let resolution = await repo.resolvedSeries(key: metric.key, source: metric.source)
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled,
+              requestedProfileState == profile.ageMetricStateToken else { return }
         if isEnergyMetric {
             await loadEnergyBreakdown(for: selectedSeries.last?.day,
                                       selectedValue: selectedSeries.last?.value)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  requestedProfileState == profile.ageMetricStateToken else { return }
         }
         series = selectedSeries
         sourceByDay = Dictionary(resolution.points.map { ($0.day, $0.source) },
@@ -1006,7 +1014,8 @@ struct MetricDetailView: View {
         // the useful guidance settle without paying for the optional catalog-wide relationship scan.
         for other in relevant {
             let s = await repo.exploreSeries(key: other.key, source: other.source)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                  requestedProfileState == profile.ageMetricStateToken else { return }
             if !s.isEmpty, !others.contains(where: { $0.metric.id == other.id }) {
                 others.append((other, s))
             }
@@ -1559,17 +1568,7 @@ struct MetricDetailView: View {
     }
 
     private func fitnessAgeComparison(_ estimate: Double) -> String {
-        let delta = Double(profile.age) - estimate
-        let years = Int(abs(delta).rounded())
-        if years == 0 { return String(localized: "About the same as your profile age") }
-        if delta > 0 {
-            return years == 1
-                ? String(localized: "1 year younger than your profile age")
-                : String(localized: "\(years) years younger than your profile age")
-        }
-        return years == 1
-            ? String(localized: "1 year older than your profile age")
-            : String(localized: "\(years) years older than your profile age")
+        FitnessAgePresentation.comparison(estimate: estimate, profileAge: profile.age)
     }
 
     // MARK: Range bar

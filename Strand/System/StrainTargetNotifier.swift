@@ -21,16 +21,33 @@ enum StrainTargetNotifier {
     /// Pure, testable policy + copy — no notification/UserDefaults runtime, so the decision logic is
     /// pinned by StrainTargetPolicyTests. Byte-identical twin of the Android `StrainTargetPolicy`.
     enum StrainTargetPolicy {
-        /// Fire at most once per day, only when today's measured Effort is within or above the planner's
-        /// complete range. An unavailable result means the planner withheld the range or the current
-        /// value is not trustworthy, so the policy fails closed.
+        /// Fire at most once per local calendar day, only for that day's measured Effort and only when it
+        /// is within or above the planner's complete range. An unavailable result means the planner withheld
+        /// the range or the current value is not trustworthy, so the policy fails closed.
         static func shouldNotify(enabled: Bool,
                                  guidance: DailyEffortGuidance.Result,
-                                 lastNotifiedDay: String?,
-                                 today: String) -> Bool {
-            guard enabled, lastNotifiedDay != today else { return false }
+                                 dataDay: String,
+                                 currentLocalDay: String,
+                                 lastNotifiedDay: String?) -> Bool {
+            guard enabled,
+                  dataDay == currentLocalDay,
+                  lastNotifiedDay != currentLocalDay else { return false }
             return guidance.state == .inRange || guidance.state == .aboveRange
         }
+    }
+
+    /// ISO day key in the device's current civil time zone. The notifier intentionally does not use the
+    /// dashboard's 04:00 logical-day carry because a notification must describe the actual calendar day.
+    private static func localCalendarDay(_ date: Date = Date()) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .autoupdatingCurrent
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
     }
 
     /// Ask up front (called when the user enables the nudge) so the system dialog appears at a
@@ -53,14 +70,16 @@ enum StrainTargetNotifier {
         enabled: Bool
     ) {
         let d = UserDefaults.standard
+        let currentLocalDay = localCalendarDay()
         let guidance = DailyEffortGuidance.evaluate(
             currentEffort: dayEffort,
             range: targetRange
         )
         guard StrainTargetPolicy.shouldNotify(enabled: enabled,
                                               guidance: guidance,
-                                              lastNotifiedDay: d.string(forKey: lastDayKey),
-                                              today: day),
+                                              dataDay: day,
+                                              currentLocalDay: currentLocalDay,
+                                              lastNotifiedDay: d.string(forKey: lastDayKey)),
               let current = guidance.current,
               let range = guidance.range else { return }
         let title = String(localized: "daily_plan.notification.title")
@@ -75,7 +94,8 @@ enum StrainTargetNotifier {
             // Authorization is requested once via requestAuthorization() when the toggle is enabled; here we
             // only check status (no second system prompt) — the BatteryNotifier idiom.
             let settings = await center.notificationSettings()
-            guard settings.authorizationStatus == .authorized else { return }
+            guard settings.authorizationStatus == .authorized,
+                  localCalendarDay() == currentLocalDay else { return }
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
@@ -90,7 +110,7 @@ enum StrainTargetNotifier {
                 try await center.add(
                     UNNotificationRequest(identifier: "strain-target", content: content, trigger: nil)
                 )
-                UserDefaults.standard.set(day, forKey: lastDayKey)
+                UserDefaults.standard.set(currentLocalDay, forKey: lastDayKey)
             } catch {
                 // Keep the day unset so a later analytics pass can retry after a transient add failure.
             }

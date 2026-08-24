@@ -23,6 +23,7 @@ struct LiquidTodayView: View {
     @EnvironmentObject var repo: Repository
     @EnvironmentObject var router: NavRouter
     @EnvironmentObject var profile: ProfileStore
+    @EnvironmentObject var behavior: BehaviorStore
     // For the pull-to-sync gesture (#334): a pull kicks a manual strap history offload via ble.syncNow().
     // Observe BLEManager, NOT AppModel — AppModel @Publishes `bpm` on the ~1 Hz HR tick, so observing it
     // would re-render all of Today every second (the exact churn the LiveState leaves isolate). BLEManager
@@ -410,7 +411,7 @@ struct LiquidTodayView: View {
         .liquidSelectionHaptic(trigger: selectedDayOffset)
         // A firm tick when the pull passes the release threshold (the custom liquid refresh).
         .liquidMediumHaptic(trigger: pullHaptic)
-        .task(id: "\(repo.refreshSeq)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(profile.ageMetricStateToken)-\(dailyActionCheckInDay)-\(dailyActionCheckInValue)") {
+        .task(id: "\(repo.refreshSeq)-\(repo.ageMetricsSeq)-\(selectedDayOffset)-\(repo.hydrationSeq)-\(hydrationEnabled)-\(profile.ageMetricStateToken)-\(dailyActionCheckInDay)-\(dailyActionCheckInValue)") {
             await load()
         }
         #if DEBUG
@@ -656,7 +657,7 @@ struct LiquidTodayView: View {
                     .textCase(.uppercase)
                     .foregroundStyle(StrandPalette.textTertiary)
                 Text(selectedDayOffset == 0 ? greeting : dayTitle)
-                    .font(StrandFont.rounded(36, weight: .bold))
+                    .font(StrandFont.rounded(30, weight: .bold))
                     .foregroundStyle(StrandPalette.textPrimary)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1369,7 +1370,7 @@ struct LiquidTodayView: View {
                     }
                     if synthesisExpanded {
                         Divider().overlay(todayFocusTone.opacity(0.24))
-                        Text(LocalizedStringKey(readiness.summary))
+                        Text(ReadinessPresentation.summary(for: readiness))
                             .font(StrandFont.caption)
                             .foregroundStyle(StrandPalette.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1382,7 +1383,7 @@ struct LiquidTodayView: View {
                         .foregroundStyle(StrandPalette.textTertiary)
                         if let limitation = readiness.limitations.first,
                            chargeDisplay.calibrationDetail == nil {
-                            Text(limitation)
+                            Text(ReadinessPresentation.limitation(limitation, for: readiness))
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.textTertiary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -1456,7 +1457,7 @@ struct LiquidTodayView: View {
     private var whySection: some View {
         let signals = dailyPlanWhySignals
         return VStack(spacing: 8) {
-            sectionHead("daily_plan.why.title", trailing: readiness.headline)
+            sectionHead("daily_plan.why.title", trailing: ReadinessPresentation.headline(for: readiness))
             card {
                 if signals.isEmpty {
                     dailyPlanEmptyRow(
@@ -1468,15 +1469,15 @@ struct LiquidTodayView: View {
                         HStack(alignment: .top, spacing: 12) {
                             MetricGlyph(todayFocusSymbol, size: 28)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(readiness.headline)
+                                Text(ReadinessPresentation.headline(for: readiness))
                                     .font(StrandFont.headline)
                                     .foregroundStyle(StrandPalette.textPrimary)
-                                Text(readiness.summary)
+                                Text(ReadinessPresentation.summary(for: readiness))
                                     .font(StrandFont.subhead)
                                     .foregroundStyle(StrandPalette.textSecondary)
                                     .fixedSize(horizontal: false, vertical: true)
                                 if let limitation = readiness.limitations.first {
-                                    Text(limitation)
+                                    Text(ReadinessPresentation.limitation(limitation, for: readiness))
                                         .font(StrandFont.caption)
                                         .foregroundStyle(StrandPalette.textTertiary)
                                         .fixedSize(horizontal: false, vertical: true)
@@ -1593,7 +1594,7 @@ struct LiquidTodayView: View {
                     tint: StrandPalette.statusWarning
                 )
             } else {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 if let target = plan.target {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(
@@ -1615,15 +1616,134 @@ struct LiquidTodayView: View {
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    let guidance = DailyEffortGuidance.evaluate(
+                        currentEffort: cachedDisplayDay?.strain,
+                        range: target
+                    )
+                    if guidance.state != .unavailable {
+                        dailyPlanEffortProgress(guidance)
+                    }
                 }
                 Label(dailyPlanActionLabel(plan.action),
                       systemImage: plan.action == .protectExtraSleep ? "moon.zzz.fill" : "bed.double.fill")
                     .font(StrandFont.subhead)
                     .foregroundStyle(StrandPalette.textPrimary)
+
+                if selectedDayOffset == 0 {
+                    Divider().overlay(StrandPalette.hairline)
+                    Toggle(isOn: $behavior.strainTargetNudge) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Label("daily_plan.notification.toggle", systemImage: "bell")
+                                .font(StrandFont.subhead)
+                                .foregroundStyle(StrandPalette.textPrimary)
+                            Text("daily_plan.notification.help")
+                                .font(StrandFont.footnote)
+                                .foregroundStyle(StrandPalette.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .tint(StrandPalette.accent)
+                    .onChangeCompat(of: behavior.strainTargetNudge) { enabled in
+                        if enabled {
+                            StrainTargetNotifier.requestAuthorization()
+                            StrainTargetNotifier.onDayUpdate(
+                                day: selectedDayKey,
+                                dayEffort: cachedDisplayDay?.strain,
+                                targetRange: plan.target,
+                                enabled: true
+                            )
+                        }
+                    }
+                }
             }
-            .accessibilityElement(children: .combine)
             }
         }
+    }
+
+    private func dailyPlanEffortProgress(
+        _ guidance: DailyEffortGuidance.Result
+    ) -> some View {
+        let current = Int((guidance.current ?? 0).rounded())
+        let range = guidance.range ?? .init(lower: 0, upper: 0)
+        let tint: Color = {
+            switch guidance.state {
+            case .inRange: return StrandPalette.statusPositive
+            case .aboveRange: return StrandPalette.statusWarning
+            case .belowRange: return StrandPalette.accent
+            case .unavailable: return StrandPalette.textTertiary
+            }
+        }()
+        let status: String = {
+            switch guidance.state {
+            case .belowRange:
+                return String(
+                    format: String(localized: "daily_plan.progress.below"),
+                    Int(ceil(guidance.remainingToLower ?? 0))
+                )
+            case .inRange:
+                return String(localized: "daily_plan.progress.in_range")
+            case .aboveRange:
+                return String(localized: "daily_plan.progress.above")
+            case .unavailable:
+                return ""
+            }
+        }()
+
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("daily_plan.progress.current")
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                Spacer(minLength: 8)
+                Text("\(current)")
+                    .font(StrandFont.number(18))
+                    .monospacedDigit()
+                    .foregroundStyle(tint)
+            }
+            GeometryReader { proxy in
+                let width = max(1, proxy.size.width)
+                let lowerX = width * CGFloat(range.lower) / 100
+                let upperX = width * CGFloat(range.upper) / 100
+                let markerSize: CGFloat = 12
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(StrandPalette.textTertiary.opacity(0.18))
+                    Capsule()
+                        .fill(StrandPalette.accent.opacity(0.16))
+                        .frame(width: max(4, upperX - lowerX))
+                        .offset(x: lowerX)
+                    Capsule()
+                        .fill(tint.opacity(0.42))
+                        .frame(width: max(2, width * CGFloat(guidance.progress)))
+                    Circle()
+                        .fill(tint)
+                        .frame(width: markerSize, height: markerSize)
+                        .overlay(Circle().stroke(StrandPalette.surfaceBase, lineWidth: 2))
+                        .offset(
+                            x: min(
+                                max(0, width * CGFloat(guidance.progress) - markerSize / 2),
+                                max(0, width - markerSize)
+                            )
+                        )
+                }
+            }
+            .frame(height: 12)
+            Text(status)
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            String(
+                format: String(localized: "daily_plan.progress.accessibility"),
+                current,
+                range.lower,
+                range.upper
+            )
+        )
+        .accessibilityValue(status)
     }
 
     private func dailyPlanCheckInButton(
@@ -2398,6 +2518,9 @@ struct LiquidTodayView: View {
     // MARK: - Data
 
     private func load() async {
+        // Capture the profile identity before any suspension. A sex/DOB edit starts a replacement task;
+        // the older task must never stamp its result with the newer profile token after its reads finish.
+        let requestedAgeMetricState = profile.ageMetricStateToken
         if hydrationEnabled {
             hydrationTotalML = await repo.hydrationTotal(day: Repository.localDayKey(Date()))
             hydrationGoalML = repo.hydrationGoalML(profileSex: profile.sex)
@@ -2512,10 +2635,14 @@ struct LiquidTodayView: View {
         stress = stressModel?.asOfDay == selectedDayKey ? stressModel?.score : nil
         let fitProfile = (await fitProfileA).last?.value
         let vitProfile = (await vitProfileA).last?.value
-        fitnessAge = profile.acceptsFitnessAge(provenance: fitProfile)
-            ? (await fitA).last?.value : nil   // history-wide latest banked (not day-scoped)
-        vitality = profile.acceptsVitality(provenance: vitProfile) ? (await vitA).last?.value : nil
-        ageMetricsLoadedProfileState = profile.ageMetricStateToken
+        let readFitnessAge = (await fitA).last?.value
+        let readVitality = (await vitA).last?.value
+        if !Task.isCancelled, requestedAgeMetricState == profile.ageMetricStateToken {
+            fitnessAge = profile.acceptsFitnessAge(provenance: fitProfile)
+                ? readFitnessAge : nil   // history-wide latest banked (not day-scoped)
+            vitality = profile.acceptsVitality(provenance: vitProfile) ? readVitality : nil
+            ageMetricsLoadedProfileState = requestedAgeMetricState
+        }
         // Steps is a DAILY metric, so key it to the SELECTED day (like restScore above), not the history-wide
         // latest. Without this, swiping to a past day with no strap motion estimate showed today's estimate (the
         // `.last` value) instead of that day's. Mirrors the classic Today's stepsEstByDay[selectedDayKey].
@@ -2670,6 +2797,25 @@ struct LiquidTodayView: View {
             if labels.count == 2 { break }
         }
         return labels.isEmpty ? nil : labels.joined(separator: " + ")
+    }
+
+    /// A mixed hero provenance label still includes the live band and must retain sync feedback.
+    static func sourceLabelIncludesNoopBand(_ label: String) -> Bool {
+        label.split(separator: "+").contains { component in
+            component.trimmingCharacters(in: .whitespacesAndNewlines)
+                .caseInsensitiveCompare("Noop Band") == .orderedSame
+        }
+    }
+
+    /// A stopped transfer is not evidence of success. Only a completion timestamp that appeared or advanced
+    /// after the current sync began may drive the brief green confirmation.
+    static func bandSyncCompletionAdvanced(
+        from startedAt: TimeInterval?,
+        to completedAt: TimeInterval?
+    ) -> Bool {
+        guard let completedAt else { return false }
+        guard let startedAt else { return true }
+        return completedAt > startedAt
     }
 
     private var readinessWord: String? {
@@ -3499,7 +3645,7 @@ private struct DailySignalHeader: View {
 
     private var summary: String {
         if let illness, status == .alert || status == .watch { return illness.copy }
-        return readiness.summary
+        return ReadinessPresentation.summary(for: readiness)
     }
 
     private var accessibilitySummary: String {
@@ -3519,9 +3665,9 @@ private struct DailySignalHeader: View {
         NavigationLink(value: TabRoute.health) {
             ViewThatFits(in: .horizontal) {
                 wideRow
-                    .fixedSize(horizontal: true, vertical: false)
                 compactRow
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Text(accessibilitySummary))
@@ -3534,9 +3680,9 @@ private struct DailySignalHeader: View {
     private var wideRow: some View {
         HStack(spacing: NoopMetrics.space2) {
             signalLabel
-            Spacer(minLength: NoopMetrics.space2)
+            Spacer(minLength: NoopMetrics.space4)
             if let sourceLabel {
-                V2Chip(text: sourceLabel, tone: StrandPalette.onDarkSecondary)
+                DailySignalSourceChip(text: sourceLabel)
                     .fixedSize()
             }
             V2Chip(text: label, tone: tint)
@@ -3549,30 +3695,33 @@ private struct DailySignalHeader: View {
             signalLabel
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: NoopMetrics.space2) {
+                    Spacer(minLength: NoopMetrics.space2)
                     sourceChip
                     statusChip
                 }
 
-                VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                VStack(alignment: .trailing, spacing: NoopMetrics.space2) {
                     sourceChip
                     statusChip
                 }
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .padding(.leading, 30 + NoopMetrics.space2)
         }
     }
 
     @ViewBuilder
     private var sourceChip: some View {
         if let sourceLabel {
-            V2Chip(text: sourceLabel, tone: StrandPalette.onDarkSecondary)
-                .fixedSize()
+            DailySignalSourceChip(text: sourceLabel)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private var statusChip: some View {
         V2Chip(text: label, tone: tint)
-            .fixedSize()
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var signalLabel: some View {
@@ -3588,7 +3737,151 @@ private struct DailySignalHeader: View {
                 .textCase(.uppercase)
                 .foregroundStyle(StrandPalette.onDarkSecondary)
                 .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
+                .minimumScaleFactor(0.8)
+        }
+    }
+}
+
+/// Score provenance stays neutral at rest. During a real band-history offload, the Noop Band source gets
+/// an indeterminate sweep because the protocol exposes chunks pulled but no total; a percentage would lie.
+/// Completion turns the label green briefly, then returns it to the same quiet provenance treatment.
+///
+/// LiveState observation is isolated here so its ~1 Hz heart-rate stream never invalidates the header,
+/// score vessels, or the rest of Today.
+private struct DailySignalSourceChip: View {
+    @EnvironmentObject private var live: LiveState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let text: String
+
+    @State private var sweep: CGFloat = 0
+    @State private var presentingSync = false
+    @State private var justSynced = false
+    @State private var syncStartedAt: TimeInterval?
+    @State private var completionTask: Task<Void, Never>?
+    private static let interChunkDelayNanoseconds: UInt64 = 3_000_000_000
+    private static let demoSyncing = CommandLine.arguments.contains("--demo-band-syncing")
+
+    private var isBand: Bool {
+        LiquidTodayView.sourceLabelIncludesNoopBand(text)
+    }
+
+    private var syncingRaw: Bool {
+        isBand && (live.backfilling || Self.demoSyncing)
+    }
+
+    private var syncing: Bool { isBand && presentingSync }
+
+    private var tone: Color {
+        syncing || justSynced ? StrandPalette.statusPositive : StrandPalette.onDarkSecondary
+    }
+
+    private var accessibilityText: String {
+        if syncing {
+            return live.syncChunksThisSession > 0
+                ? String.localizedStringWithFormat(
+                    String(localized: "appwide.today.band_sync.progress_format"),
+                    live.syncChunksThisSession
+                )
+                : String(localized: "appwide.today.band_sync.syncing")
+        }
+        return justSynced ? String(localized: "appwide.today.band_sync.synced") : text
+    }
+
+    var body: some View {
+        Text(text.uppercased())
+            .font(NoopV2.overline)
+            .tracking(0)
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+            .foregroundStyle(tone)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: NoopV2.chipRadius, style: .continuous)
+                        .fill(StrandPalette.onDarkSecondary.opacity(0.13))
+                    if syncing && !reduceMotion {
+                        GeometryReader { proxy in
+                            let width = max(CGFloat(22), proxy.size.width * 0.48)
+                            LinearGradient(
+                                colors: [.clear, StrandPalette.statusPositive.opacity(0.30), .clear],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .frame(width: width)
+                            .offset(x: -width + (proxy.size.width + width) * sweep)
+                        }
+                        .clipShape(
+                            RoundedRectangle(cornerRadius: NoopV2.chipRadius, style: .continuous)
+                        )
+                    }
+                }
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: NoopV2.chipRadius, style: .continuous)
+                    .stroke(StrandPalette.onDarkSecondary.opacity(0.16), lineWidth: 0.75)
+            }
+            .accessibilityLabel(accessibilityText)
+            .onAppear {
+                updateSyncPresentation()
+            }
+            .onChangeCompat(of: live.backfilling) { _ in
+                updateSyncPresentation()
+            }
+            .onChangeCompat(of: text) { _ in
+                updateSyncPresentation()
+            }
+            .onChangeCompat(of: reduceMotion) { _ in
+                updateSweep()
+            }
+            .onDisappear {
+                completionTask?.cancel()
+            }
+    }
+
+    private func updateSyncPresentation() {
+        completionTask?.cancel()
+        if syncingRaw {
+            if !presentingSync {
+                syncStartedAt = live.lastSyncedAt
+            }
+            presentingSync = true
+            justSynced = false
+            updateSweep()
+        } else if isBand && presentingSync {
+            // A deep offload briefly drops backfilling between chunks. Keep the sweep continuous and only
+            // settle after a quiet interval. A timestamp advance, not silence, decides whether this succeeded.
+            completionTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: Self.interChunkDelayNanoseconds)
+                guard !Task.isCancelled else { return }
+                let completed = LiquidTodayView.bandSyncCompletionAdvanced(
+                    from: syncStartedAt,
+                    to: live.lastSyncedAt
+                )
+                presentingSync = false
+                justSynced = completed
+                syncStartedAt = nil
+                updateSweep()
+                guard completed else { return }
+                try? await Task.sleep(nanoseconds: 1_800_000_000)
+                if !Task.isCancelled { justSynced = false }
+            }
+        } else {
+            presentingSync = false
+            justSynced = false
+            syncStartedAt = nil
+            updateSweep()
+        }
+    }
+
+    private func updateSweep() {
+        withAnimation(.none) { sweep = 0 }
+        guard syncing, !reduceMotion else { return }
+        DispatchQueue.main.async {
+            withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+                sweep = 1
+            }
         }
     }
 }
@@ -3683,22 +3976,12 @@ private struct FitnessAgeHeroRow: View {
     let onExplain: () -> Void
 
     private var valueText: String {
-        age.map { "\(Int($0.rounded())) yrs" } ?? String(localized: "Calibrating")
+        age.map(FitnessAgePresentation.value) ?? String(localized: "Calibrating")
     }
 
     private var comparisonText: String {
         guard let age, profileAge > 0 else { return calibrationText }
-        let delta = Double(profileAge) - age
-        let years = Int(abs(delta).rounded())
-        if years == 0 { return String(localized: "About the same as your profile age") }
-        if delta > 0 {
-            return years == 1
-                ? String(localized: "1 year younger than your profile age")
-                : String(localized: "\(years) years younger than your profile age")
-        }
-        return years == 1
-            ? String(localized: "1 year older than your profile age")
-            : String(localized: "\(years) years older than your profile age")
+        return FitnessAgePresentation.comparison(estimate: age, profileAge: profileAge)
     }
 
     var body: some View {
@@ -4183,10 +4466,12 @@ private struct LiquidBatteryButton: View {
                 HStack(spacing: 5) {
                     batteryIcon
                     VStack(alignment: .leading, spacing: -1) {
-                        Text("BAND")
+                        Text(verbatim: "NOOP")
                             .font(.system(size: 6, weight: .bold))
                             .tracking(0)
                             .foregroundStyle(StrandPalette.textSecondary)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                         Text(batteryValue)
                             .font(.system(size: 10, weight: .bold, design: .rounded))
                             .monospacedDigit()

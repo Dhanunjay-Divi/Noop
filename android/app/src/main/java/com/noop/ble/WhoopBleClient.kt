@@ -495,7 +495,7 @@ class WhoopBleClient(
      * sites + the analyze pass read this field directly; the [Backfiller] captured its own copy at
      * construction, so [setActiveDeviceId] re-points that too (see there).
      */
-    private var deviceId: String = DEFAULT_DEVICE_ID,
+    @Volatile private var deviceId: String = DEFAULT_DEVICE_ID,
     /**
      * Registry-backed source list for post-offload scoring. Without this, `analyzeRecent` sees only the
      * computed WHOOP id and cannot repair source-local sleep duplicates under Oura/other registered ids.
@@ -795,6 +795,9 @@ class WhoopBleClient(
         private const val WHOOP5_HISTORY_RETRY_DELAY_MS = 700L
         /** Debounce between a committed backfill chunk and the on-device scoring pass it schedules. */
         private const val POST_BACKFILL_ANALYZE_DELAY_MS = 1_500L
+        private const val POST_BACKFILL_RETRY_DELAY_MS = 2_000L
+        private const val POST_BACKFILL_PENDING_PREFS = "noop_post_backfill_analysis"
+        private const val POST_BACKFILL_PENDING_SOURCES = "pending_sources"
         /** #174: window after the last offload frame/HISTORY_COMPLETE during which a type-0x2F frame is
          *  treated as trailing-historical, not live. Mirrors macOS deepPacketLiveCooldownSeconds (10s). */
         private const val DEEP_PACKET_LIVE_COOLDOWN_MS = 10_000L
@@ -2005,6 +2008,22 @@ class WhoopBleClient(
      * Cancelled in [shutdown].
      */
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val postBackfillPrefs =
+        context.getSharedPreferences(POST_BACKFILL_PENDING_PREFS, Context.MODE_PRIVATE)
+    private val postBackfillAnalysisWorker = BackfillAnalysisWorker(
+        scope = ioScope,
+        debounceMillis = POST_BACKFILL_ANALYZE_DELAY_MS,
+        retryDelayMillis = POST_BACKFILL_RETRY_DELAY_MS,
+        processRevision = { revision -> runPostBackfillAnalysisPass(revision.deviceId) },
+        markDurablyDirty = ::markPostBackfillSourceDirty,
+        clearDurablyDirty = ::clearPostBackfillSourceDirty,
+        onFailure = { sourceId, failure ->
+            log(
+                "Backfill: post-sync worker for $sourceId failed " +
+                    "(${failure.javaClass.simpleName}: ${failure.message}); kept pending for retry.",
+            )
+        },
+    )
 
     /**
      * Durable archive for undecodable history record frames (#77/#91). Written BEFORE the strap is
@@ -2036,7 +2055,7 @@ class WhoopBleClient(
         deviceId = deviceId,
         cursorStore = cursorStore,
         ackTrim = { trim, endData -> ackHistoricalChunk(trim, endData) },
-        onChunkCommitted = { batch -> onBackfillChunkCommitted(batch) },
+        onChunkCommitted = { onBackfillChunkCommitted(deviceId) },
         onConsoleChunk = { consoleChunksThisSession += 1 },
         // #77/#91: archive undecodable frames before the ack. append() returns ok=true (written, or
         // archive-full → still safe to ack) and THROWS only on a genuine write failure → return false
@@ -2071,164 +2090,195 @@ class WhoopBleClient(
      * UI's 15-min analysis tick (which also doesn't run at all with the app UI closed and only the
      * foreground service alive). Mirrors the AppViewModel loop's profile + writeback behaviour. (#78 fork)
      */
-    private fun onBackfillChunkCommitted(batch: StreamBatch) {
+    private fun onBackfillChunkCommitted(sourceId: String) {
         decodedChunksThisSession += 1   // invoked once per non-empty decoded chunk (#77 family tally)
-        if (!analyzeAfterBackfillScheduled.compareAndSet(false, true)) return
-        ioScope.launch {
-            try {
-                delay(POST_BACKFILL_ANALYZE_DELAY_MS) // let trailing chunks of the same session land
+        postBackfillAnalysisWorker.noteCommit(sourceId)
+    }
+
+    /**
+     * Background-process backstop for rows committed before cancellation or process restart. Sources whose
+     * worker did not finish are persisted separately from the in-memory latch. Reconcile them first and the
+     * current source last, so the shared fingerprint watermark finishes on the source the UI currently reads.
+     */
+    fun reconcilePersistedHistory() {
+        val activeSourceId = deviceId
+        val pending = persistedPostBackfillSourceIds()
+            .asSequence()
+            .filter { it != activeSourceId }
+            .sorted()
+            .toList()
+        postBackfillAnalysisWorker.resume(pending + activeSourceId)
+    }
+
+    private fun persistedPostBackfillSourceIds(): Set<String> =
+        try {
+            postBackfillPrefs
+                .getStringSet(POST_BACKFILL_PENDING_SOURCES, emptySet())
+                .orEmpty()
+                .filterTo(linkedSetOf()) { it.isNotBlank() }
+        } catch (failure: Throwable) {
+            log(
+                "Backfill: could not read pending post-sync sources " +
+                    "(${failure.javaClass.simpleName}: ${failure.message})",
+            )
+            emptySet()
+        }
+
+    private fun markPostBackfillSourceDirty(sourceId: String) {
+        val pending = persistedPostBackfillSourceIds().toMutableSet()
+        if (!pending.add(sourceId)) return
+        check(
+            postBackfillPrefs.edit()
+                .putStringSet(POST_BACKFILL_PENDING_SOURCES, pending)
+                .commit(),
+        ) { "could not persist pending post-sync source" }
+    }
+
+    private fun clearPostBackfillSourceDirty(sourceId: String) {
+        val pending = persistedPostBackfillSourceIds().toMutableSet()
+        if (!pending.remove(sourceId)) return
+        check(
+            postBackfillPrefs.edit()
+                .putStringSet(POST_BACKFILL_PENDING_SOURCES, pending)
+                .commit(),
+        ) { "could not clear pending post-sync source" }
+    }
+
+    /** One fingerprint-gated scoring pass. The revision worker reruns this if another chunk lands mid-pass. */
+    private suspend fun runPostBackfillAnalysisPass(sourceId: String) =
+        runFingerprintGatedBackfillAnalysis(
+            // Any exception escapes only to BackfillAnalysisWorker, which retains this immutable source
+            // revision and retries without an uncaught root coroutine.
+            readFingerprint = { repository.analysisFingerprint(sourceId) },
+            readWatermark = { NoopPrefs.analyzeWatermark(context) },
+            onUpToDate = {
+                log("re-score: trigger=post-offload newData=no - skipping (empty/duplicate offload)")
+            },
+            analyze = {
                 val profileStore = ProfileStore.from(context)
-                val profile = UserProfile(
-                    weightKg = profileStore.weightKg,
-                    heightCm = profileStore.heightCm,
-                    age = profileStore.age.toDouble(),
-                    sex = profileStore.sex,
-                    stepTicksPerStep = profileStore.stepTicksPerStep,
-                    waistCm = profileStore.waistCm,
-                    ageInputConfirmed = profileStore.ageInputConfirmed,
-                    sexInputConfirmed = profileStore.sexInputConfirmed,
-                    fitnessAgeProvenanceRequired = profileStore.fitnessAgeProvenanceRequired,
-                    vo2maxProvenanceRequired = profileStore.vo2maxProvenanceRequired,
-                    vitalityProvenanceRequired = profileStore.vitalityProvenanceRequired,
-                )
-                // #1120/#1196: capture the same raw-HR fingerprint used by the UI's idle scorer. A
-                // duplicate/empty offload has nothing new to score, so skip this expensive whole-window
-                // pass; after a successful pass advance the shared watermark so the next idle tick does
-                // not immediately repeat identical work. Never advance it on cancellation/failure.
-                val analyzeFp = repository.hrFingerprint()
-                if (analyzeFp == NoopPrefs.analyzeWatermark(context)) {
-                    log("re-score: trigger=post-offload newData=no - skipping (empty/duplicate offload)")
-                    return@launch
-                }
-                runCatching {
-                    IntelligenceEngine.analyzeRecent(
-                        repo = repository,
-                        profile = profile,
-                        importedDeviceId = deviceId,
-                        maxHROverride = profileStore.hrMaxOverride.takeIf { it > 0 }?.toDouble(),
-                        // The post-offload pass must see the same complete, non-archived registry source
-                        // set as the UI scorer; otherwise it advances the watermark after healing only
-                        // `<strap>-noop`, and a later idle pass skips Oura/source-local duplicates.
-                        ownerSource = dayOwnerSource,
-                        // Steps-estimate calibration: honor the user's manual override and persist the fit
-                        // after a backfill too, so the Settings/Steps screen reflects the latest data.
-                        manualStepCoefficient = profileStore.stepsManualOverride,
-                        persistStepsCalibration = { cal ->
-                            profileStore.stepsCalibrationCoefficient = cal.coefficient
-                            profileStore.stepsCalibrationSampleDays = cal.sampleDays
-                            profileStore.stepsCalibrationConfidence = cal.confidence
-                            profileStore.stepsCalibrationManual = cal.manual
+                IntelligenceEngine.analyzeRecent(
+                    repo = repository,
+                    // Resolve after IntelligenceEngine owns its serialization gate. A queued profile
+                    // reconciliation must not be overwritten by an older age/sex snapshot.
+                    profileProvider = {
+                        UserProfile(
+                            weightKg = profileStore.weightKg,
+                            heightCm = profileStore.heightCm,
+                            age = profileStore.age.toDouble(),
+                            sex = profileStore.sex,
+                            stepTicksPerStep = profileStore.stepTicksPerStep,
+                            waistCm = profileStore.waistCm,
+                            ageInputConfirmed = profileStore.ageInputConfirmed,
+                            sexInputConfirmed = profileStore.sexInputConfirmed,
+                            fitnessAgeProvenanceRequired = profileStore.fitnessAgeProvenanceRequired,
+                            vo2maxProvenanceRequired = profileStore.vo2maxProvenanceRequired,
+                            vitalityProvenanceRequired = profileStore.vitalityProvenanceRequired,
+                        )
+                    },
+                    importedDeviceId = sourceId,
+                    maxHROverride = profileStore.hrMaxOverride.takeIf { it > 0 }?.toDouble(),
+                    ownerSource = dayOwnerSource,
+                    manualStepCoefficient = profileStore.stepsManualOverride,
+                    persistStepsCalibration = { calibration ->
+                        profileStore.stepsCalibrationCoefficient = calibration.coefficient
+                        profileStore.stepsCalibrationSampleDays = calibration.sampleDays
+                        profileStore.stepsCalibrationConfidence = calibration.confidence
+                        profileStore.stepsCalibrationManual = calibration.manual
+                    },
+                    baselineEpoch = NoopPrefs.of(context)
+                        .getLong(Baselines.hrvBaselineEpochKey, 0L).toDouble(),
+                    recoveryEpoch = NoopPrefs.of(context)
+                        .getLong(Baselines.recoveryBaselineEpochKey, 0L).toDouble(),
+                    deepHrvWindow = UnitPrefs.hrvWindow(context) == HrvWindow.DEEP_SLEEP,
+                    diag = { message -> log(message) },
+                    useExperimentalSleepV2 = PuffinExperiment.from(context).experimentalSleepV2,
+                    useMotionAwareWake = PuffinExperiment.from(context).motionAwareWake,
+                    sleepTraceSink =
+                        if (testCentre.active(com.noop.testcentre.TestDomain.SLEEP)) {
+                            { message -> log(message, com.noop.testcentre.TestDomain.SLEEP) }
+                        } else {
+                            null
                         },
-                        // Manual "Recalibrate baseline" anchor (noop.hrvBaselineEpoch, whole seconds in a
-                        // Long). The analytics layer is Context-free, so read it here and thread it down so
-                        // the post-backfill scoring pass honours the recalibration too — not just the UI's
-                        // 15-min loop. 0 = no recalibration.
-                        baselineEpoch = NoopPrefs.of(context)
-                            .getLong(Baselines.hrvBaselineEpochKey, 0L).toDouble(),
-                        recoveryEpoch = NoopPrefs.of(context)
-                            .getLong(Baselines.recoveryBaselineEpochKey, 0L).toDouble(),
-                        // #195/#141: nightly HRV over deep-sleep windows only when the user picked WHOOP-style.
-                        // Read here (the analytics layer is Context-free) and thread it down, exactly like
-                        // baselineEpoch above — otherwise this post-backfill pass would recompute + persist every
-                        // night's HRV over the WHOLE night, silently overwriting the deep-window value the UI
-                        // loop just wrote (the "deep sleep window changes nothing" bug).
-                        deepHrvWindow = UnitPrefs.hrvWindow(context) == HrvWindow.DEEP_SLEEP,
-                        // #691: route the engine's per-day diagnostics (incl. the new RHR floor-vs-mean
-                        // line) into THIS sync's strap log, so a "NOOP RHR reads lower than my sleeping-HR
-                        // app" report carries the proof - the floor (NOOP's WHOOP-style resting HR) beside
-                        // the night MEAN (the other app's number) — from the post-backfill scoring pass, not
-                        // only the UI's 15-min loop. log() PII-scrubs at the sink. Best-effort + logging only.
-                        diag = { s -> log(s) },
-                        // Opt-in experimental sleep staging (V2): stage this post-backfill pass with the same
-                        // engine the user chose in Settings, read off SharedPreferences here (the analytics
-                        // layer is Context-free). Default off → V1. (V7 Pillar 3b)
-                        useExperimentalSleepV2 = PuffinExperiment.from(context).experimentalSleepV2,
-                        // Opt-in motion-aware wake refinement (#364 follow-up) — same Context-free threading.
-                        useMotionAwareWake = PuffinExperiment.from(context).motionAwareWake,
-                        // Sleep & Rest test mode (Test Centre E5): when the SLEEP domain is on, route this
-                        // post-backfill pass's per-day sleep gate trace into the .sleep-tagged strap log, so a
-                        // shared report carries the staging proof from THIS scoring pass too, not only the UI
-                        // 15-min loop. Zero-cost when off (the gate is one SharedPreferences bool read and the
-                        // sink stays null → analyzeDay's byte-identical untraced path). log() PII-scrubs.
-                        sleepTraceSink =
-                            if (testCentre.active(com.noop.testcentre.TestDomain.SLEEP))
-                                { s -> log(s, com.noop.testcentre.TestDomain.SLEEP) }
-                            else null,
-                        // Recovery (Charge) test mode (Test Centre Group G): when the RECOVERY domain is on,
-                        // route this post-backfill pass's per-night Charge term-breakdown into the
-                        // .recovery-tagged strap log too, not only the UI 15-min loop. Zero-cost when off
-                        // (the gate is one SharedPreferences bool read and the sink stays null → the Charge
-                        // score path is byte-identical). log() PII-scrubs.
-                        recoveryTraceSink =
-                            if (testCentre.active(com.noop.testcentre.TestDomain.RECOVERY))
-                                { s -> log(s, com.noop.testcentre.TestDomain.RECOVERY) }
-                            else null,
-                        // Steps test mode (Test Centre): when the STEPS domain is on, route this post-backfill
-                        // pass's per-day 5/MG raw-counter trace + WHOOP-4 calibration trace into the
-                        // .steps-tagged strap log too, not only the UI 15-min loop. Zero-cost when off (the
-                        // gate is one SharedPreferences bool read and the sink stays null, so the steps total
-                        // path is byte-identical). log() PII-scrubs.
-                        stepsTraceSink =
-                            if (testCentre.active(com.noop.testcentre.TestDomain.STEPS))
-                                { s -> log(s, com.noop.testcentre.TestDomain.STEPS) }
-                            else null,
+                    recoveryTraceSink =
+                        if (testCentre.active(com.noop.testcentre.TestDomain.RECOVERY)) {
+                            { message -> log(message, com.noop.testcentre.TestDomain.RECOVERY) }
+                        } else {
+                            null
+                        },
+                    stepsTraceSink =
+                        if (testCentre.active(com.noop.testcentre.TestDomain.STEPS)) {
+                            { message -> log(message, com.noop.testcentre.TestDomain.STEPS) }
+                        } else {
+                            null
+                        },
+                )
+            },
+            afterAnalysis = {
+                // These actions are structurally unreachable until IntelligenceEngine succeeds.
+                try {
+                    val merged = repository.daysMerged(sourceId)
+                    val newest = merged.maxByOrNull { it.day }?.day ?: "-"
+                    val todayKey = com.noop.ui.logicalDayKeyNow()
+                    val present = if (merged.any { it.day == todayKey }) "present" else "MISSING"
+                    log(
+                        "Backfill: ${merged.size} day(s) banked; newest=$newest, " +
+                            "dashboard-today=$todayKey ($present)",
                     )
-                }.onSuccess {
-                    NoopPrefs.setAnalyzeWatermark(context, analyzeFp)
-                    log("Backfill: post-sync scoring pass done")
-                    // #277 diagnostic: surface the day-key the dashboard treats as "today" against the
-                    // newest banked row, so a UTC-bucket vs local-day split (rows persist but Today
-                    // freezes) shows up plainly in the shared strap log. Best-effort — a diagnostic read
-                    // must never break scoring.
-                    runCatching {
-                        val merged = repository.daysMerged(deviceId)
-                        val newest = merged.maxByOrNull { it.day }?.day ?: "-"
-                        val todayKey = com.noop.ui.logicalDayKeyNow()
-                        val present = if (merged.any { it.day == todayKey }) "present" else "MISSING"
-                        log("Backfill: ${merged.size} day(s) banked; newest=$newest, dashboard-today=$todayKey ($present)")
-                        val localKey = java.time.LocalDate.now().toString()
-                        val todayRow = com.noop.ui.resolveTodayRow(merged, todayKey, localKey)
-                        if (todayRow?.totalSleepMin != null) {
-                            ScheduledReportNotifier.onMorning(
-                                context = context,
-                                reportDay = todayRow.day,
-                                chargePct = todayRow.recovery.scorePctOrNull(),
-                                restPct = RestScorer.restFromDaily(todayRow).scorePctOrNull(),
-                                materializedAfterSync = true,
-                            )
-                        }
+                    val localKey = java.time.LocalDate.now().toString()
+                    val todayRow = com.noop.ui.resolveTodayRow(merged, todayKey, localKey)
+                    if (todayRow?.totalSleepMin != null) {
+                        ScheduledReportNotifier.onMorning(
+                            context = context,
+                            reportDay = todayRow.day,
+                            chargePct = todayRow.recovery.scorePctOrNull(),
+                            restPct = RestScorer.restFromDaily(todayRow).scorePctOrNull(),
+                            materializedAfterSync = true,
+                        )
                     }
-                    // Background parity: the foreground connection service can keep this process alive
-                    // without an AppViewModel. After the post-sync reanalysis succeeds, run the SAME
-                    // suggestion-only scan as Today's card and post only when notification permission was
-                    // already granted. The helper never saves/dismisses and span-dedupes repeated passes.
+                } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+                    throw cancelled
+                } catch (failure: Throwable) {
+                    log("Backfill: post-sync report refresh failed: ${failure.message}")
+                }
+
+                try {
                     AutoWorkoutCandidateNotifier.afterReanalysis(
                         context = context,
                         repository = repository,
-                        activeDeviceId = deviceId,
+                        activeDeviceId = sourceId,
                         traceSink =
-                            if (testCentre.active(com.noop.testcentre.TestDomain.WORKOUTS))
-                                { s -> log(s, com.noop.testcentre.TestDomain.WORKOUTS) }
-                            else null,
+                            if (testCentre.active(com.noop.testcentre.TestDomain.WORKOUTS)) {
+                                { message -> log(message, com.noop.testcentre.TestDomain.WORKOUTS) }
+                            } else {
+                                null
+                            },
                     )
-                }.onFailure {
-                    // The scoring pass now hops to Dispatchers.Default; shutdown() cancels it, which is
-                    // not a scoring failure — rethrow so the cancellation isn't swallowed/mis-logged. (#125)
-                    if (it is kotlin.coroutines.cancellation.CancellationException) throw it
-                    log("Backfill: post-sync scoring failed: ${it.message}")
+                } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+                    throw cancelled
+                } catch (failure: Throwable) {
+                    log("Backfill: post-sync workout suggestion failed: ${failure.message}")
                 }
-                // Keep the opt-in Health Connect writeback fresh in background-only operation too.
+
                 if (NoopPrefs.hcWriteback(context)) {
-                    // #660: log the count AND any PII-safe failure categories (the writer also persists
-                    // the outcome to prefs, so Data Sources surfaces a failing background share).
-                    runCatching { HealthConnectWriter.write(context, repository, deviceId) }
-                        .onSuccess { r -> log("HC writeback: ${r.written} record(s)" + if (r.ok) "" else " (failed: ${r.failures.joinToString()})") }
+                    try {
+                        val result = HealthConnectWriter.write(context, repository, sourceId)
+                        log(
+                            "HC writeback: ${result.written} record(s)" +
+                                if (result.ok) "" else " (failed: ${result.failures.joinToString()})",
+                        )
+                    } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+                        throw cancelled
+                    } catch (failure: Throwable) {
+                        log("HC writeback failed after post-sync scoring: ${failure.message}")
+                    }
                 }
-            } finally {
-                analyzeAfterBackfillScheduled.set(false)
-            }
-        }
-    }
+            },
+            // The watermark is the commit record for the whole pass and therefore remains last.
+            persistWatermark = { analyzeFp ->
+                NoopPrefs.setAnalyzeWatermark(context, analyzeFp)
+                log("Backfill: post-sync scoring pass done")
+            },
+        )
 
     /** True while a historical offload is in progress (offload frames route to the Backfiller). */
     @Volatile
@@ -2295,9 +2345,6 @@ class WhoopBleClient(
     private var historicalKickSent = false
     /** 5/MG zero-frame retries used this CONNECTION (max 2 — then the 900s periodic timer owns it). */
     private var whoop5HistoryAttempts = 0
-    /** One-shot debounce: a post-backfill scoring pass is already scheduled/running. */
-    private val analyzeAfterBackfillScheduled = java.util.concurrent.atomic.AtomicBoolean(false)
-
     /** Guards the once-per-connect initial offload kick (Swift `backfillStarted`). */
     private var backfillStarted = false
 

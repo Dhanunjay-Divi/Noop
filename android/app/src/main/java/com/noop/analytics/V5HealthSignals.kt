@@ -83,6 +83,7 @@ object V5HealthSignals {
                 nights,
                 baselineUsable = cycleBaselineTrusted,
                 loggedPeriodStarts = loggedPeriodStarts,
+                asOfDay = todayKey,
             )
         } else {
             CyclePhaseEngine.Result(
@@ -91,6 +92,7 @@ object V5HealthSignals {
                 cycleDayLow = null, cycleDayHigh = null, cycleLengthDays = null,
                 nextPeriodWindow = null, shiftMarkers = emptyList(),
                 note = "Turn on cycle awareness to read a coarse phase from your nightly temperature.",
+                noteKinds = listOf(CyclePhaseEngine.NoteKind.TURN_ON_AWARENESS),
             )
         }
 

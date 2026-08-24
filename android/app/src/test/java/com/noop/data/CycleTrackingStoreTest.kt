@@ -4,6 +4,7 @@ import java.lang.reflect.Proxy
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -15,7 +16,10 @@ class CycleTrackingStoreTest {
         val rows: MutableMap<Triple<String, String, String>, MetricSeriesRow>,
     )
 
-    private fun fixture(seed: List<MetricSeriesRow> = emptyList()): Fixture {
+    private fun fixture(
+        seed: List<MetricSeriesRow> = emptyList(),
+        metricSeriesFailure: Throwable? = null,
+    ): Fixture {
         val rows = seed.associateByTo(linkedMapOf()) { Triple(it.deviceId, it.day, it.key) }
         val dao = Proxy.newProxyInstance(
             WhoopDao::class.java.classLoader,
@@ -23,6 +27,7 @@ class CycleTrackingStoreTest {
         ) { _, method, args ->
             when (method.name) {
                 "metricSeries" -> {
+                    metricSeriesFailure?.let { throw it }
                     val a = args!!
                     val source = a[0] as String
                     val key = a[1] as String
@@ -167,5 +172,27 @@ class CycleTrackingStoreTest {
             null,
             CycleTrackingStore.decode("2026-08-23", ((1 shl 30) or 1).toDouble()),
         )
+    }
+
+    @Test
+    fun cycleReadFailuresPropagateInsteadOfPublishingEmptyHistory() = runBlocking {
+        val failure = IllegalStateException("storage unavailable")
+        val repo = fixture(metricSeriesFailure = failure).repo
+
+        val periodError = try {
+            repo.periodStarts()
+            null
+        } catch (error: Throwable) {
+            error
+        }
+        val detailError = try {
+            repo.cycleDailyLogs()
+            null
+        } catch (error: Throwable) {
+            error
+        }
+
+        assertSame(failure, periodError)
+        assertSame(failure, detailError)
     }
 }

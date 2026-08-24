@@ -1,6 +1,6 @@
 # Active NOOP Handoff
 
-Last updated: **2026-08-23**
+Last updated: **2026-08-24**
 
 ## Repository state
 
@@ -11,8 +11,8 @@ Last updated: **2026-08-23**
 - GitHub reports `isFork=false`, no parent, and `main` as the default branch.
 - Previous hosted implementation checkpoint: `94661a17`.
 - Current implementation and round record: use `git log -1`; this record is
-  committed with the explainable-trends, local-profile, and Rhythm-context
-  change.
+  committed with the cycle-tracking, profile-metric reconciliation, neutral
+  Sleep source, and Daily Signal sync change.
 - Hosting independence is complete. Commercial source independence is not.
 - Current agent instructions:
   [`../handoff/AGENT-HANDOFF-20260823.md`](../handoff/AGENT-HANDOFF-20260823.md)
@@ -20,21 +20,33 @@ Last updated: **2026-08-23**
 ## Last completed round
 
 The
-[explainable trends, profile identity, and Rhythm context round](rounds/2026-08-23-explainable-trends-profile-rhythm.md)
-replaces internal pattern terminology with plain evidence, adds deliberate
-iPhone trend inspection and localized range-average context, and adds an
-on-device display name defaulting to Noop. Experimental Rhythm now loads the
-latest consent-gated night on Android, refreshes on both platforms, rejects
-recorded activity, fails closed on missing resting evidence, and selects one
-readable active/canonical R-R source without merging duplicate beat trains.
-Band-tap precedence is documented in-app and paced breathing falls back to
-restrained phone haptics when no band is bonded.
+[overnight calibration, Daily Effort, and grounded Coach round](rounds/2026-08-24-overnight-calibration-effort-coach.md)
+makes persisted score-bearing history durable and source-bound until analysis
+succeeds, adds a conservative same-day opt-in Effort range/nudge, gives Coach a
+typed evidence boundary, and completes metric education parity.
 
-Current local evidence includes 1,323 StrandAnalytics tests, 44 StrandDesign
-tests, 3,573 Android Full Debug unit tests with 6 skips and no failures,
-`assembleFullDebug`, final iOS and macOS Debug builds, focused profile/brand
-tests, clean i18n/health-claims/legal/private-data gates, and a clean
-independent source review.
+Current local evidence includes 1,360 StrandAnalytics tests, 1,410 passing
+macOS app tests with 1 intentional skip, 3,627 Android Full Debug unit tests
+with 6 skips and no failures, the Full Debug APK, Android instrumentation with
+4/4 passing, a generic iOS simulator build, 21/21 iOS production-shell tests,
+40/40 visual scenarios across iPhone SE and iPhone 14 Pro, generated
+localization parity, clean i18n/health-claims/legal inventory gates, and the
+expected fail-closed distribution result.
+
+The preceding
+[cycle tracking and profile metric reconciliation round](rounds/2026-08-24-cycle-tracking-metric-reconciliation.md)
+makes private cycle setup discoverable from Profile and Health before the first
+wearable reading, adds conservative logged-cadence and temperature-shift
+handling, and localizes the full cycle presentation. Fitness Age and Vitality
+now reconcile after relevant profile, birthday, and active-device changes
+without allowing failed storage to advance the retry watermark. Sleep uses one
+neutral Imported badge, and Daily Signal keeps source/state visible while
+showing honest indeterminate Noop Band history sync.
+
+The preceding
+[explainable trends, profile identity, and Rhythm context round](rounds/2026-08-23-explainable-trends-profile-rhythm.md)
+remains the authority for pattern evidence, trend inspection, local display
+identity, Rhythm context, tap precedence, and breathing haptics.
 
 The preceding
 [Today metric catalog and Recovery color round](rounds/2026-08-23-today-metrics-recovery.md)
@@ -66,10 +78,13 @@ The stricter distribution gate intentionally fails on:
    roles separate, then commit structured evidence.
 4. Migrate the 247 Android and 166 Apple baseline-tracked literals into
    reviewed localization resources and complete native-speaker review.
-5. Only after the distribution gate passes, resume store signing, release
+5. Obtain native-speaker review for the new reproductive-health copy and run
+   representative physical-device cycle, age-metric, band-sync, calibration,
+   haptic, background, and battery checks.
+6. Only after the distribution gate passes, resume store signing, release
    metadata, physical-device validation, accuracy studies, Safety paging
    staging, and regulatory review.
-6. Validate the current tap, phone/band haptic, re-pair, workout-context, and
+7. Validate the current tap, phone/band haptic, re-pair, workout-context, and
    overnight Rhythm paths on representative physical devices without resetting
    existing user data.
 
@@ -89,6 +104,18 @@ The stricter distribution gate intentionally fails on:
 - Rhythm is descriptive and opt-in. It never alerts, and missing motion,
   elevated rate, or non-dismissed recorded activity must continue to fail
   closed under D-013.
+- Cycle tracking is private opt-in awareness. It must not become fertility,
+  contraception, safe-day, ovulation-date, or diagnostic guidance without a
+  separate validated and regulated program.
+- Fitness Age and Vitality formulas did not change in the current round; failed
+  reads, writes, and completion-marker persistence must remain retryable.
+- Persisted score-bearing history remains pending until source-bound analysis
+  succeeds. Do not replace the revision/retry contract with an in-memory
+  boolean or advance the fingerprint watermark after a failed pass.
+- Daily Effort is an opt-in current-day planning cue, not a limit, prescription,
+  or permission to train. Historical rows and withheld ranges cannot notify.
+- Coach must preserve unavailable, empty, observed, and missing states. Do not
+  turn absent evidence into zero, a trend, or personalized nutrition advice.
 - Phone and band haptic code compiled and unit logic passed; no physical
   vibration, background delivery, battery, or gesture behavior was validated.
 - Keep the repository private and do not treat private hosting as commercial

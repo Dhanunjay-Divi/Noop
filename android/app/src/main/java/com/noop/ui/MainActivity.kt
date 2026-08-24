@@ -334,9 +334,9 @@ object NoopPrefs {
         of(context).edit().putBoolean(KEY_FAST_LINK_PHY, enabled).apply()
     }
 
-    /** #836, the raw-HR fingerprint ("count:maxTs") the last COMPLETED idle rescore scored against. The
-     *  15-min backstop tick skips when the current fingerprint equals this; cleared implicitly by any HR
-     *  insert/delete (the fingerprint moves). Mirrors the Swift `analyzeWatermark` UserDefaults key. */
+    /** #836, the raw scoring-input fingerprint ("count:maxTs") the last COMPLETED idle rescore scored
+     *  against. The 15-min backstop skips when it is unchanged; any score-bearing stream insert/delete
+     *  moves it. Mirrors the Swift `analyzeWatermark` UserDefaults key. */
     fun analyzeWatermark(context: Context): String? =
         of(context).getString(KEY_ANALYZE_WATERMARK, null)
 

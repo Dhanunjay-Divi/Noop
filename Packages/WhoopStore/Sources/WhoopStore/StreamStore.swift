@@ -2,6 +2,55 @@ import Foundation
 import GRDB
 import WhoopProtocol
 
+/// Rows actually inserted by `WhoopStore.insert`, split by decoded stream. Keeping the complete result
+/// matters for history handoff: WHOOP 5/MG nights can be PPG-HR, motion, and band-sleep-state only, so the
+/// old eight-field tuple could report "0 rows" after durable overnight data had landed.
+public struct StreamInsertCounts: Equatable, Sendable {
+    public let hr: Int
+    public let rr: Int
+    public let events: Int
+    public let battery: Int
+    public let spo2: Int
+    public let skinTemp: Int
+    public let resp: Int
+    public let gravity: Int
+    public let steps: Int
+    public let sleepState: Int
+    public let ppgHr: Int
+    public let ppgWaveform: Int
+
+    public init(
+        hr: Int = 0, rr: Int = 0, events: Int = 0, battery: Int = 0,
+        spo2: Int = 0, skinTemp: Int = 0, resp: Int = 0, gravity: Int = 0,
+        steps: Int = 0, sleepState: Int = 0, ppgHr: Int = 0, ppgWaveform: Int = 0
+    ) {
+        self.hr = hr
+        self.rr = rr
+        self.events = events
+        self.battery = battery
+        self.spo2 = spo2
+        self.skinTemp = skinTemp
+        self.resp = resp
+        self.gravity = gravity
+        self.steps = steps
+        self.sleepState = sleepState
+        self.ppgHr = ppgHr
+        self.ppgWaveform = ppgWaveform
+    }
+
+    /// Persisted physiological streams. Raw PPG waveform is included because it is durable user history,
+    /// even though the current scorer consumes its derived PPG-HR projection.
+    public var biometricRows: Int {
+        hr + rr + spo2 + skinTemp + resp + gravity + steps + sleepState + ppgHr + ppgWaveform
+    }
+
+    /// Rows that can invalidate a score. Wrist events affect sleep/wear interpretation, so an event-only
+    /// chunk must wake analysis too. Battery remains transport housekeeping.
+    public var scoreBearingRows: Int {
+        biometricRows + events
+    }
+}
+
 extension WhoopStore {
     /// Deterministic JSON for an event payload (sorted keys so the same payload always
     /// serializes byte-identically, important for the natural-key dedupe and parity).
@@ -124,11 +173,11 @@ extension WhoopStore {
     /// `ON CONFLICT DO NOTHING` also preserves a row that is already marked delivered.
     @discardableResult
     public func insert(_ streams: Streams, deviceId: String) async throws
-        -> (hr: Int, rr: Int, events: Int, battery: Int,
-            spo2: Int, skinTemp: Int, resp: Int, gravity: Int) {
+        -> StreamInsertCounts {
         return try syncWrite { db in
             var hr = 0, rr = 0, ev = 0, bat = 0
             var spo2 = 0, skin = 0, resp = 0, grav = 0
+            var steps = 0, sleepState = 0, ppgHr = 0, ppgWaveform = 0
             // Reuse one prepared statement per table instead of recompiling the same SQL on every
             // row. This is the hottest write path (every Collector.flush + every Backfiller chunk
             // over potentially millions of historical rows). cachedStatement persists the compiled
@@ -239,6 +288,7 @@ extension WhoopStore {
                     """)
                 for s in streams.steps {
                     try stmt.execute(arguments: [deviceId, s.ts, s.counter, s.activityClass])
+                    steps += db.changesCount
                 }
             }
             // Band sleep_state (#175). Persist-only, same as steps — the strap's OWN @81 high-nibble state
@@ -252,19 +302,19 @@ extension WhoopStore {
                     """)
                 for s in streams.sleepState {
                     try stmt.execute(arguments: [deviceId, s.ts, s.state])
+                    sleepState += db.changesCount
                 }
             }
-            // PPG-derived HR from the v26 optical buffer (#156). Persist-only, same as steps, the count
-            // is not added to the 8-field return tuple (the Backfiller call site reads that tuple by name;
-            // extending it would ripple), so it is inserted without being counted. ON CONFLICT DO NOTHING
-            // keeps the FIRST estimate for a second; the measured hrSample is never touched here.
+            // PPG-derived HR from the v26 optical buffer (#156). ON CONFLICT DO NOTHING keeps the FIRST
+            // estimate for a second; the measured hrSample is never touched here.
             if !streams.ppgHr.isEmpty {
                 let stmt = try db.cachedStatement(sql: """
                     INSERT INTO ppgHrSample (deviceId, ts, bpm, conf) VALUES (?, ?, ?, ?)
                     ON CONFLICT(deviceId, ts) DO NOTHING
-                    """)
+                """)
                 for s in streams.ppgHr {
                     try stmt.execute(arguments: [deviceId, s.ts, s.bpm, s.conf])
+                    ppgHr += db.changesCount
                 }
             }
             // RAW v26 optical PPG waveform (#156 follow-up) — the samples `ppgHr` above is derived FROM.
@@ -276,12 +326,17 @@ extension WhoopStore {
                 let stmt = try db.cachedStatement(sql: """
                     INSERT INTO ppgWaveformSample (deviceId, ts, samples) VALUES (?, ?, ?)
                     ON CONFLICT(deviceId, ts) DO NOTHING
-                    """)
+                """)
                 for s in streams.ppgWaveform {
                     try stmt.execute(arguments: [deviceId, s.ts, WhoopStore.packPpgSamples(s.samples)])
+                    ppgWaveform += db.changesCount
                 }
             }
-            return (hr, rr, ev, bat, spo2, skin, resp, grav)
+            return StreamInsertCounts(
+                hr: hr, rr: rr, events: ev, battery: bat,
+                spo2: spo2, skinTemp: skin, resp: resp, gravity: grav,
+                steps: steps, sleepState: sleepState, ppgHr: ppgHr, ppgWaveform: ppgWaveform
+            )
         }
     }
 

@@ -1,6 +1,9 @@
 package com.noop.notif
 
 import com.noop.analytics.DailyActionPlanner
+import com.noop.analytics.DailyEffortGuidance
+import com.noop.analytics.ReadinessEngine
+import com.noop.analytics.ScoreConfidence
 import com.noop.ui.NoopPrefs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -14,17 +17,25 @@ import org.junit.Test
  * most once per day, only when strain has genuinely reached a KNOWN target, never on a guessed one.
  */
 class StrainTargetPolicyTest {
+    private val range = DailyActionPlanner.EffortRange(40, 60)
+
+    private fun guidance(effort: Double?) =
+        com.noop.analytics.DailyEffortGuidance.evaluate(effort, range)
 
     @Test fun firesWhenEnabledStrainReachedTargetAndNotYetToday() {
         assertTrue(
             StrainTargetPolicy.shouldNotify(
-                enabled = true, dayStrain = 14.0, target = 14.0, lastNotifiedDay = "2026-07-17", today = "2026-07-18",
+                enabled = true, guidance = guidance(40.0),
+                dataDay = "2026-07-18", currentLocalDay = "2026-07-18",
+                lastNotifiedDay = "2026-07-17",
             ),
         )
         // Overshooting the target still fires (>= gate), once.
         assertTrue(
             StrainTargetPolicy.shouldNotify(
-                enabled = true, dayStrain = 16.2, target = 14.0, lastNotifiedDay = null, today = "2026-07-18",
+                enabled = true, guidance = guidance(72.0),
+                dataDay = "2026-07-18", currentLocalDay = "2026-07-18",
+                lastNotifiedDay = null,
             ),
         )
     }
@@ -32,7 +43,9 @@ class StrainTargetPolicyTest {
     @Test fun suppressedWhenDisabled() {
         assertFalse(
             StrainTargetPolicy.shouldNotify(
-                enabled = false, dayStrain = 18.0, target = 14.0, lastNotifiedDay = null, today = "2026-07-18",
+                enabled = false, guidance = guidance(50.0),
+                dataDay = "2026-07-18", currentLocalDay = "2026-07-18",
+                lastNotifiedDay = null,
             ),
         )
     }
@@ -40,7 +53,9 @@ class StrainTargetPolicyTest {
     @Test fun suppressedBeforeTargetIsReached() {
         assertFalse(
             StrainTargetPolicy.shouldNotify(
-                enabled = true, dayStrain = 13.9, target = 14.0, lastNotifiedDay = null, today = "2026-07-18",
+                enabled = true, guidance = guidance(39.9),
+                dataDay = "2026-07-18", currentLocalDay = "2026-07-18",
+                lastNotifiedDay = null,
             ),
         )
     }
@@ -48,16 +63,37 @@ class StrainTargetPolicyTest {
     @Test fun suppressedWhenAlreadyFiredToday() {
         assertFalse(
             StrainTargetPolicy.shouldNotify(
-                enabled = true, dayStrain = 15.0, target = 14.0, lastNotifiedDay = "2026-07-18", today = "2026-07-18",
+                enabled = true, guidance = guidance(50.0),
+                dataDay = "2026-07-18", currentLocalDay = "2026-07-18",
+                lastNotifiedDay = "2026-07-18",
             ),
         )
+    }
+
+    @Test fun suppressedForHistoricalOrFutureDataDays() {
+        listOf("2026-07-17", "2026-07-19").forEach { dataDay ->
+            assertFalse(
+                "only the current local calendar day's row may notify",
+                StrainTargetPolicy.shouldNotify(
+                    enabled = true,
+                    guidance = guidance(50.0),
+                    dataDay = dataDay,
+                    currentLocalDay = "2026-07-18",
+                    lastNotifiedDay = null,
+                ),
+            )
+        }
     }
 
     @Test fun suppressedWhenTargetUnknownCalibrating() {
         // Planner withheld the range ⇒ null target ⇒ never fire (never guess a target).
         assertFalse(
             StrainTargetPolicy.shouldNotify(
-                enabled = true, dayStrain = 18.0, target = null, lastNotifiedDay = null, today = "2026-07-18",
+                enabled = true,
+                guidance = DailyEffortGuidance.evaluate(50.0, null),
+                dataDay = "2026-07-18",
+                currentLocalDay = "2026-07-18",
+                lastNotifiedDay = null,
             ),
         )
     }
@@ -65,21 +101,41 @@ class StrainTargetPolicyTest {
     @Test fun suppressedWhenNoStrainYet() {
         assertFalse(
             StrainTargetPolicy.shouldNotify(
-                enabled = true, dayStrain = null, target = 14.0, lastNotifiedDay = null, today = "2026-07-18",
+                enabled = true, guidance = guidance(null),
+                dataDay = "2026-07-18", currentLocalDay = "2026-07-18",
+                lastNotifiedDay = null,
             ),
         )
     }
 
-    @Test fun copyUsesNoopWordingAndTheTarget() {
-        val (title, body) = StrainTargetPolicy.copy(target = 14)
-        // NOOP's own copy — must NOT reproduce WHOOP's decompiled strings.
-        assertTrue(title.contains("Effort marker"))
-        assertFalse(title.contains("Target Strain Reached"))
-        assertTrue(body.contains("14"))
-        assertFalse(body.contains("for this activity"))
-        assertFalse(body.contains("earned", ignoreCase = true))
-        assertFalse(body.contains("optimal", ignoreCase = true))
-        assertTrue(body.contains("not a limit", ignoreCase = true))
+    @Test fun staleReadinessCannotProduceNotifiableGuidance() {
+        val staleReadiness = ReadinessEngine.Readiness(
+            level = ReadinessEngine.Level.BALANCED,
+            headline = "Readiness",
+            summary = "Stale fixture",
+            signals = emptyList(),
+            acwr = null,
+            monotony = null,
+            asOfDay = "2026-07-17",
+            confidence = ScoreConfidence.SOLID,
+            baselineDays = 14,
+        )
+        val plan = DailyActionPlanner.plan(
+            today = "2026-07-18",
+            readiness = staleReadiness,
+            checkIn = DailyActionPlanner.CheckIn.AS_USUAL,
+            recentEffort = emptyList(),
+        )
+        assertEquals(null, plan.target)
+        assertFalse(
+            StrainTargetPolicy.shouldNotify(
+                enabled = true,
+                guidance = DailyEffortGuidance.evaluate(50.0, plan.target),
+                dataDay = "2026-07-18",
+                currentLocalDay = "2026-07-18",
+                lastNotifiedDay = null,
+            ),
+        )
     }
 
     @Test fun dailyActionCheckInIsStrictlyDayScopedAndFailClosed() {
