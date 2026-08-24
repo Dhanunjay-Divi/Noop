@@ -1,11 +1,12 @@
 import Foundation
 import UserNotifications
+import StrandAnalytics
 
 // MARK: - Target-strain notification (#593)
 //
 // A single opt-in, default-OFF informational nudge: once per day, when the day's canonical 0–100 Effort
-// reaches the LOW end of DailyActionPlanner's evidence-gated personal range, post an "Effort marker
-// reached" notification. Twin of the Android `StrainTargetNotifier`/`StrainTargetPolicy` - the pure policy
+// reaches DailyActionPlanner's evidence-gated personal range, post a once-daily informational nudge.
+// Twin of the Android `StrainTargetNotifier`/`StrainTargetPolicy` - the pure policy
 // must stay byte-identical (feature-level parity).
 //
 // CLEAN-ROOM: this reimplements the BEHAVIOUR only. The copy is NOOP's own — NOT WHOOP's decompiled
@@ -20,24 +21,15 @@ enum StrainTargetNotifier {
     /// Pure, testable policy + copy — no notification/UserDefaults runtime, so the decision logic is
     /// pinned by StrainTargetPolicyTests. Byte-identical twin of the Android `StrainTargetPolicy`.
     enum StrainTargetPolicy {
-        /// Fire at most once per day: only when enabled, BOTH the day strain and the target are known,
-        /// the day strain has reached the target, and we haven't already posted for `today`. `dayStrain`
-        /// and `target` must be on the SAME canonical 0–100 Effort axis. A nil target means the planner
-        /// withheld the range (unanswered check-in, stale/thin evidence, or recovery shift) ⇒ never fires.
+        /// Fire at most once per day, only when today's measured Effort is within or above the planner's
+        /// complete range. An unavailable result means the planner withheld the range or the current
+        /// value is not trustworthy, so the policy fails closed.
         static func shouldNotify(enabled: Bool,
-                                 dayStrain: Double?,
-                                 target: Double?,
+                                 guidance: DailyEffortGuidance.Result,
                                  lastNotifiedDay: String?,
                                  today: String) -> Bool {
-            guard enabled, let dayStrain, let target else { return false }
-            return dayStrain >= target && lastNotifiedDay != today
-        }
-
-        /// Title + body for the nudge. `target` is the marker on canonical 0–100 Effort. The wording
-        /// deliberately avoids "optimal", "earned", or permission-to-push claims.
-        static func copy(target: Int) -> (title: String, body: String) {
-            (String(localized: "Effort marker reached"),
-             String(localized: "You've reached today's Effort marker of \(target). It is a planning cue, not a limit-check how you feel before adding more."))
+            guard enabled, lastNotifiedDay != today else { return false }
+            return guidance.state == .inRange || guidance.state == .aboveRange
         }
     }
 
@@ -51,18 +43,33 @@ enum StrainTargetNotifier {
     }
 
     /// Run the policy against the resolved today-row's values and post at most one notification per day.
-    /// `dayEffort`/`targetEffort` are both on canonical 0–100 Effort. No-op on every path that fails the
+    /// `dayEffort`/`targetRange` are both on canonical 0–100 Effort. No-op on every path that fails the
     /// policy, so the caller can fire it freely each time history republishes. The persisted day marker
     /// advances only after an authorized post, so a notifications-denied day can retry later that day.
-    static func onDayUpdate(day: String, dayEffort: Double?, targetEffort: Int?, enabled: Bool) {
+    static func onDayUpdate(
+        day: String,
+        dayEffort: Double?,
+        targetRange: DailyActionPlanner.EffortRange?,
+        enabled: Bool
+    ) {
         let d = UserDefaults.standard
+        let guidance = DailyEffortGuidance.evaluate(
+            currentEffort: dayEffort,
+            range: targetRange
+        )
         guard StrainTargetPolicy.shouldNotify(enabled: enabled,
-                                              dayStrain: dayEffort,
-                                              target: targetEffort.map(Double.init),
+                                              guidance: guidance,
                                               lastNotifiedDay: d.string(forKey: lastDayKey),
-                                              today: day) else { return }
-        // Non-nil: shouldNotify above required a non-nil target before returning true.
-        let copy = StrainTargetPolicy.copy(target: targetEffort!)
+                                              today: day),
+              let current = guidance.current,
+              let range = guidance.range else { return }
+        let title = String(localized: "daily_plan.notification.title")
+        let body = String(
+            format: String(localized: "daily_plan.notification.body"),
+            Int(current.rounded()),
+            range.lower,
+            range.upper
+        )
         Task { @MainActor in
             let center = UNUserNotificationCenter.current()
             // Authorization is requested once via requestAuthorization() when the toggle is enabled; here we
@@ -70,10 +77,16 @@ enum StrainTargetNotifier {
             let settings = await center.notificationSettings()
             guard settings.authorizationStatus == .authorized else { return }
             let content = UNMutableNotificationContent()
-            content.title = copy.title
-            content.body = copy.body
+            content.title = title
+            content.body = body
             content.sound = .default
+            content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+            content.threadIdentifier = "noop.daily-effort"
+            content.userInfo = [
+                NotificationRouteBridge.userInfoKey: NoopNotificationRoute.today.rawValue,
+            ]
             do {
+                DailyReviewNotifications.registerPrivacyCategory(on: center)
                 try await center.add(
                     UNNotificationRequest(identifier: "strain-target", content: content, trigger: nil)
                 )

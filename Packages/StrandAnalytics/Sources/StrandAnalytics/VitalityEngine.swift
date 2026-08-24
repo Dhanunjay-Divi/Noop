@@ -154,29 +154,35 @@ public enum VitalityEngine {
     ///   • Steps: ~12% per 1,000 steps/day up to ~7k, diminishing to ~11k (pooled step-mortality meta).
     public static func contributions(_ inputs: Inputs) -> [Contribution] {
         var out: [Contribution] = []
-        if let rhr = inputs.restingHR {
+        // CLAMPED to ±4, i.e. an effective 25…105 bpm window, matching the ±4 convention the VO2max and
+        // steps terms already use. This was previously the ONLY unclamped, unguarded contribution: a
+        // corrupt or non-finite resting HR (a bad import, a glitching sensor) produced an unbounded
+        // log-hazard — restingHR = .infinity yielded lnHazard = inf, which poisons the entire hazard sum
+        // and therefore the user-facing wellness age. Beyond this window an extra beat cannot honestly buy
+        // more hazard, so clamping is the conservative reading.
+        if let rhr = inputs.restingHR, rhr.isFinite {
             out.append(Contribution(key: "rhr", label: "Resting heart rate",
-                                    lnHazard: ((rhr - 65) / 10) * 0.100))
+                                    lnHazard: clamp((rhr - 65) / 10, -4, 4) * 0.100))
         }
-        if let vo2 = inputs.vo2max, let exp = inputs.expectedVO2max, exp > 0 {
+        if let vo2 = inputs.vo2max, let exp = inputs.expectedVO2max, exp > 0, vo2.isFinite, exp.isFinite {
             // (expected − vo2): if fitter than expected this is negative → protective.
             out.append(Contribution(key: "vo2max", label: "Cardio fitness",
                                     lnHazard: clamp((exp - vo2) / 3.5, -4, 4) * 0.130))
         }
-        if let sh = inputs.sleepHours {
+        if let sh = inputs.sleepHours, sh.isFinite {
             let dev = max(0, abs(sh - 7.5) - 0.5)   // only deviation > ±0.5 h is a risk; optimum is neutral
             out.append(Contribution(key: "sleep", label: "Sleep duration",
                                     lnHazard: clamp(dev, 0, 3) * 0.110))
         }
-        if let c = inputs.sleepConsistency {
+        if let c = inputs.sleepConsistency, c.isFinite {
             out.append(Contribution(key: "consistency", label: "Sleep-duration consistency",
                                     lnHazard: (0.75 - clamp(c, 0, 1)) * 0.450))
         }
-        if let h = inputs.rmssd, let norm = inputs.rmssdNorm, norm > 0 {
+        if let h = inputs.rmssd, let norm = inputs.rmssdNorm, norm > 0, h.isFinite, norm.isFinite {
             out.append(Contribution(key: "hrv", label: "Heart-rate variability",
                                     lnHazard: clamp((norm - h) / norm, -1, 1) * 0.160))
         }
-        if let s = inputs.steps {
+        if let s = inputs.steps, s.isFinite {
             // Below ~7k each −1,000 steps adds hazard; protection caps near 11k (diminishing returns).
             let deficit = (7000 - clamp(s, 0, 11000)) / 1000
             out.append(Contribution(key: "steps", label: "Daily steps",

@@ -83,18 +83,23 @@ object VitalityEngine {
      *  Conservative published per-unit hazard ratios — see the Swift file for citations. */
     fun contributions(inputs: Inputs): List<Contribution> {
         val out = ArrayList<Contribution>()
-        inputs.restingHR?.let {
-            out.add(Contribution("rhr", "Resting heart rate", ((it - 65) / 10) * 0.100))
+        // CLAMPED to ±4 (an effective 25..105 bpm window), matching the ±4 convention the VO2max and steps
+        // terms already use, and byte-identical to the Swift twin. This was previously the ONLY unclamped,
+        // unguarded contribution: a corrupt or non-finite resting HR produced an unbounded log-hazard
+        // (Double.POSITIVE_INFINITY yielded an infinite hazard), which poisons the whole sum and therefore
+        // the user-facing wellness age.
+        inputs.restingHR?.takeIf { it.isFinite() }?.let {
+            out.add(Contribution("rhr", "Resting heart rate", ((it - 65) / 10).coerceIn(-4.0, 4.0) * 0.100))
         }
         val vo2 = inputs.vo2max; val exp = inputs.expectedVO2max
-        if (vo2 != null && exp != null && exp > 0) {
+        if (vo2 != null && exp != null && exp > 0 && vo2.isFinite() && exp.isFinite()) {
             out.add(Contribution("vo2max", "Cardio fitness", ((exp - vo2) / 3.5).coerceIn(-4.0, 4.0) * 0.130))
         }
-        inputs.sleepHours?.let {
+        inputs.sleepHours?.takeIf { it.isFinite() }?.let {
             val dev = maxOf(0.0, abs(it - 7.5) - 0.5)
             out.add(Contribution("sleep", "Sleep duration", dev.coerceIn(0.0, 3.0) * 0.110))
         }
-        inputs.sleepConsistency?.let {
+        inputs.sleepConsistency?.takeIf { it.isFinite() }?.let {
             // Coefficient 0.450 / ref 0.75: INTERNAL, UNCITED product choice. Must NOT be attributed to
             // the UK Biobank Sleep Regularity Index — published SRI hazard ratios come from sleep–wake
             // TIMING, whereas this input is 1 − CV of nightly DURATION, a weaker partial correlate.
@@ -102,10 +107,10 @@ object VitalityEngine {
             out.add(Contribution("consistency", "Sleep-duration consistency", (0.75 - it.coerceIn(0.0, 1.0)) * 0.450))
         }
         val h = inputs.rmssd; val norm = inputs.rmssdNorm
-        if (h != null && norm != null && norm > 0) {
+        if (h != null && norm != null && norm > 0 && h.isFinite() && norm.isFinite()) {
             out.add(Contribution("hrv", "Heart-rate variability", ((norm - h) / norm).coerceIn(-1.0, 1.0) * 0.160))
         }
-        inputs.steps?.let {
+        inputs.steps?.takeIf { it.isFinite() }?.let {
             val deficit = (7000 - it.coerceIn(0.0, 11000.0)) / 1000
             out.add(Contribution("steps", "Daily steps", deficit.coerceIn(-4.0, 4.0) * 0.064))
         }

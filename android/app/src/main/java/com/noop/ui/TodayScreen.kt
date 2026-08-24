@@ -31,6 +31,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
@@ -88,6 +93,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -133,6 +139,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -149,6 +156,7 @@ import com.noop.analytics.AgeMetricProfile
 import com.noop.analytics.BatteryEstimator
 import com.noop.analytics.ChargeDriver
 import com.noop.analytics.DailyActionPlanner
+import com.noop.analytics.DailyEffortGuidance
 import com.noop.analytics.DailySignalStatus
 import com.noop.analytics.HydrationGoal
 import com.noop.analytics.HydrationStore
@@ -164,6 +172,7 @@ import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
 import com.noop.ingest.HealthConnectImporter
+import com.noop.notif.StrainTargetNotifier
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -391,6 +400,9 @@ fun TodayScreen(
     // preference (SharedPreferences isn't reactive, a Settings write triggers recomposition).
     val context = LocalContext.current
     val massUnit = UnitPrefs.mass(context)
+    var strainTargetEnabled by remember {
+        mutableStateOf(NoopPrefs.strainTargetEnabled(context))
+    }
     var dailyActionCheckIn by remember(selectedDayKey, selectedDayOffset) {
         mutableStateOf(
             if (selectedDayOffset == 0) {
@@ -441,6 +453,7 @@ fun TodayScreen(
     val displayName = remember(displayNameVersion) { profileStore.displayName }
     val ageMetricProfileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
     val ageMetricState = remember(ageMetricProfileVersion) { profileStore.ageMetricStateToken }
+    val ageMetricDataVersion by viewModel.ageMetricDataVersion.collectAsStateWithLifecycle()
 
     // Editable Key-Metrics layout (#251), an ordered list of the pinned tiles, persisted display-only.
     // SharedPreferences isn't reactive, so it's mirrored into local state and re-read when the editor saves.
@@ -519,7 +532,7 @@ fun TodayScreen(
                 viewModel.todayCardsLoadedProfileSig == ageMetricState
         })
     }
-    LaunchedEffect(days, ageMetricProfileVersion) {
+    LaunchedEffect(days, ageMetricProfileVersion, ageMetricDataVersion) {
         // #849 re-mount guard: skip the whole-history scan when `days` is content-identical to the last load
         // (data class hashCode is a stable structural signature). The marker + cached values live on the
         // long-lived ViewModel, so a tab-return / post-import re-mount restores the numbers without re-reading.
@@ -1470,6 +1483,9 @@ fun TodayScreen(
                                     DailySignalHeader(
                                         status = dailySignalStatus,
                                         sourceLabel = heroSourceLabel,
+                                        bandBackfilling = liveSnap.backfilling,
+                                        bandSyncChunks = liveSnap.syncChunksThisSession,
+                                        bandLastSyncAt = liveSnap.lastSyncAt,
                                         onOpen = onOpenHealth,
                                     )
                                     ScoreHeroRow(
@@ -1535,6 +1551,21 @@ fun TodayScreen(
                             plan = dailyActionPlan,
                             checkIn = dailyActionCheckIn,
                             onCheckIn = updateDailyActionCheckIn,
+                            currentEffort = displayMetric?.strain,
+                            notificationEnabled = strainTargetEnabled,
+                            showNotificationControl = selectedDayOffset == 0,
+                            onNotificationEnabledChange = { enabled ->
+                                strainTargetEnabled = enabled
+                                NoopPrefs.setStrainTargetEnabled(context, enabled)
+                                if (enabled) {
+                                    StrainTargetNotifier.onStrainTarget(
+                                        context = context,
+                                        day = selectedDayKey,
+                                        dayEffort = displayMetric?.strain,
+                                        targetRange = dailyActionPlan.target,
+                                    )
+                                }
+                            },
                             modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
                         )
                         TodaySection.WATCH -> DailyPlanWatchSection(
@@ -1798,6 +1829,12 @@ fun TodayScreen(
 
 // MARK: - Evidence-gated Daily Action
 
+/// Joins ALREADY-localized fragments for an accessibility description. Exists so composed a11y strings
+/// never appear as literals inside `semantics { }`, which the i18n audit treats as un-extracted copy.
+/// Byte-equivalent to the Swift `descriptorScopeHint` helper.
+private fun joinLocalizedFragments(vararg parts: String): String =
+    parts.filter { it.isNotBlank() }.joinToString(" ")
+
 @Composable
 private fun DailyPlanWhySection(
     readiness: ReadinessEngine.Readiness,
@@ -1872,6 +1909,10 @@ private fun DailyPlanTargetSection(
     plan: DailyActionPlanner.Plan,
     checkIn: DailyActionPlanner.CheckIn,
     onCheckIn: (DailyActionPlanner.CheckIn) -> Unit,
+    currentEffort: Double?,
+    notificationEnabled: Boolean,
+    showNotificationControl: Boolean,
+    onNotificationEnabledChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var detailsExpanded by rememberSaveable(plan.day) { mutableStateOf(false) }
@@ -1948,8 +1989,8 @@ private fun DailyPlanTargetSection(
                                 tint = Palette.statusWarning,
                             )
                         } else {
+                            val guidance = DailyEffortGuidance.evaluate(currentEffort, target)
                             Column(
-                                modifier = Modifier.semantics(mergeDescendants = true) {},
                                 verticalArrangement = Arrangement.spacedBy(Metrics.space10),
                             ) {
                                 Row(
@@ -1976,10 +2017,50 @@ private fun DailyPlanTargetSection(
                                     style = NoopType.subhead,
                                     color = Palette.textSecondary,
                                 )
+                                if (guidance.state != DailyEffortGuidance.State.UNAVAILABLE) {
+                                    DailyPlanEffortProgress(guidance)
+                                }
                                 DailyPlanActionRow(
                                     text = dailyPlanActionLabel(plan.action),
                                     tint = Palette.accent,
                                 )
+                                if (showNotificationControl) {
+                                    HorizontalDivider(color = Palette.hairline)
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                onNotificationEnabledChange(!notificationEnabled)
+                                            }
+                                            .padding(vertical = Metrics.space4),
+                                        horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+                                        ) {
+                                            Text(
+                                                stringResource(R.string.daily_plan_notification_toggle),
+                                                style = NoopType.subhead,
+                                                color = Palette.textPrimary,
+                                            )
+                                            Text(
+                                                stringResource(R.string.daily_plan_notification_help),
+                                                style = NoopType.footnote,
+                                                color = Palette.textTertiary,
+                                            )
+                                        }
+                                        Switch(
+                                            checked = notificationEnabled,
+                                            onCheckedChange = null,
+                                            colors = SwitchDefaults.colors(
+                                                checkedThumbColor = Color.White,
+                                                checkedTrackColor = Palette.accent,
+                                            ),
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -2015,6 +2096,100 @@ private fun DailyPlanTargetSection(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DailyPlanEffortProgress(guidance: DailyEffortGuidance.Result) {
+    val current = guidance.current?.roundToInt() ?: return
+    val range = guidance.range ?: return
+    val tint = when (guidance.state) {
+        DailyEffortGuidance.State.IN_RANGE -> Palette.statusPositive
+        DailyEffortGuidance.State.ABOVE_RANGE -> Palette.statusWarning
+        DailyEffortGuidance.State.BELOW_RANGE -> Palette.accent
+        DailyEffortGuidance.State.UNAVAILABLE -> Palette.textTertiary
+    }
+    val status = when (guidance.state) {
+        DailyEffortGuidance.State.BELOW_RANGE -> stringResource(
+            R.string.daily_plan_progress_below,
+            kotlin.math.ceil(guidance.remainingToLower ?: 0.0).toInt(),
+        )
+        DailyEffortGuidance.State.IN_RANGE ->
+            stringResource(R.string.daily_plan_progress_in_range)
+        DailyEffortGuidance.State.ABOVE_RANGE ->
+            stringResource(R.string.daily_plan_progress_above)
+        DailyEffortGuidance.State.UNAVAILABLE -> ""
+    }
+    val accessibility = stringResource(
+        R.string.daily_plan_progress_accessibility,
+        current,
+        range.lower,
+        range.upper,
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {
+                // Both fragments are ALREADY localized, so this is not translatable copy. Joined via a
+                // helper rather than a string template so no literal sits in a semantics block: the i18n
+                // audit rightly treats literals there as un-extracted UI copy. Mirrors the Swift twin's
+                // descriptorScopeHint.
+                contentDescription = joinLocalizedFragments(accessibility, status)
+            },
+        verticalArrangement = Arrangement.spacedBy(Metrics.space8),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Text(
+                stringResource(R.string.daily_plan_progress_current),
+                modifier = Modifier.weight(1f),
+                style = NoopType.caption,
+                color = Palette.textSecondary,
+            )
+            Text(
+                current.toString(),
+                style = NoopType.number(18f),
+                color = tint,
+            )
+        }
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(12.dp)
+                .clip(CircleShape)
+                .background(Palette.textTertiary.copy(alpha = 0.18f)),
+        ) {
+            val lowerX = maxWidth * (range.lower / 100f)
+            val rangeWidth = maxWidth * ((range.upper - range.lower) / 100f)
+            val markerSize = 12.dp
+            val markerX = (maxWidth * guidance.progress.toFloat() - markerSize / 2)
+                .coerceIn(0.dp, (maxWidth - markerSize).coerceAtLeast(0.dp))
+            Box(
+                Modifier
+                    .offset(x = lowerX)
+                    .width(rangeWidth.coerceAtLeast(4.dp))
+                    .fillMaxHeight()
+                    .background(Palette.accent.copy(alpha = 0.16f)),
+            )
+            Box(
+                Modifier
+                    .fillMaxWidth(guidance.progress.toFloat().coerceIn(0f, 1f))
+                    .fillMaxHeight()
+                    .background(tint.copy(alpha = 0.42f)),
+            )
+            Box(
+                Modifier
+                    .offset(x = markerX)
+                    .size(markerSize)
+                    .clip(CircleShape)
+                    .background(tint)
+                    .border(2.dp, Palette.surfaceBase, CircleShape),
+            )
+        }
+        Text(status, style = NoopType.footnote, color = Palette.textSecondary)
     }
 }
 
@@ -2947,6 +3122,9 @@ private fun LiquidWordmark() {
 private fun DailySignalHeader(
     status: DailySignalStatus,
     sourceLabel: String?,
+    bandBackfilling: Boolean,
+    bandSyncChunks: Int,
+    bandLastSyncAt: Long?,
     onOpen: () -> Unit,
 ) {
     val tint = when (status) {
@@ -2972,39 +3150,195 @@ private fun DailySignalHeader(
             )
             .padding(start = Metrics.space16, end = Metrics.space16, top = Metrics.space14),
     ) {
-        val showsSource = maxWidth >= 300.dp
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .semantics {
-                    contentDescription = uiString(
-                        R.string.appwide_a11y_state_format,
-                        uiString(R.string.appwide_daily_signal_label),
-                        label,
-                    )
-                    role = Role.Button
-                },
-            horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            DailySignalWaveform(status = status, tint = tint)
-            Text(
-                uiString(R.string.appwide_daily_signal_label).uppercase(),
-                style = NoopType.overline,
-                color = Palette.onDarkSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+        val fontScale = LocalDensity.current.fontScale
+        val sourceNeedsWideRow = sourceLabel?.contains(" + ") == true
+        val singleRowMinimum = if (sourceNeedsWideRow) 440.dp else 380.dp
+        val fitsSingleRow = maxWidth >= singleRowMinimum && fontScale <= 1.15f
+        val semantics = Modifier.semantics {
+            contentDescription = uiString(
+                R.string.appwide_a11y_state_format,
+                uiString(R.string.appwide_daily_signal_label),
+                label,
             )
-            if (sourceLabel != null && showsSource) {
-                SourceBadge(
-                    text = sourceLabel,
-                    tint = Palette.onDarkSecondary,
-                    modifier = Modifier.widthIn(max = 96.dp),
-                )
-            }
-            DailySignalStatePill(title = label, tint = tint)
+            role = Role.Button
         }
+        if (fitsSingleRow) {
+            Row(
+                modifier = semantics.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                DailySignalIdentity(status = status, tint = tint)
+                Spacer(Modifier.weight(1f))
+                if (sourceLabel != null) {
+                    DailySignalSourceBadge(
+                        text = sourceLabel,
+                        bandBackfilling = bandBackfilling,
+                        bandSyncChunks = bandSyncChunks,
+                        bandLastSyncAt = bandLastSyncAt,
+                    )
+                }
+                DailySignalStatePill(title = label, tint = tint)
+            }
+        } else {
+            Column(
+                modifier = semantics.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(Metrics.space8),
+            ) {
+                DailySignalIdentity(status = status, tint = tint)
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(Metrics.space8),
+                ) {
+                    if (sourceLabel != null) {
+                        DailySignalSourceBadge(
+                            text = sourceLabel,
+                            bandBackfilling = bandBackfilling,
+                            bandSyncChunks = bandSyncChunks,
+                            bandLastSyncAt = bandLastSyncAt,
+                        )
+                    }
+                    DailySignalStatePill(title = label, tint = tint)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DailySignalIdentity(
+    status: DailySignalStatus,
+    tint: Color,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DailySignalWaveform(status = status, tint = tint)
+        Text(
+            uiString(R.string.appwide_daily_signal_label).uppercase(),
+            style = NoopType.overline,
+            color = Palette.onDarkSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * The hero's source is provenance, not a permanent connection indicator. It stays neutral at rest, uses
+ * an indeterminate green sweep only while a real history offload is active, then briefly confirms success
+ * in green. The band protocol has no total pending count, so this deliberately never renders a percentage.
+ */
+@Composable
+private fun DailySignalSourceBadge(
+    text: String,
+    bandBackfilling: Boolean,
+    bandSyncChunks: Int,
+    bandLastSyncAt: Long?,
+    modifier: Modifier = Modifier,
+) {
+    val isBand = sourceLabelIncludesNoopBand(text)
+    val syncingRaw = isBand && bandBackfilling
+    var presentingSync by remember(isBand) { mutableStateOf(false) }
+    var justSynced by remember(isBand) { mutableStateOf(false) }
+    var syncStartedAt by remember(isBand) { mutableStateOf<Long?>(null) }
+
+    LaunchedEffect(isBand, syncingRaw, bandLastSyncAt) {
+        if (!isBand) {
+            presentingSync = false
+            justSynced = false
+            syncStartedAt = null
+        } else if (syncingRaw) {
+            if (!presentingSync) syncStartedAt = bandLastSyncAt
+            presentingSync = true
+            justSynced = false
+        } else if (presentingSync) {
+            // Backfilling briefly flips false between chunks. Settle only after a quiet interval, then require
+            // a real HISTORY_COMPLETE timestamp advance before showing the green success confirmation.
+            kotlinx.coroutines.delay(3_000)
+            val completed = bandSyncCompletionAdvanced(syncStartedAt, bandLastSyncAt)
+            presentingSync = false
+            justSynced = completed
+            syncStartedAt = null
+            if (!completed) return@LaunchedEffect
+            kotlinx.coroutines.delay(1_800)
+            justSynced = false
+        }
+    }
+
+    if (!isBand) {
+        SourceBadge(text = text, tint = Palette.onDarkSecondary, modifier = modifier)
+        return
+    }
+
+    val syncing = presentingSync
+    val tone = if (syncing || justSynced) Palette.statusPositive else Palette.onDarkSecondary
+    val shape = RoundedCornerShape(50)
+    val description = when {
+        syncing && bandSyncChunks > 0 ->
+            stringResource(R.string.appwide_today_band_sync_progress_format, bandSyncChunks)
+        syncing -> stringResource(R.string.appwide_today_band_sync_syncing)
+        justSynced -> stringResource(R.string.appwide_today_band_sync_synced)
+        else -> text
+    }
+
+    Box(
+        modifier = modifier
+            .heightIn(min = Metrics.sourceBadgeHeight)
+            .clip(shape)
+            .background(Palette.onDarkSecondary.copy(alpha = 0.14f))
+            .border(0.75.dp, Palette.onDarkSecondary.copy(alpha = 0.20f), shape)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (syncing && !rememberPoseStill()) {
+            DailySignalBandSyncSweep(Modifier.matchParentSize())
+        }
+        Text(
+            text = text.uppercase(),
+            style = NoopType.overline.copy(fontSize = 10.sp, letterSpacing = 0.sp),
+            color = tone,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = Metrics.space8),
+        )
+    }
+}
+
+/** Isolated so no infinite animation clock exists while the band is idle. */
+private const val DAILY_SIGNAL_BAND_SYNC_TRANSITION = "daily-signal-band-sync"
+private const val DAILY_SIGNAL_BAND_SYNC_PHASE = "daily-signal-band-sync-phase"
+
+@Composable
+private fun DailySignalBandSyncSweep(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = DAILY_SIGNAL_BAND_SYNC_TRANSITION)
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1_200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = DAILY_SIGNAL_BAND_SYNC_PHASE,
+    )
+    Canvas(modifier = modifier) {
+        val sweepWidth = (size.width * 0.48f).coerceAtLeast(22.dp.toPx())
+        val left = -sweepWidth + (size.width + sweepWidth) * phase
+        drawRect(
+            brush = Brush.horizontalGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    Palette.statusPositive.copy(alpha = 0.30f),
+                    Color.Transparent,
+                ),
+                startX = left,
+                endX = left + sweepWidth,
+            ),
+            topLeft = Offset(left, 0f),
+            size = Size(sweepWidth, size.height),
+        )
     }
 }
 
@@ -3018,10 +3352,13 @@ private fun DailySignalStatePill(
         text = title,
         style = NoopType.overline,
         color = tint,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        textAlign = TextAlign.Center,
         modifier = Modifier
             .clip(shape)
             .background(tint.copy(alpha = 0.12f))
-            .border(1.dp, tint.copy(alpha = 0.32f), shape)
+            .border(0.75.dp, tint.copy(alpha = 0.24f), shape)
             .padding(horizontal = 10.dp, vertical = 5.dp)
             .semantics { contentDescription = title },
     )

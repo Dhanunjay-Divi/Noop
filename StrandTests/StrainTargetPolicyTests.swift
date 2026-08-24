@@ -1,4 +1,5 @@
 import XCTest
+import StrandAnalytics
 @testable import Strand
 
 /// `StrainTargetNotifier.StrainTargetPolicy` — the pure once-per-day crossing gate + copy behind the
@@ -7,51 +8,49 @@ import XCTest
 /// most once per day, only when strain has genuinely reached a KNOWN target, never on a guessed one.
 final class StrainTargetPolicyTests: XCTestCase {
     private typealias Policy = StrainTargetNotifier.StrainTargetPolicy
+    private let range = DailyActionPlanner.EffortRange(lower: 40, upper: 60)
+
+    private func guidance(_ effort: Double?) -> DailyEffortGuidance.Result {
+        DailyEffortGuidance.evaluate(currentEffort: effort, range: range)
+    }
 
     func testFiresWhenEnabledStrainReachedTargetAndNotYetToday() {
         XCTAssertTrue(Policy.shouldNotify(
-            enabled: true, dayStrain: 14.0, target: 14.0, lastNotifiedDay: "2026-07-17", today: "2026-07-18"))
+            enabled: true, guidance: guidance(40), lastNotifiedDay: "2026-07-17",
+            today: "2026-07-18"))
         // Overshooting the target still fires (>= gate), once.
         XCTAssertTrue(Policy.shouldNotify(
-            enabled: true, dayStrain: 16.2, target: 14.0, lastNotifiedDay: nil, today: "2026-07-18"))
+            enabled: true, guidance: guidance(72), lastNotifiedDay: nil, today: "2026-07-18"))
     }
 
     func testSuppressedWhenDisabled() {
         XCTAssertFalse(Policy.shouldNotify(
-            enabled: false, dayStrain: 18.0, target: 14.0, lastNotifiedDay: nil, today: "2026-07-18"))
+            enabled: false, guidance: guidance(50), lastNotifiedDay: nil, today: "2026-07-18"))
     }
 
     func testSuppressedBeforeTargetIsReached() {
         XCTAssertFalse(Policy.shouldNotify(
-            enabled: true, dayStrain: 13.9, target: 14.0, lastNotifiedDay: nil, today: "2026-07-18"))
+            enabled: true, guidance: guidance(39.9), lastNotifiedDay: nil, today: "2026-07-18"))
     }
 
     func testSuppressedWhenAlreadyFiredToday() {
         XCTAssertFalse(Policy.shouldNotify(
-            enabled: true, dayStrain: 15.0, target: 14.0, lastNotifiedDay: "2026-07-18", today: "2026-07-18"))
+            enabled: true, guidance: guidance(50), lastNotifiedDay: "2026-07-18",
+            today: "2026-07-18"))
     }
 
     func testSuppressedWhenTargetUnknownCalibrating() {
         // Planner withheld the range ⇒ nil target ⇒ never fire (never guess a target).
         XCTAssertFalse(Policy.shouldNotify(
-            enabled: true, dayStrain: 18.0, target: nil, lastNotifiedDay: nil, today: "2026-07-18"))
+            enabled: true,
+            guidance: DailyEffortGuidance.evaluate(currentEffort: 50, range: nil),
+            lastNotifiedDay: nil,
+            today: "2026-07-18"))
     }
 
     func testSuppressedWhenNoStrainYet() {
         XCTAssertFalse(Policy.shouldNotify(
-            enabled: true, dayStrain: nil, target: 14.0, lastNotifiedDay: nil, today: "2026-07-18"))
-    }
-
-    func testCopyUsesNoopWordingAndTheTarget() {
-        let copy = Policy.copy(target: 14)
-        // NOOP's own copy — must NOT reproduce WHOOP's decompiled strings.
-        XCTAssertTrue(copy.title.contains("Effort marker"))
-        XCTAssertFalse(copy.title.contains("Target Strain Reached"))
-        XCTAssertTrue(copy.body.contains("14"))
-        XCTAssertFalse(copy.body.contains("for this activity"))
-        XCTAssertFalse(copy.body.localizedCaseInsensitiveContains("earned"))
-        XCTAssertFalse(copy.body.localizedCaseInsensitiveContains("optimal"))
-        XCTAssertTrue(copy.body.localizedCaseInsensitiveContains("not a limit"))
+            enabled: true, guidance: guidance(nil), lastNotifiedDay: nil, today: "2026-07-18"))
     }
 
     func testDailyActionCheckInIsStrictlyDayScopedAndFailClosed() {
