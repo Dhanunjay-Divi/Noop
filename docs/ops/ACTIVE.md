@@ -6,13 +6,14 @@ Last updated: **2026-08-24**
 
 - Canonical repository: `https://github.com/Dhanunjay-Divi/Noop`
 - Repository visibility: private at the final authenticated check.
-- Active branch: `main`; local and `origin/main` match after the completed push.
+- The historical `codex/app-store-submission` documentation record was
+  integrated into `main` and closed without an App Store Connect mutation.
 - Remote branches: only `origin/main` remains after merged-branch cleanup.
 - GitHub reports `isFork=false`, no parent, and `main` as the default branch.
 - Previous hosted implementation checkpoint: `94661a17`.
-- Current implementation and round record: use `git log -1`; this record is
-  committed with the Safety reliability, shared tenancy, credential lifecycle,
-  and production-operations change.
+- Safety client implementation: `82dcc042`.
+- Shared server and paging operations implementation: `29efcfc6`.
+- Safety round and production handoff record: `c216a0b5`.
 - Hosting independence is complete. Commercial source independence is not.
 - Current agent instructions:
   [`../handoff/AGENT-HANDOFF-20260823.md`](../handoff/AGENT-HANDOFF-20260823.md)
@@ -40,6 +41,12 @@ data/ops gates pass. The current iOS UI action is host-blocked before test
 launch by Xcode's debugger-version store. Docker/Timescale, k6, carrier, cloud,
 physical-device, signing, store, accuracy, and distribution evidence remain
 open.
+
+The earlier
+[mainline App Store submission audit](rounds/2026-08-24-mainline-app-store-submission.md)
+is closed. Its documentation was retained, but no durable App Store Connect
+record ID was captured and no name reservation, app creation, upload,
+submission, or release is claimed.
 
 The preceding
 [overnight calibration, Daily Effort, and grounded Coach round](rounds/2026-08-24-overnight-calibration-effort-coach.md)
