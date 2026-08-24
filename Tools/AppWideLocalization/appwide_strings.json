@@ -10,6 +10,105 @@
     "zh-Hans": "%1$s。%2$s",
     "zh-Hant": "%1$s。%2$s"
   },
+  "appwide.automations.tap_guide.alarm_body": {
+    "de": "Stoppt den aktiven Bandalarm, wenn die Reaktion auf Tippen unter „Alarme“ aktiviert ist.",
+    "en": "Stops the active band alarm when tap response is enabled in Alarms.",
+    "es": "Detiene la alarma activa de la banda cuando la respuesta al toque está activada en Alarmas.",
+    "fr": "Arrête l’alarme active du bracelet lorsque la réponse au toucher est activée dans Alarmes.",
+    "it": "Interrompe la sveglia attiva del bracciale quando la risposta al tocco è abilitata in Sveglie.",
+    "pt-PT": "Para o alarme ativo da banda quando a resposta ao toque está ativada em Alarmes.",
+    "ru": "Останавливает активный будильник браслета, если реакция на касание включена в разделе «Будильники».",
+    "zh-Hans": "在“闹钟”中启用轻触响应后，可停止当前的手环闹钟。",
+    "zh-Hant": "在「鬧鐘」中啟用輕觸回應後，可停止目前的手環鬧鐘。"
+  },
+  "appwide.automations.tap_guide.alarm_title": {
+    "de": "Alarm aktiv",
+    "en": "Alarm active",
+    "es": "Alarma activa",
+    "fr": "Alarme active",
+    "it": "Sveglia attiva",
+    "pt-PT": "Alarme ativo",
+    "ru": "Будильник активен",
+    "zh-Hans": "闹钟响起时",
+    "zh-Hant": "鬧鐘響起時"
+  },
+  "appwide.automations.tap_guide.hydration_body": {
+    "de": "Protokolliert die festgelegte Menge innerhalb des Bestätigungszeitraums.",
+    "en": "Logs your configured amount inside its confirmation window.",
+    "es": "Registra la cantidad configurada dentro del periodo de confirmación.",
+    "fr": "Enregistre la quantité configurée pendant la fenêtre de confirmation.",
+    "it": "Registra la quantità configurata entro la finestra di conferma.",
+    "pt-PT": "Regista a quantidade configurada dentro do período de confirmação.",
+    "ru": "Записывает заданный объём в течение окна подтверждения.",
+    "zh-Hans": "在确认时限内记录你设定的饮水量。",
+    "zh-Hant": "在確認時限內記錄你設定的飲水量。"
+  },
+  "appwide.automations.tap_guide.hydration_title": {
+    "de": "Trinkerinnerung aktiv",
+    "en": "Hydration cue active",
+    "es": "Aviso de hidratación activo",
+    "fr": "Rappel d’hydratation actif",
+    "it": "Promemoria idratazione attivo",
+    "pt-PT": "Aviso de hidratação ativo",
+    "ru": "Напоминание о воде активно",
+    "zh-Hans": "饮水提示响起时",
+    "zh-Hant": "飲水提示響起時"
+  },
+  "appwide.automations.tap_guide.otherwise_body": {
+    "de": "Führt die oben ausgewählte allgemeine Doppeltipp-Aktion aus.",
+    "en": "Runs the general double-tap action selected above.",
+    "es": "Ejecuta la acción general de doble toque seleccionada arriba.",
+    "fr": "Exécute l’action générale de double toucher sélectionnée ci-dessus.",
+    "it": "Esegue l’azione generale di doppio tocco selezionata sopra.",
+    "pt-PT": "Executa a ação geral de duplo toque selecionada acima.",
+    "ru": "Выполняет выбранное выше обычное действие по двойному касанию.",
+    "zh-Hans": "执行上方所选的常规双击操作。",
+    "zh-Hant": "執行上方所選的一般雙擊操作。"
+  },
+  "appwide.automations.tap_guide.otherwise_title": {
+    "de": "Andernfalls",
+    "en": "Otherwise",
+    "es": "En los demás casos",
+    "fr": "Sinon",
+    "it": "Negli altri casi",
+    "pt-PT": "Nos restantes casos",
+    "ru": "В остальных случаях",
+    "zh-Hans": "其他情况",
+    "zh-Hant": "其他情況"
+  },
+  "appwide.automations.tap_guide.sos_body": {
+    "de": "Wenn Safety bereit ist, haben die erforderlichen wiederholten Doppeltipps Vorrang, rufen akzeptierte Kontakte sofort und starten die Standortfreigabe, sofern verfügbar.",
+    "en": "When Safety is ready, the required repeated double-taps take priority, immediately page accepted contacts, and start current-location sharing when available.",
+    "es": "Cuando Safety está listo, los dobles toques repetidos necesarios tienen prioridad, avisan de inmediato a los contactos aceptados e inician el envío de la ubicación actual cuando está disponible.",
+    "fr": "Lorsque Safety est prêt, les doubles touchers répétés requis sont prioritaires, contactent immédiatement les contacts acceptés et lancent le partage de la position actuelle lorsqu’elle est disponible.",
+    "it": "Quando Safety è pronto, i doppi tocchi ripetuti richiesti hanno la priorità, avvisano subito i contatti accettati e avviano la condivisione della posizione attuale quando disponibile.",
+    "pt-PT": "Quando o Safety está pronto, os duplos toques repetidos necessários têm prioridade, avisam imediatamente os contactos aceites e iniciam a partilha da localização atual quando disponível.",
+    "ru": "Когда Safety настроен, требуемая серия двойных касаний имеет приоритет, сразу вызывает принятых контактов и запускает передачу текущего местоположения, если оно доступно.",
+    "zh-Hans": "Safety 准备就绪后，所需的连续双击手势会优先执行，立即呼叫已接受的联系人，并在可用时开始共享当前位置。",
+    "zh-Hant": "Safety 準備就緒後，所需的連續雙擊手勢會優先執行，立即呼叫已接受的聯絡人，並在可用時開始分享目前位置。"
+  },
+  "appwide.automations.tap_guide.sos_title": {
+    "de": "SOS-Geste aktiviert",
+    "en": "SOS gesture enabled",
+    "es": "Gesto SOS activado",
+    "fr": "Geste SOS activé",
+    "it": "Gesto SOS abilitato",
+    "pt-PT": "Gesto SOS ativado",
+    "ru": "Жест SOS включён",
+    "zh-Hans": "SOS 手势已启用",
+    "zh-Hant": "SOS 手勢已啟用"
+  },
+  "appwide.automations.tap_guide.title": {
+    "de": "WAS EIN TIPP AUF DAS BAND BEWIRKT",
+    "en": "WHAT A BAND TAP DOES",
+    "es": "QUÉ HACE UN TOQUE EN LA BANDA",
+    "fr": "ACTION D’UN TOUCHER SUR LE BRACELET",
+    "it": "COSA FA UN TOCCO SUL BRACCIALE",
+    "pt-PT": "O QUE FAZ UM TOQUE NA BANDA",
+    "ru": "ЧТО ДЕЛАЕТ КАСАНИЕ БРАСЛЕТА",
+    "zh-Hans": "轻触手环的作用",
+    "zh-Hant": "輕觸手環的作用"
+  },
   "appwide.backup.encryption_body": {
     "de": "Verschlüsselte Exporte schützen Datenbankverlauf und dauerhafte Einstellungen mit AES-256-GCM. NOOP speichert die Passphrase nie und kann sie nicht wiederherstellen. Zugangsdaten, Hardwarebindungen, Berechtigungen und vorübergehende Zustellzustände sind ausgeschlossen. Neue Backups enthalten ein Integritätsmanifest; ältere unverschlüsselte Backups lassen sich weiterhin importieren. Die Wiederherstellung prüft und bereitet Daten vor, bevor die Datenbank erneut geöffnet wird. Der plattformübergreifende Export überträgt unterstützte Daten zwischen Apple und Android. Ordner- und automatische Backups sind unverschlüsselt; verwende daher verschlüsselten Speicher.",
     "en": "Encrypted exports protect database history and durable settings with AES-256-GCM. NOOP never saves or recovers the passphrase. Credentials, hardware links, permissions, and temporary delivery state are excluded. New backups include an integrity manifest; legacy unencrypted backups still import. Restore validates and stages data before reopening the database. Cross-platform export moves supported data between Apple and Android. Folder and automatic backups are unencrypted, so use encrypted storage.",
@@ -20,6 +119,17 @@
     "ru": "Зашифрованные экспорты защищают историю базы данных и постоянные настройки с помощью AES-256-GCM. NOOP никогда не сохраняет и не восстанавливает кодовую фразу. Учётные данные, связи с оборудованием, разрешения и временное состояние доставки исключаются. Новые резервные копии содержат манифест целостности; прежние незашифрованные копии по-прежнему можно импортировать. При восстановлении данные проверяются и подготавливаются до повторного открытия базы данных. Межплатформенный экспорт переносит поддерживаемые данные между Apple и Android. Резервные копии в папке и автоматические резервные копии не зашифрованы, поэтому используйте зашифрованное хранилище.",
     "zh-Hans": "加密导出使用 AES-256-GCM 保护数据库历史记录和持久设置。NOOP 从不保存或恢复密码短语。凭据、硬件关联、权限和临时送达状态不会包含在内。新备份包含完整性清单；旧版未加密备份仍可导入。恢复操作会先验证并暂存数据，再重新打开数据库。跨平台导出可在 Apple 与 Android 之间迁移受支持的数据。文件夹备份和自动备份未加密，因此请使用加密存储空间。",
     "zh-Hant": "加密匯出使用 AES-256-GCM 保護資料庫歷史記錄和持久設定。NOOP 絕不儲存或復原密碼短語。憑證、硬體連結、權限和暫時傳遞狀態不會包含在內。新備份包含完整性資訊清單；舊版未加密備份仍可匯入。復原操作會先驗證並暫存資料，再重新開啟資料庫。跨平台匯出可在 Apple 與 Android 之間移轉支援的資料。資料夾備份和自動備份未加密，因此請使用加密儲存空間。"
+  },
+  "appwide.breathe.phone_haptics": {
+    "de": "Telefonhaptik",
+    "en": "Phone haptics",
+    "es": "Vibración del teléfono",
+    "fr": "Vibrations du téléphone",
+    "it": "Feedback aptico del telefono",
+    "pt-PT": "Háptica do telemóvel",
+    "ru": "Вибрация телефона",
+    "zh-Hans": "手机触感反馈",
+    "zh-Hant": "手機觸覺回饋"
   },
   "appwide.calendar.a11y.day_no_data_format": {
     "de": "Tag %1$d, keine Daten",
@@ -439,6 +549,28 @@
     "zh-Hans": "在 Noop 中打开“更多”→“好友”，然后输入服务器地址和一次性代码。",
     "zh-Hant": "在 Noop 中開啟「更多」→「朋友」，然後輸入伺服器位址和一次性代碼。"
   },
+  "appwide.pattern.what_changed": {
+    "de": "WAS HAT SICH GEÄNDERT",
+    "en": "WHAT CHANGED",
+    "es": "QUÉ HA CAMBIADO",
+    "fr": "CE QUI A CHANGÉ",
+    "it": "COSA È CAMBIATO",
+    "pt-PT": "O QUE MUDOU",
+    "ru": "ЧТО ИЗМЕНИЛОСЬ",
+    "zh-Hans": "发生了什么变化",
+    "zh-Hant": "發生了什麼變化"
+  },
+  "appwide.profile.display_name": {
+    "de": "Anzeigename",
+    "en": "Display name",
+    "es": "Nombre para mostrar",
+    "fr": "Nom affiché",
+    "it": "Nome visualizzato",
+    "pt-PT": "Nome apresentado",
+    "ru": "Отображаемое имя",
+    "zh-Hans": "显示名称",
+    "zh-Hant": "顯示名稱"
+  },
   "appwide.range.format": {
     "de": "%1$d–%2$d",
     "en": "%1$d–%2$d",
@@ -449,6 +581,17 @@
     "ru": "%1$d–%2$d",
     "zh-Hans": "%1$d–%2$d",
     "zh-Hant": "%1$d–%2$d"
+  },
+  "appwide.rhythm.methodology": {
+    "de": "NOOP wertet nur ruhige nächtliche Zeitfenster außerhalb aufgezeichneter Workouts aus. Bewegung, Training, eine erhöhte Herzfrequenz außerhalb der Ruhe und verrauschte Zeitfenster werden übersprungen statt interpretiert. Die Abstände zwischen Herzschlägen werden als Poincaré-Streudiagramm dargestellt und mit veröffentlichten deskriptiven Statistiken zusammengefasst. Rhythmus ist eine optionale Darstellung des Timings, keine Diagnose, und sendet niemals Warnungen.",
+    "en": "NOOP reads only quiet overnight windows outside recorded workouts. Movement, exercise, elevated non-resting heart rate, and noisy windows are skipped rather than interpreted. It draws the timing between heartbeats as a Poincaré scatter and computes published descriptive statistics. Rhythm is an opt-in picture of timing, never a diagnosis, and it never sends alerts.",
+    "es": "NOOP solo analiza periodos nocturnos tranquilos fuera de entrenamientos registrados. Se omiten, en vez de interpretarse, el movimiento, el ejercicio, una frecuencia cardiaca elevada fuera del reposo y los periodos con ruido. Representa el tiempo entre latidos en un diagrama de dispersión de Poincaré y calcula estadísticas descriptivas publicadas. Ritmo es una vista opcional de los tiempos, nunca un diagnóstico, y no envía alertas.",
+    "fr": "NOOP analyse uniquement les périodes nocturnes calmes en dehors des entraînements enregistrés. Les mouvements, l’exercice, une fréquence cardiaque élevée hors repos et les périodes bruitées sont ignorés plutôt qu’interprétés. L’intervalle entre les battements est représenté dans un nuage de points de Poincaré et résumé par des statistiques descriptives publiées. Rythme est une vue facultative du rythme des battements, jamais un diagnostic, et n’envoie aucune alerte.",
+    "it": "NOOP analizza solo periodi notturni tranquilli al di fuori degli allenamenti registrati. Movimento, esercizio, frequenza cardiaca elevata non a riposo e periodi rumorosi vengono ignorati anziché interpretati. Rappresenta il tempo tra i battiti in un diagramma di dispersione di Poincaré e calcola statistiche descrittive pubblicate. Ritmo è una vista facoltativa della tempistica, mai una diagnosi, e non invia avvisi.",
+    "pt-PT": "A NOOP analisa apenas períodos noturnos tranquilos fora de treinos registados. Movimento, exercício, frequência cardíaca elevada fora do repouso e períodos com ruído são ignorados em vez de interpretados. Representa o tempo entre batimentos num diagrama de dispersão de Poincaré e calcula estatísticas descritivas publicadas. Ritmo é uma vista opcional da temporização, nunca um diagnóstico, e não envia alertas.",
+    "ru": "NOOP анализирует только спокойные ночные интервалы вне записанных тренировок. Движение, нагрузка, повышенная частота пульса не в покое и зашумлённые интервалы пропускаются, а не интерпретируются. Интервалы между ударами отображаются на диаграмме рассеяния Пуанкаре и описываются опубликованными статистическими показателями. «Ритм»: это включаемое пользователем представление временных интервалов, а не диагноз; оно никогда не отправляет тревожные оповещения.",
+    "zh-Hans": "NOOP 仅分析已记录锻炼之外的安静夜间时段。检测到动作、运动、非静息状态下的心率升高或信号噪声时，会跳过该时段，不作解读。它将心搏间期绘制为庞加莱散点图，并计算已发表的描述性统计量。“节律”是可选的时间间隔视图，不是诊断，也绝不会发送警报。",
+    "zh-Hant": "NOOP 僅分析已記錄運動之外的安靜夜間時段。偵測到動作、運動、非靜息狀態下的心率升高或訊號雜訊時，會略過該時段，不作解讀。它將心搏間期繪製為龐加萊散點圖，並計算已發表的描述性統計量。「節律」是選用的時間間隔檢視，不是診斷，也絕不會傳送警報。"
   },
   "appwide.shell.updates_unread_format": {
     "de": "Updates, %1$d ungelesen",
@@ -868,6 +1011,50 @@
     "zh-Hans": "NOOP Band 即将推出",
     "zh-Hant": "NOOP Band 即將推出"
   },
+  "appwide.today.greeting.afternoon": {
+    "de": "Guten Tag",
+    "en": "Good afternoon",
+    "es": "Buenas tardes",
+    "fr": "Bonjour",
+    "it": "Buon pomeriggio",
+    "pt-PT": "Boa tarde",
+    "ru": "Добрый день",
+    "zh-Hans": "下午好",
+    "zh-Hant": "午安"
+  },
+  "appwide.today.greeting.evening": {
+    "de": "Guten Abend",
+    "en": "Good evening",
+    "es": "Buenas noches",
+    "fr": "Bonsoir",
+    "it": "Buonasera",
+    "pt-PT": "Boa noite",
+    "ru": "Добрый вечер",
+    "zh-Hans": "晚上好",
+    "zh-Hant": "晚上好"
+  },
+  "appwide.today.greeting.morning": {
+    "de": "Guten Morgen",
+    "en": "Good morning",
+    "es": "Buenos días",
+    "fr": "Bonjour",
+    "it": "Buongiorno",
+    "pt-PT": "Bom dia",
+    "ru": "Доброе утро",
+    "zh-Hans": "早上好",
+    "zh-Hant": "早安"
+  },
+  "appwide.today.greeting_format": {
+    "de": "%1$s, %2$s",
+    "en": "%1$s, %2$s",
+    "es": "%1$s, %2$s",
+    "fr": "%1$s, %2$s",
+    "it": "%1$s, %2$s",
+    "pt-PT": "%1$s, %2$s",
+    "ru": "%1$s, %2$s",
+    "zh-Hans": "%2$s，%1$s",
+    "zh-Hant": "%2$s，%1$s"
+  },
   "appwide.trend.baseline_format": {
     "de": "%1$s um %2$s%3$s gegenüber dem Ausgangswert, %4$s",
     "en": "%1$s %2$s%3$s versus baseline, %4$s",
@@ -933,6 +1120,61 @@
     "ru": "%1$s: %2$s на %3$s за 7 дней, %4$s",
     "zh-Hans": "%1$s 在 7 天内%2$s%3$s，%4$s",
     "zh-Hant": "%1$s 在 7 天內%2$s%3$s，%4$s"
+  },
+  "appwide.trends.average_format": {
+    "de": "Ø %1$s",
+    "en": "AVG %1$s",
+    "es": "PROM. %1$s",
+    "fr": "MOY. %1$s",
+    "it": "MEDIA %1$s",
+    "pt-PT": "MÉD. %1$s",
+    "ru": "СР. %1$s",
+    "zh-Hans": "平均 %1$s",
+    "zh-Hant": "平均 %1$s"
+  },
+  "appwide.trends.effort_descriptor": {
+    "de": "Herz-Kreislauf-Belastung · höher bedeutet mehr Belastung",
+    "en": "Cardiovascular load · higher means more load",
+    "es": "Carga cardiovascular · un valor mayor indica más carga",
+    "fr": "Charge cardiovasculaire · une valeur élevée indique plus de charge",
+    "it": "Carico cardiovascolare · un valore più alto indica più carico",
+    "pt-PT": "Carga cardiovascular · um valor mais alto indica mais carga",
+    "ru": "Сердечно-сосудистая нагрузка · выше означает больше нагрузки",
+    "zh-Hans": "心血管负荷 · 数值越高表示负荷越大",
+    "zh-Hant": "心血管負荷 · 數值越高表示負荷越大"
+  },
+  "appwide.trends.range_averages": {
+    "de": "Durchschnitt im Zeitraum",
+    "en": "Range averages",
+    "es": "Promedios del periodo",
+    "fr": "Moyennes de la période",
+    "it": "Medie del periodo",
+    "pt-PT": "Médias do período",
+    "ru": "Средние за период",
+    "zh-Hans": "所选时段平均值",
+    "zh-Hant": "所選時段平均值"
+  },
+  "appwide.trends.recovery_descriptor": {
+    "de": "Bereitschaft · 0–100",
+    "en": "Readiness · 0–100",
+    "es": "Disposición · 0–100",
+    "fr": "État de préparation · 0–100",
+    "it": "Prontezza · 0–100",
+    "pt-PT": "Prontidão · 0–100",
+    "ru": "Готовность · 0–100",
+    "zh-Hans": "准备度 · 0–100",
+    "zh-Hant": "準備度 · 0–100"
+  },
+  "appwide.trends.sleep_descriptor": {
+    "de": "Schlafleistung · 0–100",
+    "en": "Sleep performance · 0–100",
+    "es": "Rendimiento del sueño · 0–100",
+    "fr": "Performance du sommeil · 0–100",
+    "it": "Rendimento del sonno · 0–100",
+    "pt-PT": "Desempenho do sono · 0–100",
+    "ru": "Качество сна · 0–100",
+    "zh-Hans": "睡眠表现 · 0–100",
+    "zh-Hant": "睡眠表現 · 0–100"
   },
   "appwide.unit.grams_format": {
     "de": "%1$s g",
