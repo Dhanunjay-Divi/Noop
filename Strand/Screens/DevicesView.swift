@@ -380,6 +380,7 @@ private struct DevicesContent: View {
                 .foregroundStyle(StrandPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .accessibilityIdentifier("noop.devices.footer")
     }
 
     /// UPPERCASE overline section header with tracking + a muted trailing note, matching the liquid Today's
@@ -503,33 +504,12 @@ private struct DeviceCard: View {
     var onDeleteData: (() -> Void)? = nil
     @State private var showTechnicalDetails = false
 
-    /// The card's visible content. The required `body` wraps this in the whole-card liquid press button +
-    /// the ⋮ menu overlay.
+    /// The card's visible content. Every action is laid out in-flow so disclosure and action chevrons
+    /// never compete with an overlaid menu on compact devices or at larger Dynamic Type sizes.
     private var cardContent: some View {
         StrandCard(padding: 18, tint: isActive ? StrandPalette.accent : nil) {
             VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
-                HStack(alignment: .top, spacing: NoopMetrics.space3) {
-                    Image(systemName: icon)
-                        .font(StrandFont.title2)
-                        .foregroundStyle(isActive ? StrandPalette.accent : StrandPalette.textSecondary)
-                        .frame(width: 28)
-                        .accessibilityHidden(true)
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(device.displayName)
-                            .font(StrandFont.headline)
-                            .foregroundStyle(StrandPalette.textPrimary)
-                        Text(profile.displayModel)
-                            .font(StrandFont.subhead)
-                            .foregroundStyle(StrandPalette.textSecondary)
-                    }
-                    Spacer()
-                    // Locally-adopted Oura is Beta: a non-dot Beta chip sits beside the usual state pill.
-                    if device.sourceKind == .oura {
-                        StatePill("Beta", tone: .warning, showsDot: false)
-                    }
-                    statePill
-                }
+                adaptiveHeader
 
                 // What this device CAPTURES — honest, per-model (not the generic stored set, which would
                 // mislabel e.g. a "Blood oxygen" chip when no SpO₂ % ever comes off the strap).
@@ -558,7 +538,7 @@ private struct DeviceCard: View {
                     Text(lastSeenLine)
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.textTertiary)
-                    Spacer(minLength: 44)   // leave room for the ⋮ menu overlay at the bottom-trailing
+                    Spacer()
                 }
 
                 technicalDisclosure
@@ -583,6 +563,67 @@ private struct DeviceCard: View {
         }
         .opacity(dimmed ? 0.6 : 1)
         .accessibilityElement(children: .contain)
+    }
+
+    /// Keep identity and connection state in one row while there is genuinely room. Compact widths,
+    /// larger text, and long user-assigned names move the pills below the identity instead of squeezing
+    /// or overlapping either side.
+    private var adaptiveHeader: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: NoopMetrics.space3) {
+                deviceIdentity(multiline: false)
+                    .fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: NoopMetrics.space2)
+                stateBadges
+                    .fixedSize(horizontal: true, vertical: false)
+                actionsMenu
+            }
+
+            VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                HStack(alignment: .top, spacing: NoopMetrics.space2) {
+                    deviceIdentity(multiline: true)
+                    Spacer(minLength: NoopMetrics.space1)
+                    actionsMenu
+                }
+                stateBadges
+                    .padding(.leading, 28 + NoopMetrics.space3)
+            }
+        }
+    }
+
+    private func deviceIdentity(multiline: Bool) -> some View {
+        HStack(alignment: .top, spacing: NoopMetrics.space3) {
+            Image(systemName: icon)
+                .font(StrandFont.title2)
+                .foregroundStyle(isActive ? StrandPalette.accent : StrandPalette.textSecondary)
+                .frame(width: 28)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(device.displayName)
+                    .font(StrandFont.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .lineLimit(multiline ? 2 : 1)
+                    .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("noop.device.\(device.id).name")
+                Text(profile.displayModel)
+                    .font(StrandFont.subhead)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var stateBadges: some View {
+        HStack(spacing: NoopMetrics.space2) {
+            // Locally-adopted Oura is Beta: a non-dot Beta chip sits beside the usual state pill.
+            if device.sourceKind == .oura {
+                StatePill("Beta", tone: .warning, showsDot: false)
+            }
+            statePill
+        }
     }
 
     /// Firmware, voltage, clock correlation, record layout and model caveats are valuable when debugging,
@@ -641,15 +682,11 @@ private struct DeviceCard: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Actions stay as peer controls inside/on top of the card. Wrapping the entire card in a Button would
+    /// Actions stay as peer controls inside the card. Wrapping the entire card in a Button would
     /// nest the Technical details disclosure inside that Button, causing disclosure taps to activate the
     /// device instead of opening diagnostics.
     var body: some View {
         cardContent
-        .overlay(alignment: .bottomTrailing) {
-            actionsMenu
-                .padding(18)
-        }
     }
 
     /// The card's primary tap action, or nil when there isn't one. A paired-but-not-active band → make it
@@ -766,8 +803,10 @@ private struct DeviceCard: View {
                 .foregroundStyle(StrandPalette.textSecondary)
         }
         .menuStyle(.borderlessButton)
-        .fixedSize()
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
         .accessibilityLabel("Device actions for \(device.displayName)")
+        .accessibilityIdentifier("noop.device.actions")
     }
 
     /// SF Symbol for the device: WHOOP keeps the band glyph; an FTMS machine reads as gym equipment;

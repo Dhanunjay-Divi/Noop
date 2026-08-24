@@ -74,6 +74,20 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertTrue(app.buttons["noop.quick-actions"].exists)
     }
 
+    func testScrollingCompactsNavigationIntoTheCornerControl() {
+        let app = launchApp(tab: "trends")
+        let expanded = app.buttons["noop.tab.1"]
+        XCTAssertTrue(expanded.waitForExistence(timeout: 20))
+
+        app.swipeUp()
+
+        let compact = app.buttons["noop.tab.compact"]
+        XCTAssertTrue(compact.waitForExistence(timeout: 5))
+        XCTAssertFalse(expanded.exists)
+        XCTAssertTrue(app.buttons["noop.quick-actions"].exists)
+        keepScreenshot(app, name: "floating-navigation-scroll-compact")
+    }
+
     func testTodayCalendarButtonOpensMonthHistory() {
         let app = launchApp()
         let calendar = app.buttons["noop.today.calendar"]
@@ -415,6 +429,106 @@ final class NOOPiOSUITests: XCTestCase {
         }
         XCTAssertTrue(sundayWakeTime.isHittable)
         XCTAssertLessThanOrEqual(sundayWakeTime.frame.maxY + 8, firstFloatingControlY)
+    }
+
+    func testDeviceActionsAndFooterClearPersistentNavigation() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--demo-seed",
+            "--demo-more-route", "devices",
+            "--demo-scroll-bottom",
+            "--demo-compact-tab-bar",
+        ]
+        app.launch()
+
+        let actions = app.buttons["noop.device.actions"].firstMatch
+        let technicalDetails = app.buttons["Technical details"].firstMatch
+        XCTAssertTrue(actions.waitForExistence(timeout: 20))
+        XCTAssertTrue(technicalDetails.waitForExistence(timeout: 5))
+        XCTAssertFalse(
+            actions.frame.intersects(technicalDetails.frame),
+            "The device action menu must not cover the disclosure control."
+        )
+
+        let footer = app.descendants(matching: .any)["noop.devices.footer"]
+        let compactNavigation = app.buttons["noop.tab.compact"]
+        let expandedNavigation = app.buttons["noop.tab.4"]
+        let quickActions = app.buttons["noop.quick-actions"]
+        XCTAssertTrue(footer.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            compactNavigation.exists || expandedNavigation.waitForExistence(timeout: 5),
+            "Navigation must remain available in its compact or accessibility-expanded presentation."
+        )
+        let navigationY = compactNavigation.exists
+            ? compactNavigation.frame.minY
+            : expandedNavigation.frame.minY
+        let firstFloatingControlY = min(navigationY, quickActions.frame.minY)
+        XCTAssertLessThanOrEqual(
+            footer.frame.maxY + 8,
+            firstFloatingControlY,
+            "The Devices footer must settle above both floating controls."
+        )
+        keepScreenshot(app, name: "devices-actions-and-clear-endpoint")
+    }
+
+    func testRecoveryTrendSupportsExactDateScrubbing() {
+        let app = launchApp(tab: "trends")
+        // NavigationLink mirrors child accessibility metadata onto its button. Select the chart's
+        // concrete element so the gesture lands in the plot instead of matching both elements.
+        let chart = app.otherElements["noop.trends.recovery.chart"].firstMatch
+        XCTAssertTrue(chart.waitForExistence(timeout: 20))
+        let quickActions = app.buttons["noop.quick-actions"]
+        XCTAssertTrue(quickActions.waitForExistence(timeout: 5))
+        for _ in 0..<6 where chart.frame.maxY + 12 > quickActions.frame.minY {
+            app.swipeUp()
+        }
+        XCTAssertTrue(chart.isHittable)
+        XCTAssertLessThanOrEqual(chart.frame.maxY + 12, quickActions.frame.minY)
+        let chartFrame = chart.frame
+
+        let summary = String(describing: chart.value)
+        XCTAssertTrue(summary.localizedCaseInsensitiveContains("points"))
+
+        let july29Area = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.71, dy: 0.50))
+        let nearby = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.76, dy: 0.50))
+        july29Area.press(forDuration: 0.35, thenDragTo: nearby)
+
+        let selected = String(describing: chart.value)
+        XCTAssertNotEqual(selected, summary)
+        XCTAssertFalse(selected.localizedCaseInsensitiveContains("points"))
+        keepScreenshot(app, name: "trends-recovery-date-selection")
+
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            .withOffset(CGVector(dx: chartFrame.midX, dy: chartFrame.midY))
+            .tap()
+        XCTAssertTrue(app.navigationBars["Recovery"].waitForExistence(timeout: 5))
+    }
+
+    func testTrendsRangeCopyStaysClearAtCompactWidths() {
+        let app = launchApp(tab: "trends")
+        let rangeLabel = app.staticTexts["noop.trends.range-label"]
+        let rangeDates = app.staticTexts["noop.trends.range-dates"]
+        let coverage = app.staticTexts["noop.trends.range-coverage"]
+        XCTAssertTrue(rangeLabel.waitForExistence(timeout: 20))
+        XCTAssertTrue(rangeDates.exists)
+        XCTAssertTrue(coverage.exists)
+
+        for _ in 0..<8 where !coverage.isHittable {
+            app.swipeUp()
+        }
+
+        XCTAssertTrue(rangeLabel.isHittable)
+        XCTAssertTrue(rangeDates.isHittable)
+        XCTAssertTrue(coverage.isHittable)
+        XCTAssertTrue(rangeLabel.label.localizedCaseInsensitiveContains("last 3 months"))
+        XCTAssertTrue(coverage.label.localizedCaseInsensitiveContains("recovery scores"))
+        XCTAssertTrue(coverage.label.localizedCaseInsensitiveContains("90 of 90 days"))
+        XCTAssertTrue(coverage.label.localizedCaseInsensitiveContains("one score per day"))
+        XCTAssertFalse(coverage.label.localizedCaseInsensitiveContains("readings"))
+        XCTAssertFalse(coverage.label.localizedCaseInsensitiveContains("average across"))
+        XCTAssertFalse(rangeLabel.frame.intersects(coverage.frame))
+        XCTAssertFalse(rangeDates.frame.intersects(coverage.frame))
+        keepScreenshot(app, name: "trends-range-compact-copy")
     }
 
     private func keepScreenshot(_ app: XCUIApplication, name: String) {

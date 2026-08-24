@@ -25,16 +25,21 @@ public struct PairedDevice: Equatable, Sendable, Identifiable {
         self.addedAt = addedAt; self.lastSeenAt = lastSeenAt
     }
 
-    /// A user nickname wins; otherwise "Brand Model" - but collapse to just the model when it already
-    /// carries the brand (so a WHOOP whose model is also "WHOOP" reads "WHOOP", not "WHOOP WHOOP", and a
-    /// future "WHOOP 4.0" model reads "WHOOP 4.0").
+    /// A user nickname wins; otherwise "Brand Model". Compatible-band advertising identifiers such as
+    /// "WHOOP 5AG0146459" are transport names, not names the user chose, so they remain behind technical
+    /// diagnostics while the product surface reads "Noop Band".
     public var displayName: String {
-        if let nickname { return nickname }
-        if id == "my-whoop"
+        let isNoopBand = id == "my-whoop"
             || id.hasPrefix("whoop-")
-            || brand.caseInsensitiveCompare("WHOOP") == .orderedSame {
-            return "Noop Band"
+            || brand.caseInsensitiveCompare("WHOOP") == .orderedSame
+        if let nickname {
+            let trimmed = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isTransportName = isNoopBand
+                && (trimmed.caseInsensitiveCompare("WHOOP") == .orderedSame
+                    || trimmed.uppercased().hasPrefix("WHOOP "))
+            if !trimmed.isEmpty && !isTransportName { return trimmed }
         }
+        if isNoopBand { return "Noop Band" }
         if model.isEmpty || model == brand { return brand }
         if model.localizedCaseInsensitiveContains(brand) { return model }
         return "\(brand) \(model)"

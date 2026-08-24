@@ -40,6 +40,20 @@ enum TabRoute: Hashable {
     case calendar
 }
 
+private struct TabRoutePushKey: EnvironmentKey {
+    static let defaultValue: (TabRoute) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+    /// Programmatic first-hop routing for an interactive child that must own its touch gesture, such as
+    /// a scrub-enabled chart. The iPhone tab shell supplies a path-backed implementation; other hosts
+    /// keep the no-op default and continue to use ordinary value NavigationLinks.
+    var pushTabRoute: (TabRoute) -> Void {
+        get { self[TabRoutePushKey.self] }
+        set { self[TabRoutePushKey.self] = newValue }
+    }
+}
+
 extension View {
     /// Maps every `TabRoute` push to its screen. Apply once to the ROOT content of each
     /// `NavigationStack` that hosts a tab-root view (the iOS tab shell's stacks; the macOS

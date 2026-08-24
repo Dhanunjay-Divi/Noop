@@ -1165,13 +1165,17 @@ private fun devicesFieldColors() = OutlinedTextFieldDefaults.colors(
 // MARK: - Presentation helpers (mirror the Swift PairedDevice computed props)
 
 /**
- * Collapsed display name (mirrors Swift `PairedDevice.displayName`): the nickname if present, else the
- * model if it already contains the brand (so the seeded WHOOP/WHOOP reads "WHOOP", not "WHOOP WHOOP"),
- * else "brand model".
+ * Collapsed display name (mirrors Swift `PairedDevice.displayName`): user-assigned nicknames win, while
+ * compatible-band advertising identifiers remain in diagnostics and product UI reads "Noop Band".
  */
 internal fun displayName(device: PairedDeviceRow): String {
-    device.nickname?.takeIf { it.isNotBlank() }?.let { return it }
-    if (SourceCoordinator.isWhoop(device)) return "Noop Band"
+    val isNoopBand = SourceCoordinator.isWhoop(device)
+    device.nickname?.trim()?.takeIf { nickname ->
+        nickname.isNotEmpty() && !(isNoopBand &&
+            (nickname.equals("WHOOP", ignoreCase = true) ||
+                nickname.startsWith("WHOOP ", ignoreCase = true)))
+    }?.let { return it }
+    if (isNoopBand) return "Noop Band"
     return if (device.model.contains(device.brand, ignoreCase = true)) device.model
     else "${device.brand} ${device.model}"
 }

@@ -284,15 +284,26 @@ private fun DeltaChip(s: WeeklyMetricSummary) {
 
 // MARK: - Formatting
 
-private fun weekRangeLabel(digest: WeeklyDigest): String =
-    "${shortDate(digest.weekStart)}-${shortDate(digest.weekEnd)}"
+private fun weekRangeLabel(digest: WeeklyDigest): String {
+    val start = WeeklyDigestEngine.parseYMD(digest.weekStart)
+    val end = WeeklyDigestEngine.parseYMD(digest.weekEnd)
+    if (start == null || end == null) {
+        return "${shortDate(digest.weekStart)}–${shortDate(digest.weekEnd)}"
+    }
+    if (start[1] == end[1]) {
+        return "${shortMonth(start[1])} ${start[2]}–${end[2]}"
+    }
+    return "${shortDate(digest.weekStart)}–${shortDate(digest.weekEnd)}"
+}
 
 /** "Jun 8" from "2026-06-08", via the engine's own pure parse (no Calendar). */
 private fun shortDate(ymd: String): String {
     val p = WeeklyDigestEngine.parseYMD(ymd) ?: return ymd
-    val name = if (p[1] in 1..12) MONTHS[p[1] - 1] else p[1].toString()
-    return "$name ${p[2]}"
+    return "${shortMonth(p[1])} ${p[2]}"
 }
+
+private fun shortMonth(month: Int): String =
+    if (month in 1..12) MONTHS[month - 1] else month.toString()
 
 internal fun meanText(s: WeeklyMetricSummary, effortScale: EffortScale): String {
     if (s.thisWeek.n == 0) return "-"

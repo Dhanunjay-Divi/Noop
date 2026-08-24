@@ -165,21 +165,43 @@ struct WeeklyDigestContent: View {
         ZStack(alignment: .leading) {
             ScenicHeroBackground(domain: .charge, starCount: 26)
                 .clipShape(RoundedRectangle(cornerRadius: NoopMetrics.cardRadius, style: .continuous))
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Week in review").strandOverline()
-                    Text(weekRangeLabel)
-                        .font(StrandFont.title2)
-                        .foregroundStyle(StrandPalette.textPrimary)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Week in review").strandOverline()
+                        weekRangeText
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: NoopMetrics.space2)
+                    daysWithDataText
                 }
-                Spacer()
-                Text("\(digest.daysWithData)/7 days")
-                    .font(StrandFont.footnote)
-                    .foregroundStyle(StrandPalette.textSecondary)
-                    .accessibilityLabel("\(digest.daysWithData) of 7 days had data this week")
+
+                VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Week in review").strandOverline()
+                        Spacer(minLength: NoopMetrics.space2)
+                        daysWithDataText
+                    }
+                    weekRangeText
+                }
             }
             .padding(NoopMetrics.cardPadding)
         }
+    }
+
+    private var weekRangeText: some View {
+        Text(weekRangeLabel)
+            .font(StrandFont.title2)
+            .foregroundStyle(StrandPalette.textPrimary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var daysWithDataText: some View {
+        Text("\(digest.daysWithData)/7 days")
+            .font(StrandFont.footnote)
+            .foregroundStyle(StrandPalette.textSecondary)
+            .fixedSize(horizontal: true, vertical: false)
+            .accessibilityLabel("\(digest.daysWithData) of 7 days had data this week")
     }
 
     // MARK: Score row — three domain summaries
@@ -386,18 +408,30 @@ struct WeeklyDigestContent: View {
     // MARK: - Formatting
 
     private var weekRangeLabel: String {
-        "\(shortDate(digest.weekStart))-\(shortDate(digest.weekEnd))"
+        guard
+            let (_, startMonth, startDay) = WeeklyDigestEngine.parseYMD(digest.weekStart),
+            let (_, endMonth, endDay) = WeeklyDigestEngine.parseYMD(digest.weekEnd)
+        else {
+            return "\(shortDate(digest.weekStart))–\(shortDate(digest.weekEnd))"
+        }
+        if startMonth == endMonth {
+            return "\(shortMonth(startMonth)) \(startDay)–\(endDay)"
+        }
+        return "\(shortDate(digest.weekStart))–\(shortDate(digest.weekEnd))"
     }
 
     /// "Jun 8" from "2026-06-08", via the engine's own pure parse (no Calendar).
     private func shortDate(_ ymd: String) -> String {
         guard let (_, m, d) = WeeklyDigestEngine.parseYMD(ymd) else { return ymd }
+        return "\(shortMonth(m)) \(d)"
+    }
+
+    private func shortMonth(_ month: Int) -> String {
         let months = [String(localized: "Jan"), String(localized: "Feb"), String(localized: "Mar"),
                       String(localized: "Apr"), String(localized: "May"), String(localized: "Jun"),
                       String(localized: "Jul"), String(localized: "Aug"), String(localized: "Sep"),
                       String(localized: "Oct"), String(localized: "Nov"), String(localized: "Dec")]
-        let name = (1...12).contains(m) ? months[m - 1] : "\(m)"
-        return "\(name) \(d)"
+        return (1...12).contains(month) ? months[month - 1] : "\(month)"
     }
 
     private func meanText(_ s: WeeklyMetricSummary, effortScale: EffortScale) -> String {

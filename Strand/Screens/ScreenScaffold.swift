@@ -446,19 +446,26 @@ private struct ScreenScrollOffsetPreferenceKey: PreferenceKey {
 /// virtualize its frame and report a constant zero even while content is visibly scrolled.
 private struct ScreenScrollPositionReporter: ViewModifier {
     let report: (CGFloat) -> Void
+    @State private var legacyTopOffset: CGFloat?
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
             content.onScrollGeometryChange(for: CGFloat.self) { geometry in
-                -geometry.contentOffset.y
+                // UIKit-style content offsets begin above zero by the adjusted top inset. Normalize that
+                // inset away so every screen reports 0 at rest and negative distance as it advances,
+                // independent of its safe area, header height, or whether it is a pushed destination.
+                -(geometry.contentOffset.y + geometry.contentInsets.top)
             } action: { _, offset in
                 report(offset)
             }
         } else {
             content
                 .coordinateSpace(name: screenScaffoldScrollSpace)
-                .onPreferenceChange(ScreenScrollOffsetPreferenceKey.self) { report($0) }
+                .onPreferenceChange(ScreenScrollOffsetPreferenceKey.self) { offset in
+                    if legacyTopOffset == nil { legacyTopOffset = offset }
+                    report(offset - (legacyTopOffset ?? offset))
+                }
         }
     }
 }

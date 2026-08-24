@@ -171,10 +171,10 @@ struct RootTabView: View {
     }
 
     var body: some View {
-        // Keep the custom bar in the root's bottom alignment and reserve its largest measured height as a
-        // scroll-content margin. Unlike outer padding, this leaves every page viewport and backdrop
-        // edge-to-edge behind the floating controls while still letting the final row scroll fully above
-        // them. The margin is inherited by scrollable roots inside each NavigationStack.
+        // Keep the custom bar over a full-bleed page and reserve its measured height only inside scroll
+        // content. Padding or shrinking the TabView cuts off page backdrops and exposes an opaque band;
+        // a scroll-content margin leaves every background edge-to-edge while allowing the final row to
+        // settle fully above the controls.
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
                 tab(todayTabRoot, "Today", "square.grid.2x2", tag: IPhonePrimaryTab.today.rawValue,
@@ -423,7 +423,7 @@ struct RootTabView: View {
         if offset >= -10 {
             if tabBarCompact { tabBarCompact = false }
             tracker.directionalTravel = 0
-        } else if !tabBarCompact, offset <= -24, tracker.directionalTravel <= -12 {
+        } else if !tabBarCompact, offset <= -24 {
             tabBarCompact = true
             tracker.directionalTravel = 0
         } else if tabBarCompact, tracker.directionalTravel >= 18 {
@@ -659,6 +659,18 @@ struct RootTabView: View {
         .environment(\.scrollToTopSignal, scrollSignal)
         .environment(\.scrollPositionReporter, { offset in
             reportScrollPosition(offset, for: tag)
+        })
+        .environment(\.pushTabRoute, { route in
+            let startingCount = path.wrappedValue.count
+            Task { @MainActor in
+                // Let an ordinary NavigationLink process the same tap first. A scrub-enabled chart can
+                // suppress that ancestor gesture; only then append the identical value route ourselves.
+                await Task.yield()
+                guard path.wrappedValue.count == startingCount else { return }
+                withAnimation(.easeOut(duration: 0.24)) {
+                    path.wrappedValue.append(route)
+                }
+            }
         })
         .toolbar(.hidden, for: .tabBar)   // we draw our own FloatingTabBar
         .tabItem { Label(title, systemImage: icon) }
@@ -1010,13 +1022,11 @@ private final class WindowAttachmentProbe: UIView {
     }
 }
 
-/// A translucent contrast veil throughout the status safe area, fading over 24pt into scrolling content.
-/// The page scene remains visible beneath it; Reduced Transparency keeps the accessibility-safe solid fill.
+/// A contrast veil confined to the status safe area. It deliberately uses no blur: the status indicators
+/// stay readable while the first card and page header remain optically sharp beneath the safe-area edge.
 private final class StatusBarContrastOverlayView: UIView {
-    static let fadeHeight: CGFloat = 24
+    static let fadeHeight: CGFloat = 0
 
-    private let blurView = UIVisualEffectView()
-    private let blurMask = CAGradientLayer()
     private let gradient = CAGradientLayer()
     private var reduceTransparency = false
 
@@ -1025,12 +1035,7 @@ private final class StatusBarContrastOverlayView: UIView {
         isUserInteractionEnabled = false
         isAccessibilityElement = false
         backgroundColor = .clear
-        blurView.isUserInteractionEnabled = false
-        blurView.layer.mask = blurMask
-        addSubview(blurView)
         layer.addSublayer(gradient)
-        blurMask.startPoint = CGPoint(x: 0.5, y: 0)
-        blurMask.endPoint = CGPoint(x: 0.5, y: 1)
         gradient.startPoint = CGPoint(x: 0.5, y: 0)
         gradient.endPoint = CGPoint(x: 0.5, y: 1)
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
@@ -1062,36 +1067,21 @@ private final class StatusBarContrastOverlayView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        blurView.frame = bounds
-        blurMask.frame = bounds
         gradient.frame = bounds
         updateGradient()
     }
 
     private func updateGradient() {
         guard bounds.height > 0 else { return }
-        blurView.effect = reduceTransparency ? nil : UIBlurEffect(style: .systemThinMaterial)
         let base = UIColor(StrandPalette.surfaceBase).resolvedColor(with: traitCollection)
-        let safeTop = max(0, bounds.height - Self.fadeHeight)
-        let solidEnd = NSNumber(value: min(1, safeTop / bounds.height))
-        let softEnd = NSNumber(value: min(1, (safeTop + Self.fadeHeight * 0.48) / bounds.height))
-
-        let crownAlpha: CGFloat = reduceTransparency ? 1 : 0.52
-        let shoulderAlpha: CGFloat = reduceTransparency ? 0.82 : 0.30
+        let crownAlpha: CGFloat = reduceTransparency ? 1 : 0.48
+        let shoulderAlpha: CGFloat = reduceTransparency ? 0.88 : 0.28
         gradient.colors = [
-            base.withAlphaComponent(crownAlpha).cgColor,
             base.withAlphaComponent(crownAlpha).cgColor,
             base.withAlphaComponent(shoulderAlpha).cgColor,
             base.withAlphaComponent(0).cgColor,
         ]
-        gradient.locations = [0, solidEnd, softEnd, 1]
-        blurMask.colors = [
-            UIColor.white.cgColor,
-            UIColor.white.cgColor,
-            UIColor.white.withAlphaComponent(0.55).cgColor,
-            UIColor.clear.cgColor,
-        ]
-        blurMask.locations = [0, solidEnd, softEnd, 1]
+        gradient.locations = [0, 0.72, 1]
     }
 }
 
@@ -1397,9 +1387,8 @@ private struct FloatingTabBar: View {
     static let expandedReservedHeight: CGFloat = 76
 
     @Binding var selection: Int
-    /// Scroll-reactive presentation supplied by the shell. Accessibility Dynamic Type deliberately
-    /// keeps labels expanded even when this is true; compact mode remains an icon-only visual choice,
-    /// never a loss of VoiceOver naming or tap-target size.
+    /// Scroll-reactive presentation supplied by the shell. Compact mode keeps the same 48pt target and
+    /// full VoiceOver name at every Dynamic Type size; tapping it restores all five visible labels.
     var compact = false
     /// Compact mode is an explicit disclosure control, not a re-select gesture. Expanding must therefore
     /// preserve the current navigation stack, scroll position, and cached data.
@@ -1408,10 +1397,10 @@ private struct FloatingTabBar: View {
     var onReselect: (Int) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.noopAppearanceMode) private var appearanceMode
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Namespace private var navigationMorph
 
     private struct Item: Identifiable { let title: LocalizedStringKey; let icon: String; let tag: Int; var id: Int { tag } }
@@ -1423,6 +1412,11 @@ private struct FloatingTabBar: View {
         Item(title: "More", icon: "ellipsis", tag: IPhonePrimaryTab.more.rawValue),
     ]
 
+    /// Compaction is suppressed at accessibility text sizes. A sighted low-vision user who asked for larger
+    /// text is exactly the person who cannot afford an icon-only rail: they lose the one persistent cue for
+    /// which section they are in. This is complementary to the `.dynamicTypeSize(...xxLarge)` cap below,
+    /// not replaced by it - the cap makes expanded labels FIT, this keeps them PRESENT. VoiceOver is
+    /// unaffected either way, since every control keeps `.accessibilityLabel(item.title)`.
     private var visuallyCompact: Bool { compact && !dynamicTypeSize.isAccessibilitySize }
     private var currentItem: Item {
         nav.first(where: { $0.tag == selection }) ?? nav[0]
@@ -1659,10 +1653,6 @@ private struct FloatingQuickAddButton: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.noopAppearanceMode) private var appearanceMode
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    private var visuallyCompact: Bool { compact && !dynamicTypeSize.isAccessibilitySize }
-
     var body: some View {
         Button(action: action) {
             Image(systemName: "plus")

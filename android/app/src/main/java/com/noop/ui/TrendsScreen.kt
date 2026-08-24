@@ -49,6 +49,7 @@ import com.noop.analytics.WeeklyDigestEngine
 import com.noop.data.DailyMetric
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -189,6 +190,7 @@ fun TrendsScreen(vm: AppViewModel) {
                 charge = recovery,
                 effort = strain,
                 rest = rest,
+                selectedRange = range,
                 effortScale = effortScale,
                 modifier = Modifier.staggeredAppear(index = 1),
             )
@@ -200,21 +202,18 @@ fun TrendsScreen(vm: AppViewModel) {
                 modifier = Modifier.staggeredAppear(index = 2),
                 verticalArrangement = Arrangement.spacedBy(Metrics.space8),
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    SegmentedPillControl(
-                        items = TrendsRange.entries.toList(),
-                        selection = range,
-                        label = { it.label },
-                        onSelect = { range = it },
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Overline(range.subtitle, color = Palette.textTertiary)
+                SegmentedPillControl(
+                    items = TrendsRange.entries.toList(),
+                    selection = range,
+                    label = { it.label },
+                    onSelect = { range = it },
+                )
+                Overline(trendsRangeTitle(range), color = Palette.textTertiary)
+                rangeDateSpan(range, days.map { it.day })?.let { span ->
+                    Text(span, style = NoopType.footnote, color = Palette.textSecondary)
                 }
                 Text(
-                    recovery.caption,
+                    recoveryCoverageText(recovery),
                     style = NoopType.footnote,
                     color = if (recovery.widened) Palette.statusWarning else Palette.textTertiary,
                 )
@@ -227,9 +226,7 @@ fun TrendsScreen(vm: AppViewModel) {
             ChartCard(
                 modifier = Modifier.staggeredAppear(index = 3),
                 title = stringResource(R.string.trends_charge),
-                // The range bar above already prints the authoritative reading-count caption;
-                // the hero only names its window so the count isn't doubled in one card height.
-                subtitle = range.subtitle,
+                subtitle = resolvedSubtitle(recovery),
                 trailing = recAvg?.let { "${it.roundToInt()}" },
                 // LIQUID hero: the translucent-black frosted wrapper + a small count-up Charge vessel accent
                 // in the header (the screen's one headline single value — the window-average Charge). The
@@ -444,6 +441,7 @@ private fun WeekInReviewCard(
     charge: ResolvedMetric,
     effort: ResolvedMetric,
     rest: ResolvedMetric,
+    selectedRange: TrendsRange,
     effortScale: EffortScale,
     modifier: Modifier = Modifier,
 ) {
@@ -457,12 +455,16 @@ private fun WeekInReviewCard(
             SectionHeader(
                 stringResource(R.string.appwide_trends_range_averages),
                 overline = stringResource(R.string.trends_charge_effort_rest),
+                trailing = trendsRangeTitle(selectedRange),
             )
             if (chargeAvg != null) {
                 PipScoreRow(
                     label = stringResource(R.string.trends_charge), value = chargeAvg, range = 0f..100f,
                     tint = Palette.chargeColor,
                     descriptor = stringResource(R.string.appwide_trends_recovery_descriptor),
+                    scope = metricAverageScope(charge),
+                    scopeWarning = charge.widened,
+                    unit = "/ 100",
                     format = { "${it.roundToInt()}" },
                 )
             }
@@ -477,6 +479,9 @@ private fun WeekInReviewCard(
                     label = stringResource(R.string.trends_effort), value = display, range = 0f..maxV.toFloat(),
                     tint = Palette.effortColor,
                     descriptor = stringResource(R.string.appwide_trends_effort_descriptor),
+                    scope = metricAverageScope(effort),
+                    scopeWarning = effort.widened,
+                    unit = "/ ${UnitFormatter.effortScaleMax(effortScale)}",
                     format = { if (oneDecimal) String.format(Locale.US, "%.1f", it) else "${it.roundToInt()}" },
                 )
             }
@@ -485,6 +490,9 @@ private fun WeekInReviewCard(
                     label = stringResource(R.string.trends_rest), value = restAvg, range = 0f..100f,
                     tint = Palette.restColor,
                     descriptor = stringResource(R.string.appwide_trends_sleep_descriptor),
+                    scope = metricAverageScope(rest),
+                    scopeWarning = rest.widened,
+                    unit = "/ 100",
                     format = { "${it.roundToInt()}" },
                 )
             }
@@ -504,6 +512,9 @@ private fun PipScoreRow(
     range: ClosedFloatingPointRange<Float>,
     tint: Color,
     descriptor: String,
+    scope: String,
+    scopeWarning: Boolean,
+    unit: String,
     format: (Double) -> String,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
@@ -513,12 +524,28 @@ private fun PipScoreRow(
             color = Palette.textSecondary,
         )
         Text(descriptor, style = NoopType.footnote, color = Palette.textTertiary)
-        CountUpText(
-            value = value,
-            format = format,
-            style = NoopType.number(30f, weight = FontWeight.Bold),
-            color = Palette.textPrimary,
+        Text(
+            scope,
+            style = NoopType.caption,
+            color = if (scopeWarning) Palette.statusWarning else Palette.textTertiary,
         )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                stringResource(R.string.appwide_trends_average_label),
+                style = NoopType.overline,
+                color = Palette.textTertiary,
+            )
+            CountUpText(
+                value = value,
+                format = format,
+                style = NoopType.number(30f, weight = FontWeight.Bold),
+                color = Palette.textPrimary,
+            )
+            Text(unit, style = NoopType.bodyNumber, color = Palette.textSecondary)
+        }
         PipBar(value = value.toFloat(), range = range, tint = tint)
     }
 }
@@ -526,16 +553,13 @@ private fun PipScoreRow(
 // MARK: - Range control model (ported from TrendsView.Range)
 
 /** W(7) / M(30) / 3M(90) / 6M(180) / 1Y(365) / ALL. */
-private enum class TrendsRange(val days: Int?, val label: String, val longName: String) {
-    Week(7, "W", "week"),
-    Month(30, "M", "month"),
-    Quarter(90, "3M", "3 months"),
-    Half(180, "6M", "6 months"),
-    Year(365, "1Y", "year"),
-    All(null, "ALL", "all history");
-
-    /** "Trailing 90 days" / "All history" , the card/range subtitle. */
-    val subtitle: String get() = days?.let { "Trailing $it days" } ?: "All history"
+private enum class TrendsRange(val days: Int?, val label: String) {
+    Week(7, "W"),
+    Month(30, "M"),
+    Quarter(90, "3M"),
+    Half(180, "6M"),
+    Year(365, "1Y"),
+    All(null, "ALL");
 
     /** This range plus every LARGER range, ascending , the auto-expand search order. */
     val widening: List<TrendsRange>
@@ -544,14 +568,13 @@ private enum class TrendsRange(val days: Int?, val label: String, val longName: 
 
 // MARK: - Resolved metric (mirrors TrendsView.ResolvedMetric / resolve)
 
-/** A metric's window: its plotted values + the day-string of each point, the range it
- *  resolved to, whether the selection was widened to find data, and the caption to show. */
+/** A metric's window: its plotted values, the day string for each point, its effective range,
+ *  and whether the selection was widened to find data. */
 private data class ResolvedMetric(
     val values: List<Double>,
     val dates: List<String>,
     val effective: TrendsRange,
     val widened: Boolean,
-    val caption: String,
 )
 
 /**
@@ -572,7 +595,6 @@ private fun resolveMetric(
                 dates = pts.map { it.first },
                 effective = r,
                 widened = r != selected,
-                caption = caption(pts.size, r, selected),
             )
         }
     }
@@ -582,7 +604,6 @@ private fun resolveMetric(
         dates = pts.map { it.first },
         effective = TrendsRange.All,
         widened = TrendsRange.All != selected,
-        caption = caption(pts.size, TrendsRange.All, selected),
     )
 }
 
@@ -612,14 +633,64 @@ private fun windowPoints(
     return sliced.mapNotNull { d -> value(d)?.let { d.day to it } }
 }
 
-/** Caption text, mirroring TrendsView.caption(count:eff:). */
-private fun caption(count: Int, eff: TrendsRange, selected: TrendsRange): String {
-    val unit = if (count == 1) "reading" else "readings"
-    return if (eff != selected) {
-        "$count $unit · sparse , widened to ${eff.longName}"
+@Composable
+private fun trendsRangeTitle(range: TrendsRange): String = when (range) {
+    TrendsRange.Week -> stringResource(R.string.appwide_trends_last_7_days)
+    TrendsRange.Month -> stringResource(R.string.appwide_trends_last_30_days)
+    TrendsRange.Quarter -> stringResource(R.string.appwide_trends_last_3_months)
+    TrendsRange.Half -> stringResource(R.string.appwide_trends_last_6_months)
+    TrendsRange.Year -> stringResource(R.string.appwide_trends_last_year)
+    TrendsRange.All -> stringResource(R.string.appwide_trends_all_history)
+}
+
+/** Exact calendar span for the selected window, or the first/last stored day for All History. */
+private fun rangeDateSpan(range: TrendsRange, historyDates: List<String>): String? {
+    val end: LocalDate
+    val start: LocalDate
+    val dayCount = range.days
+    if (dayCount != null) {
+        end = LocalDate.now()
+        start = end.minusDays((dayCount - 1).toLong())
     } else {
-        "$count $unit · ${selected.longName}"
+        start = historyDates.firstNotNullOfOrNull { runCatching { LocalDate.parse(it) }.getOrNull() }
+            ?: return null
+        end = historyDates.asReversed().firstNotNullOfOrNull {
+            runCatching { LocalDate.parse(it) }.getOrNull()
+        } ?: return null
     }
+    val formatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+        .withLocale(Locale.getDefault())
+    return "${start.format(formatter)} – ${end.format(formatter)}"
+}
+
+@Composable
+private fun recoveryCoverageText(metric: ResolvedMetric): String {
+    val count = metric.values.size
+    if (count == 0) return stringResource(R.string.appwide_trends_recovery_no_scores)
+    if (metric.widened) {
+        return stringResource(R.string.appwide_trends_recovery_older_coverage_format, count)
+    }
+    return metric.effective.days?.let { total ->
+        stringResource(R.string.appwide_trends_recovery_coverage_format, count, total)
+    } ?: stringResource(R.string.appwide_trends_recovery_history_coverage_format, count)
+}
+
+@Composable
+private fun metricAverageScope(metric: ResolvedMetric): String {
+    if (metric.values.isEmpty()) {
+        return stringResource(R.string.appwide_trends_recovery_no_scores)
+    }
+    return stringResource(
+        R.string.appwide_trends_average_scope_format,
+        metric.values.size,
+    )
+}
+
+@Composable
+private fun resolvedSubtitle(metric: ResolvedMetric): String {
+    val title = trendsRangeTitle(metric.effective)
+    val span = rangeDateSpan(metric.effective, metric.dates) ?: return title
+    return "$title · $span"
 }
 
 // MARK: - ChartCard , the uniform fixed-height trend card
@@ -910,7 +981,7 @@ private fun MetricTrendCard(
     val avg = resolved.values.averageOrNull()
     ChartCard(
         title = title,
-        subtitle = null,
+        subtitle = resolvedSubtitle(resolved),
         trailing = avg?.let { fmt(it) },
         color = color,
         tint = tint,

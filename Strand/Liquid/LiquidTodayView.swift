@@ -609,30 +609,28 @@ struct LiquidTodayView: View {
                 }
             }
 
-            HStack(alignment: .bottom, spacing: NoopMetrics.space2) {
-                Button { showDayPicker = true } label: {
-                    VStack(alignment: .leading, spacing: NoopMetrics.space1) {
-                        Text(dateLine)
-                            .font(StrandFont.overline)
-                            .tracking(StrandFont.overlineTracking)
-                            .textCase(.uppercase)
-                            .foregroundStyle(StrandPalette.textTertiary)
-                        Text(selectedDayOffset == 0 ? greeting : dayTitle)
-                            .font(StrandFont.rounded(36, weight: .bold))
-                            .foregroundStyle(StrandPalette.textPrimary)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(2)
+            Group {
+                if dynamicTypeSize == .xxxLarge || dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                        dayPickerButton
+                        #if os(iOS)
+                        if selectedDayOffset == 0 {
+                            weatherChip
+                        }
+                        #endif
                     }
-                    .contentShape(Rectangle())
+                } else {
+                    HStack(alignment: .bottom, spacing: NoopMetrics.space2) {
+                        dayPickerButton
+                        Spacer(minLength: NoopMetrics.space1)
+                        #if os(iOS)
+                        if selectedDayOffset == 0 {
+                            weatherChip
+                                .padding(.bottom, 3)
+                        }
+                        #endif
+                    }
                 }
-                .buttonStyle(.plain)
-                Spacer(minLength: NoopMetrics.space1)
-                #if os(iOS)
-                if selectedDayOffset == 0 {
-                    weatherChip
-                        .padding(.bottom, 3)
-                }
-                #endif
             }
             .padding(.top, NoopMetrics.space5)
             .padding(.bottom, NoopMetrics.space4)
@@ -647,6 +645,25 @@ struct LiquidTodayView: View {
                     .liquidPopoverAdaptation()
             }
         }
+    }
+
+    private var dayPickerButton: some View {
+        Button { showDayPicker = true } label: {
+            VStack(alignment: .leading, spacing: NoopMetrics.space1) {
+                Text(dateLine)
+                    .font(StrandFont.overline)
+                    .tracking(StrandFont.overlineTracking)
+                    .textCase(.uppercase)
+                    .foregroundStyle(StrandPalette.textTertiary)
+                Text(selectedDayOffset == 0 ? greeting : dayTitle)
+                    .font(StrandFont.rounded(36, weight: .bold))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     #if os(iOS)
@@ -852,7 +869,7 @@ struct LiquidTodayView: View {
     }
 
     private var heroCard: some View {
-        VStack(alignment: .leading, spacing: NoopMetrics.space4) {
+        VStack(alignment: .leading, spacing: NoopMetrics.space3) {
             DailySignalHeader(
                 readiness: readiness,
                 includesCurrentWellnessSignal: selectedDayOffset == 0,
@@ -866,7 +883,7 @@ struct LiquidTodayView: View {
                     base: recoveryHeroTone,
                     tip: recoveryHeroTip,
                     caption: recoveryHeroCaption,
-                    size: 190
+                    size: 156
                 )
                 .frame(maxWidth: .infinity)
             }
@@ -875,14 +892,14 @@ struct LiquidTodayView: View {
                 TapGesture(count: 2).onEnded { explainHeroMetric("recovery") }
             )
 
-            HStack(spacing: 36) {
+            HStack(spacing: 28) {
                 Button { openHeroMetric("sleep_performance") } label: {
                     V2SatelliteRing(
                         label: String(localized: "Sleep"),
                         value: restScore,
                         base: sleepHeroTone,
                         tip: sleepHeroTip,
-                        size: 72
+                        size: 60
                     )
                 }
                 .buttonStyle(.plain)
@@ -900,7 +917,7 @@ struct LiquidTodayView: View {
                         max: effortScale == .whoop ? 21 : 100,
                         base: StrandPalette.effortColor,
                         tip: StrandPalette.effortBright,
-                        size: 72,
+                        size: 60,
                         decimals: effortScale == .whoop ? 1 : 0
                     )
                 }
@@ -933,7 +950,7 @@ struct LiquidTodayView: View {
                 )
             }
         }
-        .padding(.vertical, NoopMetrics.space4)
+        .padding(.vertical, NoopMetrics.space3)
         .padding(.horizontal, NoopMetrics.space4)
         .background(
             RoundedRectangle(cornerRadius: 26, style: .continuous)
@@ -3501,8 +3518,9 @@ private struct DailySignalHeader: View {
     var body: some View {
         NavigationLink(value: TabRoute.health) {
             ViewThatFits(in: .horizontal) {
-                row(showsSource: true)
-                row(showsSource: false)
+                wideRow
+                    .fixedSize(horizontal: true, vertical: false)
+                compactRow
             }
             .contentShape(Rectangle())
             .accessibilityElement(children: .ignore)
@@ -3513,7 +3531,51 @@ private struct DailySignalHeader: View {
         .buttonStyle(.plain)
     }
 
-    private func row(showsSource: Bool) -> some View {
+    private var wideRow: some View {
+        HStack(spacing: NoopMetrics.space2) {
+            signalLabel
+            Spacer(minLength: NoopMetrics.space2)
+            if let sourceLabel {
+                V2Chip(text: sourceLabel, tone: StrandPalette.onDarkSecondary)
+                    .fixedSize()
+            }
+            V2Chip(text: label, tone: tint)
+                .fixedSize()
+        }
+    }
+
+    private var compactRow: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+            signalLabel
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: NoopMetrics.space2) {
+                    sourceChip
+                    statusChip
+                }
+
+                VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                    sourceChip
+                    statusChip
+                }
+            }
+            .padding(.leading, 30 + NoopMetrics.space2)
+        }
+    }
+
+    @ViewBuilder
+    private var sourceChip: some View {
+        if let sourceLabel {
+            V2Chip(text: sourceLabel, tone: StrandPalette.onDarkSecondary)
+                .fixedSize()
+        }
+    }
+
+    private var statusChip: some View {
+        V2Chip(text: label, tone: tint)
+            .fixedSize()
+    }
+
+    private var signalLabel: some View {
         HStack(spacing: NoopMetrics.space2) {
             DailySignalWaveform(
                 status: status,
@@ -3526,13 +3588,7 @@ private struct DailySignalHeader: View {
                 .textCase(.uppercase)
                 .foregroundStyle(StrandPalette.onDarkSecondary)
                 .lineLimit(1)
-            Spacer(minLength: NoopMetrics.space2)
-            if showsSource, let sourceLabel {
-                V2Chip(text: sourceLabel, tone: StrandPalette.onDarkSecondary)
-                    .fixedSize()
-            }
-            V2Chip(text: label, tone: tint)
-                .fixedSize()
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 }
@@ -3647,36 +3703,43 @@ private struct FitnessAgeHeroRow: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            HStack(spacing: NoopMetrics.space3) {
+            HStack(alignment: .top, spacing: NoopMetrics.space3) {
                 MetricGlyph("figure.run", size: 34)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
                         Text("FITNESS AGE")
                             .font(StrandFont.overlineScaled(10))
                             .tracking(0)
+                            .fixedSize(horizontal: true, vertical: false)
                         Text("WEEKLY")
                             .font(StrandFont.overlineScaled(8))
                             .tracking(0)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
                             .background(StrandPalette.chargeColor.opacity(0.14), in: Capsule())
                     }
                     .foregroundStyle(StrandPalette.onDarkSecondary)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(valueText)
+                            .font(StrandFont.number(18))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                            .fixedSize(horizontal: true, vertical: false)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(StrandPalette.onDarkSecondary)
+                            .accessibilityHidden(true)
+                    }
                     Text(comparisonText)
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.onDarkSecondary.opacity(0.82))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: NoopMetrics.space2)
-                Text(valueText)
-                    .font(StrandFont.number(18))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(StrandPalette.onDarkSecondary)
             }
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
@@ -3698,6 +3761,7 @@ private struct FitnessAgeHeroRow: View {
             .accessibilityAction { onOpen() }
             .accessibilityAction(named: Text("Explain Fitness Age")) { onExplain() }
             .accessibilitySortPriority(1)
+            .accessibilityIdentifier("noop.today.fitness-age")
 
             MetricInfoButton(
                 title: String(localized: "About Fitness Age"),

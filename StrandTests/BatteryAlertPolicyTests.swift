@@ -8,6 +8,18 @@ import XCTest
 final class BatteryAlertPolicyTests: XCTestCase {
     private typealias Policy = BatteryNotifier.BatteryAlertPolicy
 
+    @MainActor
+    func testLiveBatteryFunnelPublishesAndInvokesAlertHook() {
+        let state = LiveState()
+        var delivered: Double?
+        state.onBatteryUpdate = { delivered = $0 }
+
+        state.setBattery(14)
+
+        XCTAssertEqual(state.batteryPct, 14)
+        XCTAssertEqual(delivered, 14)
+    }
+
     // 1. Cross down fires once; the next reading below threshold does not re-fire.
     // NB: the threshold is `pct <= 15` (≤, not <), so the alert fires AT 15, not at 16 — 16% is
     // still above the low line. This pins that boundary so a future <-vs-≤ slip can't pass silently.

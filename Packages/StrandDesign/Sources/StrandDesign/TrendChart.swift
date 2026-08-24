@@ -51,6 +51,12 @@ public struct TrendChart: View {
     /// Optional human-readable series name for VoiceOver (e.g. "HRV trend"). When nil the
     /// element falls back to a generic "Trend" label so it's never unlabeled.
     public var accessibilityLabel: String?
+    /// Optional stable identifier for UI automation of this specific series.
+    public var accessibilityIdentifier: String?
+    /// Optional fallback for a short chart tap when the chart sits inside another interactive control.
+    /// Long-press scrubbing remains owned here; callers can route the ordinary tap without layering a
+    /// second hit-testing plane over the plot.
+    public var tapAction: (() -> Void)?
     /// When set, draws a glowing "now" end-cap on the most-recent point - IN the chart's own
     /// coordinate space (via the overlay proxy), so it sits exactly on the line. nil = no cap.
     /// (#458: an earlier sibling-overlay cap guessed the plot insets and floated off the line.)
@@ -80,6 +86,8 @@ public struct TrendChart: View {
         valueFormat: @escaping (Double) -> String = { String(Int($0.rounded())) },
         dateFormat: @escaping (Date) -> String = { TrendChart.defaultDateString($0) },
         accessibilityLabel: String? = nil,
+        accessibilityIdentifier: String? = nil,
+        tapAction: (() -> Void)? = nil,
         nowCapColor: Color? = nil,
         yDomain: ClosedRange<Double>? = nil
     ) {
@@ -94,6 +102,8 @@ public struct TrendChart: View {
         self.valueFormat = valueFormat
         self.dateFormat = dateFormat
         self.accessibilityLabel = accessibilityLabel
+        self.accessibilityIdentifier = accessibilityIdentifier
+        self.tapAction = tapAction
         self.nowCapColor = nowCapColor
         self.yDomain = yDomain
         let avg = sorted.isEmpty
@@ -119,9 +129,16 @@ public struct TrendChart: View {
 
     /// The x-position the cursor is hovering, in chart-local coordinates.
     @State private var hoverX: CGFloat? = nil
+    /// The exact full-resolution sample represented by the crosshair. Keeping this separate from the
+    /// downsampled marks lets both the visible callout and VoiceOver expose every recorded date.
+    @State private var selectedPoint: TrendPoint?
     #if os(iOS)
     /// Separates a deliberate hold-to-inspect interaction from the surrounding card's normal tap.
     @State private var scrubEngaged = false
+    /// The plot bounds measured by the noninteractive chart overlay. The touch gesture lives on the
+    /// concrete Chart itself, then maps its local x through this rect so no transparent hit plane sits
+    /// between the chart and a surrounding NavigationLink.
+    @State private var touchPlotRect = CGRect.zero
     #endif
 
     /// PERF: a 365-day (or longer) series feeds Swift Charts hundreds of LineMark/AreaMark vertices, each
@@ -182,9 +199,10 @@ public struct TrendChart: View {
 
     #if os(iOS)
     /// A short hold enters inspection; sliding then updates the same crosshair used by pointer hover.
-    /// The hold gate leaves a normal card tap available for navigation.
-    private var touchScrubGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.25, maximumDistance: 10)
+    /// The gesture shares the Chart's own touch stream, so a short tap remains available to a surrounding
+    /// NavigationLink. Dates use the same linear time domain Swift Charts renders in the measured plot.
+    private func touchScrubGesture(plot: CGRect) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.20, maximumDistance: 24)
             .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
             .onChanged { value in
                 guard case .second(true, let drag) = value else { return }
@@ -192,21 +210,29 @@ public struct TrendChart: View {
                     scrubEngaged = true
                     StrandHaptic.selection.play()
                 }
-                if let drag {
+                if let drag, plot.width > 0,
+                   let first = points.first?.date,
+                   let last = points.last?.date {
+                    let x = min(max(drag.location.x, plot.minX), plot.maxX)
+                    let fraction = Double((x - plot.minX) / plot.width)
+                    let date = first.addingTimeInterval(
+                        last.timeIntervalSince(first) * fraction
+                    )
+                    guard let point = points.min(by: {
+                        abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
+                    }) else { return }
                     var transaction = Transaction()
                     transaction.disablesAnimations = true
                     withTransaction(transaction) {
-                        hoverX = drag.location.x
+                        hoverX = nil
+                        selectedPoint = point
                     }
                 }
             }
             .onEnded { _ in
                 scrubEngaged = false
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    hoverX = nil
-                }
+                // Keep the selected date visible after the finger lifts. A second scrub replaces it,
+                // while leaving the screen naturally clears this view-local state.
             }
     }
     #endif
@@ -303,8 +329,9 @@ public struct TrendChart: View {
                 let plot = proxy.plotRectCompat(in: geo)
                 ZStack(alignment: .topLeading) {
                     if showsHover,
-                       let hx = hoverX,
-                       let p = nearestPoint(toX: hx, proxy: proxy, plot: plot),
+                       let p = selectedPoint ?? hoverX.flatMap({
+                           nearestPoint(toX: $0, proxy: proxy, plot: plot)
+                       }),
                        let px = proxy.position(forX: p.date),
                        let py = proxy.position(forY: p.value) {
                         let cx = px + plot.minX
@@ -354,16 +381,36 @@ public struct TrendChart: View {
                     tx.disablesAnimations = true
                     withTransaction(tx) {
                         switch phase {
-                        case .active(let location): hoverX = location.x
-                        case .ended: hoverX = nil
+                        case .active(let location):
+                            hoverX = location.x
+                            selectedPoint = nearestPoint(toX: location.x, proxy: proxy, plot: plot)
+                        case .ended:
+                            hoverX = nil
+                            selectedPoint = nil
                         }
                     }
                 }
+                .preference(key: TrendPlotRectPreferenceKey.self, value: plot)
                 #if os(iOS)
-                .gesture(touchScrubGesture, including: showsHover ? .all : .subviews)
+                // Selection chrome is presentation only. Once the tooltip exists it becomes a concrete
+                // hit target; disabling overlay hits keeps the Chart's scrub recognizer and the enclosing
+                // card's normal tap reachable through the full plot.
+                .allowsHitTesting(false)
                 #endif
             }
         }
+        #if os(iOS)
+        .onPreferenceChange(TrendPlotRectPreferenceKey.self) { rect in
+            guard abs(rect.minX - touchPlotRect.minX) > 0.5
+                    || abs(rect.width - touchPlotRect.width) > 0.5 else { return }
+            touchPlotRect = rect
+        }
+        .simultaneousGesture(
+            touchScrubGesture(plot: touchPlotRect),
+            including: showsHover ? .all : .subviews
+        )
+        .modifier(OptionalChartTapModifier(action: tapAction))
+        #endif
         .frame(height: height)
         // NOTE: no outer `.clipped()` here. The PLOT is already clipped to its own bounds by
         // `.chartPlotStyle { plotArea.clipped() }` above (that's what contains the catmullRom overshoot +
@@ -377,10 +424,43 @@ public struct TrendChart: View {
         // double-announced; the crisp interactive copy passes showsHover:true (default) and speaks.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(accessibilityLabel ?? "Trend"))
-        .accessibilityValue(Text(a11ySummary))
+        .accessibilityValue(Text(selectedPoint.map {
+            "\(dateFormat($0.date)), \(valueFormat($0.value))"
+        } ?? a11ySummary))
+        .accessibilityHint(Text("Hold and drag to inspect each date", bundle: .module))
+        .accessibilityIdentifier(accessibilityIdentifier ?? "")
         .accessibilityHidden(!showsHover && accessibilityLabel == nil)
     }
 }
+
+private struct TrendPlotRectPreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next.width > 0 {
+            value = next
+        }
+    }
+}
+
+#if os(iOS)
+private struct OptionalChartTapModifier: ViewModifier {
+    let action: (() -> Void)?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let action {
+            content.simultaneousGesture(
+                TapGesture().onEnded(action),
+                including: .all
+            )
+        } else {
+            content
+        }
+    }
+}
+#endif
 
 // MARK: - Chart downsampling (pure)
 //

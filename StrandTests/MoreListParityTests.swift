@@ -155,10 +155,17 @@ final class MoreListParityTests: XCTestCase {
         XCTAssertTrue(rootComposition.contains(".ignoresSafeArea()"),
                       "The actual root backdrop, not an unrelated destination, must remain full-screen.")
         XCTAssertTrue(rootComposition.contains("WindowStatusBarContrastGuard(visible: statusBarGuardVisible)"))
-        XCTAssertTrue(shell.contains("UIBlurEffect(style: .systemThinMaterial)"),
-                      "The translucent status guard must blur scrolling text instead of using an opaque band.")
-        XCTAssertTrue(shell.contains("reduceTransparency ? nil"),
-                      "Reduced Transparency must disable the blur and retain the solid accessibility fallback.")
+        // The guard deliberately uses NO blur now: blurring the safe-area strip also softened the first
+        // card and the page header underneath it, so the veil is a gradient of the page's own base colour
+        // confined to the status area (see StatusBarContrastOverlayView's doc comment). What must NOT
+        // regress is the accessibility fallback: under Reduced Transparency the veil becomes effectively
+        // opaque so the clock and Dynamic Island stay legible over any content.
+        XCTAssertFalse(shell.contains("UIBlurEffect"),
+                       "The status veil is intentionally blur-free; reintroducing blur re-softens the header.")
+        XCTAssertTrue(shell.contains("crownAlpha: CGFloat = reduceTransparency ? 1"),
+                      "Reduced Transparency must make the status veil opaque, not merely tinted.")
+        XCTAssertTrue(shell.contains("shoulderAlpha: CGFloat = reduceTransparency ?"),
+                      "The veil's shoulder must also respond to Reduced Transparency.")
         XCTAssertTrue(visualHarness.contains(#"-theme.appearance "$appearance""#),
                       "Visual QA must force NOOP's app appearance, not only the simulator shell.")
         XCTAssertTrue(shell.contains(".frame(maxWidth: .infinity, maxHeight: .infinity)"),
@@ -200,8 +207,13 @@ final class MoreListParityTests: XCTestCase {
                       "Horizontal charts and Back gestures must not consume the scroll interaction budget.")
         XCTAssertTrue(shell.contains("reportScrollPosition(offset, for: tag)"),
                       "Primary tabs must drive chrome from the real ScrollView top marker.")
-        XCTAssertTrue(shell.contains("offset <= -24, tracker.directionalTravel <= -12"),
-                      "Compaction needs both page progress and directional hysteresis.")
+        // Compaction is deliberately position-based (you are reading down the page), while EXPANSION keeps
+        // directional hysteresis below so a one-frame bounce cannot pop the labels back. Pin both halves
+        // of that asymmetry, including the release threshold, so neither side silently loses its rule.
+        XCTAssertTrue(shell.contains("offset <= -24"),
+                      "Compaction must still require real page progress, not any downward pixel.")
+        XCTAssertTrue(shell.contains("if offset >= -10"),
+                      "Returning near the top must always restore the full bar.")
         XCTAssertTrue(shell.contains("tracker.directionalTravel >= 18"),
                       "Expansion needs a deliberate return, not a one-frame bounce.")
         XCTAssertTrue(shell.contains("offset >= -10"),
@@ -292,7 +304,14 @@ final class MoreListParityTests: XCTestCase {
                       "The photographic Today scene must retain its explicit dark-scrim contract.")
         XCTAssertFalse(liquidToday.contains("usesDarkSkyBehindCards"),
                        "Liquid Today cannot infer fixed-white ink from an adaptive scene preference.")
-        XCTAssertTrue(liquidToday.contains(".font(StrandFont.rounded(36, weight: .bold))\n                            .foregroundStyle(StrandPalette.textPrimary)"),
+        // Indentation-insensitive on purpose: the previous form embedded 28 spaces, so re-indenting the
+        // view broke the test while the ink was still correct. What matters is that the 36pt day title is
+        // followed by adaptive textPrimary rather than a hard-coded white.
+        let dayTitleUsesAdaptiveInk = liquidToday
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+            .contains(".font(StrandFont.rounded(36,weight:.bold)).foregroundStyle(StrandPalette.textPrimary)")
+        XCTAssertTrue(dayTitleUsesAdaptiveInk,
                       "Liquid Today's day title must use adaptive ink on pearl/obsidian backgrounds.")
         XCTAssertTrue(liquidToday.contains("compact ? StrandPalette.textSecondary : StrandPalette.textTertiary"),
                       "The NOOP wordmark must remain visible in both Light and Dark appearances.")
