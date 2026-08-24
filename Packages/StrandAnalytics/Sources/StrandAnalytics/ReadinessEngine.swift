@@ -266,9 +266,13 @@ public enum ReadinessEngine {
                 let mono = m / sd
                 monotony = mono
                 if mono >= 2.0 {
+                    let low = week.min() ?? m
+                    let high = week.max() ?? m
                     signals.append(Signal(key: "monotony", label: "Training variety",
-                        evidence: "monotony \(String(format: "%.1f", mono))",
-                        detail: "recorded daily strain has varied less than usual", flag: .watch))
+                        evidence: "Last \(week.count) recorded days: Effort "
+                            + "\(Int(low.rounded()))-\(Int(high.rounded())) "
+                            + "(average \(Int(m.rounded())))",
+                        detail: "recorded daily Effort stayed in a narrow range", flag: .watch))
                 }
             }
         }

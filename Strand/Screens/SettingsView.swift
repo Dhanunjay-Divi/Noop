@@ -36,6 +36,8 @@ struct SettingsView: View {
 
     /// Profile-photo picker selection (PhotosUI). Cleared back to nil once the bytes are loaded.
     @State private var avatarPickerItem: PhotosPickerItem?
+    @State private var displayNameDraft = ""
+    @FocusState private var displayNameFocused: Bool
 
     /// Backup & restore UI state.
     @State private var backupBusy = false
@@ -401,6 +403,18 @@ struct SettingsView: View {
             blurb: "These power your heart-rate zones, calorie estimates and recovery baselines. Keep them accurate."
         ) {
             VStack(spacing: 0) {
+                FormRow(label: "appwide.profile.display_name") {
+                    TextField("Noop", text: $displayNameDraft)
+                        .multilineTextAlignment(.trailing)
+                        .textFieldStyle(.plain)
+                        .focused($displayNameFocused)
+                        .onSubmit { commitDisplayName() }
+                        .accessibilityLabel(Text("appwide.profile.display_name"))
+                }
+                .onChangeCompat(of: displayNameFocused) { focused in
+                    if !focused { commitDisplayName() }
+                }
+                rowDivider
                 FormRow(label: "Date of birth") {
                     HStack(spacing: 12) {
                         Text("\(profile.age)")
@@ -543,6 +557,15 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .onAppear {
+            if displayNameDraft.isEmpty { displayNameDraft = profile.displayName }
+        }
+        .onDisappear { commitDisplayName() }
+    }
+
+    private func commitDisplayName() {
+        profile.setDisplayName(displayNameDraft)
+        displayNameDraft = profile.displayName
     }
 
     /// One-line state for the "Steps estimate" tap-through row: manual, the auto-fit confidence, or a

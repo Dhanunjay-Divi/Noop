@@ -53,6 +53,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -65,6 +66,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.view.HapticFeedbackConstants
 import kotlin.math.PI
 import kotlin.math.sin
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -158,6 +160,7 @@ fun BreatheScreen(viewModel: AppViewModel) {
     val live by viewModel.live.collectAsStateWithLifecycle()
     val bpm by viewModel.bpm.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val hostView = LocalView.current
 
     var mode by remember { mutableStateOf(BreatheMode.Breathe) }
     // The user's locked resonance pace (br/min), or null — read fresh; the sweep writes it.
@@ -265,11 +268,13 @@ fun BreatheScreen(viewModel: AppViewModel) {
             // Inhale: cue, then hold for the inhale duration.
             phase = Phase.Inhale
             viewModel.buzz(loops = 1)
+            if (!live.bonded) hostView.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
             if (audioCues) tonePlayer.play(BreathTone.Inhale)
             delay((pace.inhale(lockedBpm) * 1000).toLong())
             // Exhale: cue, then hold for the exhale duration.
             phase = Phase.Exhale
             viewModel.buzz(loops = 2)
+            if (!live.bonded) hostView.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
             if (audioCues) tonePlayer.play(BreathTone.Exhale)
             delay((pace.exhale(lockedBpm) * 1000).toLong())
             breathCount += 1
@@ -369,7 +374,7 @@ fun BreatheScreen(viewModel: AppViewModel) {
             if (live.bonded) {
                 StatePill("Haptics on", tone = StrandTone.Positive)
             } else {
-                StatePill("Visual only", tone = StrandTone.Warning)
+                StatePill(stringResource(R.string.appwide_breathe_phone_haptics), tone = StrandTone.Neutral)
             }
             Spacer(Modifier.weight(1f))
             Text(timeString(sessionSeconds), style = NoopType.number(15f), color = Palette.textPrimary)

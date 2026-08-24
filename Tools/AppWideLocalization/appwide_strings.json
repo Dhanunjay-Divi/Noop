@@ -77,15 +77,15 @@
     "zh-Hant": "其他情況"
   },
   "appwide.automations.tap_guide.sos_body": {
-    "de": "Wenn Safety bereit ist, haben die erforderlichen wiederholten Doppeltipps Vorrang, rufen akzeptierte Kontakte sofort und starten die Standortfreigabe, sofern verfügbar.",
+    "de": "Wenn Safety bereit ist, haben die erforderlichen wiederholten Doppeltipps Vorrang, alarmieren akzeptierte Kontakte sofort und starten die Standortfreigabe, sofern verfügbar.",
     "en": "When Safety is ready, the required repeated double-taps take priority, immediately page accepted contacts, and start current-location sharing when available.",
     "es": "Cuando Safety está listo, los dobles toques repetidos necesarios tienen prioridad, avisan de inmediato a los contactos aceptados e inician el envío de la ubicación actual cuando está disponible.",
     "fr": "Lorsque Safety est prêt, les doubles touchers répétés requis sont prioritaires, contactent immédiatement les contacts acceptés et lancent le partage de la position actuelle lorsqu’elle est disponible.",
     "it": "Quando Safety è pronto, i doppi tocchi ripetuti richiesti hanno la priorità, avvisano subito i contatti accettati e avviano la condivisione della posizione attuale quando disponibile.",
     "pt-PT": "Quando o Safety está pronto, os duplos toques repetidos necessários têm prioridade, avisam imediatamente os contactos aceites e iniciam a partilha da localização atual quando disponível.",
-    "ru": "Когда Safety настроен, требуемая серия двойных касаний имеет приоритет, сразу вызывает принятых контактов и запускает передачу текущего местоположения, если оно доступно.",
-    "zh-Hans": "Safety 准备就绪后，所需的连续双击手势会优先执行，立即呼叫已接受的联系人，并在可用时开始共享当前位置。",
-    "zh-Hant": "Safety 準備就緒後，所需的連續雙擊手勢會優先執行，立即呼叫已接受的聯絡人，並在可用時開始分享目前位置。"
+    "ru": "Когда Safety настроен, требуемая серия двойных касаний имеет приоритет, сразу оповещает принятых контактов и запускает передачу текущего местоположения, если оно доступно.",
+    "zh-Hans": "Safety 准备就绪后，所需的连续双击手势会优先执行，立即向已接受的联系人发出警报，并在可用时开始共享当前位置。",
+    "zh-Hant": "Safety 準備就緒後，所需的連續雙擊手勢會優先執行，立即向已接受的聯絡人發出警報，並在可用時開始分享目前位置。"
   },
   "appwide.automations.tap_guide.sos_title": {
     "de": "SOS-Geste aktiviert",

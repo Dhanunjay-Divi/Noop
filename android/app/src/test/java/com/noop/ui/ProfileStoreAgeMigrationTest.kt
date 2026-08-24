@@ -22,6 +22,40 @@ import org.junit.Test
 class ProfileStoreAgeMigrationTest {
 
     @Test
+    fun displayName_defaultsNormalizesAndResetsLocally() {
+        val prefs = FakeSharedPreferences()
+        val profile = ProfileStore(prefs)
+        assertEquals("Noop", profile.displayName)
+
+        profile.displayName = "  Avery\n Quinn  "
+        assertEquals("Avery Quinn", profile.displayName)
+        assertEquals("Avery Quinn", prefs.getString("display_name", null))
+
+        profile.displayName = " "
+        assertEquals("Noop", profile.displayName)
+        assertFalse(prefs.contains("display_name"))
+
+        profile.displayName = " ".repeat(40) + "Avery " + "Q".repeat(40)
+        assertEquals("Avery " + "Q".repeat(26), profile.displayName)
+
+        val emoji = "\uD83D\uDE00"
+        profile.displayName = "A".repeat(31) + emoji + "B"
+        assertEquals("A".repeat(31) + emoji, profile.displayName)
+
+        val flag = "\uD83C\uDDFA\uD83C\uDDF8"
+        profile.displayName = "A".repeat(31) + flag + "B"
+        assertEquals("A".repeat(31) + flag, profile.displayName)
+
+        val joinedEmoji = "\uD83D\uDC69\u200D\uD83D\uDCBB"
+        profile.displayName = "A".repeat(31) + joinedEmoji + "B"
+        assertEquals("A".repeat(31) + joinedEmoji, profile.displayName)
+
+        val accented = "e\u0301"
+        profile.displayName = "A".repeat(31) + accented + "B"
+        assertEquals("A".repeat(31) + accented, profile.displayName)
+    }
+
+    @Test
     fun seedValuesAreNotConfirmed_untilUserAcceptsEachInput() {
         val prefs = FakeSharedPreferences()
         val profile = ProfileStore(prefs)

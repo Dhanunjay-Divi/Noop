@@ -1057,6 +1057,10 @@ class WhoopRepository private constructor(
     suspend fun dismissedDetected(strapDeviceId: String = "my-whoop"): List<DismissedWorkout> =
         dao.dismissedWorkouts(computedDeviceId(strapDeviceId))
 
+    /** Every durable detected-bout dismissal, for reads that intentionally load all workout sources. */
+    suspend fun dismissedDetectedAllSources(): List<DismissedWorkout> =
+        dao.dismissedWorkoutsAllSources()
+
     /** Deleted-sleep tombstones for BOTH the imported and computed sources of [strapDeviceId] (#33/#65).
      *
      *  HAZARD FIX (#65 3A): [deleteSleepSession] writes the tombstone under the deleted row's OWN

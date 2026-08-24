@@ -2703,9 +2703,14 @@ struct LiquidTodayView: View {
 
     private var greeting: String {
         let h = Calendar.current.component(.hour, from: Date())
-        return h < 12 ? String(localized: "Good morning")
-            : h < 17 ? String(localized: "Good afternoon")
-            : String(localized: "Good evening")
+        let salutation = h < 12 ? String(localized: "appwide.today.greeting.morning")
+            : h < 17 ? String(localized: "appwide.today.greeting.afternoon")
+            : String(localized: "appwide.today.greeting.evening")
+        return String.localizedStringWithFormat(
+            String(localized: "appwide.today.greeting_format"),
+            salutation,
+            profile.displayName
+        )
     }
 
     // Measured Apple Health count first, then WHOOP 5/MG @57 motion estimate, then calibrated fallback.
@@ -3003,6 +3008,19 @@ private struct TodaySignalPatternsCard: View {
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                if let changed = result.findings.first?.evidence.first {
+                    VStack(alignment: .leading, spacing: NoopMetrics.space1) {
+                        Text("appwide.pattern.what_changed")
+                            .font(StrandFont.overline)
+                            .tracking(StrandFont.overlineTracking)
+                            .foregroundStyle(tint)
+                        Text(changed)
+                            .font(StrandFont.subhead.weight(.semibold))
+                            .foregroundStyle(StrandPalette.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
                 HStack(spacing: NoopMetrics.space2) {
                     Image(systemName: "point.3.connected.trianglepath.dotted")
                         .font(.system(size: 11, weight: .semibold))
@@ -3142,7 +3160,7 @@ private struct SignalPatternDetailSheet: View {
 
                 if !finding.evidence.isEmpty {
                     patternList(
-                        title: "SIGNALS",
+                        title: String(localized: "appwide.pattern.what_changed"),
                         symbol: "waveform.path.ecg",
                         rows: finding.evidence,
                         tint: tint

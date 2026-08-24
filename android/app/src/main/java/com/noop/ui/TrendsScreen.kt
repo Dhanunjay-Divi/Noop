@@ -454,11 +454,16 @@ private fun WeekInReviewCard(
 
     NoopCard(modifier = modifier, tint = Palette.chargeColor) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SectionHeader(stringResource(R.string.trends_week_in_review), overline = stringResource(R.string.trends_charge_effort_rest))
+            SectionHeader(
+                stringResource(R.string.appwide_trends_range_averages),
+                overline = stringResource(R.string.trends_charge_effort_rest),
+            )
             if (chargeAvg != null) {
                 PipScoreRow(
                     label = stringResource(R.string.trends_charge), value = chargeAvg, range = 0f..100f,
-                    tint = Palette.chargeColor, format = { "${it.roundToInt()}" },
+                    tint = Palette.chargeColor,
+                    descriptor = stringResource(R.string.appwide_trends_recovery_descriptor),
+                    format = { "${it.roundToInt()}" },
                 )
             }
             if (effortAvg != null) {
@@ -471,13 +476,16 @@ private fun WeekInReviewCard(
                 PipScoreRow(
                     label = stringResource(R.string.trends_effort), value = display, range = 0f..maxV.toFloat(),
                     tint = Palette.effortColor,
+                    descriptor = stringResource(R.string.appwide_trends_effort_descriptor),
                     format = { if (oneDecimal) String.format(Locale.US, "%.1f", it) else "${it.roundToInt()}" },
                 )
             }
             if (restAvg != null) {
                 PipScoreRow(
                     label = stringResource(R.string.trends_rest), value = restAvg, range = 0f..100f,
-                    tint = Palette.restColor, format = { "${it.roundToInt()}" },
+                    tint = Palette.restColor,
+                    descriptor = stringResource(R.string.appwide_trends_sleep_descriptor),
+                    format = { "${it.roundToInt()}" },
                 )
             }
         }
@@ -495,6 +503,7 @@ private fun PipScoreRow(
     value: Double,
     range: ClosedFloatingPointRange<Float>,
     tint: Color,
+    descriptor: String,
     format: (Double) -> String,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
@@ -503,6 +512,7 @@ private fun PipScoreRow(
             style = NoopType.overline,
             color = Palette.textSecondary,
         )
+        Text(descriptor, style = NoopType.footnote, color = Palette.textTertiary)
         CountUpText(
             value = value,
             format = format,
@@ -666,7 +676,11 @@ private fun ChartCard(
                     HeadlineVessel(value = headlineValue, tint = Palette.recoveryColor(headlineValue))
                 } else if (trailing != null) {
                     // Neutral 15pt readout (matches iOS TrendsView) , not the 22sp tinted figure.
-                    Text(trailing, style = NoopType.bodyNumber, color = Palette.textPrimary)
+                    Text(
+                        stringResource(R.string.appwide_trends_average_format, trailing),
+                        style = NoopType.bodyNumber,
+                        color = Palette.textPrimary,
+                    )
                 }
             }
 

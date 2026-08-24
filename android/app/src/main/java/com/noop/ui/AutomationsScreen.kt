@@ -232,6 +232,24 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                     tone = if (live.bonded) StrandTone.Positive else StrandTone.Warning,
                 )
             }
+            RowDivider()
+            Overline(stringResource(R.string.appwide_automations_tap_guide_title))
+            TapGuideRow(
+                stringResource(R.string.appwide_automations_tap_guide_alarm_title),
+                stringResource(R.string.appwide_automations_tap_guide_alarm_body),
+            )
+            TapGuideRow(
+                stringResource(R.string.appwide_automations_tap_guide_hydration_title),
+                stringResource(R.string.appwide_automations_tap_guide_hydration_body),
+            )
+            TapGuideRow(
+                stringResource(R.string.appwide_automations_tap_guide_sos_title),
+                stringResource(R.string.appwide_automations_tap_guide_sos_body),
+            )
+            TapGuideRow(
+                stringResource(R.string.appwide_automations_tap_guide_otherwise_title),
+                stringResource(R.string.appwide_automations_tap_guide_otherwise_body),
+            )
         }
         }
 
@@ -623,6 +641,26 @@ fun AutomationsScreen(viewModel: AppViewModel) {
                 )
             }
         }
+        }
+    }
+}
+
+@Composable
+private fun TapGuideRow(context: String, action: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            Icons.Filled.TouchApp,
+            contentDescription = null,
+            tint = Palette.accent,
+            modifier = Modifier.size(16.dp),
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(context, style = NoopType.footnote, color = Palette.textPrimary)
+            Text(action, style = NoopType.footnote, color = Palette.textTertiary)
         }
     }
 }

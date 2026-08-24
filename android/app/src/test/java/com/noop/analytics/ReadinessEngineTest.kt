@@ -139,7 +139,11 @@ class ReadinessEngineTest {
         }
 
         val read = ReadinessEngine.evaluate(days)
-        assertNotNull(read.signals.firstOrNull { it.key == "monotony" })
+        val variety = read.signals.firstOrNull { it.key == "monotony" }
+        assertNotNull(variety)
+        val evidence = requireNotNull(variety?.evidence)
+        assertTrue(evidence.contains("Effort 10-11 (average 10)"))
+        assertFalse(evidence.contains("monotony", ignoreCase = true))
         assertEquals(ReadinessEngine.Level.PRIMED, read.level)
         assertEquals("Aligned", read.headline)
     }

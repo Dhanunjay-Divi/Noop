@@ -119,6 +119,10 @@ public struct TrendChart: View {
 
     /// The x-position the cursor is hovering, in chart-local coordinates.
     @State private var hoverX: CGFloat? = nil
+    #if os(iOS)
+    /// Separates a deliberate hold-to-inspect interaction from the surrounding card's normal tap.
+    @State private var scrubEngaged = false
+    #endif
 
     /// PERF: a 365-day (or longer) series feeds Swift Charts hundreds of LineMark/AreaMark vertices, each
     /// catmullRom-interpolated — far more than the ~360pt plot has pixels, so most are sub-pixel and pure
@@ -175,6 +179,37 @@ public struct TrendChart: View {
     var plotYDomain: ClosedRange<Double> {
         showsBars ? min(0, resolvedYDomain.lowerBound)...resolvedYDomain.upperBound : resolvedYDomain
     }
+
+    #if os(iOS)
+    /// A short hold enters inspection; sliding then updates the same crosshair used by pointer hover.
+    /// The hold gate leaves a normal card tap available for navigation.
+    private var touchScrubGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.25, maximumDistance: 10)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+            .onChanged { value in
+                guard case .second(true, let drag) = value else { return }
+                if !scrubEngaged {
+                    scrubEngaged = true
+                    StrandHaptic.selection.play()
+                }
+                if let drag {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        hoverX = drag.location.x
+                    }
+                }
+            }
+            .onEnded { _ in
+                scrubEngaged = false
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    hoverX = nil
+                }
+            }
+    }
+    #endif
 
     public var body: some View {
         Chart {
@@ -324,6 +359,9 @@ public struct TrendChart: View {
                         }
                     }
                 }
+                #if os(iOS)
+                .gesture(touchScrubGesture, including: showsHover ? .all : .subviews)
+                #endif
             }
         }
         .frame(height: height)

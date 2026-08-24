@@ -210,6 +210,7 @@ fun RhythmScreen(
     night: RhythmScreener.NightRhythmSummary?,
     windows: List<RhythmScreener.WindowResult>,
     onClose: (() -> Unit)? = null,
+    onConsentAccepted: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     // Local consent record — feature OFF until the gate is passed. SharedPreferences isn't
@@ -221,6 +222,7 @@ fun RhythmScreen(
             onAccept = {
                 RhythmConsent.accept(context)
                 consentGiven = true
+                onConsentAccepted?.invoke()
             },
             onCancel = onClose,
         )
@@ -459,7 +461,7 @@ private fun MethodologyCard() {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Overline("How this is measured")
             Text(
-                uiString(R.string.l10n_rhythm_screen_during_quiet_still_resting_windows_noop_45488969),
+                stringResource(R.string.appwide_rhythm_methodology),
                 style = NoopType.footnote, color = Palette.textTertiary,
             )
         }

@@ -117,7 +117,10 @@ final class ReadinessEngineTests: XCTestCase {
                 spo2Pct: row.spo2Pct, skinTempDevC: row.skinTempDevC, respRateBpm: row.respRateBpm)
         }
         let read = ReadinessEngine.evaluate(days: days)
-        XCTAssertNotNil(read.signals.first { $0.key == "monotony" })
+        let variety = read.signals.first { $0.key == "monotony" }
+        XCTAssertNotNil(variety)
+        XCTAssertTrue(variety?.evidence?.contains("Effort 10-11 (average 10)") == true)
+        XCTAssertFalse(variety?.evidence?.localizedCaseInsensitiveContains("monotony") == true)
         XCTAssertEqual(read.level, .primed)
         XCTAssertEqual(read.headline, "Aligned")
     }

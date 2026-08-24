@@ -656,10 +656,50 @@ struct AutomationsView: View {
                     // isolation). Renders byte-for-byte the previous inline pill.
                     BondStatePill()
                 }
+                rowDivider
+                tapPriorityGuide
                 if !model.moments.isEmpty {
                     rowDivider
                     momentsView
                 }
+            }
+        }
+    }
+
+    private var tapPriorityGuide: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("appwide.automations.tap_guide.title").strandOverline()
+            tapGuideRow(
+                "appwide.automations.tap_guide.alarm_title",
+                "appwide.automations.tap_guide.alarm_body"
+            )
+            tapGuideRow(
+                "appwide.automations.tap_guide.hydration_title",
+                "appwide.automations.tap_guide.hydration_body"
+            )
+            tapGuideRow(
+                "appwide.automations.tap_guide.sos_title",
+                "appwide.automations.tap_guide.sos_body"
+            )
+            tapGuideRow(
+                "appwide.automations.tap_guide.otherwise_title",
+                "appwide.automations.tap_guide.otherwise_body"
+            )
+        }
+    }
+
+    private func tapGuideRow(_ context: LocalizedStringKey, _ action: LocalizedStringKey) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "hand.tap")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(StrandPalette.accent)
+                .frame(width: 16)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(context).font(StrandFont.footnote.weight(.semibold))
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text(action).font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
             }
         }
     }

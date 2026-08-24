@@ -8,7 +8,7 @@
     <string name="appwide_automations_tap_guide_hydration_title">Trinkerinnerung aktiv</string>
     <string name="appwide_automations_tap_guide_otherwise_body">Führt die oben ausgewählte allgemeine Doppeltipp-Aktion aus.</string>
     <string name="appwide_automations_tap_guide_otherwise_title">Andernfalls</string>
-    <string name="appwide_automations_tap_guide_sos_body">Wenn Safety bereit ist, haben die erforderlichen wiederholten Doppeltipps Vorrang, rufen akzeptierte Kontakte sofort und starten die Standortfreigabe, sofern verfügbar.</string>
+    <string name="appwide_automations_tap_guide_sos_body">Wenn Safety bereit ist, haben die erforderlichen wiederholten Doppeltipps Vorrang, alarmieren akzeptierte Kontakte sofort und starten die Standortfreigabe, sofern verfügbar.</string>
     <string name="appwide_automations_tap_guide_sos_title">SOS-Geste aktiviert</string>
     <string name="appwide_automations_tap_guide_title">WAS EIN TIPP AUF DAS BAND BEWIRKT</string>
     <string name="appwide_backup_encryption_body">Verschlüsselte Exporte schützen Datenbankverlauf und dauerhafte Einstellungen mit AES-256-GCM. NOOP speichert die Passphrase nie und kann sie nicht wiederherstellen. Zugangsdaten, Hardwarebindungen, Berechtigungen und vorübergehende Zustellzustände sind ausgeschlossen. Neue Backups enthalten ein Integritätsmanifest; ältere unverschlüsselte Backups lassen sich weiterhin importieren. Die Wiederherstellung prüft und bereitet Daten vor, bevor die Datenbank erneut geöffnet wird. Der plattformübergreifende Export überträgt unterstützte Daten zwischen Apple und Android. Ordner- und automatische Backups sind unverschlüsselt; verwende daher verschlüsselten Speicher.</string>

@@ -437,6 +437,8 @@ fun TodayScreen(
     // Body profile for the live Effort computation below, age/sex/HR-max-override drive the same
     // StrainScorer call the daily pass uses. Read once like every other Settings-backed value. (#402)
     val profileStore = remember { ProfileStore.from(context) }
+    val displayNameVersion by ProfileStore.displayNameChanges.collectAsStateWithLifecycle()
+    val displayName = remember(displayNameVersion) { profileStore.displayName }
     val ageMetricProfileVersion by ProfileStore.ageMetricProfileChanges.collectAsStateWithLifecycle()
     val ageMetricState = remember(ageMetricProfileVersion) { profileStore.ageMetricStateToken }
 
@@ -1547,6 +1549,7 @@ fun TodayScreen(
                                 recoveryCalibration = recoveryCalibration,
                                 carriedDay = lastScoredRecoveryDay,
                                 days = days,
+                                displayName = displayName,
                                 synthesisExpanded = synthesisExpanded,
                                 onToggleSynthesis = { synthesisExpanded = !synthesisExpanded },
                                 onOpenReadiness = { showChargeBreakdown = true },
@@ -3409,6 +3412,7 @@ private fun SynthesisHeroCard(
     // taps to toggle it / open the Charge breakdown (where the full Readiness card lives). Defaults keep old
     // call sites compiling; the Today call site supplies them.
     days: List<DailyMetric> = emptyList(),
+    displayName: String = ProfileStore.DEFAULT_DISPLAY_NAME,
     synthesisExpanded: Boolean = true,
     onToggleSynthesis: () -> Unit = {},
     onOpenReadiness: () -> Unit = {},
@@ -3433,7 +3437,7 @@ private fun SynthesisHeroCard(
         ) {
             // The greeting yields/ellipsises first; the pill keeps its full width (#527).
             Text(
-                greetingWord(),
+                uiString(R.string.appwide_today_greeting_format, greetingWord(), displayName),
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
                 maxLines = 1,
@@ -6705,9 +6709,9 @@ private fun rememberTrendWindow(
 private fun greetingWord(): String {
     val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
     return when {
-        h < 12 -> "Good morning"
-        h < 17 -> "Good afternoon"
-        else -> "Good evening"
+        h < 12 -> uiString(R.string.appwide_today_greeting_morning)
+        h < 17 -> uiString(R.string.appwide_today_greeting_afternoon)
+        else -> uiString(R.string.appwide_today_greeting_evening)
     }
 }
 

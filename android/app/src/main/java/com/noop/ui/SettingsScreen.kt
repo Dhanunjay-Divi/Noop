@@ -158,6 +158,18 @@ import kotlin.math.roundToInt
  */
 class ProfileStore(private val prefs: SharedPreferences) {
 
+    /** Local UI identity only; separate from Friends, sync, and shareable backups. */
+    var displayName: String
+        get() = normalizedDisplayName(prefs.getString(KEY_DISPLAY_NAME, null))
+        set(value) {
+            val resolved = normalizedDisplayName(value)
+            prefs.edit().apply {
+                if (resolved == DEFAULT_DISPLAY_NAME) remove(KEY_DISPLAY_NAME)
+                else putString(KEY_DISPLAY_NAME, resolved)
+            }.apply()
+            _displayNameChanges.value += 1
+        }
+
     /**
      * Current age in whole years (#146), DERIVED from [dateOfBirthMillis] so it advances on its own
      * instead of going stale until the user bumps a number. Read-only; change age via [setAge] (the
@@ -426,6 +438,10 @@ class ProfileStore(private val prefs: SharedPreferences) {
         private const val KEY_STEPS_CONFIDENCE = "steps_calibration_confidence"
         private const val KEY_STEPS_MANUAL_FLAG = "steps_calibration_manual"
         private const val KEY_STEPS_MANUAL_COEFF = "steps_manual_coefficient"
+        private const val KEY_DISPLAY_NAME = "display_name"
+        const val DEFAULT_DISPLAY_NAME = "Noop"
+        const val MAX_DISPLAY_NAME_LENGTH = 32
+        private val DISPLAY_NAME_GRAPHEME = Regex("\\X")
 
         private const val AGE_MIN = 13
         private const val AGE_MAX = 100
@@ -440,6 +456,21 @@ class ProfileStore(private val prefs: SharedPreferences) {
         private val _ageMetricProfileChanges = MutableStateFlow(0L)
         val ageMetricProfileChanges: StateFlow<Long> = _ageMetricProfileChanges.asStateFlow()
         private fun signalAgeMetricProfileChange() { _ageMetricProfileChanges.value += 1 }
+        private val _displayNameChanges = MutableStateFlow(0L)
+        val displayNameChanges: StateFlow<Long> = _displayNameChanges.asStateFlow()
+
+        internal fun normalizedDisplayName(raw: String?): String {
+            val clean = raw.orEmpty().trim().split(Regex("\\s+"))
+                .filter(String::isNotEmpty)
+                .joinToString(" ")
+            if (clean.isEmpty()) return DEFAULT_DISPLAY_NAME
+            // Java/Android regex \X follows extended grapheme boundaries, matching Swift Character:
+            // never split a visible accent, flag, skin-tone modifier, or joined emoji sequence.
+            val overflow = DISPLAY_NAME_GRAPHEME.findAll(clean)
+                .drop(MAX_DISPLAY_NAME_LENGTH)
+                .firstOrNull()
+            return overflow?.let { clean.substring(0, it.range.first) } ?: clean
+        }
 
         /**
          * Variable step for the calibration stepper so high values stay reachable: fine near the
@@ -528,6 +559,7 @@ fun SettingsScreen(
     // forces recomposition after each mutating write (SharedPreferences isn't reactive).
     val profile = remember { ProfileStore.from(context) }
     var rev by remember { mutableStateOf(0) }
+    var displayNameDraft by remember { mutableStateOf(profile.displayName) }
     fun mutate(block: () -> Unit) { block(); rev++ }
 
     var backupBusy by remember { mutableStateOf(false) }
@@ -980,6 +1012,28 @@ fun SettingsScreen(
             blurb = "These power your heart-rate zones, calorie estimates and recovery baselines. Keep them accurate.",
         ) {
             Column {
+                FormRow(label = stringResource(R.string.appwide_profile_display_name)) {
+                    OutlinedTextField(
+                        value = displayNameDraft,
+                        onValueChange = { raw ->
+                            displayNameDraft = raw
+                            mutate { profile.displayName = raw }
+                        },
+                        singleLine = true,
+                        placeholder = { Text(ProfileStore.DEFAULT_DISPLAY_NAME) },
+                        modifier = Modifier.widthIn(min = 140.dp, max = 220.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Palette.textPrimary,
+                            unfocusedTextColor = Palette.textPrimary,
+                            focusedBorderColor = Palette.accent,
+                            unfocusedBorderColor = Palette.hairline,
+                            cursorColor = Palette.accent,
+                            focusedContainerColor = Palette.surfaceInset,
+                            unfocusedContainerColor = Palette.surfaceInset,
+                        ),
+                    )
+                }
+                RowDivider()
                 FormRow(label = uiString(R.string.l10n_settings_screen_age_ff9f1ff3)) {
                     StepperField(
                         value = profile.age.toString(),

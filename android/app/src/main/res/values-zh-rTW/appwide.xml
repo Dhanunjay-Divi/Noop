@@ -8,7 +8,7 @@
     <string name="appwide_automations_tap_guide_hydration_title">飲水提示響起時</string>
     <string name="appwide_automations_tap_guide_otherwise_body">執行上方所選的一般雙擊操作。</string>
     <string name="appwide_automations_tap_guide_otherwise_title">其他情況</string>
-    <string name="appwide_automations_tap_guide_sos_body">Safety 準備就緒後，所需的連續雙擊手勢會優先執行，立即呼叫已接受的聯絡人，並在可用時開始分享目前位置。</string>
+    <string name="appwide_automations_tap_guide_sos_body">Safety 準備就緒後，所需的連續雙擊手勢會優先執行，立即向已接受的聯絡人發出警報，並在可用時開始分享目前位置。</string>
     <string name="appwide_automations_tap_guide_sos_title">SOS 手勢已啟用</string>
     <string name="appwide_automations_tap_guide_title">輕觸手環的作用</string>
     <string name="appwide_backup_encryption_body">加密匯出使用 AES-256-GCM 保護資料庫歷史記錄和持久設定。NOOP 絕不儲存或復原密碼短語。憑證、硬體連結、權限和暫時傳遞狀態不會包含在內。新備份包含完整性資訊清單；舊版未加密備份仍可匯入。復原操作會先驗證並暫存資料，再重新開啟資料庫。跨平台匯出可在 Apple 與 Android 之間移轉支援的資料。資料夾備份和自動備份未加密，因此請使用加密儲存空間。</string>

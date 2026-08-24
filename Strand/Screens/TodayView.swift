@@ -4344,11 +4344,17 @@ struct TodayView: View {
         if let f = DemoDayHarness.active { return f.greeting }
         #endif
         let h = Calendar.current.component(.hour, from: Date())
+        let salutation: String
         switch h {
-        case ..<12:   return String(localized: "Good morning")
-        case 12..<17: return String(localized: "Good afternoon")
-        default:      return String(localized: "Good evening")
+        case ..<12:   salutation = String(localized: "appwide.today.greeting.morning")
+        case 12..<17: salutation = String(localized: "appwide.today.greeting.afternoon")
+        default:      salutation = String(localized: "appwide.today.greeting.evening")
         }
+        return String.localizedStringWithFormat(
+            String(localized: "appwide.today.greeting_format"),
+            salutation,
+            profile.displayName
+        )
     }
 
     // #perf: fixed-locale (en_US_POSIX), hoisted to static so the ~1 Hz Today body doesn't allocate a

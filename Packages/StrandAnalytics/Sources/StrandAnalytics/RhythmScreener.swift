@@ -106,25 +106,30 @@ public enum RhythmScreener {
         public let motionStill: Bool
         /// Mean heart rate (bpm) over the window, used for the resting-band gate.
         public let meanHR: Double
+        /// True when a recorded workout overlaps this window. Stationary exercise can look still while
+        /// heart rate remains elevated, so activity context always makes the window unreadable.
+        public let activityActive: Bool
 
         public init(rrMs: [Double], ts: [Int] = [], ppgIBIms: [Double]? = nil,
-                    motionStill: Bool, meanHR: Double) {
+                    motionStill: Bool, meanHR: Double, activityActive: Bool = false) {
             self.rrMs = rrMs
             self.ts = ts
             self.ppgIBIms = ppgIBIms
             self.motionStill = motionStill
             self.meanHR = meanHR
+            self.activityActive = activityActive
         }
 
         /// Convenience: assemble from decoded `RRInterval` rows. Computes meanHR from the
         /// cleaned series so the caller need not. `motionStill` still comes from the caller.
-        public init(rr: [RRInterval], ppgIBIms: [Double]? = nil, motionStill: Bool) {
+        public init(rr: [RRInterval], ppgIBIms: [Double]? = nil, motionStill: Bool,
+                    activityActive: Bool = false) {
             let raw = rr.map { Double($0.rrMs) }
             let clean = HRVAnalyzer.rangeFilter(raw)
             let meanNN = clean.isEmpty ? 0 : clean.reduce(0, +) / Double(clean.count)
             let hr = meanNN > 0 ? 60_000.0 / meanNN : 0
             self.init(rrMs: raw, ts: rr.map { $0.ts }, ppgIBIms: ppgIBIms,
-                      motionStill: motionStill, meanHR: hr)
+                      motionStill: motionStill, meanHR: hr, activityActive: activityActive)
         }
     }
 
@@ -222,6 +227,10 @@ public enum RhythmScreener {
     /// Screen one resting window: apply the gates, then compute the descriptive stats and
     /// a neutral regularity label. Pure — takes plain inputs, returns a plain result.
     public static func screenWindow(_ input: WindowInput) -> WindowResult {
+        // Recorded activity wins even when the wrist happens to look still (cycling, lifting, rests).
+        guard !input.activityActive else {
+            return .unreadable(nBeats: 0)
+        }
         // Gate 1: motion. A regularity read is only attempted on a firmly-still window;
         // movement masquerades as irregularity and is the single biggest false signal.
         guard input.motionStill else {

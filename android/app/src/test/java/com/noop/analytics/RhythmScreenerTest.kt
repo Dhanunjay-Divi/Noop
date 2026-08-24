@@ -125,6 +125,21 @@ class RhythmScreenerTest {
     }
 
     @Test
+    fun recordedActivity_isUnreadableEvenWhenStillAndRateLooksPlausible() {
+        val result = RhythmScreener.screenWindow(
+            RhythmScreener.WindowInput(
+                rrMs = afibLike(),
+                motionStill = true,
+                meanHR = 90.0,
+                activityActive = true,
+            ),
+        )
+        assertEquals(RhythmRegularity.UNREADABLE, result.label)
+        assertNull(result.sd1)
+        assertTrue(result.poincare.isEmpty())
+    }
+
+    @Test
     fun sparseWindow_isUnreadableCalibrating() {
         val rr = List(40) { 1000.0 }
         val r = RhythmScreener.screenWindow(

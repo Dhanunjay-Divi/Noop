@@ -103,6 +103,13 @@ enum ExternalWeightUpdatePolicy {
 /// Powers HR zones, calories and recovery baselines.
 @MainActor
 final class ProfileStore: ObservableObject {
+    static let defaultDisplayName = "Noop"
+    static let maxDisplayNameLength = 32
+
+    /// Friendly name used only in this device's UI. It is intentionally separate from Friends identity,
+    /// Self-hosted Sync, and shareable backups.
+    @Published private(set) var displayName: String
+
     /// Canonical source of truth for age (#146): a date of birth, so age advances on its own instead
     /// of silently going stale until the user remembers to bump a number. `age` is derived from this.
     @Published var dateOfBirth: Date {
@@ -198,6 +205,7 @@ final class ProfileStore: ObservableObject {
         static let stepsManualFlag = "profile.stepsCalibrationManual"
         static let stepsManualCoeff = "profile.stepsManualCoefficient"
         static let avatar = "profile.avatarImageData"
+        static let displayName = "profile.displayName"
         /// Explicit confirmation gates for age-shaped estimates. Defaults seeded in `init` are useful
         /// for ordinary UI previews but must never masquerade as user-supplied Fitness Age inputs.
         static let ageConfirmed = "profile.ageInputConfirmed"
@@ -217,6 +225,7 @@ final class ProfileStore: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         d = defaults
+        displayName = Self.normalizedDisplayName(d.string(forKey: K.displayName))
         // #146 age migration. `dateOfBirth` is authoritative whenever it exists, so age advances on
         // its own. A pre-#146 install — or a `.noopbak` restore, which writes only the legacy Int age
         // and clears any stale DOB (see `BackupSettings.apply`) — has no DOB yet, so derive one from
@@ -250,6 +259,26 @@ final class ProfileStore: ObservableObject {
         stepsCalibrationManual = d.object(forKey: K.stepsManualFlag) as? Bool ?? false
         stepsManualCoefficient = max(0, d.object(forKey: K.stepsManualCoeff) as? Double ?? 0)
         avatarImageData = d.data(forKey: K.avatar)
+    }
+
+    /// Persist a compact single-line UI name. Empty input resets to the private default.
+    func setDisplayName(_ raw: String) {
+        let resolved = Self.normalizedDisplayName(raw)
+        displayName = resolved
+        if resolved == Self.defaultDisplayName {
+            d.removeObject(forKey: K.displayName)
+        } else {
+            d.set(resolved, forKey: K.displayName)
+        }
+    }
+
+    static func normalizedDisplayName(_ raw: String?) -> String {
+        let words = (raw ?? "")
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let limited = String(words.prefix(maxDisplayNameLength))
+        return limited.isEmpty ? defaultDisplayName : limited
     }
 
     // MARK: - External weight provenance

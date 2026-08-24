@@ -5,6 +5,7 @@ recorded; it does not erase the explicit limitations in that record.
 
 | Date | Round | Status | Branch | Implementation evidence | Outcome |
 |---|---|---|---|---|---|
+| 2026-08-23 | [Explainable trends, profile identity, and Rhythm context](2026-08-23-explainable-trends-profile-rhythm.md) | Completed; hardware and distribution gates remain | `main` | Commit containing the round record | Patterns state what changed, trends are inspectable, display identity stays local, and experimental Rhythm fails closed on activity/context gaps. |
 | 2026-08-23 | [Today metric catalog and Recovery color](2026-08-23-today-metrics-recovery.md) | Completed; distribution unchanged | `main` | Commit containing the round record | Moderate Recovery is consistently yellow; all ten Today metrics remain visible with user pins first. |
 | 2026-08-23 | [Repository independence and mainline consolidation](2026-08-23-repository-independence.md) | Completed; distribution blocked | `main` | Commit containing the round record | Canonical hosting and branch cleanup completed; commercial release remains fail-closed on three rights blockers. |
 | 2026-08-22 | [First App Store submission](2026-08-22-first-app-store-connect-preview.md) | Blocked before upload | `codex/day4-sync-performance` | `972a126b` plus documentation follow-up | App Store preparation and launch gate completed; public upload blocked by rights, signing/reviewer, and physical-validation gates. |

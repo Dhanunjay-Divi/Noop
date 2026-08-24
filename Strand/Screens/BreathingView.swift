@@ -250,7 +250,11 @@ private struct BreathingContent: View {
             if live.bonded {
                 StatePill("Haptics on", tone: .positive, showsDot: true)
             } else {
+                #if os(iOS)
+                StatePill("appwide.breathe.phone_haptics", tone: .neutral, showsDot: true)
+                #else
                 StatePill("Visual only", tone: .warning, showsDot: true)
+                #endif
             }
 
             Spacer()
@@ -654,6 +658,11 @@ private struct BreathingContent: View {
 
         if buzz {
             model.buzz(loops: newPhase == .inhale ? 1 : 2)
+            #if os(iOS)
+            if !live.bonded {
+                (newPhase == .inhale ? StrandHaptic.light : StrandHaptic.commit).play()
+            }
+            #endif
             if audioCues {
                 tonePlayer.play(newPhase == .inhale ? .inhale : .exhale)
             }

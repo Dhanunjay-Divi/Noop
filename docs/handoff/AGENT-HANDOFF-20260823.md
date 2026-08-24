@@ -6,12 +6,13 @@ blocked.
 ## Read first
 
 1. [`../ops/ACTIVE.md`](../ops/ACTIVE.md)
-2. [`../ops/rounds/2026-08-23-today-metrics-recovery.md`](../ops/rounds/2026-08-23-today-metrics-recovery.md)
-3. [`../ops/rounds/2026-08-23-repository-independence.md`](../ops/rounds/2026-08-23-repository-independence.md)
-4. [`../REPOSITORY_INDEPENDENCE.md`](../REPOSITORY_INDEPENDENCE.md)
-5. [`../provenance/rights-status.json`](../provenance/rights-status.json)
-6. [`RELEASE-BLOCKERS.md`](RELEASE-BLOCKERS.md)
-7. [`ROUND-14-today-metrics-recovery.md`](ROUND-14-today-metrics-recovery.md)
+2. [`../ops/rounds/2026-08-23-explainable-trends-profile-rhythm.md`](../ops/rounds/2026-08-23-explainable-trends-profile-rhythm.md)
+3. [`../ops/rounds/2026-08-23-today-metrics-recovery.md`](../ops/rounds/2026-08-23-today-metrics-recovery.md)
+4. [`../ops/rounds/2026-08-23-repository-independence.md`](../ops/rounds/2026-08-23-repository-independence.md)
+5. [`../REPOSITORY_INDEPENDENCE.md`](../REPOSITORY_INDEPENDENCE.md)
+6. [`../provenance/rights-status.json`](../provenance/rights-status.json)
+7. [`RELEASE-BLOCKERS.md`](RELEASE-BLOCKERS.md)
+8. [`ROUND-14-today-metrics-recovery.md`](ROUND-14-today-metrics-recovery.md)
 
 ## Current repository truth
 
@@ -20,8 +21,7 @@ blocked.
 - Default and only active remote branch: `main`.
 - GitHub metadata: `isFork=false`, no parent repository.
 - Local and remote `main` must resolve to the same commit after a fresh fetch.
-- Final implementation checkpoint before this documentation update:
-  `94661a17`.
+- Current round baseline before its direct-to-main commit: `d3b741dc`.
 - This source tree remains the auditable, noncommercial reference codebase.
   Standalone hosting does not make inherited source commercially independent.
 
@@ -51,6 +51,23 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
   filter.
 - Moderate Recovery gauges stay entirely yellow, and the Recovery hero and tile
   now agree on the same score-state color.
+- Pattern cards now lead with plain `WHAT CHANGED` evidence and report recent
+  Effort range/average rather than an internal monotony value.
+- iPhone trends support hold-and-drag inspection; range cards name averages and
+  score scales, including VoiceOver context.
+- The profile display name defaults to Noop, is editable and grapheme-safe, and
+  remains local to the UI rather than entering sync or shareable backups.
+- Android Rhythm now has a real latest-night route behind its existing consent
+  gate. Apple and Android refresh on new history, keep duplicate R-R sources
+  separate, include active/canonical history after re-pairing, and rank readable
+  resting coverage.
+- Rhythm rejects non-dismissed recorded workouts, missing motion evidence, and
+  elevated resting-window rates. It remains descriptive, non-diagnostic, and
+  unable to alert.
+- The Automations tap guide explains alarm, hydration, SOS, and fallback
+  precedence. SOS wording reflects immediate SMS-first paging and location
+  sharing when available, with voice remaining a delayed fallback.
+- Paced breathing uses restrained phone haptics when no band is bonded.
 
 ## Verified gates
 
@@ -58,15 +75,19 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
 - Legal inventory: 152 runtime components and 3 container inputs verified.
 - Distribution gate: blocked on exactly the three unresolved rights entries, as
   intended.
-- Health-claims scan: clear across 1,039 files.
-- Android: full Debug Kotlin compile and unit tests passed.
-- Apple: unsigned iOS simulator and macOS Debug app builds passed.
+- Current health-claims scan: clear across 1,041 files.
+- Android: 3,573 Full Debug unit tests executed with 0 failures and 6 skips;
+  `assembleFullDebug` passed.
+- Apple: final unsigned generic iOS simulator and macOS Debug app builds passed.
+- StrandAnalytics: 1,323 tests passed; StrandDesign: 44 tests passed.
+- Focused profile and brand-literal-ratchet macOS tests passed.
 - i18n: focus-locale completeness and the no-new-literal regression gate pass.
+- Shared app-wide localization has exact 122-key parity across nine locales.
 - Server: pinned Ruff checks pass; local tests pass 59 with 4
   database-dependent skips.
-- Current iOS production shell: 17/17 tests passed locally at repository HEAD,
-  including the complete-catalog regression.
-- Current macOS app suite: 1,390 executed locally, with 1,389 passed,
+- Round 14 iOS production shell: 17/17 tests passed locally, including the
+  complete-catalog regression.
+- Preceding full macOS app suite: 1,390 executed locally, with 1,389 passed,
   1 intentional skip, and 0 failures.
 - Current StrandDesign package: 44/44 tests passed.
 - Current Android Demo Debug unit suite passed, including the mirrored Recovery
@@ -87,6 +108,9 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
 - Workflow YAML parsing, ops records, private-data filename guard, JSON parsing,
   and diff whitespace checks passed.
 - GitHub authentication and standalone repository metadata were verified.
+- Independent source review found and then confirmed fixes for translated SOS
+  semantics, Unicode graphemes, sparse/noisy R-R selection, dismissed workouts,
+  canonical re-pair history, half-open tie-breaking, and gravity-source parity.
 
 These checks do not establish store readiness, physical-device behavior,
 medical accuracy, clinical safety, or commercial source rights.
@@ -109,6 +133,10 @@ that machine-translated reproductive-health copy has native-speaker approval.
   identifiers to Git.
 - Do not claim medical, anomaly-SOS, fall, ECG, AFib, or accuracy readiness
   without the separate validation and regulatory evidence.
+- Do not turn experimental Rhythm into an alert path or relax its resting,
+  workout, consent, and source-separation gates without a new validation round.
+- Do not add the local display name to Friends, sync, or backups without an
+  explicit privacy/product decision and migration review.
 
 ## Ordered next work
 
@@ -125,7 +153,10 @@ that machine-translated reproductive-health copy has native-speaker approval.
 6. When both legal gates pass, resume signing, store metadata, physical-device
    matrices, accuracy studies, safety-provider staging, and regulatory review
    in `RELEASE-BLOCKERS.md`.
-7. Start a new dated ops round for any material source, device, release, or
+7. Validate tap precedence, phone/band haptics, re-paired canonical history,
+   overnight Rhythm refresh, and workout overlap on representative physical
+   devices without resetting local data.
+8. Start a new dated ops round for any material source, device, release, or
    repository change and update `docs/ops/ACTIVE.md` before handing off.
 
 ## Fast verification

@@ -78,6 +78,7 @@ object RhythmScreener {
         val ppgIBIms: List<Double>? = null,
         val motionStill: Boolean,
         val meanHR: Double,
+        val activityActive: Boolean = false,
     ) {
         companion object {
             /**
@@ -85,13 +86,13 @@ object RhythmScreener {
              * the range-filtered series. [motionStill] still comes from the caller.
              */
             fun fromRr(rr: List<RrInterval>, ppgIBIms: List<Double>? = null,
-                       motionStill: Boolean): WindowInput {
+                       motionStill: Boolean, activityActive: Boolean = false): WindowInput {
                 val raw = rr.map { it.rrMs.toDouble() }
                 val clean = HrvAnalyzer.rangeFilter(raw)
                 val meanNN = if (clean.isEmpty()) 0.0 else clean.sum() / clean.size.toDouble()
                 val hr = if (meanNN > 0) 60_000.0 / meanNN else 0.0
                 return WindowInput(rrMs = raw, ts = rr.map { it.ts }, ppgIBIms = ppgIBIms,
-                    motionStill = motionStill, meanHR = hr)
+                    motionStill = motionStill, meanHR = hr, activityActive = activityActive)
             }
         }
     }
@@ -147,6 +148,10 @@ object RhythmScreener {
      * neutral regularity label. Pure — plain inputs, plain result.
      */
     fun screenWindow(input: WindowInput): WindowResult {
+        // Stationary exercise can pass a motion gate. Recorded activity always wins.
+        if (input.activityActive) {
+            return WindowResult.unreadable(nBeats = 0)
+        }
         // Gate 1: motion. Only a firmly-still window is read; movement masquerades as
         // irregularity and is the single biggest false signal.
         if (!input.motionStill) {

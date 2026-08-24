@@ -426,11 +426,12 @@ struct TrendsView: View {
         if chargeAvg != nil || effortAvg != nil || restAvg != nil {
             NoopCard(tint: StrandPalette.chargeColor) {
                 VStack(alignment: .leading, spacing: NoopMetrics.cardInnerSpacing) {
-                    SectionHeader("Selected range", overline: "Recovery · Effort · Sleep",
+                    SectionHeader("appwide.trends.range_averages", overline: "Recovery · Effort · Sleep",
                                   trailing: rangeSubtitle)
                     if let v = chargeAvg {
                         pipScoreRow(label: "Recovery", value: v, range: 0...100,
                                     tint: StrandPalette.chargeColor, frac: v / 100,
+                                    descriptor: "appwide.trends.recovery_descriptor",
                                     format: { "\(Int($0.rounded()))" })
                     }
                     if let v = effortAvg {
@@ -446,11 +447,13 @@ struct TrendsView: View {
                         // Charge/Rest vessels regardless of the displayed Effort unit.
                         pipScoreRow(label: "Effort", value: display, range: 0...maxV,
                                     tint: StrandPalette.effortColor, frac: v / 100,
+                                    descriptor: "appwide.trends.effort_descriptor",
                                     format: { oneDecimal ? String(format: "%.1f", $0) : "\(Int($0.rounded()))" })
                     }
                     if let v = restAvg {
                         pipScoreRow(label: "Sleep", value: v, range: 0...100,
                                     tint: StrandPalette.restColor, frac: v / 100,
+                                    descriptor: "appwide.trends.sleep_descriptor",
                                     format: { "\(Int($0.rounded()))" })
                     }
                 }
@@ -465,13 +468,19 @@ struct TrendsView: View {
     /// internal scale so the three vessels read against the same fill — a small liquid accent on a single
     /// headline metric, exactly where it reads well (not on a chart).
     private func pipScoreRow(label: LocalizedStringKey, value: Double, range: ClosedRange<Double>,
-                             tint: Color, frac: Double, format: @escaping (Double) -> String) -> some View {
+                             tint: Color, frac: Double, descriptor: LocalizedStringKey,
+                             format: @escaping (Double) -> String) -> some View {
         VStack(alignment: .leading, spacing: NoopMetrics.space2) {
-            Text(label)
-                .font(StrandFont.overline)
-                .tracking(StrandFont.overlineTracking)
-                .textCase(.uppercase)
-                .foregroundStyle(StrandPalette.textSecondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(StrandFont.overline)
+                    .tracking(StrandFont.overlineTracking)
+                    .textCase(.uppercase)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                Text(descriptor)
+                    .font(StrandFont.footnote)
+                    .foregroundStyle(StrandPalette.textTertiary)
+            }
             HStack(spacing: NoopMetrics.space3) {
                 // Static (posed) vessel — a small liquid gauge, not a live 60fps canvas, so the three
                 // in this card cost a single cached frame each (same call as Today's small vessels).
@@ -488,6 +497,7 @@ struct TrendsView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(label))
         .accessibilityValue(Text(format(value)))
+        .accessibilityHint(Text(descriptor))
     }
 
     // MARK: Export trends report (#436)
@@ -551,7 +561,12 @@ struct TrendsView: View {
             // The range bar above already prints the authoritative reading-count caption;
             // the hero only names its window so the count isn't doubled in one card height.
             subtitle: rangeSubtitle,
-            trailing: avg.map { "\(Int($0.rounded()))" },
+            trailing: avg.map {
+                String.localizedStringWithFormat(
+                    String(localized: "appwide.trends.average_format"),
+                    "\(Int($0.rounded()))"
+                )
+            },
             height: NoopMetrics.chartHeight,
             tint: StrandPalette.chargeColor,
             chart: {
@@ -669,7 +684,12 @@ struct TrendsView: View {
         let card = ChartCard(
             title: title,
             subtitle: subtitle,
-            trailing: avg.map(fmt),
+            trailing: avg.map {
+                String.localizedStringWithFormat(
+                    String(localized: "appwide.trends.average_format"),
+                    fmt($0)
+                )
+            },
             height: NoopMetrics.chartHeight,
             tint: tint,
             chart: {

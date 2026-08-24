@@ -301,11 +301,15 @@ object ReadinessEngine {
                 val mono = m / sd
                 monotony = mono
                 if (mono >= 2.0) {
+                    val low = week.min()
+                    val high = week.max()
                     signals.add(
                         Signal(
                             key = "monotony", label = "Training variety",
-                            detail = "recorded daily strain has varied less than usual", flag = Flag.WATCH,
-                            evidence = "monotony ${fmt(mono, 1)}",
+                            detail = "recorded daily Effort stayed in a narrow range", flag = Flag.WATCH,
+                            evidence = "Last ${week.size} recorded days: Effort " +
+                                "${Math.round(low)}-${Math.round(high)} " +
+                                "(average ${Math.round(m)})",
                         )
                     )
                 }

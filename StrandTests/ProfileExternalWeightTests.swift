@@ -5,6 +5,27 @@ import XCTest
 final class ProfileExternalWeightTests: XCTestCase {
     private var suiteNames: [String] = []
 
+    func testDisplayNameDefaultsNormalizesAndStaysLocal() throws {
+        let defaults = try freshDefaults()
+        let profile = ProfileStore(defaults: defaults)
+        XCTAssertEqual(profile.displayName, "Noop")
+
+        profile.setDisplayName("  Avery\n  Quinn  ")
+        XCTAssertEqual(profile.displayName, "Avery Quinn")
+        XCTAssertEqual(defaults.string(forKey: "profile.displayName"), "Avery Quinn")
+
+        profile.setDisplayName("   ")
+        XCTAssertEqual(profile.displayName, "Noop")
+        XCTAssertNil(defaults.object(forKey: "profile.displayName"))
+
+        profile.setDisplayName(String(repeating: " ", count: 40) + "Avery " + String(repeating: "Q", count: 40))
+        XCTAssertEqual(profile.displayName, "Avery " + String(repeating: "Q", count: 26))
+
+        let emoji = "\u{1F600}"
+        profile.setDisplayName(String(repeating: "A", count: 31) + emoji + "B")
+        XCTAssertEqual(profile.displayName, String(repeating: "A", count: 31) + emoji)
+    }
+
     func testAcceptsOnlyNewerValidExternalWeightAndPersistsProvenance() throws {
         let defaults = try freshDefaults()
         let profile = ProfileStore(defaults: defaults)

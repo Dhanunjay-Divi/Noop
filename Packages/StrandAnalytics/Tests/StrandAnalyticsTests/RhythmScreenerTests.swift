@@ -126,6 +126,19 @@ final class RhythmScreenerTests: XCTestCase {
         XCTAssertTrue(r.poincare.isEmpty)
     }
 
+    func testRecordedActivityIsUnreadableEvenWhenStillAndRateLooksPlausible() {
+        let input = RhythmScreener.WindowInput(
+            rrMs: Self.afibLike(),
+            motionStill: true,
+            meanHR: 90,
+            activityActive: true
+        )
+        let result = RhythmScreener.screenWindow(input)
+        XCTAssertEqual(result.label, .unreadable)
+        XCTAssertNil(result.sd1)
+        XCTAssertTrue(result.poincare.isEmpty)
+    }
+
     func testSparseWindowIsUnreadableCalibrating() {
         // Below windowMinBeats(60) → unreadable, calibrating confidence.
         let rr = Array(repeating: 1000.0, count: 40)

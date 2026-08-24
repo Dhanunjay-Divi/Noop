@@ -1326,6 +1326,10 @@ interface WhoopDao : DeviceRegistryDao {
     @Query("SELECT * FROM dismissedWorkout WHERE deviceId = :deviceId")
     suspend fun dismissedWorkouts(deviceId: String): List<DismissedWorkout>
 
+    /** Every durable workout-dismissal marker, for source-complete safety/activity context reads. */
+    @Query("SELECT * FROM dismissedWorkout")
+    suspend fun dismissedWorkoutsAllSources(): List<DismissedWorkout>
+
     /** Record a deleted sleep night (#33). IGNORE so re-deleting the same night is a no-op. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertDismissedSleep(rows: List<DismissedSleep>)
