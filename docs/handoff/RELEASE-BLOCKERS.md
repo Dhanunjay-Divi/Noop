@@ -3,30 +3,43 @@
 **Assessed:** 2026-08-24
 **Hosted implementation checkpoint:** `94661a17`; use `git log -1` for the
 current explainable-trends/profile/Rhythm implementation and handoff commit.
-**Verdict:** engineering gates are **green**. Commercial distribution is
+**Verdict:** local code gates are green except for a current iOS UI rerun blocked
+before test launch by the host Xcode debugger store. Commercial distribution is
 blocked by the three unresolved rights entries in
-`docs/provenance/rights-status.json`.
+`docs/provenance/rights-status.json`; production operations are also blocked by
+unprovisioned identity, cloud, carrier, signing, monitoring, and release-control
+systems.
 
 Current continuation instructions:
 [`AGENT-HANDOFF-20260823.md`](AGENT-HANDOFF-20260823.md).
 
 ---
 
-## 0. Gates — all green
+## 0. Current local gates and external blockers
 
 | Gate | Result | Command |
 |---|---|---|
 | iOS app (`NOOPiOS`, Debug) | BUILD SUCCEEDED at current source | `xcodebuild -scheme NOOPiOS -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` |
-| iOS production-shell UI suite | PASS, 17 tests, 0 failures | `xcodebuild -scheme NOOPiOS -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test` |
+| iOS production-shell UI suite | Earlier 17/17 evidence remains; current rerun is host-blocked before launch by Xcode 26.6's debugger-version store on two simulators | `xcodebuild -scheme NOOPiOS -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test` |
 | Profile keyboard regression | PASS, 5/5 on iPhone 17 Pro and 5/5 on compact iPhone 17e | `testProfileMeasurementsCanBeClearedAndRetyped` with `-test-iterations 5` |
 | Charging fixture regression | PASS, 5/5 UI iterations and 2/2 focused unit contracts | Charging UI test on a new simulator plus `AppleDemoSeederTests` |
 | macOS app (`Strand`, Debug) | BUILD SUCCEEDED at current source | `xcodebuild -scheme Strand -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build` |
-| macOS app tests | **1390** tests, 0 failures, 1 skipped in the preceding full run | `xcodebuild test -scheme Strand -destination 'platform=macOS'` |
+| macOS app tests | **1428** passed, 0 failures, 1 skipped | `xcodebuild test -scheme Strand -destination 'platform=macOS'` |
 | Swift engines | **1323** tests, 0 failures | `cd Packages/StrandAnalytics && swift test` |
-| **Android unit tests** | **3573** tests, 0 failures, 6 skipped | `cd android && ./gradlew :app:testFullDebugUnitTest` |
+| **Android unit tests** | **3646** tests, 0 failures, 6 skipped | `cd android && ./gradlew :app:testFullDebugUnitTest` |
 | Android Full Debug APK | ASSEMBLED | `cd android && ./gradlew :app:assembleFullDebug` |
+| Android lint / instrumentation source | PASS | `cd android && ./gradlew lintFullDebug compileFullDebugAndroidTestKotlin` |
+| Self-hosted server | 129 normal-suite passes; 9/9 PostgreSQL runtime tests pass separately; one live-Twilio test remains gated | See `docs/ops/rounds/2026-08-24-safety-reliability-shared-tenancy.md` |
 | App-wide localization parity | PASS, 122 keys in 9 locales | `AppWideLocalizationContractTest` |
 | Release legal inventory | 152 runtime components, 3 container inputs | `python3 Tools/release-legal-gate.py check` |
+
+The repository has no Actions secrets or environments. Hosted jobs currently
+end in `startup_failure` because of the account Actions budget; protected
+private `main` requires a GitHub plan upgrade. This Mac has no valid signing
+identity or Android release keystore, Docker/TimescaleDB/k6/Twilio tooling is
+absent, and its configured AWS session is expired. The 10,000-user topology and
+carrier matrix in `server/PRODUCTION_OPERATIONS.md` therefore remain deployment
+work, not completed evidence.
 
 Android was previously flagged as compiler-unverified in the earlier handoff. **That gap is now closed** —
 JDK 17 and the SDK were present at `~/Library/Android/sdk`; export `ANDROID_HOME` and the suite runs.

@@ -6,18 +6,26 @@
 
 ## 0. The honest headline
 
-The alert and notification code is in **better shape than expected**. I audited all 13 notification
-producers and the 3,669-line paging pipeline and found **no defects** in the notification layer:
+The first audit correctly found strong foundations across all 13 notification
+producers and the paging pipeline: authorization checks, stable identifiers,
+leases, idempotency, retries, SMS-first voice fallback, receipts, DTMF,
+capability-signed responder links, cancellation, expiry, and privacy-safe
+monitoring, per-installation shared tenancy, credential rotation, full
+installation erasure, bounded Safety retention, and restore-contract checks.
 
-* every scheduler checks authorization before scheduling, so nothing fails silently;
-* every request uses a **stable identifier**, so `add()` replaces rather than duplicates;
-* `removePendingNotificationRequests` is used where re-scheduling needs it;
-* the paging pipeline already implements leases (60 references), idempotency (36), retries (31),
-  SMS-first with voice fallback, provider receipts, DTMF acknowledgement, signed responder links,
-  cancellation, expiry, and privacy-safe monitoring.
+A subsequent concurrency and deployment review did find defects in the paging
+boundary. They are now fixed: ambiguous provider outcomes remain `unknown`;
+final failure is serialized; workers lease only a concurrency-sized wave;
+database-backed submission permits make disable wait for started calls;
+idempotent incident replay survives a pause; control writes are revisioned and
+audited; external workers are heartbeat-gated; and API, migration, and worker
+processes have least-privilege environment splits.
 
-What is missing is **not code**. It is three things: **evidence**, **a delivery path that survives a
-sleeping app**, and **the rights to ship at all**.
+Apple and Android now also show unique-contact delivery receipts, give a direct
+call path when every contact explicitly fails, and include bounded local
+notification lifecycle evidence in diagnostics. What remains is **real-world
+evidence**, **a delivery path that survives a sleeping app**, **consumer
+identity and production infrastructure**, and **the rights to ship at all**.
 
 ---
 
@@ -65,10 +73,30 @@ the worst possible moment. This is a procurement-and-testing task, not an engine
    be too.
 6. Test the unhappy paths users will actually hit: contact blocked the number, phone off, DND/Focus,
    airplane mode, roaming, number changed, contact revoked consent.
-7. Decide and document behaviour when **all** contacts fail. Silence is unacceptable; the user must be told
-   the page did not land.
-8. Add a **user-visible delivery receipt** in the app ("Reached 2 of 2 contacts at 14:03"). Garmin and Apple
-   both surface this; without it the user has no idea whether the feature worked.
+7. **Implemented:** every explicit SMS and voice failure closes the incident as
+   `failed`; the app says no contact was reached and offers direct call actions.
+   Ambiguous outcomes remain pending/unknown instead of becoming a false
+   failure claim.
+8. **Implemented:** Apple and Android surface unique contacts reached with a
+   localized timestamp, for example "Reached 2 of 2 contacts at 14:03."
+
+### P0 for a 10,000-user shared launch — identity and infrastructure are not procured
+
+The server now has a real shared authorization boundary. With
+`NOOP_AUTH_MODE=shared`, the operator credential is administrative only;
+versioned per-installation credentials own an exclusive device namespace and
+cannot list, read, export, or delete another installation. Rotation, export,
+hard deletion, Safety/Friends erasure, retention, migrations, and restore smoke
+checks are implemented and exercised against PostgreSQL.
+
+That does not create a consumer account system or a production deployment.
+Installation enrollment is still an administrator action. A public service
+needs a selected identity provider, signup proof, recovery and lost-device
+policy, support-access controls, abuse prevention, managed secrets and keys,
+WAF/rate limits, multi-zone database, object-locked backups, monitoring/on-call,
+DNS/TLS, and a deployment pipeline. It also needs an independent isolation
+review and production-like mixed-workload evidence. The exact topology and
+acceptance gate are in `server/PRODUCTION_OPERATIONS.md`.
 
 ### P1 — Local-first means local notifications, and that is a real reliability ceiling
 
@@ -90,28 +118,46 @@ and iOS/Android background execution — the least reliable part of any wearable
 
 * **(a) Accept and disclose.** Keep everything local; state plainly that reminders depend on the app having
   synced. Cheapest, fully consistent with the privacy promise, and weakest on reliability.
-* **(b) Optional push via the user's own self-hosted server.** NOOP already has one, with sync. Let a user
-  who runs it opt into server-side scheduling and push. This is the strategically best answer: it keeps
-  "no NOOP-operated cloud" intact while giving power users cloud-grade reliability. Cost: APNs/FCM
-  credentials handling in a self-hosted context, which is fiddly but solved.
-* **(c) A NOOP-operated push relay.** Matches competitors' reliability, breaks the core promise. Only worth
-  it if reliability data shows (a) and (b) are insufficient.
+* **(b) User-operated push for independently signed builds.** A user who builds
+  NOOP with their own Apple/Google application identity can supply their own
+  provider credentials. This is not a general App Store or Play solution.
+  Distributing NOOP's APNs signing key, certificate, or FCM server credential
+  to self-hosters would compromise every installation. Android UnifiedPush can
+  be an expert-only alternative, but it does not provide ordinary iPhone
+  delivery or a competitive default experience.
+* **(c) An optional NOOP-operated push relay.** This is the practical route to
+  cloud-grade delivery for the signed store apps. Keep it minimal: explicit
+  opt-in, separate device-registration credentials, short-lived opaque or
+  end-to-end-encrypted payloads, no wellness values in provider-visible text,
+  no advertising identity, bounded logs, deletion and key-rotation support,
+  and an independent privacy/security review. It changes the "no
+  NOOP-operated cloud" posture even if biometric computation and storage remain
+  local.
 
-Recommendation: **(a) now with honest copy, (b) as the differentiated answer.** Do not do (c) without a
-deliberate strategy change.
+Recommendation: **(a) for the first honest release.** Choose (c) deliberately
+if measured background reliability is insufficient. Do not present (b) as a
+general solution for the signed store builds and do not distribute provider
+credentials.
 
-### P1 — You are flying blind on delivery and crashes
+### P1 — Delivery evidence exists locally; fleet visibility still does not
 
 Local-first with no telemetry means a notification that never fires is invisible to you. Competitors run
 crash reporting, staged rollout, remote config, and a kill switch as table stakes.
 
-Minimum viable, without betraying the privacy stance:
-* an **opt-in**, on-device diagnostics log for the notification and paging path, exportable as a bundle in
-  one tap (the log export already exists — make the path from "it's wrong" to a reproducible bundle short);
-* a **local delivery ledger** the user can inspect: what was scheduled, what fired, what was suppressed and
-  why. This doubles as your support tool and as the transparency feature nobody else has;
-* a **remote kill switch for paging** — if a carrier or provider misbehaves you need to disable outbound
-  paging without shipping a build. This one genuinely needs a server flag.
+The minimum privacy-preserving code is now present:
+
+* Apple and Android keep a bounded local lifecycle ledger containing only
+  stable identifiers, category, state, and time. Scheduled means the OS accepted
+  the request; presented means an app callback was observed. It never claims an
+  unobserved banner or vibration happened.
+* Diagnostics exports include that ledger without notification copy, health
+  values, routes, or credentials.
+* The paging kill switch is database-backed, revisioned, audited, and waits for
+  already-started provider submissions before returning.
+
+This still does not provide fleet crash telemetry, synthetic checks, or alert
+delivery for a NOOP-operated service. Those require an explicit opt-in telemetry
+and hosting decision.
 
 ---
 
@@ -129,7 +175,7 @@ Grounded in Garmin's own documentation and each product's shipping feature set.
 | **3rd-party sync** (Strava, Garmin, Fitbit) | Standard | Listed as a gate, not built | Real adoption blocker: people will not abandon their history |
 | **Teams / social** | WHOOP teams, Garmin challenges | Private Friends only (invitation-only, 6-field, no directory) | Deliberate; the privacy stance is the differentiator |
 | **Coaching content** | WHOOP Coach, Garmin training plans | AI Coach with user's own API key | Different model, arguably better (no vendor lock) |
-| **Delivery receipts for alerts** | Garmin/Apple surface send status | Not surfaced to the user | Small, high-trust win — do it |
+| **Delivery receipts for alerts** | Garmin/Apple surface send status | Unique contacts reached and last-reached time are surfaced | Implemented; real-carrier evidence remains |
 
 ## 3. The one feature worth building, and how to do it honestly
 
@@ -176,20 +222,25 @@ Worth protecting, because these are the reasons to choose it:
 **Now (unblocks everything)**
 1. Rights: clean-room the 15,980 lines, contributor consent, pick a posture.
 2. Twilio procurement + A2P/10DLC registration — long lead, start before you need it.
+3. Choose cloud/regions, identity and recovery provider, launch countries,
+   RPO/RTO, on-call/monitoring vendor, and infrastructure budget.
 
 **Next (makes alerts real)**
-3. Run the full carrier matrix and publish the evidence table + p95 delivery latency.
-4. Add the user-visible delivery receipt and the all-contacts-failed path.
-5. Ship the local delivery ledger (support tool + transparency feature in one).
-6. Add the paging kill switch.
+4. Run the full carrier matrix and publish the evidence table + p95 delivery latency.
+5. **Done in code:** user-visible receipt and all-contacts-failed recovery.
+6. **Done in code:** bounded local notification lifecycle ledger in diagnostics.
+7. **Done in code:** revisioned, audited paging kill switch with submission permits.
+8. **Done in code:** shared installation isolation, credential lifecycle,
+   installation-wide erasure, Safety retention, and restore contracts.
 
 **Then (closes the reliability gap)**
-7. Physical-device background-sync evidence: reboot, process death, DST, airplane mode, OEM battery
+9. Physical-device background-sync evidence: reboot, process death, DST, airplane mode, OEM battery
    killers, plus 24-hour battery drain — the number buyers compare.
-8. Decide local-only vs self-hosted push (§1 P1), and make the copy match whichever you choose.
+10. Decide local-only vs an optional minimal push relay (§1 P1), and make the
+    architecture, privacy disclosure, and copy match that choice.
 
 **Then (closes the competitive gap)**
-9. Activity-scoped incident detection per §3, with published false-positive rates.
-10. Third-party import (Strava/Garmin/Fitbit) so switchers keep their history.
-11. Publish the accuracy validation. This is the moat, and it compounds: every competitor asks for trust,
+11. Activity-scoped incident detection per §3, with published false-positive rates.
+12. Third-party import (Strava/Garmin/Fitbit) so switchers keep their history.
+13. Publish the accuracy validation. This is the moat, and it compounds: every competitor asks for trust,
     only you would be showing your work.

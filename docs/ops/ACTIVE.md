@@ -11,8 +11,8 @@ Last updated: **2026-08-24**
 - GitHub reports `isFork=false`, no parent, and `main` as the default branch.
 - Previous hosted implementation checkpoint: `94661a17`.
 - Current implementation and round record: use `git log -1`; this record is
-  committed with the cycle-tracking, profile-metric reconciliation, neutral
-  Sleep source, and Daily Signal sync change.
+  committed with the Safety reliability, shared tenancy, credential lifecycle,
+  and production-operations change.
 - Hosting independence is complete. Commercial source independence is not.
 - Current agent instructions:
   [`../handoff/AGENT-HANDOFF-20260823.md`](../handoff/AGENT-HANDOFF-20260823.md)
@@ -20,6 +20,28 @@ Last updated: **2026-08-24**
 ## Last completed round
 
 The
+[Safety reliability and shared tenancy round](rounds/2026-08-24-safety-reliability-shared-tenancy.md)
+keeps automatic medical/fall paging unavailable, makes provider and human
+delivery states distinct, adds local notification evidence, hardens durable
+paging and its kill switch, enforces per-installation shared biometric access,
+and completes Safety/installation rotation, export, deletion, retention, load,
+and restore contracts.
+
+Current local evidence includes 129 passing server tests with the nine
+database tests and one explicit real-Twilio test environment-gated; all nine
+database tests pass separately on PostgreSQL 14 with only unavailable
+Timescale hooks removed from a disposable migration copy. Restore application
+SQL smoke, Ruff, migration checksums, shell/JavaScript syntax, dependency
+audits, 42 NoopRemoteSync tests, 1,428 passing macOS app tests with one
+intentional skip, an unsigned iOS simulator build, 3,646 Android Full Debug
+tests with zero failures and six skips, APK/androidTest compilation, Android
+lint, strict localization, clear health claims, and legal inventory/private
+data/ops gates pass. The current iOS UI action is host-blocked before test
+launch by Xcode's debugger-version store. Docker/Timescale, k6, carrier, cloud,
+physical-device, signing, store, accuracy, and distribution evidence remain
+open.
+
+The preceding
 [overnight calibration, Daily Effort, and grounded Coach round](rounds/2026-08-24-overnight-calibration-effort-coach.md)
 makes persisted score-bearing history durable and source-bound until analysis
 succeeds, adds a conservative same-day opt-in Effort range/nudge, gives Coach a
@@ -78,19 +100,24 @@ The stricter distribution gate intentionally fails on:
 
 1. Resolve every rights blocker through a reviewed license, independent
    replacement, or removal.
-2. Build the commercial product in a genuinely independent history containing
+2. Start Twilio sender procurement and A2P 10DLC registration, then run the
+   controlled carrier matrix.
+3. Select shared identity/recovery, cloud/regions, RPO/RTO, monitoring/on-call,
+   and budget; deploy the production-like topology and run load/failover/restore
+   evidence.
+4. Build the commercial product in a genuinely independent history containing
    only newly authored or separately licensed code.
-3. Keep behavior-specification, clean-room implementation, and overlap review
+5. Keep behavior-specification, clean-room implementation, and overlap review
    roles separate, then commit structured evidence.
-4. Migrate the 247 Android and 166 Apple baseline-tracked literals into
+6. Migrate the 247 Android and 166 Apple baseline-tracked literals into
    reviewed localization resources and complete native-speaker review.
-5. Obtain native-speaker review for the new reproductive-health copy and run
+7. Obtain native-speaker review for the new reproductive-health copy and run
    representative physical-device cycle, age-metric, band-sync, calibration,
    haptic, background, and battery checks.
-6. Only after the distribution gate passes, resume store signing, release
+8. Only after the distribution gate passes, resume store signing, release
    metadata, physical-device validation, accuracy studies, Safety paging
    staging, and regulatory review.
-7. Validate the current tap, phone/band haptic, re-pair, workout-context, and
+9. Validate the current tap, phone/band haptic, re-pair, workout-context, and
    overnight Rhythm paths on representative physical devices without resetting
    existing user data.
 
@@ -124,5 +151,11 @@ The stricter distribution gate intentionally fails on:
   turn absent evidence into zero, a trend, or personalized nutrition advice.
 - Phone and band haptic code compiled and unit logic passed; no physical
   vibration, background delivery, battery, or gesture behavior was validated.
+- Shared mode is an authorization boundary, not a consumer identity/recovery
+  product. Never distribute the operator credential or claim public-service
+  readiness without the external topology and isolation evidence.
+- Provider accepted/sent/delivered states do not prove that a contact saw or
+  accepted a page. Automatic medical, anomaly, Rhythm, and fall paging remains
+  unavailable.
 - Keep the repository private and do not treat private hosting as commercial
   distribution approval.

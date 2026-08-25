@@ -6,12 +6,12 @@ blocked.
 ## Read first
 
 1. [`../ops/ACTIVE.md`](../ops/ACTIVE.md)
-2. [`../ops/rounds/2026-08-24-overnight-calibration-effort-coach.md`](../ops/rounds/2026-08-24-overnight-calibration-effort-coach.md)
-3. [`ROUND-17-overnight-calibration-effort-coach.md`](ROUND-17-overnight-calibration-effort-coach.md)
-4. [`../ops/rounds/2026-08-24-cycle-tracking-metric-reconciliation.md`](../ops/rounds/2026-08-24-cycle-tracking-metric-reconciliation.md)
-5. [`ROUND-16-cycle-tracking-and-metric-reconciliation.md`](ROUND-16-cycle-tracking-and-metric-reconciliation.md)
-6. [`../ops/rounds/2026-08-23-explainable-trends-profile-rhythm.md`](../ops/rounds/2026-08-23-explainable-trends-profile-rhythm.md)
-7. [`../ops/rounds/2026-08-23-today-metrics-recovery.md`](../ops/rounds/2026-08-23-today-metrics-recovery.md)
+2. [`../ops/rounds/2026-08-24-safety-reliability-shared-tenancy.md`](../ops/rounds/2026-08-24-safety-reliability-shared-tenancy.md)
+3. [`ROUND-18-safety-reliability-shared-tenancy.md`](ROUND-18-safety-reliability-shared-tenancy.md)
+4. [`../ops/rounds/2026-08-24-overnight-calibration-effort-coach.md`](../ops/rounds/2026-08-24-overnight-calibration-effort-coach.md)
+5. [`ROUND-17-overnight-calibration-effort-coach.md`](ROUND-17-overnight-calibration-effort-coach.md)
+6. [`../ops/rounds/2026-08-24-cycle-tracking-metric-reconciliation.md`](../ops/rounds/2026-08-24-cycle-tracking-metric-reconciliation.md)
+7. [`ROUND-16-cycle-tracking-and-metric-reconciliation.md`](ROUND-16-cycle-tracking-and-metric-reconciliation.md)
 8. [`../ops/rounds/2026-08-23-repository-independence.md`](../ops/rounds/2026-08-23-repository-independence.md)
 9. [`../REPOSITORY_INDEPENDENCE.md`](../REPOSITORY_INDEPENDENCE.md)
 10. [`../provenance/rights-status.json`](../provenance/rights-status.json)
@@ -24,7 +24,7 @@ blocked.
 - Default and only active remote branch: `main`.
 - GitHub metadata: `isFork=false`, no parent repository.
 - Local and remote `main` must resolve to the same commit after a fresh fetch.
-- Current round baseline before its direct-to-main commit: `d1f238f8`.
+- Current round baseline before its direct-to-main commits: `b11c7c2e`.
 - This source tree remains the auditable, noncommercial reference codebase.
   Standalone hosting does not make inherited source commercially independent.
 
@@ -104,21 +104,34 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
   summaries, calories/macronutrients, mood, and body/basal-body temperature.
 - The iPhone visual harness supports real iPhone SE dimensions and waits for
   the cold fixture state before recording the first frame.
+- Apple and Android now expose honest unique-contact Safety delivery state,
+  relaunch reconciliation, and explicit all-contact-failure recovery without
+  converting unknown provider outcomes into claims.
+- Notification lifecycle diagnostics are bounded and copy-free; they record OS
+  scheduling/presentation callbacks without claiming a human saw a banner or
+  felt a vibration.
+- Paging invitations, incidents, controls, worker health, sender coordination,
+  retries, callbacks, restore smoke, and operations telemetry are durable and
+  fail-closed.
+- Shared mode requires versioned per-installation credentials for biometric
+  routes and enforces exclusive device ownership. Rotation, export, erasure,
+  tenant isolation, Safety lifecycle, and terminal/inactive retention pass real
+  PostgreSQL integration tests.
 
 ## Verified gates
 
-- Tool tests: 25/25 passed.
+- Tool tests: 62/62 passed.
 - Legal inventory: 152 runtime components and 3 container inputs verified.
 - Distribution gate: blocked on exactly the three unresolved rights entries, as
   intended.
-- Current health-claims scan: clear across 1,049 files.
-- Android: 3,627 Full Debug unit tests executed with 0 failures and 6 skips;
-  `assembleFullDebug` and instrumentation compilation passed, and managed Pixel
-  API 35 instrumentation passed 4/4 tests.
-- Apple: unsigned generic iOS simulator build passed; the production shell
-  passed 21/21 UI tests, and 40/40 visual scenarios passed across iPhone SE and
-  iPhone 14 Pro.
-- Current macOS app suite: 1,410 passed, 1 intentional skip, 0 failures.
+- Current health-claims scan: clear across 1,052 files.
+- Android: 3,646 Full Debug unit tests executed with 0 failures and 6 skips;
+  `assembleFullDebug`, instrumentation compilation, and `lintFullDebug` passed.
+- Apple: the current unsigned generic iOS simulator build passed. The current
+  UI action could not launch a test worker because Xcode 26.6's debugger-version
+  store failed on two simulators; earlier production-shell and 40/40 visual
+  suites remain recorded evidence, not a substitute for rerunning this commit.
+- Current macOS app suite: 1,428 passed, 1 intentional skip, 0 failures.
 - All nine Swift packages: 2,596 tests, 0 failures, 2 intentional skips.
 - StrandAnalytics: 1,360 tests passed; StrandDesign: 44 tests passed.
 - Focused profile and brand-literal-ratchet macOS tests passed.
@@ -129,8 +142,11 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
   Push run `32784344944` and manual health-claims run `32784502269` both ended
   in `startup_failure` before creating a job. Restore the Actions budget, then
   rerun the workflows for the current `main`.
-- Server: pinned Ruff checks pass; local tests pass 59 with 4
-  database-dependent skips.
+- Server: pinned Ruff checks pass. The normal suite has 129 passes with nine
+  database tests and one real-Twilio test skipped. All nine database tests pass
+  separately on PostgreSQL 14 after removing only unavailable Timescale hooks
+  from a disposable migration copy. Migration checksums, restore application
+  SQL smoke, shell/JavaScript syntax, and dependency audits pass.
 - Round 14 iOS production shell: 17/17 tests passed locally, including the
   complete-catalog regression.
 - Preceding full macOS app suite: 1,390 executed locally, with 1,389 passed,
@@ -202,26 +218,30 @@ that machine-translated reproductive-health copy has native-speaker approval.
 
 1. Resolve each entry in `docs/provenance/rights-status.json` through a
    rights-holder license, independently implemented replacement, or removal.
-2. Keep behavior-only specifications and clean-room implementation roles
+2. Start Twilio sender procurement/A2P registration and choose shared identity,
+   recovery, cloud/regions, RPO/RTO, monitoring/on-call, and budget.
+3. Deploy a production-like topology and run carrier, load, tenant-adversarial,
+   failover, and encrypted-restore evidence.
+4. Keep behavior-only specifications and clean-room implementation roles
    separate; record the affected-source manifest and independent review.
-3. Run `python3 Tools/release-legal-gate.py check` and then
+5. Run `python3 Tools/release-legal-gate.py check` and then
    `python3 Tools/release-legal-gate.py distribution`.
-4. Migrate the 247 Android and 166 Apple baseline entries into reviewed
+6. Migrate the 247 Android and 166 Apple baseline entries into reviewed
    localization resources; never expand the baseline for new work.
-5. Obtain native-speaker approval for reproductive-health copy in every
+7. Obtain native-speaker approval for reproductive-health copy in every
    supported locale.
-6. When both legal gates pass, resume signing, store metadata, physical-device
+8. When both legal gates pass, resume signing, store metadata, physical-device
    matrices, accuracy studies, safety-provider staging, and regulatory review
    in `RELEASE-BLOCKERS.md`.
-7. Validate tap precedence, phone/band haptics, re-paired canonical history,
+9. Validate tap precedence, phone/band haptics, re-paired canonical history,
    overnight Rhythm refresh, and workout overlap on representative physical
    devices without resetting local data.
-8. Obtain native-speaker review for the 47 new app-wide cycle/source/sync keys,
+10. Obtain native-speaker review for the 47 new app-wide cycle/source/sync keys,
    then validate cycle, age-metric, and Noop Band sync behavior on
    representative physical devices without resetting local data.
-9. Start a new dated ops round for any material source, device, release, or
+11. Start a new dated ops round for any material source, device, release, or
    repository change and update `docs/ops/ACTIVE.md` before handing off.
-10. Validate the source-bound overnight scoring queue, Daily Effort nudge, and
+12. Validate the source-bound overnight scoring queue, Daily Effort nudge, and
     Coach evidence states on representative physical devices and real user
     histories without resetting local data.
 
