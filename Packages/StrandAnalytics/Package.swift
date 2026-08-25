@@ -11,6 +11,12 @@ let package = Package(
     ],
     targets: [
         .target(name: "StrandAnalytics", dependencies: ["WhoopProtocol", "WhoopStore"]),
-        .testTarget(name: "StrandAnalyticsTests", dependencies: ["StrandAnalytics", "WhoopStore"]),
+        .testTarget(
+            name: "StrandAnalyticsTests",
+            dependencies: ["StrandAnalytics", "WhoopStore"],
+            // Real recorded R-R intervals used by RhythmScreenerRealDataTests. Declared so SwiftPM stops
+            // warning about an unhandled file; the test reads it via #filePath, not the bundle.
+            resources: [.copy("Resources/rhythm_real_rr.json")]
+        ),
     ]
 )
