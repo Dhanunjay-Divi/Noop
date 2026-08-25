@@ -3,7 +3,6 @@ package com.noop.notif
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -90,10 +89,6 @@ object ScheduledReportPolicy {
 
 object ScheduledReportNotifier {
     private const val CHANNEL_ID = "noop_scheduled_reports"
-    // #297: distinct ids so a report never silently replaces another notifier's (tagless notify()).
-    // Map: 4201 connection, 4202 illness, 4203 inactivity, 4204 smart alarm, 4205/4206/4207 battery.
-    private const val MORNING_NOTIF_ID = 4208
-    private const val WORKOUT_NOTIF_ID = 4209
 
     /**
      * Post the morning recap if enabled and not already posted today. [chargePct]/[restPct] are the
@@ -121,12 +116,33 @@ object ScheduledReportNotifier {
         ) return
         val copy = ScheduledReportPolicy.morningCopy(chargePct, restPct) ?: return
         runCatching {
-            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
+            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                NotificationLifecycleLedger.suppressed(
+                    context,
+                    NotificationLifecycleId.MORNING_REPORT,
+                    NotificationLifecycleCategory.STATUS,
+                )
+                return
+            }
             ensureChannel(context)
-            post(context, MORNING_NOTIF_ID, copy.first, copy.second)
+            if (!post(
+                    context,
+                    NotificationPlatformIdentity.NotificationId.MORNING_REPORT,
+                    NotificationPlatformIdentity.ActivityIntent.MORNING_REPORT,
+                    NotificationLifecycleId.MORNING_REPORT,
+                    copy.first,
+                    copy.second,
+                )
+            ) return
             // Mark fired only after a successful post, so a notifications-disabled night still notifies
             // once they're re-enabled while the same night's row is showing.
             NoopPrefs.setReportMorningDay(context, reportDay)
+        }.onFailure {
+            NotificationLifecycleLedger.unknown(
+                context,
+                NotificationLifecycleId.MORNING_REPORT,
+                NotificationLifecycleCategory.STATUS,
+            )
         }
     }
 
@@ -150,14 +166,35 @@ object ScheduledReportNotifier {
             )
         ) return
         runCatching {
-            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
+            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                NotificationLifecycleLedger.suppressed(
+                    context,
+                    NotificationLifecycleId.WORKOUT_REPORT,
+                    NotificationLifecycleCategory.STATUS,
+                )
+                return
+            }
             ensureChannel(context)
             // Enforce redaction at the final posting boundary too. One caller can produce a lean
             // no-Effort summary without going through workoutCopy(); it must not leak duration, HR,
             // sport, or another health detail onto the lock screen.
             val privateCopy = ScheduledReportPolicy.workoutReminderCopy()
-            post(context, WORKOUT_NOTIF_ID, privateCopy.first, privateCopy.second)
+            if (!post(
+                    context,
+                    NotificationPlatformIdentity.NotificationId.WORKOUT_REPORT,
+                    NotificationPlatformIdentity.ActivityIntent.WORKOUT_REPORT,
+                    NotificationLifecycleId.WORKOUT_REPORT,
+                    privateCopy.first,
+                    privateCopy.second,
+                )
+            ) return
             newestWorkoutTs?.let { NoopPrefs.setReportLastWorkoutTs(context, it) }
+        }.onFailure {
+            NotificationLifecycleLedger.unknown(
+                context,
+                NotificationLifecycleId.WORKOUT_REPORT,
+                NotificationLifecycleCategory.STATUS,
+            )
         }
     }
 
@@ -173,11 +210,18 @@ object ScheduledReportNotifier {
     }
 
     @SuppressLint("MissingPermission")
-    private fun post(context: Context, id: Int, title: String, body: String) {
-        val openApp = PendingIntent.getActivity(
-            context, 3,
+    private fun post(
+        context: Context,
+        id: Int,
+        activityIdentity: NotificationPlatformIdentity.ActivityIntentIdentity,
+        lifecycleId: String,
+        title: String,
+        body: String,
+    ): Boolean {
+        val openApp = NotificationPlatformIdentity.activityPendingIntent(
+            context,
+            activityIdentity,
             appLaunchIntent(context),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val n = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_heart)
@@ -190,7 +234,13 @@ object ScheduledReportNotifier {
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
-        NotificationManagerCompat.from(context).notify(id, n)
+        return NotificationLifecycleLedger.posted(
+            context,
+            lifecycleId,
+            NotificationLifecycleCategory.STATUS,
+        ) {
+            NotificationManagerCompat.from(context).notify(id, n)
+        }
     }
 
     private fun ensureChannel(context: Context) {

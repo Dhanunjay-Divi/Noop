@@ -24,7 +24,6 @@ import com.noop.ble.LiveState
 import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NotifPrefs
 import com.noop.ui.NotificationRouteBridge
-import android.app.PendingIntent
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -251,7 +250,14 @@ object HydrationReminderScheduler {
     ) {
         val config = HydrationReminderPrefs.config(context, now.toLocalDate().toEpochDay())
         if (!config.enabled) {
-            WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+            NotificationLifecycleLedger.observe(
+                context,
+                NotificationLifecycleId.HYDRATION,
+                NotificationLifecycleCategory.REMINDER,
+                NotificationLifecycleState.CANCELLED,
+            ) {
+                WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+            }
             return
         }
         val next = HydrationReminderPolicy.nextSlot(
@@ -270,11 +276,18 @@ object HydrationReminderScheduler {
         val request = OneTimeWorkRequestBuilder<HydrationReminderWorker>()
             .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
             .build()
-        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
-            WORK_NAME,
-            existingWorkPolicy,
-            request,
-        )
+        NotificationLifecycleLedger.observe(
+            context,
+            NotificationLifecycleId.HYDRATION,
+            NotificationLifecycleCategory.REMINDER,
+            NotificationLifecycleState.SCHEDULED,
+        ) {
+            WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+                WORK_NAME,
+                existingWorkPolicy,
+                request,
+            )
+        }
     }
 }
 
@@ -334,19 +347,41 @@ object HydrationReminderEscalationScheduler {
             .setInitialDelay(delayMinutes.coerceIn(5, 30).toLong(), TimeUnit.MINUTES)
             .addTag(WORK_TAG)
             .build()
-        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
-            WORK_PREFIX + slot,
-            ExistingWorkPolicy.REPLACE,
-            request,
-        )
+        NotificationLifecycleLedger.observe(
+            context,
+            NotificationLifecycleId.HYDRATION,
+            NotificationLifecycleCategory.REMINDER,
+            NotificationLifecycleState.SCHEDULED,
+        ) {
+            WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+                WORK_PREFIX + slot,
+                ExistingWorkPolicy.REPLACE,
+                request,
+            )
+        }
     }
 
     fun cancel(context: Context, slot: String) {
-        WorkManager.getInstance(context.applicationContext).cancelUniqueWork(WORK_PREFIX + slot)
+        NotificationLifecycleLedger.observe(
+            context,
+            NotificationLifecycleId.HYDRATION,
+            NotificationLifecycleCategory.REMINDER,
+            NotificationLifecycleState.CANCELLED,
+        ) {
+            WorkManager.getInstance(context.applicationContext)
+                .cancelUniqueWork(WORK_PREFIX + slot)
+        }
     }
 
     fun cancelAll(context: Context) {
-        WorkManager.getInstance(context.applicationContext).cancelAllWorkByTag(WORK_TAG)
+        NotificationLifecycleLedger.observe(
+            context,
+            NotificationLifecycleId.HYDRATION,
+            NotificationLifecycleCategory.REMINDER,
+            NotificationLifecycleState.CANCELLED,
+        ) {
+            WorkManager.getInstance(context.applicationContext).cancelAllWorkByTag(WORK_TAG)
+        }
     }
 }
 
@@ -374,24 +409,36 @@ class HydrationReminderEscalationWorker(appContext: Context, params: WorkerParam
 
 object HydrationReminderNotifier {
     private const val CHANNEL_ID = "noop_hydration_reminders"
-    private const val NOTIFICATION_ID = 4214
 
     @SuppressLint("MissingPermission")
     internal fun post(context: Context): Boolean = runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
-        ) return false
+        ) {
+            NotificationLifecycleLedger.suppressed(
+                context,
+                NotificationLifecycleId.HYDRATION,
+                NotificationLifecycleCategory.REMINDER,
+            )
+            return false
+        }
         val manager = NotificationManagerCompat.from(context)
-        if (!manager.areNotificationsEnabled()) return false
+        if (!manager.areNotificationsEnabled()) {
+            NotificationLifecycleLedger.suppressed(
+                context,
+                NotificationLifecycleId.HYDRATION,
+                NotificationLifecycleCategory.REMINDER,
+            )
+            return false
+        }
         ensureChannel(context)
         val title = context.getString(R.string.l10n_hydration_reminders_hydration_check_in_f93a58b5)
         val body = context.getString(R.string.l10n_hydration_reminders_take_a_moment_to_drink_some_6a03f36a)
-        val openApp = PendingIntent.getActivity(
+        val openApp = NotificationPlatformIdentity.activityPendingIntent(
             context,
-            14,
+            NotificationPlatformIdentity.ActivityIntent.HYDRATION,
             NotificationRouteBridge.launchIntent(context, NoopNotificationRoute.HYDRATION),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_heart)
@@ -402,9 +449,24 @@ object HydrationReminderNotifier {
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()
-        manager.notify(NOTIFICATION_ID, notification)
-        true
-    }.getOrDefault(false)
+        NotificationLifecycleLedger.posted(
+            context,
+            NotificationLifecycleId.HYDRATION,
+            NotificationLifecycleCategory.REMINDER,
+        ) {
+            manager.notify(
+                NotificationPlatformIdentity.NotificationId.HYDRATION,
+                notification,
+            )
+        }
+    }.getOrElse {
+        NotificationLifecycleLedger.unknown(
+            context,
+            NotificationLifecycleId.HYDRATION,
+            NotificationLifecycleCategory.REMINDER,
+        )
+        false
+    }
 
     private fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return

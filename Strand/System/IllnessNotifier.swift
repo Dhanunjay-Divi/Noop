@@ -32,7 +32,13 @@ enum IllnessNotifier {
             // Authorization is requested once via requestAuthorization() when the watch is enabled;
             // here we only check status (no second system prompt).
             let settings = await center.notificationSettings()
-            guard settings.authorizationStatus == .authorized else { return }
+            guard settings.authorizationStatus == .authorized else {
+                LocalNotificationLifecycle.suppressed(
+                    identifier: "wellness-check-in",
+                    categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+                )
+                return
+            }
             DailyReviewNotifications.registerPrivacyCategory(on: center)
             let content = UNMutableNotificationContent()
             content.title = String(localized: "Private wellness check-in")
@@ -41,8 +47,14 @@ enum IllnessNotifier {
             content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
             content.threadIdentifier = "noop.wellness-check-in"
             content.userInfo = [NotificationRouteBridge.userInfoKey: NoopNotificationRoute.today.rawValue]
-            try? await center.add(UNNotificationRequest(identifier: "wellness-check-in",
-                                                        content: content, trigger: nil))
+            try? await LocalNotificationLifecycle.schedule(
+                UNNotificationRequest(
+                    identifier: "wellness-check-in",
+                    content: content,
+                    trigger: nil
+                ),
+                on: center
+            )
         }
     }
 

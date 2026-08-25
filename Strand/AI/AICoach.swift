@@ -80,8 +80,11 @@ enum CoachCheckInNotifications {
 
     static func setEnabled(_ enabled: Bool, minutes: Int? = nil) async -> Bool {
         let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: [requestIdentifier])
-        center.removeDeliveredNotifications(withIdentifiers: [requestIdentifier])
+        LocalNotificationLifecycle.cancel(
+            identifiers: [requestIdentifier],
+            presented: true,
+            on: center
+        )
 
         guard enabled else {
             UserDefaults.standard.set(false, forKey: enabledKey)
@@ -104,6 +107,10 @@ enum CoachCheckInNotifications {
         }
         guard allowed else {
             UserDefaults.standard.set(false, forKey: enabledKey)
+            LocalNotificationLifecycle.suppressed(
+                identifier: requestIdentifier,
+                categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+            )
             return false
         }
 
@@ -123,11 +130,14 @@ enum CoachCheckInNotifications {
         )
         do {
             DailyReviewNotifications.registerPrivacyCategory(on: center)
-            try await center.add(UNNotificationRequest(
-                identifier: requestIdentifier,
-                content: content,
-                trigger: trigger
-            ))
+            try await LocalNotificationLifecycle.schedule(
+                UNNotificationRequest(
+                    identifier: requestIdentifier,
+                    content: content,
+                    trigger: trigger
+                ),
+                on: center
+            )
             UserDefaults.standard.set(true, forKey: enabledKey)
             UserDefaults.standard.set(resolved, forKey: minutesKey)
             return true

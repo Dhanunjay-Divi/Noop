@@ -1,7 +1,9 @@
 package com.noop.testcentre
 
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 /**
@@ -30,5 +32,21 @@ class AndroidDiagnosticsTest {
     @Test fun heuristicIsCaseInsensitive() {
         assertTrue(AndroidDiagnostics.oemKillHeuristic("XIAOMI").startsWith("aggressive vendor"))
         assertTrue(AndroidDiagnostics.oemKillHeuristic("xiaomi").startsWith("aggressive vendor"))
+    }
+
+    @Test fun summaryIncludesNotificationLifecycleLedger() {
+        val root = File(System.getProperty("user.dir") ?: ".")
+        val source = listOf(
+            File(root, "src/main/java/com/noop/testcentre/AndroidDiagnostics.kt"),
+            File(root, "app/src/main/java/com/noop/testcentre/AndroidDiagnostics.kt"),
+            File(root, "android/app/src/main/java/com/noop/testcentre/AndroidDiagnostics.kt"),
+        ).firstOrNull(File::isFile)
+        assumeTrue("AndroidDiagnostics source unavailable", source != null)
+
+        assertTrue(
+            source!!.readText().contains(
+                "NotificationLifecycleLedger.diagnosticLines(context)",
+            ),
+        )
     }
 }

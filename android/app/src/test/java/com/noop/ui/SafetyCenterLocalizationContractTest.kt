@@ -40,7 +40,7 @@ class SafetyCenterLocalizationContractTest {
         assumeTrue("Safety locale resources unavailable", files.values.all { it != null })
         val values = files.mapValues { safetyStrings(it.value!!) }
         val base = values.getValue("values")
-        assertEquals(204, base.size)
+        assertEquals(211, base.size)
 
         val placeholder = Regex("""%\d+\$[ds]""")
         for ((folder, localized) in values) {
@@ -80,5 +80,105 @@ class SafetyCenterLocalizationContractTest {
         assertFalse(safety.contains("Text(\"If danger is immediate\")"))
         assertTrue(shared.contains("accessibilityLabel: (T) -> String = label"))
         assertTrue(shared.contains("contentDescription = accessibilityLabel(item)"))
+    }
+
+    @Test
+    fun incidentReceiptAndTerminalFailureHaveAuthoritativeCopyAndDirectAction() {
+        val screen = first(
+            "src/main/java/com/noop/ui/SafetyCenterScreen.kt",
+            "app/src/main/java/com/noop/ui/SafetyCenterScreen.kt",
+            "android/app/src/main/java/com/noop/ui/SafetyCenterScreen.kt",
+        )
+        val strings = first(
+            "src/main/res/values/safety.xml",
+            "app/src/main/res/values/safety.xml",
+            "android/app/src/main/res/values/safety.xml",
+        )
+        assumeTrue("Safety screen/resources unavailable", screen != null && strings != null)
+
+        val source = screen!!.readText()
+        val resources = safetyStrings(strings!!)
+        assertTrue(source.contains("dispatch.contactSummary"))
+        assertTrue(source.contains("shouldShowAllContactsFailed"))
+        assertTrue(source.contains("Intent.ACTION_DIAL"))
+        assertTrue(source.contains("SafetyIncidentStatus.FAILED"))
+        assertTrue(source.contains("SafetyIncidentStatus.FAILED,"))
+        assertTrue(resources.containsKey("safety_page_contacts_reached_format"))
+        assertTrue(resources.containsKey("safety_page_contact_responses"))
+        assertTrue(resources.containsKey("safety_page_all_contacts_failed_title"))
+        assertTrue(resources.containsKey("safety_page_call_contact_format"))
+        assertTrue(resources.containsKey("safety_page_detail_failed"))
+        assertEquals("Paging started", resources["safety_page_status_submitted"])
+        assertTrue(
+            resources.getValue("safety_page_detail_submitted")
+                .contains("Delivery confirmation is pending"),
+        )
+        assertEquals(
+            "Reached %1\$d of %2\$d contacts",
+            resources["safety_page_contacts_reached_format"],
+        )
+        assertFalse(
+            resources.getValue("safety_page_contacts_reached_format")
+                .contains("Provider-confirmed"),
+        )
+        assertTrue(source.contains("R.string.safety_page_contact_responses"))
+    }
+
+    @Test
+    fun postSubmitStatusUsesLocalizedSafetyResource() {
+        val paging = first(
+            "src/main/java/com/noop/safety/SafetyPaging.kt",
+            "app/src/main/java/com/noop/safety/SafetyPaging.kt",
+            "android/app/src/main/java/com/noop/safety/SafetyPaging.kt",
+        )
+        assumeTrue("Safety paging source unavailable", paging != null)
+
+        val source = paging!!.readText()
+        assertTrue(
+            source.contains(
+                "statusMessage = appContext.getString(" +
+                    "R.string.safety_page_detail_submitted)",
+            ),
+        )
+        assertFalse(source.contains("Safety page request accepted. SMS delivery is pending"))
+    }
+
+    @Test
+    fun sosPermissionMonitoringAndFallBoundaryRemainExplicit() {
+        val screen = first(
+            "src/main/java/com/noop/ui/SafetyCenterScreen.kt",
+            "app/src/main/java/com/noop/ui/SafetyCenterScreen.kt",
+            "android/app/src/main/java/com/noop/ui/SafetyCenterScreen.kt",
+        )
+        val gesture = first(
+            "src/main/java/com/noop/safety/SafetySosGesture.kt",
+            "app/src/main/java/com/noop/safety/SafetySosGesture.kt",
+            "android/app/src/main/java/com/noop/safety/SafetySosGesture.kt",
+        )
+        val service = first(
+            "src/main/java/com/noop/ble/WhoopConnectionService.kt",
+            "app/src/main/java/com/noop/ble/WhoopConnectionService.kt",
+            "android/app/src/main/java/com/noop/ble/WhoopConnectionService.kt",
+        )
+        val viewModel = first(
+            "src/main/java/com/noop/ui/AppViewModel.kt",
+            "app/src/main/java/com/noop/ui/AppViewModel.kt",
+            "android/app/src/main/java/com/noop/ui/AppViewModel.kt",
+        )
+        assumeTrue(
+            "Safety runtime sources unavailable",
+            listOf(screen, gesture, service, viewModel).all { it != null },
+        )
+
+        val screenSource = screen!!.readText()
+        val gestureSource = gesture!!.readText()
+        assertTrue(screenSource.contains("sosNotificationPermissionLauncher.launch"))
+        assertTrue(screenSource.contains("SafetyStatusNotifications.deliveryAvailable"))
+        assertTrue(gestureSource.contains("SafetyIncidentStatusMonitor.start"))
+        assertTrue(gestureSource.contains("WhoopConnectionService.start"))
+        val serviceSource = service!!.readText()
+        assertTrue(serviceSource.contains("SafetyIncidentStatusMonitor.reconcile(this)"))
+        assertFalse(serviceSource.contains("FallResponseStateMachine("))
+        assertFalse(viewModel!!.readText().contains("FallResponseStateMachine("))
     }
 }

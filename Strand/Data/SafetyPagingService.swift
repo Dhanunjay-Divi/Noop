@@ -18,6 +18,7 @@ final class SafetyPagingService: ObservableObject {
     @Published private(set) var acceptedCount: Int
     @Published private(set) var maximumContacts = 5
     @Published private(set) var pagingConfigured = false
+    @Published private(set) var pagingEnabled: Bool?
     @Published private(set) var isBusy = false
     @Published private(set) var statusMessage = ""
     @Published private(set) var lastDispatch: RemoteSafetyDispatch?
@@ -41,9 +42,33 @@ final class SafetyPagingService: ObservableObject {
     var canPage: Bool {
         setupState == .ready
             && acceptedCount >= Self.minimumAcceptedContacts
-            && pagingConfigured
+            && Self.deliveryAvailable(
+                providerConfigured: pagingConfigured,
+                pagingEnabled: pagingEnabled
+            )
             && activeIncident == nil
             && !isBusy
+    }
+
+    static func deliveryAvailable(
+        providerConfigured: Bool,
+        pagingEnabled: Bool?
+    ) -> Bool {
+        providerConfigured && pagingEnabled != false
+    }
+
+    static func readinessStatusMessage(
+        acceptedCount: Int,
+        providerConfigured: Bool,
+        pagingEnabled: Bool?
+    ) -> String {
+        acceptedCount >= minimumAcceptedContacts
+            && deliveryAvailable(
+                providerConfigured: providerConfigured,
+                pagingEnabled: pagingEnabled
+            )
+            ? "Safety paging is ready."
+            : ""
     }
 
     var remainingAcceptedContacts: Int {
@@ -109,8 +134,9 @@ final class SafetyPagingService: ObservableObject {
                     response.profile.profileId.uuidString.lowercased()
                 SafetyPagingPreferences.displayName = response.profile.displayName
                 SafetyPagingPreferences.clearPendingEnrollment()
+                pagingEnabled = response.profile.pagingEnabled
                 setupState = .ready
-                statusMessage = "Safety Network is ready. Add two contacts."
+                statusMessage = ""
                 await reload()
             } catch {
                 present(error)
@@ -210,9 +236,12 @@ final class SafetyPagingService: ObservableObject {
 
     func pageAcceptedContacts() async -> Bool {
         guard canPage else {
-            errorMessage = pagingConfigured
+            errorMessage = Self.deliveryAvailable(
+                providerConfigured: pagingConfigured,
+                pagingEnabled: pagingEnabled
+            )
                 ? "At least two accepted emergency contacts are required."
-                : "SMS and voice paging are not configured on this server."
+                : "Safety Network delivery is temporarily unavailable."
             return false
         }
         var submitted = false
@@ -232,10 +261,7 @@ final class SafetyPagingService: ObservableObject {
                     for: dispatch,
                     service: self
                 )
-                statusMessage = (
-                    "Safety page opened. SMS is sending now; voice follows "
-                    + "if nobody acknowledges."
-                )
+                statusMessage = String(localized: "safety.page.detail.submitted")
                 submitted = dispatch.status != .failed
             } catch {
                 let serverStatus: Int?
@@ -265,11 +291,7 @@ final class SafetyPagingService: ObservableObject {
                 )
                 lastDispatch = refreshed
                 merge(refreshed)
-                if ![.open, .acknowledged, .pending].contains(refreshed.status) {
-                    SafetySOSRuntime.shared.stopLocationSharing(
-                        dispatchId: refreshed.dispatchId
-                    )
-                }
+                await SafetySOSRuntime.shared.reconcileStatus(refreshed)
             } else {
                 let response = try await client.safetyIncidents(
                     limit: 10,
@@ -281,6 +303,14 @@ final class SafetyPagingService: ObservableObject {
         } catch {
             // Periodic status refresh is best-effort. Explicit actions surface errors.
         }
+    }
+
+    func incident(_ dispatchId: UUID) async throws -> RemoteSafetyDispatch {
+        let context = try Self.requiredContext()
+        return try await Self.client(for: context).safetyIncident(
+            dispatchId,
+            authorization: .safety(token: context.token)
+        )
     }
 
     func resolve(_ incident: RemoteSafetyDispatch) async {
@@ -363,6 +393,7 @@ final class SafetyPagingService: ObservableObject {
             acceptedCount = response.acceptedCount
             maximumContacts = response.maximumContacts
             pagingConfigured = response.pagingConfigured
+            pagingEnabled = response.pagingEnabled
             SafetyPagingPreferences.acceptedCount = response.acceptedCount
             SafetyPagingPreferences.setupReminderRequired =
                 response.acceptedCount < Self.minimumAcceptedContacts
@@ -374,9 +405,11 @@ final class SafetyPagingService: ObservableObject {
                 name: .safetyContactsDidChange,
                 object: nil
             )
-            if response.acceptedCount >= Self.minimumAcceptedContacts {
-                statusMessage = "Safety paging is ready."
-            }
+            statusMessage = Self.readinessStatusMessage(
+                acceptedCount: response.acceptedCount,
+                providerConfigured: response.pagingConfigured,
+                pagingEnabled: response.pagingEnabled
+            )
             let incidents = try await client.safetyIncidents(
                 limit: 10,
                 authorization: .safety(token: context.token)
@@ -504,7 +537,9 @@ final class SafetyPagingService: ObservableObject {
     }
 
     static func normalizedE164(_ raw: String) -> String? {
-        var compact = raw.filter { $0 == "+" || $0.isNumber }
+        var compact = raw.filter {
+            $0 == "+" || $0.asciiValue.map { (48...57).contains($0) } == true
+        }
         if compact.hasPrefix("00") {
             compact = "+" + compact.dropFirst(2)
         }
@@ -512,7 +547,9 @@ final class SafetyPagingService: ObservableObject {
         let digits = compact.dropFirst()
         guard (8...15).contains(digits.count),
               digits.first != "0",
-              digits.allSatisfy(\.isNumber)
+              digits.allSatisfy({
+                  $0.asciiValue.map { (48...57).contains($0) } == true
+              })
         else { return nil }
         return compact
     }
@@ -635,12 +672,21 @@ enum SafetyContactReminders {
             reminderRequired: reminderRequired,
             acceptedCount: acceptedCount
         ) else {
-            center.removePendingNotificationRequests(withIdentifiers: [requestId])
+            LocalNotificationLifecycle.cancel(
+                identifiers: [requestId],
+                on: center
+            )
             return
         }
         Task { @MainActor in
             let settings = await center.notificationSettings()
-            guard notificationsAuthorized(settings.authorizationStatus) else { return }
+            guard notificationsAuthorized(settings.authorizationStatus) else {
+                LocalNotificationLifecycle.suppressed(
+                    identifier: requestId,
+                    categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+                )
+                return
+            }
             let content = UNMutableNotificationContent()
             content.title = String(localized: "safety.contacts_reminder.title")
             content.body = String(localized: "safety.contacts_reminder.body")
@@ -655,13 +701,17 @@ enum SafetyContactReminders {
                 timeInterval: 3 * 24 * 60 * 60,
                 repeats: true
             )
-            center.removePendingNotificationRequests(withIdentifiers: [requestId])
-            try? await center.add(
+            LocalNotificationLifecycle.cancel(
+                identifiers: [requestId],
+                on: center
+            )
+            try? await LocalNotificationLifecycle.schedule(
                 UNNotificationRequest(
                     identifier: requestId,
                     content: content,
                     trigger: trigger
-                )
+                ),
+                on: center
             )
         }
     }

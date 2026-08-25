@@ -31,6 +31,8 @@ import com.noop.data.DemoSeeder
 import com.noop.data.WhoopRepository
 import com.noop.ingest.HealthConnectSyncScheduler
 import com.noop.notif.HydrationReminderScheduler
+import com.noop.safety.SafetyIncidentStatusMonitor
+import com.noop.safety.SafetyLiveLocationSession
 import com.noop.sync.RemoteSyncScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -113,6 +115,13 @@ class MainActivity : ComponentActivity() {
         // one-shot chain, and this cheap reconcile repairs it after an update/reboot without touching
         // hydration logs or enabling anything on the user's behalf.
         runCatching { HydrationReminderScheduler.reconcile(applicationContext) }
+
+        // Repair status reconciliation for an explicitly opened Safety page after process death/update.
+        // WorkManager is best-effort; the foreground connection service remains the prompt polling lane.
+        runCatching {
+            SafetyLiveLocationSession.initialize(applicationContext)
+            SafetyIncidentStatusMonitor.reconcile(applicationContext)
+        }
 
         // Load the Light/Dark/System + chart-colour preferences before first composition so the theme
         // and chart ramps are correct from the very first frame (no flash).

@@ -107,13 +107,18 @@
     <string name="safety_onboarding_subtitle">Invite two to five trusted people. Paging becomes available only after at least two people accept.</string>
     <string name="safety_onboarding_title">Choose who NOOP should page</string>
     <string name="safety_owner_name">Your name</string>
+    <string name="safety_page_all_contacts_failed_title">No contact delivery was confirmed</string>
     <string name="safety_page_body">Each accepted contact receives an urgent SMS with acknowledgement controls. Voice calls follow only while the page remains unacknowledged.</string>
+    <string name="safety_page_call_contact_format">Call %1$s</string>
     <string name="safety_page_cancel_action">Cancel page</string>
     <string name="safety_page_cancel_guidance">Cancel stops pending retries and voice escalation. Messages or calls already submitted cannot be recalled.</string>
     <string name="safety_page_cannot_respond_format">%1$s cannot respond</string>
     <string name="safety_page_confirm_action">Send urgent SMS pages</string>
     <string name="safety_page_confirm_body">NOOP sends every accepted contact an SMS now. If nobody acknowledges, automated voice calls follow. Emergency services are not contacted.</string>
     <string name="safety_page_confirm_title">Page your emergency contacts now?</string>
+    <string name="safety_page_contact_responses">Contact responses</string>
+    <string name="safety_page_contacts_reached_at_format">Reached %1$d of %2$d contacts at %3$s</string>
+    <string name="safety_page_contacts_reached_format">Reached %1$d of %2$d contacts</string>
     <string name="safety_page_delivery_counts_format">%1$d submitted · %2$d pending · %3$d need attention</string>
     <string name="safety_page_detail_acknowledged">A Safety Network contact is responding.</string>
     <string name="safety_page_detail_acknowledged_format">%1$s is responding. Keep direct contact until the situation is resolved.</string>
@@ -122,7 +127,7 @@
     <string name="safety_page_detail_failed">Delivery failed. Contact trusted people or emergency services directly.</string>
     <string name="safety_page_detail_partial_failure">Some delivery attempts failed. Contact trusted people or emergency services directly.</string>
     <string name="safety_page_detail_resolved">This page was marked resolved. No pending escalation remains.</string>
-    <string name="safety_page_detail_submitted">The paging provider accepted the delivery requests.</string>
+    <string name="safety_page_detail_submitted">The paging provider accepted the requests. Delivery confirmation is pending.</string>
     <string name="safety_page_detail_waiting">Waiting for a contact to acknowledge. SMS sends first; voice escalation remains armed.</string>
     <string name="safety_page_disabled_active">Resolve or cancel the active Safety page before opening another.</string>
     <string name="safety_page_disabled_contacts">At least two contacts must accept their invitations.</string>
@@ -142,7 +147,7 @@
     <string name="safety_page_status_open">Open</string>
     <string name="safety_page_status_partial_failure">Delivery issue</string>
     <string name="safety_page_status_resolved">Resolved</string>
-    <string name="safety_page_status_submitted">Submitted</string>
+    <string name="safety_page_status_submitted">Paging started</string>
     <string name="safety_page_submit">Page accepted contacts</string>
     <string name="safety_page_submitting">Submitting safety page…</string>
     <string name="safety_page_title">Send an urgent page</string>
@@ -187,6 +192,8 @@
     <string name="safety_sos_location_retention">Only the newest fix is retained for the active page. Sharing stops when the page is cancelled, resolved, or expires.</string>
     <string name="safety_sos_location_settings">Open location settings</string>
     <string name="safety_sos_location_title">Live location during an SOS</string>
+    <string name="safety_sos_notifications_off">Notifications are off. Paging still works, but delivery updates may appear only in Safety.</string>
+    <string name="safety_sos_notifications_ready">Result notifications are ready.</string>
     <string name="safety_subtitle">Manual tools for getting a trusted person involved.</string>
     <string name="safety_timer_active">Timer active</string>
     <string name="safety_timer_disclaimer">When the timer ends, NOOP asks the operating system to show one local reminder. It does not message a contact or escalate if you do not respond, and delivery timing is not guaranteed.</string>

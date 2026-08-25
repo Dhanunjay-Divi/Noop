@@ -4,7 +4,6 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -17,6 +16,11 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.noop.R
+import com.noop.notif.NotificationLifecycleCategory
+import com.noop.notif.NotificationLifecycleId
+import com.noop.notif.NotificationLifecycleLedger
+import com.noop.notif.NotificationLifecycleState
+import com.noop.notif.NotificationPlatformIdentity
 import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NotificationRouteBridge
 import java.util.concurrent.TimeUnit
@@ -39,11 +43,18 @@ object SafetyContactSetupReminderScheduler {
             3,
             TimeUnit.DAYS,
         ).build()
-        WorkManager.getInstance(app).enqueueUniquePeriodicWork(
-            WORK_NAME,
-            ExistingPeriodicWorkPolicy.UPDATE,
-            request,
-        )
+        NotificationLifecycleLedger.observe(
+            app,
+            NotificationLifecycleId.SAFETY_CONTACT_SETUP,
+            NotificationLifecycleCategory.REMINDER,
+            NotificationLifecycleState.SCHEDULED,
+        ) {
+            WorkManager.getInstance(app).enqueueUniquePeriodicWork(
+                WORK_NAME,
+                ExistingPeriodicWorkPolicy.UPDATE,
+                request,
+            )
+        }
     }
 
     internal fun needsReminder(reminderRequired: Boolean, acceptedCount: Int): Boolean =
@@ -70,21 +81,35 @@ class SafetyContactSetupReminderWorker(
 
 private object SafetyContactSetupReminderNotifier {
     private const val CHANNEL_ID = "noop_safety_setup"
-    private const val NOTIFICATION_ID = 4_316
+    private const val NOTIFICATION_ID =
+        NotificationPlatformIdentity.NotificationId.SAFETY_CONTACT_SETUP
 
     @SuppressLint("MissingPermission")
     fun post(context: Context): Boolean = runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
-        ) return false
-        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        ) {
+            NotificationLifecycleLedger.suppressed(
+                context,
+                NotificationLifecycleId.SAFETY_CONTACT_SETUP,
+                NotificationLifecycleCategory.REMINDER,
+            )
+            return false
+        }
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            NotificationLifecycleLedger.suppressed(
+                context,
+                NotificationLifecycleId.SAFETY_CONTACT_SETUP,
+                NotificationLifecycleCategory.REMINDER,
+            )
+            return false
+        }
         ensureChannel(context)
-        val openSafety = PendingIntent.getActivity(
+        val openSafety = NotificationPlatformIdentity.activityPendingIntent(
             context,
-            16,
+            NotificationPlatformIdentity.ActivityIntent.SAFETY_CONTACT_SETUP,
             NotificationRouteBridge.launchIntent(context, NoopNotificationRoute.SAFETY),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_heart)
@@ -101,12 +126,30 @@ private object SafetyContactSetupReminderNotifier {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .build()
-        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
-        true
-    }.getOrDefault(false)
+        NotificationLifecycleLedger.posted(
+            context,
+            NotificationLifecycleId.SAFETY_CONTACT_SETUP,
+            NotificationLifecycleCategory.REMINDER,
+        ) {
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+        }
+    }.getOrElse {
+        NotificationLifecycleLedger.unknown(
+            context,
+            NotificationLifecycleId.SAFETY_CONTACT_SETUP,
+            NotificationLifecycleCategory.REMINDER,
+        )
+        false
+    }
 
     fun cancel(context: Context) {
-        NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+        NotificationLifecycleLedger.cancelled(
+            context,
+            NotificationLifecycleId.SAFETY_CONTACT_SETUP,
+            NotificationLifecycleCategory.REMINDER,
+        ) {
+            NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+        }
     }
 
     private fun ensureChannel(context: Context) {

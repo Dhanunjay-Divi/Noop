@@ -74,6 +74,7 @@ enum DebugDataDiagnostics {
         }
         #endif
         lines.append("Timezone:    \(tzLine())")
+        lines += LocalNotificationLifecycleLedger.shared.diagnosticLines()
         return lines
     }
 

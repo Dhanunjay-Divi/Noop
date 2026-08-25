@@ -100,8 +100,7 @@ enum DailyReviewNotifications {
     ) {
         guard on else {
             UserDefaults.standard.set(false, forKey: enabledKey)
-            UNUserNotificationCenter.current()
-                .removePendingNotificationRequests(withIdentifiers: requestIDs)
+            LocalNotificationLifecycle.cancel(identifiers: requestIDs)
             completion?(.off)
             return
         }
@@ -122,10 +121,12 @@ enum DailyReviewNotifications {
                     completion?(.scheduled)
                 } else {
                     UserDefaults.standard.set(false, forKey: enabledKey)
+                    recordSuppressedRequests()
                     completion?(.denied)
                 }
             default:
                 UserDefaults.standard.set(false, forKey: enabledKey)
+                recordSuppressedRequests()
                 completion?(.denied)
             }
         }
@@ -145,8 +146,7 @@ enum DailyReviewNotifications {
     /// This never asks for permission; it only restores requests when authorization already exists.
     static func restoreScheduleIfAuthorized() {
         guard isEnabled else {
-            UNUserNotificationCenter.current()
-                .removePendingNotificationRequests(withIdentifiers: requestIDs)
+            LocalNotificationLifecycle.cancel(identifiers: requestIDs)
             return
         }
         Task { @MainActor in
@@ -155,6 +155,7 @@ enum DailyReviewNotifications {
             case .authorized, .provisional, .ephemeral:
                 schedule()
             default:
+                recordSuppressedRequests()
                 break
             }
         }
@@ -185,7 +186,7 @@ enum DailyReviewNotifications {
 
     private static func schedule() {
         let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: requestIDs)
+        LocalNotificationLifecycle.cancel(identifiers: requestIDs, on: center)
         registerPrivacyCategory(on: center)
 
         for spec in reminderSpecs(morning: morningMinutes, evening: eveningMinutes) {
@@ -203,12 +204,22 @@ enum DailyReviewNotifications {
             components.hour = spec.minuteOfDay / 60
             components.minute = spec.minuteOfDay % 60
             let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
-            center.add(
+            LocalNotificationLifecycle.schedule(
                 UNNotificationRequest(
                     identifier: spec.identifier,
                     content: content,
                     trigger: trigger
-                )
+                ),
+                on: center
+            )
+        }
+    }
+
+    private static func recordSuppressedRequests() {
+        for identifier in requestIDs {
+            LocalNotificationLifecycle.suppressed(
+                identifier: identifier,
+                categoryIdentifier: privacyCategoryID
             )
         }
     }
@@ -338,8 +349,9 @@ enum BluetoothAvailabilityNotifications {
         content.userInfo = [NotificationRouteBridge.userInfoKey: NoopNotificationRoute.devices.rawValue]
 
         do {
-            try await center.add(
-                UNNotificationRequest(identifier: requestID, content: content, trigger: nil)
+            try await LocalNotificationLifecycle.schedule(
+                UNNotificationRequest(identifier: requestID, content: content, trigger: nil),
+                on: center
             )
             // `add` itself is an await point. If recovery/opt-out raced the daemon request, remove the
             // just-added notification now instead of leaving a stale "Bluetooth is off" banner behind.
@@ -374,8 +386,11 @@ enum BluetoothAvailabilityNotifications {
     /// Remove both not-yet-presented and already-presented copies on recovery or explicit opt-out.
     static func clear() {
         let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: [requestID])
-        center.removeDeliveredNotifications(withIdentifiers: [requestID])
+        LocalNotificationLifecycle.cancel(
+            identifiers: [requestID],
+            presented: true,
+            on: center
+        )
     }
 
     static func canPost(using status: UNAuthorizationStatus) -> Bool {
@@ -434,12 +449,13 @@ enum AutoWorkoutNotifications {
                         .requestAuthorization(options: [.alert, .sound])) ?? false
                 },
                 add: { request in
-                    try await UNUserNotificationCenter.current().add(request)
+                    try await LocalNotificationLifecycle.schedule(request)
                 },
                 remove: { identifiers in
-                    let center = UNUserNotificationCenter.current()
-                    center.removePendingNotificationRequests(withIdentifiers: identifiers)
-                    center.removeDeliveredNotifications(withIdentifiers: identifiers)
+                    LocalNotificationLifecycle.cancel(
+                        identifiers: identifiers,
+                        presented: true
+                    )
                 }
             )
         }

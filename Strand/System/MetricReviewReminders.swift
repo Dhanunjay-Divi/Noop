@@ -125,6 +125,12 @@ enum MetricReviewReminders {
             }
 
             guard authorized else {
+                for cadence in Cadence.allCases {
+                    LocalNotificationLifecycle.suppressed(
+                        identifier: cadence.requestID,
+                        categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+                    )
+                }
                 completion?(.denied)
                 return
             }
@@ -155,6 +161,12 @@ enum MetricReviewReminders {
             case .authorized, .provisional, .ephemeral:
                 schedule()
             default:
+                for cadence in Cadence.allCases {
+                    LocalNotificationLifecycle.suppressed(
+                        identifier: cadence.requestID,
+                        categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+                    )
+                }
                 break
             }
         }
@@ -200,8 +212,9 @@ enum MetricReviewReminders {
             return (id, title)
         }
         let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(
-            withIdentifiers: Cadence.allCases.map(\.requestID)
+        LocalNotificationLifecycle.cancel(
+            identifiers: Cadence.allCases.map(\.requestID),
+            on: center
         )
         guard !selected.isEmpty else { return }
         DailyReviewNotifications.registerPrivacyCategory(on: center)
@@ -235,7 +248,7 @@ enum MetricReviewReminders {
             case .monthly:
                 components.day = 1
             }
-            center.add(
+            LocalNotificationLifecycle.schedule(
                 UNNotificationRequest(
                     identifier: spec.identifier,
                     content: content,
@@ -243,15 +256,15 @@ enum MetricReviewReminders {
                         dateMatching: components,
                         repeats: true
                     )
-                )
+                ),
+                on: center
             )
         }
     }
 
     private static func removeRequest() {
-        UNUserNotificationCenter.current()
-            .removePendingNotificationRequests(
-                withIdentifiers: Cadence.allCases.map(\.requestID)
-            )
+        LocalNotificationLifecycle.cancel(
+            identifiers: Cadence.allCases.map(\.requestID)
+        )
     }
 }

@@ -35,10 +35,22 @@ enum SafetyCheckInNotifications {
         default:
             authorized = isAuthorized(settings.authorizationStatus)
         }
-        guard authorized else { return .denied }
+        guard authorized else {
+            LocalNotificationLifecycle.suppressed(
+                identifier: requestIdentifier,
+                categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+            )
+            return .denied
+        }
 
         let remaining = dueAt.timeIntervalSinceNow
-        guard remaining >= 1 else { return .failed }
+        guard remaining >= 1 else {
+            LocalNotificationLifecycle.suppressed(
+                identifier: requestIdentifier,
+                categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+            )
+            return .failed
+        }
 
         let content = UNMutableNotificationContent()
         content.title = String(localized: "safety.notification.title")
@@ -57,10 +69,13 @@ enum SafetyCheckInNotifications {
             trigger: trigger
         )
 
-        center.removePendingNotificationRequests(withIdentifiers: [requestIdentifier])
+        LocalNotificationLifecycle.cancel(
+            identifiers: [requestIdentifier],
+            on: center
+        )
         DailyReviewNotifications.registerPrivacyCategory(on: center)
         do {
-            try await center.add(request)
+            try await LocalNotificationLifecycle.schedule(request, on: center)
             return .scheduled
         } catch {
             return .failed
@@ -88,8 +103,11 @@ enum SafetyCheckInNotifications {
 
     static func cancel() {
         let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: [requestIdentifier])
-        center.removeDeliveredNotifications(withIdentifiers: [requestIdentifier])
+        LocalNotificationLifecycle.cancel(
+            identifiers: [requestIdentifier],
+            presented: true,
+            on: center
+        )
     }
 
     private static func isAuthorized(_ status: UNAuthorizationStatus) -> Bool {

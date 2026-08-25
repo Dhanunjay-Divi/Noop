@@ -3,7 +3,6 @@ package com.noop.notif
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -76,12 +75,6 @@ internal object BatteryAlertPolicy {
  */
 object BatteryAlertNotifier {
     private const val CHANNEL_ID = "noop_battery_alert"
-    // #297: each notifier posts under a DISTINCT id (notify() is tagless, so a shared id silently
-    // replaces an undismissed notification). Full map: 4201 connection, 4202 illness, 4203 inactivity,
-    // 4204 smart alarm, 4205/4206/4207 battery (runtime/low/full), 4208/4209 scheduled report.
-    private const val NOTIF_ID_RUNTIME = 4205
-    private const val NOTIF_ID_LOW = 4206
-    private const val NOTIF_ID_FULL = 4207
 
     /**
      * Predictive twin of [onBatteryUpdate]: run the runtime estimate against
@@ -106,19 +99,46 @@ object BatteryAlertNotifier {
             // ALWAYS persist the updated gate — re-arming must stick even when nothing fired.
             NoopPrefs.setBatteryRuntimeAlerted(context, decision.newAlerted)
             if (!decision.fire) return
-            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
+            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                NotificationLifecycleLedger.suppressed(
+                    context,
+                    NotificationLifecycleId.BATTERY_RUNTIME,
+                    NotificationLifecycleCategory.STATUS,
+                )
+                return
+            }
             ensureChannel(context)
             val label = com.noop.analytics.BatteryEstimator.label(remainingHours)
             val n = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_heart)
                 .setContentTitle("Noop Band battery low")
                 .setContentText("$label left on your ${WhoopModel.CUSTOMER_NAME} - recharge tonight.")
-                .setContentIntent(openAppIntent(context))
+                .setContentIntent(
+                    openAppIntent(
+                        context,
+                        NotificationPlatformIdentity.ActivityIntent.BATTERY_RUNTIME,
+                    ),
+                )
                 .setAutoCancel(true)
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .build()
-            NotificationManagerCompat.from(context).notify(NOTIF_ID_RUNTIME, n)
+            NotificationLifecycleLedger.posted(
+                context,
+                NotificationLifecycleId.BATTERY_RUNTIME,
+                NotificationLifecycleCategory.STATUS,
+            ) {
+                NotificationManagerCompat.from(context).notify(
+                    NotificationPlatformIdentity.NotificationId.BATTERY_RUNTIME,
+                    n,
+                )
+            }
+        }.onFailure {
+            NotificationLifecycleLedger.unknown(
+                context,
+                NotificationLifecycleId.BATTERY_RUNTIME,
+                NotificationLifecycleCategory.STATUS,
+            )
         }
     }
 
@@ -128,43 +148,98 @@ object BatteryAlertNotifier {
         if (!NoopPrefs.batteryAlerts(context)) return
         // Defensive: never let a notify() throw (revoked POST_NOTIFICATIONS, OEM quirk) crash a collector.
         runCatching {
-            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
-            ensureChannel(context)
             val decision = BatteryAlertPolicy.evaluate(
                 pct = currPct,
                 charging = charging,
                 lowAlerted = NoopPrefs.batteryLowAlerted(context),
                 fullAlerted = NoopPrefs.batteryFullAlerted(context),
             )
+            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                if (decision.fireLow) {
+                    NotificationLifecycleLedger.suppressed(
+                        context,
+                        NotificationLifecycleId.BATTERY_LOW,
+                        NotificationLifecycleCategory.STATUS,
+                    )
+                }
+                if (decision.fireFull) {
+                    NotificationLifecycleLedger.suppressed(
+                        context,
+                        NotificationLifecycleId.BATTERY_FULL,
+                        NotificationLifecycleCategory.STATUS,
+                    )
+                }
+                return
+            }
+            ensureChannel(context)
             if (decision.fireLow) {
                 val n = NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_stat_heart)
                     .setContentTitle("Low battery")
                     .setContentText("Recharge your ${WhoopModel.CUSTOMER_NAME} before tonight.")
-                    .setContentIntent(openAppIntent(context))
+                    .setContentIntent(
+                        openAppIntent(
+                            context,
+                            NotificationPlatformIdentity.ActivityIntent.BATTERY_LOW,
+                        ),
+                    )
                     .setAutoCancel(true)
                     .setCategory(NotificationCompat.CATEGORY_STATUS)
                     .setPriority(NotificationCompat.PRIORITY_HIGH)
                     .build()
-                NotificationManagerCompat.from(context).notify(NOTIF_ID_LOW, n)
+                if (!NotificationLifecycleLedger.posted(
+                        context,
+                        NotificationLifecycleId.BATTERY_LOW,
+                        NotificationLifecycleCategory.STATUS,
+                    ) {
+                        NotificationManagerCompat.from(context).notify(
+                            NotificationPlatformIdentity.NotificationId.BATTERY_LOW,
+                            n,
+                        )
+                    }
+                ) return
             }
             if (decision.fireFull) {
                 val n = NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_stat_heart)
                     .setContentTitle("Noop Band fully charged")
                     .setContentText("Your ${WhoopModel.CUSTOMER_NAME} is at 100%.")
-                    .setContentIntent(openAppIntent(context))
+                    .setContentIntent(
+                        openAppIntent(
+                            context,
+                            NotificationPlatformIdentity.ActivityIntent.BATTERY_FULL,
+                        ),
+                    )
                     .setAutoCancel(true)
                     .setCategory(NotificationCompat.CATEGORY_STATUS)
                     .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                     .build()
-                NotificationManagerCompat.from(context).notify(NOTIF_ID_FULL, n)
+                if (!NotificationLifecycleLedger.posted(
+                        context,
+                        NotificationLifecycleId.BATTERY_FULL,
+                        NotificationLifecycleCategory.STATUS,
+                    ) {
+                        NotificationManagerCompat.from(context).notify(
+                            NotificationPlatformIdentity.NotificationId.BATTERY_FULL,
+                            n,
+                        )
+                    }
+                ) return
             }
             // #514: the strap has dropped below 100% - pull the stale "fully charged" note so it
             // can't linger after the cell discharges. cancel() covers a posted notification; a
             // not-yet-shown one simply no-ops.
             if (decision.clearFull) {
-                NotificationManagerCompat.from(context).cancel(NOTIF_ID_FULL)
+                if (!NotificationLifecycleLedger.cancelled(
+                        context,
+                        NotificationLifecycleId.BATTERY_FULL,
+                        NotificationLifecycleCategory.STATUS,
+                    ) {
+                        NotificationManagerCompat.from(context).cancel(
+                            NotificationPlatformIdentity.NotificationId.BATTERY_FULL,
+                        )
+                    }
+                ) return
             }
             // ALWAYS persist the updated flags — re-arming must stick even when nothing fired.
             NoopPrefs.setBatteryLowAlerted(context, decision.newLowAlerted)
@@ -172,12 +247,14 @@ object BatteryAlertNotifier {
         }
     }
 
-    private fun openAppIntent(context: Context): PendingIntent =
-        PendingIntent.getActivity(
-            context, 3,
-            appLaunchIntent(context),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
+    private fun openAppIntent(
+        context: Context,
+        identity: NotificationPlatformIdentity.ActivityIntentIdentity,
+    ) = NotificationPlatformIdentity.activityPendingIntent(
+        context,
+        identity,
+        appLaunchIntent(context),
+    )
 
     private fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return

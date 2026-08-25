@@ -8,6 +8,55 @@ import UIKit
 import AppKit
 #endif
 
+struct SafetyIncidentContactPresentation {
+    struct Receipt: Equatable {
+        let reached: Int
+        let targeted: Int
+    }
+
+    static func receipt(reached: Int, targeted: Int) -> Receipt? {
+        guard targeted > 0, reached >= 0, reached <= targeted else { return nil }
+        return Receipt(reached: reached, targeted: targeted)
+    }
+
+    static func lastReachedDate(_ raw: String?) -> Date? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
+    }
+
+    static func shouldShowAllContactsFailed(
+        status: RemoteSafetyIncidentStatus,
+        summaryReportsAllFailed: Bool?
+    ) -> Bool {
+        status == .failed || summaryReportsAllFailed == true
+    }
+
+    static func allowsResolveOrCancel(_ status: RemoteSafetyIncidentStatus) -> Bool {
+        [.open, .acknowledged, .pending].contains(status)
+    }
+
+    static func tone(for status: RemoteSafetyIncidentStatus) -> StrandTone {
+        switch status {
+        case .open, .pending, .submitted: return .warning
+        case .acknowledged, .resolved: return .positive
+        case .failed, .partialFailure: return .critical
+        case .cancelled, .expired: return .neutral
+        }
+    }
+
+    static func telephoneURL(phoneE164: String) -> URL? {
+        guard phoneE164.first == "+" else { return nil }
+        let digits = phoneE164.dropFirst()
+        guard (8...15).contains(digits.count),
+              digits.utf8.allSatisfy({ (48...57).contains($0) }),
+              digits.first != "0"
+        else { return nil }
+        return URL(string: "tel:\(phoneE164)")
+    }
+}
+
 /// Personal-safety tools: explicitly page accepted contacts, prepare a message with an optional
 /// one-shot location, and arm a local check-in reminder. Wellness signals never silently page anyone.
 struct SafetyCenterView: View {
@@ -51,6 +100,7 @@ struct SafetyCenterView: View {
     @State private var notice: String?
     @State private var nowUnix = Int(Date().timeIntervalSince1970)
     @State private var reminderDeliveryState: SafetyCheckInNotifications.DeliveryState = .unknown
+    @State private var sosNotificationsAvailable = true
     @State private var confirmsContactPage = false
     @State private var pendingIncidentAction: IncidentAction?
 
@@ -73,6 +123,10 @@ struct SafetyCenterView: View {
             Text(notice ?? "")
         }
         .task {
+            #if os(iOS)
+            sosNotificationsAvailable =
+                await SafetySOSRuntime.notificationDeliveryAvailable()
+            #endif
             while !Task.isCancelled {
                 nowUnix = Int(Date().timeIntervalSince1970)
                 await pagingService.refreshLatestIncident()
@@ -86,6 +140,10 @@ struct SafetyCenterView: View {
             nowUnix = Int(Date().timeIntervalSince1970)
             Task {
                 await refreshReminderDeliveryState()
+                #if os(iOS)
+                sosNotificationsAvailable =
+                    await SafetySOSRuntime.notificationDeliveryAvailable()
+                #endif
                 await pagingService.refresh()
             }
         }
@@ -297,12 +355,49 @@ struct SafetyCenterView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
                 #if os(iOS)
+                HStack(alignment: .top, spacing: NoopMetrics.space2) {
+                    Image(
+                        systemName: sosNotificationsAvailable
+                            ? "bell.badge.fill"
+                            : "bell.slash.fill"
+                    )
+                    .foregroundStyle(
+                        sosNotificationsAvailable
+                            ? StrandPalette.statusPositive
+                            : StrandPalette.statusWarning
+                    )
+                    .accessibilityHidden(true)
+                    Text(
+                        sosNotificationsAvailable
+                            ? String(localized: "safety.sos.notifications.ready")
+                            : String(localized: "safety.sos.notifications.off")
+                    )
+                    .font(StrandFont.caption)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                if !sosNotificationsAvailable {
+                    NoopButton(
+                        "safety.settings.open_notifications",
+                        systemImage: "gearshape",
+                        kind: .secondary,
+                        fullWidth: true,
+                        action: openAppSettings
+                    )
+                }
                 liveLocationPermissionControl
                 #endif
             }
         }
         .onChangeCompat(of: sosGestureEnabled) { enabled in
             SafetySOSGesturePreferences.setEnabled(enabled)
+            #if os(iOS)
+            guard enabled else { return }
+            Task { @MainActor in
+                sosNotificationsAvailable =
+                    await SafetySOSRuntime.requestNotificationAuthorizationIfNeeded()
+            }
+            #endif
         }
     }
 
@@ -375,7 +470,7 @@ struct SafetyCenterView: View {
         if pagingService.setupState != .ready {
             return String(localized: "safety.page.disabled.setup")
         }
-        if !pagingService.pagingConfigured {
+        if !pagingService.pagingConfigured || pagingService.pagingEnabled == false {
             return String(localized: "safety.page.disabled.delivery")
         }
         if pagingService.activeIncident != nil {
@@ -385,12 +480,29 @@ struct SafetyCenterView: View {
     }
 
     private func incidentStatus(_ incident: RemoteSafetyDispatch) -> some View {
-        VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+        let contactSummary = incident.contactSummary.flatMap {
+            $0.isConsistent ? $0 : nil
+        }
+        let contactReceipt = contactSummary.flatMap {
+            SafetyIncidentContactPresentation.receipt(
+                reached: $0.reached,
+                targeted: $0.targeted
+            )
+        }
+        let allContactsFailed =
+            SafetyIncidentContactPresentation.shouldShowAllContactsFailed(
+                status: incident.status,
+                summaryReportsAllFailed: contactSummary?.allContactsFailed
+            )
+
+        return VStack(alignment: .leading, spacing: NoopMetrics.space3) {
             Divider().overlay(StrandPalette.hairline)
             HStack(spacing: NoopMetrics.space2) {
                 StatePill(
                     incidentStatusLabel(incident.status),
-                    tone: incidentStatusTone(incident.status)
+                    tone: SafetyIncidentContactPresentation.tone(
+                        for: incident.status
+                    )
                 )
                 Spacer(minLength: 8)
                 if incident.idempotentReplay {
@@ -400,60 +512,94 @@ struct SafetyCenterView: View {
                 }
             }
 
-            Text(incidentStatusDetail(incident))
-                .font(StrandFont.body)
-                .foregroundStyle(StrandPalette.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            let submitted = incident.deliveries.filter {
-                [.queued, .sent, .delivered].contains($0.status)
-            }.count
-            let inProgress = incident.deliveries.filter {
-                [.pending, .submitting, .leased, .retryWait].contains($0.status)
-            }.count
-            let failed = incident.deliveries.filter {
-                [.failed, .unknown].contains($0.status)
-            }.count
-            Text(
-                String(
-                    format: String(localized: "safety.page.delivery_counts_format"),
-                    submitted,
-                    inProgress,
-                    failed
-                )
-            )
-                .font(StrandFont.captionNumber)
-                .foregroundStyle(failed == 0
-                                 ? StrandPalette.textTertiary
-                                 : StrandPalette.statusWarning)
-
-            ForEach(incident.responses ?? []) { response in
-                HStack(spacing: NoopMetrics.space2) {
-                    Image(
-                        systemName: response.decision == .responding
-                            ? "checkmark.circle.fill"
-                            : "xmark.circle"
-                    )
-                    .foregroundStyle(
-                        response.decision == .responding
-                            ? StrandPalette.statusPositive
-                            : StrandPalette.textTertiary
-                    )
-                    Text(
-                        response.decision == .responding
-                            ? String(
-                                format: String(localized: "safety.page.responding_format"),
-                                response.contactDisplayName
-                            )
-                            : String(
-                                format: String(localized: "safety.page.cannot_respond_format"),
-                                response.contactDisplayName
-                            )
-                    )
-                    .font(StrandFont.footnote)
+            if !allContactsFailed {
+                Text(incidentStatusDetail(incident))
+                    .font(StrandFont.body)
                     .foregroundStyle(StrandPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let contactReceipt {
+                Label {
+                    Text(contactReceiptText(
+                        contactReceipt,
+                        lastReachedAt: contactSummary?.lastReachedAt
+                    ))
+                } icon: {
+                    Image(systemName: "person.2.fill")
+                        .accessibilityHidden(true)
                 }
+                .font(StrandFont.captionNumber)
+                .foregroundStyle(
+                    allContactsFailed
+                        ? StrandPalette.statusCriticalText
+                        : (contactReceipt.reached > 0
+                           ? StrandPalette.statusPositive
+                           : StrandPalette.textTertiary)
+                )
                 .accessibilityElement(children: .combine)
+            } else {
+                let submitted = incident.deliveries.filter {
+                    [.queued, .sent, .delivered].contains($0.status)
+                }.count
+                let inProgress = incident.deliveries.filter {
+                    [.pending, .submitting, .leased, .retryWait].contains($0.status)
+                }.count
+                let failed = incident.deliveries.filter {
+                    [.failed, .unknown].contains($0.status)
+                }.count
+                Text(
+                    String(
+                        format: String(localized: "safety.page.delivery_counts_format"),
+                        submitted,
+                        inProgress,
+                        failed
+                    )
+                )
+                    .font(StrandFont.captionNumber)
+                    .foregroundStyle(failed == 0
+                                     ? StrandPalette.textTertiary
+                                     : StrandPalette.statusWarning)
+            }
+
+            if allContactsFailed {
+                allContactsFailedWarning
+            }
+
+            if let responses = incident.responses, !responses.isEmpty {
+                Text("safety.page.contact_responses")
+                    .font(StrandFont.overline)
+                    .tracking(StrandFont.overlineTracking)
+                    .foregroundStyle(StrandPalette.textTertiary)
+
+                ForEach(responses) { response in
+                    HStack(spacing: NoopMetrics.space2) {
+                        Image(
+                            systemName: response.decision == .responding
+                                ? "checkmark.circle.fill"
+                                : "xmark.circle"
+                        )
+                        .foregroundStyle(
+                            response.decision == .responding
+                                ? StrandPalette.statusPositive
+                                : StrandPalette.textTertiary
+                        )
+                        Text(
+                            response.decision == .responding
+                                ? String(
+                                    format: String(localized: "safety.page.responding_format"),
+                                    response.contactDisplayName
+                                )
+                                : String(
+                                    format: String(localized: "safety.page.cannot_respond_format"),
+                                    response.contactDisplayName
+                                )
+                        )
+                        .font(StrandFont.footnote)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
             }
 
             if let location = incident.latestLocation {
@@ -494,7 +640,7 @@ struct SafetyCenterView: View {
                 }
             }
 
-            if [.open, .acknowledged, .pending].contains(incident.status) {
+            if SafetyIncidentContactPresentation.allowsResolveOrCancel(incident.status) {
                 NoopButton(
                     "safety.page.resolve.action",
                     systemImage: "checkmark.circle.fill",
@@ -518,6 +664,92 @@ struct SafetyCenterView: View {
         }
     }
 
+    private func contactReceiptText(
+        _ receipt: SafetyIncidentContactPresentation.Receipt,
+        lastReachedAt: String?
+    ) -> String {
+        if let date = SafetyIncidentContactPresentation.lastReachedDate(lastReachedAt) {
+            return String(
+                format: String(localized: "safety.page.contacts_reached_at_format"),
+                locale: Locale.current,
+                arguments: [
+                    Int64(receipt.reached),
+                    Int64(receipt.targeted),
+                    date.formatted(date: .omitted, time: .shortened),
+                ]
+            )
+        }
+        return String(
+            format: String(localized: "safety.page.contacts_reached_format"),
+            locale: Locale.current,
+            arguments: [Int64(receipt.reached), Int64(receipt.targeted)]
+        )
+    }
+
+    private var allContactsFailedWarning: some View {
+        VStack(alignment: .leading, spacing: NoopMetrics.space3) {
+            HStack(alignment: .top, spacing: NoopMetrics.space3) {
+                Image(systemName: "exclamationmark.octagon.fill")
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(StrandPalette.statusCriticalText)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                    Text(
+                        String(
+                            localized: "safety.page.all_contacts_failed_title"
+                        )
+                    )
+                        .font(StrandFont.headline)
+                        .foregroundStyle(StrandPalette.textPrimary)
+                    Text("safety.page.detail.failed")
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            ForEach(directlyCallableContacts) { contact in
+                if let url = SafetyIncidentContactPresentation.telephoneURL(
+                    phoneE164: contact.phoneE164
+                ) {
+                    Button {
+                        openURL(url)
+                    } label: {
+                        Label {
+                            Text(
+                                String(
+                                    format: String(
+                                        localized: "safety.page.call_contact_format"
+                                    ),
+                                    contact.displayName
+                                )
+                            )
+                        } icon: {
+                            Image(systemName: "phone.fill")
+                        }
+                    }
+                    .buttonStyle(NoopButtonStyle(.destructive, fullWidth: true))
+                }
+            }
+        }
+        .padding(.leading, NoopMetrics.space3)
+        .overlay(alignment: .leading) {
+            Capsule()
+                .fill(StrandPalette.statusCritical)
+                .frame(width: 3)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var directlyCallableContacts: [RemoteSafetyContact] {
+        pagingService.contacts.filter {
+            $0.status == .accepted
+                && SafetyIncidentContactPresentation.telephoneURL(
+                    phoneE164: $0.phoneE164
+                ) != nil
+        }
+    }
+
     private func incidentStatusLabel(
         _ status: RemoteSafetyIncidentStatus
     ) -> LocalizedStringKey {
@@ -530,17 +762,6 @@ struct SafetyCenterView: View {
         case .submitted: return "safety.page.status.submitted"
         case .partialFailure: return "safety.page.status.partial_failure"
         case .failed: return "safety.page.status.failed"
-        }
-    }
-
-    private func incidentStatusTone(
-        _ status: RemoteSafetyIncidentStatus
-    ) -> StrandTone {
-        switch status {
-        case .open, .pending, .submitted: return .warning
-        case .acknowledged, .resolved: return .positive
-        case .failed, .partialFailure: return .critical
-        case .cancelled, .expired: return .neutral
         }
     }
 

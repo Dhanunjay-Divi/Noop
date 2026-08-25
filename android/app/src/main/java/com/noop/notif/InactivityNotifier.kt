@@ -3,7 +3,6 @@ package com.noop.notif
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -24,7 +23,6 @@ import com.noop.ui.appLaunchIntent
  */
 object InactivityNotifier {
     private const val CHANNEL_ID = "noop_inactivity"
-    private const val NOTIF_ID = 4203   // 4201 = ongoing connection, 4202 = illness watch
 
     @SuppressLint("MissingPermission") // guarded by areNotificationsEnabled() + runCatching
     fun onNudged(context: Context, minutes: Int) {
@@ -37,12 +35,19 @@ object InactivityNotifier {
         }
         // Defensive: never let a notify() throw (revoked POST_NOTIFICATIONS, OEM quirk) crash the offload.
         runCatching {
-            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
+            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                NotificationLifecycleLedger.suppressed(
+                    context,
+                    NotificationLifecycleId.INACTIVITY,
+                    NotificationLifecycleCategory.REMINDER,
+                )
+                return
+            }
             ensureChannel(context)
-            val openApp = PendingIntent.getActivity(
-                context, 5,
+            val openApp = NotificationPlatformIdentity.activityPendingIntent(
+                context,
+                NotificationPlatformIdentity.ActivityIntent.INACTIVITY,
                 appLaunchIntent(context),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             val n = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_heart)
@@ -53,7 +58,22 @@ object InactivityNotifier {
                 .setCategory(NotificationCompat.CATEGORY_REMINDER)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .build()
-            NotificationManagerCompat.from(context).notify(NOTIF_ID, n)
+            NotificationLifecycleLedger.posted(
+                context,
+                NotificationLifecycleId.INACTIVITY,
+                NotificationLifecycleCategory.REMINDER,
+            ) {
+                NotificationManagerCompat.from(context).notify(
+                    NotificationPlatformIdentity.NotificationId.INACTIVITY,
+                    n,
+                )
+            }
+        }.onFailure {
+            NotificationLifecycleLedger.unknown(
+                context,
+                NotificationLifecycleId.INACTIVITY,
+                NotificationLifecycleCategory.REMINDER,
+            )
         }
     }
 

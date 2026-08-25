@@ -31,6 +31,7 @@ public struct RemoteSafetyProfile: Codable, Equatable, Sendable {
     public let installationId: String
     public let createdAt: String
     public let updatedAt: String
+    public let pagingEnabled: Bool?
 }
 
 public struct RemoteSafetyBootstrapResponse: Codable, Equatable, Sendable {
@@ -97,6 +98,7 @@ public struct RemoteSafetyContactsResponse: Codable, Equatable, Sendable {
     public let minimumAccepted: Int
     public let maximumContacts: Int
     public let pagingConfigured: Bool
+    public let pagingEnabled: Bool?
 }
 
 public struct RemoteSafetyPageCreate: Codable, Equatable, Sendable {
@@ -193,6 +195,29 @@ public struct RemoteSafetyLocationResponse: Codable, Equatable, Sendable {
     public let retention: String
 }
 
+public struct RemoteSafetyContactSummary: Codable, Equatable, Sendable {
+    public let targeted: Int
+    public let reached: Int
+    public let pending: Int
+    public let failed: Int
+    public let lastReachedAt: String?
+    public let allContactsFailed: Bool
+
+    public var isConsistent: Bool {
+        guard targeted > 0,
+              reached >= 0, reached <= targeted,
+              pending >= 0, pending <= targeted,
+              failed >= 0, failed <= targeted
+        else { return false }
+        let (partial, partialOverflow) = reached.addingReportingOverflow(pending)
+        let (total, totalOverflow) = partial.addingReportingOverflow(failed)
+        return !partialOverflow
+            && !totalOverflow
+            && total == targeted
+            && allContactsFailed == (failed == targeted)
+    }
+}
+
 public struct RemoteSafetyDispatch: Codable, Equatable, Sendable {
     public let dispatchId: UUID
     public let idempotencyKey: UUID
@@ -212,7 +237,122 @@ public struct RemoteSafetyDispatch: Codable, Equatable, Sendable {
     public let deliveries: [RemoteSafetyDelivery]
     public let responses: [RemoteSafetyResponse]?
     public let deliverySummary: [String: Int]?
+    public let contactSummary: RemoteSafetyContactSummary?
     public let latestLocation: RemoteSafetyLocation?
+
+    private enum CodingKeys: String, CodingKey {
+        case dispatchId
+        case idempotencyKey
+        case trigger
+        case status
+        case createdAt
+        case updatedAt
+        case expiresAt
+        case acknowledgedAt
+        case resolvedAt
+        case cancelledAt
+        case acknowledgedContactId
+        case acknowledgedContactDisplayName
+        case resolutionNote
+        case completedAt
+        case idempotentReplay
+        case deliveries
+        case responses
+        case deliverySummary
+        case contactSummary
+        case latestLocation
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        dispatchId = try container.decode(UUID.self, forKey: .dispatchId)
+        idempotencyKey = try container.decode(UUID.self, forKey: .idempotencyKey)
+        trigger = try container.decode(String.self, forKey: .trigger)
+        status = try container.decode(
+            RemoteSafetyIncidentStatus.self,
+            forKey: .status
+        )
+        createdAt = try container.decode(String.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(String.self, forKey: .updatedAt)
+        expiresAt = try container.decodeIfPresent(String.self, forKey: .expiresAt)
+        acknowledgedAt = try container.decodeIfPresent(
+            String.self,
+            forKey: .acknowledgedAt
+        )
+        resolvedAt = try container.decodeIfPresent(String.self, forKey: .resolvedAt)
+        cancelledAt = try container.decodeIfPresent(String.self, forKey: .cancelledAt)
+        acknowledgedContactId = try container.decodeIfPresent(
+            UUID.self,
+            forKey: .acknowledgedContactId
+        )
+        acknowledgedContactDisplayName = try container.decodeIfPresent(
+            String.self,
+            forKey: .acknowledgedContactDisplayName
+        )
+        resolutionNote = try container.decodeIfPresent(
+            String.self,
+            forKey: .resolutionNote
+        )
+        completedAt = try container.decodeIfPresent(String.self, forKey: .completedAt)
+        idempotentReplay = try container.decode(
+            Bool.self,
+            forKey: .idempotentReplay
+        )
+        deliveries = try container.decode(
+            [RemoteSafetyDelivery].self,
+            forKey: .deliveries
+        )
+        responses = try container.decodeIfPresent(
+            [RemoteSafetyResponse].self,
+            forKey: .responses
+        )
+        deliverySummary = try container.decodeIfPresent(
+            [String: Int].self,
+            forKey: .deliverySummary
+        )
+        if let summary = try? container.decode(
+            RemoteSafetyContactSummary.self,
+            forKey: .contactSummary
+        ), summary.isConsistent {
+            contactSummary = summary
+        } else {
+            contactSummary = nil
+        }
+        latestLocation = try container.decodeIfPresent(
+            RemoteSafetyLocation.self,
+            forKey: .latestLocation
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(dispatchId, forKey: .dispatchId)
+        try container.encode(idempotencyKey, forKey: .idempotencyKey)
+        try container.encode(trigger, forKey: .trigger)
+        try container.encode(status, forKey: .status)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(updatedAt, forKey: .updatedAt)
+        try container.encodeIfPresent(expiresAt, forKey: .expiresAt)
+        try container.encodeIfPresent(acknowledgedAt, forKey: .acknowledgedAt)
+        try container.encodeIfPresent(resolvedAt, forKey: .resolvedAt)
+        try container.encodeIfPresent(cancelledAt, forKey: .cancelledAt)
+        try container.encodeIfPresent(
+            acknowledgedContactId,
+            forKey: .acknowledgedContactId
+        )
+        try container.encodeIfPresent(
+            acknowledgedContactDisplayName,
+            forKey: .acknowledgedContactDisplayName
+        )
+        try container.encodeIfPresent(resolutionNote, forKey: .resolutionNote)
+        try container.encodeIfPresent(completedAt, forKey: .completedAt)
+        try container.encode(idempotentReplay, forKey: .idempotentReplay)
+        try container.encode(deliveries, forKey: .deliveries)
+        try container.encodeIfPresent(responses, forKey: .responses)
+        try container.encodeIfPresent(deliverySummary, forKey: .deliverySummary)
+        try container.encodeIfPresent(contactSummary, forKey: .contactSummary)
+        try container.encodeIfPresent(latestLocation, forKey: .latestLocation)
+    }
 }
 
 public struct RemoteSafetyIncidentList: Codable, Equatable, Sendable {

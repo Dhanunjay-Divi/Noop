@@ -4,7 +4,6 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -20,6 +19,11 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.noop.R
+import com.noop.notif.NotificationLifecycleCategory
+import com.noop.notif.NotificationLifecycleId
+import com.noop.notif.NotificationLifecycleLedger
+import com.noop.notif.NotificationLifecycleState
+import com.noop.notif.NotificationPlatformIdentity
 import com.noop.ui.NoopNotificationRoute
 import com.noop.ui.NotificationRouteBridge
 import java.util.concurrent.TimeUnit
@@ -66,11 +70,18 @@ object SafetyCheckInReminderScheduler {
                 .setInputData(input)
                 .setInitialDelay(delaySeconds, TimeUnit.SECONDS)
                 .build()
-            WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
-                WORK_NAME,
-                ExistingWorkPolicy.REPLACE,
-                request,
-            )
+            NotificationLifecycleLedger.observe(
+                context,
+                NotificationLifecycleId.SAFETY_CHECK_IN,
+                NotificationLifecycleCategory.REMINDER,
+                NotificationLifecycleState.SCHEDULED,
+            ) {
+                WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+                    WORK_NAME,
+                    ExistingWorkPolicy.REPLACE,
+                    request,
+                )
+            }
             SafetyCheckInReminderPrefs.setDueAtUnix(context, dueAtUnix)
             true
         }.getOrDefault(false)
@@ -78,8 +89,16 @@ object SafetyCheckInReminderScheduler {
 
     fun cancel(context: Context) {
         SafetyCheckInReminderPrefs.setDueAtUnix(context, 0L)
-        WorkManager.getInstance(context.applicationContext).cancelUniqueWork(WORK_NAME)
-        NotificationManagerCompat.from(context).cancel(SafetyCheckInReminderNotifier.NOTIFICATION_ID)
+        NotificationLifecycleLedger.observe(
+            context,
+            NotificationLifecycleId.SAFETY_CHECK_IN,
+            NotificationLifecycleCategory.REMINDER,
+            NotificationLifecycleState.CANCELLED,
+        ) {
+            WorkManager.getInstance(context.applicationContext).cancelUniqueWork(WORK_NAME)
+            NotificationManagerCompat.from(context)
+                .cancel(SafetyCheckInReminderNotifier.NOTIFICATION_ID)
+        }
     }
 
     fun canPostNotifications(context: Context): Boolean {
@@ -140,17 +159,24 @@ class SafetyCheckInReminderWorker(appContext: Context, params: WorkerParameters)
 
 object SafetyCheckInReminderNotifier {
     internal const val CHANNEL_ID = "noop_safety_check_in"
-    const val NOTIFICATION_ID = 4_315
+    const val NOTIFICATION_ID =
+        NotificationPlatformIdentity.NotificationId.SAFETY_CHECK_IN
 
     @SuppressLint("MissingPermission")
     fun post(context: Context): Boolean = runCatching {
-        if (!SafetyCheckInReminderScheduler.canPostNotifications(context)) return false
+        if (!SafetyCheckInReminderScheduler.canPostNotifications(context)) {
+            NotificationLifecycleLedger.suppressed(
+                context,
+                NotificationLifecycleId.SAFETY_CHECK_IN,
+                NotificationLifecycleCategory.REMINDER,
+            )
+            return false
+        }
         ensureChannel(context)
-        val openApp = PendingIntent.getActivity(
+        val openApp = NotificationPlatformIdentity.activityPendingIntent(
             context,
-            15,
+            NotificationPlatformIdentity.ActivityIntent.SAFETY_CHECK_IN,
             NotificationRouteBridge.launchIntent(context, NoopNotificationRoute.SAFETY),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_heart)
@@ -167,9 +193,21 @@ object SafetyCheckInReminderNotifier {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .build()
-        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
-        true
-    }.getOrDefault(false)
+        NotificationLifecycleLedger.posted(
+            context,
+            NotificationLifecycleId.SAFETY_CHECK_IN,
+            NotificationLifecycleCategory.REMINDER,
+        ) {
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+        }
+    }.getOrElse {
+        NotificationLifecycleLedger.unknown(
+            context,
+            NotificationLifecycleId.SAFETY_CHECK_IN,
+            NotificationLifecycleCategory.REMINDER,
+        )
+        false
+    }
 
     internal fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return

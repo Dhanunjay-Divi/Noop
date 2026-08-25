@@ -25,6 +25,7 @@ object AndroidDiagnostics {
         add("OEM background kill: ${oemKillHeuristic(Build.MANUFACTURER)}")
         add("Charging: ${chargingText(context)}")
         add("Permissions: ${permissionsText(context)}")
+        addAll(com.noop.notif.NotificationLifecycleLedger.diagnosticLines(context))
     }
 
     /**

@@ -240,8 +240,9 @@ enum WindDownNudge {
         guard on else {
             UserDefaults.standard.set(false, forKey: K.enabled)
             // Clear the single trigger AND any per-day triggers (PR#554) so disabling leaves nothing behind.
-            UNUserNotificationCenter.current()
-                .removePendingNotificationRequests(withIdentifiers: [requestId] + perDayRequestIds)
+            LocalNotificationLifecycle.cancel(
+                identifiers: [requestId] + perDayRequestIds
+            )
             completion?(.off)
             return
         }
@@ -264,12 +265,14 @@ enum WindDownNudge {
                     completion?(.scheduled)
                 } else {
                     UserDefaults.standard.set(false, forKey: K.enabled)
+                    LocalNotificationLifecycle.suppressed(identifier: requestId)
                     completion?(.denied)
                 }
             default:
                 // .denied (or any future non-authorized case) — don't fake an enabled toggle. The caller
                 // surfaces a "notifications are off" prompt with a jump to Settings.
                 UserDefaults.standard.set(false, forKey: K.enabled)
+                LocalNotificationLifecycle.suppressed(identifier: requestId)
                 completion?(.denied)
             }
         }
@@ -360,7 +363,10 @@ enum WindDownNudge {
     static func restoreScheduleIfAuthorized() {
         let center = UNUserNotificationCenter.current()
         guard isEnabled else {
-            center.removePendingNotificationRequests(withIdentifiers: [requestId] + perDayRequestIds)
+            LocalNotificationLifecycle.cancel(
+                identifiers: [requestId] + perDayRequestIds,
+                on: center
+            )
             return
         }
         Task { @MainActor in
@@ -369,6 +375,7 @@ enum WindDownNudge {
             case .authorized, .provisional, .ephemeral:
                 schedule()
             default:
+                LocalNotificationLifecycle.suppressed(identifier: requestId)
                 break
             }
         }
@@ -391,7 +398,10 @@ enum WindDownNudge {
         let center = UNUserNotificationCenter.current()
         // Clear BOTH the single trigger and any per-day triggers so switching between the two modes (or
         // editing an override) never double-fires or leaves an orphaned reminder.
-        center.removePendingNotificationRequests(withIdentifiers: [requestId] + perDayRequestIds)
+        LocalNotificationLifecycle.cancel(
+            identifiers: [requestId] + perDayRequestIds,
+            on: center
+        )
 
         let content = UNMutableNotificationContent()
         content.title = String(localized: "Wind down for tonight")
@@ -411,8 +421,14 @@ enum WindDownNudge {
                 comps.hour = minute / 60
                 comps.minute = minute % 60
                 let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
-                center.add(UNNotificationRequest(identifier: "\(requestId)-wd\(weekday)",
-                                                 content: content, trigger: trigger))
+                LocalNotificationLifecycle.schedule(
+                    UNNotificationRequest(
+                        identifier: "\(requestId)-wd\(weekday)",
+                        content: content,
+                        trigger: trigger
+                    ),
+                    on: center
+                )
             }
             return
         }
@@ -424,7 +440,14 @@ enum WindDownNudge {
         // repeats: true → a daily calendar trigger; survives relaunch (it lives in the notification
         // center, not the process), so the nudge keeps firing each evening without the app running.
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
-        center.add(UNNotificationRequest(identifier: requestId, content: content, trigger: trigger))
+        LocalNotificationLifecycle.schedule(
+            UNNotificationRequest(
+                identifier: requestId,
+                content: content,
+                trigger: trigger
+            ),
+            on: center
+        )
     }
 
     private static func notificationSubtitle() -> String {

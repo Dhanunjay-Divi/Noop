@@ -107,13 +107,18 @@
     <string name="safety_onboarding_subtitle">Invita da due a cinque persone di fiducia. Gli avvisi diventano disponibili solo dopo che almeno due persone hanno accettato.</string>
     <string name="safety_onboarding_title">Scegli chi deve avvisare NOOP</string>
     <string name="safety_owner_name">Il tuo nome</string>
+    <string name="safety_page_all_contacts_failed_title">Nessuna consegna ai contatti è stata confermata</string>
     <string name="safety_page_body">Ogni contatto che ha accettato riceve un SMS urgente con opzioni di conferma. Le chiamate vocali seguono solo finché l’avviso resta senza conferma.</string>
+    <string name="safety_page_call_contact_format">Chiama %1$s</string>
     <string name="safety_page_cancel_action">Annulla avviso</string>
     <string name="safety_page_cancel_guidance">Annulla interrompe i nuovi tentativi e l’escalation tramite chiamata. I messaggi o le chiamate già inviati non possono essere richiamati.</string>
     <string name="safety_page_cannot_respond_format">%1$s non può intervenire</string>
     <string name="safety_page_confirm_action">Invia SMS urgenti</string>
     <string name="safety_page_confirm_body">NOOP invia ora un SMS a ogni contatto che ha accettato. Se nessuno conferma, seguiranno chiamate vocali automatiche. I servizi di emergenza non vengono contattati.</string>
     <string name="safety_page_confirm_title">Avvisare ora i tuoi contatti di emergenza?</string>
+    <string name="safety_page_contact_responses">Risposte dei contatti</string>
+    <string name="safety_page_contacts_reached_at_format">Raggiunti %1$d contatti su %2$d alle %3$s</string>
+    <string name="safety_page_contacts_reached_format">Raggiunti %1$d contatti su %2$d</string>
     <string name="safety_page_delivery_counts_format">%1$d inviati · %2$d in attesa · %3$d da controllare</string>
     <string name="safety_page_detail_acknowledged">Un contatto della Rete di sicurezza sta rispondendo.</string>
     <string name="safety_page_detail_acknowledged_format">%1$s sta rispondendo. Mantieni un contatto diretto finché la situazione non è risolta.</string>
@@ -122,7 +127,7 @@
     <string name="safety_page_detail_failed">Consegna non riuscita. Contatta direttamente persone di fiducia o i servizi di emergenza.</string>
     <string name="safety_page_detail_partial_failure">Alcuni tentativi di consegna non sono riusciti. Contatta direttamente persone di fiducia o i servizi di emergenza.</string>
     <string name="safety_page_detail_resolved">Questo avviso è stato segnato come risolto. Non restano escalation in attesa.</string>
-    <string name="safety_page_detail_submitted">Il fornitore del servizio di avviso ha accettato le richieste di consegna.</string>
+    <string name="safety_page_detail_submitted">Il fornitore del servizio di avviso ha accettato le richieste. La conferma della consegna è in attesa.</string>
     <string name="safety_page_detail_waiting">In attesa della conferma di un contatto. L’SMS viene inviato per primo; l’escalation tramite chiamata resta attiva.</string>
     <string name="safety_page_disabled_active">Risolvi o annulla l’avviso di Sicurezza attivo prima di aprirne un altro.</string>
     <string name="safety_page_disabled_contacts">Almeno due contatti devono accettare l’invito.</string>
@@ -142,7 +147,7 @@
     <string name="safety_page_status_open">Aperto</string>
     <string name="safety_page_status_partial_failure">Problema di consegna</string>
     <string name="safety_page_status_resolved">Risolto</string>
-    <string name="safety_page_status_submitted">Inviato</string>
+    <string name="safety_page_status_submitted">Avviso avviato</string>
     <string name="safety_page_submit">Avvisa i contatti che hanno accettato</string>
     <string name="safety_page_submitting">Invio dell’avviso di sicurezza…</string>
     <string name="safety_page_title">Invia un avviso urgente</string>
@@ -187,6 +192,8 @@
     <string name="safety_sos_location_retention">Per l’avviso attivo viene conservata solo la posizione più recente. La condivisione termina quando l’avviso viene annullato, risolto o scade.</string>
     <string name="safety_sos_location_settings">Apri impostazioni posizione</string>
     <string name="safety_sos_location_title">Posizione in tempo reale durante un SOS</string>
+    <string name="safety_sos_notifications_off">Le notifiche sono disattivate. Gli avvisi funzionano comunque, ma gli aggiornamenti sulla consegna potrebbero apparire solo in Sicurezza.</string>
+    <string name="safety_sos_notifications_ready">Le notifiche dei risultati sono pronte.</string>
     <string name="safety_subtitle">Strumenti manuali per coinvolgere una persona di fiducia.</string>
     <string name="safety_timer_active">Timer attivo</string>
     <string name="safety_timer_disclaimer">Alla fine del timer, NOOP chiede al sistema operativo di mostrare un promemoria locale. Non invia messaggi a un contatto e non interviene se non rispondi; l’orario di consegna non è garantito.</string>

@@ -1,9 +1,9 @@
 import Foundation
 import NoopRemoteSync
 import StrandAnalytics
+import UserNotifications
 #if os(iOS)
 import CoreLocation
-import UserNotifications
 #endif
 
 /// Owns explicit SOS dispatch and the active incident's latest-only location session.
@@ -12,6 +12,11 @@ import UserNotifications
 /// physical band events or the existing manual Safety Center action.
 @MainActor
 final class SafetySOSRuntime {
+    struct StatusNotificationMarker: Hashable {
+        let dispatchId: String
+        let status: String
+    }
+
     enum TriggerOutcome {
         case opened
         case alreadyActive
@@ -20,7 +25,7 @@ final class SafetySOSRuntime {
         var logLine: String {
             switch self {
             case .opened:
-                return "SOS page opened; latest-location sharing started where permitted"
+                return "SOS page request accepted; delivery is pending"
             case .alreadyActive:
                 return "SOS page already active; latest-location sharing resumed"
             case .unavailable(let reason):
@@ -33,7 +38,14 @@ final class SafetySOSRuntime {
 
     private static let activeDispatchKey = "safety.liveLocation.dispatchId"
     private static let activeExpiryKey = "safety.liveLocation.expiresAt"
+    private static let lastNotifiedDispatchKey = "safety.status.lastNotifiedDispatchId"
+    private static let lastNotifiedStatusKey = "safety.status.lastNotifiedStatus"
+    static let fallbackSessionSeconds: TimeInterval = 30 * 60
+    static let maximumSessionSeconds: TimeInterval = 60 * 60
     private var triggerTask: Task<Void, Never>?
+    private var statusMonitorTask: Task<Void, Never>?
+    private var monitoredDispatchId: UUID?
+    private var pendingStatusNotifications: Set<StatusNotificationMarker> = []
     #if os(iOS)
     private let locationStreamer = SafetyIncidentLocationStreamer()
     #endif
@@ -84,22 +96,37 @@ final class SafetySOSRuntime {
         for dispatch: RemoteSafetyDispatch,
         service: SafetyPagingService
     ) {
-        guard [.open, .acknowledged, .pending].contains(dispatch.status) else {
+        let now = Date()
+        guard Self.isActive(dispatch.status),
+              var expiresAt = Self.boundedSessionExpiry(
+                requested: Self.parseISO8601(dispatch.expiresAt),
+                now: now
+              )
+        else {
             stopLocationSharing(dispatchId: dispatch.dispatchId)
             return
+        }
+        if UserDefaults.standard.string(forKey: Self.activeDispatchKey)
+                == dispatch.dispatchId.uuidString.lowercased(),
+           let persistedExpiry = Self.parseISO8601(
+                UserDefaults.standard.string(forKey: Self.activeExpiryKey)
+           ),
+           persistedExpiry > now {
+            expiresAt = min(expiresAt, persistedExpiry)
         }
         UserDefaults.standard.set(
             dispatch.dispatchId.uuidString.lowercased(),
             forKey: Self.activeDispatchKey
         )
         UserDefaults.standard.set(
-            dispatch.expiresAt ?? "",
+            Self.iso8601(expiresAt),
             forKey: Self.activeExpiryKey
         )
+        startStatusMonitoring(dispatchId: dispatch.dispatchId)
         #if os(iOS)
         locationStreamer.start(
             dispatchId: dispatch.dispatchId,
-            expiresAt: Self.parseISO8601(dispatch.expiresAt)
+            expiresAt: expiresAt
         ) { location, sequence in
             _ = try await service.updateLocation(
                 for: dispatch.dispatchId,
@@ -116,9 +143,10 @@ final class SafetySOSRuntime {
             != dispatchId.uuidString.lowercased() {
             return
         }
-        #if os(iOS)
-        locationStreamer.stop()
-        #endif
+        stopLocationUpdates(dispatchId: dispatchId)
+        statusMonitorTask?.cancel()
+        statusMonitorTask = nil
+        monitoredDispatchId = nil
         UserDefaults.standard.removeObject(forKey: Self.activeDispatchKey)
         UserDefaults.standard.removeObject(forKey: Self.activeExpiryKey)
     }
@@ -127,18 +155,57 @@ final class SafetySOSRuntime {
         guard let raw = UserDefaults.standard.string(forKey: Self.activeDispatchKey),
               let dispatchId = UUID(uuidString: raw)
         else { return }
-        let expiresAt = Self.parseISO8601(
-            UserDefaults.standard.string(forKey: Self.activeExpiryKey)
-        )
-        if let expiresAt, expiresAt <= Date() {
+        let service = SafetyPagingService()
+        do {
+            let dispatch = try await service.incident(dispatchId)
+            guard UserDefaults.standard.string(forKey: Self.activeDispatchKey)
+                    == dispatchId.uuidString.lowercased()
+            else { return }
+            let reconciled = await reconcileStatus(dispatch)
+            guard UserDefaults.standard.string(forKey: Self.activeDispatchKey)
+                    == dispatchId.uuidString.lowercased()
+            else { return }
+            let locallyExpired = Self.persistedSessionExpiry(now: Date()) == nil
+            guard Self.shouldRetainMonitorState(
+                status: dispatch.status,
+                locallyExpired: locallyExpired,
+                notificationReconciled: reconciled
+            ) else {
+                stopLocationSharing(dispatchId: dispatchId)
+                return
+            }
+            startStatusMonitoring(dispatchId: dispatchId)
+            guard !locallyExpired, Self.isActive(dispatch.status) else {
+                stopLocationUpdates(dispatchId: dispatchId)
+                return
+            }
+            startLocationSharing(for: dispatch, service: service)
+            return
+        } catch let RemoteSyncError.server(status, _)
+            where [401, 404, 409, 410].contains(status) {
             stopLocationSharing(dispatchId: dispatchId)
             return
+        } catch {
+            // A transient lookup failure must not terminate an active user-started page. Resume only
+            // from its persisted, privacy-bounded deadline while the status monitor retries.
         }
-        let service = SafetyPagingService()
+        guard UserDefaults.standard.string(forKey: Self.activeDispatchKey)
+                == dispatchId.uuidString.lowercased()
+        else { return }
+        guard let fallbackExpiry = Self.persistedSessionExpiry(now: Date()) else {
+            stopLocationUpdates(dispatchId: dispatchId)
+            startStatusMonitoring(dispatchId: dispatchId)
+            return
+        }
+        UserDefaults.standard.set(
+            Self.iso8601(fallbackExpiry),
+            forKey: Self.activeExpiryKey
+        )
+        startStatusMonitoring(dispatchId: dispatchId)
         #if os(iOS)
         locationStreamer.start(
             dispatchId: dispatchId,
-            expiresAt: expiresAt
+            expiresAt: fallbackExpiry
         ) { location, sequence in
             _ = try await service.updateLocation(
                 for: dispatchId,
@@ -149,6 +216,175 @@ final class SafetySOSRuntime {
         #endif
     }
 
+    /// Reconciles the persisted active page during foreground launch and opportunistic background wakes.
+    /// A successful check does not claim that iOS will grant future background execution.
+    @discardableResult
+    func refreshActiveIncidentStatusIfNeeded() async -> Bool {
+        guard let raw = UserDefaults.standard.string(forKey: Self.activeDispatchKey),
+              let dispatchId = UUID(uuidString: raw)
+        else { return true }
+        let locallyExpired = Self.parseISO8601(
+            UserDefaults.standard.string(forKey: Self.activeExpiryKey)
+        ).map { $0 <= Date() } ?? false
+        if locallyExpired {
+            stopLocationUpdates(dispatchId: dispatchId)
+        }
+        do {
+            let dispatch = try await SafetyPagingService().incident(dispatchId)
+            guard UserDefaults.standard.string(forKey: Self.activeDispatchKey)
+                    == dispatchId.uuidString.lowercased()
+            else { return true }
+            let reconciled = await reconcileStatus(dispatch)
+            if Self.shouldRetainMonitorState(
+                status: dispatch.status,
+                locallyExpired: locallyExpired,
+                notificationReconciled: reconciled
+            ) {
+                startStatusMonitoring(dispatchId: dispatchId)
+            } else {
+                stopLocationSharing(dispatchId: dispatchId)
+            }
+            return reconciled
+        } catch let RemoteSyncError.server(status, _)
+            where [401, 404, 409, 410].contains(status) {
+            stopLocationSharing(dispatchId: dispatchId)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func startStatusMonitoring(dispatchId: UUID) {
+        if monitoredDispatchId == dispatchId, statusMonitorTask != nil {
+            return
+        }
+        statusMonitorTask?.cancel()
+        monitoredDispatchId = dispatchId
+        statusMonitorTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self,
+                      self.monitoredDispatchId == dispatchId,
+                      UserDefaults.standard.string(forKey: Self.activeDispatchKey)
+                        == dispatchId.uuidString.lowercased()
+                else { return }
+                let succeeded = await self.refreshActiveIncidentStatusIfNeeded()
+                guard !Task.isCancelled,
+                      self.monitoredDispatchId == dispatchId
+                else { return }
+                try? await Task.sleep(
+                    nanoseconds: UInt64(succeeded ? 15 : 45) * 1_000_000_000
+                )
+            }
+        }
+    }
+
+    @discardableResult
+    func reconcileStatus(_ dispatch: RemoteSafetyDispatch) async -> Bool {
+        switch dispatch.status {
+        case .acknowledged:
+            return await postStatusNotificationOnce(
+                dispatch: dispatch,
+                titleKey: "safety.page.status.acknowledged",
+                bodyKey: "safety.page.detail.acknowledged"
+            )
+        case .failed:
+            stopLocationUpdates(dispatchId: dispatch.dispatchId)
+            let posted = await postStatusNotificationOnce(
+                dispatch: dispatch,
+                titleKey: "safety.page.all_contacts_failed_title",
+                bodyKey: "safety.page.detail.failed"
+            )
+            if posted {
+                stopLocationSharing(dispatchId: dispatch.dispatchId)
+            }
+            return posted
+        case .open, .pending:
+            return true
+        case .resolved, .cancelled, .expired, .submitted, .partialFailure:
+            stopLocationSharing(dispatchId: dispatch.dispatchId)
+            return true
+        }
+    }
+
+    static func isActive(_ status: RemoteSafetyIncidentStatus) -> Bool {
+        [.open, .acknowledged, .pending].contains(status)
+    }
+
+    static func boundedSessionExpiry(
+        requested: Date?,
+        now: Date
+    ) -> Date? {
+        let maximum = now.addingTimeInterval(maximumSessionSeconds)
+        guard let requested else {
+            return now.addingTimeInterval(fallbackSessionSeconds)
+        }
+        guard requested > now else { return nil }
+        return min(requested, maximum)
+    }
+
+    static func markerAfterNotificationAttempt(
+        previous: StatusNotificationMarker?,
+        candidate: StatusNotificationMarker,
+        postedSuccessfully: Bool
+    ) -> StatusNotificationMarker? {
+        postedSuccessfully ? candidate : previous
+    }
+
+    static func shouldRetainMonitorState(
+        status: RemoteSafetyIncidentStatus,
+        locallyExpired: Bool,
+        notificationReconciled: Bool
+    ) -> Bool {
+        !notificationReconciled || (!locallyExpired && isActive(status))
+    }
+
+    private func postStatusNotificationOnce(
+        dispatch: RemoteSafetyDispatch,
+        titleKey: String,
+        bodyKey: String
+    ) async -> Bool {
+        let defaults = UserDefaults.standard
+        let previous = Self.persistedStatusNotificationMarker(defaults: defaults)
+        let candidate = StatusNotificationMarker(
+            dispatchId: dispatch.dispatchId.uuidString.lowercased(),
+            status: dispatch.status.rawValue
+        )
+        guard previous != candidate else { return true }
+        guard pendingStatusNotifications.insert(candidate).inserted else {
+            return false
+        }
+        defer { pendingStatusNotifications.remove(candidate) }
+
+        let posted = await postNotification(titleKey: titleKey, bodyKey: bodyKey)
+        let next = Self.markerAfterNotificationAttempt(
+            previous: previous,
+            candidate: candidate,
+            postedSuccessfully: posted
+        )
+        guard next == candidate else { return false }
+        defaults.set(candidate.dispatchId, forKey: Self.lastNotifiedDispatchKey)
+        defaults.set(candidate.status, forKey: Self.lastNotifiedStatusKey)
+        return true
+    }
+
+    private static func persistedSessionExpiry(now: Date) -> Date? {
+        boundedSessionExpiry(
+            requested: parseISO8601(
+                UserDefaults.standard.string(forKey: activeExpiryKey)
+            ),
+            now: now
+        )
+    }
+
+    private static func persistedStatusNotificationMarker(
+        defaults: UserDefaults
+    ) -> StatusNotificationMarker? {
+        guard let dispatchId = defaults.string(forKey: lastNotifiedDispatchKey),
+              let status = defaults.string(forKey: lastNotifiedStatusKey)
+        else { return nil }
+        return StatusNotificationMarker(dispatchId: dispatchId, status: status)
+    }
+
     private static func parseISO8601(_ raw: String?) -> Date? {
         guard let raw, !raw.isEmpty else { return nil }
         let fractional = ISO8601DateFormatter()
@@ -156,33 +392,112 @@ final class SafetySOSRuntime {
         return fractional.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
     }
 
+    private static func iso8601(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
     private func postResultNotification(_ outcome: TriggerOutcome) {
         #if os(iOS)
-        let content = UNMutableNotificationContent()
-        switch outcome {
-        case .opened:
-            content.title = String(localized: "SOS page sent")
-            content.body = String(
-                localized: "Your accepted contacts are being paged. Open Safety to monitor responses."
-            )
-        case .alreadyActive:
-            content.title = String(localized: "SOS page already active")
-            content.body = String(localized: "Open Safety to monitor contact responses.")
-        case .unavailable:
-            content.title = String(localized: "SOS page was not sent")
-            content.body = String(
-                localized: "Open Safety to check setup, accepted contacts, and delivery."
-            )
+        Task { @MainActor [weak self] in
+            switch outcome {
+            case .opened:
+                _ = await self?.postNotification(
+                    titleKey: "safety.page.status.submitted",
+                    bodyKey: "safety.page.detail.submitted"
+                )
+            case .alreadyActive:
+                _ = await self?.postNotification(
+                    titleKey: "safety.page.status.open",
+                    bodyKey: "safety.page.detail.waiting"
+                )
+            case .unavailable:
+                _ = await self?.postNotification(
+                    titleKey: "safety.page.status.failed",
+                    bodyKey: "safety.delivery.unavailable"
+                )
+            }
         }
-        content.sound = .default
-        UNUserNotificationCenter.current().add(
-            UNNotificationRequest(
-                identifier: "safety-gesture-result",
-                content: content,
-                trigger: nil
-            )
-        )
         #endif
+    }
+
+    private func postNotification(
+        titleKey: String,
+        bodyKey: String
+    ) async -> Bool {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard Self.notificationsAvailable(settings.authorizationStatus) else {
+            LocalNotificationLifecycle.suppressed(
+                identifier: "safety-gesture-result",
+                categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+            )
+            return false
+        }
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: String.LocalizationValue(titleKey))
+        content.body = String(localized: String.LocalizationValue(bodyKey))
+        content.sound = .default
+        content.categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+        content.threadIdentifier = "noop.safety"
+        content.userInfo = [
+            NotificationRouteBridge.userInfoKey:
+                NoopNotificationRoute.safety.rawValue,
+        ]
+        do {
+            try await LocalNotificationLifecycle.schedule(
+                UNNotificationRequest(
+                    identifier: "safety-gesture-result",
+                    content: content,
+                    trigger: nil
+                ),
+                on: center
+            )
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func stopLocationUpdates(dispatchId: UUID? = nil) {
+        if let dispatchId,
+           UserDefaults.standard.string(forKey: Self.activeDispatchKey)
+            != dispatchId.uuidString.lowercased() {
+            return
+        }
+        #if os(iOS)
+        locationStreamer.stop()
+        #endif
+    }
+
+    static func notificationDeliveryAvailable() async -> Bool {
+        notificationsAvailable(
+            await UNUserNotificationCenter.current()
+                .notificationSettings().authorizationStatus
+        )
+    }
+
+    static func requestNotificationAuthorizationIfNeeded() async -> Bool {
+        let center = UNUserNotificationCenter.current()
+        let initial = await center.notificationSettings().authorizationStatus
+        if initial == .notDetermined {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+        }
+        return notificationsAvailable(
+            await center.notificationSettings().authorizationStatus
+        )
+    }
+
+    private static func notificationsAvailable(
+        _ status: UNAuthorizationStatus
+    ) -> Bool {
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            return true
+        default:
+            return false
+        }
     }
 }
 

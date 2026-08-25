@@ -5,6 +5,7 @@ import android.util.Base64
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.noop.R
 import com.noop.ble.WhoopConnectionService
 import com.noop.data.SecurePrefs
 import com.noop.sync.RemoteEndpointPolicy
@@ -91,6 +92,20 @@ data class SafetyPagingLocation(
     val idempotentReplay: Boolean?,
 )
 
+data class SafetyContactSummary(
+    val targeted: Int,
+    val reached: Int,
+    val pending: Int,
+    val failed: Int,
+    val lastReachedAt: String?,
+    val allContactsFailed: Boolean,
+)
+
+internal fun shouldShowAllContactsFailed(
+    status: SafetyIncidentStatus,
+    summary: SafetyContactSummary?,
+): Boolean = status == SafetyIncidentStatus.FAILED || summary?.allContactsFailed == true
+
 data class SafetyPagingDispatch(
     val dispatchId: String,
     val status: SafetyIncidentStatus,
@@ -101,13 +116,15 @@ data class SafetyPagingDispatch(
     val deliveries: List<SafetyPagingDelivery>,
     val responses: List<SafetyPagingResponse>,
     val latestLocation: SafetyPagingLocation?,
+    val contactSummary: SafetyContactSummary?,
 )
 
-private data class SafetyPagingSnapshot(
+internal data class SafetyPagingSnapshot(
     val contacts: List<SafetyPagingContact>,
     val acceptedCount: Int,
     val maximumContacts: Int,
     val pagingConfigured: Boolean,
+    val pagingEnabled: Boolean?,
 )
 
 sealed class SafetyPagingException(message: String, cause: Throwable? = null) :
@@ -133,6 +150,8 @@ class SafetyPagingController(context: Context) {
         private set
     var pagingConfigured by mutableStateOf(false)
         private set
+    var pagingEnabled by mutableStateOf<Boolean?>(null)
+        private set
     var isBusy by mutableStateOf(false)
         private set
     var statusMessage by mutableStateOf("")
@@ -149,7 +168,7 @@ class SafetyPagingController(context: Context) {
 
     val canPage: Boolean
         get() = setupState == SafetyPagingSetupState.READY &&
-            acceptedCount >= MINIMUM_ACCEPTED && pagingConfigured &&
+            acceptedCount >= MINIMUM_ACCEPTED && pagingConfigured && pagingEnabled != false &&
             activeIncident == null && !isBusy
 
     val activeIncident: SafetyPagingDispatch?
@@ -203,8 +222,9 @@ class SafetyPagingController(context: Context) {
                 profileId = profileId,
                 displayName = profile.optString("display_name", pending.displayName),
             )
+            pagingEnabled = profile.optionalBoolean("paging_enabled")
             setupState = SafetyPagingSetupState.READY
-            statusMessage = "Safety Network is ready. Add two contacts."
+            statusMessage = ""
             reload()
         }
     }
@@ -299,6 +319,7 @@ class SafetyPagingController(context: Context) {
         if (!canPage) {
             errorMessage = when {
                 !pagingConfigured -> "SMS and voice paging are not configured on this server."
+                pagingEnabled == false -> "Safety paging is disabled for this profile."
                 else -> "At least two accepted emergency contacts are required."
             }
             return false
@@ -320,14 +341,20 @@ class SafetyPagingController(context: Context) {
                 SafetyPagingPrefs.setPendingPageKey(appContext, null)
                 lastDispatch = dispatch
                 merge(dispatch)
-                SafetyLiveLocationSession.start(
-                    appContext,
-                    dispatch.dispatchId,
-                    expiresAtUnix = dispatch.expiresAt?.let(::parseIsoInstantUnix),
-                )
-                WhoopConnectionService.start(appContext)
-                statusMessage =
-                    "Safety page opened. SMS is sending now; voice follows if nobody acknowledges."
+                if (dispatch.status in ACTIVE_INCIDENT_STATES) {
+                    SafetyLiveLocationSession.start(
+                        appContext,
+                        dispatch.dispatchId,
+                        expiresAtUnix = dispatch.expiresAt?.let(::parseIsoInstantUnix),
+                    )
+                    SafetyIncidentStatusMonitor.start(
+                        appContext,
+                        dispatch.dispatchId,
+                        dispatch.expiresAt?.let(::parseIsoInstantUnix),
+                    )
+                    WhoopConnectionService.start(appContext)
+                }
+                statusMessage = appContext.getString(R.string.safety_page_detail_submitted)
                 submitted = dispatch.status != SafetyIncidentStatus.FAILED
             } catch (error: Exception) {
                 val serverStatus = (error as? SafetyPagingException.Server)?.statusCode
@@ -349,16 +376,15 @@ class SafetyPagingController(context: Context) {
                 val refreshed = client.incident(current.dispatchId)
                 lastDispatch = refreshed
                 merge(refreshed)
-                if (refreshed.status !in ACTIVE_INCIDENT_STATES) {
-                    SafetyLiveLocationSession.stop(
-                        appContext,
-                        expectedDispatchId = refreshed.dispatchId,
-                    )
-                }
+                reconcileObservedIncident(refreshed)
             } else {
                 recentIncidents = client.incidents()
                 lastDispatch = recentIncidents.firstOrNull()
+                lastDispatch?.let {
+                    reconcileObservedIncident(it)
+                }
             }
+            Unit
         }
     }
 
@@ -382,6 +408,10 @@ class SafetyPagingController(context: Context) {
                 appContext,
                 expectedDispatchId = incident.dispatchId,
             )
+            SafetyIncidentStatusMonitor.stop(
+                appContext,
+                expectedDispatchId = incident.dispatchId,
+            )
             statusMessage = if (action == "resolve") {
                 "Safety page marked resolved."
             } else {
@@ -397,17 +427,38 @@ class SafetyPagingController(context: Context) {
         acceptedCount = snapshot.acceptedCount
         maximumContacts = snapshot.maximumContacts
         pagingConfigured = snapshot.pagingConfigured
+        pagingEnabled = snapshot.pagingEnabled
         SafetyPagingPrefs.setAcceptedCount(appContext, snapshot.acceptedCount)
         SafetyPagingPrefs.setReminderRequired(
             appContext,
             snapshot.acceptedCount < MINIMUM_ACCEPTED,
         )
         SafetyContactSetupReminderScheduler.reconcile(appContext)
-        if (snapshot.acceptedCount >= MINIMUM_ACCEPTED) {
-            statusMessage = "Safety paging is ready."
-        }
+        statusMessage = readinessStatusMessage(snapshot)
         recentIncidents = client.incidents()
         lastDispatch = recentIncidents.firstOrNull()
+        lastDispatch?.let {
+            reconcileObservedIncident(it)
+        }
+    }
+
+    private fun reconcileObservedIncident(incident: SafetyPagingDispatch) {
+        val notificationReconciled =
+            SafetyIncidentStatusMonitor.observe(appContext, incident)
+        if (incident.status !in ACTIVE_INCIDENT_STATES) {
+            SafetyLiveLocationSession.stop(
+                appContext,
+                expectedDispatchId = incident.dispatchId,
+            )
+            if (notificationReconciled) {
+                SafetyIncidentStatusMonitor.stop(
+                    appContext,
+                    expectedDispatchId = incident.dispatchId,
+                )
+            } else {
+                SafetyIncidentStatusMonitor.reconcile(appContext)
+            }
+        }
     }
 
     private fun merge(incident: SafetyPagingDispatch) {
@@ -453,16 +504,28 @@ class SafetyPagingController(context: Context) {
         )
 
         fun normalizedE164(raw: String): String? {
-            var compact = raw.filter { it == '+' || it.isDigit() }
+            var compact = raw.filter { it == '+' || it in '0'..'9' }
             if (compact.startsWith("00")) compact = "+${compact.drop(2)}"
             if (!compact.startsWith('+')) return null
             val digits = compact.drop(1)
             return compact.takeIf {
                 digits.length in 8..15 &&
                     digits.firstOrNull() != '0' &&
-                    digits.all(Char::isDigit)
+                    digits.all { it in '0'..'9' }
             }
         }
+
+        private val strictE164 = Regex("""^\+[1-9][0-9]{7,14}$""")
+
+        fun isStrictE164(raw: String): Boolean = strictE164.matches(raw)
+
+        internal fun isReadySnapshot(snapshot: SafetyPagingSnapshot): Boolean =
+            snapshot.acceptedCount >= MINIMUM_ACCEPTED &&
+                snapshot.pagingConfigured &&
+                snapshot.pagingEnabled != false
+
+        internal fun readinessStatusMessage(snapshot: SafetyPagingSnapshot): String =
+            if (isReadySnapshot(snapshot)) "Safety paging is ready." else ""
 
         internal fun shouldRetainPageIdempotencyKey(serverStatus: Int?): Boolean =
             serverStatus == null || serverStatus !in 400..499
@@ -485,18 +548,7 @@ private class SafetyPagingClient(
 
     suspend fun contacts(): SafetyPagingSnapshot {
         val json = requestJson("GET", "v1/safety/contacts")
-        val rows = json.optJSONArray("contacts") ?: JSONArray()
-        val contacts = buildList {
-            for (index in 0 until rows.length()) {
-                rows.optJSONObject(index)?.let { add(decodeContact(it)) }
-            }
-        }
-        return SafetyPagingSnapshot(
-            contacts = contacts,
-            acceptedCount = json.optInt("accepted_count", 0),
-            maximumContacts = json.optInt("maximum_contacts", 5),
-            pagingConfigured = json.optBoolean("paging_configured", false),
-        )
+        return decodeSafetyPagingSnapshot(json)
     }
 
     suspend fun incidents(limit: Int = 10): List<SafetyPagingDispatch> {
@@ -634,6 +686,22 @@ private fun decodeContact(json: JSONObject): SafetyPagingContact =
         invitationError = json.nullableString("invitation_error"),
     )
 
+internal fun decodeSafetyPagingSnapshot(json: JSONObject): SafetyPagingSnapshot {
+    val rows = json.optJSONArray("contacts") ?: JSONArray()
+    val contacts = buildList {
+        for (index in 0 until rows.length()) {
+            rows.optJSONObject(index)?.let { add(decodeContact(it)) }
+        }
+    }
+    return SafetyPagingSnapshot(
+        contacts = contacts,
+        acceptedCount = json.optInt("accepted_count", 0).coerceAtLeast(0),
+        maximumContacts = json.optInt("maximum_contacts", 5).coerceAtLeast(0),
+        pagingConfigured = json.optBoolean("paging_configured", false),
+        pagingEnabled = json.optionalBoolean("paging_enabled"),
+    )
+}
+
 internal fun decodeDispatch(json: JSONObject): SafetyPagingDispatch {
     val rows = json.optJSONArray("deliveries") ?: JSONArray()
     val deliveries = buildList {
@@ -686,6 +754,7 @@ internal fun decodeDispatch(json: JSONObject): SafetyPagingDispatch {
         deliveries = deliveries,
         responses = responses,
         latestLocation = json.optJSONObject("latest_location")?.let(::decodeLocation),
+        contactSummary = json.optJSONObject("contact_summary")?.let(::decodeContactSummary),
     )
 }
 
@@ -706,6 +775,65 @@ private fun decodeLocation(json: JSONObject): SafetyPagingLocation =
             .takeIf { it.has("idempotent_replay") }
             ?.optBoolean("idempotent_replay"),
     )
+
+private fun decodeContactSummary(json: JSONObject): SafetyContactSummary? {
+    val targeted = json.strictInt("targeted") ?: return null
+    val reached = json.strictInt("reached") ?: return null
+    val pending = json.strictInt("pending") ?: return null
+    val failed = json.strictInt("failed") ?: return null
+    val allContactsFailed = json.opt("all_contacts_failed") as? Boolean ?: return null
+    val lastReachedAt = when (val raw = json.opt("last_reached_at")) {
+        null, JSONObject.NULL -> null
+        is String -> raw.takeIf(String::isNotBlank)
+        else -> return null
+    }
+    if (
+        targeted <= 0 ||
+        reached !in 0..targeted ||
+        pending !in 0..targeted ||
+        failed !in 0..targeted ||
+        reached + pending + failed != targeted ||
+        allContactsFailed != (failed == targeted)
+    ) {
+        return null
+    }
+    return SafetyContactSummary(
+        targeted = targeted,
+        reached = reached,
+        pending = pending,
+        failed = failed,
+        lastReachedAt = lastReachedAt,
+        allContactsFailed = allContactsFailed,
+    )
+}
+
+private fun JSONObject.strictInt(key: String): Int? =
+    when (val raw = opt(key)) {
+        is Int -> raw
+        is Long -> raw.takeIf {
+            it in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong()
+        }?.toInt()
+        else -> null
+    }
+
+internal suspend fun fetchSafetyIncident(
+    context: Context,
+    dispatchId: String,
+): SafetyPagingDispatch {
+    val endpoint = SafetyPagingPrefs.endpoint(context)
+    val token = SafetyPagingPrefs.token(context)
+        ?: throw SafetyPagingException.Server(
+            401,
+            "Finish Safety setup before checking a page.",
+        )
+    if (endpoint.isBlank()) {
+        throw SafetyPagingException.Server(
+            401,
+            "Finish Safety setup before checking a page.",
+        )
+    }
+    return SafetyPagingClient(endpoint, token).incident(dispatchId)
+}
 
 internal suspend fun updateSafetyIncidentLocation(
     context: Context,
@@ -741,6 +869,9 @@ private inline fun <reified T : Enum<T>> enumValueOrDefault(
 
 private fun JSONObject.nullableString(key: String): String? =
     optString(key).takeIf { it.isNotBlank() && it != "null" }
+
+private fun JSONObject.optionalBoolean(key: String): Boolean? =
+    takeIf { has(key) && !isNull(key) }?.optBoolean(key)
 
 internal object SafetyPagingPrefs {
     private const val STATE_FILE = "noop_safety_paging"

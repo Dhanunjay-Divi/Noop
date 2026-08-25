@@ -107,13 +107,18 @@
     <string name="safety_onboarding_subtitle">邀請 2 至 5 位信任的人。至少 2 人接受邀請後，通知功能才可用。</string>
     <string name="safety_onboarding_title">選擇 NOOP 應通知的聯絡人</string>
     <string name="safety_owner_name">你的姓名</string>
+    <string name="safety_page_all_contacts_failed_title">未確認傳遞給任何聯絡人</string>
     <string name="safety_page_body">每位已接受邀請的聯絡人都會收到附有確認回應選項的緊急簡訊。只有在通知仍未確認時才會撥打語音電話。</string>
+    <string name="safety_page_call_contact_format">致電 %1$s</string>
     <string name="safety_page_cancel_action">取消通知</string>
     <string name="safety_page_cancel_guidance">取消後會停止待處理的重試和語音升級。已提交的訊息或通話無法撤回。</string>
     <string name="safety_page_cannot_respond_format">%1$s 無法回應</string>
     <string name="safety_page_confirm_action">傳送緊急簡訊通知</string>
     <string name="safety_page_confirm_body">NOOP 現在會向每位已接受邀請的聯絡人傳送簡訊。如果無人確認，之後會自動撥打語音電話。NOOP 不會聯絡緊急服務。</string>
     <string name="safety_page_confirm_title">立即通知你的緊急聯絡人？</string>
+    <string name="safety_page_contact_responses">聯絡人回應</string>
+    <string name="safety_page_contacts_reached_at_format">已於 %3$s 聯絡 %1$d/%2$d 位聯絡人</string>
+    <string name="safety_page_contacts_reached_format">已聯絡 %1$d/%2$d 位聯絡人</string>
     <string name="safety_page_delivery_counts_format">已提交 %1$d · 待處理 %2$d · 需注意 %3$d</string>
     <string name="safety_page_detail_acknowledged">一位安全網路聯絡人正在回應。</string>
     <string name="safety_page_detail_acknowledged_format">%1$s 正在回應。在情況解決前，請保持直接聯絡。</string>
@@ -122,7 +127,7 @@
     <string name="safety_page_detail_failed">傳遞失敗。請直接聯絡信任的人或緊急服務。</string>
     <string name="safety_page_detail_partial_failure">部分傳遞嘗試失敗。請直接聯絡信任的人或緊急服務。</string>
     <string name="safety_page_detail_resolved">此通知已標示為已解決。沒有待處理的升級。</string>
-    <string name="safety_page_detail_submitted">通知服務供應商已接受傳遞要求。</string>
+    <string name="safety_page_detail_submitted">通知服務供應商已接受要求。傳遞確認仍在等待中。</string>
     <string name="safety_page_detail_waiting">正在等待聯絡人確認。簡訊會先傳送；語音升級仍處於待命狀態。</string>
     <string name="safety_page_disabled_active">請先解決或取消目前的安全通知，再發起新的通知。</string>
     <string name="safety_page_disabled_contacts">至少需要 2 位聯絡人接受邀請。</string>
@@ -142,7 +147,7 @@
     <string name="safety_page_status_open">進行中</string>
     <string name="safety_page_status_partial_failure">傳遞問題</string>
     <string name="safety_page_status_resolved">已解決</string>
-    <string name="safety_page_status_submitted">已提交</string>
+    <string name="safety_page_status_submitted">通知已開始</string>
     <string name="safety_page_submit">通知已接受邀請的聯絡人</string>
     <string name="safety_page_submitting">正在提交安全通知…</string>
     <string name="safety_page_title">傳送緊急通知</string>
@@ -187,6 +192,8 @@
     <string name="safety_sos_location_retention">進行中的通知只保留最新位置。通知取消、解決或到期後會停止分享。</string>
     <string name="safety_sos_location_settings">開啟位置設定</string>
     <string name="safety_sos_location_title">SOS 期間分享即時位置</string>
+    <string name="safety_sos_notifications_off">通知已關閉。安全通知仍可傳送，但傳遞更新可能只會顯示在「安全」中。</string>
+    <string name="safety_sos_notifications_ready">結果通知已就緒。</string>
     <string name="safety_subtitle">用於聯絡信任之人的手動工具。</string>
     <string name="safety_timer_active">計時器執行中</string>
     <string name="safety_timer_disclaimer">計時結束時，NOOP 會要求作業系統顯示一次本機提醒。如果你沒有回應，它不會向聯絡人傳送訊息或升級處理；提醒時間也無法保證。</string>

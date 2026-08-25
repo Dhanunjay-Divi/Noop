@@ -4,7 +4,6 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -47,7 +46,13 @@ object CoachCheckInReminder {
             appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit().putBoolean(ENABLED, false).apply()
             WorkManager.getInstance(appContext).cancelUniqueWork(WORK_NAME)
-            NotificationManagerCompat.from(appContext).cancel(NOTIFICATION_ID)
+            NotificationLifecycleLedger.cancelled(
+                appContext,
+                NotificationLifecycleId.COACH_CHECK_IN,
+                NotificationLifecycleCategory.REMINDER,
+            ) {
+                NotificationManagerCompat.from(appContext).cancel(NOTIFICATION_ID)
+            }
             return true
         }
         CoachCheckInNotifier.ensureChannel(appContext)
@@ -74,11 +79,18 @@ object CoachCheckInReminder {
         val request = OneTimeWorkRequestBuilder<CoachCheckInWorker>()
             .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
             .build()
-        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
-            WORK_NAME,
-            ExistingWorkPolicy.REPLACE,
-            request,
-        )
+        NotificationLifecycleLedger.observe(
+            context,
+            NotificationLifecycleId.COACH_CHECK_IN,
+            NotificationLifecycleCategory.REMINDER,
+            NotificationLifecycleState.SCHEDULED,
+        ) {
+            WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+                WORK_NAME,
+                ExistingWorkPolicy.REPLACE,
+                request,
+            )
+        }
     }
 
     internal fun nextRun(now: ZonedDateTime, minutes: Int): ZonedDateTime {
@@ -105,7 +117,8 @@ object CoachCheckInReminder {
         return true
     }
 
-    internal const val NOTIFICATION_ID = 4_318
+    internal const val NOTIFICATION_ID =
+        NotificationPlatformIdentity.NotificationId.COACH_CHECK_IN
 }
 
 class CoachCheckInWorker(appContext: Context, params: WorkerParameters) :
@@ -131,12 +144,18 @@ internal object CoachCheckInNotifier {
     @SuppressLint("MissingPermission")
     fun post(context: Context): Boolean = runCatching {
         ensureChannel(context)
-        if (!CoachCheckInReminder.canNotify(context)) return false
-        val openCoach = PendingIntent.getActivity(
+        if (!CoachCheckInReminder.canNotify(context)) {
+            NotificationLifecycleLedger.suppressed(
+                context,
+                NotificationLifecycleId.COACH_CHECK_IN,
+                NotificationLifecycleCategory.REMINDER,
+            )
+            return false
+        }
+        val openCoach = NotificationPlatformIdentity.activityPendingIntent(
             context,
-            18,
+            NotificationPlatformIdentity.ActivityIntent.COACH_CHECK_IN,
             NotificationRouteBridge.launchIntent(context, NoopNotificationRoute.COACH),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_heart)
@@ -153,12 +172,24 @@ internal object CoachCheckInNotifier {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .build()
-        NotificationManagerCompat.from(context).notify(
-            CoachCheckInReminder.NOTIFICATION_ID,
-            notification,
+        NotificationLifecycleLedger.posted(
+            context,
+            NotificationLifecycleId.COACH_CHECK_IN,
+            NotificationLifecycleCategory.REMINDER,
+        ) {
+            NotificationManagerCompat.from(context).notify(
+                CoachCheckInReminder.NOTIFICATION_ID,
+                notification,
+            )
+        }
+    }.getOrElse {
+        NotificationLifecycleLedger.unknown(
+            context,
+            NotificationLifecycleId.COACH_CHECK_IN,
+            NotificationLifecycleCategory.REMINDER,
         )
-        true
-    }.getOrDefault(false)
+        false
+    }
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return

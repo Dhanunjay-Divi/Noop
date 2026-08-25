@@ -166,7 +166,7 @@ internal fun SafetyContactsSetup(
             SafetyPagingSetupState.READY -> {
                 SafetyReadinessHeader(controller)
 
-                if (!controller.pagingConfigured) {
+                if (!controller.pagingConfigured || controller.pagingEnabled == false) {
                     SetupMessage(
                         icon = Icons.Filled.Warning,
                         title = stringResource(R.string.safety_network_unavailable_title),
@@ -243,6 +243,7 @@ internal fun SafetyContactsSetup(
                             fullWidth = true,
                             enabled = !controller.isBusy &&
                                 controller.pagingConfigured &&
+                                controller.pagingEnabled != false &&
                                 contactName.trim().isNotEmpty() &&
                                 contactPhone.trim().isNotEmpty(),
                         ) {

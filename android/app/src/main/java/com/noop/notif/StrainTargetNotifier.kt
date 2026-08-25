@@ -3,7 +3,6 @@ package com.noop.notif
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -53,8 +52,6 @@ object StrainTargetPolicy {
 object StrainTargetNotifier {
     // Reuse the daily-reports channel the scheduled reports post to (same family, same importance).
     private const val CHANNEL_ID = "noop_scheduled_reports"
-    // #297: distinct id so this never silently replaces another notifier's (4208 morning, 4209 workout).
-    private const val STRAIN_TARGET_NOTIF_ID = 4210
 
     /**
      * Post the range nudge if enabled and not already posted [day]. [dayEffort]/[targetRange] are both
@@ -88,21 +85,40 @@ object StrainTargetNotifier {
             range.upper,
         )
         runCatching {
-            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
+            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                NotificationLifecycleLedger.suppressed(
+                    context,
+                    NotificationLifecycleId.STRAIN_TARGET,
+                    NotificationLifecycleCategory.STATUS,
+                )
+                return
+            }
             ensureChannel(context)
-            post(context, STRAIN_TARGET_NOTIF_ID, title, body)
+            if (!post(
+                    context,
+                    NotificationPlatformIdentity.NotificationId.STRAIN_TARGET,
+                    title,
+                    body,
+                )
+            ) return
             // Mark fired only after a successful post, so a notifications-disabled day still notifies once
             // they're re-enabled while the same day still shows the reached target.
             NoopPrefs.setReportStrainTargetDay(context, currentLocalDay)
+        }.onFailure {
+            NotificationLifecycleLedger.unknown(
+                context,
+                NotificationLifecycleId.STRAIN_TARGET,
+                NotificationLifecycleCategory.STATUS,
+            )
         }
     }
 
     @SuppressLint("MissingPermission")
-    private fun post(context: Context, id: Int, title: String, body: String) {
-        val openApp = PendingIntent.getActivity(
-            context, 3,
+    private fun post(context: Context, id: Int, title: String, body: String): Boolean {
+        val openApp = NotificationPlatformIdentity.activityPendingIntent(
+            context,
+            NotificationPlatformIdentity.ActivityIntent.STRAIN_TARGET,
             NotificationRouteBridge.launchIntent(context, NoopNotificationRoute.TODAY),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val n = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_heart)
@@ -114,7 +130,13 @@ object StrainTargetNotifier {
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
-        NotificationManagerCompat.from(context).notify(id, n)
+        return NotificationLifecycleLedger.posted(
+            context,
+            NotificationLifecycleId.STRAIN_TARGET,
+            NotificationLifecycleCategory.STATUS,
+        ) {
+            NotificationManagerCompat.from(context).notify(id, n)
+        }
     }
 
     private fun ensureChannel(context: Context) {

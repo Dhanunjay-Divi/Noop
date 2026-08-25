@@ -3,6 +3,218 @@ import UserNotifications
 @testable import Strand
 
 @MainActor
+final class LocalNotificationLifecycleLedgerTests: XCTestCase {
+    private var suiteName = ""
+    private var defaults: UserDefaults!
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "LocalNotificationLifecycleLedgerTests.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults = nil
+        super.tearDown()
+    }
+
+    func testLedgerRetainsOnlyNewestBoundedRecords() {
+        let ledger = LocalNotificationLifecycleLedger(
+            defaults: defaults,
+            storageKey: "ledger",
+            capacity: 3
+        )
+
+        for index in 0..<5 {
+            ledger.record(
+                identifier: "hydration-reminder-\(480 + index)",
+                categoryIdentifier: DailyReviewNotifications.privacyCategoryID,
+                state: .scheduled,
+                timestamp: Date(timeIntervalSince1970: TimeInterval(index))
+            )
+        }
+
+        XCTAssertEqual(
+            ledger.records().map(\.identifier),
+            ["hydration", "hydration", "hydration"]
+        )
+
+        let reloaded = LocalNotificationLifecycleLedger(
+            defaults: defaults,
+            storageKey: "ledger",
+            capacity: 3
+        )
+        XCTAssertEqual(reloaded.records(), ledger.records())
+    }
+
+    func testSerializedLedgerContainsOnlyAllowedPrivacySafeFields() throws {
+        let ledger = LocalNotificationLifecycleLedger(
+            defaults: defaults,
+            storageKey: "ledger",
+            capacity: 8
+        )
+        ledger.record(
+            identifier: "daily-review-morning",
+            categoryIdentifier: "noop.daily-review.private",
+            state: .suppressed,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: ledger.serializedRecords()
+            ) as? [[String: Any]]
+        )
+        let record = try XCTUnwrap(object.first)
+        XCTAssertEqual(
+            Set(record.keys),
+            ["identifier", "categoryIdentifier", "state", "timestamp"]
+        )
+        let encoded = String(decoding: ledger.serializedRecords(), as: UTF8.self)
+        for forbidden in ["title", "body", "userInfo", "route", "health", "error"] {
+            XCTAssertFalse(encoded.contains(forbidden))
+        }
+    }
+
+    func testLedgerSanitizesUnstableTokensAndRecordsEveryLifecycleState() {
+        let ledger = LocalNotificationLifecycleLedger(
+            defaults: defaults,
+            storageKey: "ledger",
+            capacity: 8
+        )
+
+        for (index, state) in LocalNotificationLifecycleState.allCases.enumerated() {
+            ledger.record(
+                identifier: index == 0
+                    ? "contains private text"
+                    : "metric-review-heart-rate-\(index)",
+                categoryIdentifier: index == 0
+                    ? "category/unsafe"
+                    : DailyReviewNotifications.privacyCategoryID,
+                state: state,
+                timestamp: Date(timeIntervalSince1970: TimeInterval(index))
+            )
+        }
+
+        XCTAssertEqual(
+            ledger.records().map(\.state),
+            LocalNotificationLifecycleState.allCases
+        )
+        XCTAssertEqual(ledger.records().first?.identifier, "unknown")
+        XCTAssertEqual(ledger.records().first?.categoryIdentifier, "unknown")
+        XCTAssertEqual(
+            Set(ledger.records().dropFirst().map(\.identifier)),
+            ["metric_review"]
+        )
+        XCTAssertEqual(
+            Set(ledger.records().dropFirst().map(\.categoryIdentifier)),
+            ["private"]
+        )
+    }
+
+    func testConcurrentDelegateWritesRemainBoundedAndDecodable() {
+        let ledger = LocalNotificationLifecycleLedger(
+            defaults: defaults,
+            storageKey: "ledger",
+            capacity: 64
+        )
+        let categoryIdentifier = DailyReviewNotifications.privacyCategoryID
+
+        DispatchQueue.concurrentPerform(iterations: 256) { index in
+            ledger.record(
+                identifier: "hydration-reminder-\(index)",
+                categoryIdentifier: categoryIdentifier,
+                state: .presented,
+                timestamp: Date(timeIntervalSince1970: TimeInterval(index))
+            )
+        }
+
+        XCTAssertEqual(ledger.records().count, 64)
+        XCTAssertNoThrow(
+            try JSONDecoder().decode(
+                [LocalNotificationLifecycleRecord].self,
+                from: ledger.serializedRecords()
+            )
+        )
+    }
+
+    func testCancellationUsesKnownCategoryAndDiagnosticsStateEvidenceBoundary() {
+        let ledger = LocalNotificationLifecycleLedger(
+            defaults: defaults,
+            storageKey: "ledger",
+            capacity: 8
+        )
+        ledger.record(
+            identifier: "daily-review-morning",
+            categoryIdentifier: DailyReviewNotifications.privacyCategoryID,
+            state: .scheduled,
+            timestamp: Date(timeIntervalSince1970: 1)
+        )
+        ledger.recordCancellation(
+            identifier: "daily-review-morning",
+            timestamp: Date(timeIntervalSince1970: 2)
+        )
+
+        XCTAssertEqual(ledger.records().last?.state, .cancelled)
+        XCTAssertEqual(ledger.records().last?.identifier, "daily_review")
+        XCTAssertEqual(ledger.records().last?.categoryIdentifier, "private")
+        let lines = ledger.diagnosticLines()
+        XCTAssertTrue(lines.contains {
+            $0.contains("scheduled=OS accepted request")
+        })
+        XCTAssertTrue(lines.contains {
+            $0.contains("state=cancelled id=daily_review category=private")
+        })
+    }
+
+    func testLegacyDynamicIdentifiersAreScrubbedWhenLedgerLoads() throws {
+        let legacy = [
+            LocalNotificationLifecycleRecord(
+                identifier: "hydration-reminder-765",
+                categoryIdentifier: "noop.daily-review.private",
+                state: .scheduled,
+                timestamp: Date(timeIntervalSince1970: 1)
+            ),
+            LocalNotificationLifecycleRecord(
+                identifier: "contextual-oxygen-low-20260824",
+                categoryIdentifier: "private-health-topic",
+                state: .presented,
+                timestamp: Date(timeIntervalSince1970: 2)
+            ),
+        ]
+        defaults.set(try JSONEncoder().encode(legacy), forKey: "ledger")
+
+        let ledger = LocalNotificationLifecycleLedger(
+            defaults: defaults,
+            storageKey: "ledger",
+            capacity: 8
+        )
+
+        XCTAssertEqual(
+            ledger.records().map(\.identifier),
+            ["hydration", "contextual_vital"]
+        )
+        XCTAssertEqual(
+            ledger.records().map(\.categoryIdentifier),
+            ["private", "unknown"]
+        )
+        let encoded = String(decoding: ledger.serializedRecords(), as: UTF8.self)
+        XCTAssertFalse(encoded.contains("765"))
+        XCTAssertFalse(encoded.contains("oxygen"))
+        XCTAssertFalse(encoded.contains("health-topic"))
+    }
+
+    func testExistingDiagnosticExportIncludesNotificationLifecycleSection() {
+        XCTAssertTrue(
+            DebugDataDiagnostics.strapStateLines().contains(
+                "Local notification lifecycle"
+            )
+        )
+    }
+}
+
+@MainActor
 final class DailyReviewNotificationsTests: XCTestCase {
     private let keys = [
         DailyReviewNotifications.enabledKey,

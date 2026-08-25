@@ -3,7 +3,6 @@ package com.noop.notif
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -23,18 +22,24 @@ import com.noop.ui.appLaunchIntent
  */
 object SmartAlarmNotifier {
     private const val CHANNEL_ID = "noop_smart_alarm"
-    private const val NOTIF_ID = 4204   // 4201 = connection, 4202 = illness, 4203 = inactivity
 
     @SuppressLint("MissingPermission") // guarded by areNotificationsEnabled() + runCatching
     fun onFired(context: Context) {
         if (!NotifPrefs.getBool(context, NotifPrefs.MASTER, false)) return
         runCatching {
-            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
+            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                NotificationLifecycleLedger.suppressed(
+                    context,
+                    NotificationLifecycleId.BAND_SMART_ALARM,
+                    NotificationLifecycleCategory.ALARM,
+                )
+                return
+            }
             ensureChannel(context)
-            val openApp = PendingIntent.getActivity(
-                context, 6,
+            val openApp = NotificationPlatformIdentity.activityPendingIntent(
+                context,
+                NotificationPlatformIdentity.ActivityIntent.BAND_SMART_ALARM,
                 appLaunchIntent(context),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             val n = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_heart)
@@ -45,12 +50,35 @@ object SmartAlarmNotifier {
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .build()
-            NotificationManagerCompat.from(context).notify(NOTIF_ID, n)
+            NotificationLifecycleLedger.posted(
+                context,
+                NotificationLifecycleId.BAND_SMART_ALARM,
+                NotificationLifecycleCategory.ALARM,
+            ) {
+                NotificationManagerCompat.from(context).notify(
+                    NotificationPlatformIdentity.NotificationId.BAND_SMART_ALARM,
+                    n,
+                )
+            }
+        }.onFailure {
+            NotificationLifecycleLedger.unknown(
+                context,
+                NotificationLifecycleId.BAND_SMART_ALARM,
+                NotificationLifecycleCategory.ALARM,
+            )
         }
     }
 
     fun dismiss(context: Context) {
-        NotificationManagerCompat.from(context.applicationContext).cancel(NOTIF_ID)
+        NotificationLifecycleLedger.cancelled(
+            context,
+            NotificationLifecycleId.BAND_SMART_ALARM,
+            NotificationLifecycleCategory.ALARM,
+        ) {
+            NotificationManagerCompat.from(context.applicationContext).cancel(
+                NotificationPlatformIdentity.NotificationId.BAND_SMART_ALARM,
+            )
+        }
     }
 
     private fun ensureChannel(context: Context) {

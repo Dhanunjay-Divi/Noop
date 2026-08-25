@@ -10,6 +10,11 @@ import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.noop.R
+import com.noop.notif.NotificationLifecycleCategory
+import com.noop.notif.NotificationLifecycleId
+import com.noop.notif.NotificationLifecycleLedger
+import com.noop.notif.NotificationLifecycleState
+import com.noop.notif.NotificationPlatformIdentity
 import com.noop.ui.appLaunchIntent
 import java.util.Calendar
 import java.util.TimeZone
@@ -32,7 +37,6 @@ object WindDownScheduler {
     private const val REQUEST_CODE = 7311
     const val ACTION_NUDGE = "com.noop.alarm.action.WIND_DOWN_NUDGE"
     const val CHANNEL_ID = "noop_wind_down"
-    private const val NOTIF_ID = 4311
 
     /**
      * Schedule (or reschedule) the daily nudge at the minute derived from [wakeMinutes]. Cancels any
@@ -42,30 +46,45 @@ object WindDownScheduler {
     fun schedule(context: Context, store: WindDownStore, wakeMinutes: Int) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val pi = nudgePendingIntent(context)
-        am.cancel(pi)
-        val minuteOfDay = store.nudgeMinuteOfDay(wakeMinutes)
-        val next = nextOccurrenceEpochMillis(minuteOfDay)
-        // Inexact, one-shot, NOT wakeup — a wind-down reminder doesn't need to punch through Doze.
-        // WindDownReceiver schedules the following local occurrence after this one fires.
-        am.set(
-            AlarmManager.RTC,
-            next,
-            pi,
-        )
+        NotificationLifecycleLedger.observe(
+            context,
+            NotificationLifecycleId.WIND_DOWN,
+            NotificationLifecycleCategory.REMINDER,
+            NotificationLifecycleState.SCHEDULED,
+        ) {
+            am.cancel(pi)
+            val minuteOfDay = store.nudgeMinuteOfDay(wakeMinutes)
+            val next = nextOccurrenceEpochMillis(minuteOfDay)
+            // Inexact, one-shot, NOT wakeup — a wind-down reminder doesn't need to punch through Doze.
+            // WindDownReceiver schedules the following local occurrence after this one fires.
+            am.set(
+                AlarmManager.RTC,
+                next,
+                pi,
+            )
+        }
     }
 
     fun cancel(context: Context) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        am.cancel(nudgePendingIntent(context))
+        NotificationLifecycleLedger.observe(
+            context,
+            NotificationLifecycleId.WIND_DOWN,
+            NotificationLifecycleCategory.REMINDER,
+            NotificationLifecycleState.CANCELLED,
+        ) {
+            am.cancel(nudgePendingIntent(context))
+        }
     }
 
     /** Raise the low-key nudge notification. Called from [WindDownReceiver]. */
     fun fireNotification(context: Context) {
         ensureChannel(context)
         runCatching {
-            val open = PendingIntent.getActivity(
-                context, 0, appLaunchIntent(context),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            val open = NotificationPlatformIdentity.activityPendingIntent(
+                context,
+                NotificationPlatformIdentity.ActivityIntent.WIND_DOWN,
+                appLaunchIntent(context),
             )
             val n = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_heart)
@@ -77,8 +96,20 @@ object WindDownScheduler {
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setAutoCancel(true)
                 .build()
-            (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
-                .notify(NOTIF_ID, n)
+            NotificationLifecycleLedger.posted(
+                context,
+                NotificationLifecycleId.WIND_DOWN,
+                NotificationLifecycleCategory.REMINDER,
+            ) {
+                (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                    .notify(NotificationPlatformIdentity.NotificationId.WIND_DOWN, n)
+            }
+        }.onFailure {
+            NotificationLifecycleLedger.unknown(
+                context,
+                NotificationLifecycleId.WIND_DOWN,
+                NotificationLifecycleCategory.REMINDER,
+            )
         }
     }
 

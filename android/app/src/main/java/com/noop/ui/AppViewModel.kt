@@ -3040,7 +3040,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 ble.externalLog(
                     when (outcome) {
                         SafetySosDispatcher.Outcome.Opened ->
-                            "SOS page opened; latest-location sharing started where permitted"
+                            "SOS page request accepted; delivery is pending"
                         SafetySosDispatcher.Outcome.AlreadyActive ->
                             "SOS page already active; latest-location sharing resumed"
                         is SafetySosDispatcher.Outcome.Unavailable ->

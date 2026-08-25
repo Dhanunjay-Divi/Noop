@@ -169,7 +169,13 @@ enum ContextualInterventionCenter {
             defer { deliveriesInFlight.remove(candidate.kind) }
             let center = UNUserNotificationCenter.current()
             let settings = await center.notificationSettings()
-            guard isAuthorized(settings.authorizationStatus) else { return }
+            guard isAuthorized(settings.authorizationStatus) else {
+                LocalNotificationLifecycle.suppressed(
+                    identifier: "contextual-\(candidate.kind.rawValue)",
+                    categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+                )
+                return
+            }
 
             let defaults = UserDefaults.standard
             let current = loadState(defaults: defaults)
@@ -181,7 +187,13 @@ enum ContextualInterventionCenter {
                 quietStartMinutes: defaults.object(forKey: quietStartMinutesKey) as? Int ?? 22 * 60,
                 quietEndMinutes: defaults.object(forKey: quietEndMinutesKey) as? Int ?? 7 * 60
             )
-            guard decision.shouldDeliver else { return }
+            guard decision.shouldDeliver else {
+                LocalNotificationLifecycle.suppressed(
+                    identifier: "contextual-\(candidate.kind.rawValue)",
+                    categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+                )
+                return
+            }
 
             DailyReviewNotifications.registerPrivacyCategory(on: center)
             let content = UNMutableNotificationContent()
@@ -194,12 +206,13 @@ enum ContextualInterventionCenter {
                 NotificationRouteBridge.userInfoKey: candidate.route.rawValue
             ]
             do {
-                try await center.add(
+                try await LocalNotificationLifecycle.schedule(
                     UNNotificationRequest(
                         identifier: "contextual-\(candidate.kind.rawValue)",
                         content: content,
                         trigger: nil
-                    )
+                    ),
+                    on: center
                 )
                 saveState(decision.nextState, defaults: defaults)
             } catch {
@@ -583,6 +596,10 @@ enum CaffeineCutoffReminders {
         ContextualInterventionCenter.requestAuthorization { outcome in
             guard outcome == .enabled else {
                 UserDefaults.standard.set(false, forKey: notificationsEnabledKey)
+                LocalNotificationLifecycle.suppressed(
+                    identifier: requestID,
+                    categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+                )
                 completion?(outcome)
                 return
             }
@@ -615,7 +632,13 @@ enum CaffeineCutoffReminders {
             Task { @MainActor in
                 let center = UNUserNotificationCenter.current()
                 let status = await center.notificationSettings().authorizationStatus
-                guard isAuthorized(status), fireDate.timeIntervalSince(now) > 1 else { return }
+                guard isAuthorized(status), fireDate.timeIntervalSince(now) > 1 else {
+                    LocalNotificationLifecycle.suppressed(
+                        identifier: requestID,
+                        categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+                    )
+                    return
+                }
                 DailyReviewNotifications.registerPrivacyCategory(on: center)
                 let content = UNMutableNotificationContent()
                 content.title = String(localized: "Caffeine cutoff")
@@ -627,7 +650,7 @@ enum CaffeineCutoffReminders {
                     NotificationRouteBridge.userInfoKey: NoopNotificationRoute.sleep.rawValue
                 ]
                 let delay = max(1, fireDate.timeIntervalSince(now))
-                try? await center.add(
+                try? await LocalNotificationLifecycle.schedule(
                     UNNotificationRequest(
                         identifier: requestID,
                         content: content,
@@ -635,7 +658,8 @@ enum CaffeineCutoffReminders {
                             timeInterval: delay,
                             repeats: false
                         )
-                    )
+                    ),
+                    on: center
                 )
             }
         }
@@ -652,14 +676,19 @@ enum CaffeineCutoffReminders {
         Task { @MainActor in
             let status = await UNUserNotificationCenter.current()
                 .notificationSettings().authorizationStatus
-            guard isAuthorized(status) else { return }
+            guard isAuthorized(status) else {
+                LocalNotificationLifecycle.suppressed(
+                    identifier: requestID,
+                    categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+                )
+                return
+            }
             reconcile(intakes: intakes, bedtimeMinutes: bedtimeMinutes)
         }
     }
 
     static func removeScheduled() {
-        UNUserNotificationCenter.current()
-            .removePendingNotificationRequests(withIdentifiers: [requestID])
+        LocalNotificationLifecycle.cancel(identifiers: [requestID])
     }
 
     private static func isAuthorized(_ status: UNAuthorizationStatus) -> Bool {

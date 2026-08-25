@@ -3,7 +3,6 @@ package com.noop.alarm
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -13,6 +12,10 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.noop.R
 import com.noop.automation.AlarmTapAutomationPrefs
+import com.noop.notif.NotificationLifecycleCategory
+import com.noop.notif.NotificationLifecycleId
+import com.noop.notif.NotificationLifecycleLedger
+import com.noop.notif.NotificationPlatformIdentity
 import com.noop.ui.appLaunchIntent
 
 /**
@@ -48,7 +51,11 @@ class SmartAlarmReceiver : BroadcastReceiver() {
         ensureChannel(context)
         // Defensive: a notify() throw (OEM quirk / revoked POST_NOTIFICATIONS) must not crash the
         // broadcast. The system alarm sound below is the fallback-of-the-fallback audible cue.
-        runCatching {
+        NotificationLifecycleLedger.posted(
+            context,
+            NotificationLifecycleId.PHONE_SMART_ALARM,
+            NotificationLifecycleCategory.ALARM,
+        ) {
             val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             mgr.notify(NOTIF_ID, buildNotification(context, smart, isSnooze))
         }
@@ -56,9 +63,10 @@ class SmartAlarmReceiver : BroadcastReceiver() {
     }
 
     private fun buildNotification(context: Context, smart: Boolean, snooze: Boolean): Notification {
-        val fullScreen = PendingIntent.getActivity(
-            context, 0, appLaunchIntent(context),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        val fullScreen = NotificationPlatformIdentity.activityPendingIntent(
+            context,
+            NotificationPlatformIdentity.ActivityIntent.PHONE_SMART_ALARM,
+            appLaunchIntent(context),
         )
         val title = "Good morning"
         val body = if (snooze) {
@@ -114,11 +122,18 @@ class SmartAlarmReceiver : BroadcastReceiver() {
 
     companion object {
         const val CHANNEL_ID = "noop_smart_alarm"
-        const val NOTIF_ID = 4307
+        const val NOTIF_ID =
+            NotificationPlatformIdentity.NotificationId.PHONE_SMART_ALARM
 
         fun dismissActive(context: Context) {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.cancel(NOTIF_ID)
+            NotificationLifecycleLedger.cancelled(
+                context,
+                NotificationLifecycleId.PHONE_SMART_ALARM,
+                NotificationLifecycleCategory.ALARM,
+            ) {
+                manager.cancel(NOTIF_ID)
+            }
         }
     }
 }

@@ -107,13 +107,18 @@
     <string name="safety_onboarding_subtitle">Lade zwei bis fünf Vertrauenspersonen ein. Die Alarmierung wird erst verfügbar, wenn mindestens zwei Personen angenommen haben.</string>
     <string name="safety_onboarding_title">Wähle, wen NOOP alarmieren soll</string>
     <string name="safety_owner_name">Dein Name</string>
+    <string name="safety_page_all_contacts_failed_title">Für keinen Kontakt wurde die Zustellung bestätigt</string>
     <string name="safety_page_body">Jeder angenommene Kontakt erhält eine dringende SMS mit Bestätigungsoptionen. Sprachanrufe folgen nur, solange niemand den Alarm bestätigt hat.</string>
+    <string name="safety_page_call_contact_format">%1$s anrufen</string>
     <string name="safety_page_cancel_action">Alarm abbrechen</string>
     <string name="safety_page_cancel_guidance">Abbrechen stoppt ausstehende Wiederholungen und die Anrufeskalation. Bereits gesendete Nachrichten oder Anrufe können nicht zurückgerufen werden.</string>
     <string name="safety_page_cannot_respond_format">%1$s kann nicht helfen</string>
     <string name="safety_page_confirm_action">Dringende SMS-Alarme senden</string>
     <string name="safety_page_confirm_body">NOOP sendet jetzt jedem angenommenen Kontakt eine SMS. Wenn niemand bestätigt, folgen automatische Anrufe. Rettungsdienste werden nicht kontaktiert.</string>
     <string name="safety_page_confirm_title">Jetzt deine Notfallkontakte alarmieren?</string>
+    <string name="safety_page_contact_responses">Antworten der Kontakte</string>
+    <string name="safety_page_contacts_reached_at_format">%1$d von %2$d Kontakten um %3$s erreicht</string>
+    <string name="safety_page_contacts_reached_format">%1$d von %2$d Kontakten erreicht</string>
     <string name="safety_page_delivery_counts_format">%1$d gesendet · %2$d ausstehend · %3$d zu prüfen</string>
     <string name="safety_page_detail_acknowledged">Ein Kontakt aus dem Sicherheitsnetz reagiert.</string>
     <string name="safety_page_detail_acknowledged_format">%1$s reagiert. Bleibe in direktem Kontakt, bis die Situation geklärt ist.</string>
@@ -122,7 +127,7 @@
     <string name="safety_page_detail_failed">Die Zustellung ist fehlgeschlagen. Kontaktiere Vertrauenspersonen oder Rettungsdienste direkt.</string>
     <string name="safety_page_detail_partial_failure">Einige Zustellversuche sind fehlgeschlagen. Kontaktiere Vertrauenspersonen oder Rettungsdienste direkt.</string>
     <string name="safety_page_detail_resolved">Dieser Alarm wurde als gelöst markiert. Es steht keine Eskalation mehr aus.</string>
-    <string name="safety_page_detail_submitted">Der Alarmierungsanbieter hat die Zustellanfragen angenommen.</string>
+    <string name="safety_page_detail_submitted">Der Alarmierungsanbieter hat die Anfragen angenommen. Zustellbestätigungen stehen noch aus.</string>
     <string name="safety_page_detail_waiting">Warten auf die Bestätigung eines Kontakts. Zuerst wird eine SMS gesendet; die Anrufeskalation bleibt aktiv.</string>
     <string name="safety_page_disabled_active">Löse oder storniere den aktiven Sicherheitsalarm, bevor du einen neuen öffnest.</string>
     <string name="safety_page_disabled_contacts">Mindestens zwei Kontakte müssen ihre Einladungen annehmen.</string>
@@ -142,7 +147,7 @@
     <string name="safety_page_status_open">Offen</string>
     <string name="safety_page_status_partial_failure">Zustellproblem</string>
     <string name="safety_page_status_resolved">Gelöst</string>
-    <string name="safety_page_status_submitted">Gesendet</string>
+    <string name="safety_page_status_submitted">Alarmierung gestartet</string>
     <string name="safety_page_submit">Angenommene Kontakte alarmieren</string>
     <string name="safety_page_submitting">Sicherheitsalarm wird gesendet…</string>
     <string name="safety_page_title">Dringenden Alarm senden</string>
@@ -187,6 +192,8 @@
     <string name="safety_sos_location_retention">Für den aktiven Alarm wird nur der neueste Standort gespeichert. Die Freigabe endet, wenn der Alarm abgebrochen, gelöst oder abgelaufen ist.</string>
     <string name="safety_sos_location_settings">Standorteinstellungen öffnen</string>
     <string name="safety_sos_location_title">Live-Standort während eines SOS</string>
+    <string name="safety_sos_notifications_off">Mitteilungen sind deaktiviert. Die Alarmierung funktioniert weiterhin, aber Zustellupdates erscheinen möglicherweise nur in Sicherheit.</string>
+    <string name="safety_sos_notifications_ready">Ergebnismitteilungen sind bereit.</string>
     <string name="safety_subtitle">Manuelle Werkzeuge, um eine Vertrauensperson einzubeziehen.</string>
     <string name="safety_timer_active">Timer aktiv</string>
     <string name="safety_timer_disclaimer">Wenn der Timer endet, bittet NOOP das Betriebssystem, eine lokale Erinnerung anzuzeigen. Es benachrichtigt keine Kontaktperson und eskaliert nicht, wenn du nicht reagierst; der Zustellzeitpunkt ist nicht garantiert.</string>

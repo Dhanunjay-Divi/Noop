@@ -94,8 +94,20 @@ enum StrainTargetNotifier {
             // Authorization is requested once via requestAuthorization() when the toggle is enabled; here we
             // only check status (no second system prompt) — the BatteryNotifier idiom.
             let settings = await center.notificationSettings()
-            guard settings.authorizationStatus == .authorized,
-                  localCalendarDay() == currentLocalDay else { return }
+            guard settings.authorizationStatus == .authorized else {
+                LocalNotificationLifecycle.suppressed(
+                    identifier: "strain-target",
+                    categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+                )
+                return
+            }
+            guard localCalendarDay() == currentLocalDay else {
+                LocalNotificationLifecycle.suppressed(
+                    identifier: "strain-target",
+                    categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+                )
+                return
+            }
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
@@ -107,8 +119,9 @@ enum StrainTargetNotifier {
             ]
             do {
                 DailyReviewNotifications.registerPrivacyCategory(on: center)
-                try await center.add(
-                    UNNotificationRequest(identifier: "strain-target", content: content, trigger: nil)
+                try await LocalNotificationLifecycle.schedule(
+                    UNNotificationRequest(identifier: "strain-target", content: content, trigger: nil),
+                    on: center
                 )
                 UserDefaults.standard.set(currentLocalDay, forKey: lastDayKey)
             } catch {

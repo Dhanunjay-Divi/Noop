@@ -4,7 +4,6 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -74,10 +73,8 @@ internal object AutoWorkoutCandidateNotificationPolicy {
  */
 object AutoWorkoutCandidateNotifier {
     private const val CHANNEL_ID = "noop_auto_workout_candidates"
-    private const val NOTIFICATION_ID = 4211
     private const val PREFS_FILE = "noop_auto_workout_notifications"
     private const val KEY_LAST_NOTIFIED_TOKEN = "autoWorkout.lastNotifiedToken"
-    private const val CONTENT_INTENT_REQUEST_CODE = 11
     private val postLock = Any()
 
     suspend fun afterReanalysis(
@@ -171,8 +168,16 @@ object AutoWorkoutCandidateNotifier {
             val candidateToken = AutoWorkoutCandidateNotificationPolicy.token(startSec, endSec)
             val deliveryToken = AutoWorkoutCandidateNotificationPolicy.deliveryToken(kind, candidateToken)
             val authorized = runCatching { notificationsAlreadyAuthorized(context) }.getOrDefault(false)
+            val autoDetectEnabled = NoopPrefs.autoDetectWorkouts(context)
+            if (!authorized && autoDetectEnabled) {
+                NotificationLifecycleLedger.suppressed(
+                    context,
+                    NotificationLifecycleId.AUTO_WORKOUT,
+                    NotificationLifecycleCategory.RECOMMENDATION,
+                )
+            }
             if (!AutoWorkoutCandidateNotificationPolicy.shouldPost(
-                    autoDetectEnabled = NoopPrefs.autoDetectWorkouts(context),
+                    autoDetectEnabled = autoDetectEnabled,
                     notificationsAlreadyAuthorized = authorized,
                     kind = kind,
                     candidateToken = candidateToken,
@@ -181,13 +186,19 @@ object AutoWorkoutCandidateNotifier {
             ) return
 
             val posted = runCatching {
-                if (!ensureUsableChannel(context)) return@runCatching false
+                if (!ensureUsableChannel(context)) {
+                    NotificationLifecycleLedger.suppressed(
+                        context,
+                        NotificationLifecycleId.AUTO_WORKOUT,
+                        NotificationLifecycleCategory.RECOMMENDATION,
+                    )
+                    return@runCatching false
+                }
                 val copy = AutoWorkoutCandidateNotificationPolicy.privacySafeCopy(kind)
-                val openToday = PendingIntent.getActivity(
+                val openToday = NotificationPlatformIdentity.activityPendingIntent(
                     context,
-                    CONTENT_INTENT_REQUEST_CODE,
+                    NotificationPlatformIdentity.ActivityIntent.AUTO_WORKOUT,
                     NotificationRouteBridge.launchIntent(context, NoopNotificationRoute.TODAY),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                 )
                 val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_stat_heart)
@@ -200,9 +211,24 @@ object AutoWorkoutCandidateNotifier {
                     .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                     .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                     .build()
-                NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
-                true
-            }.getOrDefault(false)
+                NotificationLifecycleLedger.posted(
+                    context,
+                    NotificationLifecycleId.AUTO_WORKOUT,
+                    NotificationLifecycleCategory.RECOMMENDATION,
+                ) {
+                    NotificationManagerCompat.from(context).notify(
+                        NotificationPlatformIdentity.NotificationId.AUTO_WORKOUT,
+                        notification,
+                    )
+                }
+            }.getOrElse {
+                NotificationLifecycleLedger.unknown(
+                    context,
+                    NotificationLifecycleId.AUTO_WORKOUT,
+                    NotificationLifecycleCategory.RECOMMENDATION,
+                )
+                false
+            }
 
             val next = AutoWorkoutCandidateNotificationPolicy.tokenAfterAttempt(
                 previous, deliveryToken, posted,
@@ -213,7 +239,15 @@ object AutoWorkoutCandidateNotifier {
 
     /** Remove a suggestion the user handled in-app. Keep its stable last-token so it cannot re-alert. */
     fun cancelHandled(context: Context) {
-        NotificationManagerCompat.from(context.applicationContext).cancel(NOTIFICATION_ID)
+        NotificationLifecycleLedger.cancelled(
+            context,
+            NotificationLifecycleId.AUTO_WORKOUT,
+            NotificationLifecycleCategory.RECOMMENDATION,
+        ) {
+            NotificationManagerCompat.from(context.applicationContext).cancel(
+                NotificationPlatformIdentity.NotificationId.AUTO_WORKOUT,
+            )
+        }
     }
 
     /** True only for permission/settings already granted by some user-initiated notification feature. */

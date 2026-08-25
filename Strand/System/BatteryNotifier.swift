@@ -92,8 +92,11 @@ enum BatteryNotifier {
         // banner + any still-pending request) so it can't linger after the cell discharges.
         if result.clearFull {
             let center = UNUserNotificationCenter.current()
-            center.removeDeliveredNotifications(withIdentifiers: ["battery-full"])
-            center.removePendingNotificationRequests(withIdentifiers: ["battery-full"])
+            LocalNotificationLifecycle.cancel(
+                identifiers: ["battery-full"],
+                presented: true,
+                on: center
+            )
         }
     }
 
@@ -123,13 +126,22 @@ enum BatteryNotifier {
             // Authorization is requested once via requestAuthorization() when alerts are enabled; here
             // we only check status (no second system prompt).
             let settings = await center.notificationSettings()
-            guard settings.authorizationStatus == .authorized else { return }
+            guard settings.authorizationStatus == .authorized else {
+                LocalNotificationLifecycle.suppressed(identifier: identifier)
+                return
+            }
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
             content.sound = .default
-            try? await center.add(UNNotificationRequest(identifier: identifier,
-                                                        content: content, trigger: nil))
+            try? await LocalNotificationLifecycle.schedule(
+                UNNotificationRequest(
+                    identifier: identifier,
+                    content: content,
+                    trigger: nil
+                ),
+                on: center
+            )
         }
     }
 }

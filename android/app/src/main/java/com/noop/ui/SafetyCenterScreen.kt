@@ -8,6 +8,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,14 +18,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Warning
@@ -46,6 +51,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -60,6 +66,7 @@ import com.noop.safety.SafetyCheckInPolicy
 import com.noop.safety.SafetyCheckInReminderPrefs
 import com.noop.safety.SafetyCheckInReminderScheduler
 import com.noop.safety.SafetyCheckInState
+import com.noop.safety.SafetyContactStatus
 import com.noop.safety.SafetyLocation
 import com.noop.safety.SafetyLocationCapture
 import com.noop.safety.SafetyDeliveryStatus
@@ -71,6 +78,8 @@ import com.noop.safety.SafetyShareCopy
 import com.noop.safety.SafetyShareIntent
 import com.noop.safety.SafetyShareMessage
 import com.noop.safety.SafetySosGesturePrefs
+import com.noop.safety.SafetyStatusNotifications
+import com.noop.safety.shouldShowAllContactsFailed
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -121,6 +130,9 @@ fun SafetyCenterScreen() {
     }
     var sosGestureEvents by remember {
         mutableStateOf(SafetySosGesturePrefs.requiredEvents(context))
+    }
+    var sosNotificationsAvailable by remember {
+        mutableStateOf(SafetyStatusNotifications.deliveryAvailable(context))
     }
     val hasForegroundLocation =
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
@@ -253,6 +265,11 @@ fun SafetyCenterScreen() {
             notice = notificationsOffStart
         }
     }
+    val sosNotificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        sosNotificationsAvailable = SafetyStatusNotifications.deliveryAvailable(context)
+    }
 
     fun startCheckIn() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -274,6 +291,8 @@ fun SafetyCenterScreen() {
     }
     LaunchedEffect(pagingController) {
         while (true) {
+            sosNotificationsAvailable =
+                SafetyStatusNotifications.deliveryAvailable(context)
             pagingController.refreshLatestIncident()
             delay(5_000L)
         }
@@ -519,7 +538,8 @@ fun SafetyCenterScreen() {
                         when {
                             pagingController.setupState != SafetyPagingSetupState.READY ->
                                 stringResource(R.string.safety_page_disabled_setup)
-                            !pagingController.pagingConfigured ->
+                            !pagingController.pagingConfigured ||
+                                pagingController.pagingEnabled == false ->
                                 stringResource(R.string.safety_page_disabled_delivery)
                             pagingController.activeIncident != null ->
                                 stringResource(R.string.safety_page_disabled_active)
@@ -531,6 +551,10 @@ fun SafetyCenterScreen() {
                     )
                 }
                 pagingController.lastDispatch?.let { dispatch ->
+                    val allContactsFailed = shouldShowAllContactsFailed(
+                        dispatch.status,
+                        dispatch.contactSummary,
+                    )
                     val submitted = dispatch.deliveries.count {
                         it.status in setOf(
                             SafetyDeliveryStatus.QUEUED,
@@ -557,54 +581,177 @@ fun SafetyCenterScreen() {
                         incidentStatusLabel(dispatch.status),
                         tone = incidentStatusTone(dispatch.status),
                     )
-                    Text(
-                        incidentStatusDetail(
-                            dispatch.status,
-                            dispatch.acknowledgedContactDisplayName,
-                        ),
-                        style = NoopType.body,
-                        color = Palette.textSecondary,
-                    )
-                    val deliverySummary = stringResource(
-                        R.string.safety_page_delivery_counts_format,
-                        submitted,
-                        pending,
-                        failed,
-                    )
-                    val replaySummary = stringResource(R.string.safety_page_safe_retry)
-                    Text(
-                        if (dispatch.idempotentReplay) {
-                            listOf(deliverySummary, replaySummary).joinToString(" · ")
-                        } else {
-                            deliverySummary
-                        },
-                        style = NoopType.caption,
-                        color = if (failed == 0) {
-                            Palette.textTertiary
-                        } else {
-                            Palette.statusWarning
-                        },
-                    )
-                    dispatch.responses.forEach { response ->
+                    if (!allContactsFailed) {
                         Text(
-                            if (response.decision == SafetyResponseDecision.RESPONDING) {
-                                stringResource(
-                                    R.string.safety_page_responding_format,
-                                    response.contactDisplayName,
+                            incidentStatusDetail(
+                                dispatch.status,
+                                dispatch.acknowledgedContactDisplayName,
+                            ),
+                            style = NoopType.body,
+                            color = Palette.textSecondary,
+                        )
+                    }
+                    dispatch.contactSummary?.let { summary ->
+                        if (
+                            summary.targeted > 0 &&
+                            summary.reached in 0..summary.targeted
+                        ) {
+                            val reachedAt = summary.lastReachedAt
+                                ?.let { runCatching { Instant.parse(it) }.getOrNull() }
+                                ?.let {
+                                    DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
+                                        .withZone(ZoneId.systemDefault())
+                                        .format(it)
+                                }
+                            Text(
+                                if (reachedAt == null) {
+                                    stringResource(
+                                        R.string.safety_page_contacts_reached_format,
+                                        summary.reached,
+                                        summary.targeted,
+                                    )
+                                } else {
+                                    stringResource(
+                                        R.string.safety_page_contacts_reached_at_format,
+                                        summary.reached,
+                                        summary.targeted,
+                                        reachedAt,
+                                    )
+                                },
+                                style = NoopType.body,
+                                color = when {
+                                    allContactsFailed -> Palette.statusCritical
+                                    summary.reached > 0 -> Palette.statusPositive
+                                    else -> Palette.textSecondary
+                                },
+                            )
+                        }
+                    }
+                    if (allContactsFailed) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Palette.statusCritical.copy(alpha = 0.12f))
+                                .padding(Metrics.space12),
+                            verticalArrangement = Arrangement.spacedBy(Metrics.space12),
+                        ) {
+                            Row(
+                                modifier = Modifier.semantics(mergeDescendants = true) {},
+                                horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                Icon(
+                                    Icons.Filled.Warning,
+                                    contentDescription = null,
+                                    tint = Palette.statusCritical,
                                 )
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+                                ) {
+                                    Text(
+                                        stringResource(
+                                            R.string.safety_page_all_contacts_failed_title,
+                                        ),
+                                        style = NoopType.headline,
+                                        color = Palette.statusCritical,
+                                    )
+                                    Text(
+                                        stringResource(R.string.safety_page_detail_failed),
+                                        style = NoopType.body,
+                                        color = Palette.textPrimary,
+                                    )
+                                }
+                            }
+                            pagingController.contacts
+                                .filter {
+                                    it.status == SafetyContactStatus.ACCEPTED &&
+                                        SafetyPagingController.isStrictE164(it.phoneE164)
+                                }
+                                .forEach { contact ->
+                                    NoopButton(
+                                        text = stringResource(
+                                            R.string.safety_page_call_contact_format,
+                                            contact.displayName,
+                                        ),
+                                        leadingIcon = Icons.Filled.PhoneInTalk,
+                                        kind = NoopButtonKind.Secondary,
+                                        fullWidth = true,
+                                    ) {
+                                        runCatching {
+                                            context.startActivity(
+                                                Intent(
+                                                    Intent.ACTION_DIAL,
+                                                    Uri.fromParts(
+                                                        "tel",
+                                                        contact.phoneE164,
+                                                        null,
+                                                    ),
+                                                ),
+                                            )
+                                        }
+                                    }
+                                }
+                        }
+                    }
+                    if (dispatch.contactSummary == null) {
+                        val deliverySummary = stringResource(
+                            R.string.safety_page_delivery_counts_format,
+                            submitted,
+                            pending,
+                            failed,
+                        )
+                        val replaySummary = stringResource(R.string.safety_page_safe_retry)
+                        Text(
+                            if (dispatch.idempotentReplay) {
+                                listOf(deliverySummary, replaySummary).joinToString(" · ")
                             } else {
-                                stringResource(
-                                    R.string.safety_page_cannot_respond_format,
-                                    response.contactDisplayName,
-                                )
+                                deliverySummary
                             },
-                            style = NoopType.footnote,
-                            color = if (response.decision == SafetyResponseDecision.RESPONDING) {
-                                Palette.statusPositive
+                            style = NoopType.caption,
+                            color = if (failed == 0) {
+                                Palette.textTertiary
                             } else {
-                                Palette.textSecondary
+                                Palette.statusWarning
                             },
                         )
+                    } else if (dispatch.idempotentReplay) {
+                        Text(
+                            stringResource(R.string.safety_page_safe_retry),
+                            style = NoopType.caption,
+                            color = Palette.textTertiary,
+                        )
+                    }
+                    if (dispatch.responses.isNotEmpty()) {
+                        Text(
+                            stringResource(R.string.safety_page_contact_responses),
+                            style = NoopType.overline,
+                            color = Palette.textTertiary,
+                        )
+                        dispatch.responses.forEach { response ->
+                            Text(
+                                if (response.decision == SafetyResponseDecision.RESPONDING) {
+                                    stringResource(
+                                        R.string.safety_page_responding_format,
+                                        response.contactDisplayName,
+                                    )
+                                } else {
+                                    stringResource(
+                                        R.string.safety_page_cannot_respond_format,
+                                        response.contactDisplayName,
+                                    )
+                                },
+                                style = NoopType.footnote,
+                                color = if (
+                                    response.decision == SafetyResponseDecision.RESPONDING
+                                ) {
+                                    Palette.statusPositive
+                                } else {
+                                    Palette.textSecondary
+                                },
+                            )
+                        }
                     }
                     dispatch.latestLocation?.let { latest ->
                         HorizontalDivider(color = Palette.hairline)
@@ -691,7 +838,23 @@ fun SafetyCenterScreen() {
                             onValueChange = { enabled ->
                                 sosGestureEnabled = enabled
                                 SafetySosGesturePrefs.setEnabled(context, enabled)
-                                if (enabled) WhoopConnectionService.start(context)
+                                if (enabled) {
+                                    WhoopConnectionService.start(context)
+                                    if (
+                                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                        ContextCompat.checkSelfPermission(
+                                            context,
+                                            Manifest.permission.POST_NOTIFICATIONS,
+                                        ) != PackageManager.PERMISSION_GRANTED
+                                    ) {
+                                        sosNotificationPermissionLauncher.launch(
+                                            Manifest.permission.POST_NOTIFICATIONS,
+                                        )
+                                    } else {
+                                        sosNotificationsAvailable =
+                                            SafetyStatusNotifications.deliveryAvailable(context)
+                                    }
+                                }
                             },
                         )
                         .padding(vertical = Metrics.space4)
@@ -752,6 +915,48 @@ fun SafetyCenterScreen() {
                         style = NoopType.caption,
                         color = Palette.textTertiary,
                     )
+
+                    HorizontalDivider(color = Palette.hairline)
+                    Row(
+                        modifier = Modifier.semantics(mergeDescendants = true) {},
+                        horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Icon(
+                            if (sosNotificationsAvailable) {
+                                Icons.Filled.Notifications
+                            } else {
+                                Icons.Filled.NotificationsOff
+                            },
+                            contentDescription = null,
+                            tint = if (sosNotificationsAvailable) {
+                                Palette.statusPositive
+                            } else {
+                                Palette.statusWarning
+                            },
+                        )
+                        Text(
+                            stringResource(
+                                if (sosNotificationsAvailable) {
+                                    R.string.safety_sos_notifications_ready
+                                } else {
+                                    R.string.safety_sos_notifications_off
+                                },
+                            ),
+                            modifier = Modifier.weight(1f),
+                            style = NoopType.caption,
+                            color = Palette.textSecondary,
+                        )
+                    }
+                    if (!sosNotificationsAvailable) {
+                        NoopButton(
+                            text = stringResource(R.string.safety_settings_open_notifications),
+                            leadingIcon = Icons.Filled.Settings,
+                            kind = NoopButtonKind.Secondary,
+                            fullWidth = true,
+                            onClick = ::openAppSettings,
+                        )
+                    }
 
                     HorizontalDivider(color = Palette.hairline)
                     Row(

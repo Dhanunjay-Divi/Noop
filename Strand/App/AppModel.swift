@@ -1626,17 +1626,24 @@ final class AppModel: ObservableObject {
     /// notifications (no second system prompt , BatteryNotifier-style status-only check). A fresh
     /// identifier per category means a new alert replaces the old one rather than stacking.
     private static func postWristAlert(identifier: String, title: String, body: String) {
-        guard UserDefaults.standard.bool(forKey: wristAlertsMasterKey) else { return }
+        guard UserDefaults.standard.bool(forKey: wristAlertsMasterKey) else {
+            LocalNotificationLifecycle.suppressed(identifier: identifier)
+            return
+        }
         Task { @MainActor in
             let center = UNUserNotificationCenter.current()
             let settings = await center.notificationSettings()
-            guard settings.authorizationStatus == .authorized else { return }
+            guard settings.authorizationStatus == .authorized else {
+                LocalNotificationLifecycle.suppressed(identifier: identifier)
+                return
+            }
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
             content.sound = .default
-            try? await center.add(
-                UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
+            try? await LocalNotificationLifecycle.schedule(
+                UNNotificationRequest(identifier: identifier, content: content, trigger: nil),
+                on: center
             )
         }
     }
@@ -1678,8 +1685,7 @@ final class AppModel: ObservableObject {
         #if os(iOS)
         // Always clear BOTH the single and the per-day ids so switching modes (or editing the weekday set)
         // never leaves an orphaned trigger or double-fires.
-        UNUserNotificationCenter.current()
-            .removePendingNotificationRequests(withIdentifiers: smartAlarmBackupIds)
+        LocalNotificationLifecycle.cancel(identifiers: smartAlarmBackupIds)
         // #34: the backup follows THE ALARM, not the wrist-alerts master. This is only reached from
         // applySmartAlarm() with the alarm enabled, so the alarm being on IS the correct gate — a user who
         // sets a smart alarm but never turned on the separate wrist HR/strain alerts must still get a backup
@@ -1687,7 +1693,12 @@ final class AppModel: ObservableObject {
         // couldn't arm left them with nothing.
         let valid = weekdays.filter { (1...7).contains($0) }
         // A non-empty selection that filters to nothing (only out-of-range numbers) has no day to fire on.
-        if !weekdays.isEmpty && valid.isEmpty { return }
+        if !weekdays.isEmpty && valid.isEmpty {
+            LocalNotificationLifecycle.suppressed(
+                identifier: smartAlarmBackupId
+            )
+            return
+        }
 
         Task { @MainActor in
             let center = UNUserNotificationCenter.current()
@@ -1706,12 +1717,21 @@ final class AppModel: ObservableObject {
                     if finalStatus == .authorized {
                         addSmartAlarmBackupRequests(center: center, minutes: minutes, weekdays: valid)
                     } else {
+                        LocalNotificationLifecycle.suppressed(
+                            identifier: smartAlarmBackupId
+                        )
                         log?("Smart alarm: backup notification NOT scheduled (notifications not authorized)")
                     }
                 } else {
+                    LocalNotificationLifecycle.suppressed(
+                        identifier: smartAlarmBackupId
+                    )
                     log?("Smart alarm: backup notification NOT scheduled (notification permission denied)")
                 }
             default:
+                LocalNotificationLifecycle.suppressed(
+                    identifier: smartAlarmBackupId
+                )
                 log?("Smart alarm: backup notification NOT scheduled (notifications not authorized)")
             }
         }
@@ -1737,7 +1757,14 @@ final class AppModel: ObservableObject {
             comps.hour = hour
             comps.minute = minute
             let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
-            center.add(UNNotificationRequest(identifier: smartAlarmBackupId, content: content, trigger: trigger))
+            LocalNotificationLifecycle.schedule(
+                UNNotificationRequest(
+                    identifier: smartAlarmBackupId,
+                    content: content,
+                    trigger: trigger
+                ),
+                on: center
+            )
         } else {
             for weekday in weekdays {
                 var comps = DateComponents()
@@ -1745,8 +1772,14 @@ final class AppModel: ObservableObject {
                 comps.hour = hour
                 comps.minute = minute
                 let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
-                center.add(UNNotificationRequest(identifier: "\(smartAlarmBackupId)-d\(weekday)",
-                                                 content: content, trigger: trigger))
+                LocalNotificationLifecycle.schedule(
+                    UNNotificationRequest(
+                        identifier: "\(smartAlarmBackupId)-d\(weekday)",
+                        content: content,
+                        trigger: trigger
+                    ),
+                    on: center
+                )
             }
         }
     }
@@ -1761,8 +1794,16 @@ final class AppModel: ObservableObject {
     ) {
         #if os(iOS)
         let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: smartAlarmBackupIds)
-        guard fireDate.timeIntervalSinceNow > 1 else { return }
+        LocalNotificationLifecycle.cancel(
+            identifiers: smartAlarmBackupIds,
+            on: center
+        )
+        guard fireDate.timeIntervalSinceNow > 1 else {
+            LocalNotificationLifecycle.suppressed(
+                identifier: smartAlarmDurationBackupId
+            )
+            return
+        }
 
         Task { @MainActor in
             let initialStatus = await center.notificationSettings().authorizationStatus
@@ -1775,9 +1816,15 @@ final class AppModel: ObservableObject {
                 if granted, finalStatus == .authorized {
                     addSmartAlarmDurationBackupRequest(center: center, fireDate: fireDate)
                 } else {
+                    LocalNotificationLifecycle.suppressed(
+                        identifier: smartAlarmDurationBackupId
+                    )
                     log?("Sleep-duration alarm: backup notification NOT scheduled (notifications not authorized)")
                 }
             default:
+                LocalNotificationLifecycle.suppressed(
+                    identifier: smartAlarmDurationBackupId
+                )
                 log?("Sleep-duration alarm: backup notification NOT scheduled (notifications not authorized)")
             }
         }
@@ -1794,12 +1841,13 @@ final class AppModel: ObservableObject {
         content.title = String(localized: "Sleep goal")
         content.body = String(localized: "Your detected-sleep target is due. This is a best-effort backup for the Noop Band vibration.")
         content.sound = .default
-        center.add(
+        LocalNotificationLifecycle.schedule(
             UNNotificationRequest(
                 identifier: smartAlarmDurationBackupId,
                 content: content,
                 trigger: UNTimeIntervalNotificationTrigger(timeInterval: delay, repeats: false)
-            )
+            ),
+            on: center
         )
     }
     #endif
@@ -1807,8 +1855,7 @@ final class AppModel: ObservableObject {
     /// Cancel the smart-alarm backup wake notification(s). Called on disarm. No-op on macOS.
     static func cancelSmartAlarmBackupNotification() {
         #if os(iOS)
-        UNUserNotificationCenter.current()
-            .removePendingNotificationRequests(withIdentifiers: smartAlarmBackupIds)
+        LocalNotificationLifecycle.cancel(identifiers: smartAlarmBackupIds)
         #endif
     }
 

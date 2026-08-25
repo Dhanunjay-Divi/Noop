@@ -3,7 +3,6 @@ package com.noop.notif
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -126,7 +125,6 @@ object ContextualVitalNotifier {
     private const val CHANNEL_ID = "noop_contextual_vitals"
     private const val PREFS_FILE = "noop_contextual_vital_delivery"
     private const val KEY_GLOBAL_AT = "global.at"
-    private const val NOTIFICATION_ID = 4205
 
     @SuppressLint("MissingPermission")
     fun onCandidate(
@@ -136,7 +134,14 @@ object ContextualVitalNotifier {
     ) {
         runCatching {
             val manager = NotificationManagerCompat.from(context)
-            if (!manager.areNotificationsEnabled()) return
+            if (!manager.areNotificationsEnabled()) {
+                NotificationLifecycleLedger.suppressed(
+                    context,
+                    NotificationLifecycleId.CONTEXTUAL_VITAL,
+                    NotificationLifecycleCategory.RECOMMENDATION,
+                )
+                return
+            }
 
             val state = loadState(context)
             val decision = ContextualVitalDeliveryPolicy.evaluate(
@@ -147,15 +152,23 @@ object ContextualVitalNotifier {
                 quietStartMinutes = NotifPrefs.getInt(context, NotifPrefs.QUIET_START, 22 * 60),
                 quietEndMinutes = NotifPrefs.getInt(context, NotifPrefs.QUIET_END, 7 * 60),
             )
-            if (!decision.shouldDeliver) return
+            if (!decision.shouldDeliver) {
+                if (decision.reason == ContextualVitalDecisionReason.QUIET_HOURS) {
+                    NotificationLifecycleLedger.suppressed(
+                        context,
+                        NotificationLifecycleId.CONTEXTUAL_VITAL,
+                        NotificationLifecycleCategory.RECOMMENDATION,
+                    )
+                }
+                return
+            }
 
             ensureChannel(context)
             val (title, body) = copy(candidate.kind)
-            val openApp = PendingIntent.getActivity(
+            val openApp = NotificationPlatformIdentity.activityPendingIntent(
                 context,
-                5,
+                NotificationPlatformIdentity.ActivityIntent.CONTEXTUAL_VITAL,
                 appLaunchIntent(context),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_heart)
@@ -168,8 +181,24 @@ object ContextualVitalNotifier {
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                 .build()
-            manager.notify(NOTIFICATION_ID, notification)
+            if (!NotificationLifecycleLedger.posted(
+                    context,
+                    NotificationLifecycleId.CONTEXTUAL_VITAL,
+                    NotificationLifecycleCategory.RECOMMENDATION,
+                ) {
+                    manager.notify(
+                        NotificationPlatformIdentity.NotificationId.CONTEXTUAL_VITAL,
+                        notification,
+                    )
+                }
+            ) return
             saveState(context, decision.nextState)
+        }.onFailure {
+            NotificationLifecycleLedger.unknown(
+                context,
+                NotificationLifecycleId.CONTEXTUAL_VITAL,
+                NotificationLifecycleCategory.RECOMMENDATION,
+            )
         }
     }
 

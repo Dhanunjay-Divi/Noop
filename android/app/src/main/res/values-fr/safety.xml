@@ -107,13 +107,18 @@
     <string name="safety_onboarding_subtitle">Invitez deux à cinq personnes de confiance. L’alerte ne devient disponible qu’après l’acceptation d’au moins deux personnes.</string>
     <string name="safety_onboarding_title">Choisissez qui NOOP doit alerter</string>
     <string name="safety_owner_name">Votre nom</string>
+    <string name="safety_page_all_contacts_failed_title">Aucun envoi à un contact n’a été confirmé</string>
     <string name="safety_page_body">Chaque contact accepté reçoit un SMS urgent avec des commandes de confirmation. Les appels vocaux suivent uniquement tant que l’alerte reste sans réponse.</string>
+    <string name="safety_page_call_contact_format">Appeler %1$s</string>
     <string name="safety_page_cancel_action">Annuler l’alerte</string>
     <string name="safety_page_cancel_guidance">L’annulation arrête les nouvelles tentatives et l’escalade vocale. Les messages ou appels déjà envoyés ne peuvent pas être rappelés.</string>
     <string name="safety_page_cannot_respond_format">%1$s ne peut pas intervenir</string>
     <string name="safety_page_confirm_action">Envoyer les alertes SMS urgentes</string>
     <string name="safety_page_confirm_body">NOOP envoie maintenant un SMS à chaque contact accepté. Sans confirmation, des appels automatiques suivent. Les secours ne sont pas contactés.</string>
     <string name="safety_page_confirm_title">Alerter vos contacts d’urgence maintenant ?</string>
+    <string name="safety_page_contact_responses">Réponses des contacts</string>
+    <string name="safety_page_contacts_reached_at_format">%1$d contacts joints sur %2$d à %3$s</string>
+    <string name="safety_page_contacts_reached_format">%1$d contacts joints sur %2$d</string>
     <string name="safety_page_delivery_counts_format">%1$d envoyés · %2$d en attente · %3$d à vérifier</string>
     <string name="safety_page_detail_acknowledged">Un contact du Réseau de sécurité intervient.</string>
     <string name="safety_page_detail_acknowledged_format">%1$s intervient. Gardez un contact direct jusqu’à la résolution de la situation.</string>
@@ -122,7 +127,7 @@
     <string name="safety_page_detail_failed">L’envoi a échoué. Contactez directement des proches ou les secours.</string>
     <string name="safety_page_detail_partial_failure">Certaines tentatives d’envoi ont échoué. Contactez directement des proches ou les secours.</string>
     <string name="safety_page_detail_resolved">Cette alerte a été marquée comme résolue. Aucune escalade n’est en attente.</string>
-    <string name="safety_page_detail_submitted">Le prestataire d’alerte a accepté les demandes d’envoi.</string>
+    <string name="safety_page_detail_submitted">Le prestataire d’alerte a accepté les demandes. La confirmation de livraison est en attente.</string>
     <string name="safety_page_detail_waiting">En attente de la confirmation d’un contact. Le SMS part d’abord ; l’escalade vocale reste prête.</string>
     <string name="safety_page_disabled_active">Résolvez ou annulez l’alerte de Sécurité active avant d’en ouvrir une autre.</string>
     <string name="safety_page_disabled_contacts">Au moins deux contacts doivent accepter leur invitation.</string>
@@ -142,7 +147,7 @@
     <string name="safety_page_status_open">Ouverte</string>
     <string name="safety_page_status_partial_failure">Problème d’envoi</string>
     <string name="safety_page_status_resolved">Résolue</string>
-    <string name="safety_page_status_submitted">Envoyée</string>
+    <string name="safety_page_status_submitted">Alerte lancée</string>
     <string name="safety_page_submit">Alerter les contacts acceptés</string>
     <string name="safety_page_submitting">Envoi de l’alerte de sécurité…</string>
     <string name="safety_page_title">Envoyer une alerte urgente</string>
@@ -187,6 +192,8 @@
     <string name="safety_sos_location_retention">Seule la position la plus récente est conservée pour l’alerte active. Le partage s’arrête lorsque l’alerte est annulée, résolue ou expirée.</string>
     <string name="safety_sos_location_settings">Ouvrir les réglages de position</string>
     <string name="safety_sos_location_title">Position en direct pendant un SOS</string>
+    <string name="safety_sos_notifications_off">Les notifications sont désactivées. L’alerte fonctionne toujours, mais les mises à jour d’envoi peuvent apparaître uniquement dans Sécurité.</string>
+    <string name="safety_sos_notifications_ready">Les notifications de résultat sont prêtes.</string>
     <string name="safety_subtitle">Outils manuels pour faire appel à une personne de confiance.</string>
     <string name="safety_timer_active">Minuteur actif</string>
     <string name="safety_timer_disclaimer">À la fin du minuteur, NOOP demande au système d’afficher un rappel local. Il n’envoie aucun message à un contact et n’escalade pas la situation si vous ne répondez pas ; l’heure d’affichage n’est pas garantie.</string>

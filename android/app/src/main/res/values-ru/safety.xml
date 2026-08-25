@@ -107,13 +107,18 @@
     <string name="safety_onboarding_subtitle">Пригласите от двух до пяти доверенных лиц. Оповещения станут доступны только после того, как приглашение примут как минимум два человека.</string>
     <string name="safety_onboarding_title">Выберите, кого должен оповестить NOOP</string>
     <string name="safety_owner_name">Ваше имя</string>
+    <string name="safety_page_all_contacts_failed_title">Доставка ни одному контакту не подтверждена</string>
     <string name="safety_page_body">Каждый принявший приглашение контакт получит срочное SMS с вариантами подтверждения. Голосовые вызовы выполняются только пока оповещение не подтверждено.</string>
+    <string name="safety_page_call_contact_format">Позвонить: %1$s</string>
     <string name="safety_page_cancel_action">Отменить оповещение</string>
     <string name="safety_page_cancel_guidance">Отмена прекращает ожидающие повторы и эскалацию с помощью голосовых вызовов. Уже отправленные сообщения и вызовы отозвать нельзя.</string>
     <string name="safety_page_cannot_respond_format">%1$s не может помочь</string>
     <string name="safety_page_confirm_action">Отправить срочные SMS</string>
     <string name="safety_page_confirm_body">Сейчас NOOP отправит SMS каждому принявшему приглашение контакту. Если никто не подтвердит получение, последуют автоматические голосовые вызовы. Экстренные службы не вызываются.</string>
     <string name="safety_page_confirm_title">Оповестить экстренные контакты сейчас?</string>
+    <string name="safety_page_contact_responses">Ответы контактов</string>
+    <string name="safety_page_contacts_reached_at_format">Есть связь с %1$d из %2$d контактов, %3$s</string>
+    <string name="safety_page_contacts_reached_format">Есть связь с %1$d из %2$d контактов</string>
     <string name="safety_page_delivery_counts_format">Отправлено: %1$d · ожидается: %2$d · требуют внимания: %3$d</string>
     <string name="safety_page_detail_acknowledged">Контакт из Сети безопасности отвечает.</string>
     <string name="safety_page_detail_acknowledged_format">%1$s отвечает. Поддерживайте прямую связь, пока ситуация не будет разрешена.</string>
@@ -122,7 +127,7 @@
     <string name="safety_page_detail_failed">Доставка не удалась. Свяжитесь с доверенными людьми или экстренными службами напрямую.</string>
     <string name="safety_page_detail_partial_failure">Некоторые попытки доставки завершились сбоем. Свяжитесь с доверенными людьми или экстренными службами напрямую.</string>
     <string name="safety_page_detail_resolved">Это оповещение отмечено как разрешённое. Ожидающих этапов эскалации больше нет.</string>
-    <string name="safety_page_detail_submitted">Поставщик оповещений принял запросы на доставку.</string>
+    <string name="safety_page_detail_submitted">Поставщик оповещений принял запросы. Подтверждение доставки ожидается.</string>
     <string name="safety_page_detail_waiting">Ожидание подтверждения от контакта. Сначала отправляется SMS; эскалация с помощью голосовых вызовов остаётся активной.</string>
     <string name="safety_page_disabled_active">Разрешите или отмените активное оповещение о безопасности, прежде чем создавать новое.</string>
     <string name="safety_page_disabled_contacts">Приглашение должны принять как минимум два контакта.</string>
@@ -142,7 +147,7 @@
     <string name="safety_page_status_open">Открыто</string>
     <string name="safety_page_status_partial_failure">Проблема с доставкой</string>
     <string name="safety_page_status_resolved">Разрешено</string>
-    <string name="safety_page_status_submitted">Отправлено</string>
+    <string name="safety_page_status_submitted">Оповещение запущено</string>
     <string name="safety_page_submit">Оповестить принявшие контакты</string>
     <string name="safety_page_submitting">Отправка оповещения о безопасности…</string>
     <string name="safety_page_title">Отправить срочное оповещение</string>
@@ -187,6 +192,8 @@
     <string name="safety_sos_location_retention">Для активного оповещения хранится только последняя точка. Передача прекращается после отмены, разрешения или истечения срока.</string>
     <string name="safety_sos_location_settings">Открыть настройки геопозиции</string>
     <string name="safety_sos_location_title">Геопозиция во время SOS</string>
+    <string name="safety_sos_notifications_off">Уведомления отключены. Оповещение продолжит работать, но сведения о доставке могут появиться только в разделе «Безопасность».</string>
+    <string name="safety_sos_notifications_ready">Уведомления о результате готовы.</string>
     <string name="safety_subtitle">Ручные инструменты, чтобы связаться с доверенным человеком.</string>
     <string name="safety_timer_active">Таймер активен</string>
     <string name="safety_timer_disclaimer">Когда таймер завершится, NOOP попросит операционную систему показать одно локальное напоминание. Приложение не пишет контактам и не предпринимает дальнейших действий, если вы не ответите; точное время показа не гарантируется.</string>

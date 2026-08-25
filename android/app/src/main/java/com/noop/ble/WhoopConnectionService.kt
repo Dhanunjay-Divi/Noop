@@ -32,7 +32,13 @@ import com.noop.location.LocationTracker
 import com.noop.notif.BatteryAlertNotifier
 import com.noop.notif.HydrationReminderDelivery
 import com.noop.notif.IllnessAlertNotifier
+import com.noop.notif.NotificationLifecycleCategory
+import com.noop.notif.NotificationLifecycleId
+import com.noop.notif.NotificationLifecycleLedger
+import com.noop.notif.NotificationPlatformIdentity
+import com.noop.notif.NotificationLifecycleState
 import com.noop.safety.SafetyIncidentLocationTracker
+import com.noop.safety.SafetyIncidentStatusMonitor
 import com.noop.safety.SafetyLiveLocationSession
 import com.noop.safety.SafetyPagingException
 import com.noop.safety.SafetySosDispatcher
@@ -113,6 +119,7 @@ class WhoopConnectionService : Service() {
     /** Latest-only location session for an explicitly opened Safety page. */
     private var safetyLocationGateJob: Job? = null
     private var safetyLocationJob: Job? = null
+    private var safetyIncidentStatusJob: Job? = null
     private val safetyLocationTracker by lazy { SafetyIncidentLocationTracker(this) }
 
     /** Last illness-watch evaluation seen by the collector — clear→raised is the notify edge.
@@ -179,7 +186,13 @@ class WhoopConnectionService : Service() {
         // The notification "Disconnect" action routes back here as a self-intent.
         if (intent?.action == ACTION_STOP) {
             runCatching { ble.disconnect() }
-            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            NotificationLifecycleLedger.cancelled(
+                this,
+                NotificationLifecycleId.CONNECTION_SERVICE,
+                NotificationLifecycleCategory.SERVICE,
+            ) {
+                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            }
             stopSelf()
             return START_NOT_STICKY
         }
@@ -448,6 +461,7 @@ class WhoopConnectionService : Service() {
         // Stream only the newest fix for an explicitly opened Safety page. Session identity/expiry is
         // distinct from sequence so each uploaded fix does not restart the platform location listener.
         SafetyLiveLocationSession.initialize(this)
+        SafetyIncidentStatusMonitor.reconcile(this)
         safetyLocationGateJob?.cancel()
         safetyLocationGateJob = scope.launch {
             SafetyLiveLocationSession.state
@@ -456,6 +470,8 @@ class WhoopConnectionService : Service() {
                 .collect { (dispatchId, expiresAtUnix) ->
                     safetyLocationJob?.cancel()
                     safetyLocationJob = null
+                    safetyIncidentStatusJob?.cancel()
+                    safetyIncidentStatusJob = null
                     val nowUnix = System.currentTimeMillis() / 1_000L
                     if (dispatchId.isNullOrBlank() ||
                         expiresAtUnix == null ||
@@ -478,6 +494,17 @@ class WhoopConnectionService : Service() {
                         buildNotification(ble.state.value, null),
                         locationActive = true,
                     )
+                    safetyIncidentStatusJob = launch statusMonitor@ {
+                        while (true) {
+                            val result = SafetyIncidentStatusMonitor.poll(
+                                this@WhoopConnectionService,
+                            )
+                            val delayMillis =
+                                SafetyIncidentStatusMonitor.nextPollDelayMillis(result)
+                                    ?: return@statusMonitor
+                            delay(delayMillis)
+                        }
+                    }
                     safetyLocationJob = launch {
                         val expiry = launch {
                             delay((expiresAtUnix - nowUnix).coerceAtMost(3_600L) * 1_000L)
@@ -570,7 +597,14 @@ class WhoopConnectionService : Service() {
             } else {
                 0
             }
-        ServiceCompat.startForeground(this, NOTIF_ID, notification, type)
+        NotificationLifecycleLedger.observe(
+            this,
+            NotificationLifecycleId.CONNECTION_SERVICE,
+            NotificationLifecycleCategory.SERVICE,
+            NotificationLifecycleState.POSTED,
+        ) {
+            ServiceCompat.startForeground(this, NOTIF_ID, notification, type)
+        }
     }.isSuccess
 
     /** Returns true when SOS owns this event, so normal double-tap actions cannot also fire. */
@@ -589,7 +623,7 @@ class WhoopConnectionService : Service() {
                 ble.externalLog(
                     when (outcome) {
                         SafetySosDispatcher.Outcome.Opened ->
-                            "SOS page opened; latest-location sharing started where permitted"
+                            "SOS page request accepted; delivery is pending"
                         SafetySosDispatcher.Outcome.AlreadyActive ->
                             "SOS page already active; latest-location sharing resumed"
                         is SafetySosDispatcher.Outcome.Unavailable ->
@@ -616,7 +650,11 @@ class WhoopConnectionService : Service() {
         lastNotificationKey = key
         // Defensive: a notify() throw (OEM quirk, revoked POST_NOTIFICATIONS on some ROMs) must not
         // crash the collector and tear down the connection we exist to keep alive.
-        runCatching {
+        NotificationLifecycleLedger.posted(
+            this,
+            NotificationLifecycleId.CONNECTION_SERVICE,
+            NotificationLifecycleCategory.SERVICE,
+        ) {
             val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             mgr.notify(NOTIF_ID, buildNotification(state, recoveryPct))
         }
@@ -638,11 +676,10 @@ class WhoopConnectionService : Service() {
             state.batteryPct?.let { add("Strap ${it.roundToInt()}%") }
         }.joinToString("  ·  ")
 
-        val openApp = PendingIntent.getActivity(
+        val openApp = NotificationPlatformIdentity.activityPendingIntent(
             this,
-            0,
+            NotificationPlatformIdentity.ActivityIntent.CONNECTION_SERVICE,
             appLaunchIntent(this),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val stopAction = PendingIntent.getService(
             this,
@@ -700,7 +737,8 @@ class WhoopConnectionService : Service() {
 
     companion object {
         private const val CHANNEL_ID = "noop_strap_connection"
-        private const val NOTIF_ID = 4201
+        private const val NOTIF_ID =
+            NotificationPlatformIdentity.NotificationId.CONNECTION_SERVICE
         const val ACTION_STOP = "com.noop.ble.action.STOP_CONNECTION"
         const val ACTION_RECONNECT = "com.noop.ble.action.RECONNECT_SAVED"
 

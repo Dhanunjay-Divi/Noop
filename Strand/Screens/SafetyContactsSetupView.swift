@@ -119,7 +119,7 @@ struct SafetyContactsSetupView: View {
         VStack(alignment: .leading, spacing: NoopMetrics.space4) {
             readinessHeader
 
-            if !service.pagingConfigured {
+            if !service.pagingConfigured || service.pagingEnabled == false {
                 HStack(alignment: .top, spacing: NoopMetrics.space2) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(StrandPalette.statusWarning)
@@ -241,6 +241,12 @@ struct SafetyContactsSetupView: View {
                     } label: {
                         Label("safety.contact.resend", systemImage: "paperplane")
                     }
+                    .disabled(
+                        !SafetyPagingService.deliveryAvailable(
+                            providerConfigured: service.pagingConfigured,
+                            pagingEnabled: service.pagingEnabled
+                        )
+                    )
                 }
                 Button(role: .destructive) {
                     contactToRemove = contact
@@ -300,6 +306,7 @@ struct SafetyContactsSetupView: View {
             .disabled(
                 service.isBusy
                     || !service.pagingConfigured
+                    || service.pagingEnabled == false
                     || contactName.trimmingCharacters(in: .whitespaces).isEmpty
                     || contactPhone.trimmingCharacters(in: .whitespaces).isEmpty
             )

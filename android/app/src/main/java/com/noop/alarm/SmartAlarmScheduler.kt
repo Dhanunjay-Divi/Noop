@@ -5,6 +5,11 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import com.noop.notif.NotificationLifecycleCategory
+import com.noop.notif.NotificationLifecycleId
+import com.noop.notif.NotificationLifecycleLedger
+import com.noop.notif.NotificationLifecycleState
+import com.noop.notif.NotificationPlatformIdentity
 import java.util.Calendar
 
 /**
@@ -111,7 +116,14 @@ object SmartAlarmScheduler {
     /** Cancel the alarm and clear the persisted edges. Only the user-disable / post-fire paths call this. */
     fun cancel(context: Context, store: SmartAlarmStore) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        am.cancel(firePendingIntent(context))
+        NotificationLifecycleLedger.observe(
+            context,
+            NotificationLifecycleId.PHONE_SMART_ALARM,
+            NotificationLifecycleCategory.ALARM,
+            NotificationLifecycleState.CANCELLED,
+        ) {
+            am.cancel(firePendingIntent(context))
+        }
         store.scheduledDeadlineMs = 0L
         store.scheduledWindowStartMs = 0L
     }
@@ -121,16 +133,22 @@ object SmartAlarmScheduler {
         if (!canScheduleExact(context)) return false
         val triggerAtMs = System.currentTimeMillis() + minutes.coerceIn(5, 30) * 60_000L
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val show = PendingIntent.getActivity(
+        val show = NotificationPlatformIdentity.activityPendingIntent(
             context,
-            SNOOZE_REQUEST_CODE + 1,
+            NotificationPlatformIdentity.ActivityIntent.PHONE_SMART_ALARM_SNOOZE_SCHEDULE,
             com.noop.ui.appLaunchIntent(context),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        am.setAlarmClock(
-            AlarmManager.AlarmClockInfo(triggerAtMs, show),
-            snoozePendingIntent(context),
-        )
+        NotificationLifecycleLedger.observe(
+            context,
+            NotificationLifecycleId.PHONE_SMART_ALARM,
+            NotificationLifecycleCategory.ALARM,
+            NotificationLifecycleState.SCHEDULED,
+        ) {
+            am.setAlarmClock(
+                AlarmManager.AlarmClockInfo(triggerAtMs, show),
+                snoozePendingIntent(context),
+            )
+        }
         return true
     }
 
@@ -148,13 +166,20 @@ object SmartAlarmScheduler {
      *  the notification can say it woke you on a light-sleep phase rather than at the deadline. */
     private fun scheduleExact(context: Context, triggerAtMs: Long, smart: Boolean = false) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val show = PendingIntent.getActivity(
-            context, REQUEST_CODE + 1,
+        val show = NotificationPlatformIdentity.activityPendingIntent(
+            context,
+            NotificationPlatformIdentity.ActivityIntent.PHONE_SMART_ALARM_SCHEDULE,
             com.noop.ui.appLaunchIntent(context),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val info = AlarmManager.AlarmClockInfo(triggerAtMs, show)
-        am.setAlarmClock(info, firePendingIntent(context, smart))
+        NotificationLifecycleLedger.observe(
+            context,
+            NotificationLifecycleId.PHONE_SMART_ALARM,
+            NotificationLifecycleCategory.ALARM,
+            NotificationLifecycleState.SCHEDULED,
+        ) {
+            am.setAlarmClock(info, firePendingIntent(context, smart))
+        }
     }
 
     private fun firePendingIntent(context: Context, smart: Boolean = false): PendingIntent {

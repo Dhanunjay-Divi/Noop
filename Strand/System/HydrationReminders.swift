@@ -205,10 +205,12 @@ enum HydrationReminders {
                     completion?(.scheduled)
                 } else {
                     UserDefaults.standard.set(false, forKey: enabledKey)
+                    recordSuppressedRequests()
                     completion?(.denied)
                 }
             default:
                 UserDefaults.standard.set(false, forKey: enabledKey)
+                recordSuppressedRequests()
                 completion?(.denied)
             }
         }
@@ -378,6 +380,7 @@ enum HydrationReminders {
             case .authorized, .provisional, .ephemeral:
                 schedule()
             default:
+                recordSuppressedRequests()
                 break
             }
         }
@@ -525,7 +528,7 @@ enum HydrationReminders {
     private static func removeScheduledRequests() {
         let ids = storedRequestIDs
         if !ids.isEmpty {
-            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+            LocalNotificationLifecycle.cancel(identifiers: ids)
         }
         UserDefaults.standard.removeObject(forKey: scheduledRequestIDsKey)
     }
@@ -533,7 +536,12 @@ enum HydrationReminders {
     private static func schedule() {
         let center = UNUserNotificationCenter.current()
         let oldIDs = storedRequestIDs
-        if !oldIDs.isEmpty { center.removePendingNotificationRequests(withIdentifiers: oldIDs) }
+        if !oldIDs.isEmpty {
+            LocalNotificationLifecycle.cancel(
+                identifiers: oldIDs,
+                on: center
+            )
+        }
         DailyReviewNotifications.registerPrivacyCategory(on: center)
 
         let specs = reminderSpecs(
@@ -545,6 +553,12 @@ enum HydrationReminders {
         // alert, and a confirmed tap cancels it. Keeping the repeating requests here would notify even
         // after confirmation, which iOS cannot suppress per occurrence.
         guard !bandFirstEnabled else {
+            for spec in specs {
+                LocalNotificationLifecycle.suppressed(
+                    identifier: spec.identifier,
+                    categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+                )
+            }
             UserDefaults.standard.removeObject(forKey: scheduledRequestIDsKey)
             return
         }
@@ -562,12 +576,13 @@ enum HydrationReminders {
             var components = DateComponents()
             components.hour = spec.minuteOfDay / 60
             components.minute = spec.minuteOfDay % 60
-            center.add(
+            LocalNotificationLifecycle.schedule(
                 UNNotificationRequest(
                     identifier: spec.identifier,
                     content: content,
                     trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
-                )
+                ),
+                on: center
             )
         }
     }
@@ -578,7 +593,10 @@ enum HydrationReminders {
         defaults.set(slot.token, forKey: pendingEscalationSlotKey)
 
         let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: [missedResponseRequestID])
+        LocalNotificationLifecycle.cancel(
+            identifiers: [missedResponseRequestID],
+            on: center
+        )
         DailyReviewNotifications.registerPrivacyCategory(on: center)
 
         let content = UNMutableNotificationContent()
@@ -589,7 +607,7 @@ enum HydrationReminders {
         content.threadIdentifier = "noop.hydration"
         content.userInfo = [NotificationRouteBridge.userInfoKey: NoopNotificationRoute.hydration.rawValue]
 
-        center.add(
+        LocalNotificationLifecycle.schedule(
             UNNotificationRequest(
                 identifier: missedResponseRequestID,
                 content: content,
@@ -597,13 +615,31 @@ enum HydrationReminders {
                     timeInterval: TimeInterval(doubleTapWindowMinutes * 60),
                     repeats: false
                 )
-            )
+            ),
+            on: center
         )
     }
 
     private static func cancelMissedResponse() {
-        UNUserNotificationCenter.current()
-            .removePendingNotificationRequests(withIdentifiers: [missedResponseRequestID])
+        LocalNotificationLifecycle.cancel(
+            identifiers: [missedResponseRequestID]
+        )
         UserDefaults.standard.removeObject(forKey: pendingEscalationSlotKey)
+    }
+
+    private static func recordSuppressedRequests() {
+        let identifiers = storedRequestIDs.isEmpty
+            ? reminderSpecs(
+                start: activeStartMinutes,
+                end: activeEndMinutes,
+                interval: effectiveIntervalMinutes
+            ).map(\.identifier)
+            : storedRequestIDs
+        for identifier in identifiers {
+            LocalNotificationLifecycle.suppressed(
+                identifier: identifier,
+                categoryIdentifier: DailyReviewNotifications.privacyCategoryID
+            )
+        }
     }
 }

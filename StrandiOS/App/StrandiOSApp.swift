@@ -139,6 +139,8 @@ struct StrandiOSApp: App {
 
             await FriendsService.catchUpIfDue(repo: model.repo)
             guard !Task.isCancelled else { return false }
+            _ = await SafetySOSRuntime.shared.refreshActiveIncidentStatusIfNeeded()
+            guard !Task.isCancelled else { return false }
             await WidgetSnapshot.publish(from: model)
             return strapSyncCompleted && !Task.isCancelled
         }

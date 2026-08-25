@@ -1,14 +1,23 @@
 package com.noop.safety
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.noop.R
-import com.noop.ui.appLaunchIntent
+import com.noop.ble.WhoopConnectionService
+import com.noop.notif.NotificationLifecycleCategory
+import com.noop.notif.NotificationLifecycleId
+import com.noop.notif.NotificationLifecycleLedger
+import com.noop.notif.NotificationPlatformIdentity
+import com.noop.ui.NoopNotificationRoute
+import com.noop.ui.NotificationRouteBridge
 
 /**
  * The band emits one DOUBLE_TAP event, not individual tap counts. This policy therefore counts
@@ -137,11 +146,18 @@ object SafetySosDispatcher {
         val active = controller.activeIncident
         val outcome = when {
             active != null -> {
+                val expiresAtUnix = active.expiresAt?.let(::parseIsoInstantUnix)
                 SafetyLiveLocationSession.start(
                     appContext,
                     active.dispatchId,
-                    expiresAtUnix = active.expiresAt?.let(::parseIsoInstantUnix),
+                    expiresAtUnix = expiresAtUnix,
                 )
+                SafetyIncidentStatusMonitor.start(
+                    appContext,
+                    active.dispatchId,
+                    expiresAtUnix,
+                )
+                WhoopConnectionService.start(appContext)
                 Outcome.AlreadyActive
             }
             !controller.canPage -> Outcome.Unavailable(
@@ -153,50 +169,114 @@ object SafetySosDispatcher {
                 controller.errorMessage ?: "The paging server did not accept the request.",
             )
         }
-        postResultNotification(appContext, outcome)
+        SafetyStatusNotifications.postOutcome(appContext, outcome)
         return outcome
     }
+}
 
-    private fun postResultNotification(context: Context, outcome: Outcome) {
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-            manager.getNotificationChannel(CHANNEL_ID) == null
+internal object SafetyStatusNotifications {
+    internal fun outcomeResources(
+        outcome: SafetySosDispatcher.Outcome,
+    ): Pair<Int, Int> = when (outcome) {
+        SafetySosDispatcher.Outcome.Opened ->
+            R.string.safety_page_status_submitted to
+                R.string.safety_page_detail_submitted
+        SafetySosDispatcher.Outcome.AlreadyActive ->
+            R.string.safety_page_status_open to
+                R.string.safety_page_detail_waiting
+        is SafetySosDispatcher.Outcome.Unavailable ->
+            R.string.safety_page_status_failed to
+                R.string.safety_delivery_unavailable
+    }
+
+    fun deliveryAvailable(context: Context): Boolean {
+        val app = context.applicationContext
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
         ) {
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "Safety page status",
-                    NotificationManager.IMPORTANCE_HIGH,
-                ).apply {
-                    description = "Confirms whether an explicit band SOS gesture opened a page."
-                },
+            return false
+        }
+        if (!NotificationManagerCompat.from(app).areNotificationsEnabled()) {
+            return false
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val channel = manager.getNotificationChannel(CHANNEL_ID)
+            if (channel != null && channel.importance == NotificationManager.IMPORTANCE_NONE) {
+                return false
+            }
+        }
+        return true
+    }
+
+    fun postOutcome(context: Context, outcome: SafetySosDispatcher.Outcome): Boolean {
+        val (title, body) = outcomeResources(outcome)
+        return post(context, title, body)
+    }
+
+    fun postIncident(context: Context, status: SafetyIncidentStatus): Boolean {
+        val resources = when (status) {
+            SafetyIncidentStatus.ACKNOWLEDGED ->
+                R.string.safety_page_status_acknowledged to
+                    R.string.safety_page_detail_acknowledged
+            SafetyIncidentStatus.FAILED ->
+                R.string.safety_page_all_contacts_failed_title to
+                    R.string.safety_page_detail_failed
+            else -> return true
+        }
+        return post(context, resources.first, resources.second)
+    }
+
+    private fun post(context: Context, titleResource: Int, bodyResource: Int): Boolean {
+        val app = context.applicationContext
+        if (!deliveryAvailable(app)) {
+            NotificationLifecycleLedger.suppressed(
+                app,
+                NotificationLifecycleId.SAFETY_SOS_RESULT,
+                NotificationLifecycleCategory.STATUS,
             )
+            return false
         }
-        val title: String
-        val body: String
-        when (outcome) {
-            Outcome.Opened -> {
-                title = "SOS page sent"
-                body = "Accepted contacts are being paged. Open Safety to monitor responses."
+        val manager = runCatching {
+            (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).also {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                    it.getNotificationChannel(CHANNEL_ID) == null
+                ) {
+                    it.createNotificationChannel(
+                        NotificationChannel(
+                            CHANNEL_ID,
+                            app.getString(R.string.safety_page_section),
+                            NotificationManager.IMPORTANCE_HIGH,
+                        ).apply {
+                            description = app.getString(R.string.safety_page_disclaimer)
+                        },
+                    )
+                }
             }
-            Outcome.AlreadyActive -> {
-                title = "SOS page already active"
-                body = "Open Safety to monitor contact responses."
-            }
-            is Outcome.Unavailable -> {
-                title = "SOS page was not sent"
-                body = "Open Safety to check setup, accepted contacts, and delivery."
-            }
+        }.getOrElse {
+            NotificationLifecycleLedger.unknown(
+                context,
+                NotificationLifecycleId.SAFETY_SOS_RESULT,
+                NotificationLifecycleCategory.STATUS,
+            )
+            return false
         }
-        val open = PendingIntent.getActivity(
-            context,
-            0,
-            appLaunchIntent(context),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        val title = app.getString(titleResource)
+        val body = app.getString(bodyResource)
+        val open = NotificationPlatformIdentity.activityPendingIntent(
+            app,
+            NotificationPlatformIdentity.ActivityIntent.SAFETY_SOS_RESULT,
+            NotificationRouteBridge.launchIntent(app, NoopNotificationRoute.SAFETY),
         )
-        runCatching {
+        return NotificationLifecycleLedger.posted(
+            app,
+            NotificationLifecycleId.SAFETY_SOS_RESULT,
+            NotificationLifecycleCategory.STATUS,
+        ) {
             manager.notify(
-                NOTIFICATION_ID,
+                NotificationPlatformIdentity.NotificationId.SAFETY_SOS_RESULT,
                 NotificationCompat.Builder(context, CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_stat_heart)
                     .setContentTitle(title)
@@ -205,11 +285,11 @@ object SafetySosDispatcher {
                     .setContentIntent(open)
                     .setAutoCancel(true)
                     .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setCategory(NotificationCompat.CATEGORY_STATUS)
                     .build(),
             )
         }
     }
 
     private const val CHANNEL_ID = "noop_safety_page_status"
-    private const val NOTIFICATION_ID = 4_207
 }

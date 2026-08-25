@@ -3,7 +3,6 @@ package com.noop.notif
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -26,7 +25,6 @@ internal object IllnessAlertPolicy {
  */
 object IllnessAlertNotifier {
     private const val CHANNEL_ID = "noop_illness_watch"
-    private const val NOTIF_ID = 4202   // 4201 is the ongoing connection notification
 
     @SuppressLint("MissingPermission") // guarded by areNotificationsEnabled() + runCatching
     fun onEvaluated(context: Context, alert: String?) {
@@ -34,12 +32,19 @@ object IllnessAlertNotifier {
         if (!IllnessAlertPolicy.shouldNotify(alert, NoopPrefs.illnessLastNotifiedDay(context), today)) return
         // Defensive: never let a notify() throw (revoked POST_NOTIFICATIONS, OEM quirk) crash a collector.
         runCatching {
-            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
+            if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                NotificationLifecycleLedger.suppressed(
+                    context,
+                    NotificationLifecycleId.ILLNESS_CHECK_IN,
+                    NotificationLifecycleCategory.RECOMMENDATION,
+                )
+                return
+            }
             ensureChannel(context)
-            val openApp = PendingIntent.getActivity(
-                context, 2,
+            val openApp = NotificationPlatformIdentity.activityPendingIntent(
+                context,
+                NotificationPlatformIdentity.ActivityIntent.ILLNESS_CHECK_IN,
                 appLaunchIntent(context),
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             val n = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_heart)
@@ -51,8 +56,24 @@ object IllnessAlertNotifier {
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                 .build()
-            NotificationManagerCompat.from(context).notify(NOTIF_ID, n)
+            if (!NotificationLifecycleLedger.posted(
+                    context,
+                    NotificationLifecycleId.ILLNESS_CHECK_IN,
+                    NotificationLifecycleCategory.RECOMMENDATION,
+                ) {
+                    NotificationManagerCompat.from(context).notify(
+                        NotificationPlatformIdentity.NotificationId.ILLNESS_CHECK_IN,
+                        n,
+                    )
+                }
+            ) return
             NoopPrefs.setIllnessLastNotifiedDay(context, today)
+        }.onFailure {
+            NotificationLifecycleLedger.unknown(
+                context,
+                NotificationLifecycleId.ILLNESS_CHECK_IN,
+                NotificationLifecycleCategory.RECOMMENDATION,
+            )
         }
     }
 
