@@ -182,14 +182,13 @@ final class NOOPiOSUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts.matching(identifier: "NOOP Band is coming").count, 1)
         XCTAssertTrue(
             app.staticTexts[
-                "Until NOOP Band is ready, this version works with a compatible WHOOP band you own."
+                "Until NOOP Band is ready, this version works with a compatible band you own."
             ].exists
         )
         XCTAssertFalse(app.staticTexts["Independent: not affiliated with WHOOP"].exists)
-        XCTAssertTrue(
-            app.staticTexts.matching(
-                NSPredicate(format: "label CONTAINS %@", "may breach WHOOP's Terms of Service")
-            ).firstMatch.exists
+        XCTAssertEqual(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "WHOOP")).count,
+            0
         )
         let accept = app.buttons["noop.terms.accept"]
         XCTAssertTrue(accept.waitForExistence(timeout: 5))

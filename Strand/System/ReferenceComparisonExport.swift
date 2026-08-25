@@ -60,7 +60,7 @@ enum ReferenceComparisonExport {
 
         let scopeSlug = scope == .summaryOnly ? "summary" : "exact-daily-pairs"
         let filename = [
-            "noop-whoop-comparison",
+            "noop-provider-comparison",
             slug(metricName),
             scopeSlug,
             slug(context.platform),
@@ -83,11 +83,11 @@ enum ReferenceComparisonExport {
             : "Aggregate summary plus exact daily pairs"
         let privacyText = scope == .summaryOnly
             ? """
-              This summary excludes exact comparison dates, every daily WHOOP/NOOP value, personal \
-              WHOOP and NOOP means, raw sensor streams, account details, and device identifiers.
+              This summary excludes exact comparison dates, every daily provider/NOOP value, personal \
+              provider and NOOP means, raw sensor streams, account details, and device identifiers.
               """
             : """
-              daily_pairs.csv includes exact dates and daily official WHOOP and NOOP values. Treat that \
+              daily_pairs.csv includes exact dates and daily official provider and NOOP values. Treat that \
               CSV as sensitive health data. This summary still excludes account details, device \
               identifiers, and raw sensor streams.
               """
@@ -112,8 +112,8 @@ enum ReferenceComparisonExport {
             )
         }
 
-        return """
-        NOOP WHOOP comparison export
+        return CustomerFacingBrand.text("""
+        NOOP provider comparison export
 
         PRIVACY AND ORIGIN
         Scope: \(scopeTitle)
@@ -124,7 +124,7 @@ enum ReferenceComparisonExport {
         SOFTWARE
         NOOP version: \(context.appVersion)
         Platform: \(context.platform)
-        WHOOP import revision: \(context.whoopImporterRevision)
+        Provider import revision: \(context.whoopImporterRevision)
         NOOP algorithm revision: \(report.noopAlgorithmVersion)
 
         COMPARISON
@@ -132,7 +132,7 @@ enum ReferenceComparisonExport {
         Scale or units: \(units)
         Paired days: \(statistics.sampleCount)
         Comparison span: \(span)
-        Error direction: NOOP minus official WHOOP
+        Error direction: NOOP minus official provider
         Bias: \(number(statistics.bias, signed: true))
         Mean absolute error (MAE): \(number(statistics.meanAbsoluteError))
         Root mean squared error (RMSE): \(number(statistics.rootMeanSquaredError))
@@ -142,18 +142,18 @@ enum ReferenceComparisonExport {
         \(calibrationLines.joined(separator: "\n"))
 
         INTERPRETATION
-        These results compare user-imported official WHOOP outcomes with separately computed NOOP \
-        estimates on matched days. They do not recover, reproduce, or claim to know WHOOP's \
+        These results compare user-imported provider outcomes with separately computed NOOP \
+        estimates on matched days. They do not recover, reproduce, or claim to know the provider's \
         proprietary formulas.
 
         TESTER SHARING CHECKLIST
-        [ ] Latest original, unmodified WHOOP export ZIP
+        [ ] Latest original, unmodified wearable export ZIP
         [ ] This NOOP comparison ZIP
         On iPhone, save the NOOP ZIP to Files. In Files, select both ZIPs together, tap Share → Messages, \
-        and use the same iMessage conversation with your trial coordinator. The original WHOOP ZIP contains sensitive health \
+        and use the same iMessage conversation with your trial coordinator. The original wearable ZIP contains sensitive health \
         data, so verify the recipient before sending. NOOP does not choose a recipient, send a message, \
         or upload either file automatically.
-        """
+        """)
     }
 
     private static func exactPairsCSV(_ pairs: [PairedReferenceDay]) -> String {
@@ -166,7 +166,7 @@ enum ReferenceComparisonExport {
             ].joined(separator: ",")
         }
         return ([
-            "day,official_whoop_value,noop_value,noop_minus_official"
+            "day,official_provider_value,noop_value,noop_minus_official"
         ] + rows).joined(separator: "\n") + "\n"
     }
 

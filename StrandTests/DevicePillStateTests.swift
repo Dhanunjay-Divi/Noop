@@ -48,11 +48,11 @@ final class DevicePillStateTests: XCTestCase {
         XCTAssertEqual(DeviceCapabilityProfile.make(for: device).displayModel, "Noop Band")
     }
 
-    func testBandCustomerNameHidesGenerationButDiagnosticsPreserveIt() {
+    func testBandCustomerNameAndVisibleDiagnosticsHideVendorBrand() {
         XCTAssertEqual(WhoopModel.whoop4.displayName, "Noop Band")
         XCTAssertEqual(WhoopModel.whoop5mg.displayName, "Noop Band")
-        XCTAssertEqual(WhoopModel.whoop4.transportName, "WHOOP 4.0")
-        XCTAssertEqual(WhoopModel.whoop5mg.transportName, "WHOOP 5.0 / MG")
+        XCTAssertEqual(WhoopModel.whoop4.transportName, "legacy band")
+        XCTAssertEqual(WhoopModel.whoop5mg.transportName, "newer band")
     }
 
     func testDevicesDefaultHierarchyKeepsDiagnosticsBehindDisclosure() throws {

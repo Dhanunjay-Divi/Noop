@@ -253,7 +253,7 @@ fun JournalLogCard(
                     when {
                         editing ->
                             "Rename, regroup, or remove an item to tidy your list. Renaming keeps the " +
-                                "original question behind the scenes, so a WHOOP import still lines up. " +
+                                "original question behind the scenes, so a wearable import still lines up. " +
                                 "Custom items are deleted; built-in ones are hidden and can be restored below."
                         dayOffset == -1L ->
                             "Logging ahead for tomorrow: today's activities inform tomorrow's " +
@@ -261,7 +261,7 @@ fun JournalLogCard(
                                 "answers line up with tomorrow's morning."
                         else ->
                             "Answers are about the night and day leading into this morning, the " +
-                                "same attribution a WHOOP export uses, so logged and imported days " +
+                                "same attribution a wearable export uses, so logged and imported days " +
                                 "line up."
                     },
                     style = NoopType.footnote,

@@ -397,7 +397,7 @@ struct WorkoutDetailView: View {
             let busiest = z.indices.max(by: { z[$0] < z[$1] }) ?? 0
             VStack(alignment: .leading, spacing: NoopMetrics.gap) {
                 SectionHeader("HR Zones",
-                              overline: zonesFromImport ? "Whoop import" : "From strap HR",
+                              overline: zonesFromImport ? "Imported zones" : "From strap HR",
                               trailing: String(localized: "\(Int(total.rounded()))m in zone"))
                 NoopCard(tint: StrandPalette.effortColor) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -512,7 +512,7 @@ struct WorkoutDetailView: View {
     private func sourceBadge(_ source: String) -> some View {
         let (label, tint): (String, Color) = {
             switch WorkoutSource.classify(source) {
-            case .whoop:    return (String(localized: "Whoop"), StrandPalette.accent)
+            case .whoop:    return (String(localized: "Imported"), StrandPalette.accent)
             case .apple:    return (String(localized: "Apple"), StrandPalette.metricCyan)
             case .detected: return (String(localized: "Detected"), StrandPalette.metricPurple)
             case .manual:   return (String(localized: "Manual"), StrandPalette.statusWarning)

@@ -521,11 +521,11 @@ private struct DeviceCard: View {
                 // #221: the full #78 pairing-refusal guidance, self-service right on the card instead of
                 // buried in the strap log — only when the bond was genuinely refused.
                 if bondRefused, let hint = pairingHint {
-                    Text(hint)
+                    Text(CustomerFacingBrand.text(hint))
                         .font(StrandFont.footnote)
                         .foregroundStyle(StrandPalette.statusWarning)
                         .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityLabel(hint)
+                        .accessibilityLabel(CustomerFacingBrand.text(hint))
                 }
 
                 // Live battery for the active+connected device, shown as a liquid tube that fills to the

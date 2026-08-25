@@ -23,11 +23,11 @@ final class IntelligenceDaySourceTests: XCTestCase {
     }
 
     func testWhoopImportWinsWhenItCoversTheDay() {
-        // A WHOOP export covers the day → it wins the dashboard merge → badge "Whoop".
+        // A compatible export covers the day -> it wins the dashboard merge -> badge "Imported".
         let src = DaySource.classify(day: "2026-06-12",
                                      importedWhoopDays: ["2026-06-12"], appleHealthDays: [])
         XCTAssertEqual(src, .whoopImport)
-        XCTAssertEqual(src.badge, "Whoop")
+        XCTAssertEqual(src.badge, "Imported")
         XCTAssertEqual(src.logToken, "imported:whoop")
     }
 

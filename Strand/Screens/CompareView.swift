@@ -348,7 +348,7 @@ struct CompareView: View {
 
     private var officialReferenceSection: some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
-            SectionHeader("Official reference", overline: "Your WHOOP export vs Noop",
+            SectionHeader("Official reference", overline: "Your wearable export vs Noop",
                           onDark: false)
             NoopCard {
                 VStack(alignment: .leading, spacing: NoopMetrics.gap) {

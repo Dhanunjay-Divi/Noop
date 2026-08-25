@@ -966,7 +966,7 @@ struct CoachView: View {
             // verbatim `Text` so typed `*`/`#` never turn into surprise formatting.
             // The reply sits on a frosted Charge-tinted surface, a card, not a flat box.
             HStack {
-                Markdown(message.text)
+                Markdown(CustomerFacingBrand.text(message.text))
                     .markdownTheme(.strand)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -977,7 +977,7 @@ struct CoachView: View {
                 Spacer(minLength: 48)
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Coach said: \(message.text)")
+            .accessibilityLabel("Coach said: \(CustomerFacingBrand.text(message.text))")
         }
     }
 

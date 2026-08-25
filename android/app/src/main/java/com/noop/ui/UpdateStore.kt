@@ -2,6 +2,7 @@ package com.noop.ui
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.noop.brand.CustomerFacingBrand
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -267,7 +268,9 @@ class UpdateStore private constructor(private val prefs: SharedPreferences) {
         post(
             UpdateItem(
                 kind = UpdateKind.WHATS_NEW,
-                title = if (title.isEmpty()) "What's new in NOOP $version" else title,
+                title = CustomerFacingBrand.text(
+                    if (title.isEmpty()) "What's new in NOOP $version" else title,
+                ),
                 message = "NOOP $version is here - tap to read what's new.",
             ),
         )

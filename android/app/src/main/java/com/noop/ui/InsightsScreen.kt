@@ -505,7 +505,7 @@ fun InsightsScreen(vm: AppViewModel, onOpenInsightsHub: () -> Unit = {}) {
             DataPendingNote(
                 title = uiString(R.string.l10n_insights_screen_insights_read_your_journal_and_outcomes_6ec8aaf9),
                 body = "Log behaviours above. After a few days of answers, NOOP ranks how each " +
-                    "one moves your recovery, HRV and sleep. Importing a WHOOP export (which " +
+                    "one moves your recovery, HRV and sleep. Importing a wearable export (which " +
                     "includes its journal) backfills history instantly.",
             )
         } else {

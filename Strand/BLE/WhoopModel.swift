@@ -15,8 +15,13 @@ public enum WhoopModel: String, CaseIterable, Identifiable, Hashable {
     /// Hardware generation is an internal transport detail. Setup and status surfaces use one product name.
     public var displayName: String { Self.customerName }
 
-    /// Diagnostic-only transport identity. Never use this on ordinary customer setup or status screens.
-    public var transportName: String { rawValue }
+    /// Diagnostic transport identity without exposing a third-party brand in the customer-visible log.
+    public var transportName: String {
+        switch self {
+        case .whoop4: return "legacy band"
+        case .whoop5mg: return "newer band"
+        }
+    }
 
     /// The OTHER WHOOP family to try when a service-filtered scan for this model finds nothing. A
     /// stale/missing persisted preference (after an update or a state restore) can point the scan at

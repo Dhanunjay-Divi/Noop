@@ -1796,7 +1796,7 @@ struct MetricDetailView: View {
     /// `provenanceLabelTint` so the same source reads the same colour across the twins.
     private func readingSourceTint(_ label: String) -> Color {
         switch label {
-        case "Whoop":         return StrandPalette.accent
+        case "Imported":      return StrandPalette.accent
         case "Apple Health":  return StrandPalette.metricCyan
         case "Health Connect": return StrandPalette.metricPurple
         default:              return StrandPalette.statusPositive

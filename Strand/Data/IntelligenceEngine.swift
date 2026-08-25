@@ -97,7 +97,7 @@ final class IntelligenceEngine: ObservableObject {
         var badge: String {
             switch self {
             case .computed:    return String(localized: "On-device")
-            case .whoopImport: return "Whoop"
+            case .whoopImport: return String(localized: "Imported")
             case .appleHealth: return "Apple Health"
             }
         }

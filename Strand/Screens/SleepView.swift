@@ -574,8 +574,8 @@ struct SleepView: View {
         let wakeDay = Repository.localDayKey(Date(timeIntervalSince1970: TimeInterval(night.session.endTs)))
         let hasWhoop = repo.importedSleep[wakeDay] != nil
         let hasOura = night.sourceBlocks.contains(where: OuraSleepSessionMapping.hasOuraProvenance)
-        if hasWhoop && hasOura { return String(localized: "Whoop") + " + " + String(localized: "Oura ring") }
-        if hasWhoop { return String(localized: "Whoop") }
+        if hasWhoop && hasOura { return String(localized: "Imported") + " + " + String(localized: "Oura ring") }
+        if hasWhoop { return String(localized: "Imported") }
         if hasOura { return String(localized: "Oura ring") }
         return String(localized: "On-device")
     }
@@ -2499,7 +2499,7 @@ struct SleepView: View {
         // SleepView (scroll-stutter isolation; identical output to the prior inline check).
         SleepSyncingNote()
         if repo.loaded {
-            ComingSoon(what: "No nights here yet. Import your WHOOP export in Data Sources to see every night, your sleep stages and trends straight away. Or open Intelligence to see last night computed from the strap after you wear it to bed.")
+            ComingSoon(what: "No nights here yet. Import a wearable export in Data Sources to see every night, your sleep stages and trends straight away. Or open Intelligence to see last night computed from the strap after you wear it to bed.")
         } else {
             ComingSoon(what: "Loading your sleep history…")
         }

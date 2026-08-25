@@ -63,7 +63,7 @@ struct LiveView: View {
         guard let registry = model.deviceRegistry,
               let active = registry.devices.first(where: { $0.id == registry.activeDeviceId })
         else { return WhoopModel.customerName }
-        return active.displayName
+        return CustomerFacingBrand.text(active.displayName)
     }
 
     /// Live workout mode (#238) — presents the full in-exercise screen while a manual workout is
@@ -484,14 +484,15 @@ struct LiveView: View {
     }
 
     private func reconnectGuideBanner(_ guide: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        let visibleGuide = CustomerFacingBrand.text(guide)
+        return HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(StrandPalette.statusWarning)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Can't connect: Noop Band pairing was reset")
                     .font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
-                Text(guide)
+                Text(visibleGuide)
                     .font(StrandFont.footnote).foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -502,18 +503,19 @@ struct LiveView: View {
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
             .strokeBorder(StrandPalette.statusWarning.opacity(0.5), lineWidth: 1))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Reconnect help: \(guide)")
+        .accessibilityLabel("Reconnect help: \(visibleGuide)")
     }
 
     private func pairingHintBanner(_ hint: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        let visibleHint = CustomerFacingBrand.text(hint)
+        return HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(StrandPalette.statusWarning)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Live HR works. Re-pair Noop Band to unlock haptics, alarms, and sync")
                     .font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
-                Text(hint)
+                Text(visibleHint)
                     .font(StrandFont.footnote).foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -524,7 +526,7 @@ struct LiveView: View {
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
             .strokeBorder(StrandPalette.statusWarning.opacity(0.5), lineWidth: 1))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Pairing help: \(hint)")
+        .accessibilityLabel("Pairing help: \(visibleHint)")
     }
 
     /// Whether the low-bandwidth standard-HR fallback note should render. The note explains that live HR

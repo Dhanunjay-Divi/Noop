@@ -420,9 +420,9 @@ private struct ExpectationsStep: View {
                             .frame(width: 26)
                             .padding(.top, 2)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(e.title).font(StrandFont.headline)
+                            Text(CustomerFacingBrand.text(e.title)).font(StrandFont.headline)
                                 .foregroundStyle(StrandPalette.textPrimary)
-                            Text(e.body).font(StrandFont.subhead)
+                            Text(CustomerFacingBrand.text(e.body)).font(StrandFont.subhead)
                                 .foregroundStyle(StrandPalette.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }

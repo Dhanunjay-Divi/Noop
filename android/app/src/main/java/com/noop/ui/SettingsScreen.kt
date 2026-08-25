@@ -110,6 +110,7 @@ import com.noop.analytics.Zones
 import com.noop.R
 import com.noop.ble.PuffinExperiment
 import com.noop.ble.WhoopModel
+import com.noop.brand.CustomerFacingBrand
 import com.noop.data.BackupSettingsCodec
 import com.noop.data.DataBackup
 import com.noop.data.MedicationStore
@@ -781,7 +782,7 @@ fun SettingsScreen(
                 onSuccess = { msg ->
                     Toast.makeText(
                         context,
-                        "$msg Re-import it via Data sources → WHOOP import, on Android or Mac.",
+                        "$msg Re-import it through Data Sources on Android or Mac.",
                         Toast.LENGTH_LONG,
                     ).show()
                 },
@@ -1623,7 +1624,12 @@ fun SettingsScreen(
                                 onClick = { vm.ble.renameStrap(nameDraft) },
                             )
                             live.renameStatus?.let {
-                                Text(it, style = NoopType.footnote, color = Palette.textSecondary, modifier = Modifier.weight(1f))
+                                Text(
+                                    CustomerFacingBrand.text(it),
+                                    style = NoopType.footnote,
+                                    color = Palette.textSecondary,
+                                    modifier = Modifier.weight(1f),
+                                )
                             }
                         }
                     }

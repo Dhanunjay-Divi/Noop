@@ -30,10 +30,10 @@ public enum FusionSource: String, Equatable, Sendable, CaseIterable, Codable {
     /// Locally-cached fallback row with no richer provenance.
     case localCache = "local-cache"
 
-    /// Human-facing source name for a provenance pill ("from WHOOP"). Never a clinical claim.
+    /// Human-facing source name for a provenance pill. Never a clinical claim.
     public var displayName: String {
         switch self {
-        case .whoopImport:   return "WHOOP"
+        case .whoopImport:   return "Imported"
         case .noopComputed:  return "NOOP"
         case .appleHealth:   return "Apple Health"
         case .healthConnect: return "Health Connect"
@@ -61,7 +61,7 @@ public enum AgreementState: String, Equatable, Sendable, CaseIterable, Codable {
 
 /// One source's value for a `(metric, day)`, with the trust tier the policy assigned it. The winner
 /// is the lowest `tier` (most trusted), ties broken by `sourcePriority` (stable). `reason` is the
-/// published, plain-English evidence description ("WHOOP import", "computed stages") - the honesty contract.
+/// published, plain-English evidence description ("wearable import", "computed stages") - the honesty contract.
 public struct ContributingSource: Equatable, Sendable {
     public let source: FusionSource
     public let value: Double

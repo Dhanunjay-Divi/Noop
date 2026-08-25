@@ -81,7 +81,7 @@ final class MetricCatalogStepsTests: XCTestCase {
 
     /// A catalog row describes a namespace, not necessarily the producer of every resolved point.
     /// `my-whoop` can resolve to measured strap data or a `-noop` computed sibling, so it must never
-    /// present an independent score as if it were an official WHOOP value.
+    /// present an independent score as if it were an official imported value.
     func testSourceLabelsKeepIndependentAndOfficialSeriesDistinct() {
         XCTAssertEqual(
             MetricCatalog.metric(key: "recovery", source: "my-whoop")?.sourceLabel,
@@ -98,7 +98,7 @@ final class MetricCatalogStepsTests: XCTestCase {
             decimals: 0,
             higherIsBetter: true
         )
-        XCTAssertEqual(official.sourceLabel, "WHOOP import")
+        XCTAssertEqual(official.sourceLabel, "Imported")
     }
 
     func testMetricEmptyStateCopyNamesTheDescriptorSource() {

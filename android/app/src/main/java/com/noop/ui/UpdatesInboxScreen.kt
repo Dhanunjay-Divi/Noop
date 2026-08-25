@@ -2,6 +2,7 @@
 
 package com.noop.ui
 
+import com.noop.brand.CustomerFacingBrand
 import com.noop.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.Arrangement
@@ -284,6 +285,8 @@ private fun UpdateRow(
     onRestore: () -> Unit,
 ) {
     val tint = kindTint(item.kind)
+    val visibleTitle = CustomerFacingBrand.text(item.title)
+    val visibleMessage = CustomerFacingBrand.text(item.message)
     NoopCard(
         // Unread rows carry the kind's colour wash; read rows sit on the plain navy fill.
         tint = if (item.read) null else tint,
@@ -296,9 +299,9 @@ private fun UpdateRow(
             )
             .semantics {
                 contentDescription = if (item.read) {
-                    "${item.title}. ${item.message}"
+                    CustomerFacingBrand.text("${item.title}. ${item.message}")
                 } else {
-                    "Unread. ${item.title}. ${item.message}"
+                    CustomerFacingBrand.text("Unread. ${item.title}. ${item.message}")
                 }
             },
     ) {
@@ -319,9 +322,9 @@ private fun UpdateRow(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
-                    Text(item.title, style = NoopType.headline, color = Palette.textPrimary)
+                    Text(visibleTitle, style = NoopType.headline, color = Palette.textPrimary)
                     Text(
-                        item.message,
+                        visibleMessage,
                         style = NoopType.subhead,
                         color = Palette.textSecondary,
                         maxLines = 2,

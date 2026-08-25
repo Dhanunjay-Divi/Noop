@@ -140,7 +140,7 @@ public struct ConnectionDot: View {
             Image(systemName: "applewatch")
                 .foregroundStyle(StrandPalette.textSecondary)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Whoop 4.0").font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
+                Text("Legacy band").font(StrandFont.subhead).foregroundStyle(StrandPalette.textPrimary)
                 Text("87% · streaming").font(StrandFont.footnote).foregroundStyle(StrandPalette.textTertiary)
             }
             Spacer()

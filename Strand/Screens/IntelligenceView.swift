@@ -61,7 +61,7 @@ struct IntelligenceView: View {
                 IntelSyncingNote()
                 DataPendingNote(
                     title: "Building from Noop Band",
-                    message: "This builds as Noop Band syncs. Effort and Sleep appear after you have worn the band and slept a night. Recovery needs about four nights of sleep to learn your baseline (you'll see \"Calibrating\" until then), and keeps sharpening over your first couple of weeks. Some band firmware syncs history less often, so the night count can climb slowly or stay at 0 of 4 until you have worn it across a few nights. That's a sync limit, not a fault. Import your WHOOP export to skip the wait.",
+                    message: "This builds as Noop Band syncs. Effort and Sleep appear after you have worn the band and slept a night. Recovery needs about four nights of sleep to learn your baseline (you'll see \"Calibrating\" until then), and keeps sharpening over your first couple of weeks. Some band firmware syncs history less often, so the night count can climb slowly or stay at 0 of 4 until you have worn it across a few nights. That's a sync limit, not a fault. Import a wearable export to skip the wait.",
                     symbol: "brain.head.profile"
                 )
             } else {

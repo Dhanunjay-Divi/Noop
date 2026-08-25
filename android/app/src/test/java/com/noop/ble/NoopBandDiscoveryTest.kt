@@ -17,11 +17,11 @@ class NoopBandDiscoveryTest {
     }
 
     @Test
-    fun customerNameIsStableWhileDiagnosticsPreserveTransportFamily() {
+    fun customerNameAndVisibleDiagnosticsHideVendorBrand() {
         assertEquals("Noop Band", WhoopModel.WHOOP4.displayName)
         assertEquals("Noop Band", WhoopModel.WHOOP5_MG.displayName)
-        assertEquals("WHOOP 4.0", WhoopModel.WHOOP4.transportName)
-        assertEquals("WHOOP 5.0 / MG", WhoopModel.WHOOP5_MG.transportName)
+        assertEquals("legacy band", WhoopModel.WHOOP4.transportName)
+        assertEquals("newer band", WhoopModel.WHOOP5_MG.transportName)
     }
 
     @Test

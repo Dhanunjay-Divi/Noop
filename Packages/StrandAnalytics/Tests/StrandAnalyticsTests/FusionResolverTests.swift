@@ -29,7 +29,7 @@ final class FusionResolverTests: XCTestCase {
         ])
         XCTAssertEqual(point?.winningSource, .whoopImport)
         XCTAssertEqual(point?.value, 432)
-        XCTAssertEqual(point?.contributors.first?.reason, "WHOOP staged-sleep import")
+        XCTAssertEqual(point?.contributors.first?.reason, "imported sleep stages")
     }
 
     func testRestingHRStrapBeatsPhone() {
@@ -182,7 +182,7 @@ final class FusionResolverTests: XCTestCase {
 
     func testEvidenceReasonsNeverRelabelImportsAsDirectSensors() {
         XCTAssertEqual(MetricArbitrationPolicy.reason(metric: .hrv, source: .whoopImport),
-                       "WHOOP import")
+                       "wearable import")
         XCTAssertEqual(MetricArbitrationPolicy.reason(metric: .skinTemp, source: .appleHealth),
                        "health-data import")
         XCTAssertEqual(MetricArbitrationPolicy.reason(metric: .heartRate, source: .xiaomiBand),

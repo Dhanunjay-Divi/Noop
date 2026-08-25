@@ -222,9 +222,9 @@ class TodayExplainabilityTest {
     }
 
     @Test
-    fun dayOwner_importedStrap_mapsToWhoop() {
+    fun dayOwner_importedStrap_mapsToImported() {
         assertEquals(FusionSource.WHOOP_IMPORT, dayOwnerSource("my-whoop"))
-        assertEquals("Whoop", provenanceBadgeLabel(dayOwnerSource("my-whoop")))
+        assertEquals("Imported", provenanceBadgeLabel(dayOwnerSource("my-whoop")))
     }
 
     @Test
@@ -242,7 +242,7 @@ class TodayExplainabilityTest {
     @Test
     fun provenanceLabel_isNeverBlanketOnDevice_forImports() {
         // Honesty: an imported source must NOT be relabelled "On-device".
-        assertEquals("Whoop", provenanceBadgeLabel(FusionSource.WHOOP_IMPORT))
+        assertEquals("Imported", provenanceBadgeLabel(FusionSource.WHOOP_IMPORT))
         assertEquals("Apple Health", provenanceBadgeLabel(FusionSource.APPLE_HEALTH))
     }
 
@@ -252,7 +252,7 @@ class TodayExplainabilityTest {
     // WhoopRepository.mergeDaily (imported WHOOP > NOOP-computed > Apple Health). `provenanceDisplayLabel`
     // is the PURE raw-source-id → label mapper that the per-ring badge uses. It must mirror the Swift
     // `provenanceDisplayLabel(rawSource:deviceId:)` EXACTLY: the computed sibling reads "On-device", the
-    // imported strap source reads "Whoop", Apple Health reads "Apple Health", and any OTHER source keeps
+    // imported strap source reads "Imported", Apple Health reads "Apple Health", and any OTHER source keeps
     // its FusionSource display name (never a blanket "on-device").
 
     @Test
@@ -262,9 +262,9 @@ class TodayExplainabilityTest {
     }
 
     @Test
-    fun perMetric_importedStrap_readsWhoop() {
-        // The imported strap source (the deviceId itself, normally "my-whoop") is a real WHOOP export.
-        assertEquals("Whoop", provenanceDisplayLabel("my-whoop"))
+    fun perMetric_importedStrap_readsImported() {
+        // The imported strap source (the deviceId itself, normally "my-whoop") is compatible history.
+        assertEquals("Imported", provenanceDisplayLabel("my-whoop"))
     }
 
     @Test
@@ -272,8 +272,8 @@ class TodayExplainabilityTest {
         // THE CONTRACT (Component 4): an imported metric winning field-by-field on an otherwise-computed
         // day must read its REAL source, never a blanket "On-device". So when the resolver returns the
         // import source for, say, "recovery" while the day's other fields are computed, the Charge badge
-        // reads "Whoop" — and an Apple-Health-won metric reads "Apple Health" — not the day's deviceId.
-        assertEquals("Whoop", provenanceDisplayLabel("my-whoop"))
+        // reads "Imported", and an Apple-Health-won metric reads "Apple Health", not the day's deviceId.
+        assertEquals("Imported", provenanceDisplayLabel("my-whoop"))
         assertEquals("Apple Health", provenanceDisplayLabel("apple-health"))
     }
 
@@ -298,10 +298,10 @@ class TodayExplainabilityTest {
     @Test
     fun perMetric_honoursACustomStrapDeviceId() {
         // The deviceId is parameterised (mirrors Swift's repo.deviceId): a custom strap id and its "-noop"
-        // sibling still resolve to "Whoop" / "On-device", and the FIXED "my-whoop" import still reads "Whoop".
+        // sibling still resolve to "Imported" / "On-device", and the fixed legacy import stays "Imported".
         assertEquals("On-device", provenanceDisplayLabel("strap-42-noop", deviceId = "strap-42"))
-        assertEquals("Whoop", provenanceDisplayLabel("strap-42", deviceId = "strap-42"))
-        assertEquals("Whoop", provenanceDisplayLabel("my-whoop", deviceId = "strap-42"))
+        assertEquals("Imported", provenanceDisplayLabel("strap-42", deviceId = "strap-42"))
+        assertEquals("Imported", provenanceDisplayLabel("my-whoop", deviceId = "strap-42"))
     }
 
     @Test

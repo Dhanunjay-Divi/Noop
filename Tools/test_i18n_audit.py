@@ -185,6 +185,58 @@ class AppleFormatCoverage(unittest.TestCase):
         self.assertEqual(ia.apple_format_gaps(cat, "de"), [])
 
 
+class CustomerFacingBrandAudit(unittest.TestCase):
+    def test_legacy_catalog_key_is_safe_with_neutral_english_override(self):
+        cat = {
+            "strings": {
+                "Import WHOOP export": {
+                    "localizations": {
+                        "en": {"stringUnit": {"state": "translated", "value": "Import wearable export"}},
+                        "de": {"stringUnit": {"state": "translated", "value": "Wearable-Export importieren"}},
+                    }
+                }
+            }
+        }
+        self.assertEqual(ia.apple_catalog_brand_violations(cat), [])
+
+    def test_legacy_catalog_key_without_english_override_is_rejected(self):
+        cat = {"strings": {"Import WHOOP export": {"shouldTranslate": False}}}
+        self.assertEqual(
+            ia.apple_catalog_brand_violations(cat),
+            ["<catalog> :: source 'Import WHOOP export'"],
+        )
+
+    def test_forbidden_translated_value_is_rejected(self):
+        cat = {
+            "strings": {
+                "import.source": {
+                    "localizations": {
+                        "en": {"stringUnit": {"state": "translated", "value": "WHOOP import"}},
+                    }
+                }
+            }
+        }
+        violations = ia.apple_catalog_brand_violations(cat)
+        self.assertEqual(len(violations), 1)
+        self.assertIn("WHOOP import", violations[0])
+
+    def test_android_resource_names_are_ignored_but_values_are_checked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "strings.xml"
+            path.write_text(
+                '<resources><string name="whoop_internal_key">Noop Band</string>'
+                '<string name="unsafe">WHOOP import</string></resources>',
+                encoding="utf-8",
+            )
+            violations = ia.android_resource_file_brand_violations(path)
+        self.assertEqual(len(violations), 1)
+        self.assertIn("unsafe", violations[0])
+
+    def test_internal_interpolation_identifier_is_not_rendered_text(self):
+        literal = "${WhoopModel.CUSTOMER_NAME} (Live Bluetooth)"
+        self.assertEqual(ia._static_literal_text(literal, "android"), " (Live Bluetooth)")
+
+
 class ScanAndroidEndToEnd(unittest.TestCase):
     """Exercises scan_android() against real files on disk (its actual
     contract), not just the pure-function helpers above."""

@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import com.noop.R
+import com.noop.brand.CustomerFacingBrand
 import androidx.compose.ui.res.stringResource
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -530,7 +531,7 @@ private fun DeviceCard(
             // #221: the full #78 pairing-refusal guidance, self-service right on the card instead of
             // buried in the strap log — only when the bond was genuinely refused.
             if (bondRefused && pairingHint != null) {
-                Text(pairingHint, style = NoopType.footnote, color = Palette.statusWarning)
+                Text(CustomerFacingBrand.text(pairingHint), style = NoopType.footnote, color = Palette.statusWarning)
             }
 
             // Live battery as a small liquid TUBE — the active+connected device's reported % (WHOOP, a
@@ -1174,10 +1175,11 @@ internal fun displayName(device: PairedDeviceRow): String {
         nickname.isNotEmpty() && !(isNoopBand &&
             (nickname.equals("WHOOP", ignoreCase = true) ||
                 nickname.startsWith("WHOOP ", ignoreCase = true)))
-    }?.let { return it }
+    }?.let { return CustomerFacingBrand.text(it) }
     if (isNoopBand) return "Noop Band"
-    return if (device.model.contains(device.brand, ignoreCase = true)) device.model
+    val raw = if (device.model.contains(device.brand, ignoreCase = true)) device.model
     else "${device.brand} ${device.model}"
+    return CustomerFacingBrand.text(raw)
 }
 
 /** SF-Symbol-equivalent icon: WHOOP keeps the band glyph; an FTMS machine reads as gym equipment;

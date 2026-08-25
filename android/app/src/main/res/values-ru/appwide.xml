@@ -99,6 +99,8 @@
     <string name="appwide_fitness_age_younger_many_profile_age">На %1$d лет моложе возраста в профиле</string>
     <string name="appwide_fitness_age_younger_one_profile_age">На 1 год моложе возраста в профиле</string>
     <string name="appwide_friends_invite_instructions">В Noop откройте «Ещё» → «Друзья» и введите адрес сервера и одноразовый код.</string>
+    <string name="appwide_journal_editing_help">Переименуйте, перегруппируйте или удалите пункт, чтобы упорядочить список. Исходный вопрос сохраняется внутри, поэтому импортированные данные продолжают сопоставляться. Пользовательские пункты удаляются, а встроенные скрываются и могут быть восстановлены ниже.</string>
+    <string name="appwide_legal_summary">Условия проекта и лицензия исходного кода. Доступно офлайн.</string>
     <string name="appwide_metric_education_body_temp_action">Проверьте исходный источник и способ измерения. Подтвердите неожиданный результат подходящим термометром и обратитесь за помощью, если этого требуют симптомы.</string>
     <string name="appwide_metric_education_body_temp_limits">Место, устройство, время и условия измерения различаются. Это не мониторинг внутренней температуры тела и не диагноз.</string>
     <string name="appwide_metric_education_body_temp_method">NOOP сохраняет исходное значение в отдельном ряду и не подменяет им отклонение температуры кожи.</string>
@@ -219,18 +221,18 @@
     <string name="appwide_strength_reps_format">Повторений: %1$d</string>
     <string name="appwide_strength_sessions_goal">Силовые тренировки</string>
     <string name="appwide_strength_sets_format">Подходов: %1$d</string>
-    <string name="appwide_terms_attest_band">Я понимаю, что NOOP Band пока недоступен. Сейчас эта версия работает с принадлежащим мне совместимым браслетом WHOOP, и я буду использовать только собственный браслет и собственные данные.</string>
+    <string name="appwide_terms_attest_band">Я понимаю, что NOOP Band пока недоступен. Сейчас эта версия работает с принадлежащим мне совместимым браслетом, и я буду использовать только собственный браслет и собственные данные.</string>
     <string name="appwide_terms_attest_early_access">Я понимаю, что NOOP является программой для отслеживания самочувствия в раннем доступе, предоставляется «как есть» и не является медицинским устройством или медицинской рекомендацией.</string>
     <string name="appwide_terms_attest_full_terms">Я прочитал и принимаю Условия использования полностью, включая допустимые законом ограничения гарантий и ответственности.</string>
-    <string name="appwide_terms_point_compatibility_body">NOOP разрабатывается независимо и не связан с WHOOP, Inc. и не одобрен этой компанией. Название «WHOOP» используется только для обозначения совместимого браслета, который сейчас поддерживает NOOP.</string>
+    <string name="appwide_terms_point_compatibility_body">NOOP разрабатывается независимо. Текущая прямая поддержка браслета предназначена для проверки совместимости, пока NOOP Band находится в разработке.</string>
     <string name="appwide_terms_point_compatibility_head">Текущая совместимость</string>
     <string name="appwide_terms_point_early_access_body">Эта версия предоставляется «как есть», пока NOOP Band и программное обеспечение находятся в разработке. Ограничения гарантий и ответственности приведены в полных условиях.</string>
     <string name="appwide_terms_point_early_access_head">Программа в раннем доступе</string>
     <string name="appwide_terms_point_medical_body">Показатели NOOP являются оценками общего самочувствия. Не используйте их для диагностики, лечения или принятия медицинских либо экстренных решений. При необходимости обращайтесь за квалифицированной помощью.</string>
     <string name="appwide_terms_point_medical_head">Самочувствие, а не медицинская помощь</string>
-    <string name="appwide_terms_point_ownership_body">Подключайте только принадлежащий вам браслет и используйте NOOP только со своими данными. Текущая совместимость основана на неофициальном, независимо изученном протоколе и может нарушать Условия использования WHOOP либо повлиять на поддержку, учётную запись, подписку, устройство или гарантию.</string>
+    <string name="appwide_terms_point_ownership_body">Подключайте только принадлежащий вам браслет и используйте NOOP только со своими данными. Прямая совместимость может повлиять на подключение другого приложения, службы учётной записи, поддержку устройства или гарантию.</string>
     <string name="appwide_terms_point_ownership_head">Ваш браслет, ваши данные</string>
-    <string name="appwide_terms_subtitle">Пока NOOP Band не готов, эта версия работает с принадлежащим вам совместимым браслетом WHOOP.</string>
+    <string name="appwide_terms_subtitle">Пока NOOP Band не готов, эта версия работает с принадлежащим вам совместимым браслетом.</string>
     <string name="appwide_terms_title">NOOP Band уже в разработке</string>
     <string name="appwide_today_band_sync_progress_format">История Noop Band синхронизируется, получено пакетов: %1$d</string>
     <string name="appwide_today_band_sync_synced">История Noop Band синхронизирована</string>
@@ -279,4 +281,6 @@
     <string name="appwide_v4_target">ЦЕЛЬ НА СЕГОДНЯ</string>
     <string name="appwide_v4_watch">СТОИТ НАБЛЮДАТЬ</string>
     <string name="appwide_v4_why">ПОЧЕМУ</string>
+    <string name="appwide_workouts_imported_zone_split">Импортированное распределение по зонам для этой тренировки.</string>
+    <string name="appwide_workouts_imported_zones">Импортированные зоны</string>
 </resources>

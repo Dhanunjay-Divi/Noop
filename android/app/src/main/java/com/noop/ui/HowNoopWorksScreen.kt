@@ -103,7 +103,7 @@ private enum class PrimerSection(
     PROVENANCE(
         title = uiString(R.string.l10n_how_noop_works_screen_where_your_numbers_come_from_e169963a),
         body = "A badge shows whether a number was scored on-device by NOOP, or imported " +
-            "from a WHOOP export or Apple Health.",
+            "from a wearable export or Apple Health.",
         icon = Icons.Filled.Verified,
     );
 

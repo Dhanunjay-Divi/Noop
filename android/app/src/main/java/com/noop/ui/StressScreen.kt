@@ -1124,7 +1124,7 @@ private fun StressLoading() {
 private fun StressEmpty() {
     DataPendingNote(
         title = uiString(R.string.l10n_stress_screen_no_stress_history_yet_ec962e3c),
-        body = "No stress history yet. Import your WHOOP export in Data Sources to see it.",
+        body = "No stress history yet. Import a wearable export in Data Sources to see it.",
     )
 }
 

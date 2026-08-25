@@ -91,15 +91,15 @@ struct ScoringGuideView: View {
                         scoreCard(.charge,
                                   headline: String(localized: "Recovery: how recovered are you?"),
                                   body: String(localized: "Led by your heart-rate variability (HRV) measured against your own personal baseline, plus resting heart rate, last night's Sleep Score, breathing rate, and a skin-temperature signal (an early illness or overreach flag). Higher HRV versus your baseline means higher Recovery. NOOP needs a few nights to learn your baseline first. Until then you'll see “Calibrating”."),
-                                  vsWhoop: String(localized: "Same core idea as WHOOP's Recovery % (HRV-led recovery), but our weighting and baseline maths are our own, and openly documented."))
+                                  methodNote: String(localized: "NOOP uses an HRV-led recovery model with its own openly documented weighting and personal-baseline math."))
                         scoreCard(.effort,
                                   headline: String(localized: "Effort: how hard did your heart work?"),
                                   body: String(localized: "Your cardiovascular load. NOOP turns every second of heart rate into a training-impulse using heart-rate-reserve zones (Karvonen), weights time in harder zones more heavily (Edwards / Banister), and places it on a logarithmic 0-100 scale, so easy days sit low and an all-out day approaches 100, which stays genuinely rare. A long walk with little cardio still counts, through a steps / active-energy floor."),
-                                  vsWhoop: String(localized: "Same cardiovascular-load idea as WHOOP's Day Strain (0-21). We rescaled the top of the ladder from 21 to 100 so all three scores share one scale. The rungs didn't move, so a 100 is as rare as a 21.0 was."))
+                                  methodNote: String(localized: "NOOP uses a cardiovascular-load model and presents all three scores on one 0-100 scale. A 100 is reserved for an exceptionally hard day."))
                         scoreCard(.rest,
                                   headline: String(localized: "Sleep Score: how restorative was your sleep?"),
                                   body: String(localized: "A blend of how long you slept versus your personal need (the biggest factor), how efficiently (asleep versus in bed), how much was restorative (deep + REM sleep), and how consistent your sleep and wake timing is."),
-                                  vsWhoop: String(localized: "Similar in spirit to WHOOP's Sleep Performance %; our composite is our own."))
+                                  methodNote: String(localized: "NOOP combines duration, efficiency, restorative sleep and consistency in its own composite."))
                         confidenceCard
                         footerNote
                     }
@@ -199,7 +199,7 @@ struct ScoringGuideView: View {
     /// day reads like" preview in the section's own colour - so a glance maps a card to its Today ring.
     /// Design Reset: a flat GlowRing (no bloom) replaces the old BevelGauge; the accent is a Reset score
     /// token, never gold / strain / sleep-purple.
-    private func scoreCard(_ section: ScoreSection, headline: String, body: String, vsWhoop: String) -> some View {
+    private func scoreCard(_ section: ScoreSection, headline: String, body: String, methodNote: String) -> some View {
         NoopCard(tint: section.accent) {
             VStack(alignment: .leading, spacing: 14) {
                 // Header row — the flat sample ring sits beside the accent icon + headline.
@@ -235,7 +235,7 @@ struct ScoringGuideView: View {
                         .textCase(.uppercase)
                         .foregroundStyle(section.accent)
                         .padding(.top, 1)
-                    Text(vsWhoop)
+                    Text(methodNote)
                         .font(StrandFont.footnote)
                         .italic()
                         .foregroundStyle(StrandPalette.textTertiary)

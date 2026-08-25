@@ -504,7 +504,7 @@ private fun ExperimentalAlgorithmsCard(vm: AppViewModel) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             ToggleRowTC(
                 title = uiString(R.string.l10n_test_centre_screen_hr_from_ppg_sub_lag_interpolation_a3ed1536),
-                description = "When NOOP reconstructs heart rate from the WHOOP 5/MG v26 optical waveform (the " +
+                description = "When NOOP reconstructs heart rate from the newer band's v26 optical waveform (the " +
                     "seconds the strap stored no HR), refine the autocorrelation peak with a parabolic sub-lag " +
                     "fit so the estimate is not quantized to roughly 16 bpm steps near a high HR. It only fills " +
                     "seconds the strap never reported; it never overrides a stored HR. 5/MG only, off by default.",

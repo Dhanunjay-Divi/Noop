@@ -183,7 +183,7 @@ private object CompareCatalog {
             "°C",
             "apple-health",
             1,
-            note = "Absolute body temperature; never WHOOP skin-temperature deviation.",
+            note = "Absolute body temperature; separate from the band's skin-temperature deviation.",
         ),
         CompareMetric(
             "wrist_temp",
@@ -588,7 +588,7 @@ fun CompareScreen(vm: AppViewModel) {
                         DataPendingNote(
                             title = uiString(R.string.l10n_compare_screen_compare_needs_at_least_two_metrics_2bfe1fad),
                             body = "Compare needs at least two metrics with history. Import your " +
-                                "WHOOP export in Data Sources first.",
+                                "wearable export in Data Sources first.",
                         )
                     }
                 } else {

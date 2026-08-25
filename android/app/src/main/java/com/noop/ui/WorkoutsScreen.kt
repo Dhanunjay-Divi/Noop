@@ -492,7 +492,7 @@ private val SOURCE_FILTER_OPTIONS = listOf(
 
 /** The Source-filter menu label for an origin class. */
 private fun sourceFilterLabel(c: WorkoutSource): String = when (c) {
-    WorkoutSource.WHOOP -> "Whoop"
+    WorkoutSource.WHOOP -> "Imported"
     WorkoutSource.APPLE -> "Apple"
     WorkoutSource.DETECTED -> "Detected"
     WorkoutSource.MANUAL -> "Manual"
@@ -933,7 +933,7 @@ private fun ZonesSection(rows: List<WorkoutRow>) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         SectionHeader(
             title = uiString(R.string.l10n_workouts_screen_hr_zones_293d7175),
-            overline = "Whoop import",
+            overline = uiString(R.string.appwide_workouts_imported_zones),
             trailing = "${z.sessionsWithZones} of ${rows.size} session${if (rows.size == 1) "" else "s"}",
         )
         NoopCard(tint = Palette.effortColor) {
@@ -1426,7 +1426,11 @@ private fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: () 
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Overline("HR zones", modifier = Modifier.weight(1f))
                         Text(
-                            if (zonesFromImport) "Whoop import" else "From strap HR",
+                            if (zonesFromImport) {
+                                uiString(R.string.appwide_workouts_imported_zones)
+                            } else {
+                                "From strap HR"
+                            },
                             style = NoopType.footnote,
                             color = Palette.textTertiary,
                         )
@@ -1440,7 +1444,7 @@ private fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: () 
                         z.forEachIndexed { i, m -> ZoneStat(i + 1, m, total, Modifier.weight(1f)) }
                     }
                     Text(
-                        if (zonesFromImport) "WHOOP's imported per-zone split for this session."
+                        if (zonesFromImport) uiString(R.string.appwide_workouts_imported_zone_split)
                         else "Time in each %HRmax zone, derived from the strap's heart rate over this window (approximate).",
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
@@ -2184,7 +2188,7 @@ internal fun workoutSourceLabel(deviceId: String, source: String): String {
     val src = source.lowercase()
     return when {
         id == "health-connect" || src.contains("health-connect") -> "HC"
-        id.contains("whoop") || src.contains("whoop") -> "Whoop"
+        id.contains("whoop") || src.contains("whoop") -> "Imported"
         else -> "Apple"
     }
 }
@@ -2249,7 +2253,7 @@ private val WorkoutRow.sourceBadge: Pair<String, Color>
         WorkoutSource.ACTIVITY_FILE -> "FILE" to Palette.metricAmber // imported GPX / TCX / FIT
         else -> when (workoutSourceLabel(deviceId, source)) {
             "HC" -> "HC" to Palette.metricPurple
-            "Whoop" -> "WHP" to Palette.accent
+            "Imported" -> "IMP" to Palette.accent
             else -> "APL" to Palette.metricCyan
         }
     }

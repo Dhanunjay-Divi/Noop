@@ -170,7 +170,7 @@ object MetricArbitrationPolicy {
                 (source == FusionSource.WHOOP_IMPORT || source == FusionSource.NOOP_COMPUTED) ->
                 "step estimate"
             metric == MetricKind.SLEEP && source == FusionSource.WHOOP_IMPORT ->
-                "WHOOP staged-sleep import"
+                "imported sleep stages"
             metric == MetricKind.SLEEP && source == FusionSource.NOOP_COMPUTED ->
                 "computed stages"
             metric == MetricKind.SLEEP && source == FusionSource.XIAOMI_BAND ->
@@ -184,7 +184,7 @@ object MetricArbitrationPolicy {
             metric == MetricKind.SKIN_TEMP &&
                 (source == FusionSource.APPLE_HEALTH || source == FusionSource.HEALTH_CONNECT) ->
                 "health-data import"
-            source == FusionSource.WHOOP_IMPORT -> "WHOOP import"
+            source == FusionSource.WHOOP_IMPORT -> "wearable import"
             source == FusionSource.XIAOMI_BAND -> "device-derived"
             source == FusionSource.NOOP_COMPUTED -> "computed on device"
             source == FusionSource.APPLE_HEALTH || source == FusionSource.HEALTH_CONNECT ->

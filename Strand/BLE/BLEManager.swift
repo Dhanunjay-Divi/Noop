@@ -2582,7 +2582,7 @@ public final class BLEManager: NSObject, ObservableObject {
     public func renameStrap(_ rawName: String) {
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard selectedModel.deviceFamily == .whoop4 else {
-            state.renameStatus = "Renaming is WHOOP 4.0 only."
+            state.renameStatus = "Renaming is unavailable on this band."
             log("Strap rename: WHOOP 4.0 only - ignored on a 5/MG."); return
         }
         guard state.connected, state.bonded else {

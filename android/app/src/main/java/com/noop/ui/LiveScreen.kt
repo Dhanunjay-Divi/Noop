@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import com.noop.R
+import com.noop.brand.CustomerFacingBrand
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -297,7 +298,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
         live.statusNote?.let { note ->
             item {
             Text(
-                note,
+                CustomerFacingBrand.text(note),
                 style = NoopType.footnote,
                 color = Palette.textSecondary,
                 modifier = Modifier.fillMaxWidth(),
@@ -322,7 +323,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
                     style = NoopType.subhead,
                     color = Palette.textPrimary,
                 )
-                Text(guide, style = NoopType.footnote, color = Palette.textSecondary)
+                Text(CustomerFacingBrand.text(guide), style = NoopType.footnote, color = Palette.textSecondary)
             }
             }
         }

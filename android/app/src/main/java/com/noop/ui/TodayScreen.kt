@@ -1380,7 +1380,7 @@ fun TodayScreen(
                         title = uiString(R.string.l10n_today_screen_live_now_your_scores_are_building_cb05a4e8),
                         body = "Your live heart rate is working from Noop Band, and recovery, strain " +
                             "and sleep build from it over your next few nights of wear, sharpening as it " +
-                            "learns your baseline. Want your full history instantly? Import your WHOOP " +
+                            "learns your baseline. Want your full history instantly? Import your wearable " +
                             "export in Data Sources and it backfills in about a minute.",
                     )
                     // The × is only meaningful for today's card (a past day's note isn't dismissed).
@@ -7069,7 +7069,7 @@ private fun synthesisWord(score: Double?): String {
 
 private fun synthesisDetail(d: DailyMetric?): String {
     val rec = d?.recovery
-        ?: return "No metrics yet. Import your WHOOP export or wear Noop Band to begin."
+        ?: return "No metrics yet. Import a wearable export or wear Noop Band to begin."
     val recPart = when {
         rec < 50 -> "Recovery is low"
         rec < 70 -> "Recovery is steady"

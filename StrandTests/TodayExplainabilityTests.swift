@@ -258,9 +258,9 @@ final class TodayExplainabilityTests: XCTestCase {
                        "On-device")
     }
 
-    func testProvenance_importedStrapSource_isWhoop() {
+    func testProvenance_importedStrapSource_isImported() {
         XCTAssertEqual(TodayView.provenanceDisplayLabel(rawSource: "my-whoop", deviceId: "my-whoop"),
-                       "Whoop")
+                       "Imported")
     }
 
     func testProvenance_appleHealthSource_isAppleHealth() {
@@ -273,7 +273,7 @@ final class TodayExplainabilityTests: XCTestCase {
         XCTAssertEqual(TodayView.provenanceDisplayLabel(rawSource: "whoop5-AB12-noop", deviceId: "whoop5-AB12"),
                        "On-device")
         XCTAssertEqual(TodayView.provenanceDisplayLabel(rawSource: "whoop5-AB12", deviceId: "whoop5-AB12"),
-                       "Whoop")
+                       "Imported")
     }
 
     func testProvenance_crossStrapComputedSibling_stillOnDevice() {

@@ -6,6 +6,6 @@ Your core history is stored locally on your device. There is no required NOOP ac
 
 NOOP supports local export and backup so you can keep a portable copy of your history. Widgets and Live Activities can show selected information at a glance when you enable them.
 
-NOOP is an independent, unofficial project and is not affiliated with or endorsed by WHOOP, Oura, Apple, Fitbit, Garmin, or another wearable manufacturer.
+NOOP is developed independently and is not affiliated with or endorsed by any wearable manufacturer.
 
 NOOP is intended for general wellness and fitness information. It is not a medical device, does not diagnose or treat any condition, and is not a substitute for professional medical advice or emergency services. Feature availability and background delivery depend on your hardware, permissions, data quality, and operating-system scheduling.

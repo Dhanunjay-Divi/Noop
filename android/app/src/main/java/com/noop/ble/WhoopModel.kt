@@ -13,11 +13,11 @@ enum class WhoopModel(val service: UUID) {
     /** Hardware generation stays internal; the product name is stable across compatible transports. */
     val displayName: String get() = CUSTOMER_NAME
 
-    /** Diagnostic-only transport identity. Never use this on ordinary customer setup or status screens. */
+    /** Diagnostic transport identity that is safe to show in the customer-visible strap log. */
     val transportName: String
         get() = when (this) {
-            WHOOP4 -> "WHOOP 4.0"
-            WHOOP5_MG -> "WHOOP 5.0 / MG"
+            WHOOP4 -> "legacy band"
+            WHOOP5_MG -> "newer band"
         }
 
     /** Existing registry schema value. Kept stable so upgrades do not orphan paired hardware or data. */

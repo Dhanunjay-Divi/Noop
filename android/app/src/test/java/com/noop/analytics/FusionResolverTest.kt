@@ -43,7 +43,7 @@ class FusionResolverTest {
         )
         assertEquals(FusionSource.WHOOP_IMPORT, point?.winningSource)
         assertEquals(432.0, point?.value)
-        assertEquals("WHOOP staged-sleep import", point?.contributors?.first()?.reason)
+        assertEquals("imported sleep stages", point?.contributors?.first()?.reason)
     }
 
     @Test
@@ -264,7 +264,7 @@ class FusionResolverTest {
     @Test
     fun evidenceReasonsNeverRelabelImportsAsDirectSensors() {
         assertEquals(
-            "WHOOP import",
+            "wearable import",
             MetricArbitrationPolicy.reason(
                 MetricArbitrationPolicy.MetricKind.HRV, FusionSource.WHOOP_IMPORT,
             ),

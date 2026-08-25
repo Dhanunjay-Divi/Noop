@@ -18,7 +18,7 @@ class TestBundleAssemblerTest {
         val raw = scrubbed.first { it.first == "raw-capture.jsonl" }.second
         val text = String(raw)
         assertFalse(text.contains("4C1594026"))
-        assertTrue(text.contains("WHOOP <serial>"))
+        assertTrue(text.contains("Band <serial>"))
     }
 
     @Test fun stampsRedactionV2() {
@@ -59,7 +59,7 @@ class TestBundleAssemblerTest {
         assertTrue(prepared.entries.sumOf { it.second.size } <= 512)
         val text = String(prepared.entries.single().second)
         assertTrue(text.contains("diagnostic export truncated"))
-        assertTrue(text.contains("newest WHOOP <serial>"))
+        assertTrue(text.contains("newest Band <serial>"))
         assertFalse(text.contains(serial))
     }
 

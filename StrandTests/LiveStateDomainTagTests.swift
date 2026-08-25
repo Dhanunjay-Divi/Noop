@@ -31,6 +31,6 @@ final class LiveStateDomainTagTests: XCTestCase {
     func testRedactionRunsAfterTagging() {
         let live = LiveState()
         live.append(log: "saw WHOOP 4C1594026 advertise", domain: .connection)
-        XCTAssertEqual(live.log.last, "[connection] saw WHOOP <serial> advertise")
+        XCTAssertEqual(live.log.last, "[connection] saw Band <serial> advertise")
     }
 }

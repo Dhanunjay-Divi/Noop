@@ -194,8 +194,8 @@ fun ScoringGuideScreen(
                         "rate, and a skin-temperature signal (an early illness or overreach flag). " +
                         "Higher HRV versus your baseline means higher Recovery. NOOP needs a few nights " +
                         "to learn your baseline first. Until then you'll see “Calibrating”.",
-                    vsWhoop = "Same core idea as WHOOP's Recovery % (HRV-led recovery), but our " +
-                        "weighting and baseline maths are our own, and openly documented.",
+                    methodNote = "NOOP uses an HRV-led recovery model with its own openly documented " +
+                        "weighting and personal-baseline math.",
                     highlighted = highlighted == ScoreSection.CHARGE,
                     onPositioned = { if (ScoreSection.CHARGE !in anchors) anchors[ScoreSection.CHARGE] = it },
                 )
@@ -208,9 +208,8 @@ fun ScoringGuideScreen(
                         "logarithmic 0-100 scale, so easy days sit low and an all-out day approaches " +
                         "100, which stays genuinely rare. A long walk with little cardio still counts, " +
                         "through a steps / active-energy floor.",
-                    vsWhoop = "Same cardiovascular-load idea as WHOOP's Day Strain (0-21). We " +
-                        "rescaled the top of the ladder from 21 to 100 so all three scores share one " +
-                        "scale. The rungs didn't move, so a 100 is as rare as a 21.0 was.",
+                    methodNote = "NOOP uses a cardiovascular-load model and presents all three scores " +
+                        "on one 0-100 scale. A 100 is reserved for an exceptionally hard day.",
                     highlighted = highlighted == ScoreSection.EFFORT,
                     onPositioned = { if (ScoreSection.EFFORT !in anchors) anchors[ScoreSection.EFFORT] = it },
                 )
@@ -220,7 +219,8 @@ fun ScoringGuideScreen(
                     body = "A blend of how long you slept versus your personal need (the biggest " +
                         "factor), how efficiently (asleep versus in bed), how much was restorative " +
                         "(deep + REM sleep), and how consistent your sleep and wake timing is.",
-                    vsWhoop = "Similar in spirit to WHOOP's Sleep Performance %; our composite is our own.",
+                    methodNote = "NOOP combines duration, efficiency, restorative sleep and consistency " +
+                        "in its own composite.",
                     highlighted = highlighted == ScoreSection.REST,
                     onPositioned = { if (ScoreSection.REST !in anchors) anchors[ScoreSection.REST] = it },
                 )
@@ -279,10 +279,8 @@ private fun IntroCard() {
                 uiString(R.string.l10n_scoring_guide_screen_noop_gives_you_three_daily_scores_36244209) +
                     "scale. They're built from your strap's raw signals using published, " +
                     "peer-reviewed sport science, and computed entirely on your device. They are " +
-                    "NOT WHOOP's scores: we don't have WHOOP's private algorithms and don't pretend " +
-                    "to. They aim at the same three questions using open science, so they'll usually " +
-                    "track WHOOP's in direction, but won't match number-for-number. And that's the " +
-                    "point.",
+                    "independent scores and may not match other apps number-for-number. Source and " +
+                    "confidence stay visible so you can compare them honestly.",
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
             )
@@ -311,14 +309,14 @@ private fun LegendDot(section: ScoreSection) {
     }
 }
 
-// MARK: - Score card (accent strip + tinted icon/headline + body + "vs WHOOP" line)
+// MARK: - Score card (accent strip + tinted icon/headline + method note)
 
 @Composable
 private fun ScoreCard(
     section: ScoreSection,
     headline: String,
     body: String,
-    vsWhoop: String,
+    methodNote: String,
     highlighted: Boolean,
     onPositioned: (Int) -> Unit,
 ) {
@@ -382,7 +380,7 @@ private fun ScoreCard(
                     modifier = Modifier.padding(top = 1.dp),
                 )
                 Text(
-                    vsWhoop,
+                    methodNote,
                     style = NoopType.footnote.copy(fontStyle = FontStyle.Italic),
                     color = Palette.textTertiary,
                 )
@@ -452,7 +450,7 @@ private fun ConfidenceCard() {
 private fun FooterNote() {
     Text(
         uiString(R.string.l10n_scoring_guide_screen_these_are_independent_approximations_from_a_301457ed) +
-            "medical advice, and not WHOOP's official scores.",
+            "medical advice or another provider's official scores.",
         style = NoopType.footnote,
         color = Palette.textTertiary,
         modifier = Modifier

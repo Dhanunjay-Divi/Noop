@@ -11,8 +11,8 @@ import org.junit.Test
  * The readings table under a series-backed vital detail (task #8). Pins the pure projection
  * [vitalReadingRows] the VitalDetailScreen table renders: rows and the "N readings" header derive from the
  * SAME windowed list (so their counts can't disagree), rows are NEWEST-FIRST, each raw source id resolves
- * through the shared [provenanceDisplayLabel] (strap → "Whoop", Health Connect → "Health Connect", Apple
- * Health → "Apple Health", the "-noop" sibling → "On-device"), and each value reuses the model's own
+ * through the shared [provenanceDisplayLabel] (strap -> "Imported", Health Connect -> "Health Connect",
+ * Apple Health -> "Apple Health", the "-noop" sibling -> "On-device"), and each value reuses the model's own
  * formatter + unit. Blood Oxygen (SpO2) is the acceptance case.
  */
 class VitalReadingsTableTest {
@@ -44,8 +44,8 @@ class VitalReadingsTableTest {
 
     @Test fun sourceLabelsResolvePerSample() {
         val rows = vitalReadingRows(spo2Readings, "%", strap, spo2Format)
-        // Newest-first, so: Apple Health (03), Health Connect (02), Whoop strap (01).
-        assertEquals(listOf("Apple Health", "Health Connect", "Whoop"), rows.map { it.source })
+        // Newest-first, so: Apple Health (03), Health Connect (02), imported strap (01).
+        assertEquals(listOf("Apple Health", "Health Connect", "Imported"), rows.map { it.source })
     }
 
     @Test fun computedStrapSiblingReadsOnDevice() {

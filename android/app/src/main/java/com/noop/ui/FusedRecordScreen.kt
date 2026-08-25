@@ -117,7 +117,7 @@ fun FusedRecordScreen(
         if (record.rows.isEmpty()) {
             DataPendingNote(
                 title = uiString(R.string.l10n_fused_record_screen_nothing_to_fuse_yet_30789c4e),
-                body = "Import a WHOOP export, Health Connect or a second band and your best-sourced record builds here, on this device.",
+                body = "Import a wearable export, Health Connect or a second band and your best-sourced record builds here, on this device.",
             )
         } else {
             NoopCard(padding = 0.dp) {

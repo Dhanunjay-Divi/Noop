@@ -78,7 +78,7 @@ private val CAPABILITIES: List<CapabilityRow> = listOf(
     CapabilityRow(
         "Strap broadcasts its own HR (firmware flag)",
         Support.NO, Support.YES,
-        "Making the STRAP itself advertise HR (the whoop_live_hr_in_adv_ind_pkt config) only exists on " +
+        "Making the STRAP itself advertise HR (the band broadcast setting) only exists on " +
             "5/MG firmware. A 4.0 can't do this, but the phone re-broadcast above covers the same use.",
     ),
     CapabilityRow(

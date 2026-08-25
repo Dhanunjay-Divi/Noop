@@ -275,7 +275,7 @@ struct WorkoutsView: View {
                         ScreenStateCard(
                             kind: .empty,
                             title: "No workouts yet",
-                            message: "They come from your WHOOP and Apple Health history. Import in Data Sources to bring them in, or add one you tracked elsewhere.",
+                            message: "They come from your wearable and Apple Health history. Import in Data Sources to bring them in, or add one you tracked elsewhere.",
                             symbol: "figure.run"
                         )
                     } else {
@@ -963,7 +963,7 @@ struct WorkoutsView: View {
     /// The Source-filter menu label for an origin class (matches the row source badges).
     private static func sourceFilterLabel(_ c: WorkoutSource) -> String {
         switch c {
-        case .whoop:        return String(localized: "Whoop")
+        case .whoop:        return String(localized: "Imported")
         case .apple:        return String(localized: "Apple")
         case .detected:     return String(localized: "Detected")
         case .manual:       return String(localized: "Manual")
@@ -1373,7 +1373,7 @@ struct WorkoutsView: View {
     private func zonesSection(_ z: WorkoutZones.Summary, totalSessions: Int) -> some View {
         VStack(alignment: .leading, spacing: NoopMetrics.gap) {
             SectionHeader("HR Zones",
-                          overline: "Whoop import",
+                          overline: "Imported zones",
                           trailing: totalSessions == 1
                               ? String(localized: "\(z.sessionsWithZones) of 1 session")
                               : String(localized: "\(z.sessionsWithZones) of \(totalSessions) sessions"))
@@ -1915,7 +1915,7 @@ struct WorkoutsView: View {
     private func sourceBadge(_ source: String) -> some View {
         let (label, tint, a11y): (String, Color, String) = {
             switch WorkoutSource.classify(source) {
-            case .whoop:    return (String(localized: "Whoop"), StrandPalette.accent, String(localized: "Source Whoop"))
+            case .whoop:    return (String(localized: "Imported"), StrandPalette.accent, String(localized: "Source imported wearable"))
             case .apple:    return (String(localized: "Apple"), StrandPalette.metricCyan, String(localized: "Source Apple Health"))
             case .detected: return (String(localized: "Detected"), StrandPalette.metricPurple, String(localized: "Source on-device detected"))
             case .manual:   return (String(localized: "Manual"), StrandPalette.statusWarning, String(localized: "Source manual entry"))

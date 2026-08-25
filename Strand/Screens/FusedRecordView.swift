@@ -89,7 +89,7 @@ struct FusedRecordView: View {
                 if record.rows.isEmpty {
                     DataPendingNote(
                         title: "Nothing to fuse yet",
-                        message: "Import a WHOOP export, Apple Health or a second band and your best-sourced record builds here, on this device.",
+                        message: "Import a wearable export, Apple Health or a second band and your best-sourced record builds here, on this device.",
                         symbol: "square.stack.3d.up"
                     )
                 } else {

@@ -38,4 +38,20 @@ final class PairedDeviceSourceKindTests: XCTestCase {
 
         XCTAssertEqual(device.displayName, "Morning Band")
     }
+
+    func testUserAssignedBandNameCannotReintroduceRetiredBranding() {
+        let device = PairedDevice(
+            id: "whoop-demo",
+            brand: "WHOOP",
+            model: "5.0 MG",
+            nickname: "My WHOOP sensor",
+            sourceKind: .liveBLE,
+            capabilities: [.hr],
+            status: .active,
+            addedAt: 0,
+            lastSeenAt: 0
+        )
+
+        XCTAssertEqual(device.displayName, "My compatible band sensor")
+    }
 }

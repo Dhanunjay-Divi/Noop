@@ -970,14 +970,6 @@
     ],
     [
       "android/app/src/main/java/com/noop/ui/WorkoutsScreen.kt",
-      "WHOOP's imported per-zone split for this session."
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/WorkoutsScreen.kt",
-      "Whoop import"
-    ],
-    [
-      "android/app/src/main/java/com/noop/ui/WorkoutsScreen.kt",
       "strain (0-21)"
     ],
     [
@@ -1261,10 +1253,6 @@
     [
       "Strand/Screens/JournalLogCard.swift",
       "New item group"
-    ],
-    [
-      "Strand/Screens/JournalLogCard.swift",
-      "Rename, regroup, or remove an item to tidy your list. Renaming keeps the original question behind the scenes, so a WHOOP import still lines up. Custom items are deleted; built-in ones are hidden and can be restored below."
     ],
     [
       "Strand/Screens/JournalLogCard.swift",

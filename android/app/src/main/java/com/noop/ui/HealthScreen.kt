@@ -2293,7 +2293,7 @@ private suspend fun buildSeriesVitalDetail(vm: AppViewModel, key: String): Vital
 private fun HealthEmptyState() {
     DataPendingNote(
         title = uiString(R.string.l10n_health_screen_no_biometrics_yet_7c594a6c),
-        body = "No biometrics yet. Import your WHOOP export (and Apple Health if you " +
+        body = "No biometrics yet. Import a wearable export (and Apple Health if you " +
             "have it) in Data Sources to fill this in.",
     )
 }

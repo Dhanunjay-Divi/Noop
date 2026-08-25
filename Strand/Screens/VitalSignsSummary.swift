@@ -99,7 +99,7 @@ struct BodyVitalReading: Identifiable {
         guard let source else { return nil }
         switch source {
         case .whoopImport:
-            return String(localized: "WHOOP import")
+            return String(localized: "Imported")
         case .noopComputed:
             if key == "skin" { return String(localized: "Overnight computed") }
             return String(localized: "NOOP computed")

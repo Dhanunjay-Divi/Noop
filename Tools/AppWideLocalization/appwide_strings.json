@@ -2398,15 +2398,15 @@
     "zh-Hant": "%1$d 組"
   },
   "appwide.terms.attest.band": {
-    "de": "Ich verstehe, dass NOOP Band noch nicht verfügbar ist. Diese Version funktioniert derzeit mit einem kompatiblen WHOOP-Band, das mir gehört, und ich werde nur mein eigenes Band und meine eigenen Daten verwenden.",
-    "en": "I understand NOOP Band is not available yet. This version currently works with a compatible WHOOP band I own, and I will use only my own band and my own data.",
-    "es": "Entiendo que NOOP Band aún no está disponible. Esta versión funciona actualmente con una banda WHOOP compatible que me pertenece y usaré únicamente mi propia banda y mis propios datos.",
-    "fr": "Je comprends que NOOP Band n’est pas encore disponible. Cette version fonctionne actuellement avec un bracelet WHOOP compatible qui m’appartient et j’utiliserai uniquement mon propre bracelet et mes propres données.",
-    "it": "Comprendo che NOOP Band non è ancora disponibile. Questa versione funziona attualmente con un dispositivo WHOOP compatibile di mia proprietà e userò solo il mio dispositivo e i miei dati.",
-    "pt-PT": "Compreendo que a NOOP Band ainda não está disponível. Esta versão funciona atualmente com uma pulseira WHOOP compatível que me pertence e utilizarei apenas a minha própria pulseira e os meus próprios dados.",
-    "ru": "Я понимаю, что NOOP Band пока недоступен. Сейчас эта версия работает с принадлежащим мне совместимым браслетом WHOOP, и я буду использовать только собственный браслет и собственные данные.",
-    "zh-Hans": "我了解 NOOP Band 尚未推出。此版本目前可配合我本人拥有的兼容 WHOOP 手环使用，并且我只会使用自己的手环和自己的数据。",
-    "zh-Hant": "我了解 NOOP Band 尚未推出。此版本目前可配合我本人擁有的相容 WHOOP 手環使用，並且我只會使用自己的手環和自己的資料。"
+    "de": "Ich verstehe, dass NOOP Band noch nicht verfügbar ist. Diese Version funktioniert derzeit mit einem kompatiblen Band, das mir gehört, und ich werde nur mein eigenes Band und meine eigenen Daten verwenden.",
+    "en": "I understand NOOP Band is not available yet. This version currently works with a compatible band I own, and I will use only my own band and my own data.",
+    "es": "Entiendo que NOOP Band aún no está disponible. Esta versión funciona actualmente con una banda compatible que me pertenece y usaré únicamente mi propia banda y mis propios datos.",
+    "fr": "Je comprends que NOOP Band n’est pas encore disponible. Cette version fonctionne actuellement avec un bracelet compatible qui m’appartient et j’utiliserai uniquement mon propre bracelet et mes propres données.",
+    "it": "Comprendo che NOOP Band non è ancora disponibile. Questa versione funziona attualmente con un dispositivo compatibile di mia proprietà e userò solo il mio dispositivo e i miei dati.",
+    "pt-PT": "Compreendo que a NOOP Band ainda não está disponível. Esta versão funciona atualmente com uma pulseira compatível que me pertence e utilizarei apenas a minha própria pulseira e os meus próprios dados.",
+    "ru": "Я понимаю, что NOOP Band пока недоступен. Сейчас эта версия работает с принадлежащим мне совместимым браслетом, и я буду использовать только собственный браслет и собственные данные.",
+    "zh-Hans": "我了解 NOOP Band 尚未推出。此版本目前可配合我本人拥有的兼容手环使用，并且我只会使用自己的手环和自己的数据。",
+    "zh-Hant": "我了解 NOOP Band 尚未推出。此版本目前可配合我本人擁有的相容手環使用，並且我只會使用自己的手環和自己的資料。"
   },
   "appwide.terms.attest.early_access": {
     "de": "Ich verstehe, dass NOOP eine Early-Access-Wellnesssoftware ist, ohne Zusicherungen im aktuellen Zustand bereitgestellt wird und weder ein Medizinprodukt noch medizinische Beratung ist.",
@@ -2431,15 +2431,15 @@
     "zh-Hant": "我已閱讀並接受完整的使用條款，包括法律允許的保固和責任限制。"
   },
   "appwide.terms.point.compatibility.body": {
-    "de": "NOOP wird unabhängig entwickelt und ist weder mit WHOOP, Inc. verbunden noch von ihr unterstützt. \"WHOOP\" wird nur genannt, um das kompatible Band zu kennzeichnen, das NOOP derzeit unterstützt.",
-    "en": "NOOP is developed independently and is not affiliated with or endorsed by WHOOP, Inc. \"WHOOP\" is named only to identify the compatible band NOOP currently supports.",
-    "es": "NOOP se desarrolla de forma independiente y no está afiliado ni respaldado por WHOOP, Inc. \"WHOOP\" se menciona únicamente para identificar la banda compatible que NOOP admite actualmente.",
-    "fr": "NOOP est développé de manière indépendante et n’est ni affilié à WHOOP, Inc. ni approuvé par cette société. « WHOOP » est cité uniquement pour identifier le bracelet compatible actuellement pris en charge par NOOP.",
-    "it": "NOOP è sviluppato in modo indipendente e non è affiliato né approvato da WHOOP, Inc. \"WHOOP\" viene citato solo per identificare il dispositivo compatibile attualmente supportato da NOOP.",
-    "pt-PT": "O NOOP é desenvolvido de forma independente e não é afiliado nem apoiado pela WHOOP, Inc. \"WHOOP\" é mencionado apenas para identificar a pulseira compatível atualmente suportada pelo NOOP.",
-    "ru": "NOOP разрабатывается независимо и не связан с WHOOP, Inc. и не одобрен этой компанией. Название «WHOOP» используется только для обозначения совместимого браслета, который сейчас поддерживает NOOP.",
-    "zh-Hans": "NOOP 由独立团队开发，与 WHOOP, Inc. 不存在隶属或背书关系。“WHOOP”仅用于说明 NOOP 目前支持的兼容手环。",
-    "zh-Hant": "NOOP 由獨立團隊開發，與 WHOOP, Inc. 不存在隸屬或背書關係。「WHOOP」僅用於說明 NOOP 目前支援的相容手環。"
+    "de": "NOOP wird unabhängig entwickelt. Die aktuelle direkte Bandunterstützung dient Kompatibilitätstests, während NOOP Band entwickelt wird.",
+    "en": "NOOP is developed independently. Current direct-band support is provided for compatibility testing while NOOP Band is in development.",
+    "es": "NOOP se desarrolla de forma independiente. La compatibilidad directa actual se ofrece para pruebas mientras NOOP Band está en desarrollo.",
+    "fr": "NOOP est développé de manière indépendante. La prise en charge directe actuelle sert aux tests de compatibilité pendant le développement de NOOP Band.",
+    "it": "NOOP è sviluppato in modo indipendente. Il supporto diretto attuale serve a testare la compatibilità mentre NOOP Band è in fase di sviluppo.",
+    "pt-PT": "O NOOP é desenvolvido de forma independente. O suporte direto atual destina-se a testes de compatibilidade enquanto a NOOP Band está em desenvolvimento.",
+    "ru": "NOOP разрабатывается независимо. Текущая прямая поддержка браслета предназначена для проверки совместимости, пока NOOP Band находится в разработке.",
+    "zh-Hans": "NOOP 由独立团队开发。在 NOOP Band 仍处于开发阶段时，当前的手环直连支持仅用于兼容性测试。",
+    "zh-Hant": "NOOP 由獨立團隊開發。在 NOOP Band 仍處於開發階段時，目前的手環直連支援僅用於相容性測試。"
   },
   "appwide.terms.point.compatibility.head": {
     "de": "Aktuelle Kompatibilität",
@@ -2497,15 +2497,15 @@
     "zh-Hant": "用於健康管理，並非醫療服務"
   },
   "appwide.terms.point.ownership.body": {
-    "de": "Verbinde nur ein Band, das dir gehört, und verwende NOOP nur mit deinen eigenen Daten. Die aktuelle Kompatibilität nutzt ein inoffizielles, unabhängig nachvollzogenes Protokoll und kann gegen die Nutzungsbedingungen von WHOOP verstoßen oder sich auf Support, Konto, Abonnement, Gerät oder Garantie auswirken.",
-    "en": "Connect only a band you own and use NOOP only with your own data. Current compatibility uses an unofficial, independently mapped protocol and may breach WHOOP's Terms of Service or affect support, account, subscription, device, or warranty.",
-    "es": "Conecta únicamente una banda que te pertenezca y usa NOOP solo con tus propios datos. La compatibilidad actual utiliza un protocolo no oficial, trazado de forma independiente, y puede incumplir los Términos de servicio de WHOOP o afectar al soporte, la cuenta, la suscripción, el dispositivo o la garantía.",
-    "fr": "Connectez uniquement un bracelet qui vous appartient et utilisez NOOP uniquement avec vos propres données. La compatibilité actuelle utilise un protocole non officiel, cartographié de façon indépendante, et peut enfreindre les Conditions d’utilisation de WHOOP ou affecter l’assistance, le compte, l’abonnement, l’appareil ou la garantie.",
-    "it": "Collega solo un dispositivo di tua proprietà e usa NOOP esclusivamente con i tuoi dati. La compatibilità attuale utilizza un protocollo non ufficiale, mappato in modo indipendente, e può violare i Termini di servizio di WHOOP o influire su assistenza, account, abbonamento, dispositivo o garanzia.",
-    "pt-PT": "Liga apenas uma pulseira que te pertence e utiliza o NOOP apenas com os teus próprios dados. A compatibilidade atual utiliza um protocolo não oficial, mapeado de forma independente, e pode violar os Termos de Serviço da WHOOP ou afetar o suporte, a conta, a subscrição, o dispositivo ou a garantia.",
-    "ru": "Подключайте только принадлежащий вам браслет и используйте NOOP только со своими данными. Текущая совместимость основана на неофициальном, независимо изученном протоколе и может нарушать Условия использования WHOOP либо повлиять на поддержку, учётную запись, подписку, устройство или гарантию.",
-    "zh-Hans": "仅连接您本人拥有的手环，并仅将 NOOP 用于您自己的数据。当前兼容方式使用独立解析的非官方协议，可能违反 WHOOP 的服务条款，或影响支持、账户、订阅、设备或保修。",
-    "zh-Hant": "僅連接您本人擁有的手環，並僅將 NOOP 用於您自己的資料。目前相容方式使用獨立解析的非官方協定，可能違反 WHOOP 的服務條款，或影響支援、帳戶、訂閱、裝置或保固。"
+    "de": "Verbinde nur ein Band, das dir gehört, und verwende NOOP nur mit deinen eigenen Daten. Die direkte Kompatibilität kann die Verbindung einer anderen App, Kontodienste, Gerätesupport oder Garantie beeinflussen.",
+    "en": "Connect only a band you own and use NOOP only with your own data. Direct compatibility may affect another app's connection, account services, device support, or warranty.",
+    "es": "Conecta únicamente una banda que te pertenezca y usa NOOP solo con tus propios datos. La compatibilidad directa puede afectar la conexión de otra aplicación, los servicios de cuenta, el soporte del dispositivo o la garantía.",
+    "fr": "Connectez uniquement un bracelet qui vous appartient et utilisez NOOP uniquement avec vos propres données. La compatibilité directe peut affecter la connexion d’une autre app, les services de compte, l’assistance de l’appareil ou la garantie.",
+    "it": "Collega solo un dispositivo di tua proprietà e usa NOOP esclusivamente con i tuoi dati. La compatibilità diretta può influire sulla connessione di un’altra app, sui servizi dell’account, sull’assistenza del dispositivo o sulla garanzia.",
+    "pt-PT": "Liga apenas uma pulseira que te pertence e utiliza o NOOP apenas com os teus próprios dados. A compatibilidade direta pode afetar a ligação de outra aplicação, os serviços da conta, o suporte do dispositivo ou a garantia.",
+    "ru": "Подключайте только принадлежащий вам браслет и используйте NOOP только со своими данными. Прямая совместимость может повлиять на подключение другого приложения, службы учётной записи, поддержку устройства или гарантию.",
+    "zh-Hans": "仅连接您本人拥有的手环，并仅将 NOOP 用于您自己的数据。直接兼容可能会影响其他应用的连接、账户服务、设备支持或保修。",
+    "zh-Hant": "僅連接您本人擁有的手環，並僅將 NOOP 用於您自己的資料。直接相容可能會影響其他 App 的連線、帳戶服務、裝置支援或保固。"
   },
   "appwide.terms.point.ownership.head": {
     "de": "Dein Band, deine Daten",
@@ -2519,15 +2519,15 @@
     "zh-Hant": "您的手環，您的資料"
   },
   "appwide.terms.subtitle": {
-    "de": "Bis NOOP Band bereit ist, funktioniert diese Version mit einem kompatiblen WHOOP-Band, das dir gehört.",
-    "en": "Until NOOP Band is ready, this version works with a compatible WHOOP band you own.",
-    "es": "Hasta que NOOP Band esté lista, esta versión funciona con una banda WHOOP compatible que te pertenece.",
-    "fr": "En attendant que NOOP Band soit prêt, cette version fonctionne avec un bracelet WHOOP compatible qui vous appartient.",
-    "it": "Fino a quando NOOP Band non sarà pronto, questa versione funziona con un dispositivo WHOOP compatibile di tua proprietà.",
-    "pt-PT": "Até a NOOP Band estar pronta, esta versão funciona com uma pulseira WHOOP compatível que te pertence.",
-    "ru": "Пока NOOP Band не готов, эта версия работает с принадлежащим вам совместимым браслетом WHOOP.",
-    "zh-Hans": "在 NOOP Band 准备就绪之前，此版本可配合您本人拥有的兼容 WHOOP 手环使用。",
-    "zh-Hant": "在 NOOP Band 準備就緒之前，此版本可配合您本人擁有的相容 WHOOP 手環使用。"
+    "de": "Bis NOOP Band bereit ist, funktioniert diese Version mit einem kompatiblen Band, das dir gehört.",
+    "en": "Until NOOP Band is ready, this version works with a compatible band you own.",
+    "es": "Hasta que NOOP Band esté lista, esta versión funciona con una banda compatible que te pertenece.",
+    "fr": "En attendant que NOOP Band soit prêt, cette version fonctionne avec un bracelet compatible qui vous appartient.",
+    "it": "Fino a quando NOOP Band non sarà pronto, questa versione funziona con un dispositivo compatibile di tua proprietà.",
+    "pt-PT": "Até a NOOP Band estar pronta, esta versão funciona com uma pulseira compatível que te pertence.",
+    "ru": "Пока NOOP Band не готов, эта версия работает с принадлежащим вам совместимым браслетом.",
+    "zh-Hans": "在 NOOP Band 准备就绪之前，此版本可配合您本人拥有的兼容手环使用。",
+    "zh-Hant": "在 NOOP Band 準備就緒之前，此版本可配合您本人擁有的相容手環使用。"
   },
   "appwide.terms.title": {
     "de": "NOOP Band kommt",
@@ -3056,5 +3056,49 @@
     "ru": "ПОЧЕМУ",
     "zh-Hans": "原因",
     "zh-Hant": "原因"
+  },
+  "appwide.legal.summary": {
+    "de": "Projektbedingungen und Quellcodelizenz. Offline verfügbar.",
+    "en": "Project terms and source license. Available offline.",
+    "es": "Términos del proyecto y licencia del código fuente. Disponible sin conexión.",
+    "fr": "Conditions du projet et licence du code source. Disponible hors ligne.",
+    "it": "Termini del progetto e licenza del codice sorgente. Disponibile offline.",
+    "pt-PT": "Termos do projeto e licença do código-fonte. Disponível offline.",
+    "ru": "Условия проекта и лицензия исходного кода. Доступно офлайн.",
+    "zh-Hans": "项目条款和源代码许可。可离线查看。",
+    "zh-Hant": "專案條款和原始碼授權。可離線查看。"
+  },
+  "appwide.journal.editing_help": {
+    "de": "Benenne einen Eintrag um, gruppiere ihn neu oder entferne ihn, um deine Liste aufzuräumen. Beim Umbenennen bleibt die ursprüngliche Frage intern erhalten, damit importierte Referenzen weiterhin zugeordnet werden. Eigene Einträge werden gelöscht; integrierte werden ausgeblendet und können unten wiederhergestellt werden.",
+    "en": "Rename, regroup, or remove an item to tidy your list. Renaming keeps the original question behind the scenes, so imported references still line up. Custom items are deleted; built-in ones are hidden and can be restored below.",
+    "es": "Cambia el nombre, el grupo o elimina un elemento para ordenar la lista. Al cambiarle el nombre, la pregunta original se conserva internamente para que las referencias importadas sigan coincidiendo. Los elementos personalizados se eliminan; los integrados se ocultan y se pueden restaurar abajo.",
+    "fr": "Renommez, regroupez ou supprimez un élément pour organiser votre liste. Le renommage conserve la question d’origine en interne afin que les références importées restent alignées. Les éléments personnalisés sont supprimés; les éléments intégrés sont masqués et peuvent être restaurés ci-dessous.",
+    "it": "Rinomina, raggruppa o rimuovi un elemento per riordinare l’elenco. La domanda originale resta associata internamente, così i riferimenti importati continuano a corrispondere. Gli elementi personalizzati vengono eliminati; quelli integrati vengono nascosti e possono essere ripristinati qui sotto.",
+    "pt-PT": "Muda o nome, reagrupa ou remove um item para organizar a lista. A pergunta original fica associada internamente, para que as referências importadas continuem alinhadas. Os itens personalizados são eliminados; os integrados ficam ocultos e podem ser restaurados abaixo.",
+    "ru": "Переименуйте, перегруппируйте или удалите пункт, чтобы упорядочить список. Исходный вопрос сохраняется внутри, поэтому импортированные данные продолжают сопоставляться. Пользовательские пункты удаляются, а встроенные скрываются и могут быть восстановлены ниже.",
+    "zh-Hans": "可重命名、重新分组或移除项目来整理列表。重命名后，原始问题仍会在内部保留，以便继续匹配导入的参考数据。自定义项目会被删除；内置项目会被隐藏，并可在下方恢复。",
+    "zh-Hant": "可重新命名、重新分組或移除項目來整理清單。重新命名後，原始問題仍會在內部保留，以便繼續比對匯入的參考資料。自訂項目會被刪除；內建項目會被隱藏，並可在下方還原。"
+  },
+  "appwide.workouts.imported_zones": {
+    "de": "Importierte Zonen",
+    "en": "Imported zones",
+    "es": "Zonas importadas",
+    "fr": "Zones importées",
+    "it": "Zone importate",
+    "pt-PT": "Zonas importadas",
+    "ru": "Импортированные зоны",
+    "zh-Hans": "已导入的心率区间",
+    "zh-Hant": "已匯入的心率區間"
+  },
+  "appwide.workouts.imported_zone_split": {
+    "de": "Importierte Aufteilung nach Herzfrequenzzonen für diese Einheit.",
+    "en": "Imported per-zone split for this session.",
+    "es": "Distribución importada por zonas para esta sesión.",
+    "fr": "Répartition importée par zone pour cette séance.",
+    "it": "Suddivisione per zone importata per questa sessione.",
+    "pt-PT": "Distribuição por zonas importada para esta sessão.",
+    "ru": "Импортированное распределение по зонам для этой тренировки.",
+    "zh-Hans": "此训练的已导入心率区间分布。",
+    "zh-Hant": "此訓練的已匯入心率區間分佈。"
   }
 }

@@ -84,9 +84,9 @@ struct WhatsNewView: View {
                             .frame(width: 22)
                             .padding(.top, 2)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(e.title).font(StrandFont.headline)
+                            Text(CustomerFacingBrand.text(e.title)).font(StrandFont.headline)
                                 .foregroundStyle(StrandPalette.textPrimary)
-                            Text(e.body).font(StrandFont.subhead)
+                            Text(CustomerFacingBrand.text(e.body)).font(StrandFont.subhead)
                                 .foregroundStyle(StrandPalette.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -102,7 +102,7 @@ struct WhatsNewView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     SourceBadge("v\(release.version)")
-                    Text(release.title).font(StrandFont.headline)
+                    Text(CustomerFacingBrand.text(release.title)).font(StrandFont.headline)
                         .foregroundStyle(StrandPalette.textPrimary)
                     Spacer()
                     Text(release.date).font(StrandFont.caption)
@@ -112,7 +112,7 @@ struct WhatsNewView: View {
                     HStack(alignment: .top, spacing: 8) {
                         Circle().fill(StrandPalette.accent).frame(width: 5, height: 5)
                             .padding(.top, 7)
-                        Text(item).font(StrandFont.subhead)
+                        Text(CustomerFacingBrand.text(item)).font(StrandFont.subhead)
                             .foregroundStyle(StrandPalette.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }

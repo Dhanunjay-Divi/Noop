@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import com.noop.R
+import com.noop.brand.CustomerFacingBrand
 import androidx.compose.ui.res.stringResource
 import android.Manifest
 import android.content.pm.PackageManager
@@ -420,7 +421,7 @@ private fun WhatItDoesStep() {
                 icon = Icons.Filled.MonitorHeart,
                 tint = Palette.accent,
                 title = uiString(R.string.l10n_onboarding_screen_watch_your_heart_live_8c9c1267),
-                body = "Connect a Noop Band, heart-rate strap, watch, ring, or gym machine and watch each beat in real time, with zones that match your profile. Already have history elsewhere? Import it from WHOOP, Apple Health, Oura, Fitbit or Garmin.",
+                body = "Connect a Noop Band, heart-rate strap, watch, ring, or gym machine and watch each beat in real time, with zones that match your profile. Already have history elsewhere? Import a wearable export, Apple Health, Oura, Fitbit or Garmin data.",
             )
             FeatureRow(
                 icon = Icons.Filled.Lock,
@@ -548,7 +549,7 @@ private fun ConnectStep(viewModel: AppViewModel) {
 
             live.statusNote?.let {
                 Text(
-                    it,
+                    CustomerFacingBrand.text(it),
                     style = NoopType.footnote,
                     color = Palette.textSecondary,
                     textAlign = TextAlign.Center,
@@ -621,7 +622,7 @@ private fun ConnectStep(viewModel: AppViewModel) {
             if (!live.bonded) {
                 Text(
                     "No Noop Band? You can still continue. Pair another heart-rate strap, watch, ring, " +
-                        "or gym machine under Devices, or import from WHOOP, Apple Health, Oura, Fitbit, Garmin " +
+                        "or gym machine under Devices, or import a wearable export, Apple Health, Oura, Fitbit, Garmin " +
                         "and more under Data Sources. You can do either any time.",
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
@@ -840,8 +841,9 @@ private fun ImportStep(viewModel: AppViewModel) {
             // tagged IMPORT, iff the mode is on. Gated zero-cost when off; shared with the Data Sources flow.
             emitImportTrace(context, viewModel, summary)
             busy = false
-            status = summary.message
-            Toast.makeText(context, summary.message, Toast.LENGTH_LONG).show()
+            val visibleMessage = CustomerFacingBrand.text(summary.message)
+            status = visibleMessage
+            Toast.makeText(context, visibleMessage, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -896,7 +898,7 @@ private fun ImportStep(viewModel: AppViewModel) {
                 icon = Icons.Filled.AutoGraph,
                 tint = Palette.accent,
                 title = uiString(R.string.l10n_onboarding_screen_history_fills_the_dashboard_immediately_9728dde5),
-                message = "A WHOOP export backfills recovery, strain, sleep and workouts. Health Connect can add steps, HR, HRV, sleep, absolute body temperature and weight from Android sources.",
+                message = "A wearable export backfills recovery, strain, sleep and workouts. Health Connect can add steps, HR, HRV, sleep, absolute body temperature and weight from Android sources.",
             )
 
             NoopCard(padding = 16.dp) {
@@ -1204,8 +1206,8 @@ private fun ExpectationCard(e: AppChangelog.Expectation) {
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Text(e.title, style = NoopType.headline, color = Palette.textPrimary)
-                Text(e.body, style = NoopType.subhead, color = Palette.textSecondary)
+                Text(CustomerFacingBrand.text(e.title), style = NoopType.headline, color = Palette.textPrimary)
+                Text(CustomerFacingBrand.text(e.body), style = NoopType.subhead, color = Palette.textSecondary)
             }
         }
     }

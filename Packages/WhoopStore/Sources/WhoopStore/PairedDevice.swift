@@ -37,12 +37,23 @@ public struct PairedDevice: Equatable, Sendable, Identifiable {
             let isTransportName = isNoopBand
                 && (trimmed.caseInsensitiveCompare("WHOOP") == .orderedSame
                     || trimmed.uppercased().hasPrefix("WHOOP "))
-            if !trimmed.isEmpty && !isTransportName { return trimmed }
+            if !trimmed.isEmpty && !isTransportName { return Self.customerFacingName(trimmed) }
         }
         if isNoopBand { return "Noop Band" }
-        if model.isEmpty || model == brand { return brand }
-        if model.localizedCaseInsensitiveContains(brand) { return model }
-        return "\(brand) \(model)"
+        if model.isEmpty || model == brand { return Self.customerFacingName(brand) }
+        if model.localizedCaseInsensitiveContains(brand) { return Self.customerFacingName(model) }
+        return Self.customerFacingName("\(brand) \(model)")
+    }
+
+    /// Device names come from Bluetooth advertisements, imports, and user-editable nicknames. Keep the
+    /// stored value untouched for reconnect and backup compatibility while preventing retired transport
+    /// branding from resurfacing through any UI that uses `displayName`.
+    private static func customerFacingName(_ raw: String) -> String {
+        raw.replacingOccurrences(
+            of: "whoop",
+            with: "compatible band",
+            options: [.caseInsensitive]
+        )
     }
 
     /// True for a data-partition source (a cloud API pull or a file/CSV import) rather than a live,

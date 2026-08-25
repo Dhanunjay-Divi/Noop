@@ -198,11 +198,11 @@ private struct UpdateRow: View {
                         .padding(.top, 1)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(item.title)
+                        Text(CustomerFacingBrand.text(item.title))
                             .font(StrandFont.headline.weight(.semibold))
                             .foregroundStyle(StrandPalette.textPrimary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(item.message)
+                        Text(CustomerFacingBrand.text(item.message))
                             .font(StrandFont.subhead)
                             .foregroundStyle(StrandPalette.textSecondary)
                             .lineLimit(2)
@@ -235,8 +235,9 @@ private struct UpdateRow: View {
         .strandPressable()
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
-        .accessibilityLabel(item.read ? "\(item.title). \(item.message)"
-                                       : "Unread. \(item.title). \(item.message)")
+        .accessibilityLabel(item.read
+            ? "\(CustomerFacingBrand.text(item.title)). \(CustomerFacingBrand.text(item.message))"
+            : "Unread. \(CustomerFacingBrand.text(item.title)). \(CustomerFacingBrand.text(item.message))")
     }
 
     private var symbol: String {

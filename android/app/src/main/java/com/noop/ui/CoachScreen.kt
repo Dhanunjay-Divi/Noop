@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.speech.RecognizerIntent
 import com.noop.R
+import com.noop.brand.CustomerFacingBrand
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.res.stringResource
@@ -1146,7 +1147,7 @@ private fun ChatBubble(msg: ChatMsg) {
                     Text(msg.text, style = NoopType.body, color = Palette.textPrimary)
                 } else {
                     // Render the Coach's Markdown (bold/lists/headings) instead of raw symbols (#149).
-                    CoachMarkdown(msg.text, color = Palette.textPrimary)
+                    CoachMarkdown(CustomerFacingBrand.text(msg.text), color = Palette.textPrimary)
                 }
             }
         }

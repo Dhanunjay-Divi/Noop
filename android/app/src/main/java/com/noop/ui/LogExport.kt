@@ -356,7 +356,7 @@ object LogExport {
         val tail = if (sharingLog) " Sharing the strap log." else ""
         return when {
             !whoop5Connected ->
-                "Raw capture records WHOOP 5/MG history syncs and doesn't apply to WHOOP 4.0 (already fully decoded).$tail"
+                "Raw capture records newer-band history syncs and doesn't apply to legacy bands (already fully decoded).$tail"
             !PuffinExperiment.from(context).isCaptureEnabled ->
                 "No raw capture yet. Turn on \"Record 5/MG raw capture\" above, then let a history sync run.$tail"
             else ->

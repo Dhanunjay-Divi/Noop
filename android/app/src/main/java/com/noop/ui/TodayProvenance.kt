@@ -79,7 +79,7 @@ internal fun dayOwnerSource(deviceId: String?): FusionSource? = when {
 
 internal fun provenanceBadgeLabel(owner: FusionSource?): String? = when (owner) {
     FusionSource.NOOP_COMPUTED -> "On-device"
-    FusionSource.WHOOP_IMPORT -> "Whoop"
+    FusionSource.WHOOP_IMPORT -> "Imported"
     FusionSource.APPLE_HEALTH -> "Apple Health"
     FusionSource.HEALTH_CONNECT -> "Health Connect"
     FusionSource.XIAOMI_BAND -> "Mi Band"
@@ -107,7 +107,7 @@ internal fun provenanceDisplayLabel(
     if (rawSource == MOTION_DERIVED_STEPS_SOURCE) return "Motion-derived estimate"
     if (rawSource == CALIBRATED_MOTION_STEPS_SOURCE) return "Calibrated motion estimate"
     if (rawSource.endsWith("-noop")) return "On-device"
-    if (rawSource == deviceId || rawSource == WhoopRepository.WHOOP_SOURCE) return "Whoop"
+    if (rawSource == deviceId || rawSource == WhoopRepository.WHOOP_SOURCE) return "Imported"
     if (rawSource == WhoopRepository.APPLE_HEALTH_SOURCE) return "Apple Health"
     // Fall back to the FusionSource display name for any other known source; else the raw id verbatim.
     return FusionSource.entries.firstOrNull { it.id == rawSource }?.displayName ?: rawSource
@@ -121,7 +121,7 @@ internal fun todayProvenanceChipLabel(
     "Apple Watch"
 } else {
     provenanceDisplayLabel(rawSource, deviceId).let {
-        if (it == "Whoop") WhoopModel.CUSTOMER_NAME else it
+        if (it == "Imported") WhoopModel.CUSTOMER_NAME else it
     }
 }
 
@@ -186,7 +186,7 @@ internal fun todayPullToSyncEnabled(
  *  Apple Health, the positive status hue for on-device (and anything else). Matches the Data Sources
  *  footer + the Swift `provenanceTint` so the same source reads the same colour on Today. */
 internal fun provenanceLabelTint(label: String): Color = when (label) {
-    "Whoop", WhoopModel.CUSTOMER_NAME -> Palette.accent
+    "Imported", WhoopModel.CUSTOMER_NAME -> Palette.accent
     "Apple Health" -> Palette.metricCyan
     "Health Connect" -> Palette.metricPurple
     else -> Palette.statusPositive

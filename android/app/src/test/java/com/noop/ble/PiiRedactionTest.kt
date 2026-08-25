@@ -31,7 +31,7 @@ class PiiRedactionTest {
     }
 
     @Test fun masksWhoopSerial() {
-        assertEquals("Discovered WHOOP <serial> (rssi -63)",
+        assertEquals("Discovered Band <serial> (rssi -63)",
             redactStrapLogPii("Discovered WHOOP 4C1594026 (rssi -63)"))
     }
 

@@ -116,7 +116,7 @@ struct MetricDescriptor: Identifiable, Hashable {
         case let s where s.hasSuffix("-noop"):
             return "NOOP"
         case "whoop", "whoop-official-reference":
-            return String(localized: "WHOOP import")
+            return String(localized: "Imported")
         default:
             return source
         }

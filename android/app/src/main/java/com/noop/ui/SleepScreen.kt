@@ -2902,7 +2902,7 @@ private fun SparkTile(
 private fun SleepEmptyState() {
     DataPendingNote(
         title = uiString(R.string.l10n_sleep_screen_no_nights_here_yet_607248f5),
-        body = "No nights here yet. Import your WHOOP export in Data Sources to see " +
+        body = "No nights here yet. Import a wearable export in Data Sources to see " +
             "every night, your sleep stages and trends straight away.",
     )
 }

@@ -99,6 +99,8 @@
     <string name="appwide_fitness_age_younger_many_profile_age">%1$d Jahre jünger als dein Profilalter</string>
     <string name="appwide_fitness_age_younger_one_profile_age">1 Jahr jünger als dein Profilalter</string>
     <string name="appwide_friends_invite_instructions">Öffne in Noop Mehr → Freunde und gib die Serveradresse und den Einmalcode ein.</string>
+    <string name="appwide_journal_editing_help">Benenne einen Eintrag um, gruppiere ihn neu oder entferne ihn, um deine Liste aufzuräumen. Beim Umbenennen bleibt die ursprüngliche Frage intern erhalten, damit importierte Referenzen weiterhin zugeordnet werden. Eigene Einträge werden gelöscht; integrierte werden ausgeblendet und können unten wiederhergestellt werden.</string>
+    <string name="appwide_legal_summary">Projektbedingungen und Quellcodelizenz. Offline verfügbar.</string>
     <string name="appwide_metric_education_body_temp_action">Prüfe die ursprüngliche Quelle und Messmethode. Bestätige einen unerwarteten Wert mit einem geeigneten Thermometer und hole bei entsprechenden Beschwerden medizinischen Rat ein.</string>
     <string name="appwide_metric_education_body_temp_limits">Messstelle, Gerät, Zeitpunkt und Umgebung unterscheiden sich. Dies ist weder eine Überwachung der Körperkerntemperatur noch eine Diagnose.</string>
     <string name="appwide_metric_education_body_temp_method">NOOP bewahrt den Quellenwert in einer eigenen Datenreihe und ersetzt damit nicht die Abweichung der Hauttemperatur.</string>
@@ -219,18 +221,18 @@
     <string name="appwide_strength_reps_format">%1$d Wdh.</string>
     <string name="appwide_strength_sessions_goal">Krafteinheiten</string>
     <string name="appwide_strength_sets_format">%1$d Sätze</string>
-    <string name="appwide_terms_attest_band">Ich verstehe, dass NOOP Band noch nicht verfügbar ist. Diese Version funktioniert derzeit mit einem kompatiblen WHOOP-Band, das mir gehört, und ich werde nur mein eigenes Band und meine eigenen Daten verwenden.</string>
+    <string name="appwide_terms_attest_band">Ich verstehe, dass NOOP Band noch nicht verfügbar ist. Diese Version funktioniert derzeit mit einem kompatiblen Band, das mir gehört, und ich werde nur mein eigenes Band und meine eigenen Daten verwenden.</string>
     <string name="appwide_terms_attest_early_access">Ich verstehe, dass NOOP eine Early-Access-Wellnesssoftware ist, ohne Zusicherungen im aktuellen Zustand bereitgestellt wird und weder ein Medizinprodukt noch medizinische Beratung ist.</string>
     <string name="appwide_terms_attest_full_terms">Ich habe die vollständigen Nutzungsbedingungen einschließlich der gesetzlich zulässigen Gewährleistungs- und Haftungsbeschränkungen gelesen und akzeptiere sie.</string>
-    <string name="appwide_terms_point_compatibility_body">NOOP wird unabhängig entwickelt und ist weder mit WHOOP, Inc. verbunden noch von ihr unterstützt. &quot;WHOOP&quot; wird nur genannt, um das kompatible Band zu kennzeichnen, das NOOP derzeit unterstützt.</string>
+    <string name="appwide_terms_point_compatibility_body">NOOP wird unabhängig entwickelt. Die aktuelle direkte Bandunterstützung dient Kompatibilitätstests, während NOOP Band entwickelt wird.</string>
     <string name="appwide_terms_point_compatibility_head">Aktuelle Kompatibilität</string>
     <string name="appwide_terms_point_early_access_body">Diese Version wird im aktuellen Zustand bereitgestellt, während NOOP Band und die Software weiterentwickelt werden. Die vollständigen Bedingungen enthalten die Gewährleistungs- und Haftungsbeschränkungen.</string>
     <string name="appwide_terms_point_early_access_head">Early-Access-Software</string>
     <string name="appwide_terms_point_medical_body">Die Messwerte von NOOP sind Schätzungen für das allgemeine Wohlbefinden. Verwende sie nicht für Diagnosen, Behandlungen oder medizinische beziehungsweise Notfallentscheidungen. Hole bei Bedarf qualifizierte Hilfe.</string>
     <string name="appwide_terms_point_medical_head">Wellness, keine medizinische Versorgung</string>
-    <string name="appwide_terms_point_ownership_body">Verbinde nur ein Band, das dir gehört, und verwende NOOP nur mit deinen eigenen Daten. Die aktuelle Kompatibilität nutzt ein inoffizielles, unabhängig nachvollzogenes Protokoll und kann gegen die Nutzungsbedingungen von WHOOP verstoßen oder sich auf Support, Konto, Abonnement, Gerät oder Garantie auswirken.</string>
+    <string name="appwide_terms_point_ownership_body">Verbinde nur ein Band, das dir gehört, und verwende NOOP nur mit deinen eigenen Daten. Die direkte Kompatibilität kann die Verbindung einer anderen App, Kontodienste, Gerätesupport oder Garantie beeinflussen.</string>
     <string name="appwide_terms_point_ownership_head">Dein Band, deine Daten</string>
-    <string name="appwide_terms_subtitle">Bis NOOP Band bereit ist, funktioniert diese Version mit einem kompatiblen WHOOP-Band, das dir gehört.</string>
+    <string name="appwide_terms_subtitle">Bis NOOP Band bereit ist, funktioniert diese Version mit einem kompatiblen Band, das dir gehört.</string>
     <string name="appwide_terms_title">NOOP Band kommt</string>
     <string name="appwide_today_band_sync_progress_format">Noop Band-Verlauf wird synchronisiert, %1$d Pakete empfangen</string>
     <string name="appwide_today_band_sync_synced">Noop Band-Verlauf synchronisiert</string>
@@ -279,4 +281,6 @@
     <string name="appwide_v4_target">HEUTIGES ZIEL</string>
     <string name="appwide_v4_watch">WEITER BEOBACHTEN</string>
     <string name="appwide_v4_why">WARUM</string>
+    <string name="appwide_workouts_imported_zone_split">Importierte Aufteilung nach Herzfrequenzzonen für diese Einheit.</string>
+    <string name="appwide_workouts_imported_zones">Importierte Zonen</string>
 </resources>

@@ -39,8 +39,8 @@ final class TestBundleRobustnessTests: XCTestCase {
         let crashText = String(data: scrubbed.first { $0.name == "last-crash.txt" }!.data, encoding: .utf8)!
         XCTAssertFalse(rawText.contains("4C1594026"))
         XCTAssertFalse(crashText.contains("5A9988776"))
-        XCTAssertTrue(rawText.contains("WHOOP <serial>"))
-        XCTAssertTrue(crashText.contains("WHOOP <serial>"))
+        XCTAssertTrue(rawText.contains("Band <serial>"))
+        XCTAssertTrue(crashText.contains("Band <serial>"))
     }
 
     func testCrashLogURLLivesInCaches() {
@@ -76,10 +76,22 @@ final class TestBundleRobustnessTests: XCTestCase {
     func testActiveDomainsIncludesUniversalOnlyWhenAModeIsOn() {
         // Isolate UserDefaults so the suite doesn't depend on ambient Test Centre state.
         let defaults = UserDefaults.standard
-        let key = "testcentre.active.sleep"
-        let prior = defaults.object(forKey: key)
-        defer { if let prior { defaults.set(prior, forKey: key) } else { defaults.removeObject(forKey: key) } }
+        let keys = TestDomain.allCases
+            .filter { $0 != .universal }
+            .map { "testcentre.active.\($0.id)" }
+        let prior = Dictionary(uniqueKeysWithValues: keys.map { ($0, defaults.object(forKey: $0)) })
+        defer {
+            for key in keys {
+                if let value = prior[key] {
+                    defaults.set(value, forKey: key)
+                } else {
+                    defaults.removeObject(forKey: key)
+                }
+            }
+        }
 
+        for key in keys { defaults.set(false, forKey: key) }
+        let key = "testcentre.active.sleep"
         defaults.set(false, forKey: key)
         XCTAssertFalse(TestBundleAssembler.activeDomains().contains(.universal),
                        "no mode on => universal not graded")

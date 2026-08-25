@@ -25,6 +25,7 @@ import android.os.Looper
 import android.os.ParcelUuid
 import android.os.SystemClock
 import android.util.Log
+import com.noop.brand.CustomerFacingBrand
 import com.noop.data.HrRow
 import com.noop.data.RrRow
 import com.noop.data.StreamBatch
@@ -3329,7 +3330,7 @@ class WhoopBleClient(
     fun renameStrap(rawName: String) {
         val name = rawName.trim()
         if (connectedFamily != DeviceFamily.WHOOP4) {
-            _state.update { it.copy(renameStatus = "Renaming is WHOOP 4.0 only.") }
+            _state.update { it.copy(renameStatus = "Renaming is unavailable on this band.") }
             log("Strap rename: WHOOP 4.0 only - ignored.")
             return
         }
@@ -3826,7 +3827,9 @@ class WhoopBleClient(
             // Persist the family that actually advertised so the next scan starts on the right service —
             // this is what makes a one-time rotation stick after a stale-preference reconnect. (PR#195)
             persistSelectedModel(selectedModel)
-            _state.update { it.copy(statusNote = "Found $name, connecting…") }
+            _state.update {
+                it.copy(statusNote = "Found ${CustomerFacingBrand.text(name)}, connecting…")
+            }
             // Port of didDiscover: stop scanning, then connect to this peripheral.
             stopScan()
             connectToDevice(device)
@@ -4468,9 +4471,9 @@ class WhoopBleClient(
                 log("WHOOP 5/MG detected - will send CLIENT_HELLO after subscribing (experimental).")
                 _state.update { it.copy(
                     whoop5Detected = true,
-                    statusNote = "WHOOP 5/MG connected - experimental. After bonding, NOOP brings up live " +
+                    statusNote = "Newer compatible band connected - experimental. After bonding, NOOP brings up live " +
                         "heart rate from the strap's realtime stream. Deeper metrics (recovery, strain, " +
-                        "sleep) for 5/MG are still being figured out. WHOOP 4.0 is fully supported today.",
+                        "sleep) are still being validated. Legacy compatible bands have full support today.",
                 ) }
                 cmdCharacteristic = whoop5.getCharacteristic(WHOOP5_CMD_WRITE_CHAR)
             } else {
@@ -7128,7 +7131,7 @@ class WhoopBleClient(
         try {
             // Scrub personal identifiers FIRST so a user can safely share the strap log (#445), THEN
             // apply the optional Test Centre domain tag in front of the already-safe line.
-            val safe = taggedStrapLogLine(redactPii(s), domain)
+            val safe = taggedStrapLogLine(CustomerFacingBrand.text(redactPii(s)), domain)
             // logcat is opt-in (Settings → Strap → "Debug logging"); default OFF so normal users don't
             // emit the strap log to the system log. The in-app ring buffer below always records.
             if (debugLogcat) Log.d(TAG, safe)
@@ -7300,7 +7303,7 @@ internal fun alarmReadbackLocalTime(epochSec: Long): String =
  *  so the replacement references $1/$2 only. */
 internal fun redactStrapLogPii(s: String): String = try {
     s.replace(PII_MAC_RE, "$1:••:••:••:••:$2")
-        .replace(PII_WHOOP_SERIAL_RE, "WHOOP <serial>")
+        .replace(PII_WHOOP_SERIAL_RE, "Band <serial>")
 } catch (t: Throwable) {
     "[redaction error - line withheld]"
 }

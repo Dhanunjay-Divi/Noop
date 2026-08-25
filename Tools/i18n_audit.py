@@ -870,6 +870,90 @@ def scan_ios() -> tuple[list[tuple[str, int, str]], dict[str, list[str]]]:
     return hardcoded, lang_gaps
 
 
+FORBIDDEN_CUSTOMER_BRAND = re.compile(r"whoop", re.IGNORECASE)
+
+
+def _static_literal_text(literal: str, platform: str) -> str:
+    """Remove interpolation expressions before checking authored visible text.
+
+    An identifier such as ``WhoopModel.CUSTOMER_NAME`` evaluates to ``Noop Band`` and is not itself
+    rendered. Keeping interpolation source in the scan would reject safe strings solely because an
+    internal compatibility symbol retains its historical name.
+    """
+    if platform == "android":
+        value = re.sub(r"\$\{[^{}]*\}", "", literal)
+        return re.sub(r"\$[A-Za-z_]\w*", "", value)
+    return re.sub(r"\\\([^)]*\)", "", literal)
+
+
+def apple_catalog_brand_violations(cat: dict, label: str = "<catalog>") -> list[str]:
+    """Forbidden vendor wording in values that an Apple String Catalog can actually render.
+
+    A legacy source key is acceptable only when it has an explicit neutral English localization;
+    catalog keys are implementation identifiers in that case. Every localized value is still checked.
+    """
+    violations: list[str] = []
+    for key, entry in cat.get("strings", {}).items():
+        localizations = entry.get("localizations", {}) or {}
+        english_units = _string_units(entry, "en")
+        if not english_units and FORBIDDEN_CUSTOMER_BRAND.search(key):
+            violations.append(f"{label} :: source {key!r}")
+        for lang in sorted(localizations):
+            for unit in _string_units(entry, lang):
+                value = unit.get("value", "")
+                if FORBIDDEN_CUSTOMER_BRAND.search(value):
+                    violations.append(f"{label} :: {lang} {key!r} -> {value!r}")
+    return violations
+
+
+def android_resource_file_brand_violations(path: Path) -> list[str]:
+    """Forbidden vendor wording in Android string/plural/array resource values, never resource names."""
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError as exc:
+        return [f"{path} :: XML parse error: {exc}"]
+
+    violations: list[str] = []
+    for child in root:
+        nodes = [child] if child.tag == "string" else (
+            list(child.findall("item")) if child.tag in {"plurals", "string-array"} else []
+        )
+        for node in nodes:
+            value = "".join(node.itertext())
+            if FORBIDDEN_CUSTOMER_BRAND.search(value):
+                name = child.attrib.get("name", "<unnamed>")
+                quantity = node.attrib.get("quantity")
+                suffix = f"[{quantity}]" if quantity else ""
+                violations.append(f"{path} :: {name}{suffix} -> {value!r}")
+    return violations
+
+
+def customer_facing_brand_violations(platform: str = "all") -> list[str]:
+    """Every known customer-rendered path that still contains the retired vendor term."""
+    violations: list[str] = []
+    if platform in ("android", "all"):
+        resource_root = ROOT / "android/app/src/main/res"
+        for path in sorted(resource_root.glob("values*/*.xml")):
+            violations.extend(android_resource_file_brand_violations(path))
+        for path, line, literal in scan_android():
+            if FORBIDDEN_CUSTOMER_BRAND.search(_static_literal_text(literal, "android")):
+                violations.append(f"{path}:{line} hardcoded UI -> {literal!r}")
+
+    if platform in ("ios", "all"):
+        for _dirs, catalog_path in CATALOGS:
+            violations.extend(
+                apple_catalog_brand_violations(
+                    load_catalog(catalog_path),
+                    str(catalog_path.relative_to(ROOT)),
+                )
+            )
+        ios_literals, _gaps = scan_ios()
+        for path, line, literal in ios_literals:
+            if FORBIDDEN_CUSTOMER_BRAND.search(_static_literal_text(literal, "ios")):
+                violations.append(f"{path}:{line} hardcoded UI -> {literal!r}")
+    return violations
+
+
 BASELINE_PATH = ROOT / "Tools/i18n_audit_baseline.json"
 
 
@@ -978,6 +1062,16 @@ def ci_check(base_ref: str) -> int:
             if format_gaps:
                 failed = True
                 print(f"FAIL {catalog_path.relative_to(ROOT)} {lang}: {len(format_gaps)} format mismatch(es): {format_gaps[:10]}")
+
+    print("\n--- Customer-facing brand boundary ---")
+    brand_violations = customer_facing_brand_violations()
+    if brand_violations:
+        failed = True
+        print(f"FAIL {len(brand_violations)} rendered value(s) contain retired vendor wording:")
+        for violation in brand_violations[:30]:
+            print(f"  {violation}")
+    else:
+        print("  OK no retired vendor wording in rendered catalog, resource, or hardcoded UI values")
 
     return 1 if failed else 0
 

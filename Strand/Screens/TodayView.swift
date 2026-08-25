@@ -871,7 +871,7 @@ struct TodayView: View {
     ///, still the genuine merge winner, never a blanket claim. Mirror EXACTLY in Kotlin.
     nonisolated static func provenanceDisplayLabel(rawSource: String, deviceId: String) -> String {
         if rawSource.hasSuffix("-noop") { return "On-device" }
-        if rawSource == deviceId || rawSource == Repository.whoopSource { return "Whoop" }
+        if rawSource == deviceId || rawSource == Repository.whoopSource { return "Imported" }
         if rawSource == Repository.appleHealthSource { return "Apple Health" }
         // Fall back to the FusionSource display name for any other known source; else the raw id.
         return FusionSource(rawValue: rawSource)?.displayName ?? rawSource
@@ -881,7 +881,7 @@ struct TodayView: View {
     /// for on-device, matching the Data Sources footer so the same source reads the same colour on Today.
     private func provenanceTint(_ metricKey: String) -> Color {
         switch provenanceLabel(metricKey) {
-        case "Whoop":       return StrandPalette.accent
+        case "Imported":    return StrandPalette.accent
         case "Apple Health": return StrandPalette.metricCyan
         default:            return StrandPalette.statusPositive
         }
@@ -911,7 +911,7 @@ struct TodayView: View {
     static func todayProvenanceChipLabel(rawSource: String, deviceId: String, appleHealthSource: String) -> String {
         if rawSource == appleHealthSource { return "Apple Watch" }
         let shared = provenanceDisplayLabel(rawSource: rawSource, deviceId: deviceId)
-        return shared == "Whoop" ? "Noop Band" : shared
+        return shared == "Imported" ? "Noop Band" : shared
     }
 
     /// True for a watch-context user with no strap supplying scores (Apple-Health days present and no WHOOP
@@ -1369,7 +1369,7 @@ struct TodayView: View {
                     if !scoresBuildingDismissed {
                         DataPendingNote(
                             title: "Live now. Your scores are building.",
-                            message: "Your live heart rate is working from the strap, and Recovery, Effort and Sleep Score build from it over your next few nights of wear, sharpening as NOOP learns your baseline. Want your full history instantly? Import your WHOOP export in Data Sources and it backfills in about a minute."
+                            message: "Your live heart rate is working from the strap, and Recovery, Effort and Sleep Score build from it over your next few nights of wear, sharpening as NOOP learns your baseline. Want your full history instantly? Import a wearable export in Data Sources and it backfills in about a minute."
                         )
                         // A small × dismisses the card INTO the Updates inbox (restorable from there).
                         .overlay(alignment: .topTrailing) {
@@ -1612,7 +1612,7 @@ struct TodayView: View {
                         dismissTodayCard(
                             id: "newHere",
                             title: String(localized: "New here?"),
-                            message: String(localized: "How Recovery, Effort and Sleep Score are calculated, and how they differ from WHOOP.")
+                            message: String(localized: "How Recovery, Effort and Sleep Score are calculated, with independent methods and visible confidence.")
                         )
                     }
                 } label: {
@@ -4499,7 +4499,7 @@ struct TodayView: View {
     /// state), never a stitched tail fragment, so every combination is one clean catalog key.
     private func synthesisDetail(_ d: DailyMetric?) -> String {
         guard let d, let rec = d.recovery else {
-            return String(localized: "No metrics yet. Import a WHOOP export or wear Noop Band to begin.")
+            return String(localized: "No metrics yet. Import a wearable export or wear Noop Band to begin.")
         }
         // true = slept 7h+; false = short; nil = no banked duration.
         let sleptWell: Bool? = d.totalSleepMin.map { $0 / 60.0 >= 7 }
@@ -4547,7 +4547,7 @@ struct TodayView: View {
     private func sleepSourceSubtitle(_ d: DailyMetric?) -> String? {
         guard let d, d.totalSleepMin != nil else { return nil }
         let source = repo.importedSleep[d.day] != nil
-            ? String(localized: "Whoop") : String(localized: "On-device")
+            ? String(localized: "Imported") : String(localized: "On-device")
         // At offset 0 the row IS last night; a navigated past day names its real date so the label never
         // over-claims "last night".
         let night = selectedDayOffset == 0

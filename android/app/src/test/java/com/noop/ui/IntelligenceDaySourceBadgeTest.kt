@@ -9,7 +9,7 @@ import org.junit.Test
  * EVERY row — even days an import won the dashboard merge — so a user couldn't tell a strap-scored
  * night from an imported one. The badge now derives from the merged DailyMetric's WINNING deviceId:
  *   - computed "<id>-noop"        → "On-device"
- *   - imported WHOOP export        → "Whoop"
+ *   - imported compatible export    -> "Imported"
  *   - apple-health / health-connect → "Apple Health"
  * Brand wording matches macOS IntelligenceEngine.DaySource.badge. Mirrors WorkoutSourceLabelTest.
  */
@@ -27,9 +27,9 @@ class IntelligenceDaySourceBadgeTest {
     }
 
     @Test
-    fun whoopImportRow_isWhoop() {
-        // The merged row keeps the imported "my-whoop" id when a WHOOP export wins the merge.
-        assertEquals("Whoop", daySourceBadge("my-whoop").first)
+    fun whoopImportRow_isImported() {
+        // The merged row keeps the legacy imported source id when a compatible export wins the merge.
+        assertEquals("Imported", daySourceBadge("my-whoop").first)
     }
 
     @Test

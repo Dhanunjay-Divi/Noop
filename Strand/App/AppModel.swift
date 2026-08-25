@@ -2938,7 +2938,7 @@ final class AppModel: ObservableObject {
     private func finishImport(_ source: DataSourceImportKind, summary: String, failed: Bool = false) {
         switch source {
         case .whoop:
-            whoopImportSummary = summary
+            whoopImportSummary = CustomerFacingBrand.text(summary)
             whoopImportFailed = failed
         case .appleHealth:
             appleHealthImportSummary = summary

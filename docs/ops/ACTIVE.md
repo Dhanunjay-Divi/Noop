@@ -14,11 +14,23 @@ Last updated: **2026-08-25**
 - Safety client implementation: `82dcc042`.
 - Shared server and paging operations implementation: `29efcfc6`.
 - Safety round and production handoff record: `c216a0b5`.
+- Customer-facing brand boundary: pending validated Round 20 commit.
 - Hosting independence is complete. Commercial source independence is not.
 - Current agent instructions:
   [`../handoff/AGENT-HANDOFF-20260823.md`](../handoff/AGENT-HANDOFF-20260823.md)
 
 ## Last completed round
+
+The
+[customer-facing brand boundary round](rounds/2026-08-25-customer-facing-brand-boundary.md)
+removes the retired transport-vendor name from normal Apple and Android UI,
+notifications, diagnostics, release notes, Coach context, and customer exports.
+It adds dynamic Apple/Android scrubbers and a standing rendered-text audit while
+preserving BLE symbols, persisted IDs, import formats, databases, and mandatory
+legal provenance. Local evidence includes 42 audit tests, 27 focused Apple
+tests, 2 rendered iPhone UI tests, 1,367 StrandAnalytics tests with 7 intentional
+skips, 44 StrandDesign tests, the complete macOS app suite, 3,653 Android tests
+with 6 skips, the debug APK, and an unsigned iOS simulator build.
 
 The
 [Safety escalation and validated-fall contract round](rounds/2026-08-25-safety-escalation-contract.md)
@@ -133,7 +145,7 @@ The stricter distribution gate intentionally fails on:
    only newly authored or separately licensed code.
 5. Keep behavior-specification, clean-room implementation, and overlap review
    roles separate, then commit structured evidence.
-6. Migrate the 247 Android and 166 Apple baseline-tracked literals into
+6. Migrate the 245 Android and 165 Apple baseline-tracked literals into
    reviewed localization resources and complete native-speaker review.
 7. Obtain native-speaker review for the new reproductive-health copy and run
    representative physical-device cycle, age-metric, band-sync, calibration,
@@ -148,6 +160,8 @@ The stricter distribution gate intentionally fails on:
 ## Handoff constraints
 
 - Do not remove required provenance to change appearances.
+- Customer-rendered text must cross D-024's neutral brand boundary. Keep
+  compatibility identifiers internal and preserve mandatory legal provenance.
 - Preserve app bundle identity and local data during in-place testing.
 - Back up before schema, container, import, or destructive device work.
 - Build and simulator success do not prove BLE, sleep, background, haptic,

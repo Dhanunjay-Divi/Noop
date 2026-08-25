@@ -200,8 +200,10 @@ final class UpdateStore: ObservableObject {
         let message = summary ?? String(localized: "NOOP \(version) is here. Tap to read what's new.")
         post(UpdateItem(
             kind: .whatsNew,
-            title: title.isEmpty ? String(localized: "What's new in NOOP \(version)") : title,
-            message: message
+            title: CustomerFacingBrand.text(
+                title.isEmpty ? String(localized: "What's new in NOOP \(version)") : title
+            ),
+            message: CustomerFacingBrand.text(message)
         ))
     }
 

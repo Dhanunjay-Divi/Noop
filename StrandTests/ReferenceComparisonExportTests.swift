@@ -29,11 +29,11 @@ final class ReferenceComparisonExportTests: XCTestCase {
         XCTAssertTrue(summary.contains("Bias: +1.666667"))
         XCTAssertTrue(summary.contains("Mean absolute error (MAE): 2.333333"))
         XCTAssertTrue(summary.contains("Root mean squared error (RMSE): 2.645751"))
-        XCTAssertTrue(summary.contains("WHOOP import revision: whoop-csv-import-v2"))
+        XCTAssertTrue(summary.contains("Provider import revision: wearable-csv-import-v2"))
         XCTAssertTrue(summary.contains("NOOP algorithm revision: \(algorithmVersion)"))
         XCTAssertTrue(summary.contains("NOOP did not upload this export"))
         XCTAssertTrue(summary.contains("TESTER SHARING CHECKLIST"))
-        XCTAssertTrue(summary.contains("[ ] Latest original, unmodified WHOOP export ZIP"))
+        XCTAssertTrue(summary.contains("[ ] Latest original, unmodified wearable export ZIP"))
         XCTAssertTrue(summary.contains("[ ] This NOOP comparison ZIP"))
         XCTAssertTrue(summary.contains("select both ZIPs together"))
         XCTAssertTrue(summary.contains("Share → Messages"))
@@ -48,6 +48,7 @@ final class ReferenceComparisonExportTests: XCTestCase {
         XCTAssertFalse(summary.contains("NOOP mean:"))
         XCTAssertFalse(summary.contains("daily_pairs.csv"))
         XCTAssertFalse(package.suggestedName.contains("2026-06"))
+        assertNoRetiredBrand(in: package)
     }
 
     func testExactScopeAddsSortedDailyPairsOnlyAfterThatScopeIsRequested() throws {
@@ -76,13 +77,14 @@ final class ReferenceComparisonExportTests: XCTestCase {
         XCTAssertEqual(
             csv,
             """
-            day,official_whoop_value,noop_value,noop_minus_official
+            day,official_provider_value,noop_value,noop_minus_official
             2026-06-01,70,72,+2
             2026-06-03,80,79,-1
             2026-06-10,90,94,+4
 
             """
         )
+        assertNoRetiredBrand(in: package)
     }
 
     func testNoStatisticsProducesNoExportPackage() {
@@ -142,5 +144,21 @@ final class ReferenceComparisonExportTests: XCTestCase {
     ) throws -> String {
         let entry = try XCTUnwrap(package.entries.first { $0.name == name })
         return try XCTUnwrap(String(data: entry.data, encoding: .utf8))
+    }
+
+    private func assertNoRetiredBrand(
+        in package: ReferenceComparisonExport.ExportPackage,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertFalse(
+            package.suggestedName.localizedCaseInsensitiveContains("whoop"),
+            file: file,
+            line: line
+        )
+        for entry in package.entries {
+            let text = String(data: entry.data, encoding: .utf8) ?? ""
+            XCTAssertFalse(text.localizedCaseInsensitiveContains("whoop"), file: file, line: line)
+        }
     }
 }

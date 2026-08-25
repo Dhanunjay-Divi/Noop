@@ -48,7 +48,7 @@ enum TestBundleAssembler {
     static func redactEntries(_ entries: [FileExport.BundleEntry]) -> [FileExport.BundleEntry] {
         entries.map { entry in
             guard let text = String(data: entry.data, encoding: .utf8) else { return entry }
-            var scrubbed = LiveState.redactPii(text)
+            var scrubbed = CustomerFacingBrand.text(LiveState.redactPii(text))
             // #572 follow-up: field-aware deviceId mask for the Oura sidecars (see `ouraSidecarNames`). Runs
             // AFTER redactPii, so it catches a non-canonical id that the dash-anchored UUID rule misses; on an
             // already-canonical id redactPii turned into `<device>`, this is a no-op. Key-anchored to

@@ -5,6 +5,7 @@ import android.os.Build
 import com.noop.BuildConfig
 import com.noop.CrashCapture
 import com.noop.ble.redactStrapLogPii
+import com.noop.brand.CustomerFacingBrand
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
@@ -42,7 +43,7 @@ object TestBundleAssembler {
             if (isBinaryEntry(name)) {
                 name to data
             } else {
-                name to redactStrapLogPii(String(data)).toByteArray()
+                name to CustomerFacingBrand.text(redactStrapLogPii(String(data))).toByteArray()
             }
         }
 

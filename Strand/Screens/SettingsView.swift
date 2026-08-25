@@ -1287,7 +1287,7 @@ struct SettingsView: View {
                 .disabled(strapNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             if let status = live.renameStatus {
-                Text(status)
+                Text(CustomerFacingBrand.text(status))
                     .font(StrandFont.caption)
                     .foregroundStyle(StrandPalette.textSecondary)
             }
@@ -1311,7 +1311,7 @@ struct SettingsView: View {
         if live.bonded && live.connected {
             return String(localized: "Noop Band is paired and sending data. Open Live for a real-time heart rate.")
         }
-        if live.connected, let hint = live.pairingHint { return hint }
+        if live.connected, let hint = live.pairingHint { return CustomerFacingBrand.text(hint) }
         if live.connected { return String(localized: "Connected. Finishing the secure pairing handshake…") }
         if live.bonded { return String(localized: "Previously paired but not currently connected. Re-scan to reconnect.") }
         return String(localized: "No band connected. Keep Noop Band nearby and tap Re-scan to pair.")
@@ -2293,10 +2293,8 @@ struct SettingsView: View {
                 .buttonStyle(LiquidPressStyle())
                 .accessibilityLabel("Storage")
 
-                // The exact root legal files copied into this app bundle by project.yml. This stays
-                // available offline and satisfies the Terms gate's promise that the complete terms,
-                // license, notices and attribution ship with the binary rather than existing only on
-                // GitHub.
+                // Complete terms, license, notices and attribution stay available offline. The summary
+                // uses neutral product copy; the underlying provenance documents remain unmodified.
                 NavigationLink {
                     LegalDocumentsView()
                 } label: {
@@ -2308,7 +2306,7 @@ struct SettingsView: View {
                             Text("Legal & acknowledgements")
                                 .font(StrandFont.body)
                                 .foregroundStyle(StrandPalette.textPrimary)
-                            Text("Project terms, source license, current notices and attribution. Available offline.")
+                            Text("appwide.legal.summary")
                                 .font(StrandFont.footnote)
                                 .foregroundStyle(StrandPalette.textTertiary)
                                 .fixedSize(horizontal: false, vertical: true)

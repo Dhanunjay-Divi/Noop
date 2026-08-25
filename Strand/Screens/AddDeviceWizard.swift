@@ -1053,7 +1053,7 @@ struct AddDeviceWizard: View {
                 FTMSPickList(scanner: ftmsScanner) { machine in
                     pickedMachine = machine
                     clearOtherPicks(except: .gymEquipment)
-                    nameDraft = machine.name
+                    nameDraft = CustomerFacingBrand.text(machine.name)
                     ftmsScanner.stopScan()
                     step = .confirm
                 } onRescan: {
@@ -1064,7 +1064,7 @@ struct AddDeviceWizard: View {
                 HuamiPickList(scanner: huamiScanner) { dev in
                     pickedHuami = dev
                     clearOtherPicks(except: type)
-                    nameDraft = dev.name
+                    nameDraft = CustomerFacingBrand.text(dev.name)
                     huamiScanner.stopScan()
                     step = .confirm
                 } onRescan: {
@@ -1075,7 +1075,7 @@ struct AddDeviceWizard: View {
                 HRPickList(scanner: hrScanner) { strap in
                     pickedStrap = strap
                     clearOtherPicks(except: type)
-                    nameDraft = strap.name
+                    nameDraft = CustomerFacingBrand.text(strap.name)
                     hrScanner.stopScan()
                     step = .confirm
                 } onRescan: {
@@ -1173,10 +1173,10 @@ struct AddDeviceWizard: View {
     }
     private var confirmAdvertisedName: String {
         if pickedWhoop != nil { return String(localized: "Noop Band") }
-        if let pickedStrap { return pickedStrap.name }
-        if let pickedMachine { return pickedMachine.name }
-        if let pickedHuami { return pickedHuami.name }
-        if let pickedOura { return pickedOura.ring.name }
+        if let pickedStrap { return CustomerFacingBrand.text(pickedStrap.name) }
+        if let pickedMachine { return CustomerFacingBrand.text(pickedMachine.name) }
+        if let pickedHuami { return CustomerFacingBrand.text(pickedHuami.name) }
+        if let pickedOura { return CustomerFacingBrand.text(pickedOura.ring.name) }
         return type.map(typeTitle) ?? String(localized: "Device")
     }
     private var confirmBrand: String {
@@ -1764,14 +1764,16 @@ private struct DiscoveredRow: View {
     let rssi: Int
     let onTap: () -> Void
     var body: some View {
+        let visibleName = CustomerFacingBrand.text(name)
+        let visibleSubtitle = CustomerFacingBrand.text(subtitle)
         Button(action: onTap) {
             HStack(spacing: 12) {
                 SignalBars(rssi: rssi)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(name)
+                    Text(visibleName)
                         .font(StrandFont.body)
                         .foregroundStyle(StrandPalette.textPrimary)
-                    Text(subtitle)
+                    Text(visibleSubtitle)
                         .font(StrandFont.caption)
                         .foregroundStyle(StrandPalette.textTertiary)
                 }
@@ -1785,7 +1787,7 @@ private struct DiscoveredRow: View {
             .frostedCardSurface(cornerRadius: 12)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(name), signal \(SignalBars.level(for: rssi)) of 4")
+        .accessibilityLabel("\(visibleName), signal \(SignalBars.level(for: rssi)) of 4")
     }
 }
 

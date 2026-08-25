@@ -5,7 +5,7 @@ import org.junit.Test
 
 /**
  * Pins the Workouts "Src" column badge to the real stored origins. The bug (#53): Health Connect
- * workouts showed the "Apple" pill because the badge was a binary `isWhoop ? "Whoop" : "Apple"`.
+ * workouts showed the "Apple" pill because the badge used a binary imported-vs-Apple decision.
  * These cases mirror exactly what the importers write:
  *   - WhoopCsvImporter      → deviceId/source "my-whoop"
  *   - AppleHealthImporter   → deviceId "apple-health", source "Apple Health"
@@ -14,8 +14,8 @@ import org.junit.Test
 class WorkoutSourceLabelTest {
 
     @Test
-    fun whoop_isLabelledWhoop() {
-        assertEquals("Whoop", workoutSourceLabel("my-whoop", "my-whoop"))
+    fun compatibleImport_isLabelledImported() {
+        assertEquals("Imported", workoutSourceLabel("my-whoop", "my-whoop"))
     }
 
     @Test

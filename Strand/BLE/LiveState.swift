@@ -611,7 +611,7 @@ public final class LiveState: ObservableObject {
         // parseable marker the export filters on. Redaction is STILL the only scrub point
         // (redactPii below); tagging happens BEFORE redaction so the scrub covers the whole line.
         let tagged = domain.map { "[\($0.id)] " + line } ?? line
-        log.append(Self.redactPii(tagged))
+        log.append(CustomerFacingBrand.text(Self.redactPii(tagged)))
         // Batched trim: overrun by `trimSlack`, then trim back to the cap in one shot (amortized O(1)/line).
         if log.count > Self.maxLogLines + Self.trimSlack { log.removeFirst(log.count - Self.maxLogLines) }
         // Batched durable-tail mirror: persist every `persistEveryNLines` lines, not on every line;
@@ -664,7 +664,8 @@ public final class LiveState: ObservableObject {
     /// Empty if nothing has ever been logged on this device. `nonisolated` so a background task with no
     /// main-actor instance can read it.
     nonisolated public static func persistedLogTail() -> [String] {
-        (UserDefaults.standard.array(forKey: tailKey) as? [String]) ?? []
+        ((UserDefaults.standard.array(forKey: tailKey) as? [String]) ?? [])
+            .map(CustomerFacingBrand.text)
     }
 
     /// A shareable strap-log body sourced from the DURABLE tail, for a background / scheduled export that
@@ -702,7 +703,7 @@ public final class LiveState: ObservableObject {
             of: "([0-9A-Fa-f]{2}):[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:([0-9A-Fa-f]{2})",
             with: "$1:••:••:••:••:$2", options: .regularExpression)
         out = out.replacingOccurrences(
-            of: "WHOOP (\\d[0-9A-Za-z]{5,})", with: "WHOOP <serial>", options: .regularExpression)
+            of: "WHOOP (\\d[0-9A-Za-z]{5,})", with: "Band <serial>", options: .regularExpression)
         // Mask a CoreBluetooth peripheral UUID, but NOT a standard-BLE / WHOOP-vendor service UUID.
         out = out.replacingOccurrences(
             of: "(?![0-9A-Fa-f]{8}-(?:0000-1000-8000-00805f9b34fb|8d6d-82b8-614a-1c8cb0f8dcc6))[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}",
@@ -729,6 +730,6 @@ public final class LiveState: ObservableObject {
         #endif
         if !extraHeaderLines.isEmpty { header += extraHeaderLines.joined(separator: "\n") + "\n" }
         header += String(repeating: "-", count: 40) + "\n"
-        return header + log.joined(separator: "\n")
+        return CustomerFacingBrand.text(header + log.joined(separator: "\n"))
     }
 }

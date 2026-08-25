@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import com.noop.R
+import com.noop.brand.CustomerFacingBrand
 import androidx.compose.ui.res.stringResource
 import android.text.format.DateUtils
 import android.widget.Toast
@@ -191,6 +192,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
             val summary = withContext(Dispatchers.IO) {
                 runCatching { block() }.getOrElse { ImportSummary.failure("Import", it.message ?: "failed") }
             }
+            val visibleMessage = CustomerFacingBrand.text(summary.message)
             // Mirror the import into the SAME exported strap log the WHOOP path uses (issue #421 parity),
             // so a tester's file import is captured in a shared debug bundle. On success: brand label +
             // per-table COUNTS only (e.g. "dailyMetric=120, sleepSession=88"). On a zero-row/failed import:
@@ -211,7 +213,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
             emitImportTrace(context, vm, summary)
             refreshCounts()
             busy = false
-            Toast.makeText(context, summary.message, Toast.LENGTH_LONG).show()
+            Toast.makeText(context, visibleMessage, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -397,7 +399,7 @@ fun DataSourcesScreen(vm: AppViewModel) {
             title = uiString(R.string.l10n_data_sources_screen_whoop_history_db101974),
             icon = Icons.Filled.MonitorHeart,
             subtitle = "Recovery, strain, sleep and workouts, stored locally. Import a full " +
-                "WHOOP data export (.zip) from app.whoop.com → Data Management and it " +
+                "compatible wearable data export (.zip) from your wearable app and it " +
                 "backfills your whole history in about a minute. Working now on Android.",
         ) {
             StatePill(

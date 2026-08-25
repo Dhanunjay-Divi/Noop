@@ -26,7 +26,7 @@ internal object BackgroundReconnectPolicy {
         hasBluetoothConnectPermission: Boolean,
     ): Decision = when {
         !keepConnectedEnabled -> Decision(false, "Keep connected in background is off")
-        !hasRememberedDevice -> Decision(false, "No previously paired WHOOP")
+        !hasRememberedDevice -> Decision(false, "No previously paired band")
         !hasBluetoothConnectPermission -> Decision(false, "Bluetooth connect permission is missing")
         else -> Decision(true, "Reconnect allowed")
     }

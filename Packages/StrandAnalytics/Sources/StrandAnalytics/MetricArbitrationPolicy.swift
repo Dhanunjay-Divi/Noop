@@ -171,7 +171,7 @@ public enum MetricArbitrationPolicy {
         case (.steps, .whoopImport), (.steps, .noopComputed):
             return "step estimate"
         case (.sleep, .whoopImport):
-            return "WHOOP staged-sleep import"
+            return "imported sleep stages"
         case (.sleep, .noopComputed):
             return "computed stages"
         case (.sleep, .xiaomiBand):
@@ -183,7 +183,7 @@ public enum MetricArbitrationPolicy {
         case (.skinTemp, .appleHealth), (.skinTemp, .healthConnect):
             return "health-data import"
         case (_, .whoopImport):
-            return "WHOOP import"
+            return "wearable import"
         case (_, .xiaomiBand):
             return "device-derived"
         case (_, .noopComputed):

@@ -99,6 +99,8 @@
     <string name="appwide_fitness_age_younger_many_profile_age">比個人資料年齡小 %1$d 歲</string>
     <string name="appwide_fitness_age_younger_one_profile_age">比個人資料年齡小 1 歲</string>
     <string name="appwide_friends_invite_instructions">在 Noop 中開啟「更多」→「朋友」，然後輸入伺服器位址和一次性代碼。</string>
+    <string name="appwide_journal_editing_help">可重新命名、重新分組或移除項目來整理清單。重新命名後，原始問題仍會在內部保留，以便繼續比對匯入的參考資料。自訂項目會被刪除；內建項目會被隱藏，並可在下方還原。</string>
+    <string name="appwide_legal_summary">專案條款和原始碼授權。可離線查看。</string>
     <string name="appwide_metric_education_body_temp_action">查看原始來源和測量方法。使用合適的體溫計確認異常數值；如症狀需要，請及時就醫。</string>
     <string name="appwide_metric_education_body_temp_limits">測量部位、裝置、時間和環境各不相同。這不是核心體溫監測，也不能用於診斷。</string>
     <string name="appwide_metric_education_body_temp_method">NOOP 會將來源數值保存在獨立序列中，不會用它取代皮膚溫度偏差。</string>
@@ -219,18 +221,18 @@
     <string name="appwide_strength_reps_format">%1$d 次</string>
     <string name="appwide_strength_sessions_goal">肌力訓練</string>
     <string name="appwide_strength_sets_format">%1$d 組</string>
-    <string name="appwide_terms_attest_band">我了解 NOOP Band 尚未推出。此版本目前可配合我本人擁有的相容 WHOOP 手環使用，並且我只會使用自己的手環和自己的資料。</string>
+    <string name="appwide_terms_attest_band">我了解 NOOP Band 尚未推出。此版本目前可配合我本人擁有的相容手環使用，並且我只會使用自己的手環和自己的資料。</string>
     <string name="appwide_terms_attest_early_access">我了解 NOOP 是處於搶先體驗階段的健康管理軟體，按現狀提供，並非醫療裝置，也不提供醫療建議。</string>
     <string name="appwide_terms_attest_full_terms">我已閱讀並接受完整的使用條款，包括法律允許的保固和責任限制。</string>
-    <string name="appwide_terms_point_compatibility_body">NOOP 由獨立團隊開發，與 WHOOP, Inc. 不存在隸屬或背書關係。「WHOOP」僅用於說明 NOOP 目前支援的相容手環。</string>
+    <string name="appwide_terms_point_compatibility_body">NOOP 由獨立團隊開發。在 NOOP Band 仍處於開發階段時，目前的手環直連支援僅用於相容性測試。</string>
     <string name="appwide_terms_point_compatibility_head">目前相容方式</string>
     <string name="appwide_terms_point_early_access_body">在 NOOP Band 及其軟體仍處於開發階段時，此版本按現狀提供。有關保固和責任限制，請閱讀完整條款。</string>
     <string name="appwide_terms_point_early_access_head">搶先體驗軟體</string>
     <string name="appwide_terms_point_medical_body">NOOP 的指標僅為健康狀態估算。請勿用其進行診斷、治療或作出醫療及緊急決定。需要時請尋求專業醫療協助。</string>
     <string name="appwide_terms_point_medical_head">用於健康管理，並非醫療服務</string>
-    <string name="appwide_terms_point_ownership_body">僅連接您本人擁有的手環，並僅將 NOOP 用於您自己的資料。目前相容方式使用獨立解析的非官方協定，可能違反 WHOOP 的服務條款，或影響支援、帳戶、訂閱、裝置或保固。</string>
+    <string name="appwide_terms_point_ownership_body">僅連接您本人擁有的手環，並僅將 NOOP 用於您自己的資料。直接相容可能會影響其他 App 的連線、帳戶服務、裝置支援或保固。</string>
     <string name="appwide_terms_point_ownership_head">您的手環，您的資料</string>
-    <string name="appwide_terms_subtitle">在 NOOP Band 準備就緒之前，此版本可配合您本人擁有的相容 WHOOP 手環使用。</string>
+    <string name="appwide_terms_subtitle">在 NOOP Band 準備就緒之前，此版本可配合您本人擁有的相容手環使用。</string>
     <string name="appwide_terms_title">NOOP Band 即將推出</string>
     <string name="appwide_today_band_sync_progress_format">正在同步 Noop Band 歷史記錄，已接收 %1$d 批</string>
     <string name="appwide_today_band_sync_synced">Noop Band 歷史記錄已同步</string>
@@ -279,4 +281,6 @@
     <string name="appwide_v4_target">今日目標</string>
     <string name="appwide_v4_watch">值得留意</string>
     <string name="appwide_v4_why">原因</string>
+    <string name="appwide_workouts_imported_zone_split">此訓練的已匯入心率區間分佈。</string>
+    <string name="appwide_workouts_imported_zones">已匯入的心率區間</string>
 </resources>

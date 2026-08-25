@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import com.noop.R
+import com.noop.brand.CustomerFacingBrand
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -251,9 +252,9 @@ fun AddDeviceWizard(
 
     val confirmAdvertisedName = run {
         pickedWhoop?.let { return@run WhoopModel.CUSTOMER_NAME }
-        pickedStrap?.let { return@run it.name }
-        pickedMachine?.let { return@run it.name }
-        pickedHuami?.let { return@run it.name }
+        pickedStrap?.let { return@run CustomerFacingBrand.text(it.name) }
+        pickedMachine?.let { return@run CustomerFacingBrand.text(it.name) }
+        pickedHuami?.let { return@run CustomerFacingBrand.text(it.name) }
         type?.title ?: "Device"
     }
     val confirmName = nameDraft.trim().ifEmpty { confirmAdvertisedName }
@@ -534,7 +535,7 @@ fun AddDeviceWizard(
                                 onSelect = { machine ->
                                     pickedMachine = machine
                                     pickedWhoop = null; pickedStrap = null; pickedHuami = null
-                                    nameDraft = machine.name
+                                    nameDraft = CustomerFacingBrand.text(machine.name)
                                     ftmsScanner.stopScan()
                                     step = WizardStep.Confirm
                                 },
@@ -545,7 +546,7 @@ fun AddDeviceWizard(
                                 onSelect = { dev ->
                                     pickedHuami = dev
                                     pickedWhoop = null; pickedStrap = null; pickedMachine = null
-                                    nameDraft = dev.name
+                                    nameDraft = CustomerFacingBrand.text(dev.name)
                                     huamiScanner.stopScan()
                                     step = WizardStep.Confirm
                                 },
@@ -557,7 +558,7 @@ fun AddDeviceWizard(
                                 onSelect = { strap ->
                                     pickedStrap = strap
                                     pickedWhoop = null; pickedMachine = null; pickedHuami = null
-                                    nameDraft = strap.name
+                                    nameDraft = CustomerFacingBrand.text(strap.name)
                                     hrScanner.stopScan()
                                     step = WizardStep.Confirm
                                 },
@@ -1599,21 +1600,23 @@ private fun PickList(
 
 @Composable
 private fun DiscoveredRow(name: String, subtitle: String, rssi: Int, onTap: () -> Unit) {
+    val visibleName = CustomerFacingBrand.text(name)
+    val visibleSubtitle = CustomerFacingBrand.text(subtitle)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .frostedCardSurface(cornerRadius = 12.dp)
             .clickable(onClick = onTap)
-            .semantics { contentDescription = uiString(R.string.l10n_add_device_wizard_name_signal_signalbars_level_rssi_of_6aa514f6, name, SignalBars.level(rssi)) }
+            .semantics { contentDescription = uiString(R.string.l10n_add_device_wizard_name_signal_signalbars_level_rssi_of_6aa514f6, visibleName, SignalBars.level(rssi)) }
             .padding(14.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         SignalBars(rssi)
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(name, style = NoopType.body, color = Palette.textPrimary)
-            Text(subtitle, style = NoopType.caption, color = Palette.textTertiary)
+            Text(visibleName, style = NoopType.body, color = Palette.textPrimary)
+            Text(visibleSubtitle, style = NoopType.caption, color = Palette.textTertiary)
         }
         Icon(
             Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -1647,8 +1650,8 @@ private fun ConfirmStep(
         ) {
             SignalBars(rssi)
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(advertisedName, style = NoopType.headline, color = Palette.textPrimary)
-                Text(brand, style = NoopType.caption, color = Palette.textTertiary)
+                Text(CustomerFacingBrand.text(advertisedName), style = NoopType.headline, color = Palette.textPrimary)
+                Text(CustomerFacingBrand.text(brand), style = NoopType.caption, color = Palette.textTertiary)
             }
         }
 

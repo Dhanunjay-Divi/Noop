@@ -18,7 +18,7 @@ package com.noop.analytics
  */
 enum class FusionSource(val id: String, val displayName: String) {
     /** Imported WHOOP record (CSV/zip export under the strap's deviceId, e.g. "my-whoop"). */
-    WHOOP_IMPORT("my-whoop", "WHOOP"),
+    WHOOP_IMPORT("my-whoop", "Imported"),
 
     /** NOOP-computed score derived on-device from raw strap streams (the "$deviceId-noop" sibling). */
     NOOP_COMPUTED("my-whoop-noop", "NOOP"),
@@ -62,7 +62,7 @@ enum class AgreementState {
 /**
  * One source's value for a (metric, day), with the trust tier the policy assigned it. The winner is
  * the lowest [tier] (most trusted), ties broken by [sourcePriority] (stable). [reason] is the
- * published, plain-English evidence description ("WHOOP import", "computed stages") - the honesty contract.
+ * published, plain-English evidence description ("wearable import", "computed stages") - the honesty contract.
  */
 data class ContributingSource(
     val source: FusionSource,

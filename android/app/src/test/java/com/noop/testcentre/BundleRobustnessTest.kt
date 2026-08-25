@@ -114,10 +114,10 @@ class BundleRobustnessTest {
     }
 
     @Test fun redactedFormsDoNotFalsePositive() {
-        // The masked MAC and the "WHOOP <serial>" placeholder are the EXPECTED redacted output - they must
+        // The masked MAC and the "Band <serial>" placeholder are the EXPECTED redacted output - they must
         // not trip the leak scan, or every healthy bundle would fail.
         val entries = listOf(
-            "report.txt" to "mac=AA:••:••:••:••:FF dev=WHOOP <serial> connected".toByteArray(),
+            "report.txt" to "mac=AA:••:••:••:••:FF dev=Band <serial> connected".toByteArray(),
             "meta.json" to "{}".toByteArray(),
         )
         val r = BundleRobustness.verify(entries, expectScreenshot = false, crashWasCaptured = false)

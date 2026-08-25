@@ -291,7 +291,7 @@ private fun EmptyNote() {
                     "baseline (you'll see \"Calibrating\" until then), and keeps sharpening over your first " +
                     "couple of weeks. Some Noop Band firmware banks only a short history, so that night count " +
                     "can climb slowly or sit at 0 of 4 until you have worn it across a few nights. That is " +
-                    "the band's sync limit, not a fault. Import your WHOOP export to skip the wait.",
+                    "the band's sync limit, not a fault. Import a wearable export to skip the wait.",
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
             )
@@ -484,7 +484,7 @@ internal fun daySourceBadge(deviceId: String): Pair<String, Color> = when {
     deviceId == com.noop.data.WhoopRepository.APPLE_HEALTH_SOURCE ||
         deviceId == com.noop.data.WhoopRepository.HEALTH_CONNECT_SOURCE -> "Apple Health" to Palette.accent
     deviceId == "oura-api" || deviceId.startsWith("oura-") -> "Oura Ring" to Palette.restColor
-    else -> "Whoop" to Palette.accent
+    else -> "Imported" to Palette.accent
 }
 
 /** Recent-window options for the By Day list. `days == null` means show everything. */

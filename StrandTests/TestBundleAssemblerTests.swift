@@ -14,7 +14,7 @@ final class TestBundleAssemblerTests: XCTestCase {
         let raw = scrubbed.first { $0.name == "raw-capture.jsonl" }!
         let text = String(data: raw.data, encoding: .utf8)!
         XCTAssertFalse(text.contains("4C1594026"), "the injected serial must be scrubbed")
-        XCTAssertTrue(text.contains("WHOOP <serial>"))
+        XCTAssertTrue(text.contains("Band <serial>"))
     }
 
     func testMetaJsonIsNotMangledButStillPasses() {
@@ -64,7 +64,7 @@ final class TestBundleAssemblerTests: XCTestCase {
         XCTAssertLessThanOrEqual(prepared.entries.reduce(0) { $0 + $1.data.count }, 512)
         let text = try XCTUnwrap(String(data: prepared.entries[0].data, encoding: .utf8))
         XCTAssertTrue(text.contains("diagnostic export truncated"))
-        XCTAssertTrue(text.contains("newest WHOOP <serial>"), "the newest complete diagnostic line survives")
+        XCTAssertTrue(text.contains("newest Band <serial>"), "the newest complete diagnostic line survives")
         XCTAssertFalse(text.contains(serial), "the standalone path must run the same redaction sink")
     }
 
@@ -164,13 +164,13 @@ final class TestBundleAssemblerTests: XCTestCase {
         XCTAssertTrue(out.contains("\"hex\":\"\(hex)\""), "the raw hex bytes must survive redaction intact")
     }
 
-    /// The field-aware mask is SCOPED to the Oura sidecars: it must NOT rewrite a non-PII logical `deviceId`
-    /// (e.g. "my-whoop") in a non-sidecar entry, which would strip useful, non-sensitive context from the
-    /// report body the user reviews.
-    func testSidecarDeviceIdMaskDoesNotTouchNonSidecarEntries() {
+    /// The field-aware Oura mask stays scoped to sidecars, while the separate customer-brand boundary
+    /// neutralizes a legacy logical source id in every user-reviewable text entry.
+    func testNonSidecarLegacySourceIdUsesNeutralCustomerLabel() {
         let line = "{\"deviceId\":\"my-whoop\",\"note\":\"hi\"}"
         let out = String(data: TestBundleAssembler.redactEntries(
             [FileExport.BundleEntry(name: "report.txt", data: Data(line.utf8))]).first!.data, encoding: .utf8)!
-        XCTAssertTrue(out.contains("\"deviceId\":\"my-whoop\""), "a non-sidecar logical deviceId must be left readable")
+        XCTAssertTrue(out.contains("\"deviceId\":\"primary-band\""))
+        XCTAssertFalse(out.localizedCaseInsensitiveContains("whoop"))
     }
 }

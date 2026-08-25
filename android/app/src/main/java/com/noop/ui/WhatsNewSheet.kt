@@ -1,6 +1,7 @@
 package com.noop.ui
 
 import com.noop.R
+import com.noop.brand.CustomerFacingBrand
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -136,8 +137,8 @@ private fun ExpectationsCard() {
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(3.dp),
                     ) {
-                        Text(e.title, style = NoopType.headline, color = Palette.textPrimary)
-                        Text(e.body, style = NoopType.subhead, color = Palette.textSecondary)
+                        Text(CustomerFacingBrand.text(e.title), style = NoopType.headline, color = Palette.textPrimary)
+                        Text(CustomerFacingBrand.text(e.body), style = NoopType.subhead, color = Palette.textSecondary)
                     }
                 }
             }
@@ -158,7 +159,7 @@ private fun ReleaseCard(release: AppChangelog.Release, isLatest: Boolean = false
             ) {
                 SourceBadge("v${release.version}")
                 Text(
-                    release.title,
+                    CustomerFacingBrand.text(release.title),
                     style = NoopType.headline,
                     color = Palette.textPrimary,
                     modifier = Modifier.weight(1f),
@@ -179,7 +180,7 @@ private fun ReleaseCard(release: AppChangelog.Release, isLatest: Boolean = false
                             .background(Palette.accent),
                     )
                     Text(
-                        item,
+                        CustomerFacingBrand.text(item),
                         style = NoopType.subhead,
                         color = Palette.textSecondary,
                         modifier = Modifier.weight(1f),
