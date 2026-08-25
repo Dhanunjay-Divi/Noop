@@ -28,7 +28,8 @@ The
 has created the durable `NOOP Health` iOS record (`6804921246`) in `Prepare for
 Submission` on exact private mainline. The identity-correct unsigned Release
 build passes, the ignored one-way launch verifier is generated locally and
-valid, and signed archive/upload remain blocked by the recorded release gates.
+valid, App Store release control is manual, and signed archive/upload remain
+blocked by the recorded release gates.
 
 The remaining work is to integrate and verify the protected App Store surface,
 refresh final evidence, push `main`, and remove the merged feature branch.

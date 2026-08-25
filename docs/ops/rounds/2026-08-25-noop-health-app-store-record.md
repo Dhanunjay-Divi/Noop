@@ -56,6 +56,9 @@ submit only when the current release gates pass.
 - Kept the existing NOOP icon assets unchanged. App Store Connect does not
   accept an icon during record creation; the storefront icon will be taken
   from the signed app build when it is uploaded.
+- Changed App Store Version Release from Apple's automatic-release default to
+  `Manually release this version`, so approval cannot publish the protected
+  preview before an explicit owner go-live action.
 - Completed an unsigned generic iOS Release build from exact mainline.
 - Rebuilt with the ignored local bundle/team mapping attached without adding it
   to Git. The app, widget, Watch app, and complication all resolve to the
@@ -91,6 +94,7 @@ submit only when the current release gates pass.
 | Bundle inspection | Existing app/widget/Watch/complication family; `9.2.0 (229)` | Artifact identity matches the intended App Store record and upgrade path. | Provisioning or distribution authorization. |
 | Archive-like launch-access validation | Missing-verifier fixture fails; generated ignored verifier passes | Ungated archive fails closed and the local protected verifier has the required shape. | Strength against a patched client or App Review acceptance. |
 | App Store Connect app record | `NOOP Health`, app ID `6804921246`, `Prepare for Submission` | Apple accepted the localized name and bound the existing main bundle ID to a durable record. | Archive validation, upload, review, or release. |
+| App Store release control | `Manually release this version` saved | An approved build will wait for an explicit release action. | That a build has been uploaded or approved. |
 | Existing icon assets | Primary Obsidian NOOP mark plus existing alternate and Watch icon sets remain unchanged | The next signed build will carry the established NOOP logo. | That Apple has ingested or rendered the icon before build upload. |
 
 ## Physical device and deployment
