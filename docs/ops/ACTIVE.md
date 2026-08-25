@@ -26,10 +26,17 @@ on `main`.
 The
 [NOOP Health App Store record and release preflight round](rounds/2026-08-25-noop-health-app-store-record.md)
 has created the durable `NOOP Health` iOS record (`6804921246`) in `Prepare for
-Submission` on exact private mainline. The identity-correct unsigned Release
-build passes, the ignored one-way launch verifier is generated locally and
-valid, App Store release control is manual, and signed archive/upload remain
-blocked by the recorded release gates.
+Submission` on exact private mainline. App Store release control is manual.
+The ignored one-way launch verifier is generated locally and valid, and the
+fail-closed boundary now covers the iPhone shell, iOS widgets, Live Activities,
+Dynamic Island, Watch app, and Watch complications without copying verifier
+material or build settings into extensions. A locked build-230 iPhone also
+replaces build-229 Watch caches with a legacy-decodable neutral snapshot during
+a staggered upgrade. The full embedded unsigned Release graph passes as
+`9.2.0 (230)` with the existing bundle/App Group identity, 51/51 StrandDesign
+tests pass, and the name-only build-setting isolation gate passes. Signed
+archive, upload, physical validation, and the recorded release gates remain
+open.
 
 The remaining work is to integrate and verify the protected App Store surface,
 refresh final evidence, push `main`, and remove the merged feature branch.

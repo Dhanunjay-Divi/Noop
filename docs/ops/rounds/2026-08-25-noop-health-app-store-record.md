@@ -2,11 +2,11 @@
 
 ## Status
 
-- State: `record created; archive and upload blocked`
+- State: `protected release candidate compiled; signed archive and upload blocked`
 - Owner: project team
 - Branch: `codex/app-store-submit-20260825`
 - Start commit: `9d4a6957`
-- End implementation commit: none (record-only round)
+- End implementation commit: `c1cdd8b3`
 - Record commit or PR: private branch head
 
 ## Objective
@@ -61,12 +61,37 @@ submit only when the current release gates pass.
   preview before an explicit owner go-live action.
 - Completed an unsigned generic iOS Release build from exact mainline.
 - Rebuilt with the ignored local bundle/team mapping attached without adding it
-  to Git. The app, widget, Watch app, and complication all resolve to the
-  existing bundle family and version `9.2.0 (229)`.
+  to Git. The initial mainline artifact resolved the existing bundle family at
+  `9.2.0 (229)`; the protected candidate was then rebuilt in lockstep as
+  `9.2.0 (230)`.
 - Generated the ignored one-way launch-access verifier interactively for
   rotation `appstore-2026-08-25-v1`. The file is mode `0600`, remains ignored
   by Git, contains no plaintext access code, and passes the Release archive
   validation contract.
+- Matched the App Store record to marketing version `9.2.0` and advanced the
+  source build from `229` to `230` across the iPhone app, widget, Watch app,
+  and Watch complication without changing any bundle or App Group identity.
+- Extended the temporary preview boundary to every embedded user-facing
+  surface. A required build now defaults to a neutral locked presentation in
+  iOS widgets, Lock Screen widgets, Live Activities, Dynamic Island, the Watch
+  app, and Watch complications until the iPhone has accepted the current gate
+  version. Missing, corrupt, legacy, or version-mismatched receipts deny.
+- Deferred returning-user BLE restoration, paired-scale reconnection,
+  analysis, Watch publishing, Health observers, GPS-workout restoration, and
+  scheduled diagnostic work until launch access and the current Terms are
+  accepted. Extensions receive only a non-secret required/version marker;
+  they never receive the verifier, salt, candidate code, or a derivative.
+- Isolated the ignored verifier build settings to the `NOOPiOS` target through
+  a dedicated target wrapper. CI and local validation inspect setting names
+  only and fail if salt, verifier, or iteration keys reach the widget, Watch,
+  or complication targets.
+- Added a locked-start WatchConnectivity scrub for staggered upgrades. A build
+  230 iPhone sends a build-229-decodable empty score snapshot and empty
+  strength plan while locked, so an older paired Watch cannot keep presenting
+  cached health values until it receives the newer Watch binary.
+- Localized the neutral locked presentation for the iPhone-adjacent widgets,
+  Live Activity/Dynamic Island, Watch app, and complication in the supported
+  Apple catalog languages.
 
 ## Data, privacy, and medical truth
 
@@ -87,15 +112,22 @@ submit only when the current release gates pass.
 | `python3 Tools/release-legal-gate.py check` | Pass; 152 runtime components and 3 container inputs | Inventory is internally consistent. | Redistribution rights. |
 | `python3 Tools/release-legal-gate.py distribution` | Expected fail on three recorded independence statuses | Release remains fail-closed. | That separate remediation is complete. |
 | `python3 Tools/check-private-data.py` | Pass | No prohibited private-data filenames are tracked. | Final archive privacy labels. |
-| `python3 Tools/validate-ops-rounds.py --all .` | Pass for 10 pre-existing rounds | Existing ledger was valid before this record. | This new record until revalidated. |
-| `python3 Tools/health_claims_gate.py` | Pass across 1,052 files | Current copy gate is clear. | Clinical accuracy or regulatory status. |
-| Release-tool unit tests | 25/25 pass | Release helper contracts pass locally. | App Store acceptance. |
+| `python3 Tools/validate-ops-rounds.py --all .` | Pass for all 11 rounds | The current ledger, including this round, is structurally valid. | Product or release correctness. |
+| `python3 Tools/health_claims_gate.py` | Pass across 1,053 files | Current copy gate is clear. | Clinical accuracy or regulatory status. |
+| Release-tool unit tests | 30/30 pass | Release helper and launch-isolation contracts pass locally. | App Store acceptance. |
+| `python3 Tools/i18n_audit.py --ci origin/main` | Pass for Android and all Apple focus catalogs | The locked-surface update adds no untranslated focus-locale copy or new raw UI literals. | Native-speaker quality. |
 | Unsigned generic iOS Release build | Pass | Exact mainline compiles for the app and embedded targets. | Signing, archive validation, or hardware behavior. |
-| Bundle inspection | Existing app/widget/Watch/complication family; `9.2.0 (229)` | Artifact identity matches the intended App Store record and upgrade path. | Provisioning or distribution authorization. |
+| Bundle inspection | Existing app/widget/Watch/complication family; final candidate `9.2.0 (230)` | Artifact identity matches the intended App Store record and upgrade path. | Provisioning or distribution authorization. |
 | Archive-like launch-access validation | Missing-verifier fixture fails; generated ignored verifier passes | Ungated archive fails closed and the local protected verifier has the required shape. | Strength against a patched client or App Review acceptance. |
 | App Store Connect app record | `NOOP Health`, app ID `6804921246`, `Prepare for Submission` | Apple accepted the localized name and bound the existing main bundle ID to a durable record. | Archive validation, upload, review, or release. |
 | App Store release control | `Manually release this version` saved | An approved build will wait for an explicit release action. | That a build has been uploaded or approved. |
 | Existing icon assets | Primary Obsidian NOOP mark plus existing alternate and Watch icon sets remain unchanged | The next signed build will carry the established NOOP logo. | That Apple has ingested or rendered the icon before build upload. |
+| `swift test` for `StrandDesign` | 51/51 pass | Cross-surface authorization, version rotation, malformed state, legacy Watch denial, and build-229 scrub decoding contracts pass. | Physical Watch/Widget/ActivityKit behavior. |
+| Focused `LaunchAccessTests` | 13/13 pass | Explicit `required=false` disables the gate consistently in Debug, malformed required flags fail closed, and Release remains required. | Signed archive or App Review behavior. |
+| Unsigned generic iOS Release build after gate hardening | Pass for app, widget/Live Activity, Watch app, and complication | The full embedded Release dependency graph compiles as `9.2.0 (230)`. | Signing, upload, App Review, or hardware behavior. |
+| Built-product launch policy inspection | All four bundles require one resolved gate version; all three extensions contain no verifier, salt, or iteration value | Embedded surfaces carry only non-secret exact-version policy and fail closed on absent authorization. | Encryption or resistance to a patched binary/container owner. |
+| `Tools/validate-launch-gate-isolation.py` | Pass with the local verifier and in clean-checkout mode | Verifier setting names resolve only for `NOOPiOS`; embedded targets receive public policy only. The checker retains names and never prints values. | Runtime secrecy against a controlled build host. |
+| Staggered Watch payload tests | Build-229-shaped decoder receives nil scores/HR, empty summary, epoch time, and empty strength state | A locked build-230 phone can overwrite health-bearing caches understood by the immediately preceding Watch build. | Apple-managed delivery timing or a physical staggered upgrade. |
 
 ## Physical device and deployment
 
@@ -108,13 +140,16 @@ submit only when the current release gates pass.
 
 ## Git and release state
 
-- Changed paths: App Store localized name, this round record, decision log,
-  and active/index pointers
-- Commits: App Store reservation/metadata record committed on the branch
+- Changed paths: App Store localized name and release records, cross-surface
+  launch authorization contract/tests, iPhone startup/BLE deferral, Watch
+  transport/UI, widgets/Live Activity, embedded target policy, and build number
+- Commits: App Store reservation/metadata record committed on the branch;
+  protected-surface implementation committed as `c1cdd8b3`
 - Branch and remote state: pushed to private origin as
   `codex/app-store-submit-20260825`
 - Repository visibility verified: private
-- Version/build impact: none; `9.2.0 (229)`
+- Version/build impact: App Store version remains `9.2.0`; build advanced in
+  lockstep from `229` to `230`
 - Release or distribution impact: the App Store record was created; no signed
   archive, upload, submission, review request, or release has occurred
 
@@ -123,7 +158,8 @@ submit only when the current release gates pass.
 - Durable decision added or changed: use `NOOP Health` as the first fallback
   App Store localization while keeping the installed bundle and app-group
   identity unchanged and retaining the NOOP logo.
-- Decision-log entry: `D-027`.
+- Durable decisions: `D-027` for App Store identity and `D-028` for the
+  exact-version, fail-closed embedded-surface preview boundary.
 
 ## Open risks and honest limitations
 
@@ -133,6 +169,16 @@ submit only when the current release gates pass.
   privacy/entitlement validation, and physical-device release matrix are open.
 - The distribution gate still reports three unresolved source-independence
   statuses on exact private mainline.
+- The preview gate is a client-side presentation/distribution deterrent, not
+  health-data encryption or durable authentication. App Group data remains at
+  rest, and a party controlling the binary or container can bypass the UI.
+- A locked cold launch intentionally postpones a staged database restore until
+  the next authorized cold launch; BLE and scale restoration resume after
+  authorization. This behavior requires physical in-place upgrade testing.
+- WatchConnectivity application-context delivery is Apple-managed. A physical
+  staggered-upgrade test must still update the iPhone from 229 to 230 while the
+  Watch remains on 229, confirm old complication values clear while locked,
+  then confirm current data rehydrates after authorization.
 
 ## Next round
 
