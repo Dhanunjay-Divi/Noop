@@ -20,16 +20,18 @@ Last updated: **2026-08-25**
 
 Round 21 validates and hardens recovery calibration, sleep evidence,
 cross-platform wearable import, data repair, compact-device layouts, and
-localization. The interrupted implementation is being completed together with:
+localization. Its implementation and canonical repository cleanup are committed
+on `main`.
 
-- owner-controlled provenance cleanup and a passing distribution gate;
-- removal of obsolete repository references and the retired upstream-watch
-  automation;
-- restoration and UI verification of the liquid pull-to-sync indicator;
-- compact iPhone navigation and bottom-bar visual verification;
-- complete Apple, Android, server, localization, privacy, legal, and whitespace
-  gates; and
-- one reviewed commit pushed directly to `main`.
+The
+[NOOP Health App Store record and release preflight round](rounds/2026-08-25-noop-health-app-store-record.md)
+has created the durable `NOOP Health` iOS record (`6804921246`) in `Prepare for
+Submission` on exact private mainline. The identity-correct unsigned Release
+build passes, the ignored one-way launch verifier is generated locally and
+valid, and signed archive/upload remain blocked by the recorded release gates.
+
+The remaining work is to integrate and verify the protected App Store surface,
+refresh final evidence, push `main`, and remove the merged feature branch.
 
 ## Decisions that remain binding
 
