@@ -27,19 +27,30 @@ struct LaunchAccessConfiguration: Equatable {
     let iterations: UInt32
 
     enum Resolution: Equatable {
-        /// An intentionally blank version removes the temporary gate without changing app identity/data.
+        /// An explicitly ungated policy, or a blank legacy version, removes the temporary gate
+        /// without changing app identity/data.
         case disabled
         case enabled(LaunchAccessConfiguration)
-        /// A nonblank version with incomplete or unsafe verifier material must never fail open.
+        /// A required or legacy-enabled nonblank version with incomplete or unsafe verifier material
+        /// must never fail open.
         case invalid
     }
 
     static func resolve(
         infoDictionary: [String: Any] = Bundle.main.infoDictionary ?? [:]
     ) -> Resolution {
+        let required: Bool
+        if let rawRequired = infoDictionary[requiredInfoKey] {
+            guard let parsedRequired = boolValue(rawRequired) else { return .invalid }
+            guard parsedRequired else { return .disabled }
+            required = true
+        } else {
+            // Preserve the legacy version-driven policy for callers and older test fixtures that do
+            // not carry an explicit required flag.
+            required = false
+        }
         let rawVersion = stringValue(infoDictionary[versionInfoKey]) ?? ""
         let version = rawVersion.trimmingCharacters(in: .whitespacesAndNewlines)
-        let required = boolValue(infoDictionary[requiredInfoKey]) ?? false
         guard !version.isEmpty else { return required ? .invalid : .disabled }
         guard version.count <= 128,
               !version.contains("$("),

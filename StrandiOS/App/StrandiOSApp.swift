@@ -23,7 +23,7 @@ struct StrandiOSApp: App {
     @StateObject private var health: HealthKitBridge
     /// The phone→watch link. Built + activated here so the watch app actually receives snapshots on a
     /// real device; without an owner that pushes it, the watch only ever shows placeholder data.
-    @StateObject private var watch = WatchSessionBridge()
+    @StateObject private var watch: WatchSessionBridge
     /// Shared cross-screen navigation hook (e.g. Live → Devices). The iOS shell (`RootTabView`)
     /// observes it and presents the Devices manager.
     @StateObject private var router = NavRouter()
@@ -61,6 +61,23 @@ struct StrandiOSApp: App {
         DemoDayHarness.applyLaunchArgsIfNeeded()
         WindDownNudge.applyDemoLaunchArgumentsIfNeeded()
         #endif
+        // Resolve the launch gate before constructing any operational model or registering a background
+        // handler. Returning users with a matching this-device receipt resume normally; a locked/invalid
+        // process keeps Bluetooth, analysis and diagnostic export inert until the verified unlock edge.
+        let access = LaunchAccessController()
+        _launchAccess = StateObject(wrappedValue: access)
+        let operationallyAllowed = access.isUnlocked
+            && UserDefaults.standard.string(forKey: "noop.acceptedTermsVersion")
+                == Terms.currentVersion
+        Self.reconcileLaunchSurfaceAuthorization(allowed: access.isUnlocked)
+        // WatchConnectivity is the one intentionally permitted subsystem on a locked launch. It sends
+        // only a legacy-decodable empty context, ensuring a build-229 Watch/complication cannot retain
+        // cached metrics while its iPhone has already updated to this protected build.
+        let watchBridge = WatchSessionBridge()
+        _watch = StateObject(wrappedValue: watchBridge)
+        if !operationallyAllowed {
+            watchBridge.activateForLockedLaunch()
+        }
         // Debug-only canary: trips if the App Group entitlement is missing on this target before any
         // silent no-op (PendingIntents, WidgetSnapshot.publish, Live Activity) can mask the issue as
         // "the widget doesn't show anything yet." No-op in Release.
@@ -69,14 +86,19 @@ struct StrandiOSApp: App {
         // only delivers a background task whose identifier was registered at launch AND listed in the
         // target's BGTaskSchedulerPermittedIdentifiers (project.yml). Without this the overnight drop
         // never fires; the macOS timer, foreground catch-up, and "Run now" already work without it.
-        ScheduledDebugExport.register()
+        ScheduledDebugExport.register(launchAccessAuthorized: {
+            access.isUnlocked
+                && UserDefaults.standard.string(forKey: "noop.acceptedTermsVersion")
+                    == Terms.currentVersion
+        })
+        if operationallyAllowed {
+            ScheduledDebugExport.activateIfEnabled()
+        }
         // Foreground presentation: without a delegate, iOS suppresses a notification's banner while the app
         // is open, so a user testing the wind-down reminder with NOOP foregrounded sees nothing. Register
         // before the first scene so any early-fired notification is presented.
         UNUserNotificationCenter.current().delegate = NotificationPresenter.shared
-        let access = LaunchAccessController()
-        _launchAccess = StateObject(wrappedValue: access)
-        let model = AppModel()
+        let model = AppModel(startOperationalWork: operationallyAllowed)
         _model = StateObject(wrappedValue: model)
         let bridge = HealthKitBridge(
             repo: model.repo,
@@ -100,7 +122,7 @@ struct StrandiOSApp: App {
         // before a SwiftUI scene becomes active. Install observers at this process-launch boundary for
         // returning users only. The bridge checks NOOP's prior explicit-consent marker and never opens a
         // permission sheet, so a fresh install still reaches the in-app rationale first.
-        if access.isUnlocked {
+        if operationallyAllowed {
             bridge.registerObserversAtLaunchIfPreviouslyRequested()
         }
         // Register the general maintenance refresh while launch is still in progress. This is an
@@ -165,6 +187,7 @@ struct StrandiOSApp: App {
                 }
                 .onChange(of: launchAccess.state) { _, state in
                     let unlocked = state == .unlocked
+                    Self.reconcileLaunchSurfaceAuthorization(allowed: unlocked)
                     model.setRealtimeForeground(
                         unlocked
                             && acceptedTermsVersion == Terms.currentVersion
@@ -344,21 +367,17 @@ struct StrandiOSApp: App {
                 // waiting for the next foreground. activate() is idempotent + a no-op where WC isn't
                 // supported, so this is safe on every device/simulator combination.
                 .task {
-                    guard launchAccess.isUnlocked else {
+                    guard launchAccess.isUnlocked,
+                          acceptedTermsVersion == Terms.currentVersion else {
+                        // Retry the latest-state scrub after the scene mounts. This remains limited to
+                        // WatchConnectivity and does not start BLE, HealthKit, repository, or diagnostics.
+                        watch.activateForLockedLaunch()
                         await liveActivity.end()
                         return
                     }
                     // Cold-launch adoption/cleanup: packet publishers may stay quiet while an activity
                     // from the prior process is still visible, so reconcile the cached sensor state too.
-                    watch.startStrengthRoutineHandler = {
-                        [weak model, weak router, weak watch] routineID in
-                        guard let model, let router, let watch else { return }
-                        Task { @MainActor in
-                            _ = try? await model.repo.startStrengthSession(routineID: routineID)
-                            router.openStrength()
-                            await watch.pushStrengthLatest(from: model)
-                        }
-                    }
+                    configureWatchHandlers()
                     watch.activate()
                     reconcileLiveActivity(repairHydration: true)
                     await model.reconcileAutomaticWorkoutSurfaces()
@@ -367,6 +386,8 @@ struct StrandiOSApp: App {
                 .onReceive(
                     NotificationCenter.default.publisher(for: .strengthTrainingChanged)
                 ) { _ in
+                    guard launchAccess.isUnlocked,
+                          acceptedTermsVersion == Terms.currentVersion else { return }
                     Task { await watch.pushStrengthLatest(from: model) }
                 }
         }
@@ -455,12 +476,26 @@ struct StrandiOSApp: App {
         }
     }
 
+    /// Mirror only a non-secret, exact-version authorization into the shared App Group. Every extension
+    /// embeds the same Release policy and treats a missing, corrupt, or mismatched receipt as locked.
+    private static func reconcileLaunchSurfaceAuthorization(allowed: Bool) {
+        if allowed {
+            _ = LaunchSurfaceAuthorization.publishAuthorizedForCurrentBundle()
+        } else {
+            LaunchSurfaceAuthorization.clear()
+        }
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
     /// Resumes only work a locked launch deliberately skipped. Every call is idempotent or internally
     /// rate-limited, so the access-unlock and Terms-acceptance edges can safely converge here.
     private func resumeOperationalWorkAfterUnlock() {
         guard launchAccess.isUnlocked,
               acceptedTermsVersion == Terms.currentVersion else { return }
+        model.startOperationalWorkAfterLaunchAccess()
+        ScheduledDebugExport.activateIfEnabled()
         health.registerObserversAtLaunchIfPreviouslyRequested()
+        configureWatchHandlers()
         watch.activate()
         guard scenePhase == .active else { return }
         reconcileLiveActivity(repairHydration: true)
@@ -476,6 +511,18 @@ struct StrandiOSApp: App {
             await watch.pushLatest(from: model)
         }
         Task { await FriendsService.catchUpIfDue(repo: model.repo) }
+    }
+
+    private func configureWatchHandlers() {
+        watch.startStrengthRoutineHandler = {
+            [weak model, weak router, weak watch] routineID in
+            guard let model, let router, let watch else { return }
+            Task { @MainActor in
+                _ = try? await model.repo.startStrengthSession(routineID: routineID)
+                router.openStrength()
+                await watch.pushStrengthLatest(from: model)
+            }
+        }
     }
 }
 

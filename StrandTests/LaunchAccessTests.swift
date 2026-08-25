@@ -86,6 +86,41 @@ final class LaunchAccessTests: XCTestCase {
         )
     }
 
+    func testExplicitRequiredFalseDisablesWithVersionAndVerifierMaterial() {
+        var info = configurationInfo(version: "preview-1")
+        info[LaunchAccessConfiguration.requiredInfoKey] = false
+
+        XCTAssertEqual(
+            LaunchAccessConfiguration.resolve(infoDictionary: info),
+            .disabled
+        )
+
+        let store = MemoryStore()
+        let controller = LaunchAccessController(infoDictionary: info, store: store)
+        XCTAssertEqual(controller.state, .unlocked)
+        XCTAssertNil(store.receipt)
+    }
+
+    func testExplicitRequiredFalseDisablesCleanCheckoutWithoutVerifierMaterial() {
+        let info: [String: Any] = [
+            LaunchAccessConfiguration.requiredInfoKey: "NO",
+            LaunchAccessConfiguration.versionInfoKey: "preview-1",
+            LaunchAccessConfiguration.saltInfoKey: "$(NOOP_LAUNCH_GATE_SALT_HEX)",
+            LaunchAccessConfiguration.verifierInfoKey: "$(NOOP_LAUNCH_GATE_VERIFIER_HEX)",
+            LaunchAccessConfiguration.iterationsInfoKey: "$(NOOP_LAUNCH_GATE_ITERATIONS)",
+        ]
+
+        XCTAssertEqual(
+            LaunchAccessConfiguration.resolve(infoDictionary: info),
+            .disabled
+        )
+
+        let store = MemoryStore()
+        let controller = LaunchAccessController(infoDictionary: info, store: store)
+        XCTAssertEqual(controller.state, .unlocked)
+        XCTAssertNil(store.receipt)
+    }
+
     func testUnsafeIterationCountsFailClosed() {
         var info = configurationInfo(version: "preview-1")
         info[LaunchAccessConfiguration.iterationsInfoKey] = 1

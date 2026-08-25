@@ -43,6 +43,11 @@ final class WatchSessionBridge: NSObject, ObservableObject {
     @Published private(set) var isWatchReachable = false
 
     private let session: WCSession?
+    /// A build-230 phone may update before its paired Watch. Until the phone launch gate is unlocked, the
+    /// old Watch must receive one build-229-decodable empty context so it cannot keep rendering cached
+    /// scores/routines. This flag survives WCSession's asynchronous activation edge and is cancelled by
+    /// the normal authorized `activate()` path.
+    private var lockedScrubPending = false
 
     override init() {
         // WCSession is only meaningful where the framework is supported (a real device, not every
@@ -52,13 +57,47 @@ final class WatchSessionBridge: NSObject, ObservableObject {
         super.init()
     }
 
-    /// Activate the session. Safe to call more than once (WCSession ignores a redundant activate). The
-    /// app calls this once at startup, alongside the other session-scoped services.
+    /// Activate the authorized session. Safe to call more than once (WCSession ignores a redundant
+    /// activate). Cancelling a pending locked scrub before normal score publication prevents a very fast
+    /// unlock from racing a late activation callback and re-clearing the Watch after authorization.
     func activate() {
+        lockedScrubPending = false
+        activateSession()
+    }
+
+    /// The only work this bridge performs during a locked/invalid iPhone launch: activate
+    /// WatchConnectivity and replace its latest-state context with a legacy-decodable privacy scrub. It
+    /// does not read AppModel, open the repository, start Bluetooth/HealthKit, or publish diagnostics.
+    func activateForLockedLaunch() {
+        lockedScrubPending = true
+        activateSession()
+        pushLockedScrubIfPossible()
+    }
+
+    private func activateSession() {
         guard let session else { return }
         session.delegate = self
         if session.activationState != .activated {
             session.activate()
+        }
+    }
+
+    /// Retry only after activation. `updateApplicationContext` has latest-state semantics and queues for
+    /// a temporarily unreachable Watch, so no reachability gate or background operational service is
+    /// needed here.
+    private func pushLockedScrubIfPossible() {
+        guard lockedScrubPending,
+              let session,
+              session.activationState == .activated,
+              let context = Self.lockedApplicationContext(
+                authorization: LaunchSurfaceAuthorization.current()
+              ) else { return }
+        do {
+            try session.updateApplicationContext(context)
+            lockedScrubPending = false
+        } catch {
+            // Keep the flag set. A later activation/reachability callback or locked scene task retries;
+            // failure must not turn into an authorized payload or start any operational subsystem.
         }
     }
 
@@ -104,6 +143,7 @@ final class WatchSessionBridge: NSObject, ObservableObject {
     /// Sync compact routine and active-session state. Unlike score snapshots, this is user-edited
     /// latest state and is sent immediately when it changes rather than using the complication budget.
     func pushStrengthLatest(from model: AppModel) async {
+        guard LaunchSurfaceAuthorization.isAuthorized() else { return }
         guard let trainer = try? await model.repo.strengthTrainerSnapshot() else { return }
         let exerciseByID = Dictionary(
             trainer.exercises.map { ($0.id, $0) },
@@ -173,6 +213,9 @@ final class WatchSessionBridge: NSObject, ObservableObject {
             || last.restCalibrating != next.restCalibrating
             || last.sleepSummary != next.sleepSummary
             || last.scoreDay != next.scoreDay
+            || last.launchGateRequired != next.launchGateRequired
+            || last.launchGateVersion != next.launchGateVersion
+            || last.launchGateAuthorized != next.launchGateAuthorized
     }
 
     /// Build the snapshot off the app state. Pure read; no side effects. Split out so the wiring is easy
@@ -218,6 +261,7 @@ final class WatchSessionBridge: NSObject, ObservableObject {
         let effort = day?.strain
         let rest = restScore
 
+        let launchAuthorization = LaunchSurfaceAuthorization.current()
         let snap = WatchScoreSnapshot(
             charge: charge,
             chargeCalibrating: hasAnyDay && charge == nil,
@@ -230,7 +274,10 @@ final class WatchSessionBridge: NSObject, ObservableObject {
             asOf: Date(),
             // The day the scores are ABOUT (not when we built this), so the watch can label recency
             // honestly ("Yesterday") even when the build is fresh. nil when there's no anchor day at all.
-            scoreDay: day?.day
+            scoreDay: day?.day,
+            launchGateRequired: launchAuthorization.required,
+            launchGateVersion: launchAuthorization.gateVersion,
+            launchGateAuthorized: launchAuthorization.authorized
         )
         return snap
     }
@@ -286,6 +333,23 @@ final class WatchSessionBridge: NSObject, ObservableObject {
     nonisolated static let contextKey = "snapshot"
     /// The message key the watch sends on launch to ask for the latest snapshot right now.
     nonisolated static let requestLatestKey = "requestLatest"
+
+    /// Construct the complete replacement context for a locked iPhone. Both values are deliberately
+    /// encoded in their pre-gate wire shapes: build 229 ignores the snapshot's new authorization fields,
+    /// but it still overwrites its cached health values and strength metadata with neutral empty state.
+    nonisolated static func lockedApplicationContext(
+        authorization: LaunchSurfaceAuthorization
+    ) -> [String: Any]? {
+        guard let snapshot = try? JSONEncoder().encode(
+            WatchScoreSnapshot.launchLocked(authorization: authorization)
+        ), let strengthPlan = try? JSONEncoder().encode(WatchStrengthPlan.launchLocked) else {
+            return nil
+        }
+        return [
+            contextKey: snapshot,
+            WatchStrengthPlan.contextKey: strengthPlan,
+        ]
+    }
 }
 
 // MARK: - WCSessionDelegate
@@ -296,6 +360,7 @@ extension WatchSessionBridge: WCSessionDelegate {
                              error: Error?) {
         Task { @MainActor in
             self.isWatchReachable = session.isReachable
+            self.pushLockedScrubIfPossible()
         }
     }
 
@@ -309,6 +374,7 @@ extension WatchSessionBridge: WCSessionDelegate {
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         Task { @MainActor in
             self.isWatchReachable = session.isReachable
+            self.pushLockedScrubIfPossible()
         }
     }
 
@@ -318,6 +384,19 @@ extension WatchSessionBridge: WCSessionDelegate {
     nonisolated func session(_ session: WCSession,
                              didReceiveMessage message: [String: Any],
                              replyHandler: @escaping ([String: Any]) -> Void) {
+        guard LaunchSurfaceAuthorization.isAuthorized() else {
+            let attemptedStart = message[WatchStrengthPlan.startRoutineMessageKey] != nil
+            if attemptedStart {
+                replyHandler(["accepted": false])
+            } else if message[Self.requestLatestKey] != nil {
+                replyHandler(Self.lockedApplicationContext(
+                    authorization: LaunchSurfaceAuthorization.current()
+                ) ?? [:])
+            } else {
+                replyHandler([:])
+            }
+            return
+        }
         if let routineID = message[WatchStrengthPlan.startRoutineMessageKey] as? String,
            !routineID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             Task { @MainActor in

@@ -42,6 +42,19 @@ public struct WatchStrengthPlan: Codable, Equatable, Sendable {
     public static let contextKey = "strengthPlan"
     public static let startRoutineMessageKey = "startStrengthRoutine"
 
+    /// Legacy-compatible scrub sent while the iPhone launch gate is locked. An older Watch build has no
+    /// launch-state field on this payload, so absence of the key would leave its previously persisted
+    /// routines and active-session name visible. Sending an explicit empty plan overwrites that cache.
+    public static var launchLocked: WatchStrengthPlan {
+        WatchStrengthPlan(
+            routines: [],
+            activeSessionName: nil,
+            activeCompletedSets: 0,
+            activeTargetSets: 0,
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+    }
+
     public func save() {
         guard let defaults = UserDefaults(suiteName: WatchScoreSnapshot.appGroupId),
               let data = try? JSONEncoder().encode(self) else { return }

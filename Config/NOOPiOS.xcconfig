@@ -1,0 +1,7 @@
+// Target-only configuration for the iPhone app. Do not attach this wrapper to widgets, Watch, or
+// complication targets: it is the sole build-setting path to the ignored verifier material.
+//
+// The Oura wrapper remains independent and contains no Oura client configuration unless its own
+// optional, ignored file is present.
+#include "../Strand/Oura/OuraConfig.xcconfig"
+#include? "LaunchGateSecrets.xcconfig"

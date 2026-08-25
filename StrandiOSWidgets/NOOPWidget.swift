@@ -7,36 +7,52 @@ struct NOOPEntry: TimelineEntry {
     let date: Date
     let snapshot: WidgetSnapshot
     let supportingMetrics: [WidgetMetric]
+    let launchSurfaceAuthorized: Bool
 
     init(date: Date, snapshot: WidgetSnapshot,
-         supportingMetrics: [WidgetMetric] = WidgetMetricPreference.defaultSelection) {
+         supportingMetrics: [WidgetMetric] = WidgetMetricPreference.defaultSelection,
+         launchSurfaceAuthorized: Bool = false) {
         self.date = date
         self.snapshot = snapshot
         self.supportingMetrics = WidgetMetricPreference.normalized(supportingMetrics.map(\.rawValue))
+        self.launchSurfaceAuthorized = launchSurfaceAuthorized
     }
 }
 
 struct NOOPProvider: TimelineProvider {
     func placeholder(in context: Context) -> NOOPEntry {
-        NOOPEntry(date: Date(), snapshot: .placeholder,
-                  supportingMetrics: WidgetMetricPreference.defaultSelection)
+        let authorized = LaunchSurfaceAuthorization.isAuthorized()
+        return NOOPEntry(date: Date(), snapshot: authorized ? .placeholder : .unavailable,
+                  supportingMetrics: WidgetMetricPreference.defaultSelection,
+                  launchSurfaceAuthorized: authorized)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (NOOPEntry) -> Void) {
+        let authorized = LaunchSurfaceAuthorization.isAuthorized()
         let fallback: WidgetSnapshot = context.isPreview ? .placeholder : .unavailable
-        completion(NOOPEntry(date: Date(), snapshot: WidgetSnapshot.load() ?? fallback,
-                             supportingMetrics: WidgetMetricPreference.load()))
+        completion(NOOPEntry(
+            date: Date(),
+            snapshot: authorized ? (WidgetSnapshot.load() ?? fallback) : .unavailable,
+            supportingMetrics: authorized
+                ? WidgetMetricPreference.load()
+                : WidgetMetricPreference.defaultSelection,
+            launchSurfaceAuthorized: authorized
+        ))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<NOOPEntry>) -> Void) {
-        let snapshot = WidgetSnapshot.load() ?? .unavailable
+        let authorized = LaunchSurfaceAuthorization.isAuthorized()
+        let snapshot = authorized ? (WidgetSnapshot.load() ?? .unavailable) : .unavailable
         // WidgetKit controls the final cadence. The app also explicitly reloads after meaningful data
         // changes, while high-frequency HR publishes are throttled before they reach the extension.
         let next = Calendar.current.date(byAdding: .minute, value: 15, to: Date())
             ?? Date().addingTimeInterval(900)
         let now = Date()
-        let metrics = WidgetMetricPreference.load()
-        var entries = [NOOPEntry(date: now, snapshot: snapshot, supportingMetrics: metrics)]
+        let metrics = authorized
+            ? WidgetMetricPreference.load()
+            : WidgetMetricPreference.defaultSelection
+        var entries = [NOOPEntry(date: now, snapshot: snapshot, supportingMetrics: metrics,
+                                 launchSurfaceAuthorized: authorized)]
         // WidgetKit can defer the requested reload, so schedule semantic state transitions into this
         // timeline. Live HR expires from the REAL packet receipt (two minutes), while connection remains
         // a distinct, coarser observation that retains the existing 20-minute expiry.
@@ -51,7 +67,8 @@ struct NOOPProvider: TimelineProvider {
         for expiry in expiries.filter({ $0 > now }).sorted() {
             guard entries.last?.date != expiry else { continue }
             entries.append(NOOPEntry(date: expiry, snapshot: snapshot,
-                                     supportingMetrics: metrics))
+                                     supportingMetrics: metrics,
+                                     launchSurfaceAuthorized: authorized))
         }
         completion(Timeline(entries: entries,
                             policy: .after(next)))
@@ -68,21 +85,25 @@ struct NOOPDailyWidgetView: View {
     private var snapshot: WidgetSnapshot { entry.snapshot }
 
     var body: some View {
-        switch family {
-        case .accessoryCircular:
-            WidgetScoreGauge(value: snapshot.recovery, symbol: "bolt.heart.fill", tint: chargeTint)
-        case .accessoryInline:
-            Text(dailyInlineText)
-        case .accessoryRectangular:
-            DailyAccessoryRectangular(snapshot: snapshot)
-        case .systemSmall:
-            small
-        case .systemMedium:
-            medium
-        case .systemLarge:
-            large
-        default:
-            small
+        if entry.launchSurfaceAuthorized && LaunchSurfaceAuthorization.isAuthorized() {
+            switch family {
+            case .accessoryCircular:
+                WidgetScoreGauge(value: snapshot.recovery, symbol: "bolt.heart.fill", tint: chargeTint)
+            case .accessoryInline:
+                Text(dailyInlineText)
+            case .accessoryRectangular:
+                DailyAccessoryRectangular(snapshot: snapshot)
+            case .systemSmall:
+                small
+            case .systemMedium:
+                medium
+            case .systemLarge:
+                large
+            default:
+                small
+            }
+        } else {
+            LaunchLockedWidgetView()
         }
     }
 
@@ -185,21 +206,25 @@ struct NOOPVitalsWidgetView: View {
     private var snapshot: WidgetSnapshot { entry.snapshot }
 
     var body: some View {
-        switch family {
-        case .accessoryCircular:
-            VStack(spacing: 0) {
-                Image(systemName: "heart.fill").font(.caption2)
-                Text(value(snapshot.bpm)).font(.system(.headline, design: .rounded, weight: .bold))
+        if entry.launchSurfaceAuthorized && LaunchSurfaceAuthorization.isAuthorized() {
+            switch family {
+            case .accessoryCircular:
+                VStack(spacing: 0) {
+                    Image(systemName: "heart.fill").font(.caption2)
+                    Text(value(snapshot.bpm)).font(.system(.headline, design: .rounded, weight: .bold))
+                }
+                .widgetAccentable()
+            case .accessoryInline:
+                Text("HR \(value(snapshot.bpm)) · HRV \(value(snapshot.hrv)) · RHR \(value(snapshot.restingHr))")
+            case .accessoryRectangular:
+                accessoryRectangular
+            case .systemMedium:
+                medium
+            default:
+                small
             }
-            .widgetAccentable()
-        case .accessoryInline:
-            Text("HR \(value(snapshot.bpm)) · HRV \(value(snapshot.hrv)) · RHR \(value(snapshot.restingHr))")
-        case .accessoryRectangular:
-            accessoryRectangular
-        case .systemMedium:
-            medium
-        default:
-            small
+        } else {
+            LaunchLockedWidgetView()
         }
     }
 
@@ -293,17 +318,21 @@ struct NOOPSleepWidgetView: View {
     private var restTint: Color { snapshot.rest == nil ? StrandPalette.textTertiary : StrandPalette.restColor }
 
     var body: some View {
-        switch family {
-        case .accessoryCircular:
-            WidgetScoreGauge(value: snapshot.rest, symbol: "moon.zzz.fill", tint: restTint)
-        case .accessoryInline:
-            Text("Sleep \(value(snapshot.rest)) · \(sleepDuration(snapshot.sleepMinutes))")
-        case .accessoryRectangular:
-            accessoryRectangular
-        case .systemMedium:
-            medium
-        default:
-            small
+        if entry.launchSurfaceAuthorized && LaunchSurfaceAuthorization.isAuthorized() {
+            switch family {
+            case .accessoryCircular:
+                WidgetScoreGauge(value: snapshot.rest, symbol: "moon.zzz.fill", tint: restTint)
+            case .accessoryInline:
+                Text("Sleep \(value(snapshot.rest)) · \(sleepDuration(snapshot.sleepMinutes))")
+            case .accessoryRectangular:
+                accessoryRectangular
+            case .systemMedium:
+                medium
+            default:
+                small
+            }
+        } else {
+            LaunchLockedWidgetView()
         }
     }
 
@@ -726,6 +755,45 @@ private struct DailyGuidance: View {
     }
 }
 
+/// Neutral default-deny presentation shared by every widget family. It intentionally carries no
+/// cached value, score label, device state, or user-customized supporting metric.
+private struct LaunchLockedWidgetView: View {
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        switch family {
+        case .accessoryCircular:
+            Image(systemName: "lock.fill")
+                .font(.headline)
+                .widgetAccentable()
+        case .accessoryInline:
+            Text("launch.locked.inline")
+        case .accessoryRectangular:
+            VStack(alignment: .leading, spacing: 2) {
+                Label("launch.locked.title", systemImage: "lock.fill")
+                    .font(.headline)
+                Text("launch.locked.instruction")
+                    .font(.caption2)
+            }
+            .widgetAccentable()
+        default:
+            VStack(spacing: 8) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(StrandPalette.textSecondary)
+                Text("launch.locked.title")
+                    .font(.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text("launch.locked.instruction")
+                    .font(.caption)
+                    .foregroundStyle(StrandPalette.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(10)
+        }
+    }
+}
+
 private struct NOOPWidgetCanvas: View {
     let accent: Color
 
@@ -956,36 +1024,44 @@ struct NOOPWidgetPreviews: PreviewProvider {
 
     static var previews: some View {
         Group {
-            NOOPDailyWidgetView(entry: NOOPEntry(date: Date(), snapshot: .placeholder))
+            NOOPDailyWidgetView(entry: NOOPEntry(date: Date(), snapshot: .placeholder,
+                                                 launchSurfaceAuthorized: true))
                 .containerBackground(for: .widget) { NOOPWidgetCanvas(accent: StrandPalette.chargeColor) }
                 .previewContext(WidgetPreviewContext(family: .systemSmall))
                 .previewDisplayName("Daily · Small · Fresh")
-            NOOPDailyWidgetView(entry: NOOPEntry(date: Date(), snapshot: .unavailable))
+            NOOPDailyWidgetView(entry: NOOPEntry(date: Date(), snapshot: .unavailable,
+                                                 launchSurfaceAuthorized: true))
                 .containerBackground(for: .widget) { NOOPWidgetCanvas(accent: StrandPalette.chargeColor) }
                 .previewContext(WidgetPreviewContext(family: .systemMedium))
                 .previewDisplayName("Daily · Medium · Empty")
-            NOOPDailyWidgetView(entry: NOOPEntry(date: Date(), snapshot: staleSnapshot))
+            NOOPDailyWidgetView(entry: NOOPEntry(date: Date(), snapshot: staleSnapshot,
+                                                 launchSurfaceAuthorized: true))
                 .containerBackground(for: .widget) { NOOPWidgetCanvas(accent: StrandPalette.chargeColor) }
                 .previewContext(WidgetPreviewContext(family: .systemLarge))
                 .preferredColorScheme(.dark)
                 .previewDisplayName("Daily · Large · Stale")
-            NOOPVitalsWidgetView(entry: NOOPEntry(date: Date(), snapshot: .placeholder))
+            NOOPVitalsWidgetView(entry: NOOPEntry(date: Date(), snapshot: .placeholder,
+                                                 launchSurfaceAuthorized: true))
                 .containerBackground(for: .widget) { NOOPWidgetCanvas(accent: StrandPalette.statusCritical) }
                 .previewContext(WidgetPreviewContext(family: .systemSmall))
                 .previewDisplayName("Vitals · Small")
-            NOOPVitalsWidgetView(entry: NOOPEntry(date: Date(), snapshot: .placeholder))
+            NOOPVitalsWidgetView(entry: NOOPEntry(date: Date(), snapshot: .placeholder,
+                                                 launchSurfaceAuthorized: true))
                 .containerBackground(for: .widget) { NOOPWidgetCanvas(accent: StrandPalette.statusCritical) }
                 .previewContext(WidgetPreviewContext(family: .systemMedium))
                 .previewDisplayName("Vitals · Medium")
-            NOOPSleepWidgetView(entry: NOOPEntry(date: Date(), snapshot: .placeholder))
+            NOOPSleepWidgetView(entry: NOOPEntry(date: Date(), snapshot: .placeholder,
+                                                launchSurfaceAuthorized: true))
                 .containerBackground(for: .widget) { NOOPWidgetCanvas(accent: StrandPalette.restColor) }
                 .previewContext(WidgetPreviewContext(family: .systemSmall))
                 .previewDisplayName("Sleep · Small")
-            NOOPSleepWidgetView(entry: NOOPEntry(date: Date(), snapshot: .unavailable))
+            NOOPSleepWidgetView(entry: NOOPEntry(date: Date(), snapshot: .unavailable,
+                                                launchSurfaceAuthorized: true))
                 .containerBackground(for: .widget) { NOOPWidgetCanvas(accent: StrandPalette.restColor) }
                 .previewContext(WidgetPreviewContext(family: .systemMedium))
                 .previewDisplayName("Sleep · Medium · Empty")
-            NOOPDailyWidgetView(entry: NOOPEntry(date: Date(), snapshot: .placeholder))
+            NOOPDailyWidgetView(entry: NOOPEntry(date: Date(), snapshot: .placeholder,
+                                                 launchSurfaceAuthorized: true))
                 .previewContext(WidgetPreviewContext(family: .accessoryRectangular))
                 .previewDisplayName("Daily · Lock Screen")
         }

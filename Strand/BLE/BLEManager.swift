@@ -936,7 +936,11 @@ public final class BLEManager: NSObject, ObservableObject {
         return ref.device + (wallNow - ref.wall)
     }
 
-    public init(state: LiveState, deviceId: String = "my-whoop") {
+    public init(
+        state: LiveState,
+        deviceId: String = "my-whoop",
+        resumeRememberedRuntimeAtLaunch: Bool = true
+    ) {
         self.state = state
         self.deviceId = deviceId
         self.router = FrameRouter(state: state)
@@ -951,7 +955,9 @@ public final class BLEManager: NSObject, ObservableObject {
         #if os(iOS)
         // Returning users retain restoration. Fresh installs do not construct CoreBluetooth until an
         // explicit Connect/Scan gesture, so the system sheet can never precede NOOP's rationale.
-        if Self.shouldResumeBluetoothRuntime { activateCentralIfNeeded(recordUserIntent: false) }
+        if resumeRememberedRuntimeAtLaunch, Self.shouldResumeBluetoothRuntime {
+            activateCentralIfNeeded(recordUserIntent: false)
+        }
         #else
         // Strand (macOS desktop): no state-restoration identifier (iOS background feature).
         central = CBCentralManager(delegate: self, queue: .main)
@@ -1127,6 +1133,14 @@ public final class BLEManager: NSObject, ObservableObject {
         guard !defaults.bool(forKey: bluetoothReleasedKey) else { return false }
         return defaults.bool(forKey: bluetoothIntentKey)
             || defaults.object(forKey: "lastSyncedAt") != nil
+    }
+
+    /// Resume CoreBluetooth restoration only after the iPhone launch-access boundary has been crossed.
+    /// The initializer can deliberately stay inert for a locked process; this method restores the normal
+    /// returning-user path without recording a new user intent and is idempotent when a central already exists.
+    func resumeRememberedRuntimeAfterLaunchAccess() {
+        guard Self.shouldResumeBluetoothRuntime else { return }
+        activateCentralIfNeeded(recordUserIntent: false)
     }
 
     /// The single central-construction point. On iOS callers are either a returning-user restoration path or

@@ -84,10 +84,7 @@ final class WatchScoreStore: NSObject, ObservableObject, WCSessionDelegate {
 
     /// Read the last snapshot the phone delivered, if any. The complication uses the same key.
     static func loadPersisted() -> WatchScoreSnapshot? {
-        guard let defaults = UserDefaults(suiteName: suiteName),
-              let data = defaults.data(forKey: storageKey),
-              let snap = try? JSONDecoder().decode(WatchScoreSnapshot.self, from: data) else { return nil }
-        return snap
+        WatchScoreSnapshot.load()
     }
 
     /// Persist a snapshot into the shared group so the complication reads the SAME bytes the glance shows.
@@ -101,6 +98,12 @@ final class WatchScoreStore: NSObject, ObservableObject, WCSessionDelegate {
     /// Apply a freshly received snapshot: store it, publish to the glance, refresh the complication.
     /// Hops to the main actor because it touches @Published state and WidgetCenter.
     private func apply(_ snap: WatchScoreSnapshot) {
+        guard snap.isLaunchSurfaceAuthorized() else {
+            UserDefaults(suiteName: Self.suiteName)?.removeObject(forKey: Self.storageKey)
+            snapshot = nil
+            WidgetCenter.shared.reloadAllTimelines()
+            return
+        }
         persist(snap)
         snapshot = snap
         // The phone just pushed new scores, so pull the complication timelines forward now rather

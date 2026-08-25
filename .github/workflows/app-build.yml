@@ -15,6 +15,9 @@ on:
       - 'StrandiOSShared/**'
       - 'StrandiOSWidgets/**'
       - 'Packages/**'
+      - 'Config/**'
+      - 'Tools/validate-launch-gate-isolation.py'
+      - 'Tools/tests/test_launch_gate_isolation.py'
       - 'project.yml'
       - '.github/workflows/app-build.yml'
   push:
@@ -26,6 +29,9 @@ on:
       - 'StrandiOSShared/**'
       - 'StrandiOSWidgets/**'
       - 'Packages/**'
+      - 'Config/**'
+      - 'Tools/validate-launch-gate-isolation.py'
+      - 'Tools/tests/test_launch_gate_isolation.py'
       - 'project.yml'
       - '.github/workflows/app-build.yml'
   workflow_dispatch:
@@ -69,6 +75,19 @@ jobs:
 
       - name: Generate Xcode project
         run: xcodegen generate
+
+      - name: Test launch-gate isolation checker
+        if: matrix.scheme == 'NOOPiOS'
+        run: python3 -m unittest Tools.tests.test_launch_gate_isolation
+
+      # Clean CI checkouts intentionally have no ignored verifier file. This name-only scan still
+      # proves that public policy reaches every launch surface and private verifier setting names
+      # do not leak from the iPhone target into widgets or either Watch target.
+      - name: Validate launch-gate build-setting isolation
+        if: matrix.scheme == 'NOOPiOS'
+        run: >-
+          python3 Tools/validate-launch-gate-isolation.py
+          --allow-missing-iphone-secrets
 
       - name: Build ${{ matrix.scheme }}
         run: >-

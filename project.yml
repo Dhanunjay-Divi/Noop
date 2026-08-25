@@ -9,9 +9,9 @@ options:
   # source language and is where additional languages are added.
   developmentLanguage: en
 # Project-level xcconfig: Xcode layers this beneath every target's OWN configFiles (a target-level
-# xcconfig only shadows keys it redefines itself), so this is the one place BUNDLE_ID_PREFIX is
-# defined — every target picks it up automatically, including Strand/StrandTests/NOOPiOS, which also
-# carry Strand/Oura/OuraConfig.xcconfig for their unrelated Oura credentials. See Config/BundleId.xcconfig.
+# xcconfig only shadows keys it redefines itself), so this is the one place BUNDLE_ID_PREFIX and the
+# non-secret launch required/version policy are defined. Every target picks those values up, while
+# verifier material is attached only through NOOPiOS's target wrapper. See Config/BundleId.xcconfig.
 configFiles:
   Debug: Config/BundleId.xcconfig
   Release: Config/BundleId.xcconfig
@@ -21,7 +21,7 @@ settings:
     # iOS build number (CFBundleVersion). GLOBAL so the iOS app AND its widget extension inherit the
     # SAME value — they must match or iOS warns "extension version must match parent app" (#416).
     # macOS inherits it too so every artifact from one source revision reports the same build.
-    CURRENT_PROJECT_VERSION: "229"
+    CURRENT_PROJECT_VERSION: "230"
     SWIFT_VERSION: "5.0"
     # Emit localizable strings so Xcode auto-extracts every LocalizedStringKey into the
     # String Catalog on build (the English (US) base entries).
@@ -265,10 +265,12 @@ targets:
         buildPhase: resources
       - path: TERMS.md
         buildPhase: resources
-    # Same tracked wrapper as the macOS target (Strand/Oura/ is shared, not per-platform).
+    # iPhone-only wrapper: preserves the Oura wrapper while making the ignored launch verifier
+    # available exclusively to this target. Embedded extensions inherit only public policy from the
+    # project-level BundleId.xcconfig and must never use this target configuration.
     configFiles:
-      Debug: Strand/Oura/OuraConfig.xcconfig
-      Release: Strand/Oura/OuraConfig.xcconfig
+      Debug: Config/NOOPiOS.xcconfig
+      Release: Config/NOOPiOS.xcconfig
     info:
       path: StrandiOS/Resources/Info.plist
       properties:
@@ -445,6 +447,9 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # Mirrors the app target: exposes APP_GROUP_ID to the extension at runtime (WidgetSnapshot.suiteName).
         AppGroupIdentifier: "$(APP_GROUP_ID)"
+        # Non-secret extension policy only. The verifier and salt remain exclusive to the iPhone app.
+        NOOPLaunchGateVersion: $(NOOP_LAUNCH_GATE_VERSION)
+        NOOPLaunchGateRequired: $(NOOP_LAUNCH_GATE_REQUIRED)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     entitlements:
@@ -458,6 +463,9 @@ targets:
         PRODUCT_NAME: NOOPWidgets
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1,2"
+      configs:
+        Release:
+          NOOP_LAUNCH_GATE_REQUIRED: YES
     dependencies:
       - package: StrandDesign
 
@@ -491,6 +499,9 @@ targets:
         # Surfaces APP_GROUP_ID to runtime (WatchScoreStore.suiteName) so the App Group id isn't
         # hard-coded in Swift; stays in sync with the application-groups entitlement (both $(APP_GROUP_ID)).
         AppGroupIdentifier: "$(APP_GROUP_ID)"
+        # Non-secret Watch policy. Authorization arrives in WatchScoreSnapshot; no verifier/salt ships here.
+        NOOPLaunchGateVersion: $(NOOP_LAUNCH_GATE_VERSION)
+        NOOPLaunchGateRequired: $(NOOP_LAUNCH_GATE_REQUIRED)
         # Modern single-target watchOS app — no separate WatchKit extension.
         WKApplication: true
         # Pairs this watch app to the iPhone companion (must match NOOPiOS PRODUCT_BUNDLE_IDENTIFIER).
@@ -519,6 +530,9 @@ targets:
         # watchOS family.
         TARGETED_DEVICE_FAMILY: "4"
         SWIFT_EMIT_LOC_STRINGS: YES
+      configs:
+        Release:
+          NOOP_LAUNCH_GATE_REQUIRED: YES
     dependencies:
       - package: StrandDesign
       # The complication WidgetKit extension is embedded inside the watch app.
@@ -549,6 +563,9 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # Mirrors the watch app: exposes APP_GROUP_ID to the extension at runtime (WatchScoreStore.suiteName).
         AppGroupIdentifier: "$(APP_GROUP_ID)"
+        # Non-secret complication policy; exact version matching makes old snapshots fail closed.
+        NOOPLaunchGateVersion: $(NOOP_LAUNCH_GATE_VERSION)
+        NOOPLaunchGateRequired: $(NOOP_LAUNCH_GATE_REQUIRED)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     entitlements:
@@ -565,6 +582,9 @@ targets:
         # Parity with the other UI targets: auto-extract LocalizedStringKey / String(localized:) usages
         # into this target's Localizable.xcstrings on build.
         SWIFT_EMIT_LOC_STRINGS: YES
+      configs:
+        Release:
+          NOOP_LAUNCH_GATE_REQUIRED: YES
     dependencies:
       - package: StrandDesign
 

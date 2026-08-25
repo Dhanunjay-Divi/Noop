@@ -216,15 +216,26 @@ enum ScheduledDebugExport {
     // MARK: - iOS background task plumbing
 
     #if os(iOS)
+    /// Process-local authorization supplied by the iPhone composition root. It defaults to deny so a
+    /// background delivery cannot export diagnostics before the temporary launch gate is unlocked.
+    private static var launchAccessAuthorized: () -> Bool = { false }
+
     /// Register the BGTask handler. MUST be called from the app's launch (before launch finishes) AND the
     /// identifier MUST be listed in `BGTaskSchedulerPermittedIdentifiers` (Info.plist) for iOS to deliver
     /// the task. Both live in the iOS app target — call this from `StrandiOSApp.init()`. Safe to leave
     /// uncalled: `submitBackgroundRequest()` fails gracefully and the macOS path + "Run now" still work.
-    static func register() {
+    static func register(launchAccessAuthorized: @escaping () -> Bool) {
+        Self.launchAccessAuthorized = launchAccessAuthorized
         // An older build may have left a one-shot request queued under the engineering-era identifier.
         // It is no longer permitted or registered, so remove it before registering the shipping name.
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: legacyBGTaskIdentifier)
         BGTaskScheduler.shared.register(forTaskWithIdentifier: bgTaskIdentifier, using: nil) { task in
+            // A request queued by an older/unlocked process may arrive before this process crosses the
+            // launch gate. Fail closed and do not re-arm; the unlock edge calls activateIfEnabled().
+            guard Self.launchAccessAuthorized() else {
+                task.setTaskCompleted(success: true)
+                return
+            }
             // Write the drop, then immediately request the next one (BGAppRefresh is single-shot).
             if isEnabled { catchUpIfDue() }
             submitBackgroundRequest()

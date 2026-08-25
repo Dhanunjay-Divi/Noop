@@ -50,11 +50,21 @@ public struct WatchScoreSnapshot: Codable, Equatable, Sendable {
     /// is recent. Optional + decodes as nil when absent so older payloads on the wire stay compatible.
     public var scoreDay: String?
 
+    /// Non-secret launch-surface authorization copied from the iPhone App Group receipt when this
+    /// payload is built. These fields travel over WatchConnectivity because phone and Watch do not
+    /// share one physical App Group container. Legacy payloads decode as required + denied.
+    public var launchGateRequired: Bool
+    public var launchGateVersion: String?
+    public var launchGateAuthorized: Bool
+
     public init(charge: Double?, chargeCalibrating: Bool,
                 effort: Double?, effortCalibrating: Bool,
                 rest: Double?, restCalibrating: Bool,
                 hr: Int?, sleepSummary: String, asOf: Date,
-                scoreDay: String? = nil) {
+                scoreDay: String? = nil,
+                launchGateRequired: Bool = true,
+                launchGateVersion: String? = nil,
+                launchGateAuthorized: Bool = false) {
         self.charge = charge
         self.chargeCalibrating = chargeCalibrating
         self.effort = effort
@@ -65,6 +75,52 @@ public struct WatchScoreSnapshot: Codable, Equatable, Sendable {
         self.sleepSummary = sleepSummary
         self.asOf = asOf
         self.scoreDay = scoreDay
+        self.launchGateRequired = launchGateRequired
+        self.launchGateVersion = launchGateVersion
+        self.launchGateAuthorized = launchGateAuthorized
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case charge, chargeCalibrating
+        case effort, effortCalibrating
+        case rest, restCalibrating
+        case hr, sleepSummary, asOf, scoreDay
+        case launchGateRequired, launchGateVersion, launchGateAuthorized
+    }
+
+    /// Preserve value compatibility while making missing privacy state explicitly fail closed.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        charge = try container.decodeIfPresent(Double.self, forKey: .charge)
+        chargeCalibrating = try container.decode(Bool.self, forKey: .chargeCalibrating)
+        effort = try container.decodeIfPresent(Double.self, forKey: .effort)
+        effortCalibrating = try container.decode(Bool.self, forKey: .effortCalibrating)
+        rest = try container.decodeIfPresent(Double.self, forKey: .rest)
+        restCalibrating = try container.decode(Bool.self, forKey: .restCalibrating)
+        hr = try container.decodeIfPresent(Int.self, forKey: .hr)
+        sleepSummary = try container.decode(String.self, forKey: .sleepSummary)
+        asOf = try container.decode(Date.self, forKey: .asOf)
+        scoreDay = try container.decodeIfPresent(String.self, forKey: .scoreDay)
+        launchGateRequired = try container.decodeIfPresent(Bool.self, forKey: .launchGateRequired) ?? true
+        launchGateVersion = try container.decodeIfPresent(String.self, forKey: .launchGateVersion)
+        launchGateAuthorized = try container.decodeIfPresent(Bool.self, forKey: .launchGateAuthorized) ?? false
+    }
+
+    public var launchSurfaceAuthorization: LaunchSurfaceAuthorization {
+        LaunchSurfaceAuthorization(
+            required: launchGateRequired,
+            gateVersion: launchGateVersion,
+            authorized: launchGateAuthorized
+        )
+    }
+
+    /// Consumer-side validation against the Watch app or complication's embedded gate requirement.
+    public func isLaunchSurfaceAuthorized(
+        infoDictionary: [String: Any] = Bundle.main.infoDictionary ?? [:]
+    ) -> Bool {
+        launchSurfaceAuthorization.authorizes(
+            LaunchSurfaceAuthorization.requirement(infoDictionary: infoDictionary)
+        )
     }
 
     // MARK: - Shared app group transport
@@ -93,6 +149,33 @@ public struct WatchScoreSnapshot: Codable, Equatable, Sendable {
                            effort: nil, effortCalibrating: true,
                            rest: nil, restCalibrating: true,
                            hr: nil, sleepSummary: "", asOf: Date(timeIntervalSince1970: 0))
+    }
+
+    /// A privacy scrub that both the current Watch build and the immediately preceding legacy build can
+    /// decode. Every health value, summary, and day anchor is empty; the epoch timestamp makes a legacy
+    /// renderer treat it as stale, while the explicit denied receipt makes a gate-aware renderer lock.
+    ///
+    /// Keep the legacy fields present rather than replacing the context with an unfamiliar marker: during
+    /// a staggered iPhone/Watch update, build 229 ignores the new launch fields but still overwrites its
+    /// previously persisted scores with this neutral payload.
+    public static func launchLocked(
+        authorization: LaunchSurfaceAuthorization
+    ) -> WatchScoreSnapshot {
+        WatchScoreSnapshot(
+            charge: nil,
+            chargeCalibrating: false,
+            effort: nil,
+            effortCalibrating: false,
+            rest: nil,
+            restCalibrating: false,
+            hr: nil,
+            sleepSummary: "",
+            asOf: Date(timeIntervalSince1970: 0),
+            scoreDay: nil,
+            launchGateRequired: authorization.required,
+            launchGateVersion: authorization.gateVersion,
+            launchGateAuthorized: false
+        )
     }
 
     // MARK: - Freshness
@@ -199,10 +282,14 @@ public struct WatchScoreSnapshot: Codable, Equatable, Sendable {
     }()
 
     /// Decode the last snapshot the phone wrote into the shared app group, if any.
-    public static func load(from defaults: UserDefaults? = UserDefaults(suiteName: appGroupId)) -> WatchScoreSnapshot? {
+    public static func load(
+        from defaults: UserDefaults? = UserDefaults(suiteName: appGroupId),
+        infoDictionary: [String: Any] = Bundle.main.infoDictionary ?? [:]
+    ) -> WatchScoreSnapshot? {
         guard let defaults,
               let data = defaults.data(forKey: storageKey),
-              let snap = try? JSONDecoder().decode(WatchScoreSnapshot.self, from: data) else { return nil }
+              let snap = try? JSONDecoder().decode(WatchScoreSnapshot.self, from: data),
+              snap.isLaunchSurfaceAuthorized(infoDictionary: infoDictionary) else { return nil }
         return snap
     }
 

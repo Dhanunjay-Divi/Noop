@@ -56,7 +56,10 @@ final class WeightScaleSource: NSObject, ObservableObject {
     private var wantsResume = false
     private var scanRequested = false
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        resumeRememberedRuntimeAtLaunch: Bool = true
+    ) {
         self.defaults = defaults
         let restoredPeripheralID = defaults.string(forKey: Self.pairedIDKey).flatMap(UUID.init(uuidString:))
         pairedPeripheralID = restoredPeripheralID
@@ -69,7 +72,9 @@ final class WeightScaleSource: NSObject, ObservableObject {
         }
         super.init()
         #if os(iOS)
-        if restoredPeripheralID != nil { activateCentralIfNeeded() }
+        if resumeRememberedRuntimeAtLaunch, restoredPeripheralID != nil {
+            activateCentralIfNeeded()
+        }
         #else
         central = CBCentralManager(delegate: self, queue: .main)
         #endif

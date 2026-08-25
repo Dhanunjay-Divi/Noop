@@ -3,7 +3,8 @@
 
 The access code is read with terminal echo disabled, accepted only interactively, and is never printed,
 accepted as a command-line/environment value, or written to disk. The output file contains a random salt,
-a PBKDF2-HMAC-SHA256 verifier, a rotation id, and the work factor.
+a PBKDF2-HMAC-SHA256 verifier, and the work factor. The non-secret rotation id lives in the tracked public
+policy shared by the iPhone app and its extensions.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import unicodedata
 ITERATIONS = 310_000
 ROOT = Path(__file__).resolve().parent.parent
 DESTINATION = ROOT / "Config" / "LaunchGateSecrets.xcconfig"
+POLICY = ROOT / "Config" / "LaunchGate.xcconfig"
 VERSION_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 
 
@@ -30,9 +32,23 @@ def fail(message: str) -> "NoReturn":
     raise SystemExit(2)
 
 
+def public_policy_version() -> str:
+    prefix = "NOOP_LAUNCH_GATE_VERSION ="
+    try:
+        lines = POLICY.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        fail("public launch-gate policy is unavailable")
+    matches = [line.split("=", 1)[1].strip() for line in lines if line.strip().startswith(prefix)]
+    if len(matches) != 1 or VERSION_PATTERN.fullmatch(matches[0]) is None:
+        fail("public launch-gate policy must contain one valid rotation id")
+    return matches[0]
+
+
 def main() -> int:
     if len(sys.argv) != 2 or not VERSION_PATTERN.fullmatch(sys.argv[1]):
         fail("usage: generate-launch-gate-verifier.py <rotation-id>")
+    if sys.argv[1] != public_policy_version():
+        fail("rotation id must match Config/LaunchGate.xcconfig")
     if not sys.stdin.isatty():
         fail("run this command in an interactive terminal")
 
@@ -49,7 +65,6 @@ def main() -> int:
     verifier = hashlib.pbkdf2_hmac("sha256", normalized, salt, ITERATIONS, dklen=32)
     content = (
         "// Generated locally. Never commit this file. Rotate by generating a new version.\n"
-        f"NOOP_LAUNCH_GATE_VERSION = {sys.argv[1]}\n"
         f"NOOP_LAUNCH_GATE_SALT_HEX = {salt.hex()}\n"
         f"NOOP_LAUNCH_GATE_VERIFIER_HEX = {verifier.hex()}\n"
         f"NOOP_LAUNCH_GATE_ITERATIONS = {ITERATIONS}\n"

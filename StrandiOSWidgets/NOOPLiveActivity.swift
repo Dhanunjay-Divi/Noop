@@ -8,26 +8,32 @@ struct NOOPLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: NOOPActivityAttributes.self) { context in
             // Lock Screen / banner presentation.
-            HStack(spacing: 14) {
-                Image(systemName: "waveform.path.ecg")
-                    .font(.title2)
-                    .foregroundStyle(StrandPalette.statusCritical)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(context.attributes.title)
-                        .font(.caption).foregroundStyle(StrandPalette.textSecondary)
-                    Text(context.isStale ? "Update paused" : "\(context.state.bpm.map(String.init) ?? "–") bpm")
-                        .font(.system(size: 26, weight: .bold, design: .rounded))
-                        .foregroundStyle(context.isStale ? StrandPalette.textSecondary : StrandPalette.textPrimary)
-                }
-                Spacer()
-                // Charge + Effort (#446) on the banner, mirroring the Dynamic Island expanded stats.
-                HStack(spacing: 12) {
-                    if let r = context.state.recovery {
-                        bannerStat(label: "Charge", value: "\(r)%")
+            Group {
+                if LaunchSurfaceAuthorization.isAuthorized() {
+                    HStack(spacing: 14) {
+                        Image(systemName: "waveform.path.ecg")
+                            .font(.title2)
+                            .foregroundStyle(StrandPalette.statusCritical)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(context.attributes.title)
+                                .font(.caption).foregroundStyle(StrandPalette.textSecondary)
+                            Text(context.isStale ? "Update paused" : "\(context.state.bpm.map(String.init) ?? "–") bpm")
+                                .font(.system(size: 26, weight: .bold, design: .rounded))
+                                .foregroundStyle(context.isStale ? StrandPalette.textSecondary : StrandPalette.textPrimary)
+                        }
+                        Spacer()
+                        // Charge + Effort (#446) on the banner, mirroring the Dynamic Island expanded stats.
+                        HStack(spacing: 12) {
+                            if let r = context.state.recovery {
+                                bannerStat(label: "Charge", value: "\(r)%")
+                            }
+                            if let e = context.state.effort {
+                                bannerStat(label: "Effort", value: "\(e)")
+                            }
+                        }
                     }
-                    if let e = context.state.effort {
-                        bannerStat(label: "Effort", value: "\(e)")
-                    }
+                } else {
+                    LaunchLockedLiveActivityView()
                 }
             }
             .padding()
@@ -36,35 +42,66 @@ struct NOOPLiveActivity: Widget {
             .activitySystemActionForegroundColor(StrandPalette.textPrimary)
             .opacity(context.isStale ? 0.72 : 1)
         } dynamicIsland: { context in
-            DynamicIsland {
+            let authorized = LaunchSurfaceAuthorization.isAuthorized()
+            return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Label(context.isStale ? "Paused" : "\(context.state.bpm.map(String.init) ?? "–")",
-                          systemImage: context.isStale ? "pause.fill" : "heart.fill")
-                        .foregroundStyle(context.isStale ? .secondary : StrandPalette.statusCritical)
+                    if authorized {
+                        Label(context.isStale ? "Paused" : "\(context.state.bpm.map(String.init) ?? "–")",
+                              systemImage: context.isStale ? "pause.fill" : "heart.fill")
+                            .foregroundStyle(context.isStale ? .secondary : StrandPalette.statusCritical)
+                    } else {
+                        Label("Locked", systemImage: "lock.fill")
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    // Charge + Effort (#446) — one more stat alongside the leading live HR.
-                    HStack(spacing: 10) {
-                        if let r = context.state.recovery {
-                            statColumn(label: "Charge", value: "\(r)%")
+                    if authorized {
+                        // Charge + Effort (#446) — one more stat alongside the leading live HR.
+                        HStack(spacing: 10) {
+                            if let r = context.state.recovery {
+                                statColumn(label: "Charge", value: "\(r)%")
+                            }
+                            if let e = context.state.effort {
+                                statColumn(label: "Effort", value: "\(e)")
+                            }
                         }
-                        if let e = context.state.effort {
-                            statColumn(label: "Effort", value: "\(e)")
-                        }
+                    } else {
+                        Text("NOOP").foregroundStyle(.secondary)
                     }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    Text(context.attributes.title).font(.caption).foregroundStyle(.secondary)
+                    Text(authorized ? context.attributes.title : String(localized: "launch.locked.instruction"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             } compactLeading: {
-                Image(systemName: context.isStale ? "pause.fill" : "heart.fill")
-                    .foregroundStyle(context.isStale ? .secondary : StrandPalette.statusCritical)
+                Image(systemName: authorized ? (context.isStale ? "pause.fill" : "heart.fill") : "lock.fill")
+                    .foregroundStyle(authorized && !context.isStale ? StrandPalette.statusCritical : .secondary)
             } compactTrailing: {
-                Text(context.isStale ? "—" : "\(context.state.bpm.map(String.init) ?? "–")")
+                Text(authorized ? (context.isStale ? "—" : "\(context.state.bpm.map(String.init) ?? "–")") : "NOOP")
             } minimal: {
-                Image(systemName: context.isStale ? "pause.fill" : "heart.fill")
-                    .foregroundStyle(context.isStale ? .secondary : StrandPalette.statusCritical)
+                Image(systemName: authorized ? (context.isStale ? "pause.fill" : "heart.fill") : "lock.fill")
+                    .foregroundStyle(authorized && !context.isStale ? StrandPalette.statusCritical : .secondary)
             }
+        }
+    }
+}
+
+private struct LaunchLockedLiveActivityView: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "lock.shield.fill")
+                .font(.title2)
+                .foregroundStyle(StrandPalette.textSecondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("launch.locked.title")
+                    .font(.headline)
+                    .foregroundStyle(StrandPalette.textPrimary)
+                Text("launch.locked.instruction")
+                    .font(.caption)
+                    .foregroundStyle(StrandPalette.textSecondary)
+            }
+            Spacer()
         }
     }
 }

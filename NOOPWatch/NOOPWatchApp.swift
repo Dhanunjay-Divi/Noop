@@ -43,18 +43,36 @@ struct NOOPWatchApp: App {
     // the active features so each can be screenshotted on the simulator (which can't tap to navigate).
     // Compiled out of release builds.
     @ViewBuilder private var rootView: some View {
-        #if DEBUG
-        switch ProcessInfo.processInfo.environment["NOOP_DEMO_SCREEN"] {
-        case "breathe":   WatchBreatheView()
-        case "workout":   WatchWorkoutView()
-        case "strength":  WatchStrengthView()
-        case "intervals": WatchIntervalView()
-        case "glance":    WatchGlanceView()
-        default:          WatchRootView()
+        if isLaunchSurfaceAuthorized {
+            #if DEBUG
+            switch ProcessInfo.processInfo.environment["NOOP_DEMO_SCREEN"] {
+            case "breathe":   WatchBreatheView()
+            case "workout":   WatchWorkoutView()
+            case "strength":  WatchStrengthView()
+            case "intervals": WatchIntervalView()
+            case "glance":    WatchGlanceView()
+            default:          WatchRootView()
+            }
+            #else
+            WatchRootView()
+            #endif
+        } else {
+            WatchLaunchLockedView()
         }
-        #else
-        WatchRootView()
-        #endif
+    }
+
+    /// Ungated source builds retain the existing Watch experience. A gated build stays entirely inert
+    /// until the phone sends a snapshot authorized for this exact gate version; this also prevents the
+    /// watch's own HealthKit HR/workout pages from mounting before the phone unlock.
+    private var isLaunchSurfaceAuthorized: Bool {
+        switch LaunchSurfaceAuthorization.requirement() {
+        case .notRequired:
+            return true
+        case .invalid:
+            return false
+        case .required(version: _):
+            return store.snapshot?.isLaunchSurfaceAuthorized() == true
+        }
     }
 
     #if DEBUG
@@ -73,4 +91,24 @@ struct NOOPWatchApp: App {
         demo.save()
     }
     #endif
+}
+
+private struct WatchLaunchLockedView: View {
+    var body: some View {
+        VStack(spacing: 9) {
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 25, weight: .semibold))
+                .foregroundStyle(StrandPalette.textSecondary)
+            Text("launch.locked.title")
+                .font(StrandFont.subhead)
+                .foregroundStyle(StrandPalette.textPrimary)
+            Text("launch.locked.instruction")
+                .font(StrandFont.footnote)
+                .foregroundStyle(StrandPalette.textSecondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 12)
+        .background(StrandPalette.surfaceBase.ignoresSafeArea())
+    }
 }

@@ -50,8 +50,8 @@ enum ChargeFormulaUpgradeGate {
 @MainActor
 final class AppModel: ObservableObject {
     /// The live instance, so an AppIntent (Shortcuts) can reach the bonded strap rather than spinning
-    /// up a dead second AppModel (which would start a duplicate BLE engine and never buzz). Set in
-    /// init(); `weak` so an intent fired while NOOP is closed sees nil and asks the user to open it. (#42)
+    /// up a dead second AppModel (which would start a duplicate BLE engine and never buzz). Published only
+    /// after launch access; `weak` so a closed or still-locked app asks the user to open it. (#42)
     static weak var shared: AppModel?
 
     /// Idle scoring is only a safety-net. Imports, completed syncs, edits, recalibration and foreground
@@ -270,6 +270,9 @@ final class AppModel: ObservableObject {
     private var readSpineCancellable: AnyCancellable?
     /// Daily re-arm timer for the single-instant firmware smart alarm (see scheduleDailySmartAlarmRearm).
     private var smartAlarmRearmTimer: Timer?
+    /// The temporary launch gate may construct the observable graph while deliberately leaving every
+    /// hardware/background subsystem inert. This latch makes the later unlock edge idempotent.
+    private var operationalWorkStarted = false
 
     private static func applyPendingRestoreAtColdLaunch() {
         do {
@@ -290,12 +293,14 @@ final class AppModel: ObservableObject {
         }
     }
 
-    init() {
+    init(startOperationalWork: Bool = true) {
         // A restore is validated/staged by the running app and consumed only on a cold launch. Apply it
         // synchronously before ProfileStore reads the restored settings and before BLE/Repository can
         // create either of the two live WhoopStore pools. PendingDatabaseRestore's per-process claim also
         // prevents any store opened later in THIS session from consuming a restore the user just staged.
-        Self.applyPendingRestoreAtColdLaunch()
+        if startOperationalWork {
+            Self.applyPendingRestoreAtColdLaunch()
+        }
         let profile = ProfileStore()
         self.profile = profile
         self.lastAgeMetricProfileState = UserDefaults.standard.string(
@@ -303,12 +308,18 @@ final class AppModel: ObservableObject {
         self.behavior = BehaviorStore()
         let live = LiveState()
         self.live = live
-        self.weightScaleSource = WeightScaleSource()
+        self.weightScaleSource = WeightScaleSource(
+            resumeRememberedRuntimeAtLaunch: startOperationalWork
+        )
         // SEED every subsystem with the same id (`deviceId`, "my-whoop" at launch). The store/registry
         // aren't open yet here, so the registry's active id can't be read synchronously; `bootstrapStore`
         // (write side) and `wireSourceCoordinator → adoptActiveDevice` (read spine, #814) re-point them to
         // the registry active id once the store opens. Single-device install keeps "my-whoop" throughout.
-        self.ble = BLEManager(state: live, deviceId: deviceId)
+        self.ble = BLEManager(
+            state: live,
+            deviceId: deviceId,
+            resumeRememberedRuntimeAtLaunch: startOperationalWork
+        )
         self.repo = Repository(deviceId: deviceId)
         self.coach = AICoachEngine(repo: repo)
         self.intelligence = IntelligenceEngine(repo: repo, profile: profile, deviceId: deviceId)
@@ -393,9 +404,6 @@ final class AppModel: ObservableObject {
         // Physical-input + wear hooks (fired live by FrameRouter).
         live.onDoubleTap = { [weak self] in self?.handleDoubleTap() }
         live.onWristChange = { [weak self] worn in self?.handleWristChange(worn) }
-        Task { @MainActor in
-            await SafetySOSRuntime.shared.restoreLocationSharingIfNeeded()
-        }
         // Re-arm the next day's firmware alarm the moment the strap reports it fired (if/when the
         // firmware pushes STRAP_DRIVEN_ALARM_EXECUTED). Gated on enabled inside applySmartAlarm.
         live.onSmartAlarmFired = { [weak self] in
@@ -475,20 +483,20 @@ final class AppModel: ObservableObject {
         // itself) always goes out on a link that's actually ready. `dropFirst()` skips the initial
         // published value (0) at subscribe time, so this doesn't fire on app launch before any connection.
         live.$connectSettled.dropFirst().sink { [weak self] _ in
-            guard let self, self.behavior.smartAlarmEnabled else { return }
+            guard let self, self.operationalWorkStarted,
+                  self.behavior.smartAlarmEnabled else { return }
             self.applySmartAlarm()
         }.store(in: &hrCancellables)
         // The firmware alarm is a single absolute instant with no recurrence, and was re-armed ONLY on
         // a (re)bond or a settings change. A strap that stays continuously bonded (a Mac in range) would
         // fire once and never re-arm , silent from day two. Re-arm daily so an always-on session keeps
         // waking the user.
-        scheduleDailySmartAlarmRearm()
         // Re-apply "Continuous HRV capture" on every (re)bond: if on, the strap should hold the dense
         // realtime stream armed even with no Live screen open, so it banks beat-to-beat R-R 24/7 for
         // better overnight HRV/recovery/sleep. The BLE reconciler arms it on the off→on edge; pushing it
         // here (and at the init tail) covers a fresh launch and every reconnect. (See PuffinExperiment.)
         live.$bonded.removeDuplicates().sink { [weak self] _ in
-            guard let self else { return }
+            guard let self, self.operationalWorkStarted else { return }
             self.ble.setKeepRealtimeForData(PuffinExperiment.keepRealtimeForDataEnabled)
             self.applyPowerSaving()
         }.store(in: &hrCancellables)
@@ -520,36 +528,48 @@ final class AppModel: ObservableObject {
             .map { Date(timeIntervalSince1970: $0) }
         sleepMarks = (UserDefaults.standard.array(forKey: "sleepMarks") as? [Double] ?? [])
             .map { Date(timeIntervalSince1970: $0) }
-        // Rehydrate a manual workout that was in flight when iOS killed the app, so it can still be ended
-        // + saved on relaunch (#529). Restored here alongside the other UserDefaults-backed state.
+        if startOperationalWork {
+            startOperationalWorkAfterLaunchAccess()
+        }
+    }
+
+    /// Cross the hardware/background boundary after the launch-access receipt is valid. The locked app
+    /// still owns a lightweight observable graph for SwiftUI injection, but does not restore Bluetooth,
+    /// resume a scale, publish App Intents, restore SOS sharing, purge files, or open the analysis loop.
+    /// A pending database restore deliberately waits for the next cold launch because applying it after
+    /// ProfileStore/Repository construction would violate the restore transaction's cold-start contract.
+    func startOperationalWorkAfterLaunchAccess() {
+        guard !operationalWorkStarted else { return }
+        operationalWorkStarted = true
+
+        AppModel.shared = self   // publish for App Intents only after the launch gate is open
+        // An unfinished GPS workout resumes location + realtime hardware, so restoration belongs on the
+        // same authorized side of the boundary as Bluetooth rather than in the lightweight initializer.
         rehydrateActiveWorkout()
+        Task { @MainActor in
+            await SafetySOSRuntime.shared.restoreLocationSharingIfNeeded()
+        }
+        scheduleDailySmartAlarmRearm()
 
-        AppModel.shared = self   // publish for App Intents (Shortcuts) , see the static above (#42)
-
-        // No open discovery and no anonymous adoption: this only asks CoreBluetooth to resume the
-        // exact scale the user already paired. A fresh install with no paired id is a no-op.
-        weightScaleSource.resumePairedScale()
-
-        // Seed the BLE client with the persisted "Continuous HRV capture" intent so `wantsRealtime`
-        // reflects it from launch , the reconciler then arms the dense stream as soon as the strap bonds
-        // (and the bond sink above re-applies it on every reconnect).
+        // Seed preferences before restoring the central so its first powered-on callback sees the final
+        // realtime/power-saving intent. Both calls and both resume paths are idempotent.
         ble.setKeepRealtimeForData(PuffinExperiment.keepRealtimeForDataEnabled)
         applyPowerSaving()
+        ble.resumeRememberedRuntimeAfterLaunchAccess()
+        weightScaleSource.resumePairedScale()
 
-        // Turn the strap's offloaded raw data into dashboard scores on launch and every 15
-        // minutes, so recovery / strain / sleep populate from the strap itself with no import.
-        // IntelligenceEngine computes, persists under "my-whoop-noop", and refreshes the dashboard.
-        // One-shot reclaim of any stale Documents/Inbox picker drops a previous build left behind
-        // before cleanup() reclaimed the original, PLUS any stranded `noop-*` temp scratch (e.g. the
-        // multi-GB `noop-health-*` export.xml an interrupted import leaves behind , #590). Off the main
-        // actor; no-op on macOS for the Inbox part.
         Task.detached { AppModel.purgeImportInbox(); AppModel.purgeImportTemp() }
 
         #if DEBUG
-        // Live fixture state is independent of the database and must be available to the first frame.
-        // Reapply it after seeding below in case a restored Bluetooth callback changed the live snapshot.
         AppleDemoSeeder.applyLiveFixtureIfRequested(to: live)
         #endif
+
+        startAnalysisLoop()
+    }
+
+    /// Turn the strap's offloaded raw data into dashboard scores on launch and every 30 minutes. Kept in
+    /// a separate helper so a locked process can start the exact same loop once, on the unlock edge.
+    private func startAnalysisLoop() {
 
         // FIX 2(b): the launch sequence runs at `.utility` so its heavy one-shot 4000-day heal/rescore
         // yields to UI rendering instead of contending at the inherited user-initiated QoS. The reads are
@@ -769,6 +789,7 @@ final class AppModel: ObservableObject {
     #endif
 
     private func refreshAfterPersistedHistory() async {
+        guard operationalWorkStarted else { return }
         live.append(log: "Backfill: scoring newly persisted history")
         await repo.refresh(days: 120)
         // Score the freshly-offloaded raw data RIGHT NOW rather than waiting for the next 15-minute

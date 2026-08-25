@@ -37,10 +37,7 @@ enum WatchSnapshotAccess {
 
     /// The last snapshot the phone pushed, or nil if nothing has synced yet.
     static func load() -> WatchScoreSnapshot? {
-        guard let defaults = UserDefaults(suiteName: suiteName),
-              let data = defaults.data(forKey: storageKey),
-              let snap = try? JSONDecoder().decode(WatchScoreSnapshot.self, from: data) else { return nil }
-        return snap
+        WatchScoreSnapshot.load()
     }
 }
 
@@ -83,13 +80,17 @@ private extension WatchScoreSnapshot {
     /// A representative snapshot for the widget gallery: a primed Recovery, a mid Effort, a calibrating
     /// Sleep score (so the gallery also shows the cal marker), a live HR and a short sleep line.
     static var preview: WatchScoreSnapshot {
-        WatchScoreSnapshot(
+        let launchAuthorization = LaunchSurfaceAuthorization.current()
+        return WatchScoreSnapshot(
             charge: 74, chargeCalibrating: false,
             effort: 41, effortCalibrating: false,
             rest: nil, restCalibrating: true,
             hr: 58,
             sleepSummary: "7h 12m",
-            asOf: Date()
+            asOf: Date(),
+            launchGateRequired: launchAuthorization.required,
+            launchGateVersion: launchAuthorization.gateVersion,
+            launchGateAuthorized: launchAuthorization.authorized
         )
     }
 }
@@ -186,13 +187,48 @@ struct NOOPChargeView: View {
         entry.snapshot?.isFreshToday(now: entry.date) ?? false
     }
 
+    private var launchSurfaceAuthorized: Bool {
+        switch LaunchSurfaceAuthorization.requirement() {
+        case .notRequired:
+            return true
+        case .invalid:
+            return false
+        case .required(version: _):
+            return entry.snapshot?.isLaunchSurfaceAuthorized() == true
+        }
+    }
+
     var body: some View {
+        if launchSurfaceAuthorized {
+            switch family {
+            case .accessoryCircular:    circular
+            case .accessoryCorner:      corner
+            case .accessoryInline:      Text(inlineText)
+            case .accessoryRectangular: rectangular
+            default:                    circular
+            }
+        } else {
+            locked
+        }
+    }
+
+    @ViewBuilder
+    private var locked: some View {
         switch family {
-        case .accessoryCircular:    circular
-        case .accessoryCorner:      corner
-        case .accessoryInline:      Text(inlineText)
-        case .accessoryRectangular: rectangular
-        default:                    circular
+        case .accessoryInline:
+            Text("launch.locked.title")
+        case .accessoryRectangular:
+            VStack(alignment: .leading, spacing: 2) {
+                Label("launch.locked.title", systemImage: "lock.fill")
+                    .font(.headline)
+                Text("launch.locked.instruction")
+                    .font(.caption2)
+            }
+            .widgetAccentable()
+        default:
+            Image(systemName: "lock.fill")
+                .font(.headline)
+                .widgetAccentable()
         }
     }
 

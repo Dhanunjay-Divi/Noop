@@ -1,13 +1,12 @@
-// Temporary launch-access gate. The tracked wrapper contains no access code or verifier material.
-// Generate the ignored LaunchGateSecrets.xcconfig interactively with:
+// Temporary launch-access gate policy shared by the iPhone app and its user-facing extensions.
+// This file is intentionally public and contains only the required/version contract. The ignored
+// verifier configuration is included exclusively by Config/NOOPiOS.xcconfig so widgets and Watch
+// targets never inherit verifier, salt, or iteration build settings.
+//
+// Generate the matching ignored iPhone-only verifier configuration interactively with:
 //   python3 Tools/generate-launch-gate-verifier.py <new-version>
 //
-// An intentionally blank version disables the gate for ordinary source builds and makes its eventual
-// removal an in-place app update. The iOS Release target overrides REQUIRED to YES so an App Store
-// archive cannot silently omit the requested gate; set that target override to NO when retiring it.
+// REQUIRED remains NO for ordinary source builds. Every embedded Release target overrides it to YES;
+// set those overrides to NO together when retiring the gate in an in-place update.
 NOOP_LAUNCH_GATE_REQUIRED = NO
-NOOP_LAUNCH_GATE_VERSION =
-NOOP_LAUNCH_GATE_SALT_HEX =
-NOOP_LAUNCH_GATE_VERIFIER_HEX =
-NOOP_LAUNCH_GATE_ITERATIONS = 310000
-#include? "LaunchGateSecrets.xcconfig"
+NOOP_LAUNCH_GATE_VERSION = appstore-2026-08-25-v1
