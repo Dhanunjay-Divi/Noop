@@ -6,8 +6,8 @@
 - Owner: project team
 - Branch: `codex/app-store-submit-20260825`
 - Start commit: `9d4a6957`
-- End implementation commit: none
-- Record commit or PR: pending
+- End implementation commit: none (record-only round)
+- Record commit or PR: private branch head
 
 ## Objective
 
@@ -106,8 +106,9 @@ submit only when the current release gates pass.
 
 - Changed paths: App Store localized name, this round record, decision log,
   and active/index pointers
-- Commits: pending
-- Branch and remote state: fresh local branch from exact private `origin/main`
+- Commits: App Store reservation/metadata record committed on the branch
+- Branch and remote state: pushed to private origin as
+  `codex/app-store-submit-20260825`
 - Repository visibility verified: private
 - Version/build impact: none; `9.2.0 (229)`
 - Release or distribution impact: the App Store record was created; no signed
