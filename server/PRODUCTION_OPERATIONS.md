@@ -228,11 +228,13 @@ Before enabling paging:
    revoked consent.
 5. Define staffed ownership for a provider outage and a carrier filtering event.
 
-The app now reports unique contacts reached, not SMS/voice row counts. If every
-channel explicitly fails for every contact, the incident becomes terminal
-`failed` and the client must direct the owner to call local emergency services.
-An `unknown` provider receipt remains unknown and must never be described as a
-confirmed failure or confirmed delivery.
+The app now reports a deduplicated contact count backed by either an actual
+response or provider-confirmed delivery, not SMS/voice row counts or a claim
+that a carrier receipt proves human receipt. If every channel explicitly fails
+for every contact, the incident becomes terminal `failed` and the client must
+direct the owner to call local emergency services. An `unknown` provider receipt
+remains unknown and must never be described as a confirmed failure or confirmed
+delivery.
 
 ## Paging kill switch
 
@@ -404,5 +406,8 @@ Code cannot complete these items:
   legal/safety review.
 
 No production launch should convert an unavailable medical or fall detector
-into marketing copy. Safety paging remains explicit, user-triggered contact
-paging and does not contact emergency services.
+into marketing copy. App SOS and repeated band gestures are explicit user
+actions. The possible-fall request model remains hard-disabled because detector
+attestation is absent; preparatory configuration cannot activate it. Wellness
+and biometric estimates never page contacts, and NOOP does not contact
+emergency services.

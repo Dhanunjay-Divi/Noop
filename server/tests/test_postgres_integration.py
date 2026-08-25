@@ -130,6 +130,9 @@ def test_tenancy_and_safety_lifecycle_migrations_are_complete() -> None:
     cutover = (MIGRATIONS / "012_tenancy_cutover_invariants.sql").read_text(
         encoding="utf-8"
     )
+    escalation = (MIGRATIONS / "013_safety_escalation_contract.sql").read_text(
+        encoding="utf-8"
+    )
 
     assert "CREATE TABLE IF NOT EXISTS installation_credentials" in tenancy
     assert "CREATE TABLE IF NOT EXISTS installation_devices" in tenancy
@@ -140,6 +143,10 @@ def test_tenancy_and_safety_lifecycle_migrations_are_complete() -> None:
     assert "AFTER INSERT ON devices" in cutover
     assert "BEFORE INSERT ON friend_profiles" in cutover
     assert "BEFORE INSERT ON safety_profiles" in cutover
+    assert "validated_fall" in escalation
+    assert "safety_dispatches_fall_event_unique" in escalation
+    assert "safety_delivery_round_unique" in escalation
+    assert "share_duration_hours" in escalation
 
 
 @pytest.mark.skipif(
@@ -529,6 +536,249 @@ async def test_postgres_safety_lifecycle_export_retention_and_erasure() -> None:
                 await safety.set_paging_control(
                     enabled=bool(original_control["enabled"]),
                     reason="PostgreSQL lifecycle integration test cleanup",
+                    expected_revision=int(current["revision"]),
+                    now=datetime.now(UTC),
+                )
+        await repository.shutdown()
+
+
+@pytest.mark.skipif(
+    not DATABASE_URL,
+    reason="NOOP_TEST_DATABASE_URL is required for TimescaleDB integration tests",
+)
+@pytest.mark.asyncio
+async def test_postgres_safety_escalation_and_fall_event_contract() -> None:
+    repository = PostgresRepository(
+        DATABASE_URL or "",
+        pool_min_size=1,
+        pool_max_size=2,
+    )
+    safety = PostgresSafetyRepository(repository)
+    installation_id = str(uuid4())
+    profile_id = str(uuid4())
+    now = datetime.now(UTC)
+    original_control: dict | None = None
+    event_id = str(uuid4())
+    evidence = {
+        "detector_id": "noop_band_fall",
+        "detector_version": 1,
+        "event_id": event_id,
+        "detected_at": (now - timedelta(seconds=47)).isoformat(),
+        "warning_haptic_confirmed_at": (now - timedelta(seconds=46)).isoformat(),
+        "response_deadline_at": (now - timedelta(seconds=1)).isoformat(),
+    }
+
+    await repository.startup()
+    try:
+        original_control = await safety.paging_control()
+        if not original_control["enabled"]:
+            await safety.set_paging_control(
+                enabled=True,
+                reason="PostgreSQL Safety escalation integration test",
+                expected_revision=int(original_control["revision"]),
+                now=now,
+            )
+        await safety.create_profile(
+            profile_id=profile_id,
+            enrollment_id=str(uuid4()),
+            display_name="Escalation integration",
+            installation_id=installation_id,
+            token_hash=hashlib.sha256(uuid4().bytes).hexdigest(),
+        )
+        for index in range(2):
+            invite_hash = hashlib.sha256(
+                f"escalation-invite-{uuid4()}".encode()
+            ).hexdigest()
+            await safety.create_contact(
+                contact_id=str(uuid4()),
+                profile_id=profile_id,
+                display_name=f"Contact {index}",
+                phone_e164=f"+1415555070{index}",
+                invite_token_hash=invite_hash,
+                invited_at=now,
+                invite_expires_at=now + timedelta(days=7),
+            )
+            await safety.decide_invitation(
+                invite_token_hash=invite_hash,
+                decision="accept",
+                now=now,
+            )
+
+        idempotency_key = str(uuid4())
+        request_hash = hashlib.sha256(b"validated-fall-rounds").hexdigest()
+        dispatch = await safety.create_dispatch(
+            dispatch_id=str(uuid4()),
+            profile_id=profile_id,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+            accepted_request_hashes=frozenset({request_hash}),
+            trigger="validated_fall",
+            share_duration_hours=12,
+            evidence=evidence,
+            escalation_rounds=3,
+            escalation_interval_seconds=15 * 60,
+            now=now,
+            expires_at=now + timedelta(hours=12),
+            voice_fallback_at=now + timedelta(seconds=90),
+        )
+        assert dispatch["share_duration_hours"] == 12
+        assert dispatch["evidence"]["event_id"] == event_id
+        assert dispatch["escalation_rounds"] == 3
+        assert len(dispatch["deliveries"]) == 12
+        assert {row["escalation_round"] for row in dispatch["deliveries"]} == {
+            0,
+            1,
+            2,
+        }
+        first_contact_id = str(dispatch["deliveries"][0]["contact_id"])
+        await safety.update_incident_location(
+            profile_id=profile_id,
+            dispatch_id=str(dispatch["dispatch_id"]),
+            sequence=1,
+            latitude=40.7131,
+            longitude=-74.0057,
+            horizontal_accuracy_meters=12.0,
+            captured_at=now + timedelta(seconds=1),
+            received_at=now + timedelta(seconds=2),
+        )
+        active_preview = await safety.responder_preview(
+            dispatch_id=str(dispatch["dispatch_id"]),
+            contact_id=first_contact_id,
+            now=now + timedelta(seconds=3),
+        )
+        assert active_preview is not None
+        assert active_preview["latest_location"]["sequence"] == 1
+
+        replay = await safety.dispatch_for_idempotency_key(
+            profile_id=profile_id,
+            idempotency_key=idempotency_key,
+            accepted_request_hashes=frozenset({request_hash}),
+        )
+        assert replay is not None
+        assert replay["dispatch_id"] == dispatch["dispatch_id"]
+        assert replay["idempotent_replay"] is True
+
+        acknowledged = await safety.record_responder_decision(
+            dispatch_id=str(dispatch["dispatch_id"]),
+            contact_id=first_contact_id,
+            decision="responding",
+            source="sms_link",
+            now=now + timedelta(minutes=1),
+        )
+        assert acknowledged["status"] == "acknowledged"
+        assert (
+            await safety.expire_due_dispatches(now=now + timedelta(hours=12, seconds=1))
+            == 1
+        )
+        expired = await safety.dispatch_for_idempotency_key(
+            profile_id=profile_id,
+            idempotency_key=idempotency_key,
+            accepted_request_hashes=frozenset({request_hash}),
+        )
+        assert expired is not None
+        assert expired["status"] == "expired"
+        expired_preview = await safety.responder_preview(
+            dispatch_id=str(dispatch["dispatch_id"]),
+            contact_id=first_contact_id,
+            now=now + timedelta(hours=12, seconds=2),
+        )
+        assert expired_preview is not None
+        assert expired_preview["latest_location"] is None
+
+        stale_key = str(uuid4())
+        stale_hash = hashlib.sha256(b"stale-acknowledged-page").hexdigest()
+        stale_now = now + timedelta(hours=12, seconds=2)
+        stale = await safety.create_dispatch(
+            dispatch_id=str(uuid4()),
+            profile_id=profile_id,
+            idempotency_key=stale_key,
+            request_hash=stale_hash,
+            trigger="manual_sos",
+            share_duration_hours=8,
+            escalation_rounds=1,
+            now=stale_now,
+            expires_at=stale_now + timedelta(hours=8),
+            voice_fallback_at=stale_now + timedelta(seconds=90),
+        )
+        stale_acknowledged = await safety.record_responder_decision(
+            dispatch_id=str(stale["dispatch_id"]),
+            contact_id=str(stale["deliveries"][0]["contact_id"]),
+            decision="responding",
+            source="sms_link",
+            now=stale_now + timedelta(minutes=1),
+        )
+        assert stale_acknowledged["status"] == "acknowledged"
+
+        replacement_now = stale_now + timedelta(hours=8, seconds=1)
+        with pytest.raises(
+            SafetyConflictError,
+            match="no longer accepting responses",
+        ):
+            await safety.record_responder_decision(
+                dispatch_id=str(stale["dispatch_id"]),
+                contact_id=str(stale["deliveries"][0]["contact_id"]),
+                decision="responding",
+                source="sms_link",
+                now=replacement_now,
+            )
+        retired = await safety.dispatch_for_idempotency_key(
+            profile_id=profile_id,
+            idempotency_key=stale_key,
+            accepted_request_hashes=frozenset({stale_hash}),
+        )
+        assert retired is not None
+        assert retired["status"] == "expired"
+        assert all(
+            row["status"] not in {"pending", "retry_wait", "leased"}
+            for row in retired["deliveries"]
+        )
+
+        replacement = await safety.create_dispatch(
+            dispatch_id=str(uuid4()),
+            profile_id=profile_id,
+            idempotency_key=str(uuid4()),
+            request_hash=hashlib.sha256(b"replacement-page").hexdigest(),
+            trigger="manual_sos",
+            share_duration_hours=8,
+            escalation_rounds=1,
+            now=replacement_now,
+            expires_at=replacement_now + timedelta(hours=8),
+            voice_fallback_at=replacement_now + timedelta(seconds=90),
+        )
+        assert replacement["status"] == "open"
+        await safety.transition_dispatch(
+            profile_id=profile_id,
+            dispatch_id=str(replacement["dispatch_id"]),
+            action="cancel",
+            note=None,
+            now=replacement_now + timedelta(seconds=1),
+        )
+
+        with pytest.raises(SafetyConflictError, match="fall event was already used"):
+            await safety.create_dispatch(
+                dispatch_id=str(uuid4()),
+                profile_id=profile_id,
+                idempotency_key=str(uuid4()),
+                request_hash=hashlib.sha256(b"duplicate-fall-event").hexdigest(),
+                trigger="validated_fall",
+                share_duration_hours=8,
+                evidence=evidence,
+                escalation_rounds=1,
+                now=replacement_now + timedelta(seconds=2),
+                expires_at=replacement_now + timedelta(hours=8, seconds=2),
+                voice_fallback_at=replacement_now + timedelta(seconds=92),
+            )
+    finally:
+        try:
+            await safety.delete_profiles_for_installation(installation_id)
+        except Exception:
+            pass
+        if original_control is not None:
+            current = await safety.paging_control()
+            if bool(current["enabled"]) != bool(original_control["enabled"]):
+                await safety.set_paging_control(
+                    enabled=bool(original_control["enabled"]),
+                    reason="PostgreSQL Safety escalation integration test cleanup",
                     expected_revision=int(current["revision"]),
                     now=datetime.now(UTC),
                 )

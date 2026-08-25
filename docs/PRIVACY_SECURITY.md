@@ -55,7 +55,7 @@ one of the explicit outputs:
 | File import (Apple Health, WHOOP CSV, nutrition CSV) | User-selected files on disk | Read-only from disk |
 | Oura history import (opt-in build flag, §1.1b) | HTTPS OAuth + REST, `api.ouraring.com` → device | Read-only from your own Oura account |
 | Self-hosted Sync + Friends (§1.1c–d) | HTTPS, or HTTP only on loopback/private LAN | Selected records and optional friend summaries ↔ the server you configure |
-| Safety Network (§1.1e, §1.4) | HTTPS to the configured server; server-to-provider HTTPS; carrier SMS/voice | Contact enrollment and a user-confirmed page → the server and its configured provider; delivery/response state → NOOP |
+| Safety Network (§1.1e, §1.4) | HTTPS to the configured server; server-to-provider HTTPS; carrier SMS/voice | Contact enrollment and an explicit app/band SOS, or a separately approved possible-fall event → the server and its configured provider; delivery/response state → NOOP |
 | Check for updates | HTTPS GET to GitHub's public releases API, only when tapped | Public version metadata → device; no biometric payload |
 | Apple Health export, incl. iOS "Export for Shortcuts" | On-device, user-initiated | NOOP → your Apple Health, on your device only (§1.3) |
 | Safety message handoff | OS share sheet, user-initiated | Prepared text and an optional fresh one-shot location → the destination app and recipient you choose (§1.4) |
@@ -296,7 +296,7 @@ one-time capability. Share both only with the intended recipient, use HTTPS
 outside a trusted private network, and revoke an unused invite if it may have
 leaked. The complete API and operator contract is in `server/FRIENDS.md`.
 
-### 1.1e Safety Network (optional, self-hosted, user-confirmed)
+### 1.1e Safety Network (optional, self-hosted, explicit SOS)
 
 Safety Network uses the same server origin configured for Self-hosted Sync, but
 has a separate device-bound credential and data boundary:
@@ -305,27 +305,36 @@ has a separate device-bound credential and data boundary:
   invites two to five contacts by name and E.164 phone number. An invitation
   expires after seven days, and the recipient must explicitly accept before
   counting toward the two-contact paging threshold or receiving a page.
-- **Manual trigger only.** A page is created only after the owner presses the
-  page action and confirms the warning. Current wellness, anomaly, sleep,
-  activity, location, and check-in-timer values cannot trigger this endpoint.
+- **Bounded origins.** A page can start after the owner confirms in the app or
+  completes the configured repeated Noop Band SOS gesture. The API models a
+  future possible-fall origin, but this release always refuses new incidents of
+  that origin because detector evidence is not cryptographically attested.
+  Its preparatory flag and allowlist cannot activate transport. Wellness,
+  rhythm, SpO2, temperature, sleep, stress, delayed history, location, and
+  check-in timers cannot create an incident.
 - **What leaves the device.** Enrollment sends the owner's display name,
   installation-scoped identifiers, and a one-way authenticated request. Contact
-  setup sends contact names and phone numbers. A page sends a random
-  idempotency key and the fixed `manual_sos` trigger. It does not send biometric
-  streams, scores, notes, or location.
+  setup sends contact names and phone numbers. A page sends a random idempotency
+  key, its fixed origin, the selected 8- or 12-hour duration, and, only for a
+  validated possible-fall event, bounded detector/timestamp evidence. While the
+  page is active, the newest location fix replaces the prior fix. It sends no
+  biometric streams, scores, ECG/rhythm output, notes, or route history.
 - **Provider boundary.** The server operator configures Twilio credentials and
   a sending number. Twilio and downstream carriers receive the recipient phone
-  number, generic Safety copy, owner display name, signed response URL, and
-  provider delivery metadata. Voice fallback receives equivalent call content.
+  number, generic Safety copy, non-diagnostic origin summary, owner display
+  name, signed response URL, and provider delivery metadata. Voice fallback
+  receives equivalent call content. The signed web page can show the latest
+  location while the incident is active; SMS and voice do not contain raw
+  coordinates or health values.
   Their retention, geographic routing, carrier registration, and legal terms
   apply; this is not a NOOP-operated carrier.
 - **Durability and acknowledgement.** PostgreSQL stores profiles, contacts,
   incidents, delivery attempts, provider references, and responder decisions.
-  Delivery jobs use leases, bounded exponential retries, provider status
-  callbacks, and an expiry. A recipient can choose **responding** or **cannot
-  respond** by signed web action or voice DTMF; the first responding contact
-  stops pending retries and voice fallback. The owner can resolve or cancel the
-  incident and inspect per-contact delivery state.
+  Delivery jobs use leases, bounded exponential retries, independent bounded
+  SMS/voice rounds, provider status callbacks, and an expiry. A recipient can
+  choose **responding** or **cannot respond** by signed web action or voice
+  DTMF; the first responding contact stops every unsent round. The owner can
+  resolve or cancel the incident and inspect per-contact delivery state.
 - **Secrets and capabilities.** Clients store the random Safety credential in
   Keychain or encrypted preferences; the server stores its digest. Invitation
   tokens are stored only as digests. Responder links use an expiring HMAC
@@ -406,24 +415,28 @@ NOOP's own store — but it never leaves your **device**, and never touches the 
   you push into Apple Health and for anything you or your Shortcuts then do with it.** See
   `DISCLAIMER.md` §5.3 and `TERMS.md` §5.
 
-### 1.4 Safety Center sharing, paging, and reminders (user-confirmed, non-emergency)
+### 1.4 Safety Center sharing, paging, and reminders (non-emergency)
 
 Safety contains three explicit tools, none of which is medical monitoring or
 emergency dispatch:
 
-- **Acknowledged contact paging.** After a separate confirmation, NOOP sends a
-  request to the configured server to page every accepted contact by SMS and,
-  while unacknowledged, voice. The durable and privacy boundaries are in §1.1e.
-  No wellness score, anomaly estimate, overdue timer, or background process can
-  open an incident.
+- **Acknowledged contact paging.** App SOS requires confirmation. A configured
+  repeated band SOS gesture pages without another phone action. Automatic
+  possible-fall transport is unavailable in this release; a future workflow
+  would require authenticated detector evidence before evaluating a confirmed
+  haptic safety check and unanswered window. SMS and voice continue for a
+  bounded number of rounds until acknowledgement. The durable and privacy
+  boundaries are in §1.1e. No wellness score, biometric threshold, anomaly
+  estimate, overdue timer, or delayed history can open an incident.
 - **Optional share-sheet message.** NOOP can also prepare visible text for one
   of the user's selected intents. The user reviews it, opens the operating-system
   share sheet, chooses the destination and recipient, and must still press Send
   in that destination app. This is independent of acknowledged paging.
-- **Location is one-shot and short-lived.** Location is requested only when the user taps to add it.
-  NOOP accepts a structurally valid fix only while it is no more than five minutes old, shows its
-  capture time and accuracy, and rechecks freshness when building the final share-sheet message. It
-  does not continuously or silently track location, and acknowledged pages do not include it.
+- **Location is purpose-bounded.** The share-sheet message uses one user-added
+  fix no more than five minutes old. An active contact page instead keeps only
+  the newest fix for the user-selected 8 or 12 hours so a responder link can
+  show current context. Each update replaces the previous row; NOOP stores no
+  route, and resolution or cancellation ends sharing sooner.
 - **The receiving app becomes the data controller.** If the user chooses Messages, email, or another
   app, the prepared text and optional map coordinate are then handled by that app, its provider, and
   the selected recipient under their own storage, transport, and privacy terms.
@@ -431,10 +444,11 @@ emergency dispatch:
   WorkManager plus a dedicated notification channel. NOOP checks visible delivery availability and
   offers Settings or repair when authorization, channel state, or the pending request blocks it.
   The operating system may still defer or suppress delivery.
-- **No emergency claim.** NOOP does not monitor the timer, page anyone when it
-  becomes overdue, detect a fall or medical event, dispatch emergency services,
-  or guarantee help. Page copy directs recipients to contact local emergency
-  services themselves when immediate danger is suspected.
+- **No emergency claim.** NOOP does not monitor the timer, page from medical or
+  wellness values, diagnose a fall or medical event, dispatch emergency
+  services, or guarantee help. Possible-fall wording is an observed motion
+  event, not a confirmed cause. Page copy directs recipients to contact local
+  emergency services themselves when immediate danger is suspected.
 
 ---
 

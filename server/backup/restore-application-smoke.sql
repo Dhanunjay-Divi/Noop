@@ -33,6 +33,13 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'required tenancy cutover migration is missing';
     END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM noop_schema_migrations
+        WHERE version = '013_safety_escalation_contract.sql'
+    ) THEN
+        RAISE EXCEPTION 'required Safety escalation migration is missing';
+    END IF;
     IF EXISTS (
         SELECT 1
         FROM installation_devices device
@@ -91,6 +98,19 @@ BEGIN
           AND next_slot_at IS NOT NULL
     ) <> 1 THEN
         RAISE EXCEPTION 'Twilio sender-rate state is missing';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM safety_deliveries delivery
+        JOIN safety_dispatches incident
+          ON incident.dispatch_id = delivery.dispatch_id
+        WHERE delivery.escalation_round < 0
+           OR (
+                incident.escalation_rounds IS NOT NULL
+                AND delivery.escalation_round >= incident.escalation_rounds
+           )
+    ) THEN
+        RAISE EXCEPTION 'Safety escalation round is outside its incident contract';
     END IF;
     IF EXISTS (
         SELECT 1

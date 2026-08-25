@@ -36,11 +36,13 @@ async def test_real_twilio_accepts_sms_and_voice_submissions() -> None:
     sms = await provider.send_page_sms(
         to_phone=required["NOOP_TWILIO_STAGING_TO"],
         owner_name="NOOP staging test, no emergency",
+        incident_summary="Staging test only. No emergency.",
         response_url=required["NOOP_TWILIO_STAGING_RESPONSE_URL"],
     )
     voice = await provider.send_page_voice(
         to_phone=required["NOOP_TWILIO_STAGING_TO"],
         owner_name="NOOP staging test, no emergency",
+        incident_summary="Staging test only. No emergency.",
         response_url=required["NOOP_TWILIO_STAGING_RESPONSE_URL"],
     )
 

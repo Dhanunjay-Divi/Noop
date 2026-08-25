@@ -75,6 +75,7 @@ def test_twilio_voice_callback_events_are_repeated_form_values(monkeypatch) -> N
         provider.send_page_voice(
             to_phone="+14155550101",
             owner_name="Jordan",
+            incident_summary="Started from the NOOP app.",
             response_url="https://safety.example.test/respond",
         )
     )
@@ -130,6 +131,7 @@ def test_twilio_distinguishes_ambiguous_outcomes_from_explicit_rejection(
             provider.send_page_sms(
                 to_phone="+14155550101",
                 owner_name="Jordan",
+                incident_summary="Started from the NOOP app.",
                 response_url="https://safety.example.test/respond",
             )
         )
@@ -158,6 +160,7 @@ def test_twilio_rate_limit_preserves_bounded_retry_after(monkeypatch) -> None:
             provider.send_page_sms(
                 to_phone="+14155550101",
                 owner_name="Jordan",
+                incident_summary="Started from the NOOP app.",
                 response_url="https://safety.example.test/respond",
             )
         )

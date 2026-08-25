@@ -50,19 +50,80 @@ class SafetyPagingPolicyTest {
     }
 
     @Test
+    fun legacyPendingKeyRetriesTheOriginalManualPageBody() {
+        val requested = JSONObject()
+            .put("trigger", SafetyPageTrigger.BAND_SOS.wireValue)
+            .put("share_duration_hours", 12)
+        val migrated = pendingSafetyPageBody(
+            persistedBody = null,
+            hadPendingKey = true,
+            requestedBody = requested,
+        )
+
+        assertEquals("manual_sos", migrated.getString("trigger"))
+        assertEquals(8, migrated.getInt("share_duration_hours"))
+
+        val persisted = pendingSafetyPageBody(
+            persistedBody = requested.toString(),
+            hadPendingKey = true,
+            requestedBody = JSONObject(),
+        )
+        assertEquals("band_sos", persisted.getString("trigger"))
+        assertEquals(12, persisted.getInt("share_duration_hours"))
+
+        val orphanedBody = pendingSafetyPageBody(
+            persistedBody = persisted.toString(),
+            hadPendingKey = false,
+            requestedBody = JSONObject()
+                .put("trigger", SafetyPageTrigger.MANUAL_SOS.wireValue)
+                .put("share_duration_hours", 8),
+        )
+        assertEquals("manual_sos", orphanedBody.getString("trigger"))
+        assertEquals(8, orphanedBody.getInt("share_duration_hours"))
+    }
+
+    @Test
+    fun terminalIdempotentReplayRequiresOneFreshPageRequest() {
+        assertTrue(
+            shouldReplaceTerminalSafetyPageReplay(
+                SafetyIncidentStatus.RESOLVED,
+                idempotentReplay = true,
+            ),
+        )
+        assertFalse(
+            shouldReplaceTerminalSafetyPageReplay(
+                SafetyIncidentStatus.OPEN,
+                idempotentReplay = true,
+            ),
+        )
+        assertFalse(
+            shouldReplaceTerminalSafetyPageReplay(
+                SafetyIncidentStatus.RESOLVED,
+                idempotentReplay = false,
+            ),
+        )
+    }
+
+    @Test
     fun acknowledgedIncidentDecodesResponderAndRetryState() {
         val incident = decodeDispatch(
             JSONObject(
                 """
                 {
                   "dispatch_id": "11111111-1111-4111-8111-111111111111",
+                  "idempotency_key": "99999999-9999-4999-8999-999999999999",
+                  "trigger": "band_sos",
                   "status": "acknowledged",
+                  "share_duration_hours": 12,
+                  "escalation_rounds": 4,
+                  "escalation_interval_seconds": 900,
                   "idempotent_replay": false,
                   "acknowledged_contact_display_name": "Alex",
                   "deliveries": [{
                     "delivery_id": "22222222-2222-4222-8222-222222222222",
                     "contact_display_name": "Alex",
                     "channel": "sms",
+                    "escalation_round": 2,
                     "status": "retry_wait",
                     "attempt_count": 2,
                     "max_attempts": 3
@@ -95,6 +156,15 @@ class SafetyPagingPolicyTest {
         )
 
         assertEquals(SafetyIncidentStatus.ACKNOWLEDGED, incident.status)
+        assertEquals(
+            "99999999-9999-4999-8999-999999999999",
+            incident.idempotencyKey,
+        )
+        assertEquals(SafetyPageTrigger.BAND_SOS, incident.trigger)
+        assertEquals(12, incident.shareDurationHours)
+        assertEquals(4, incident.escalationRounds)
+        assertEquals(900, incident.escalationIntervalSeconds)
+        assertEquals(2, incident.deliveries.single().escalationRound)
         assertEquals("Alex", incident.acknowledgedContactDisplayName)
         assertEquals(SafetyDeliveryStatus.RETRY_WAIT, incident.deliveries.single().status)
         assertEquals(2, incident.deliveries.single().attemptCount)
@@ -107,6 +177,60 @@ class SafetyPagingPolicyTest {
         assertEquals(1, incident.contactSummary?.failed)
         assertEquals("2026-08-22T12:01:00Z", incident.contactSummary?.lastReachedAt)
         assertFalse(requireNotNull(incident.contactSummary).allContactsFailed)
+    }
+
+    @Test
+    fun liveLocationExpiryKeepsTheSelectedEightOrTwelveHourWindow() {
+        val now = 1_800_000_000L
+        assertEquals(
+            8 * 60 * 60L,
+            SafetyLiveLocationSession.remainingSessionSeconds(
+                now + 8 * 60 * 60L,
+                now,
+            ),
+        )
+        assertEquals(
+            SafetyLiveLocationSession.MAXIMUM_SESSION_SECONDS,
+            SafetyLiveLocationSession.remainingSessionSeconds(
+                now + 24 * 60 * 60L,
+                now,
+            ),
+        )
+        assertEquals(
+            0L,
+            SafetyLiveLocationSession.remainingSessionSeconds(now - 1L, now),
+        )
+    }
+
+    @Test
+    fun liveLocationSequenceResumesPastBothDiskAndServerState() {
+        assertEquals(
+            56L,
+            SafetyLiveLocationSession.resumedSequence(
+                currentDispatchId = "incident-a",
+                requestedDispatchId = "incident-a",
+                currentSequence = 41L,
+                serverSequence = 56L,
+            ),
+        )
+        assertEquals(
+            56L,
+            SafetyLiveLocationSession.resumedSequence(
+                currentDispatchId = "incident-a",
+                requestedDispatchId = "incident-a",
+                currentSequence = 56L,
+                serverSequence = 41L,
+            ),
+        )
+        assertEquals(
+            41L,
+            SafetyLiveLocationSession.resumedSequence(
+                currentDispatchId = "incident-a",
+                requestedDispatchId = "incident-b",
+                currentSequence = 56L,
+                serverSequence = 41L,
+            ),
+        )
     }
 
     @Test
@@ -340,7 +464,7 @@ class SafetyPagingPolicyTest {
         )
         assertEquals(
             now + SafetyIncidentStatusMonitor.MAXIMUM_MONITOR_SECONDS,
-            SafetyIncidentStatusMonitor.boundedExpiryUnix(now + 7_200L, now),
+            SafetyIncidentStatusMonitor.boundedExpiryUnix(now + 24 * 60 * 60L, now),
         )
         assertEquals(
             now + 300L,

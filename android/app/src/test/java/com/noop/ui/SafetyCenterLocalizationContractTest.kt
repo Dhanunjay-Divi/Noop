@@ -40,7 +40,7 @@ class SafetyCenterLocalizationContractTest {
         assumeTrue("Safety locale resources unavailable", files.values.all { it != null })
         val values = files.mapValues { safetyStrings(it.value!!) }
         val base = values.getValue("values")
-        assertEquals(211, base.size)
+        assertEquals(221, base.size)
 
         val placeholder = Regex("""%\d+\$[ds]""")
         for ((folder, localized) in values) {
@@ -114,12 +114,12 @@ class SafetyCenterLocalizationContractTest {
                 .contains("Delivery confirmation is pending"),
         )
         assertEquals(
-            "Reached %1\$d of %2\$d contacts",
+            "Delivery or response confirmed for %1\$d of %2\$d contacts",
             resources["safety_page_contacts_reached_format"],
         )
-        assertFalse(
+        assertTrue(
             resources.getValue("safety_page_contacts_reached_format")
-                .contains("Provider-confirmed"),
+                .contains("Delivery or response confirmed"),
         )
         assertTrue(source.contains("R.string.safety_page_contact_responses"))
     }

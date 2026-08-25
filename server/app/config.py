@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from ipaddress import ip_network
 from urllib.parse import urlsplit
@@ -49,6 +50,14 @@ def _choice(name: str, default: str, allowed: frozenset[str]) -> str:
     return value
 
 
+def _csv_values(name: str) -> frozenset[str]:
+    raw = os.getenv(name, "")
+    values = [value.strip() for value in raw.split(",") if value.strip()]
+    if len(values) != len(set(values)):
+        raise ValueError(f"{name} cannot contain duplicate values")
+    return frozenset(values)
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """Runtime settings.
@@ -84,7 +93,11 @@ class Settings:
     twilio_status_callback_secret: str | None = None
     safety_capability_secret: str | None = None
     safety_acknowledgement_timeout_seconds: int = 90
-    safety_incident_ttl_seconds: int = 30 * 60
+    safety_incident_ttl_seconds: int = 12 * 60 * 60
+    safety_escalation_rounds: int = 4
+    safety_escalation_interval_seconds: int = 15 * 60
+    safety_automatic_paging_enabled: bool = False
+    safety_approved_fall_detectors: frozenset[str] = frozenset()
     safety_worker_poll_seconds: int = 2
     safety_worker_heartbeat_timeout_seconds: int = 30
     safety_delivery_lease_seconds: int = 30
@@ -164,7 +177,17 @@ class Settings:
                 "NOOP_SAFETY_ACKNOWLEDGEMENT_TIMEOUT_SECONDS", 90
             ),
             safety_incident_ttl_seconds=_positive_int(
-                "NOOP_SAFETY_INCIDENT_TTL_SECONDS", 30 * 60
+                "NOOP_SAFETY_INCIDENT_TTL_SECONDS", 12 * 60 * 60
+            ),
+            safety_escalation_rounds=_positive_int("NOOP_SAFETY_ESCALATION_ROUNDS", 4),
+            safety_escalation_interval_seconds=_positive_int(
+                "NOOP_SAFETY_ESCALATION_INTERVAL_SECONDS", 15 * 60
+            ),
+            safety_automatic_paging_enabled=_boolean(
+                "NOOP_SAFETY_AUTOMATIC_PAGING_ENABLED", False
+            ),
+            safety_approved_fall_detectors=_csv_values(
+                "NOOP_SAFETY_APPROVED_FALL_DETECTORS"
             ),
             safety_worker_poll_seconds=_positive_int(
                 "NOOP_SAFETY_WORKER_POLL_SECONDS", 2
@@ -330,6 +353,57 @@ class Settings:
             raise RuntimeError(
                 "NOOP_SAFETY_ACKNOWLEDGEMENT_TIMEOUT_SECONDS must be shorter "
                 "than NOOP_SAFETY_INCIDENT_TTL_SECONDS"
+            )
+        if self.safety_incident_ttl_seconds < 12 * 60 * 60:
+            raise RuntimeError(
+                "NOOP_SAFETY_INCIDENT_TTL_SECONDS must allow the 12-hour "
+                "location-sharing option"
+            )
+        if not 1 <= self.safety_escalation_rounds <= 8:
+            raise RuntimeError("NOOP_SAFETY_ESCALATION_ROUNDS must be between 1 and 8")
+        if not 60 <= self.safety_escalation_interval_seconds <= 86_400:
+            raise RuntimeError(
+                "NOOP_SAFETY_ESCALATION_INTERVAL_SECONDS must be between 60 and 86400"
+            )
+        if (
+            self.safety_escalation_interval_seconds
+            <= self.safety_acknowledgement_timeout_seconds
+        ):
+            raise RuntimeError(
+                "NOOP_SAFETY_ESCALATION_INTERVAL_SECONDS must exceed the "
+                "voice acknowledgement timeout"
+            )
+        final_voice_offset = (
+            (self.safety_escalation_rounds - 1)
+            * self.safety_escalation_interval_seconds
+            + self.safety_acknowledgement_timeout_seconds
+        )
+        if final_voice_offset >= 8 * 60 * 60:
+            raise RuntimeError(
+                "Safety escalation rounds must finish within the minimum "
+                "8-hour incident window"
+            )
+        malformed_detectors = [
+            value
+            for value in self.safety_approved_fall_detectors
+            if re.fullmatch(
+                r"[a-z][a-z0-9_.-]{0,63}:(?:[1-9][0-9]{0,3}|10000)",
+                value,
+            )
+            is None
+        ]
+        if malformed_detectors:
+            raise RuntimeError(
+                "NOOP_SAFETY_APPROVED_FALL_DETECTORS entries must use "
+                "detector_id:version"
+            )
+        if (
+            self.safety_automatic_paging_enabled
+            and not self.safety_approved_fall_detectors
+        ):
+            raise RuntimeError(
+                "Automatic paging requires at least one explicitly approved "
+                "fall detector contract"
             )
         if self.safety_delivery_lease_seconds <= self.safety_worker_poll_seconds:
             raise RuntimeError(

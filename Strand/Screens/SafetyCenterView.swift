@@ -89,6 +89,7 @@ struct SafetyCenterView: View {
     @AppStorage("safety.checkInDueAtUnix") private var checkInDueAtUnix = 0.0
     @AppStorage(SafetySOSGesturePreferences.enabledKey) private var sosGestureEnabled = false
     @AppStorage(SafetySOSGesturePreferences.requiredEventsKey) private var sosGestureEvents = 4
+    @AppStorage("safetyPaging.shareDurationHours") private var shareDurationHours = 8
 
     @State private var shareIntent: SafetyShareIntent = .feelUnsafe
     @State private var displayName = ""
@@ -153,7 +154,11 @@ struct SafetyCenterView: View {
             titleVisibility: .visible
         ) {
             Button("safety.page.confirm.action", role: .destructive) {
-                Task { _ = await pagingService.pageAcceptedContacts() }
+                Task {
+                    _ = await pagingService.pageAcceptedContacts(
+                        shareDurationHours: selectedPageDurationHours
+                    )
+                }
             }
             Button("safety.cancel", role: .cancel) {}
         } message: {
@@ -282,6 +287,28 @@ struct SafetyCenterView: View {
                         }
                     }
 
+                    #if os(iOS)
+                    VStack(alignment: .leading, spacing: NoopMetrics.space2) {
+                        Text("safety.sos.duration.title")
+                            .font(StrandFont.overline)
+                            .tracking(StrandFont.overlineTracking)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                        Picker(
+                            "safety.sos.duration.title",
+                            selection: shareDurationBinding
+                        ) {
+                            Text("safety.sos.duration.8_hours").tag(8)
+                            Text("safety.sos.duration.12_hours").tag(12)
+                        }
+                        .pickerStyle(.segmented)
+                        Text("safety.sos.duration.help")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    liveLocationPermissionControl
+                    #endif
+
                     NoopButton(
                         "safety.page.submit",
                         systemImage: "sos",
@@ -385,7 +412,6 @@ struct SafetyCenterView: View {
                         action: openAppSettings
                     )
                 }
-                liveLocationPermissionControl
                 #endif
             }
         }
@@ -517,6 +543,40 @@ struct SafetyCenterView: View {
                     .font(StrandFont.body)
                     .foregroundStyle(StrandPalette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Label {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("safety.page.why_started")
+                        .font(StrandFont.overline)
+                        .tracking(StrandFont.overlineTracking)
+                        .foregroundStyle(StrandPalette.textTertiary)
+                    Text(incidentReason(incident))
+                        .font(StrandFont.body)
+                        .foregroundStyle(StrandPalette.textSecondary)
+                    if incident.trigger == RemoteSafetyPageTrigger.validatedFall.rawValue {
+                        Text("safety.page.reason.observation")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
+                }
+            } icon: {
+                Image(systemName: incidentReasonIcon(incident))
+                    .foregroundStyle(StrandPalette.statusWarning)
+                    .accessibilityHidden(true)
+            }
+
+            if let rounds = incident.escalationRounds, rounds > 1,
+               [.open, .pending].contains(incident.status) {
+                Text(
+                    String(
+                        format: String(localized: "safety.page.escalation_format"),
+                        Int64(rounds)
+                    )
+                )
+                .font(StrandFont.caption)
+                .foregroundStyle(StrandPalette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             if let contactReceipt {
@@ -762,6 +822,46 @@ struct SafetyCenterView: View {
         case .submitted: return "safety.page.status.submitted"
         case .partialFailure: return "safety.page.status.partial_failure"
         case .failed: return "safety.page.status.failed"
+        }
+    }
+
+    private var shareDurationBinding: Binding<Int> {
+        Binding(
+            get: { shareDurationHours == 12 ? 12 : 8 },
+            set: {
+                shareDurationHours = $0 == 12 ? 12 : 8
+                SafetyPagingPreferences.shareDurationHours = shareDurationHours
+            }
+        )
+    }
+
+    private var selectedPageDurationHours: Int {
+        #if os(iOS)
+        shareDurationHours == 12 ? 12 : 8
+        #else
+        8
+        #endif
+    }
+
+    private func incidentReason(_ incident: RemoteSafetyDispatch) -> LocalizedStringKey {
+        switch incident.trigger {
+        case RemoteSafetyPageTrigger.bandSOS.rawValue:
+            return "safety.page.reason.band"
+        case RemoteSafetyPageTrigger.validatedFall.rawValue:
+            return "safety.page.reason.fall"
+        default:
+            return "safety.page.reason.app"
+        }
+    }
+
+    private func incidentReasonIcon(_ incident: RemoteSafetyDispatch) -> String {
+        switch incident.trigger {
+        case RemoteSafetyPageTrigger.bandSOS.rawValue:
+            return "hand.tap.fill"
+        case RemoteSafetyPageTrigger.validatedFall.rawValue:
+            return "figure.fall"
+        default:
+            return "iphone"
         }
     }
 

@@ -315,14 +315,70 @@ class SafetyInvitationDecision(StrictModel):
     decision: Literal["accept", "decline"]
 
 
+class SafetyValidatedFallEvidence(StrictModel):
+    """Bounded fields reserved for a future attested live-motion contract."""
+
+    detector_id: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9_.-]{0,63}$",
+    )
+    detector_version: int = Field(ge=1, le=10_000)
+    event_id: UUID
+    detected_at: datetime
+    warning_haptic_confirmed_at: datetime
+    response_deadline_at: datetime
+
+    @field_validator(
+        "detected_at",
+        "warning_haptic_confirmed_at",
+        "response_deadline_at",
+        mode="before",
+    )
+    @classmethod
+    def parse_timestamp(cls, value: Any) -> Any:
+        return _rfc3339_input(value)
+
+    @field_validator(
+        "detected_at",
+        "warning_haptic_confirmed_at",
+        "response_deadline_at",
+    )
+    @classmethod
+    def normalize_timestamp(cls, value: datetime) -> datetime:
+        return _normalise_datetime(value)
+
+    @model_validator(mode="after")
+    def validate_response_sequence(self) -> "SafetyValidatedFallEvidence":
+        if not (
+            self.detected_at
+            <= self.warning_haptic_confirmed_at
+            <= self.response_deadline_at
+        ):
+            raise ValueError("fall evidence timestamps must be chronological")
+        response_seconds = (
+            self.response_deadline_at - self.warning_haptic_confirmed_at
+        ).total_seconds()
+        if not 30 <= response_seconds <= 120:
+            raise ValueError("fall response window must be between 30 and 120 seconds")
+        return self
+
+
 class SafetyPageCreate(StrictModel):
-    """The only currently validated escalation entry point.
+    """An explicit SOS or a fail-closed, operator-approved fall escalation."""
 
-    Wellness/anomaly estimates are deliberately not accepted here. A future
-    automated trigger needs a separately validated critical-event contract.
-    """
+    trigger: Literal["manual_sos", "band_sos", "validated_fall"] = "manual_sos"
+    share_duration_hours: Literal[8, 12] = 8
+    evidence: SafetyValidatedFallEvidence | None = None
 
-    trigger: Literal["manual_sos"] = "manual_sos"
+    @model_validator(mode="after")
+    def evidence_matches_trigger(self) -> "SafetyPageCreate":
+        if self.trigger == "validated_fall":
+            if self.evidence is None:
+                raise ValueError("validated_fall requires live detector evidence")
+        elif self.evidence is not None:
+            raise ValueError("detector evidence is allowed only for validated_fall")
+        return self
 
 
 class SafetyIncidentTransition(StrictModel):
@@ -352,7 +408,7 @@ class SafetyPagingControlUpdate(StrictModel):
 
 
 class SafetyLocationUpdate(StrictModel):
-    """One latest-only location fix for an active, user-triggered incident."""
+    """One latest-only location fix for an active Safety incident."""
 
     sequence: int = Field(ge=1, le=9_223_372_036_854_775_807)
     latitude: float = Field(ge=-90, le=90)

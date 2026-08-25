@@ -74,11 +74,14 @@ the worst possible moment. This is a procurement-and-testing task, not an engine
 6. Test the unhappy paths users will actually hit: contact blocked the number, phone off, DND/Focus,
    airplane mode, roaming, number changed, contact revoked consent.
 7. **Implemented:** every explicit SMS and voice failure closes the incident as
-   `failed`; the app says no contact was reached and offers direct call actions.
+   `failed`; the app says no contact delivery was confirmed and offers direct
+   call actions.
    Ambiguous outcomes remain pending/unknown instead of becoming a false
    failure claim.
-8. **Implemented:** Apple and Android surface unique contacts reached with a
-   localized timestamp, for example "Reached 2 of 2 contacts at 14:03."
+8. **Implemented:** Apple and Android show human responses individually and a
+   deduplicated contact count backed by either a response or provider-confirmed
+   delivery, with a localized timestamp, for example "Delivery or response
+   confirmed for 2 of 2 contacts at 14:03."
 
 ### P0 for a 10,000-user shared launch — identity and infrastructure are not procured
 

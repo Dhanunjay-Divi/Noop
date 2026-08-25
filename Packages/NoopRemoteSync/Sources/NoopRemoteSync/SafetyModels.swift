@@ -101,11 +101,55 @@ public struct RemoteSafetyContactsResponse: Codable, Equatable, Sendable {
     public let pagingEnabled: Bool?
 }
 
-public struct RemoteSafetyPageCreate: Codable, Equatable, Sendable {
-    public let trigger: String
+public enum RemoteSafetyPageTrigger: String, Codable, Equatable, Sendable {
+    case manualSOS = "manual_sos"
+    case bandSOS = "band_sos"
+    case validatedFall = "validated_fall"
+}
 
-    public init(trigger: String = "manual_sos") {
+public enum RemoteSafetyShareDurationHours: Int, Codable, Equatable, Sendable {
+    case eight = 8
+    case twelve = 12
+}
+
+public struct RemoteSafetyValidatedFallEvidence: Codable, Equatable, Sendable {
+    public let detectorId: String
+    public let detectorVersion: Int
+    public let eventId: UUID
+    public let detectedAt: String
+    public let warningHapticConfirmedAt: String
+    public let responseDeadlineAt: String
+
+    public init(
+        detectorId: String,
+        detectorVersion: Int,
+        eventId: UUID,
+        detectedAt: String,
+        warningHapticConfirmedAt: String,
+        responseDeadlineAt: String
+    ) {
+        self.detectorId = detectorId
+        self.detectorVersion = detectorVersion
+        self.eventId = eventId
+        self.detectedAt = detectedAt
+        self.warningHapticConfirmedAt = warningHapticConfirmedAt
+        self.responseDeadlineAt = responseDeadlineAt
+    }
+}
+
+public struct RemoteSafetyPageCreate: Codable, Equatable, Sendable {
+    public let trigger: RemoteSafetyPageTrigger
+    public let shareDurationHours: RemoteSafetyShareDurationHours
+    public let evidence: RemoteSafetyValidatedFallEvidence?
+
+    public init(
+        trigger: RemoteSafetyPageTrigger = .manualSOS,
+        shareDurationHours: RemoteSafetyShareDurationHours = .eight,
+        evidence: RemoteSafetyValidatedFallEvidence? = nil
+    ) {
         self.trigger = trigger
+        self.shareDurationHours = shareDurationHours
+        self.evidence = evidence
     }
 }
 
@@ -114,6 +158,7 @@ public struct RemoteSafetyDelivery: Codable, Equatable, Identifiable, Sendable {
     public let contactId: UUID
     public let contactDisplayName: String
     public let channel: String
+    public let escalationRound: Int?
     public let status: RemoteSafetyDeliveryStatus
     public let providerReference: String?
     public let error: String?
@@ -222,6 +267,10 @@ public struct RemoteSafetyDispatch: Codable, Equatable, Sendable {
     public let dispatchId: UUID
     public let idempotencyKey: UUID
     public let trigger: String
+    public let shareDurationHours: Int?
+    public let evidence: RemoteSafetyValidatedFallEvidence?
+    public let escalationRounds: Int?
+    public let escalationIntervalSeconds: Int?
     public let status: RemoteSafetyIncidentStatus
     public let createdAt: String
     public let updatedAt: String?
@@ -244,6 +293,10 @@ public struct RemoteSafetyDispatch: Codable, Equatable, Sendable {
         case dispatchId
         case idempotencyKey
         case trigger
+        case shareDurationHours
+        case evidence
+        case escalationRounds
+        case escalationIntervalSeconds
         case status
         case createdAt
         case updatedAt
@@ -268,6 +321,22 @@ public struct RemoteSafetyDispatch: Codable, Equatable, Sendable {
         dispatchId = try container.decode(UUID.self, forKey: .dispatchId)
         idempotencyKey = try container.decode(UUID.self, forKey: .idempotencyKey)
         trigger = try container.decode(String.self, forKey: .trigger)
+        shareDurationHours = try container.decodeIfPresent(
+            Int.self,
+            forKey: .shareDurationHours
+        )
+        evidence = try container.decodeIfPresent(
+            RemoteSafetyValidatedFallEvidence.self,
+            forKey: .evidence
+        )
+        escalationRounds = try container.decodeIfPresent(
+            Int.self,
+            forKey: .escalationRounds
+        )
+        escalationIntervalSeconds = try container.decodeIfPresent(
+            Int.self,
+            forKey: .escalationIntervalSeconds
+        )
         status = try container.decode(
             RemoteSafetyIncidentStatus.self,
             forKey: .status
@@ -329,6 +398,16 @@ public struct RemoteSafetyDispatch: Codable, Equatable, Sendable {
         try container.encode(dispatchId, forKey: .dispatchId)
         try container.encode(idempotencyKey, forKey: .idempotencyKey)
         try container.encode(trigger, forKey: .trigger)
+        try container.encodeIfPresent(
+            shareDurationHours,
+            forKey: .shareDurationHours
+        )
+        try container.encodeIfPresent(evidence, forKey: .evidence)
+        try container.encodeIfPresent(escalationRounds, forKey: .escalationRounds)
+        try container.encodeIfPresent(
+            escalationIntervalSeconds,
+            forKey: .escalationIntervalSeconds
+        )
         try container.encode(status, forKey: .status)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(updatedAt, forKey: .updatedAt)

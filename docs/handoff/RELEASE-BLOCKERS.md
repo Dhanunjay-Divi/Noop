@@ -1,6 +1,6 @@
 # Release blockers & production readiness
 
-**Assessed:** 2026-08-24
+**Assessed:** 2026-08-25
 **Hosted implementation checkpoint:** `94661a17`; use `git log -1` for the
 current explainable-trends/profile/Rhythm implementation and handoff commit.
 **Verdict:** local code gates are green except for a current iOS UI rerun blocked
@@ -24,13 +24,13 @@ Current continuation instructions:
 | Profile keyboard regression | PASS, 5/5 on iPhone 17 Pro and 5/5 on compact iPhone 17e | `testProfileMeasurementsCanBeClearedAndRetyped` with `-test-iterations 5` |
 | Charging fixture regression | PASS, 5/5 UI iterations and 2/2 focused unit contracts | Charging UI test on a new simulator plus `AppleDemoSeederTests` |
 | macOS app (`Strand`, Debug) | BUILD SUCCEEDED at current source | `xcodebuild -scheme Strand -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build` |
-| macOS app tests | **1428** passed, 0 failures, 1 skipped | `xcodebuild test -scheme Strand -destination 'platform=macOS'` |
+| macOS app tests | **1430** executed, 0 failures, 1 skipped | `xcodebuild test -scheme Strand -destination 'platform=macOS'` |
 | Swift engines | **1323** tests, 0 failures | `cd Packages/StrandAnalytics && swift test` |
-| **Android unit tests** | **3646** tests, 0 failures, 6 skipped | `cd android && ./gradlew :app:testFullDebugUnitTest` |
+| **Android unit tests** | **3649** tests, 0 failures, 6 skipped | `cd android && ./gradlew :app:testFullDebugUnitTest` |
 | Android Full Debug APK | ASSEMBLED | `cd android && ./gradlew :app:assembleFullDebug` |
 | Android lint / instrumentation source | PASS | `cd android && ./gradlew lintFullDebug compileFullDebugAndroidTestKotlin` |
-| Self-hosted server | 129 normal-suite passes; 9/9 PostgreSQL runtime tests pass separately; one live-Twilio test remains gated | See `docs/ops/rounds/2026-08-24-safety-reliability-shared-tenancy.md` |
-| App-wide localization parity | PASS, 122 keys in 9 locales | `AppWideLocalizationContractTest` |
+| Self-hosted server | 142 normal-suite passes; 10 PostgreSQL-runtime and 1 live-Twilio test environment-gated; migration 013 focused PostgreSQL contract passes | See `docs/ops/rounds/2026-08-25-safety-escalation-contract.md` |
+| Safety localization parity | PASS, 221 keys in 9 locales | Apple and Android Safety localization contracts |
 | Release legal inventory | 152 runtime components, 3 container inputs | `python3 Tools/release-legal-gate.py check` |
 
 The repository has no Actions secrets or environments. Hosted jobs currently
@@ -151,7 +151,7 @@ PolyForm Noncommercial with no CLA. See `docs/handoff/OWNERSHIP-CLEANUP-CHECKLIS
 | 2.2 | **Privacy manifest / nutrition label must match the new usage strings** | This session corrected `NSHealthShareUsageDescription` to disclose all three destinations (local, self-hosted server, user-chosen AI provider) and `NSHealthUpdateUsageDescription` to name workouts + sleep. The App Store privacy answers must say the same. |
 | 2.3 | **HealthKit + reproductive-health review** | Cycle tracking reads Apple Health cycle-start dates behind a dedicated consent gate and stores optional user-typed flow/symptoms locally. Verified: `menstrualFlow` is **not** in general `readTypes`, the request is read-only, detail is independently erasable. Expect reviewer questions; the answers are in `docs/handoff/ROUND-13-principal-review.md` §3. |
 | 2.4 | **Native-speaker sign-off on 8 machine-translated locale values** | The cycle disclosure was machine-translated this round and is not approved for release. CI marks the four focus locales structurally complete, while the other four remain `needs_review`; neither state is native-speaker sign-off. |
-| 2.5 | **Fall response must stay visibly inert** | It is correctly gated ("Not active", "Supported band firmware required", no production code constructs a candidate). Do not enable it without a validated detector; do not let marketing imply fall detection exists. |
+| 2.5 | **Fall response must stay visibly inert** | The server models a distinct, fail-closed `validated_fall` contract, but authenticated detector attestation is absent, every new automatic fall request is rejected, and no production client constructs a candidate. The preparatory flag and allowlist cannot activate transport. The UI remains "Not active" and "Supported band firmware required." Do not replace the hard block until detector, firmware, physical-device, staged-event, human-factors, carrier, legal, and regulatory gates pass. |
 | 2.6 | **"NOOP Band is in development"** | TERMS/DISCLAIMER now say this. Keep the store listing consistent — no implication that first-party hardware ships today. |
 | 2.7 | **Retire the imported i18n baseline** | Canonical CI now blocks new debt, but 247 Android and 166 Apple unique literals remain baseline-tracked and are not proof of translated UI. Migrate them to reviewed resources before claiming supported-language readiness. |
 

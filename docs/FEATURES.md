@@ -437,7 +437,7 @@ on this Mac.
 
 ## Safety Center
 
-**More / Sidebar: Safety · user-confirmed contact paging, help sharing, and personal check-ins.**
+**More / Sidebar: Safety · contact paging, help sharing, and personal check-ins.**
 
 The Safety Center is a fast fallback for situations where the user wants to contact someone they
 trust. It is deliberately not presented as fall detection, monitoring, or emergency dispatch.
@@ -445,21 +445,27 @@ trust. It is deliberately not presented as fall detection, monitoring, or emerge
 - During onboarding, invite **two to five** emergency contacts. A contact counts only after accepting
   the expiring invitation. NOOP keeps a private setup reminder active until two contacts have
   accepted; onboarding remains finishable while another person responds.
-- After explicit confirmation, **Page accepted contacts** opens one durable incident. Each accepted
-  contact receives an SMS with **I'm responding / I cannot respond** controls; an unacknowledged
-  incident falls back to a voice call with equivalent keypad choices. The owner sees delivery and
-  response state and can resolve or cancel the incident.
+- After explicit confirmation, **Page accepted contacts** opens one durable incident. A configured
+  three- or four-event Noop Band SOS gesture can open the same flow without another phone
+  confirmation. Each accepted contact receives SMS and delayed voice rounds with **I'm responding /
+  I cannot respond** controls. The first responding acknowledgement cancels every unsent round.
 - Page submission is retry-safe and delivery work survives an API or worker restart. Bounded retries,
   leases, provider receipts, and immutable attempts make failures visible. At-least-once delivery can
   produce a duplicate after an ambiguous provider response, and a provider receipt cannot guarantee
   that a person saw or acted on the page.
+- The owner chooses **8 or 12 hours** for the active page. Only the newest location fix is retained
+  and exposed through the signed responder link. Resolution or cancellation stops sharing sooner;
+  NOOP stores no route history.
+- A separate possible-fall request model exists but is visibly **Not active**.
+  Transport is hard-disabled because authenticated detector attestation is not
+  implemented; neither an environment flag nor an allowlist can activate it.
+  Delayed history and wellness values can never enter that path.
 - Choose a plain-language intent such as **I need help now**, **I feel unsafe**, or **I missed a
   check-in**, add an optional name or note, then review the exact message before opening the system
   share sheet. This separate sharing path never selects a recipient or presses Send.
-- Add an optional **one-shot location** only after granting location permission. The captured time
+- Add an optional **one-shot location** to the separate share-sheet message only after granting location permission. The captured time
   and accuracy stay visible; the fix expires after five minutes and must be refreshed before it can
-  be included. Message construction checks freshness again at the final share boundary. Location is
-  not attached to Safety Network pages.
+  be included. Message construction checks freshness again at the final share boundary.
 - Arm one local **personal check-in** timer. The reminder is best-effort: Apple notification
   authorization or the pending request can disappear, and Android can defer WorkManager or block the
   app/channel. Safety shows those states and offers the relevant Settings or repair path.
@@ -472,10 +478,11 @@ trust. It is deliberately not presented as fall detection, monitoring, or emerge
 - Compact choices expose complete VoiceOver and TalkBack labels, and the location setting is one
   understandable switch action rather than several competing targets.
 
-NOOP pages contacts only after the user confirms the page. It does not monitor location in the
-background, turn an overdue timer or wellness/anomaly reading into a page, detect falls, dispatch
-emergency services, or guarantee carrier delivery or human response. For immediate danger, use the
-phone's native emergency calling or SOS features.
+NOOP pages contacts after app confirmation or a configured repeated band SOS gesture. It never turns
+an overdue timer, wellness value, ECG/rhythm estimate, SpO2, or temperature value into a page. The
+possible-fall path remains disabled until its detector and release evidence exist. NOOP does not
+dispatch emergency services or guarantee carrier delivery or human response. For immediate danger,
+use the phone's native emergency calling or SOS features.
 
 ---
 

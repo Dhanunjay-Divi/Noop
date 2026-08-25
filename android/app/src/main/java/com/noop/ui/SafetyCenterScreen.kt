@@ -42,8 +42,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,6 +61,9 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.noop.R
 import com.noop.ble.WhoopConnectionService
 import com.noop.safety.FallResponsePolicy
@@ -73,6 +78,8 @@ import com.noop.safety.SafetyDeliveryStatus
 import com.noop.safety.SafetyIncidentStatus
 import com.noop.safety.SafetyPagingController
 import com.noop.safety.SafetyPagingSetupState
+import com.noop.safety.SafetyPageTrigger
+import com.noop.safety.SafetyPagingPrefs
 import com.noop.safety.SafetyResponseDecision
 import com.noop.safety.SafetyShareCopy
 import com.noop.safety.SafetyShareIntent
@@ -131,20 +138,36 @@ fun SafetyCenterScreen() {
     var sosGestureEvents by remember {
         mutableStateOf(SafetySosGesturePrefs.requiredEvents(context))
     }
+    var shareDurationHours by remember {
+        mutableStateOf(SafetyPagingPrefs.shareDurationHours(context))
+    }
     var sosNotificationsAvailable by remember {
         mutableStateOf(SafetyStatusNotifications.deliveryAvailable(context))
     }
-    val hasForegroundLocation =
+    var locationPermissionRevision by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                locationPermissionRevision += 1
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val hasForegroundLocation = remember(locationPermissionRevision, context) {
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
-    val hasBackgroundLocation =
+    }
+    val hasBackgroundLocation = remember(locationPermissionRevision, context) {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
             ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.ACCESS_BACKGROUND_LOCATION,
             ) == PackageManager.PERMISSION_GRANTED
+    }
     val sosLocationReady = hasForegroundLocation && hasBackgroundLocation
     val reminderAvailability = SafetyCheckInReminderScheduler.deliveryAvailability(context)
     val scheduleFailure = stringResource(R.string.safety_error_schedule)
@@ -152,6 +175,8 @@ fun SafetyCenterScreen() {
     val channelOffStart = stringResource(R.string.safety_error_channel_start)
     val sosThreeLabel = stringResource(R.string.safety_sos_gesture_three)
     val sosFourLabel = stringResource(R.string.safety_sos_gesture_four)
+    val duration8Label = stringResource(R.string.safety_sos_duration_8_hours)
+    val duration12Label = stringResource(R.string.safety_sos_duration_12_hours)
     val safetyShareCopy = SafetyShareCopy(
         needHelpNowOpening = stringResource(R.string.safety_message_need_help_opening),
         feelUnsafeOpening = stringResource(R.string.safety_message_feel_unsafe_opening),
@@ -203,7 +228,9 @@ fun SafetyCenterScreen() {
     }
     val sosLocationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { }
+    ) {
+        locationPermissionRevision += 1
+    }
 
     fun requestLocation() {
         val granted =
@@ -334,7 +361,11 @@ fun SafetyCenterScreen() {
                 TextButton(
                     onClick = {
                         confirmsContactPage = false
-                        scope.launch { pagingController.pageAcceptedContacts() }
+                        scope.launch {
+                            pagingController.pageAcceptedContacts(
+                                shareDurationHours = shareDurationHours,
+                            )
+                        }
                     },
                 ) {
                     Text(
@@ -520,6 +551,98 @@ fun SafetyCenterScreen() {
                         )
                     }
                 }
+                Text(
+                    stringResource(R.string.safety_sos_duration_title),
+                    style = NoopType.overline,
+                    color = Palette.textTertiary,
+                )
+                SegmentedPillControl(
+                    items = listOf(8, 12),
+                    selection = shareDurationHours,
+                    label = { if (it == 12) duration12Label else duration8Label },
+                    accessibilityLabel = {
+                        if (it == 12) duration12Label else duration8Label
+                    },
+                    onSelect = { hours ->
+                        shareDurationHours = if (hours == 12) 12 else 8
+                        SafetyPagingPrefs.setShareDurationHours(
+                            context,
+                            shareDurationHours,
+                        )
+                    },
+                )
+                Text(
+                    stringResource(R.string.safety_sos_duration_help),
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                )
+                HorizontalDivider(color = Palette.hairline)
+                Row(
+                    modifier = Modifier.semantics(mergeDescendants = true) {},
+                    horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Icon(
+                        Icons.Filled.LocationOn,
+                        contentDescription = null,
+                        tint = if (sosLocationReady) {
+                            Palette.statusPositive
+                        } else {
+                            Palette.statusWarning
+                        },
+                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+                    ) {
+                        Text(
+                            stringResource(R.string.safety_sos_location_title),
+                            style = NoopType.body,
+                            color = Palette.textPrimary,
+                        )
+                        Text(
+                            stringResource(
+                                if (sosLocationReady) {
+                                    R.string.safety_sos_location_ready
+                                } else {
+                                    R.string.safety_sos_location_permission
+                                },
+                            ),
+                            style = NoopType.caption,
+                            color = Palette.textTertiary,
+                        )
+                    }
+                }
+                if (!sosLocationReady) {
+                    NoopButton(
+                        text = stringResource(
+                            if (hasForegroundLocation) {
+                                R.string.safety_sos_location_settings
+                            } else {
+                                R.string.safety_sos_location_enable
+                            },
+                        ),
+                        leadingIcon = Icons.Filled.MyLocation,
+                        kind = NoopButtonKind.Secondary,
+                        fullWidth = true,
+                    ) {
+                        if (hasForegroundLocation) {
+                            openAppSettings()
+                        } else {
+                            sosLocationPermissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                                    Manifest.permission.ACCESS_FINE_LOCATION,
+                                ),
+                            )
+                        }
+                    }
+                }
+                Text(
+                    stringResource(R.string.safety_sos_location_retention),
+                    style = NoopType.caption,
+                    color = Palette.textTertiary,
+                )
                 NoopButton(
                     text = if (pagingController.isBusy) {
                         stringResource(R.string.safety_page_submitting)
@@ -589,6 +712,70 @@ fun SafetyCenterScreen() {
                             ),
                             style = NoopType.body,
                             color = Palette.textSecondary,
+                        )
+                    }
+                    Text(
+                        stringResource(R.string.safety_page_why_started),
+                        style = NoopType.overline,
+                        color = Palette.textTertiary,
+                    )
+                    Row(
+                        modifier = Modifier.semantics(mergeDescendants = true) {},
+                        horizontalArrangement = Arrangement.spacedBy(Metrics.space8),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Icon(
+                            when (dispatch.trigger) {
+                                SafetyPageTrigger.BAND_SOS -> Icons.Filled.Shield
+                                SafetyPageTrigger.VALIDATED_FALL -> Icons.Filled.Warning
+                                SafetyPageTrigger.MANUAL_SOS -> Icons.Filled.PhoneInTalk
+                            },
+                            contentDescription = null,
+                            tint = Palette.statusWarning,
+                        )
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(Metrics.space4),
+                        ) {
+                            Text(
+                                stringResource(
+                                    when (dispatch.trigger) {
+                                        SafetyPageTrigger.BAND_SOS ->
+                                            R.string.safety_page_reason_band
+                                        SafetyPageTrigger.VALIDATED_FALL ->
+                                            R.string.safety_page_reason_fall
+                                        SafetyPageTrigger.MANUAL_SOS ->
+                                            R.string.safety_page_reason_app
+                                    },
+                                ),
+                                style = NoopType.body,
+                                color = Palette.textSecondary,
+                            )
+                            if (dispatch.trigger == SafetyPageTrigger.VALIDATED_FALL) {
+                                Text(
+                                    stringResource(
+                                        R.string.safety_page_reason_observation,
+                                    ),
+                                    style = NoopType.caption,
+                                    color = Palette.textTertiary,
+                                )
+                            }
+                        }
+                    }
+                    dispatch.escalationRounds?.takeIf {
+                        it > 1 &&
+                            dispatch.status in setOf(
+                                SafetyIncidentStatus.OPEN,
+                                SafetyIncidentStatus.PENDING,
+                            )
+                    }?.let { rounds ->
+                        Text(
+                            stringResource(
+                                R.string.safety_page_escalation_format,
+                                rounds,
+                            ),
+                            style = NoopType.caption,
+                            color = Palette.textTertiary,
                         )
                     }
                     dispatch.contactSummary?.let { summary ->
@@ -958,73 +1145,6 @@ fun SafetyCenterScreen() {
                         )
                     }
 
-                    HorizontalDivider(color = Palette.hairline)
-                    Row(
-                        modifier = Modifier.semantics(mergeDescendants = true) {},
-                        horizontalArrangement = Arrangement.spacedBy(Metrics.space12),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Icon(
-                            Icons.Filled.LocationOn,
-                            contentDescription = null,
-                            tint = if (sosLocationReady) {
-                                Palette.statusPositive
-                            } else {
-                                Palette.statusWarning
-                            },
-                        )
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(Metrics.space4),
-                        ) {
-                            Text(
-                                stringResource(R.string.safety_sos_location_title),
-                                style = NoopType.body,
-                                color = Palette.textPrimary,
-                            )
-                            Text(
-                                stringResource(
-                                    if (sosLocationReady) {
-                                        R.string.safety_sos_location_ready
-                                    } else {
-                                        R.string.safety_sos_location_permission
-                                    },
-                                ),
-                                style = NoopType.caption,
-                                color = Palette.textTertiary,
-                            )
-                        }
-                    }
-                    if (!sosLocationReady) {
-                        NoopButton(
-                            text = stringResource(
-                                if (hasForegroundLocation) {
-                                    R.string.safety_sos_location_settings
-                                } else {
-                                    R.string.safety_sos_location_enable
-                                },
-                            ),
-                            leadingIcon = Icons.Filled.MyLocation,
-                            kind = NoopButtonKind.Secondary,
-                            fullWidth = true,
-                        ) {
-                            if (hasForegroundLocation) {
-                                openAppSettings()
-                            } else {
-                                sosLocationPermissionLauncher.launch(
-                                    arrayOf(
-                                        Manifest.permission.ACCESS_COARSE_LOCATION,
-                                        Manifest.permission.ACCESS_FINE_LOCATION,
-                                    ),
-                                )
-                            }
-                        }
-                    }
-                    Text(
-                        stringResource(R.string.safety_sos_location_retention),
-                        style = NoopType.caption,
-                        color = Palette.textTertiary,
-                    )
                 }
                 Text(
                     stringResource(R.string.safety_page_disclaimer),

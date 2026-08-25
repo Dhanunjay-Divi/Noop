@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 from collections import Counter
 from collections.abc import AsyncIterator
@@ -202,12 +203,25 @@ class SafetyRepository(Protocol):
         profile_id: str,
         idempotency_key: str,
         request_hash: str,
+        accepted_request_hashes: frozenset[str] = frozenset(),
         trigger: str,
+        share_duration_hours: int = 8,
+        evidence: dict[str, Any] | None = None,
+        escalation_rounds: int = 1,
+        escalation_interval_seconds: int = 15 * 60,
         now: datetime,
         expires_at: datetime,
         voice_fallback_at: datetime,
         delivery_ready: bool = True,
     ) -> dict[str, Any]: ...
+
+    async def dispatch_for_idempotency_key(
+        self,
+        *,
+        profile_id: str,
+        idempotency_key: str,
+        accepted_request_hashes: frozenset[str],
+    ) -> dict[str, Any] | None: ...
 
     async def claim_due_deliveries(
         self,
@@ -1371,7 +1385,12 @@ class MemorySafetyRepository:
         profile_id: str,
         idempotency_key: str,
         request_hash: str,
+        accepted_request_hashes: frozenset[str] = frozenset(),
         trigger: str,
+        share_duration_hours: int = 8,
+        evidence: dict[str, Any] | None = None,
+        escalation_rounds: int = 1,
+        escalation_interval_seconds: int = 15 * 60,
         now: datetime,
         expires_at: datetime,
         voice_fallback_at: datetime,
@@ -1382,7 +1401,9 @@ class MemorySafetyRepository:
             existing_id = self._dispatch_keys.get((profile_id, idempotency_key))
             if existing_id is not None:
                 existing = self._dispatches[existing_id]
-                if existing["request_hash"] != request_hash:
+                if existing["request_hash"] not in (
+                    accepted_request_hashes | {request_hash}
+                ):
                     raise SafetyConflictError(
                         "Idempotency-Key was already used for a different page"
                     )
@@ -1393,7 +1414,9 @@ class MemorySafetyRepository:
                 if tombstone["expires_at"] <= now:
                     del self._dispatch_tombstones[tombstone_key]
                 else:
-                    if tombstone["request_hash"] != request_hash:
+                    if tombstone["request_hash"] not in (
+                        accepted_request_hashes | {request_hash}
+                    ):
                         raise SafetyConflictError(
                             "Idempotency-Key was already used for a different page"
                         )
@@ -1404,6 +1427,23 @@ class MemorySafetyRepository:
                 raise SafetyNotReadyError("safety delivery is temporarily unavailable")
             if not self._paging_control["enabled"]:
                 raise SafetyNotReadyError("safety paging is temporarily paused")
+            for row in self._dispatches.values():
+                if (
+                    row["profile_id"] == profile_id
+                    and row["status"] in {"open", "acknowledged"}
+                    and row["expires_at"] <= now
+                ):
+                    row.update(
+                        {
+                            "status": "expired",
+                            "updated_at": now,
+                            "completed_at": now,
+                        }
+                    )
+                    self._cancel_pending_deliveries(
+                        row["dispatch_id"],
+                        now=now,
+                    )
             if any(
                 row["profile_id"] == profile_id
                 and row["status"] in {"open", "acknowledged"}
@@ -1412,6 +1452,17 @@ class MemorySafetyRepository:
                 raise SafetyConflictError(
                     "resolve or cancel the active safety incident first"
                 )
+            if trigger == "validated_fall" and evidence is not None:
+                event_id = str(evidence.get("event_id", ""))
+                if any(
+                    row["profile_id"] == profile_id
+                    and row["trigger"] == "validated_fall"
+                    and str((row.get("evidence") or {}).get("event_id", "")) == event_id
+                    for row in self._dispatches.values()
+                ):
+                    raise SafetyConflictError(
+                        "this validated fall event was already used"
+                    )
             contacts = sorted(
                 (
                     row
@@ -1432,6 +1483,10 @@ class MemorySafetyRepository:
                 "idempotency_key": idempotency_key,
                 "request_hash": request_hash,
                 "trigger": trigger,
+                "share_duration_hours": share_duration_hours,
+                "evidence": evidence,
+                "escalation_rounds": escalation_rounds,
+                "escalation_interval_seconds": escalation_interval_seconds,
                 "status": "open",
                 "created_at": now,
                 "updated_at": now,
@@ -1445,33 +1500,60 @@ class MemorySafetyRepository:
             }
             self._dispatches[dispatch_id] = dispatch
             self._dispatch_keys[(profile_id, idempotency_key)] = dispatch_id
+            voice_delay = voice_fallback_at - now
             for contact in contacts:
-                for channel in ("sms", "voice"):
-                    delivery_id = str(uuid4())
-                    self._deliveries[delivery_id] = {
-                        "delivery_id": delivery_id,
-                        "dispatch_id": dispatch_id,
-                        "contact_id": contact["contact_id"],
-                        "contact_display_name": contact["display_name"],
-                        "phone_e164": contact["phone_e164"],
-                        "channel": channel,
-                        "status": "pending",
-                        "provider_reference": None,
-                        "error": None,
-                        "available_at": (
-                            now if channel == "sms" else voice_fallback_at
-                        ),
-                        "lease_owner": None,
-                        "lease_expires_at": None,
-                        "attempt_count": 0,
-                        "max_attempts": 3 if channel == "sms" else 2,
-                        "last_attempt_at": None,
-                        "delivered_at": None,
-                        "terminal_at": None,
-                        "created_at": now,
-                        "updated_at": now,
-                    }
+                for escalation_round in range(escalation_rounds):
+                    round_start = now + timedelta(
+                        seconds=escalation_round * escalation_interval_seconds
+                    )
+                    for channel in ("sms", "voice"):
+                        delivery_id = str(uuid4())
+                        self._deliveries[delivery_id] = {
+                            "delivery_id": delivery_id,
+                            "dispatch_id": dispatch_id,
+                            "contact_id": contact["contact_id"],
+                            "contact_display_name": contact["display_name"],
+                            "phone_e164": contact["phone_e164"],
+                            "channel": channel,
+                            "escalation_round": escalation_round,
+                            "status": "pending",
+                            "provider_reference": None,
+                            "error": None,
+                            "available_at": (
+                                round_start
+                                if channel == "sms"
+                                else round_start + voice_delay
+                            ),
+                            "lease_owner": None,
+                            "lease_expires_at": None,
+                            "attempt_count": 0,
+                            "max_attempts": 3 if channel == "sms" else 2,
+                            "last_attempt_at": None,
+                            "delivered_at": None,
+                            "terminal_at": None,
+                            "created_at": now,
+                            "updated_at": now,
+                        }
             return self._dispatch_payload(dispatch_id, idempotent_replay=False)
+
+    async def dispatch_for_idempotency_key(
+        self,
+        *,
+        profile_id: str,
+        idempotency_key: str,
+        accepted_request_hashes: frozenset[str],
+    ) -> dict[str, Any] | None:
+        async with self._lock:
+            self._require_profile(profile_id)
+            existing_id = self._dispatch_keys.get((profile_id, idempotency_key))
+            if existing_id is None:
+                return None
+            existing = self._dispatches[existing_id]
+            if existing["request_hash"] not in accepted_request_hashes:
+                raise SafetyConflictError(
+                    "Idempotency-Key was already used for a different page"
+                )
+            return self._dispatch_payload(existing_id, idempotent_replay=True)
 
     async def claim_due_deliveries(
         self,
@@ -1562,6 +1644,8 @@ class MemorySafetyRepository:
                         "attempt_id": attempt_id,
                         "owner_display_name": profile["display_name"],
                         "expires_at": dispatch["expires_at"],
+                        "trigger": dispatch["trigger"],
+                        "evidence": dispatch["evidence"],
                     }
                 )
             return claimed
@@ -2052,7 +2136,10 @@ class MemorySafetyRepository:
         async with self._lock:
             changed = 0
             for dispatch in self._dispatches.values():
-                if dispatch["status"] == "open" and dispatch["expires_at"] <= now:
+                if (
+                    dispatch["status"] in {"open", "acknowledged"}
+                    and dispatch["expires_at"] <= now
+                ):
                     dispatch.update(
                         {
                             "status": "expired",
@@ -2088,7 +2175,8 @@ class MemorySafetyRepository:
                 return None
             effective_status = (
                 "expired"
-                if dispatch["status"] == "open" and dispatch["expires_at"] <= now
+                if dispatch["status"] in {"open", "acknowledged"}
+                and dispatch["expires_at"] <= now
                 else dispatch["status"]
             )
             return {
@@ -2098,8 +2186,15 @@ class MemorySafetyRepository:
                 "owner_display_name": profile["display_name"],
                 "status": effective_status,
                 "expires_at": dispatch["expires_at"],
+                "trigger": dispatch["trigger"],
+                "share_duration_hours": dispatch["share_duration_hours"],
+                "evidence": dispatch["evidence"],
                 "response": self._responses.get((dispatch_id, contact_id)),
-                "latest_location": self._locations.get(dispatch_id),
+                "latest_location": (
+                    self._locations.get(dispatch_id)
+                    if effective_status in {"open", "acknowledged"}
+                    else None
+                ),
             }
 
     async def record_responder_decision(
@@ -2117,7 +2212,10 @@ class MemorySafetyRepository:
                 dispatch_id, contact_id
             ):
                 raise SafetyNotFoundError("safety incident was not found")
-            if dispatch["status"] == "open" and dispatch["expires_at"] <= now:
+            if (
+                dispatch["status"] in {"open", "acknowledged"}
+                and dispatch["expires_at"] <= now
+            ):
                 dispatch.update(
                     {
                         "status": "expired",
@@ -2299,7 +2397,8 @@ class MemorySafetyRepository:
                         for row in self._dispatches.values()
                     ),
                     "overdue": sum(
-                        row["status"] == "open" and row["expires_at"] <= now
+                        row["status"] in {"open", "acknowledged"}
+                        and row["expires_at"] <= now
                         for row in self._dispatches.values()
                     ),
                 },
@@ -2494,6 +2593,7 @@ class MemorySafetyRepository:
                 delivery["dispatch_id"] == source_delivery["dispatch_id"]
                 and delivery["contact_id"] == source_delivery["contact_id"]
                 and delivery["channel"] == "voice"
+                and delivery["escalation_round"] == source_delivery["escalation_round"]
                 and delivery["status"] in {"pending", "retry_wait"}
             ):
                 delivery["available_at"] = min(delivery["available_at"], now)
@@ -2633,6 +2733,7 @@ class MemorySafetyRepository:
         deliveries.sort(
             key=lambda row: (
                 str(row["contact_display_name"]).casefold(),
+                row["escalation_round"],
                 row["channel"],
             ),
         )
@@ -4428,7 +4529,12 @@ class PostgresSafetyRepository:
         profile_id: str,
         idempotency_key: str,
         request_hash: str,
+        accepted_request_hashes: frozenset[str] = frozenset(),
         trigger: str,
+        share_duration_hours: int = 8,
+        evidence: dict[str, Any] | None = None,
+        escalation_rounds: int = 1,
+        escalation_interval_seconds: int = 15 * 60,
         now: datetime,
         expires_at: datetime,
         voice_fallback_at: datetime,
@@ -4452,7 +4558,9 @@ class PostgresSafetyRepository:
                     UUID(idempotency_key),
                 )
                 if existing is not None:
-                    if existing["request_hash"].strip() != request_hash:
+                    if existing["request_hash"].strip() not in (
+                        accepted_request_hashes | {request_hash}
+                    ):
                         raise SafetyConflictError(
                             "Idempotency-Key was already used for a different page"
                         )
@@ -4482,7 +4590,9 @@ class PostgresSafetyRepository:
                     UUID(idempotency_key),
                 )
                 if tombstone is not None:
-                    if tombstone["request_hash"].strip() != request_hash:
+                    if tombstone["request_hash"].strip() not in (
+                        accepted_request_hashes | {request_hash}
+                    ):
                         raise SafetyConflictError(
                             "Idempotency-Key was already used for a different page"
                         )
@@ -4503,6 +4613,33 @@ class PostgresSafetyRepository:
                 )
                 if paging_enabled is not True:
                     raise SafetyNotReadyError("safety paging is temporarily paused")
+                expired = await connection.fetch(
+                    """
+                    UPDATE safety_dispatches
+                    SET status = 'expired', updated_at = $2, completed_at = $2
+                    WHERE profile_id = $1
+                      AND status IN ('open', 'acknowledged')
+                      AND expires_at <= $2
+                    RETURNING dispatch_id
+                    """,
+                    profile_uuid,
+                    now,
+                )
+                if expired:
+                    await connection.execute(
+                        """
+                        UPDATE safety_deliveries
+                        SET status = 'cancelled',
+                            lease_owner = NULL,
+                            lease_expires_at = NULL,
+                            terminal_at = $2,
+                            updated_at = $2
+                        WHERE dispatch_id = ANY($1::uuid[])
+                          AND status IN ('pending', 'retry_wait', 'leased')
+                        """,
+                        [row["dispatch_id"] for row in expired],
+                        now,
+                    )
                 active = await connection.fetchval(
                     """
                     SELECT EXISTS (
@@ -4518,6 +4655,24 @@ class PostgresSafetyRepository:
                     raise SafetyConflictError(
                         "resolve or cancel the active safety incident first"
                     )
+                if trigger == "validated_fall" and evidence is not None:
+                    duplicate_event = await connection.fetchval(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM safety_dispatches
+                            WHERE profile_id = $1
+                              AND trigger = 'validated_fall'
+                              AND evidence ->> 'event_id' = $2
+                        )
+                        """,
+                        profile_uuid,
+                        str(evidence.get("event_id", "")),
+                    )
+                    if duplicate_event:
+                        raise SafetyConflictError(
+                            "this validated fall event was already used"
+                        )
                 contacts = await connection.fetch(
                     """
                     SELECT contact_id, display_name, phone_e164
@@ -4539,8 +4694,11 @@ class PostgresSafetyRepository:
                     INSERT INTO safety_dispatches (
                         dispatch_id, profile_id, idempotency_key,
                         request_hash, trigger, status, created_at, updated_at,
-                        expires_at
-                    ) VALUES ($1,$2,$3,$4,$5,'open',$6,$6,$7)
+                        expires_at, share_duration_hours, evidence,
+                        escalation_rounds, escalation_interval_seconds
+                    ) VALUES (
+                        $1,$2,$3,$4,$5,'open',$6,$6,$7,$8,$9::jsonb,$10,$11
+                    )
                     """,
                     UUID(dispatch_id),
                     profile_uuid,
@@ -4549,29 +4707,78 @@ class PostgresSafetyRepository:
                     trigger,
                     now,
                     expires_at,
+                    share_duration_hours,
+                    (
+                        json.dumps(evidence, separators=(",", ":"), sort_keys=True)
+                        if evidence is not None
+                        else None
+                    ),
+                    escalation_rounds,
+                    escalation_interval_seconds,
                 )
+                voice_delay = voice_fallback_at - now
                 for contact in contacts:
-                    for channel in ("sms", "voice"):
-                        await connection.execute(
-                            """
-                            INSERT INTO safety_deliveries (
-                                delivery_id, dispatch_id, contact_id, channel,
-                                available_at, max_attempts, created_at, updated_at
-                            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$7)
-                            """,
-                            uuid4(),
-                            UUID(dispatch_id),
-                            contact["contact_id"],
-                            channel,
-                            now if channel == "sms" else voice_fallback_at,
-                            3 if channel == "sms" else 2,
-                            now,
+                    for escalation_round in range(escalation_rounds):
+                        round_start = now + timedelta(
+                            seconds=(escalation_round * escalation_interval_seconds)
                         )
+                        for channel in ("sms", "voice"):
+                            await connection.execute(
+                                """
+                                INSERT INTO safety_deliveries (
+                                    delivery_id, dispatch_id, contact_id, channel,
+                                    escalation_round, available_at, max_attempts,
+                                    created_at, updated_at
+                                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8)
+                                """,
+                                uuid4(),
+                                UUID(dispatch_id),
+                                contact["contact_id"],
+                                channel,
+                                escalation_round,
+                                (
+                                    round_start
+                                    if channel == "sms"
+                                    else round_start + voice_delay
+                                ),
+                                3 if channel == "sms" else 2,
+                                now,
+                            )
                 return await self._dispatch_payload(
                     connection,
                     dispatch_id,
                     idempotent_replay=False,
                 )
+
+    async def dispatch_for_idempotency_key(
+        self,
+        *,
+        profile_id: str,
+        idempotency_key: str,
+        accepted_request_hashes: frozenset[str],
+    ) -> dict[str, Any] | None:
+        pool = self._pool()
+        async with pool.acquire() as connection:
+            existing = await connection.fetchrow(
+                """
+                SELECT dispatch_id, request_hash
+                FROM safety_dispatches
+                WHERE profile_id = $1 AND idempotency_key = $2
+                """,
+                UUID(profile_id),
+                UUID(idempotency_key),
+            )
+            if existing is None:
+                return None
+            if existing["request_hash"].strip() not in accepted_request_hashes:
+                raise SafetyConflictError(
+                    "Idempotency-Key was already used for a different page"
+                )
+            return await self._dispatch_payload(
+                connection,
+                str(existing["dispatch_id"]),
+                idempotent_replay=True,
+            )
 
     async def claim_due_deliveries(
         self,
@@ -4600,7 +4807,7 @@ class PostgresSafetyRepository:
                     """
                     SELECT d.delivery_id, d.status, d.attempt_count,
                            d.max_attempts, d.channel, d.dispatch_id,
-                           d.contact_id
+                           d.contact_id, d.escalation_round
                     FROM safety_deliveries d
                     JOIN safety_dispatches i
                       ON i.dispatch_id = d.dispatch_id
@@ -4667,11 +4874,13 @@ class PostgresSafetyRepository:
                                 WHERE dispatch_id = $1
                                   AND contact_id = $2
                                   AND channel = 'voice'
+                                  AND escalation_round = $4
                                   AND status IN ('pending', 'retry_wait')
                                 """,
                                 row["dispatch_id"],
                                 row["contact_id"],
                                 now,
+                                row["escalation_round"],
                             )
                         dispatches_to_finalize.add(str(row["dispatch_id"]))
                         continue
@@ -4707,7 +4916,7 @@ class PostgresSafetyRepository:
                     )
                     job = await connection.fetchrow(
                         """
-                        SELECT d.*, i.expires_at,
+                        SELECT d.*, i.expires_at, i.trigger, i.evidence,
                                p.display_name AS owner_display_name
                         FROM safety_deliveries d
                         JOIN safety_dispatches i
@@ -4718,7 +4927,10 @@ class PostgresSafetyRepository:
                         """,
                         delivery_id,
                     )
-                    claimed.append(dict(job) | {"attempt_id": attempt_id})
+                    claimed_job = dict(job)
+                    if isinstance(claimed_job.get("evidence"), str):
+                        claimed_job["evidence"] = json.loads(claimed_job["evidence"])
+                    claimed.append(claimed_job | {"attempt_id": attempt_id})
         # Parent incidents are always locked before their delivery rows. Finish
         # exhausted aggregates after releasing the claim transaction's delivery
         # locks to preserve that global order.
@@ -4893,11 +5105,13 @@ class PostgresSafetyRepository:
                             WHERE dispatch_id = $1
                               AND contact_id = $2
                               AND channel = 'voice'
+                              AND escalation_round = $4
                               AND status IN ('pending', 'retry_wait')
                             """,
                             row["dispatch_id"],
                             row["contact_id"],
                             now,
+                            row["escalation_round"],
                         )
                 await connection.execute(
                     """
@@ -5242,11 +5456,13 @@ class PostgresSafetyRepository:
                                 WHERE dispatch_id = $1
                                   AND contact_id = $2
                                   AND channel = 'voice'
+                                  AND escalation_round = $4
                                   AND status IN ('pending', 'retry_wait')
                                 """,
                                 row["dispatch_id"],
                                 row["contact_id"],
                                 now,
+                                row["escalation_round"],
                             )
                 elif is_latest and row["status"] not in {
                     "delivered",
@@ -5295,7 +5511,8 @@ class PostgresSafetyRepository:
                     """
                     WITH stale AS (
                         SELECT d.delivery_id, d.dispatch_id, d.contact_id,
-                               d.channel, d.provider_reference,
+                               d.channel, d.escalation_round,
+                               d.provider_reference,
                                i.status AS incident_status
                         FROM safety_deliveries d
                         JOIN safety_dispatches i
@@ -5315,7 +5532,8 @@ class PostgresSafetyRepository:
                         FROM stale
                         WHERE d.delivery_id = stale.delivery_id
                         RETURNING d.delivery_id, d.dispatch_id, d.contact_id,
-                                  d.channel, d.provider_reference
+                                  d.channel, d.escalation_round,
+                                  d.provider_reference
                     ),
                     attempts AS (
                         UPDATE safety_delivery_attempts a
@@ -5344,17 +5562,19 @@ class PostgresSafetyRepository:
                     await connection.execute(
                         """
                         UPDATE safety_deliveries voice
-                        SET available_at = LEAST(voice.available_at, $3),
-                            updated_at = $3
-                        FROM unnest($1::uuid[], $2::uuid[])
-                          AS source(dispatch_id, contact_id)
+                        SET available_at = LEAST(voice.available_at, $4),
+                            updated_at = $4
+                        FROM unnest($1::uuid[], $2::uuid[], $3::smallint[])
+                          AS source(dispatch_id, contact_id, escalation_round)
                         WHERE voice.dispatch_id = source.dispatch_id
                           AND voice.contact_id = source.contact_id
                           AND voice.channel = 'voice'
+                          AND voice.escalation_round = source.escalation_round
                           AND voice.status IN ('pending', 'retry_wait')
                         """,
                         [row["dispatch_id"] for row in open_sms],
                         [row["contact_id"] for row in open_sms],
+                        [row["escalation_round"] for row in open_sms],
                         now,
                     )
                 remaining = limit - len(rows)
@@ -5430,7 +5650,8 @@ class PostgresSafetyRepository:
                     """
                     UPDATE safety_dispatches
                     SET status = 'expired', updated_at = $1, completed_at = $1
-                    WHERE status = 'open' AND expires_at <= $1
+                    WHERE status IN ('open', 'acknowledged')
+                      AND expires_at <= $1
                     RETURNING dispatch_id
                     """,
                     now,
@@ -5465,11 +5686,12 @@ class PostgresSafetyRepository:
                    c.display_name AS contact_display_name,
                    p.display_name AS owner_display_name,
                    CASE
-                     WHEN i.status = 'open' AND i.expires_at <= $3
-                       THEN 'expired'
+                     WHEN i.status IN ('open', 'acknowledged')
+                          AND i.expires_at <= $3
+                     THEN 'expired'
                      ELSE i.status
                    END AS status,
-                   i.expires_at,
+                   i.expires_at, i.trigger, i.share_duration_hours, i.evidence,
                    r.decision,
                    r.source,
                    r.responded_at,
@@ -5500,6 +5722,8 @@ class PostgresSafetyRepository:
         if row is None:
             return None
         decoded = dict(row)
+        if isinstance(decoded.get("evidence"), str):
+            decoded["evidence"] = json.loads(decoded["evidence"])
         if decoded["decision"] is None:
             decoded["response"] = None
         else:
@@ -5511,7 +5735,10 @@ class PostgresSafetyRepository:
         decoded.pop("decision", None)
         decoded.pop("source", None)
         decoded.pop("responded_at", None)
-        if decoded["location_sequence"] is None:
+        if (
+            decoded["status"] not in {"open", "acknowledged"}
+            or decoded["location_sequence"] is None
+        ):
             decoded["latest_location"] = None
         else:
             decoded["latest_location"] = {
@@ -5540,6 +5767,8 @@ class PostgresSafetyRepository:
         now: datetime,
     ) -> dict[str, Any]:
         pool = self._pool()
+        expired_while_locked = False
+        response_payload: dict[str, Any] | None = None
         async with pool.acquire() as connection:
             async with connection.transaction():
                 incident = await connection.fetchrow(
@@ -5565,7 +5794,10 @@ class PostgresSafetyRepository:
                 if incident is None or not recipient:
                     raise SafetyNotFoundError("safety incident was not found")
                 incident_status = incident["status"]
-                if incident_status == "open" and incident["expires_at"] <= now:
+                if (
+                    incident_status in {"open", "acknowledged"}
+                    and incident["expires_at"] <= now
+                ):
                     incident_status = "expired"
                     await connection.execute(
                         """
@@ -5577,71 +5809,85 @@ class PostgresSafetyRepository:
                         UUID(dispatch_id),
                         now,
                     )
-                if incident_status in {
-                    "resolved",
-                    "cancelled",
-                    "expired",
-                    "failed",
-                }:
-                    raise SafetyConflictError(
-                        "this safety incident is no longer accepting responses"
+                    await self._cancel_pending_deliveries(
+                        connection,
+                        dispatch_id=dispatch_id,
+                        now=now,
                     )
-                await connection.execute(
-                    """
-                    INSERT INTO safety_responses (
-                        dispatch_id, contact_id, decision, source, responded_at
-                    ) VALUES ($1,$2,$3,$4,$5)
-                    ON CONFLICT (dispatch_id, contact_id) DO UPDATE
-                    SET decision = EXCLUDED.decision,
-                        source = EXCLUDED.source,
-                        responded_at = EXCLUDED.responded_at
-                    """,
-                    UUID(dispatch_id),
-                    UUID(contact_id),
-                    decision,
-                    source,
-                    now,
-                )
-                if decision == "responding" and incident_status == "open":
+                    expired_while_locked = True
+                else:
+                    if incident_status in {
+                        "resolved",
+                        "cancelled",
+                        "expired",
+                        "failed",
+                    }:
+                        raise SafetyConflictError(
+                            "this safety incident is no longer accepting responses"
+                        )
                     await connection.execute(
                         """
-                        UPDATE safety_dispatches
-                        SET status = 'acknowledged',
-                            acknowledged_at = $2,
-                            acknowledged_contact_id = $3,
-                            updated_at = $2
-                        WHERE dispatch_id = $1
+                        INSERT INTO safety_responses (
+                            dispatch_id, contact_id, decision, source, responded_at
+                        ) VALUES ($1,$2,$3,$4,$5)
+                        ON CONFLICT (dispatch_id, contact_id) DO UPDATE
+                        SET decision = EXCLUDED.decision,
+                            source = EXCLUDED.source,
+                            responded_at = EXCLUDED.responded_at
                         """,
                         UUID(dispatch_id),
-                        now,
                         UUID(contact_id),
-                    )
-                    await self._cancel_pending_deliveries(
-                        connection,
-                        dispatch_id=dispatch_id,
-                        now=now,
-                    )
-                elif decision == "cannot_respond":
-                    await self._cancel_pending_deliveries(
-                        connection,
-                        dispatch_id=dispatch_id,
-                        contact_id=contact_id,
-                        now=now,
-                    )
-                    await connection.execute(
-                        """
-                        UPDATE safety_dispatches
-                        SET updated_at = $2
-                        WHERE dispatch_id = $1
-                        """,
-                        UUID(dispatch_id),
+                        decision,
+                        source,
                         now,
                     )
-                return await self._dispatch_payload(
-                    connection,
-                    dispatch_id,
-                    idempotent_replay=False,
-                )
+                    if decision == "responding" and incident_status == "open":
+                        await connection.execute(
+                            """
+                            UPDATE safety_dispatches
+                            SET status = 'acknowledged',
+                                acknowledged_at = $2,
+                                acknowledged_contact_id = $3,
+                                updated_at = $2
+                            WHERE dispatch_id = $1
+                            """,
+                            UUID(dispatch_id),
+                            now,
+                            UUID(contact_id),
+                        )
+                        await self._cancel_pending_deliveries(
+                            connection,
+                            dispatch_id=dispatch_id,
+                            now=now,
+                        )
+                    elif decision == "cannot_respond":
+                        await self._cancel_pending_deliveries(
+                            connection,
+                            dispatch_id=dispatch_id,
+                            contact_id=contact_id,
+                            now=now,
+                        )
+                        await connection.execute(
+                            """
+                            UPDATE safety_dispatches
+                            SET updated_at = $2
+                            WHERE dispatch_id = $1
+                            """,
+                            UUID(dispatch_id),
+                            now,
+                        )
+                    response_payload = await self._dispatch_payload(
+                        connection,
+                        dispatch_id,
+                        idempotent_replay=False,
+                    )
+        if expired_while_locked:
+            raise SafetyConflictError(
+                "this safety incident is no longer accepting responses"
+            )
+        if response_payload is None:
+            raise SafetyNotFoundError("safety incident was not found")
+        return response_payload
 
     async def transition_dispatch(
         self,
@@ -5739,7 +5985,8 @@ class PostgresSafetyRepository:
                   AND completed_at >= $2::timestamptz
               ) AS failed,
               count(*) FILTER (
-                WHERE status = 'open' AND expires_at <= $1::timestamptz
+                WHERE status IN ('open', 'acknowledged')
+                  AND expires_at <= $1::timestamptz
               ) AS overdue
             FROM safety_dispatches
             """,
@@ -6195,7 +6442,8 @@ class PostgresSafetyRepository:
                    i.created_at, i.updated_at, i.expires_at,
                    i.acknowledged_at, i.resolved_at, i.cancelled_at,
                    i.acknowledged_contact_id, i.resolution_note,
-                   i.completed_at,
+                   i.completed_at, i.share_duration_hours, i.evidence,
+                   i.escalation_rounds, i.escalation_interval_seconds,
                    c.display_name AS acknowledged_contact_display_name
             FROM safety_dispatches i
             LEFT JOIN safety_contacts c
@@ -6210,7 +6458,7 @@ class PostgresSafetyRepository:
             """
             SELECT d.delivery_id, d.contact_id,
                    c.display_name AS contact_display_name,
-                   c.phone_e164, d.channel, d.status,
+                   c.phone_e164, d.channel, d.escalation_round, d.status,
                    d.provider_reference, d.error,
                    d.available_at, d.attempt_count, d.max_attempts,
                    d.last_attempt_at, d.delivered_at, d.terminal_at,
@@ -6224,7 +6472,7 @@ class PostgresSafetyRepository:
             FROM safety_deliveries d
             JOIN safety_contacts c ON c.contact_id = d.contact_id
             WHERE d.dispatch_id = $1
-            ORDER BY lower(c.display_name), d.channel
+            ORDER BY lower(c.display_name), d.escalation_round, d.channel
             """,
             UUID(dispatch_id),
         )
@@ -6249,7 +6497,10 @@ class PostgresSafetyRepository:
             """,
             UUID(dispatch_id),
         )
-        return dict(dispatch) | {
+        decoded_dispatch = dict(dispatch)
+        if isinstance(decoded_dispatch.get("evidence"), str):
+            decoded_dispatch["evidence"] = json.loads(decoded_dispatch["evidence"])
+        return decoded_dispatch | {
             "idempotent_replay": idempotent_replay,
             "deliveries": [dict(row) for row in deliveries],
             "responses": [dict(row) for row in responses],

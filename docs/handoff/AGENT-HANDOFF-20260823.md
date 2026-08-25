@@ -6,16 +6,18 @@ blocked.
 ## Read first
 
 1. [`../ops/ACTIVE.md`](../ops/ACTIVE.md)
-2. [`../ops/rounds/2026-08-24-safety-reliability-shared-tenancy.md`](../ops/rounds/2026-08-24-safety-reliability-shared-tenancy.md)
-3. [`ROUND-18-safety-reliability-shared-tenancy.md`](ROUND-18-safety-reliability-shared-tenancy.md)
-4. [`../ops/rounds/2026-08-24-overnight-calibration-effort-coach.md`](../ops/rounds/2026-08-24-overnight-calibration-effort-coach.md)
-5. [`ROUND-17-overnight-calibration-effort-coach.md`](ROUND-17-overnight-calibration-effort-coach.md)
-6. [`../ops/rounds/2026-08-24-cycle-tracking-metric-reconciliation.md`](../ops/rounds/2026-08-24-cycle-tracking-metric-reconciliation.md)
-7. [`ROUND-16-cycle-tracking-and-metric-reconciliation.md`](ROUND-16-cycle-tracking-and-metric-reconciliation.md)
-8. [`../ops/rounds/2026-08-23-repository-independence.md`](../ops/rounds/2026-08-23-repository-independence.md)
-9. [`../REPOSITORY_INDEPENDENCE.md`](../REPOSITORY_INDEPENDENCE.md)
-10. [`../provenance/rights-status.json`](../provenance/rights-status.json)
-11. [`RELEASE-BLOCKERS.md`](RELEASE-BLOCKERS.md)
+2. [`../ops/rounds/2026-08-25-safety-escalation-contract.md`](../ops/rounds/2026-08-25-safety-escalation-contract.md)
+3. [`ROUND-19-safety-escalation-contract.md`](ROUND-19-safety-escalation-contract.md)
+4. [`../ops/rounds/2026-08-24-safety-reliability-shared-tenancy.md`](../ops/rounds/2026-08-24-safety-reliability-shared-tenancy.md)
+5. [`ROUND-18-safety-reliability-shared-tenancy.md`](ROUND-18-safety-reliability-shared-tenancy.md)
+6. [`../ops/rounds/2026-08-24-overnight-calibration-effort-coach.md`](../ops/rounds/2026-08-24-overnight-calibration-effort-coach.md)
+7. [`ROUND-17-overnight-calibration-effort-coach.md`](ROUND-17-overnight-calibration-effort-coach.md)
+8. [`../ops/rounds/2026-08-24-cycle-tracking-metric-reconciliation.md`](../ops/rounds/2026-08-24-cycle-tracking-metric-reconciliation.md)
+9. [`ROUND-16-cycle-tracking-and-metric-reconciliation.md`](ROUND-16-cycle-tracking-and-metric-reconciliation.md)
+10. [`../ops/rounds/2026-08-23-repository-independence.md`](../ops/rounds/2026-08-23-repository-independence.md)
+11. [`../REPOSITORY_INDEPENDENCE.md`](../REPOSITORY_INDEPENDENCE.md)
+12. [`../provenance/rights-status.json`](../provenance/rights-status.json)
+13. [`RELEASE-BLOCKERS.md`](RELEASE-BLOCKERS.md)
 
 ## Current repository truth
 
@@ -24,7 +26,7 @@ blocked.
 - Default and only active remote branch: `main`.
 - GitHub metadata: `isFork=false`, no parent repository.
 - Local and remote `main` must resolve to the same commit after a fresh fetch.
-- Current round baseline before its direct-to-main commits: `b11c7c2e`.
+- Current Round 19 baseline before its direct-to-main commit: `9d4a6957`.
 - This source tree remains the auditable, noncommercial reference codebase.
   Standalone hosting does not make inherited source commercially independent.
 
@@ -41,6 +43,12 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
 - Terms are synchronized at version 2.3 on Apple, Android, and in source docs.
 - Machine-readable rights state and fail-closed release enforcement are active.
 - Current ops round, active handoff, and release blockers agree.
+- Safety incidents now preserve distinct app SOS, repeated band SOS, and
+  fail-closed possible-fall origins. Four bounded SMS/voice rounds stop after a
+  responder acknowledgement, responder links show latest-only location for the
+  selected 8 or 12 hours, and retry compatibility covers older app/server state.
+- The possible-fall server contract defaults off. Shipping clients construct no
+  candidate, and wellness/biometric values cannot enter the request model.
 - Hosted CI migration debt is explicit: 247 Android and 166 Apple unique
   hardcoded or unextracted literals are baseline-tracked, and future additions
   fail the i18n gate.
@@ -125,13 +133,16 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
 - Distribution gate: blocked on exactly the three unresolved rights entries, as
   intended.
 - Current health-claims scan: clear across 1,052 files.
-- Android: 3,646 Full Debug unit tests executed with 0 failures and 6 skips;
+- Android: 3,649 Full Debug unit tests executed with 0 failures and 6 skips;
   `assembleFullDebug`, instrumentation compilation, and `lintFullDebug` passed.
+- The final Android Safety localization contract passed with 221 keys across
+  all nine generated locales.
 - Apple: the current unsigned generic iOS simulator build passed. The current
   UI action could not launch a test worker because Xcode 26.6's debugger-version
   store failed on two simulators; earlier production-shell and 40/40 visual
   suites remain recorded evidence, not a substitute for rerunning this commit.
-- Current macOS app suite: 1,428 passed, 1 intentional skip, 0 failures.
+- Current macOS app suite: 1,430 executed, 1 intentional skip, 0 failures.
+- NoopRemoteSync: 43/43 passed.
 - All nine Swift packages: 2,596 tests, 0 failures, 2 intentional skips.
 - StrandAnalytics: 1,360 tests passed; StrandDesign: 44 tests passed.
 - Focused profile and brand-literal-ratchet macOS tests passed.
@@ -142,11 +153,12 @@ this handoff are in that commit, avoiding a self-referential hard-coded hash.
   Push run `32784344944` and manual health-claims run `32784502269` both ended
   in `startup_failure` before creating a job. Restore the Actions budget, then
   rerun the workflows for the current `main`.
-- Server: pinned Ruff checks pass. The normal suite has 129 passes with nine
-  database tests and one real-Twilio test skipped. All nine database tests pass
-  separately on PostgreSQL 14 after removing only unavailable Timescale hooks
-  from a disposable migration copy. Migration checksums, restore application
-  SQL smoke, shell/JavaScript syntax, and dependency audits pass.
+- Server: pinned Ruff checks pass. The normal suite has 142 passes with 10
+  PostgreSQL-runtime tests and one real-Twilio test skipped without their
+  explicit environments. Migration 013 and its focused escalation contract
+  pass on the disposable PostgreSQL 14 fixture. The preceding nine-test
+  PostgreSQL matrix, migration checksums, restore application SQL smoke,
+  shell/JavaScript syntax, and dependency audits also pass.
 - Round 14 iOS production shell: 17/17 tests passed locally, including the
   complete-catalog regression.
 - Preceding full macOS app suite: 1,390 executed locally, with 1,389 passed,
@@ -198,6 +210,11 @@ that machine-translated reproductive-health copy has native-speaker approval.
   identifiers to Git.
 - Do not claim medical, anomaly-SOS, fall, ECG, AFib, or accuracy readiness
   without the separate validation and regulatory evidence.
+- Do not enable `NOOP_SAFETY_AUTOMATIC_PAGING_ENABLED`, populate a detector
+  allowlist as though it were authentication or validation evidence, remove the
+  endpoint's attestation hard block, or connect the inert Fall Response state
+  machines to production transport before every Round 19 physical-device,
+  detector, carrier, human-factors, legal, and regulatory gate is recorded.
 - Do not turn experimental Rhythm into an alert path or relax its resting,
   workout, consent, and source-separation gates without a new validation round.
 - Do not add the local display name to Friends, sync, or backups without an

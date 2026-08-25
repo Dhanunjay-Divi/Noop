@@ -43,7 +43,7 @@
     <string name="safety_duration_hours_minutes">%1$d 小时 %2$d 分钟</string>
     <string name="safety_duration_minutes">%1$d 分钟</string>
     <string name="safety_duration_seconds">%1$d 秒</string>
-    <string name="safety_emergency_body">立即使用手机内置的“紧急 SOS”，或联系当地紧急服务。NOOP 仅在你确认后通知已接受邀请的联系人；它不会派遣紧急服务，也不会根据健康数据自动采取行动。</string>
+    <string name="safety_emergency_body">立即使用手机内置的“紧急 SOS”，或联系当地紧急服务。NOOP 可通过 App 或已配置的手环手势通知已接受邀请的联系人。NOOP 绝不会派遣紧急服务，也不会根据健康数据发出通知。</string>
     <string name="safety_emergency_title">如果危险迫在眉睫</string>
     <string name="safety_enrollment_activate">激活安全网络</string>
     <string name="safety_enrollment_activating">正在激活…</string>
@@ -117,8 +117,8 @@
     <string name="safety_page_confirm_body">NOOP 现在会向每位已接受邀请的联系人发送短信。如果无人确认，随后会自动发起语音呼叫。NOOP 不会联系紧急服务。</string>
     <string name="safety_page_confirm_title">立即通知你的紧急联系人？</string>
     <string name="safety_page_contact_responses">联系人回应</string>
-    <string name="safety_page_contacts_reached_at_format">已于 %3$s 联系 %1$d/%2$d 位联系人</string>
-    <string name="safety_page_contacts_reached_format">已联系 %1$d/%2$d 位联系人</string>
+    <string name="safety_page_contacts_reached_at_format">已于 %3$s 确认 %1$d/%2$d 位联系人的送达或回应</string>
+    <string name="safety_page_contacts_reached_format">已确认 %1$d/%2$d 位联系人的送达或回应</string>
     <string name="safety_page_delivery_counts_format">已提交 %1$d · 待处理 %2$d · 需注意 %3$d</string>
     <string name="safety_page_detail_acknowledged">一位安全网络联系人正在回应。</string>
     <string name="safety_page_detail_acknowledged_format">%1$s 正在回应。在情况解决前，请保持直接联系。</string>
@@ -133,8 +133,13 @@
     <string name="safety_page_disabled_contacts">至少需要 2 位联系人接受邀请。</string>
     <string name="safety_page_disabled_delivery">安全网络暂时无法送达消息。</string>
     <string name="safety_page_disabled_setup">通知联系人前，请先完成安全设置。</string>
-    <string name="safety_page_disclaimer">这是由用户确认后发送给可信联系人的通知。NOOP 不会根据健康评分自动发送通知，也不会调度紧急服务。</string>
+    <string name="safety_page_disclaimer">通知可由 App SOS 或手环上的重复 SOS 手势发起。可能跌倒通知尚未启用。健康评分绝不会触发通知。NOOP 不会调度紧急服务。</string>
+    <string name="safety_page_escalation_format">在联系人确认前，最多会进行 %1$d 轮通知。</string>
     <string name="safety_page_keep_open">保持开启</string>
+    <string name="safety_page_reason_app">从 NOOP App 发起。</string>
+    <string name="safety_page_reason_band">在 Noop Band 上重复执行 SOS 手势后发起。</string>
+    <string name="safety_page_reason_fall">安全确认未获回应后，系统记录了可能跌倒的运动证据。</string>
+    <string name="safety_page_reason_observation">这是观察到的运动事件，并非诊断或已确认原因。</string>
     <string name="safety_page_resolve_action">标记为已解决</string>
     <string name="safety_page_resolve_guidance">确认不再需要帮助后，再将通知标记为已解决。</string>
     <string name="safety_page_responding_format">%1$s 正在回应</string>
@@ -152,6 +157,7 @@
     <string name="safety_page_submitting">正在提交安全通知…</string>
     <string name="safety_page_title">发送紧急通知</string>
     <string name="safety_page_update_title">更新此安全通知？</string>
+    <string name="safety_page_why_started">通知发起原因</string>
     <string name="safety_privacy_body">消息草稿和报平安时间只保留在此设备上。只有当你主动通过其他应用分享已准备的消息时，位置才会离开 NOOP。</string>
     <string name="safety_privacy_title">默认保持私密</string>
     <string name="safety_refresh">刷新</string>
@@ -176,6 +182,10 @@
     <string name="safety_share_review_prompt">选择联系人，并在发送前检查消息。</string>
     <string name="safety_share_subject">个人安全报平安</string>
     <string name="safety_share_title">分享给你信任的人</string>
+    <string name="safety_sos_duration_12_hours">12 小时</string>
+    <string name="safety_sos_duration_8_hours">8 小时</string>
+    <string name="safety_sos_duration_help">在所选时间内仅共享最新位置。如果通知已解决或取消，共享会提前停止。</string>
+    <string name="safety_sos_duration_title">实时位置</string>
     <string name="safety_sos_gesture_four">4 次</string>
     <string name="safety_sos_gesture_help_format">Noop Band 每次会报告一次双击事件。请重复 %1$d 次，每次间隔少于 3 秒。通知将不再要求确认并直接发送。</string>
     <string name="safety_sos_gesture_priority">闹钟和饮水确认优先。健康信号绝不会触发此手势。</string>
@@ -194,7 +204,7 @@
     <string name="safety_sos_location_title">SOS 期间共享实时位置</string>
     <string name="safety_sos_notifications_off">通知已关闭。安全通知仍可发送，但送达更新可能只会显示在“安全”中。</string>
     <string name="safety_sos_notifications_ready">结果通知已就绪。</string>
-    <string name="safety_subtitle">用于联系可信任之人的手动工具。</string>
+    <string name="safety_subtitle">用于联系可信任之人的工具。</string>
     <string name="safety_timer_active">计时器运行中</string>
     <string name="safety_timer_disclaimer">计时结束时，NOOP 会请求操作系统显示一次本地提醒。如果你没有回应，它不会向联系人发送消息或升级处理；提醒时间也无法保证。</string>
     <string name="safety_timer_due_soon">即将到时</string>

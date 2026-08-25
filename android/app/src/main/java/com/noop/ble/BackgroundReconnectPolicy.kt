@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
+import com.noop.safety.SafetyIncidentStatusMonitor
+import com.noop.safety.SafetyLiveLocationSession
 import com.noop.ui.NoopPrefs
 
 /** Pure gate: reboot/process-death reconnect is allowed only for an existing user-kept connection. */
@@ -38,13 +40,29 @@ internal object BackgroundReconnectPolicy {
     )
 }
 
+internal fun shouldStartConnectionServiceAfterBoot(
+    backgroundReconnectAllowed: Boolean,
+    safetyLocationActive: Boolean,
+): Boolean = backgroundReconnectAllowed || safetyLocationActive
+
 /** Re-enters the already-opted-in foreground connection after a reboot; does nothing otherwise. */
 class WhoopReconnectBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED &&
             intent.action != ACTION_QUICKBOOT_POWERON
         ) return
-        if (BackgroundReconnectPolicy.runtimeDecision(context).reconnect) {
+        SafetyLiveLocationSession.initialize(context)
+        SafetyIncidentStatusMonitor.reconcile(context)
+        val safetyLocationActive = SafetyLiveLocationSession.state.value.isActiveAt(
+            System.currentTimeMillis() / 1_000L,
+        )
+        if (
+            shouldStartConnectionServiceAfterBoot(
+                backgroundReconnectAllowed =
+                    BackgroundReconnectPolicy.runtimeDecision(context).reconnect,
+                safetyLocationActive = safetyLocationActive,
+            )
+        ) {
             WhoopConnectionService.startReconnect(context)
         }
     }

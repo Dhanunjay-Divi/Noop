@@ -43,7 +43,7 @@
     <string name="safety_duration_hours_minutes">%1$d Std. %2$d Min.</string>
     <string name="safety_duration_minutes">%1$d Min.</string>
     <string name="safety_duration_seconds">%1$d Sek.</string>
-    <string name="safety_emergency_body">Nutze jetzt den integrierten Notruf SOS deines Telefons oder kontaktiere den örtlichen Rettungsdienst. NOOP alarmiert angenommene Kontakte nur nach deiner Bestätigung; es schickt keinen Rettungsdienst und reagiert nicht automatisch auf Gesundheitswerte.</string>
+    <string name="safety_emergency_body">Nutze jetzt den integrierten Notruf SOS deines Telefons oder kontaktiere den örtlichen Rettungsdienst. NOOP kann angenommene Kontakte über die App oder eine konfigurierte Band-Geste alarmieren. NOOP ruft keine Rettungsdienste und alarmiert nie aufgrund von Wellness-Werten.</string>
     <string name="safety_emergency_title">Bei unmittelbarer Gefahr</string>
     <string name="safety_enrollment_activate">Sicherheitsnetz aktivieren</string>
     <string name="safety_enrollment_activating">Wird aktiviert…</string>
@@ -117,8 +117,8 @@
     <string name="safety_page_confirm_body">NOOP sendet jetzt jedem angenommenen Kontakt eine SMS. Wenn niemand bestätigt, folgen automatische Anrufe. Rettungsdienste werden nicht kontaktiert.</string>
     <string name="safety_page_confirm_title">Jetzt deine Notfallkontakte alarmieren?</string>
     <string name="safety_page_contact_responses">Antworten der Kontakte</string>
-    <string name="safety_page_contacts_reached_at_format">%1$d von %2$d Kontakten um %3$s erreicht</string>
-    <string name="safety_page_contacts_reached_format">%1$d von %2$d Kontakten erreicht</string>
+    <string name="safety_page_contacts_reached_at_format">Zustellung oder Antwort für %1$d von %2$d Kontakten um %3$s bestätigt</string>
+    <string name="safety_page_contacts_reached_format">Zustellung oder Antwort für %1$d von %2$d Kontakten bestätigt</string>
     <string name="safety_page_delivery_counts_format">%1$d gesendet · %2$d ausstehend · %3$d zu prüfen</string>
     <string name="safety_page_detail_acknowledged">Ein Kontakt aus dem Sicherheitsnetz reagiert.</string>
     <string name="safety_page_detail_acknowledged_format">%1$s reagiert. Bleibe in direktem Kontakt, bis die Situation geklärt ist.</string>
@@ -133,8 +133,13 @@
     <string name="safety_page_disabled_contacts">Mindestens zwei Kontakte müssen ihre Einladungen annehmen.</string>
     <string name="safety_page_disabled_delivery">Die Zustellung über das Sicherheitsnetz ist vorübergehend nicht verfügbar.</string>
     <string name="safety_page_disabled_setup">Schließe die Sicherheitseinrichtung ab, bevor du Kontakte alarmierst.</string>
-    <string name="safety_page_disclaimer">Dies ist ein von dir bestätigter Alarm an Vertrauenspersonen. NOOP alarmiert nicht automatisch anhand von Wellnesswerten und entsendet keine Rettungsdienste.</string>
+    <string name="safety_page_disclaimer">Alarme starten über App-SOS oder eine wiederholte SOS-Geste am Band. Die Alarmierung bei einem möglichen Sturz ist nicht aktiv. Wellnesswerte lösen niemals Alarme aus. NOOP entsendet keine Rettungsdienste.</string>
+    <string name="safety_page_escalation_format">Bis zu %1$d Alarmrunden laufen weiter, bis ein Kontakt bestätigt.</string>
     <string name="safety_page_keep_open">Offen lassen</string>
+    <string name="safety_page_reason_app">Über die NOOP App gestartet.</string>
+    <string name="safety_page_reason_band">Nach einer wiederholten SOS-Geste am Noop Band gestartet.</string>
+    <string name="safety_page_reason_fall">Nach einer unbeantworteten Sicherheitsabfrage wurden Bewegungsdaten zu einem möglichen Sturz erfasst.</string>
+    <string name="safety_page_reason_observation">Dies ist ein beobachtetes Bewegungsereignis, keine Diagnose oder bestätigte Ursache.</string>
     <string name="safety_page_resolve_action">Als gelöst markieren</string>
     <string name="safety_page_resolve_guidance">Markiere als gelöst, nachdem du bestätigt hast, dass keine Hilfe mehr nötig ist.</string>
     <string name="safety_page_responding_format">%1$s antwortet</string>
@@ -152,6 +157,7 @@
     <string name="safety_page_submitting">Sicherheitsalarm wird gesendet…</string>
     <string name="safety_page_title">Dringenden Alarm senden</string>
     <string name="safety_page_update_title">Diesen Sicherheitsalarm aktualisieren?</string>
+    <string name="safety_page_why_started">Warum dieser Alarm gestartet wurde</string>
     <string name="safety_privacy_body">Nachrichtenentwurf und Check-in-Zeitpunkt bleiben auf diesem Gerät. Ein Standort verlässt NOOP nur, wenn du die vorbereitete Nachricht bewusst über eine andere App teilst.</string>
     <string name="safety_privacy_title">Standardmäßig privat</string>
     <string name="safety_refresh">Aktualisieren</string>
@@ -176,6 +182,10 @@
     <string name="safety_share_review_prompt">Wähle eine Person und prüfe die Nachricht vor dem Senden.</string>
     <string name="safety_share_subject">Persönlicher Sicherheits-Check-in</string>
     <string name="safety_share_title">Mit einer Vertrauensperson teilen</string>
+    <string name="safety_sos_duration_12_hours">12 Stunden</string>
+    <string name="safety_sos_duration_8_hours">8 Stunden</string>
+    <string name="safety_sos_duration_help">Teile nur den neuesten Standort für die gewählte Dauer. Die Freigabe endet früher, wenn der Alarm gelöst oder abgebrochen wird.</string>
+    <string name="safety_sos_duration_title">Live-Standort</string>
     <string name="safety_sos_gesture_four">4-mal</string>
     <string name="safety_sos_gesture_help_format">Noop Band meldet ein Doppeltipp-Ereignis. Wiederhole es %1$d-mal mit weniger als 3 Sekunden Abstand. Der Alarm wird ohne weitere Bestätigung gesendet.</string>
     <string name="safety_sos_gesture_priority">Wecker- und Trinkbestätigungen haben Vorrang. Wellness-Signale lösen diese Geste nie aus.</string>
@@ -194,7 +204,7 @@
     <string name="safety_sos_location_title">Live-Standort während eines SOS</string>
     <string name="safety_sos_notifications_off">Mitteilungen sind deaktiviert. Die Alarmierung funktioniert weiterhin, aber Zustellupdates erscheinen möglicherweise nur in Sicherheit.</string>
     <string name="safety_sos_notifications_ready">Ergebnismitteilungen sind bereit.</string>
-    <string name="safety_subtitle">Manuelle Werkzeuge, um eine Vertrauensperson einzubeziehen.</string>
+    <string name="safety_subtitle">Werkzeuge, um Vertrauenspersonen einzubeziehen.</string>
     <string name="safety_timer_active">Timer aktiv</string>
     <string name="safety_timer_disclaimer">Wenn der Timer endet, bittet NOOP das Betriebssystem, eine lokale Erinnerung anzuzeigen. Es benachrichtigt keine Kontaktperson und eskaliert nicht, wenn du nicht reagierst; der Zustellzeitpunkt ist nicht garantiert.</string>
     <string name="safety_timer_due_soon">Bald fällig</string>

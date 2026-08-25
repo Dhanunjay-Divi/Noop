@@ -9,6 +9,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.noop.ble.WhoopConnectionService
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 
@@ -30,7 +31,7 @@ internal fun safetyNotificationMarkerAfterAttempt(
 ): SafetyIncidentNotificationMarker? = if (postedSuccessfully) candidate else previous
 
 /**
- * Best-effort reconciliation for an explicitly opened page.
+ * Best-effort reconciliation for an active Safety page.
  *
  * The foreground BLE service polls promptly while it is alive. WorkManager is the process-death and
  * reboot fallback; Android owns its timing, so this is not represented as real-time delivery.
@@ -42,7 +43,7 @@ internal object SafetyIncidentStatusMonitor {
     private const val LAST_NOTIFIED_DISPATCH_ID = "last_notified_dispatch_id"
     private const val LAST_NOTIFIED_STATUS = "last_notified_status"
     private const val WORK_NAME = "noop-safety-incident-status"
-    internal const val MAXIMUM_MONITOR_SECONDS = 60L * 60L
+    internal const val MAXIMUM_MONITOR_SECONDS = 12L * 60L * 60L
     internal const val ACTIVE_POLL_DELAY_MILLIS = 15_000L
     internal const val RETRY_POLL_DELAY_MILLIS = 45_000L
     internal val workBackoffPolicy: BackoffPolicy = BackoffPolicy.LINEAR
@@ -145,6 +146,7 @@ internal object SafetyIncidentStatusMonitor {
 
     suspend fun poll(context: Context): SafetyIncidentPollResult {
         val app = context.applicationContext
+        SafetyLiveLocationSession.initialize(app)
         val (dispatchId, expiry) = synchronized(stateLock) {
             val state = prefs(app)
             val id = state.getString(DISPATCH_ID, null)
@@ -160,6 +162,20 @@ internal object SafetyIncidentStatusMonitor {
         return try {
             val dispatch = fetchSafetyIncident(app, dispatchId)
             val notificationReconciled = observe(app, dispatch)
+            val activeLocation = SafetyLiveLocationSession.state.value
+            if (
+                !locallyExpired &&
+                isActive(dispatch.status) &&
+                activeLocation.dispatchId == dispatchId
+            ) {
+                SafetyLiveLocationSession.start(
+                    app,
+                    dispatchId,
+                    expiresAtUnix = dispatch.expiresAt?.let(::parseIsoInstantUnix),
+                    startingSequence = dispatch.latestLocation?.sequence ?: 0L,
+                )
+                WhoopConnectionService.start(app)
+            }
             if (locallyExpired || !isActive(dispatch.status)) {
                 SafetyLiveLocationSession.stop(app, expectedDispatchId = dispatchId)
             }

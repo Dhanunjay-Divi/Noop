@@ -8,6 +8,9 @@ final class SafetyModelsTests: XCTestCase {
           "dispatch_id": "11111111-1111-4111-8111-111111111111",
           "idempotency_key": "22222222-2222-4222-8222-222222222222",
           "trigger": "manual_sos",
+          "share_duration_hours": 8,
+          "escalation_rounds": 4,
+          "escalation_interval_seconds": 900,
           "status": "acknowledged",
           "created_at": "2026-08-22T12:00:00Z",
           "updated_at": "2026-08-22T12:01:00Z",
@@ -22,6 +25,7 @@ final class SafetyModelsTests: XCTestCase {
             "contact_id": "33333333-3333-4333-8333-333333333333",
             "contact_display_name": "Alex",
             "channel": "sms",
+            "escalation_round": 2,
             "status": "retry_wait",
             "attempt_count": 1,
             "max_attempts": 3,
@@ -63,6 +67,10 @@ final class SafetyModelsTests: XCTestCase {
         )
 
         XCTAssertEqual(incident.status, .acknowledged)
+        XCTAssertEqual(incident.shareDurationHours, 8)
+        XCTAssertEqual(incident.escalationRounds, 4)
+        XCTAssertEqual(incident.escalationIntervalSeconds, 900)
+        XCTAssertEqual(incident.deliveries.first?.escalationRound, 2)
         XCTAssertEqual(incident.deliveries.first?.status, .retryWait)
         XCTAssertEqual(incident.deliveries.first?.attemptCount, 1)
         XCTAssertEqual(incident.responses?.first?.decision, .responding)
@@ -78,6 +86,49 @@ final class SafetyModelsTests: XCTestCase {
             "2026-08-22T12:01:00Z"
         )
         XCTAssertEqual(incident.contactSummary?.allContactsFailed, false)
+    }
+
+    func testValidatedFallRequestEncodesBoundedEvidenceAndDuration() throws {
+        let page = RemoteSafetyPageCreate(
+            trigger: .validatedFall,
+            shareDurationHours: .twelve,
+            evidence: RemoteSafetyValidatedFallEvidence(
+                detectorId: "noop_band_fall",
+                detectorVersion: 1,
+                eventId: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!,
+                detectedAt: "2026-08-24T12:00:00Z",
+                warningHapticConfirmedAt: "2026-08-24T12:00:01Z",
+                responseDeadlineAt: "2026-08-24T12:00:46Z"
+            )
+        )
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoder.encode(page))
+                as? [String: Any]
+        )
+
+        XCTAssertEqual(object["trigger"] as? String, "validated_fall")
+        XCTAssertEqual(object["share_duration_hours"] as? Int, 12)
+        let evidence = try XCTUnwrap(object["evidence"] as? [String: Any])
+        XCTAssertEqual(evidence["detector_id"] as? String, "noop_band_fall")
+        XCTAssertEqual(evidence["detector_version"] as? Int, 1)
+    }
+
+    func testSafetyPageDurationUsesClosedEightOrTwelveHourType() throws {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let eight = try JSONSerialization.jsonObject(
+            with: encoder.encode(RemoteSafetyPageCreate())
+        ) as? [String: Any]
+        let twelve = try JSONSerialization.jsonObject(
+            with: encoder.encode(
+                RemoteSafetyPageCreate(shareDurationHours: .twelve)
+            )
+        ) as? [String: Any]
+
+        XCTAssertEqual(eight?["share_duration_hours"] as? Int, 8)
+        XCTAssertEqual(twelve?["share_duration_hours"] as? Int, 12)
     }
 
     func testLegacyDispatchStillDecodesWithoutIncidentMetadata() throws {

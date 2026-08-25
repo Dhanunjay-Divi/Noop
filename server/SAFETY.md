@@ -1,28 +1,41 @@
 # Safety Network operations
 
-NOOP Safety Network is an opt-in, user-triggered contact paging service. It is
-not emergency dispatch, fall detection, clinical monitoring, or a substitute
-for calling local emergency services.
+NOOP Safety Network is an opt-in contact paging service. Current production
+origins are an app SOS and the configured repeated-tap Noop Band SOS gesture.
+The server also reserves a fail-closed request model for a future, separately
+validated live-motion fall workflow. Automatic fall transport is hard-disabled
+because authenticated detector attestation is not implemented. It is not
+emergency dispatch, clinical monitoring, or a substitute for calling local
+emergency services.
 
 ## Incident flow
 
 1. The owner must have two to five contacts who explicitly accepted an
    invitation.
-2. A manual page creates one durable incident and one SMS plus one deferred
-   voice job per accepted contact.
-3. SMS jobs are leased immediately. Voice jobs become eligible only after the
-   acknowledgement window.
-4. A recipient can choose **I'm responding** or **I cannot respond** from the
+2. An app SOS or repeated band SOS creates one durable incident. The reserved
+   `validated_fall` request shape is always rejected in this release, including
+   when its preparatory flag and detector allowlist are populated. A future
+   implementation must authenticate detector evidence before evaluating its
+   freshness, warning haptic, and unanswered response window.
+3. Each incident queues a bounded number of independent paging rounds for every
+   accepted contact. Each round has one SMS job and one deferred voice job.
+4. SMS is eligible at the start of its round. Voice becomes eligible after the
+   acknowledgement window. The default is four rounds, 15 minutes apart.
+5. A recipient can choose **I'm responding** or **I cannot respond** from the
    signed SMS link. Voice calls accept `1` or `2` by DTMF.
-5. The first responding contact acknowledges the incident and cancels pending
-   retries and voice jobs. The owner sees who responded, unique contacts reached,
-   and each delivery state.
-6. The owner marks the incident resolved or cancelled. An unacknowledged
-   incident expires at its configured TTL.
-7. If every SMS and voice path explicitly fails for every contact, the incident
-   becomes terminal `failed`. The client tells the owner no contact was reached
-   and directs them to call local emergency services. An unconfirmed provider
-   receipt remains `unknown`; it is not relabelled as delivered or failed.
+6. The first responding contact acknowledges the incident and cancels every
+   pending retry and future round. A cannot-respond decision stops future jobs
+   only for that contact. The owner sees human responses individually and a
+   deduplicated contact count backed by either a response or provider-confirmed
+   delivery, plus each delivery state.
+7. The owner selects an 8- or 12-hour incident window. Only the newest location
+   fix is retained and exposed through the signed responder page; no route
+   history is stored. Resolution or cancellation stops sharing sooner.
+8. If every SMS and voice path explicitly fails for every contact, the incident
+   becomes terminal `failed`. The client tells the owner that no contact
+   delivery was confirmed and directs them to call local emergency services. An
+   unconfirmed provider receipt remains `unknown`; it is not relabelled as
+   delivered or failed.
 
 Responder links use an expiring HMAC capability derived at send time. Plaintext
 capabilities are never stored. Provider callbacks require both the configured
@@ -64,7 +77,11 @@ Policy controls and defaults:
 | Variable | Default | Purpose |
 | --- | ---: | --- |
 | `NOOP_SAFETY_ACKNOWLEDGEMENT_TIMEOUT_SECONDS` | `90` | Delay before voice fallback |
-| `NOOP_SAFETY_INCIDENT_TTL_SECONDS` | `1800` | Response-link and open-incident lifetime |
+| `NOOP_SAFETY_INCIDENT_TTL_SECONDS` | `43200` | Deployment ceiling for the selected 8- or 12-hour incident window; must allow 12 hours |
+| `NOOP_SAFETY_ESCALATION_ROUNDS` | `4` | SMS-and-voice rounds per accepted contact; range 1 through 8 |
+| `NOOP_SAFETY_ESCALATION_INTERVAL_SECONDS` | `900` | Delay between rounds; all rounds must finish inside eight hours |
+| `NOOP_SAFETY_AUTOMATIC_PAGING_ENABLED` | `false` | Reserved gate for a future live-motion fall workflow; this release still refuses automatic transport |
+| `NOOP_SAFETY_APPROVED_FALL_DETECTORS` | empty | Reserved `detector_id:version` metadata; not authentication or validation evidence |
 | `NOOP_SAFETY_WORKER_POLL_SECONDS` | `2` | Idle queue poll interval |
 | `NOOP_SAFETY_WORKER_HEARTBEAT_TIMEOUT_SECONDS` | `30` | Age after which the API blocks new pages |
 | `NOOP_SAFETY_DELIVERY_LEASE_SECONDS` | `30` | Worker crash-recovery lease |
@@ -182,14 +199,22 @@ Then exercise a complete incident from each shipping client:
 4. press `2` for one contact and `1` for the other;
 5. verify the owner sees both responses and the acknowledging contact;
 6. repeat with a forced provider rejection, worker restart, and API restart;
-7. resolve and cancel separate incidents and confirm no pending voice call starts;
-8. verify callback, retry, and `unknown` alerts in operations telemetry.
+7. leave a page unacknowledged and verify each configured follow-up round;
+8. acknowledge during a later round and verify every remaining job is cancelled;
+9. verify latest-only location for both 8- and 12-hour choices without route history;
+10. resolve and cancel separate incidents and confirm no pending voice call starts;
+11. verify callback, retry, and `unknown` alerts in operations telemetry.
 
 Record carrier, country, Twilio message/call SIDs, timestamps, app builds, and
 server revision as release evidence. The automated staging test proves Twilio
 accepted real SMS and voice submissions; it does not prove carrier delivery,
 human acknowledgement, or emergency suitability.
 
-Automatic anomaly-triggered incidents remain disabled. Enabling them requires a
-separate validated detector, cancellation window, participant/device-held-out
-study, dispatch reliability evidence, safety review, and regulatory review.
+Automatic medical, rhythm, ECG, SpO2, temperature, stress, and other wellness
+incidents are not accepted by the API. The API models bounded possible-fall
+evidence for future compatibility, but its production route always rejects that
+origin because authenticated detector attestation does not exist. Do not remove
+that hard block until firmware authentication, staged-fall and hard-negative
+studies, participant/device-held-out evidence, physical background and haptic
+tests, carrier staging, human-factors review, legal review, and any required
+regulatory work are complete. NOOP never contacts emergency services.

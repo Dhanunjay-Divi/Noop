@@ -433,7 +433,7 @@ public actor RemoteSyncClient: RemoteSyncUploading {
         )
     }
 
-    // MARK: - Emergency contacts and manual paging
+    // MARK: - Emergency contacts and safety paging
 
     public func bootstrapSafetyProfile(
         _ profile: RemoteSafetyProfileBootstrap
@@ -512,11 +512,23 @@ public actor RemoteSyncClient: RemoteSyncUploading {
         idempotencyKey: UUID,
         authorization: RemoteSafetyAuthorization
     ) async throws -> RemoteSafetyDispatch {
+        try await sendSafetyPage(
+            RemoteSafetyPageCreate(),
+            idempotencyKey: idempotencyKey,
+            authorization: authorization
+        )
+    }
+
+    public func sendSafetyPage(
+        _ page: RemoteSafetyPageCreate,
+        idempotencyKey: UUID,
+        authorization: RemoteSafetyAuthorization
+    ) async throws -> RemoteSafetyDispatch {
         var request = try safetyJSONRequest(
             path: "v1/safety/incidents",
             method: "POST",
             authorization: authorization,
-            body: RemoteSafetyPageCreate()
+            body: page
         )
         request.setValue(
             idempotencyKey.uuidString.lowercased(),

@@ -79,7 +79,11 @@ private. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md).
 | `NOOP_TWILIO_STATUS_CALLBACK_SECRET` | for paging | none | Independent random callback capability, at least 32 bytes |
 | `NOOP_SAFETY_CAPABILITY_SECRET` | for paging | none | Independent random responder-link signing secret, at least 32 bytes |
 | `NOOP_SAFETY_ACKNOWLEDGEMENT_TIMEOUT_SECONDS` | no | `90` | Delay before an unacknowledged SMS page becomes eligible for voice fallback |
-| `NOOP_SAFETY_INCIDENT_TTL_SECONDS` | no | `1800` | Open-incident and responder-link lifetime |
+| `NOOP_SAFETY_INCIDENT_TTL_SECONDS` | no | `43200` | Deployment ceiling for the user-selected 8- or 12-hour incident and latest-location window; must be at least 12 hours |
+| `NOOP_SAFETY_ESCALATION_ROUNDS` | no | `4` | Independent SMS-and-voice rounds queued per accepted contact; range 1 through 8 |
+| `NOOP_SAFETY_ESCALATION_INTERVAL_SECONDS` | no | `900` | Delay between paging rounds; must exceed voice fallback and keep all rounds inside eight hours |
+| `NOOP_SAFETY_AUTOMATIC_PAGING_ENABLED` | no | `false` | Reserved fail-closed gate for a future live-motion fall contract; authenticated detector attestation is not implemented, so this release still refuses automatic fall transport |
+| `NOOP_SAFETY_APPROVED_FALL_DETECTORS` | no | empty | Reserved comma-separated `detector_id:version` metadata; an allowlist is neither authentication nor validation evidence and cannot enable transport |
 | `NOOP_SAFETY_WORKER_POLL_SECONDS` | no | `2` | Idle delivery-worker poll interval |
 | `NOOP_SAFETY_WORKER_HEARTBEAT_TIMEOUT_SECONDS` | no | `30` | Maximum heartbeat age before new paging is blocked |
 | `NOOP_SAFETY_DELIVERY_LEASE_SECONDS` | no | `30` | Crash-recovery lease; must exceed provider request timeout plus the poll interval |

@@ -93,13 +93,21 @@ The active phase, event identity, boot identity, haptic-confirmed time, absolute
 and terminal outcome must be persisted atomically. A process restart resumes an already-confirmed
 countdown from its original deadline; it never creates a new 45-second window.
 
-Paging uses `event_id` as its idempotency key. A timeout can produce at most one incident even across
-restarts, reconnects, or retries. Terminal event IDs remain in a bounded durable replay ledger.
+Paging binds the request to `event_id`. A timeout can produce at most one
+incident even across restarts, reconnects, retries, or a different request
+idempotency key. The server enforces one `validated_fall` incident per profile
+and event ID, and the client contract still requires a bounded durable replay
+ledger.
 
-The existing server accepts only `manual_sos`. Automatic fall response must use a distinct audited
-trigger such as `validated_fall_no_response_v1` and must not be disguised as a manual SOS. That
-server entry point remains blocked until detector validation, device attestation, abuse controls,
-regulatory review, and staged delivery tests are complete.
+The server accepts `manual_sos` and `band_sos` and models a distinct
+`validated_fall` request origin. `validated_fall` is never disguised as manual
+SOS, but new incidents are hard-disabled because authenticated detector
+attestation is not implemented. Its preparatory gate and detector allowlist
+cannot activate transport. Shipping clients remain inert and construct no fall
+candidate. Replacing the hard block stays prohibited until detector validation,
+authenticated firmware transport, abuse controls, regulatory review,
+physical-device and human-factors evidence, and staged carrier delivery tests
+are complete.
 
 ## Production Gates
 

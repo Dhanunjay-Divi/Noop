@@ -56,6 +56,38 @@ enum class SafetyIncidentStatus {
 
 enum class SafetyResponseDecision { RESPONDING, CANNOT_RESPOND }
 
+enum class SafetyPageTrigger(val wireValue: String) {
+    MANUAL_SOS("manual_sos"),
+    BAND_SOS("band_sos"),
+    VALIDATED_FALL("validated_fall"),
+}
+
+internal fun pendingSafetyPageBody(
+    persistedBody: String?,
+    hadPendingKey: Boolean,
+    requestedBody: JSONObject,
+): JSONObject {
+    if (hadPendingKey) {
+        persistedBody
+            ?.let { runCatching { JSONObject(it) }.getOrNull() }
+            ?.let { return it }
+        return JSONObject()
+            .put("trigger", SafetyPageTrigger.MANUAL_SOS.wireValue)
+            .put("share_duration_hours", 8)
+    }
+    return requestedBody
+}
+
+internal fun shouldReplaceTerminalSafetyPageReplay(
+    status: SafetyIncidentStatus,
+    idempotentReplay: Boolean,
+): Boolean = idempotentReplay &&
+    status !in setOf(
+        SafetyIncidentStatus.OPEN,
+        SafetyIncidentStatus.ACKNOWLEDGED,
+        SafetyIncidentStatus.PENDING,
+    )
+
 data class SafetyPagingContact(
     val contactId: String,
     val displayName: String,
@@ -69,6 +101,7 @@ data class SafetyPagingDelivery(
     val deliveryId: String,
     val contactDisplayName: String,
     val channel: String,
+    val escalationRound: Int,
     val status: SafetyDeliveryStatus,
     val error: String?,
     val attemptCount: Int,
@@ -108,8 +141,13 @@ internal fun shouldShowAllContactsFailed(
 
 data class SafetyPagingDispatch(
     val dispatchId: String,
+    val idempotencyKey: String?,
+    val trigger: SafetyPageTrigger,
     val status: SafetyIncidentStatus,
     val expiresAt: String?,
+    val shareDurationHours: Int?,
+    val escalationRounds: Int?,
+    val escalationIntervalSeconds: Int?,
     val idempotentReplay: Boolean,
     val acknowledgedContactDisplayName: String?,
     val resolutionNote: String?,
@@ -315,7 +353,11 @@ class SafetyPagingController(context: Context) {
         }
     }
 
-    suspend fun pageAcceptedContacts(): Boolean {
+    suspend fun pageAcceptedContacts(
+        trigger: SafetyPageTrigger = SafetyPageTrigger.MANUAL_SOS,
+        shareDurationHours: Int = SafetyPagingPrefs.shareDurationHours(appContext),
+        evidence: JSONObject? = null,
+    ): Boolean {
         if (!canPage) {
             errorMessage = when {
                 !pagingConfigured -> "SMS and voice paging are not configured on this server."
@@ -326,40 +368,85 @@ class SafetyPagingController(context: Context) {
         }
         var submitted = false
         withBusy {
-            val key = SafetyPagingPrefs.pendingPageKey(appContext)
-                ?: UUID.randomUUID().toString().also {
-                    SafetyPagingPrefs.setPendingPageKey(appContext, it)
-                }
-            try {
-                val response = memberClient().requestJson(
-                    method = "POST",
-                    path = "v1/safety/incidents",
-                    body = JSONObject().put("trigger", "manual_sos"),
-                    idempotencyKey = key,
+            val pendingKey = SafetyPagingPrefs.pendingPageKey(appContext)
+            var key = pendingKey
+                ?: UUID.randomUUID().toString()
+            val requestedBody = JSONObject()
+                .put("trigger", trigger.wireValue)
+                .put(
+                    "share_duration_hours",
+                    if (shareDurationHours == 12) 12 else 8,
                 )
-                val dispatch = decodeDispatch(response)
-                SafetyPagingPrefs.setPendingPageKey(appContext, null)
-                lastDispatch = dispatch
-                merge(dispatch)
-                if (dispatch.status in ACTIVE_INCIDENT_STATES) {
-                    SafetyLiveLocationSession.start(
-                        appContext,
-                        dispatch.dispatchId,
-                        expiresAtUnix = dispatch.expiresAt?.let(::parseIsoInstantUnix),
+            if (evidence != null) requestedBody.put("evidence", evidence)
+            var body = pendingSafetyPageBody(
+                persistedBody = SafetyPagingPrefs.pendingPageBody(appContext),
+                hadPendingKey = pendingKey != null,
+                requestedBody = requestedBody,
+            )
+            check(
+                SafetyPagingPrefs.setPendingPage(
+                    appContext,
+                    key = key,
+                    body = body.toString(),
+                ),
+            ) { "Safety page retry state could not be saved." }
+            try {
+                val client = memberClient()
+                var replacedTerminalReplay = false
+                while (true) {
+                    val response = client.requestJson(
+                        method = "POST",
+                        path = "v1/safety/incidents",
+                        body = body,
+                        idempotencyKey = key,
                     )
-                    SafetyIncidentStatusMonitor.start(
-                        appContext,
-                        dispatch.dispatchId,
-                        dispatch.expiresAt?.let(::parseIsoInstantUnix),
-                    )
-                    WhoopConnectionService.start(appContext)
+                    val dispatch = decodeDispatch(response)
+                    check(SafetyPagingPrefs.clearPendingPage(appContext)) {
+                        "Safety page retry state could not be cleared."
+                    }
+                    if (
+                        shouldReplaceTerminalSafetyPageReplay(
+                            dispatch.status,
+                            dispatch.idempotentReplay,
+                        ) &&
+                        !replacedTerminalReplay
+                    ) {
+                        replacedTerminalReplay = true
+                        key = UUID.randomUUID().toString()
+                        body = requestedBody
+                        check(
+                            SafetyPagingPrefs.setPendingPage(
+                                appContext,
+                                key = key,
+                                body = body.toString(),
+                            ),
+                        ) { "Safety page retry state could not be saved." }
+                        continue
+                    }
+                    lastDispatch = dispatch
+                    merge(dispatch)
+                    if (dispatch.status in ACTIVE_INCIDENT_STATES) {
+                        SafetyLiveLocationSession.start(
+                            appContext,
+                            dispatch.dispatchId,
+                            expiresAtUnix = dispatch.expiresAt?.let(::parseIsoInstantUnix),
+                            startingSequence = dispatch.latestLocation?.sequence ?: 0L,
+                        )
+                        SafetyIncidentStatusMonitor.start(
+                            appContext,
+                            dispatch.dispatchId,
+                            dispatch.expiresAt?.let(::parseIsoInstantUnix),
+                        )
+                        WhoopConnectionService.start(appContext)
+                    }
+                    statusMessage = appContext.getString(R.string.safety_page_detail_submitted)
+                    submitted = dispatch.status != SafetyIncidentStatus.FAILED
+                    break
                 }
-                statusMessage = appContext.getString(R.string.safety_page_detail_submitted)
-                submitted = dispatch.status != SafetyIncidentStatus.FAILED
             } catch (error: Exception) {
                 val serverStatus = (error as? SafetyPagingException.Server)?.statusCode
                 if (!shouldRetainPageIdempotencyKey(serverStatus)) {
-                    SafetyPagingPrefs.setPendingPageKey(appContext, null)
+                    SafetyPagingPrefs.clearPendingPage(appContext)
                 }
                 throw error
             }
@@ -374,11 +461,13 @@ class SafetyPagingController(context: Context) {
             val current = activeIncident ?: lastDispatch
             if (current != null) {
                 val refreshed = client.incident(current.dispatchId)
+                reconcilePendingPage(refreshed)
                 lastDispatch = refreshed
                 merge(refreshed)
                 reconcileObservedIncident(refreshed)
             } else {
                 recentIncidents = client.incidents()
+                recentIncidents.forEach(::reconcilePendingPage)
                 lastDispatch = recentIncidents.firstOrNull()
                 lastDispatch?.let {
                     reconcileObservedIncident(it)
@@ -436,6 +525,7 @@ class SafetyPagingController(context: Context) {
         SafetyContactSetupReminderScheduler.reconcile(appContext)
         statusMessage = readinessStatusMessage(snapshot)
         recentIncidents = client.incidents()
+        recentIncidents.forEach(::reconcilePendingPage)
         lastDispatch = recentIncidents.firstOrNull()
         lastDispatch?.let {
             reconcileObservedIncident(it)
@@ -458,6 +548,13 @@ class SafetyPagingController(context: Context) {
             } else {
                 SafetyIncidentStatusMonitor.reconcile(appContext)
             }
+        }
+    }
+
+    private fun reconcilePendingPage(incident: SafetyPagingDispatch) {
+        val pendingKey = SafetyPagingPrefs.pendingPageKey(appContext) ?: return
+        if (incident.idempotencyKey == pendingKey) {
+            SafetyPagingPrefs.clearPendingPage(appContext)
         }
     }
 
@@ -712,6 +809,7 @@ internal fun decodeDispatch(json: JSONObject): SafetyPagingDispatch {
                     deliveryId = row.optString("delivery_id"),
                     contactDisplayName = row.optString("contact_display_name"),
                     channel = row.optString("channel"),
+                    escalationRound = row.optInt("escalation_round", 0),
                     status = enumValueOrDefault(
                         row.optString("status"),
                         SafetyDeliveryStatus.PENDING,
@@ -742,11 +840,18 @@ internal fun decodeDispatch(json: JSONObject): SafetyPagingDispatch {
     }
     return SafetyPagingDispatch(
         dispatchId = json.optString("dispatch_id"),
+        idempotencyKey = json.nullableString("idempotency_key"),
+        trigger = SafetyPageTrigger.entries.firstOrNull {
+            it.wireValue == json.optString("trigger")
+        } ?: SafetyPageTrigger.MANUAL_SOS,
         status = enumValueOrDefault(
             json.optString("status"),
             SafetyIncidentStatus.FAILED,
         ),
         expiresAt = json.nullableString("expires_at"),
+        shareDurationHours = json.strictInt("share_duration_hours"),
+        escalationRounds = json.strictInt("escalation_rounds"),
+        escalationIntervalSeconds = json.strictInt("escalation_interval_seconds"),
         idempotentReplay = json.optBoolean("idempotent_replay", false),
         acknowledgedContactDisplayName =
             json.nullableString("acknowledged_contact_display_name"),
@@ -885,6 +990,8 @@ internal object SafetyPagingPrefs {
     private const val PENDING_ENROLLMENT_ID = "pending_enrollment_id"
     private const val PENDING_DISPLAY_NAME = "pending_display_name"
     private const val PENDING_PAGE_KEY = "pending_page_key"
+    private const val PENDING_PAGE_BODY = "pending_page_body"
+    private const val SHARE_DURATION_HOURS = "share_duration_hours"
     private const val TOKEN = "safety_token"
 
     data class PendingEnrollment(
@@ -991,9 +1098,27 @@ internal object SafetyPagingPrefs {
     fun pendingPageKey(context: Context): String? =
         state(context).getString(PENDING_PAGE_KEY, null)
 
-    fun setPendingPageKey(context: Context, key: String?) {
-        state(context).edit().apply {
-            if (key == null) remove(PENDING_PAGE_KEY) else putString(PENDING_PAGE_KEY, key)
-        }.apply()
+    fun pendingPageBody(context: Context): String? =
+        state(context).getString(PENDING_PAGE_BODY, null)
+
+    fun setPendingPage(context: Context, key: String, body: String): Boolean =
+        state(context).edit()
+            .putString(PENDING_PAGE_KEY, key)
+            .putString(PENDING_PAGE_BODY, body)
+            .commit()
+
+    fun clearPendingPage(context: Context): Boolean =
+        state(context).edit()
+            .remove(PENDING_PAGE_KEY)
+            .remove(PENDING_PAGE_BODY)
+            .commit()
+
+    fun shareDurationHours(context: Context): Int =
+        if (state(context).getInt(SHARE_DURATION_HOURS, 8) == 12) 12 else 8
+
+    fun setShareDurationHours(context: Context, hours: Int) {
+        state(context).edit()
+            .putInt(SHARE_DURATION_HOURS, if (hours == 12) 12 else 8)
+            .apply()
     }
 }

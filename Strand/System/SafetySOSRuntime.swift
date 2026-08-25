@@ -38,10 +38,11 @@ final class SafetySOSRuntime {
 
     private static let activeDispatchKey = "safety.liveLocation.dispatchId"
     private static let activeExpiryKey = "safety.liveLocation.expiresAt"
+    private static let activeSequenceKey = "safety.liveLocation.sequence"
     private static let lastNotifiedDispatchKey = "safety.status.lastNotifiedDispatchId"
     private static let lastNotifiedStatusKey = "safety.status.lastNotifiedStatus"
-    static let fallbackSessionSeconds: TimeInterval = 30 * 60
-    static let maximumSessionSeconds: TimeInterval = 60 * 60
+    static let fallbackSessionSeconds: TimeInterval = 8 * 60 * 60
+    static let maximumSessionSeconds: TimeInterval = 12 * 60 * 60
     private var triggerTask: Task<Void, Never>?
     private var statusMonitorTask: Task<Void, Never>?
     private var monitoredDispatchId: UUID?
@@ -78,7 +79,7 @@ final class SafetySOSRuntime {
                 return
             }
 
-            let submitted = await service.pageAcceptedContacts()
+            let submitted = await service.pageAcceptedContacts(origin: .band)
             let outcome: TriggerOutcome
             if submitted, service.lastDispatch != nil {
                 outcome = .opened
@@ -106,8 +107,10 @@ final class SafetySOSRuntime {
             stopLocationSharing(dispatchId: dispatch.dispatchId)
             return
         }
-        if UserDefaults.standard.string(forKey: Self.activeDispatchKey)
-                == dispatch.dispatchId.uuidString.lowercased(),
+        let wasSameDispatch =
+            UserDefaults.standard.string(forKey: Self.activeDispatchKey)
+            == dispatch.dispatchId.uuidString.lowercased()
+        if wasSameDispatch,
            let persistedExpiry = Self.parseISO8601(
                 UserDefaults.standard.string(forKey: Self.activeExpiryKey)
            ),
@@ -122,12 +125,31 @@ final class SafetySOSRuntime {
             Self.iso8601(expiresAt),
             forKey: Self.activeExpiryKey
         )
+        let resumedSequence = Self.resumedLocationSequence(
+            server: dispatch.latestLocation?.sequence,
+            persisted: UserDefaults.standard.object(
+                forKey: Self.activeSequenceKey
+            ) as? NSNumber,
+            sameDispatch: wasSameDispatch
+        )
+        UserDefaults.standard.set(
+            NSNumber(value: resumedSequence),
+            forKey: Self.activeSequenceKey
+        )
         startStatusMonitoring(dispatchId: dispatch.dispatchId)
         #if os(iOS)
         locationStreamer.start(
             dispatchId: dispatch.dispatchId,
-            expiresAt: expiresAt
+            expiresAt: expiresAt,
+            startingSequence: resumedSequence
         ) { location, sequence in
+            if UserDefaults.standard.string(forKey: Self.activeDispatchKey)
+                == dispatch.dispatchId.uuidString.lowercased() {
+                UserDefaults.standard.set(
+                    NSNumber(value: sequence),
+                    forKey: Self.activeSequenceKey
+                )
+            }
             _ = try await service.updateLocation(
                 for: dispatch.dispatchId,
                 sequence: sequence,
@@ -149,6 +171,7 @@ final class SafetySOSRuntime {
         monitoredDispatchId = nil
         UserDefaults.standard.removeObject(forKey: Self.activeDispatchKey)
         UserDefaults.standard.removeObject(forKey: Self.activeExpiryKey)
+        UserDefaults.standard.removeObject(forKey: Self.activeSequenceKey)
     }
 
     func restoreLocationSharingIfNeeded() async {
@@ -203,10 +226,25 @@ final class SafetySOSRuntime {
         )
         startStatusMonitoring(dispatchId: dispatchId)
         #if os(iOS)
+        let resumedSequence = Self.resumedLocationSequence(
+            server: nil,
+            persisted: UserDefaults.standard.object(
+                forKey: Self.activeSequenceKey
+            ) as? NSNumber,
+            sameDispatch: true
+        )
         locationStreamer.start(
             dispatchId: dispatchId,
-            expiresAt: fallbackExpiry
+            expiresAt: fallbackExpiry,
+            startingSequence: resumedSequence
         ) { location, sequence in
+            if UserDefaults.standard.string(forKey: Self.activeDispatchKey)
+                == dispatchId.uuidString.lowercased() {
+                UserDefaults.standard.set(
+                    NSNumber(value: sequence),
+                    forKey: Self.activeSequenceKey
+                )
+            }
             _ = try await service.updateLocation(
                 for: dispatchId,
                 sequence: sequence,
@@ -320,6 +358,16 @@ final class SafetySOSRuntime {
         }
         guard requested > now else { return nil }
         return min(requested, maximum)
+    }
+
+    static func resumedLocationSequence(
+        server: Int64?,
+        persisted: NSNumber?,
+        sameDispatch: Bool
+    ) -> Int64 {
+        let serverValue = max(server ?? 0, 0)
+        guard sameDispatch else { return serverValue }
+        return max(serverValue, max(persisted?.int64Value ?? 0, 0))
     }
 
     static func markerAfterNotificationAttempt(
@@ -526,23 +574,26 @@ private final class SafetyIncidentLocationStreamer: NSObject {
     func start(
         dispatchId: UUID,
         expiresAt: Date?,
+        startingSequence: Int64,
         sender: @escaping Sender
     ) {
         if self.dispatchId != dispatchId {
-            sequence = 0
+            sequence = max(startingSequence, 0)
             lastSubmittedAt = .distantPast
+        } else {
+            sequence = max(sequence, max(startingSequence, 0))
         }
         self.dispatchId = dispatchId
         self.sender = sender
         expiryTask?.cancel()
         let deadline = min(
-            expiresAt ?? Date().addingTimeInterval(30 * 60),
-            Date().addingTimeInterval(60 * 60)
+            expiresAt ?? Date().addingTimeInterval(8 * 60 * 60),
+            Date().addingTimeInterval(12 * 60 * 60)
         )
         expiryTask = Task { @MainActor [weak self] in
             let delay = max(deadline.timeIntervalSinceNow, 0)
             try? await Task.sleep(
-                nanoseconds: UInt64(min(delay, 60 * 60) * 1_000_000_000)
+                nanoseconds: UInt64(min(delay, 12 * 60 * 60) * 1_000_000_000)
             )
             guard !Task.isCancelled else { return }
             self?.stop()
@@ -580,6 +631,7 @@ private final class SafetyIncidentLocationStreamer: NSObject {
     private func submit(_ fix: CLLocation) {
         guard sendTask == nil,
               Date().timeIntervalSince(lastSubmittedAt) >= 12,
+              sequence < Int64.max,
               fix.horizontalAccuracy >= 0,
               fix.horizontalAccuracy <= 10_000
         else { return }

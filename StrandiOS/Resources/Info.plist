@@ -79,9 +79,9 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>NOOP connects to a self-hosted server on your local network only when you configure and enable that optional sync.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>When you explicitly enable the band SOS gesture, Always location access lets NOOP keep the latest location fix available to your accepted contacts while an SOS page is active. NOOP retains no route history and stops sharing when the page ends.</string>
+	<string>Always location access lets NOOP update the newest fix for accepted contacts during an active 8- or 12-hour Safety page, including one started from a configured band SOS gesture. NOOP keeps no route history and stops when the page ends.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>NOOP uses location when you enable Today weather, record an outdoor-workout route, prepare a safety message, or explicitly send an SOS page. Safety location is shared only for the active page.</string>
+	<string>NOOP uses location for Today weather, an outdoor-workout route, a safety message, or an active Safety page. Safety shares only the newest fix with accepted contacts.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>NOOP uses the microphone only while you explicitly dictate a Coach question or journal draft. Audio is transcribed by the system and is not stored by NOOP.</string>
 	<key>NSMotionUsageDescription</key>

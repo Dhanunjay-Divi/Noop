@@ -52,6 +52,81 @@ def test_worker_concurrency_reserves_a_database_connection() -> None:
         settings.validate_for_startup(needs_database=False)
 
 
+def test_automatic_paging_requires_an_approved_fall_contract() -> None:
+    settings = Settings(
+        api_token="a" * 32,
+        database_url=None,
+        safety_automatic_paging_enabled=True,
+    )
+
+    with pytest.raises(RuntimeError, match="approved fall detector"):
+        settings.validate_for_startup(needs_database=False)
+
+    Settings(
+        api_token="a" * 32,
+        database_url=None,
+        safety_automatic_paging_enabled=True,
+        safety_approved_fall_detectors=frozenset({"noop_band_fall:1"}),
+    ).validate_for_startup(needs_database=False)
+
+
+def test_safety_escalation_must_finish_inside_eight_hour_window() -> None:
+    settings = Settings(
+        api_token="a" * 32,
+        database_url=None,
+        safety_escalation_rounds=8,
+        safety_escalation_interval_seconds=70 * 60,
+    )
+
+    with pytest.raises(RuntimeError, match="8-hour incident window"):
+        settings.validate_for_startup(needs_database=False)
+
+
+@pytest.mark.parametrize("interval_seconds", [59, 86_401])
+def test_safety_escalation_interval_matches_database_contract(
+    interval_seconds: int,
+) -> None:
+    settings = Settings(
+        api_token="a" * 32,
+        database_url=None,
+        safety_acknowledgement_timeout_seconds=1,
+        safety_escalation_interval_seconds=interval_seconds,
+    )
+
+    with pytest.raises(RuntimeError, match="between 60 and 86400"):
+        settings.validate_for_startup(needs_database=False)
+
+
+def test_fall_detector_allowlist_rejects_duplicates_and_bad_versions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "NOOP_SAFETY_APPROVED_FALL_DETECTORS",
+        "noop_band_fall:1,noop_band_fall:1",
+    )
+    with pytest.raises(ValueError, match="duplicate"):
+        Settings.from_env()
+
+    monkeypatch.setenv(
+        "NOOP_SAFETY_APPROVED_FALL_DETECTORS",
+        "noop_band_fall:zero",
+    )
+    with pytest.raises(RuntimeError, match="detector_id:version"):
+        Settings.from_env().validate_for_startup(
+            needs_database=False,
+            needs_api_token=False,
+        )
+
+    monkeypatch.setenv(
+        "NOOP_SAFETY_APPROVED_FALL_DETECTORS",
+        "noop_band_fall:10000",
+    )
+    Settings.from_env().validate_for_startup(
+        needs_database=False,
+        needs_api_token=False,
+    )
+
+
 def test_retention_is_explicitly_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "NOOP_RETENTION_DAYS",

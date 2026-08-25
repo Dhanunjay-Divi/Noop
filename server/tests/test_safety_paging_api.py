@@ -14,7 +14,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from app.main import _safety_dispatch_response, create_app
+from app.main import (
+    _safety_dispatch_response,
+    _safety_page_request_hashes,
+    create_app,
+)
+from app.models import SafetyPageCreate
 from app.paging import (
     PagingOutcomeUnknownError,
     PagingSubmission,
@@ -22,7 +27,7 @@ from app.paging import (
 )
 from app.repository import MemoryRepository
 from app.safety_capabilities import SafetyCapabilitySigner
-from app.safety_repository import MemorySafetyRepository
+from app.safety_repository import MemorySafetyRepository, SafetyConflictError
 from app.safety_worker import SafetyDeliveryWorker
 
 
@@ -72,8 +77,14 @@ class FakePagingProvider:
         )
 
     async def send_page_sms(
-        self, *, to_phone: str, owner_name: str, response_url: str
+        self,
+        *,
+        to_phone: str,
+        owner_name: str,
+        incident_summary: str,
+        response_url: str,
     ) -> PagingSubmission:
+        assert incident_summary
         self.sms_attempts += 1
         if self.fail_first_sms and self.sms_attempts == 1:
             raise PagingUnavailableError("temporary provider failure")
@@ -88,8 +99,14 @@ class FakePagingProvider:
         )
 
     async def send_page_voice(
-        self, *, to_phone: str, owner_name: str, response_url: str
+        self,
+        *,
+        to_phone: str,
+        owner_name: str,
+        incident_summary: str,
+        response_url: str,
     ) -> PagingSubmission:
+        assert incident_summary
         self.pages.append(SentMessage("voice", to_phone, owner_name, response_url))
         return PagingSubmission(
             provider_reference=f"CApage{len(self.pages):026d}",
@@ -104,6 +121,11 @@ def _client(
     retry_base_seconds: int = 1,
     signed_callbacks: bool = False,
     worker_enabled: bool = True,
+    escalation_rounds: int = 1,
+    escalation_interval_seconds: int = 15 * 60,
+    automatic_paging_enabled: bool = False,
+    approved_fall_detectors: frozenset[str] = frozenset(),
+    incident_ttl_seconds: int = 12 * 60 * 60,
 ) -> tuple[TestClient, MemorySafetyRepository]:
     safety = MemorySafetyRepository()
     callback_settings = (
@@ -124,6 +146,11 @@ def _client(
             database_url=None,
             max_request_bytes=1_000_000,
             safety_acknowledgement_timeout_seconds=(acknowledgement_timeout_seconds),
+            safety_escalation_rounds=escalation_rounds,
+            safety_escalation_interval_seconds=escalation_interval_seconds,
+            safety_automatic_paging_enabled=automatic_paging_enabled,
+            safety_approved_fall_detectors=approved_fall_detectors,
+            safety_incident_ttl_seconds=incident_ttl_seconds,
             safety_retry_base_seconds=retry_base_seconds,
             safety_worker_poll_seconds=1,
             safety_worker_enabled=worker_enabled,
@@ -268,6 +295,55 @@ async def _ready_memory_dispatch(
         voice_fallback_at=now + timedelta(minutes=5),
     )
     return profile_id, dispatch_id
+
+
+def test_elapsed_acknowledged_page_does_not_block_a_new_sos() -> None:
+    async def exercise() -> None:
+        repository = MemorySafetyRepository()
+        now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+        profile_id, dispatch_id = await _ready_memory_dispatch(
+            repository,
+            now=now,
+        )
+        first_delivery = next(
+            row
+            for row in repository._deliveries.values()
+            if row["dispatch_id"] == dispatch_id
+        )
+        acknowledged = await repository.record_responder_decision(
+            dispatch_id=dispatch_id,
+            contact_id=first_delivery["contact_id"],
+            decision="responding",
+            source="sms_link",
+            now=now + timedelta(minutes=1),
+        )
+        assert acknowledged["status"] == "acknowledged"
+
+        elapsed_at = now + timedelta(minutes=31)
+        preview = await repository.responder_preview(
+            dispatch_id=dispatch_id,
+            contact_id=first_delivery["contact_id"],
+            now=elapsed_at,
+        )
+        monitoring = await repository.monitoring_snapshot(now=elapsed_at)
+        assert preview is not None
+        assert preview["status"] == "expired"
+        assert monitoring["incidents"]["overdue"] == 1
+
+        next_page = await repository.create_dispatch(
+            dispatch_id=str(uuid4()),
+            profile_id=profile_id,
+            idempotency_key=str(uuid4()),
+            request_hash=hashlib.sha256(b"next-manual-sos").hexdigest(),
+            trigger="manual_sos",
+            now=elapsed_at,
+            expires_at=elapsed_at + timedelta(hours=8),
+            voice_fallback_at=elapsed_at + timedelta(seconds=90),
+        )
+        assert repository._dispatches[dispatch_id]["status"] == "expired"
+        assert next_page["status"] == "open"
+
+    asyncio.run(exercise())
 
 
 def test_contacts_require_acceptance_and_page_is_sms_first_and_idempotent() -> None:
@@ -647,6 +723,107 @@ def test_recipient_acknowledgement_stops_voice_fallback_and_is_owner_visible() -
         )
 
 
+def test_band_page_uses_requested_lifetime_and_ack_cancels_future_rounds() -> None:
+    provider = FakePagingProvider()
+    client, safety = _client(
+        provider,
+        acknowledgement_timeout_seconds=1,
+        escalation_rounds=3,
+        escalation_interval_seconds=60,
+    )
+    with client:
+        _, headers, _ = _bootstrap(client)
+        _ready_contacts(client, provider, headers)
+        created = client.post(
+            "/v1/safety/incidents",
+            headers={**headers, "Idempotency-Key": str(uuid4())},
+            json={"trigger": "band_sos", "share_duration_hours": 12},
+        )
+        assert created.status_code == 202, created.text
+        payload = created.json()
+        assert payload["trigger"] == "band_sos"
+        assert payload["share_duration_hours"] == 12
+        assert payload["escalation_rounds"] == 3
+        assert {row["escalation_round"] for row in payload["deliveries"]} == {
+            0,
+            1,
+            2,
+        }
+        created_at = datetime.fromisoformat(
+            payload["created_at"].replace("Z", "+00:00")
+        )
+        expires_at = datetime.fromisoformat(
+            payload["expires_at"].replace("Z", "+00:00")
+        )
+        assert expires_at - created_at == timedelta(hours=12)
+
+        _wait_until(lambda: len(provider.pages) == 2)
+        response_url = provider.pages[0].response_url
+        preview = client.get(response_url)
+        assert "repeated SOS gesture on their Noop Band" in preview.text
+        acknowledged = client.post(
+            response_url,
+            content="decision=responding",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert acknowledged.status_code == 200
+        assert len(provider.pages) == 2
+
+        incident = client.get(
+            f"/v1/safety/incidents/{payload['dispatch_id']}",
+            headers=headers,
+        ).json()
+        assert incident["status"] == "acknowledged"
+        assert all(
+            row["status"] not in {"pending", "retry_wait", "leased"}
+            for row in incident["deliveries"]
+        )
+
+        async def expire_acknowledged_page() -> int:
+            return await safety.expire_due_dispatches(
+                now=expires_at + timedelta(seconds=1)
+            )
+
+        expired_count = client.portal.call(expire_acknowledged_page)
+        assert expired_count == 1
+        expired = client.get(
+            f"/v1/safety/incidents/{payload['dispatch_id']}",
+            headers=headers,
+        )
+        assert expired.status_code == 200
+        assert expired.json()["status"] == "expired"
+
+
+def test_unacknowledged_page_runs_bounded_follow_up_round() -> None:
+    provider = FakePagingProvider()
+    client, safety = _client(
+        provider,
+        acknowledgement_timeout_seconds=1,
+        escalation_rounds=2,
+        escalation_interval_seconds=60,
+    )
+    clock_offset = {"seconds": 0}
+
+    async def coordination_now() -> datetime:
+        return datetime.now(UTC) + timedelta(seconds=clock_offset["seconds"])
+
+    safety.coordination_now = coordination_now  # type: ignore[method-assign]
+    with client:
+        _, headers, _ = _bootstrap(client)
+        _ready_contacts(client, provider, headers)
+        created = client.post(
+            "/v1/safety/incidents",
+            headers={**headers, "Idempotency-Key": str(uuid4())},
+            json={"trigger": "manual_sos", "share_duration_hours": 8},
+        )
+        assert created.status_code == 202
+        _wait_until(lambda: len(provider.pages) == 4)
+        clock_offset["seconds"] = 61
+        _wait_until(lambda: len(provider.pages) == 8, timeout=5)
+        assert [page.channel for page in provider.pages].count("sms") == 4
+        assert [page.channel for page in provider.pages].count("voice") == 4
+
+
 def test_unacknowledged_incident_uses_voice_fallback_and_owner_can_resolve() -> None:
     provider = FakePagingProvider()
     client, _ = _client(provider, acknowledgement_timeout_seconds=1)
@@ -983,13 +1160,19 @@ def test_worker_graceful_stop_drains_the_started_submission_wave() -> None:
             self.release = asyncio.Event()
 
         async def send_page_sms(
-            self, *, to_phone: str, owner_name: str, response_url: str
+            self,
+            *,
+            to_phone: str,
+            owner_name: str,
+            incident_summary: str,
+            response_url: str,
         ) -> PagingSubmission:
             self.started.set()
             await self.release.wait()
             return await super().send_page_sms(
                 to_phone=to_phone,
                 owner_name=owner_name,
+                incident_summary=incident_summary,
                 response_url=response_url,
             )
 
@@ -1047,11 +1230,17 @@ def test_worker_drains_consecutive_due_waves_without_idle_poll_delay() -> None:
 
         class StopAfterTwoProvider(FakePagingProvider):
             async def send_page_sms(
-                self, *, to_phone: str, owner_name: str, response_url: str
+                self,
+                *,
+                to_phone: str,
+                owner_name: str,
+                incident_summary: str,
+                response_url: str,
             ) -> PagingSubmission:
                 submission = await super().send_page_sms(
                     to_phone=to_phone,
                     owner_name=owner_name,
+                    incident_summary=incident_summary,
                     response_url=response_url,
                 )
                 if len(self.pages) == 2:
@@ -1084,7 +1273,12 @@ def test_worker_drains_consecutive_due_waves_without_idle_poll_delay() -> None:
 def test_ambiguous_provider_outcome_stays_unknown_not_failed() -> None:
     class AmbiguousProvider(FakePagingProvider):
         async def send_page_sms(
-            self, *, to_phone: str, owner_name: str, response_url: str
+            self,
+            *,
+            to_phone: str,
+            owner_name: str,
+            incident_summary: str,
+            response_url: str,
         ) -> PagingSubmission:
             raise PagingOutcomeUnknownError("connection closed after upload")
 
@@ -1130,13 +1324,19 @@ def test_disabling_paging_waits_for_started_provider_submission() -> None:
             self.release = asyncio.Event()
 
         async def send_page_sms(
-            self, *, to_phone: str, owner_name: str, response_url: str
+            self,
+            *,
+            to_phone: str,
+            owner_name: str,
+            incident_summary: str,
+            response_url: str,
         ) -> PagingSubmission:
             self.started.set()
             await self.release.wait()
             return await super().send_page_sms(
                 to_phone=to_phone,
                 owner_name=owner_name,
+                incident_summary=incident_summary,
                 response_url=response_url,
             )
 
@@ -1192,13 +1392,19 @@ def test_profile_erasure_drains_started_page_and_blocks_cached_jobs() -> None:
             self.release = asyncio.Event()
 
         async def send_page_sms(
-            self, *, to_phone: str, owner_name: str, response_url: str
+            self,
+            *,
+            to_phone: str,
+            owner_name: str,
+            incident_summary: str,
+            response_url: str,
         ) -> PagingSubmission:
             self.started.set()
             await self.release.wait()
             return await super().send_page_sms(
                 to_phone=to_phone,
                 owner_name=owner_name,
+                incident_summary=incident_summary,
                 response_url=response_url,
             )
 
@@ -1491,6 +1697,228 @@ def test_automated_or_anomaly_trigger_is_not_an_incident_entry_point() -> None:
         assert provider.pages == []
 
 
+def test_validated_fall_is_fail_closed_without_approved_live_contract() -> None:
+    provider = FakePagingProvider()
+    client, _ = _client(provider)
+    now = datetime.now(UTC)
+    with client:
+        _, headers, _ = _bootstrap(client)
+        rejected = client.post(
+            "/v1/safety/incidents",
+            headers={**headers, "Idempotency-Key": str(uuid4())},
+            json={
+                "trigger": "validated_fall",
+                "share_duration_hours": 8,
+                "evidence": {
+                    "detector_id": "noop_band_fall",
+                    "detector_version": 1,
+                    "event_id": str(uuid4()),
+                    "detected_at": (now - timedelta(seconds=47)).isoformat(),
+                    "warning_haptic_confirmed_at": (
+                        now - timedelta(seconds=46)
+                    ).isoformat(),
+                    "response_deadline_at": (now - timedelta(seconds=1)).isoformat(),
+                },
+            },
+        )
+        assert rejected.status_code == 409
+        assert "disabled" in rejected.json()["detail"]
+        assert provider.pages == []
+
+
+def test_allowlist_cannot_replace_authenticated_fall_evidence() -> None:
+    provider = FakePagingProvider()
+    client, _ = _client(
+        provider,
+        automatic_paging_enabled=True,
+        approved_fall_detectors=frozenset({"noop_band_fall:1"}),
+    )
+    now = datetime.now(UTC)
+    with client:
+        _, headers, _ = _bootstrap(client)
+        _ready_contacts(client, provider, headers)
+        rejected = client.post(
+            "/v1/safety/incidents",
+            headers={**headers, "Idempotency-Key": str(uuid4())},
+            json={
+                "trigger": "validated_fall",
+                "share_duration_hours": 8,
+                "evidence": {
+                    "detector_id": "noop_band_fall",
+                    "detector_version": 1,
+                    "event_id": str(uuid4()),
+                    "detected_at": (now - timedelta(seconds=47)).isoformat(),
+                    "warning_haptic_confirmed_at": (
+                        now - timedelta(seconds=46)
+                    ).isoformat(),
+                    "response_deadline_at": (now - timedelta(seconds=1)).isoformat(),
+                },
+            },
+        )
+        assert rejected.status_code == 409, rejected.text
+        assert "authenticated fall-detector evidence" in rejected.json()["detail"]
+        assert provider.pages == []
+
+
+def test_validated_fall_retry_replays_after_evidence_freshness_window() -> None:
+    provider = FakePagingProvider()
+    client, safety = _client(
+        provider,
+        automatic_paging_enabled=True,
+        approved_fall_detectors=frozenset({"noop_band_fall:1"}),
+    )
+    clock = {"now": datetime(2026, 8, 24, 18, 0, tzinfo=UTC)}
+
+    async def coordination_now() -> datetime:
+        return clock["now"]
+
+    safety.coordination_now = coordination_now  # type: ignore[method-assign]
+    event_id = str(uuid4())
+    key = str(uuid4())
+    body = {
+        "trigger": "validated_fall",
+        "share_duration_hours": 8,
+        "evidence": {
+            "detector_id": "noop_band_fall",
+            "detector_version": 1,
+            "event_id": event_id,
+            "detected_at": (clock["now"] - timedelta(seconds=47)).isoformat(),
+            "warning_haptic_confirmed_at": (
+                clock["now"] - timedelta(seconds=46)
+            ).isoformat(),
+            "response_deadline_at": (clock["now"] - timedelta(seconds=1)).isoformat(),
+        },
+    }
+    with client:
+        profile, headers, _ = _bootstrap(client)
+        _ready_contacts(client, provider, headers)
+        page = SafetyPageCreate.model_validate(body)
+        request_hash, accepted_hashes = _safety_page_request_hashes(page)
+
+        async def seed_authenticated_future_incident() -> dict:
+            return await safety.create_dispatch(
+                dispatch_id=str(uuid4()),
+                profile_id=profile["profile_id"],
+                idempotency_key=key,
+                request_hash=request_hash,
+                accepted_request_hashes=accepted_hashes,
+                trigger="validated_fall",
+                share_duration_hours=8,
+                evidence=page.evidence.model_dump(mode="json"),
+                escalation_rounds=1,
+                now=clock["now"],
+                expires_at=clock["now"] + timedelta(hours=8),
+                voice_fallback_at=clock["now"] + timedelta(seconds=90),
+            )
+
+        created = client.portal.call(seed_authenticated_future_incident)
+
+        clock["now"] += timedelta(minutes=5)
+        replay = client.post(
+            "/v1/safety/incidents",
+            headers={**headers, "Idempotency-Key": key},
+            json=body,
+        )
+        assert replay.status_code == 202, replay.text
+        assert replay.json()["dispatch_id"] == created["dispatch_id"]
+        assert replay.json()["idempotent_replay"] is True
+
+
+def test_repository_rejects_a_second_incident_for_the_same_fall_event() -> None:
+    provider = FakePagingProvider()
+    client, safety = _client(
+        provider,
+        automatic_paging_enabled=True,
+        approved_fall_detectors=frozenset({"noop_band_fall:1"}),
+    )
+    now = datetime.now(UTC)
+    body = {
+        "trigger": "validated_fall",
+        "share_duration_hours": 8,
+        "evidence": {
+            "detector_id": "noop_band_fall",
+            "detector_version": 1,
+            "event_id": str(uuid4()),
+            "detected_at": (now - timedelta(seconds=47)).isoformat(),
+            "warning_haptic_confirmed_at": (now - timedelta(seconds=46)).isoformat(),
+            "response_deadline_at": (now - timedelta(seconds=1)).isoformat(),
+        },
+    }
+    with client:
+        profile, headers, _ = _bootstrap(client)
+        _ready_contacts(client, provider, headers)
+        page = SafetyPageCreate.model_validate(body)
+
+        async def exercise() -> None:
+            first = await safety.create_dispatch(
+                dispatch_id=str(uuid4()),
+                profile_id=profile["profile_id"],
+                idempotency_key=str(uuid4()),
+                request_hash=hashlib.sha256(b"first-fall-event").hexdigest(),
+                trigger="validated_fall",
+                evidence=page.evidence.model_dump(mode="json"),
+                now=now,
+                expires_at=now + timedelta(hours=8),
+                voice_fallback_at=now + timedelta(seconds=90),
+            )
+            await safety.transition_dispatch(
+                profile_id=profile["profile_id"],
+                dispatch_id=first["dispatch_id"],
+                action="cancel",
+                note=None,
+                now=now + timedelta(seconds=1),
+            )
+            with pytest.raises(
+                SafetyConflictError,
+                match="fall event was already used",
+            ):
+                await safety.create_dispatch(
+                    dispatch_id=str(uuid4()),
+                    profile_id=profile["profile_id"],
+                    idempotency_key=str(uuid4()),
+                    request_hash=hashlib.sha256(b"duplicate-fall-event").hexdigest(),
+                    trigger="validated_fall",
+                    evidence=page.evidence.model_dump(mode="json"),
+                    now=now + timedelta(seconds=2),
+                    expires_at=now + timedelta(hours=8, seconds=2),
+                    voice_fallback_at=now + timedelta(seconds=92),
+                )
+
+        client.portal.call(exercise)
+
+
+def test_manual_page_replays_a_pre_escalation_request_hash() -> None:
+    provider = FakePagingProvider()
+    client, safety = _client(provider)
+    key = str(uuid4())
+    with client:
+        _, headers, _ = _bootstrap(client)
+        _ready_contacts(client, provider, headers)
+        created = client.post(
+            "/v1/safety/incidents",
+            headers={**headers, "Idempotency-Key": key},
+            json={"trigger": "manual_sos"},
+        )
+        assert created.status_code == 202, created.text
+        legacy_hash = hashlib.sha256(b'{"trigger":"manual_sos"}').hexdigest()
+
+        async def set_legacy_hash() -> None:
+            async with safety._lock:
+                safety._dispatches[created.json()["dispatch_id"]]["request_hash"] = (
+                    legacy_hash
+                )
+
+        client.portal.call(set_legacy_hash)
+        replay = client.post(
+            "/v1/safety/incidents",
+            headers={**headers, "Idempotency-Key": key},
+            json={"trigger": "manual_sos"},
+        )
+        assert replay.status_code == 202, replay.text
+        assert replay.json()["dispatch_id"] == created.json()["dispatch_id"]
+        assert replay.json()["idempotent_replay"] is True
+
+
 def test_pending_contacts_do_not_satisfy_page_threshold_and_invites_are_one_time() -> (
     None
 ):
@@ -1688,6 +2116,18 @@ def test_incident_location_keeps_only_latest_fix_and_signed_link_shows_it() -> N
         assert "Latest shared location" in contact_view.text
         assert "40.713100" in contact_view.text
         assert 'http-equiv="refresh"' in contact_view.text
+
+        cancelled = client.post(
+            f"/v1/safety/incidents/{incident_id}/cancel",
+            headers=headers,
+            json={},
+        )
+        assert cancelled.status_code == 200
+        terminal_contact_view = client.get(provider.pages[0].response_url)
+        assert terminal_contact_view.status_code == 200
+        assert "Latest shared location" not in terminal_contact_view.text
+        assert "40.713100" not in terminal_contact_view.text
+        assert 'http-equiv="refresh"' not in terminal_contact_view.text
 
 
 def test_location_replays_are_idempotent_and_stale_fixes_are_rejected() -> None:

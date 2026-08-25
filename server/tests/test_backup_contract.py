@@ -130,6 +130,8 @@ def test_backup_contract_encrypts_before_publish_and_validates_before_restore() 
     assert "010_installation_tenancy.sql" in smoke
     assert "011_safety_data_lifecycle.sql" in smoke
     assert "012_tenancy_cutover_invariants.sql" in smoke
+    assert "013_safety_escalation_contract.sql" in smoke
+    assert "Safety escalation round is outside its incident contract" in smoke
     assert "orphaned Safety queue rows were restored" in smoke
     assert "orphaned installation device ownership was restored" in smoke
     assert "profile without installation ownership was restored" in smoke

@@ -30,6 +30,13 @@ def test_compose_separates_migrations_api_and_paging_worker() -> None:
     assert "NOOP_FORWARDED_ALLOW_IPS" in compose
     assert "NOOP_SAFETY_INCIDENT_RETENTION_DAYS" in compose
     assert "NOOP_SAFETY_CONTACT_RETENTION_DAYS" in compose
+    assert (
+        "NOOP_SAFETY_INCIDENT_TTL_SECONDS: ${NOOP_SAFETY_INCIDENT_TTL_SECONDS:-43200}"
+    ) in compose
+    assert "NOOP_SAFETY_ESCALATION_ROUNDS" in compose
+    assert "NOOP_SAFETY_ESCALATION_INTERVAL_SECONDS" in compose
+    assert "NOOP_SAFETY_AUTOMATIC_PAGING_ENABLED" in compose
+    assert "NOOP_SAFETY_APPROVED_FALL_DETECTORS" in compose
     backup = compose.split("\n  backup:\n", maxsplit=1)[1]
     assert "migrate:" in backup
     assert "condition: service_completed_successfully" in backup

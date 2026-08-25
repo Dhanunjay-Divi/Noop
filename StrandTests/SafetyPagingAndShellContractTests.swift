@@ -85,6 +85,39 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         )
     }
 
+    func testLegacyPendingPageKeepsItsOriginalManualEightHourBody() {
+        let key = UUID()
+        let pending = SafetyPendingPageRequest.legacyManual(
+            idempotencyKey: key
+        )
+
+        XCTAssertEqual(pending.idempotencyKey, key)
+        XCTAssertEqual(pending.page.trigger, .manualSOS)
+        XCTAssertEqual(pending.page.shareDurationHours, .eight)
+        XCTAssertNil(pending.page.evidence)
+    }
+
+    func testTerminalIdempotentReplayRequiresOneFreshPageRequest() {
+        XCTAssertTrue(
+            SafetyPagingService.shouldReplaceTerminalPageReplay(
+                status: .resolved,
+                idempotentReplay: true
+            )
+        )
+        XCTAssertFalse(
+            SafetyPagingService.shouldReplaceTerminalPageReplay(
+                status: .open,
+                idempotentReplay: true
+            )
+        )
+        XCTAssertFalse(
+            SafetyPagingService.shouldReplaceTerminalPageReplay(
+                status: .resolved,
+                idempotentReplay: false
+            )
+        )
+    }
+
     func testSafetyContactReceiptRejectsInvalidServerCounts() {
         XCTAssertEqual(
             SafetyIncidentContactPresentation.receipt(reached: 2, targeted: 3),
@@ -218,12 +251,30 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
         XCTAssertEqual(
             try XCTUnwrap(
                 SafetySOSRuntime.boundedSessionExpiry(
-                    requested: now.addingTimeInterval(3 * 60 * 60),
+                    requested: now.addingTimeInterval(24 * 60 * 60),
                     now: now
                 )
             ).timeIntervalSince(now),
             SafetySOSRuntime.maximumSessionSeconds,
             accuracy: 0.001
+        )
+        XCTAssertEqual(SafetySOSRuntime.fallbackSessionSeconds, 8 * 60 * 60)
+        XCTAssertEqual(SafetySOSRuntime.maximumSessionSeconds, 12 * 60 * 60)
+        XCTAssertEqual(
+            SafetySOSRuntime.resumedLocationSequence(
+                server: 41,
+                persisted: NSNumber(value: 56),
+                sameDispatch: true
+            ),
+            56
+        )
+        XCTAssertEqual(
+            SafetySOSRuntime.resumedLocationSequence(
+                server: 41,
+                persisted: NSNumber(value: 56),
+                sameDispatch: false
+            ),
+            41
         )
         XCTAssertNil(
             SafetySOSRuntime.boundedSessionExpiry(
@@ -353,9 +404,9 @@ final class SafetyPagingAndShellContractTests: XCTestCase {
             "SafetySOSRuntime.shared.refreshActiveIncidentStatusIfNeeded()"
         ))
         XCTAssertTrue(strings.contains(
-            #"value":"Reached %1$lld of %2$lld contacts"#
+            #"value":"Delivery or response confirmed for %1$lld of %2$lld contacts"#
         ))
-        XCTAssertFalse(strings.contains("Provider-confirmed delivery"))
+        XCTAssertTrue(strings.contains("Delivery or response confirmed"))
         XCTAssertTrue(strings.contains(
             #""safety.sos.notifications.off""#
         ))

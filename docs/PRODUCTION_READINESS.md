@@ -27,7 +27,7 @@ or a person's response to a page.
 | Shared server tenancy | **Locally verified, identity pending** | `NOOP_AUTH_MODE=shared` requires retry-safe per-installation credentials for biometric routes, gives each native device one exclusive installation owner, returns `404` across tenant boundaries, and keeps the operator token administrative. Rotation, export, hard deletion, and Safety/Friends erasure pass memory and PostgreSQL isolation tests. Public signup, identity proof, recovery, support access, managed key posture, and independent penetration testing remain launch gates. |
 | Private Friends | **Locally verified on Apple and Android** | Invitation-only enrollment, accepted requests, directional six-field privacy, summary-only replacement upload, removal, deletion, and localized Android UI are implemented. Android uses an encrypted member credential, retry-stable enrollment and upload identities, best-effort WorkManager refresh, and server-confirmed cleanup for an interrupted first join. There is no public directory, ranking, or end-to-end encryption. |
 | Safety contact enrollment | **Locally verified** | Two accepted contacts are required, five is the maximum, invitations are one-time, and clients keep reminding until the accepted minimum is met. |
-| Acknowledged Safety paging | **Locally verified in automation** | Durable incidents, idempotency, leases, bounded retries, attempt history, provider receipts, SMS-first delivery, voice fallback, signed responder links, DTMF, acknowledgement, cancellation, resolution, expiry, and privacy-safe monitoring are covered. This is contact paging, not emergency dispatch. |
+| Acknowledged Safety paging | **Locally verified in automation; carrier evidence pending** | App SOS and repeated band SOS origins create durable incidents. Independent bounded SMS/voice rounds continue until acknowledgement; acknowledgement cancels unsent work. Signed responder links expose latest-only location for a selected 8 or 12 hours. Idempotency, leases, retries, attempt history, provider receipts, DTMF, cancellation, resolution, expiry, and privacy-safe monitoring are covered. This is contact paging, not emergency dispatch. |
 | Safety data lifecycle | **Locally verified** | Safety-token rotation is versioned and retry-safe; profile export excludes credential/invitation hashes; profile and installation erasure cover contacts, incidents, latest location, queues, attempts, Friends, and biometric data; bounded retention touches only terminal incidents and inactive contacts and preserves replay tombstones. |
 | Strength Trainer | **Locally verified** | Apple and Android provide manual routines/sessions/sets, per-exercise history and PRs, weekly goals, muscle exposure, import/export, and portable restore. Watch can request a routine start on the paired iPhone. Rep sensing and muscular-load claims remain unavailable pending studies. |
 | Sleep planning | **Locally verified** | Target, Balance, and Extra Opportunity modes, debt bounds, behavioral timing context, per-day wake overrides, reminders, and alarm boundaries exist on Apple and Android. Comparative accuracy and physical travel/DST behavior remain evidence gates. |
@@ -58,17 +58,22 @@ or a person's response to a page.
 
 ## Safety release boundary
 
-Automatic anomaly, fall, or medical SOS is **intentionally unavailable**.
-Current wellness signals must not page contacts automatically. That program needs
-a validated detector, an accessible cancellation window, hard-negative and
-staged-event studies, dispatch reliability evidence, human-factors review,
-clinical/safety governance, regional legal analysis, and any required regulatory
-authorization.
+Automatic medical, rhythm, SpO2, temperature, stress, and wellness SOS is
+**intentionally unavailable**. Those signals never enter the paging API.
 
-The supported Safety action is explicit and user-confirmed. It pages accepted
-trusted contacts and tells them to call the owner or local emergency services;
-NOOP does not contact emergency services and cannot guarantee carrier delivery or
-human response.
+The server models a separate possible-fall contract, but new automatic fall
+incidents are hard-disabled because authenticated detector attestation is not
+implemented. The preparatory flag and allowlist cannot activate transport, and
+shipping clients construct no fall candidate. Replacing the hard block still
+requires authenticated firmware transport, staged-event and hard-negative
+studies, participant/device-held-out evidence, physical background/haptic
+testing, carrier evidence, accessible human-factors review, regional legal
+analysis, and any required regulatory authorization.
+
+Available Safety actions are app-confirmed SOS and a configured repeated band
+SOS gesture. They page accepted trusted contacts and tell them to call the owner
+or local emergency services. NOOP does not contact emergency services and cannot
+guarantee carrier delivery or human response.
 
 ## Release rule
 

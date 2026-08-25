@@ -89,7 +89,7 @@ from app.safety_repository import (
     SafetyRepository,
 )
 from app.safety_capabilities import SafetyCapabilitySigner
-from app.safety_worker import SafetyDeliveryWorker
+from app.safety_worker import SafetyDeliveryWorker, safety_incident_summary
 from app.tenancy import (
     InstallationConflictError,
     InstallationNotFoundError,
@@ -392,6 +392,42 @@ def _canonical_payload_hash(payload: SyncPayload) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def _safety_page_request_hashes(
+    page: SafetyPageCreate,
+) -> tuple[str, frozenset[str]]:
+    canonical = json.dumps(
+        page.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    request_hash = hashlib.sha256(canonical).hexdigest()
+    accepted = {request_hash}
+    if (
+        page.trigger == "manual_sos"
+        and page.share_duration_hours == 8
+        and page.evidence is None
+    ):
+        legacy = json.dumps(
+            {"trigger": "manual_sos"},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        accepted.add(hashlib.sha256(legacy).hexdigest())
+    return request_hash, frozenset(accepted)
+
+
+def _require_authenticated_fall_evidence_verifier() -> None:
+    """Keep automatic paging inert until trusted detector attestation exists."""
+
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "authenticated fall-detector evidence is unavailable in this "
+            "release; an allowlist alone cannot activate automatic paging"
+        ),
+    )
+
+
 def _secret_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -597,10 +633,21 @@ def _safety_response_page(
 ) -> str:
     refresh = ""
     location_block = ""
+    reason_block = ""
     if preview is not None:
         status_value = str(preview["status"])
         if status_value in {"open", "acknowledged"}:
             refresh = '<meta http-equiv="refresh" content="15">'
+        reason = safety_incident_summary(
+            str(preview.get("trigger", "manual_sos")),
+            preview.get("evidence"),
+        )
+        reason_block = f"""
+          <section class="reason">
+            <strong>Why this page started</strong>
+            <span>{html_lib.escape(reason)}</span>
+          </section>
+        """
         location = preview.get("latest_location")
         if location is not None:
             latitude = float(location["latitude"])
@@ -684,9 +731,9 @@ def _safety_response_page(
     .mark {{ color: #9a6d00; font-size: 13px; font-weight: 700; letter-spacing: .08em; }}
     h1 {{ margin: 12px 0; font-size: 28px; line-height: 1.15; letter-spacing: 0; }}
     p {{ color: #4f5962; line-height: 1.55; }}
-    .location {{ display: grid; gap: 7px; margin: 20px 0; padding: 16px;
-                 border: 1px solid #dfe3e7; border-radius: 7px; }}
-    .location span {{ color: #4f5962; font-size: 14px; }}
+    .location, .reason {{ display: grid; gap: 7px; margin: 20px 0; padding: 16px;
+                         border: 1px solid #dfe3e7; border-radius: 7px; }}
+    .location span, .reason span {{ color: #4f5962; font-size: 14px; line-height: 1.45; }}
     .location a {{ color: #087e57; font-weight: 650; }}
     form {{ display: grid; gap: 10px; margin-top: 24px; }}
     button {{ min-height: 48px; border-radius: 7px; font: inherit; font-weight: 650; cursor: pointer; }}
@@ -697,8 +744,8 @@ def _safety_response_page(
       body {{ background: #090a0b; color: #f4f5f6; }}
       main {{ background: #151719; border-color: #303438; box-shadow: none; }}
       p, small {{ color: #abb2b8; }}
-      .location {{ border-color: #303438; }}
-      .location span {{ color: #abb2b8; }}
+      .location, .reason {{ border-color: #303438; }}
+      .location span, .reason span {{ color: #abb2b8; }}
       .location a {{ color: #43d6a3; }}
       .accept {{ background: #f4f5f6; color: #14171a; }}
       .decline {{ border-color: #4b5157; }}
@@ -710,6 +757,7 @@ def _safety_response_page(
     <div class="mark">NOOP SAFETY NETWORK</div>
     <h1>{html_lib.escape(title)}</h1>
     <p>{body}</p>
+    {reason_block}
     {location_block}
     {actions}
     <small>NOOP has not contacted emergency services. In immediate danger, call local emergency services directly.</small>
@@ -2823,24 +2871,79 @@ def create_app(
                 status_code=400,
                 detail="Idempotency-Key must be a UUID",
             ) from exc
-        request_hash = hashlib.sha256(
-            json.dumps(
-                body.model_dump(mode="json"),
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
-        now = await runtime_safety_repository.coordination_now()
+        request_hash, accepted_request_hashes = _safety_page_request_hashes(body)
         try:
+            replay = await runtime_safety_repository.dispatch_for_idempotency_key(
+                profile_id=str(member["profile_id"]),
+                idempotency_key=idempotency_uuid,
+                accepted_request_hashes=accepted_request_hashes,
+            )
+        except SafetyConflictError as exc:
+            raise_safety_error(exc)
+            raise AssertionError("unreachable")
+        if replay is not None:
+            return _safety_dispatch_response(replay)
+        now = await runtime_safety_repository.coordination_now()
+        evidence = body.evidence
+        if body.trigger == "validated_fall":
+            assert evidence is not None
+            contract = f"{evidence.detector_id}:{evidence.detector_version}"
+            if not runtime_settings.safety_automatic_paging_enabled:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "automatic paging is disabled until a live detector "
+                        "contract is approved and activated"
+                    ),
+                )
+            if contract not in runtime_settings.safety_approved_fall_detectors:
+                raise HTTPException(
+                    status_code=422,
+                    detail="fall detector contract is not approved",
+                )
+            if evidence.response_deadline_at > now:
+                raise HTTPException(
+                    status_code=409,
+                    detail="fall response window has not elapsed",
+                )
+            if now - evidence.response_deadline_at > timedelta(seconds=15):
+                raise HTTPException(
+                    status_code=422,
+                    detail="fall escalation evidence is stale",
+                )
+            if now - evidence.detected_at > timedelta(minutes=3):
+                raise HTTPException(
+                    status_code=422,
+                    detail="fall detector observation is stale",
+                )
+            if evidence.detected_at > now + timedelta(seconds=2):
+                raise HTTPException(
+                    status_code=422,
+                    detail="fall detector observation is in the future",
+                )
+            _require_authenticated_fall_evidence_verifier()
+        try:
+            incident_lifetime_seconds = min(
+                body.share_duration_hours * 60 * 60,
+                runtime_settings.safety_incident_ttl_seconds,
+            )
             dispatch = await runtime_safety_repository.create_dispatch(
                 dispatch_id=str(uuid4()),
                 profile_id=str(member["profile_id"]),
                 idempotency_key=idempotency_uuid,
                 request_hash=request_hash,
+                accepted_request_hashes=accepted_request_hashes,
                 trigger=body.trigger,
+                share_duration_hours=body.share_duration_hours,
+                evidence=(
+                    evidence.model_dump(mode="json") if evidence is not None else None
+                ),
+                escalation_rounds=runtime_settings.safety_escalation_rounds,
+                escalation_interval_seconds=(
+                    runtime_settings.safety_escalation_interval_seconds
+                ),
                 now=now,
-                expires_at=now
-                + timedelta(seconds=runtime_settings.safety_incident_ttl_seconds),
+                expires_at=now + timedelta(seconds=incident_lifetime_seconds),
                 voice_fallback_at=now
                 + timedelta(
                     seconds=(runtime_settings.safety_acknowledgement_timeout_seconds)

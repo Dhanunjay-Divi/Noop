@@ -151,6 +151,7 @@ object SafetySosDispatcher {
                     appContext,
                     active.dispatchId,
                     expiresAtUnix = expiresAtUnix,
+                    startingSequence = active.latestLocation?.sequence ?: 0L,
                 )
                 SafetyIncidentStatusMonitor.start(
                     appContext,
@@ -164,7 +165,8 @@ object SafetySosDispatcher {
                 controller.errorMessage
                     ?: "Finish Safety setup and add two accepted contacts.",
             )
-            controller.pageAcceptedContacts() -> Outcome.Opened
+            controller.pageAcceptedContacts(trigger = SafetyPageTrigger.BAND_SOS) ->
+                Outcome.Opened
             else -> Outcome.Unavailable(
                 controller.errorMessage ?: "The paging server did not accept the request.",
             )

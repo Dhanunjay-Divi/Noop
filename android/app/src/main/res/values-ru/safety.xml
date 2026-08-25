@@ -43,7 +43,7 @@
     <string name="safety_duration_hours_minutes">%1$d ч %2$d мин</string>
     <string name="safety_duration_minutes">%1$d мин</string>
     <string name="safety_duration_seconds">%1$d с</string>
-    <string name="safety_emergency_body">Используйте встроенную функцию экстренного вызова SOS на телефоне или немедленно свяжитесь с местными экстренными службами. NOOP оповещает принявших приглашение контактов только после вашего подтверждения; оно не вызывает экстренные службы и не действует автоматически по показателям самочувствия.</string>
+    <string name="safety_emergency_body">Используйте встроенную функцию экстренного вызова SOS на телефоне или немедленно свяжитесь с местными экстренными службами. NOOP может оповестить принявших приглашение контактов из приложения или настроенным жестом на браслете. NOOP никогда не вызывает экстренные службы и не оповещает по показателям самочувствия.</string>
     <string name="safety_emergency_title">При непосредственной опасности</string>
     <string name="safety_enrollment_activate">Активировать Сеть безопасности</string>
     <string name="safety_enrollment_activating">Активация…</string>
@@ -117,8 +117,8 @@
     <string name="safety_page_confirm_body">Сейчас NOOP отправит SMS каждому принявшему приглашение контакту. Если никто не подтвердит получение, последуют автоматические голосовые вызовы. Экстренные службы не вызываются.</string>
     <string name="safety_page_confirm_title">Оповестить экстренные контакты сейчас?</string>
     <string name="safety_page_contact_responses">Ответы контактов</string>
-    <string name="safety_page_contacts_reached_at_format">Есть связь с %1$d из %2$d контактов, %3$s</string>
-    <string name="safety_page_contacts_reached_format">Есть связь с %1$d из %2$d контактов</string>
+    <string name="safety_page_contacts_reached_at_format">Доставка или ответ подтверждены для %1$d из %2$d контактов, %3$s</string>
+    <string name="safety_page_contacts_reached_format">Доставка или ответ подтверждены для %1$d из %2$d контактов</string>
     <string name="safety_page_delivery_counts_format">Отправлено: %1$d · ожидается: %2$d · требуют внимания: %3$d</string>
     <string name="safety_page_detail_acknowledged">Контакт из Сети безопасности отвечает.</string>
     <string name="safety_page_detail_acknowledged_format">%1$s отвечает. Поддерживайте прямую связь, пока ситуация не будет разрешена.</string>
@@ -133,8 +133,13 @@
     <string name="safety_page_disabled_contacts">Приглашение должны принять как минимум два контакта.</string>
     <string name="safety_page_disabled_delivery">Отправка через Сеть безопасности временно недоступна.</string>
     <string name="safety_page_disabled_setup">Завершите настройку безопасности, прежде чем оповещать контакты.</string>
-    <string name="safety_page_disclaimer">Это подтверждённое пользователем оповещение доверенных контактов. NOOP не отправляет оповещения автоматически на основании показателей самочувствия и не вызывает экстренные службы.</string>
+    <string name="safety_page_disclaimer">Оповещение запускается через SOS в приложении или повторный жест SOS на браслете. Оповещение о возможном падении неактивно. Показатели самочувствия никогда не запускают оповещение. NOOP не вызывает экстренные службы.</string>
+    <string name="safety_page_escalation_format">До подтверждения контактом выполняется до %1$d раундов оповещения.</string>
     <string name="safety_page_keep_open">Оставить открытым</string>
+    <string name="safety_page_reason_app">Запущено из приложения NOOP.</string>
+    <string name="safety_page_reason_band">Запущено после повторного жеста SOS на Noop Band.</string>
+    <string name="safety_page_reason_fall">После отсутствия ответа на проверку безопасности были записаны данные о движении при возможном падении.</string>
+    <string name="safety_page_reason_observation">Это наблюдаемое событие движения, а не диагноз или подтверждённая причина.</string>
     <string name="safety_page_resolve_action">Отметить как разрешённое</string>
     <string name="safety_page_resolve_guidance">Отметьте оповещение как разрешённое после того, как убедитесь, что помощь больше не требуется.</string>
     <string name="safety_page_responding_format">%1$s отвечает</string>
@@ -152,6 +157,7 @@
     <string name="safety_page_submitting">Отправка оповещения о безопасности…</string>
     <string name="safety_page_title">Отправить срочное оповещение</string>
     <string name="safety_page_update_title">Обновить это оповещение о безопасности?</string>
+    <string name="safety_page_why_started">Почему началось это оповещение</string>
     <string name="safety_privacy_body">Черновик и время отметки остаются на этом устройстве. Местоположение покидает NOOP только когда вы сознательно делитесь подготовленным сообщением через другое приложение.</string>
     <string name="safety_privacy_title">Конфиденциально по умолчанию</string>
     <string name="safety_refresh">Обновить</string>
@@ -176,6 +182,10 @@
     <string name="safety_share_review_prompt">Выберите человека и проверьте сообщение перед отправкой.</string>
     <string name="safety_share_subject">Личная отметка безопасности</string>
     <string name="safety_share_title">Поделиться с доверенным человеком</string>
+    <string name="safety_sos_duration_12_hours">12 часов</string>
+    <string name="safety_sos_duration_8_hours">8 часов</string>
+    <string name="safety_sos_duration_help">Передаётся только последняя геопозиция в течение выбранного времени. Передача завершится раньше, если оповещение разрешить или отменить.</string>
+    <string name="safety_sos_duration_title">Геопозиция в реальном времени</string>
     <string name="safety_sos_gesture_four">4 раза</string>
     <string name="safety_sos_gesture_help_format">Noop Band регистрирует одно двойное касание. Повторите его %1$d раза с интервалом менее 3 секунд. Оповещение отправится без дополнительного подтверждения.</string>
     <string name="safety_sos_gesture_priority">Подтверждения будильника и воды имеют приоритет. Показатели самочувствия никогда не запускают этот жест.</string>
@@ -194,7 +204,7 @@
     <string name="safety_sos_location_title">Геопозиция во время SOS</string>
     <string name="safety_sos_notifications_off">Уведомления отключены. Оповещение продолжит работать, но сведения о доставке могут появиться только в разделе «Безопасность».</string>
     <string name="safety_sos_notifications_ready">Уведомления о результате готовы.</string>
-    <string name="safety_subtitle">Ручные инструменты, чтобы связаться с доверенным человеком.</string>
+    <string name="safety_subtitle">Инструменты для связи с доверенными людьми.</string>
     <string name="safety_timer_active">Таймер активен</string>
     <string name="safety_timer_disclaimer">Когда таймер завершится, NOOP попросит операционную систему показать одно локальное напоминание. Приложение не пишет контактам и не предпринимает дальнейших действий, если вы не ответите; точное время показа не гарантируется.</string>
     <string name="safety_timer_due_soon">Скоро срок</string>

@@ -19,4 +19,26 @@ class BackgroundReconnectPolicyTest {
         assertTrue(allowed.reconnect)
         assertFalse(allowed.armRealtime)
     }
+
+    @Test
+    fun activeSafetyLocationRestartsServiceEvenWhenBandReconnectIsOff() {
+        assertTrue(
+            shouldStartConnectionServiceAfterBoot(
+                backgroundReconnectAllowed = false,
+                safetyLocationActive = true,
+            ),
+        )
+        assertTrue(
+            shouldStartConnectionServiceAfterBoot(
+                backgroundReconnectAllowed = true,
+                safetyLocationActive = false,
+            ),
+        )
+        assertFalse(
+            shouldStartConnectionServiceAfterBoot(
+                backgroundReconnectAllowed = false,
+                safetyLocationActive = false,
+            ),
+        )
+    }
 }

@@ -43,7 +43,7 @@
     <string name="safety_duration_hours_minutes">%1$d h %2$d min</string>
     <string name="safety_duration_minutes">%1$d min</string>
     <string name="safety_duration_seconds">%1$d s</string>
-    <string name="safety_emergency_body">Usa subito SOS emergenze del telefono o contatta i servizi di emergenza locali. NOOP avvisa i contatti accettati solo dopo la tua conferma; non manda soccorsi e non agisce automaticamente in base ai dati sul benessere.</string>
+    <string name="safety_emergency_body">Usa subito SOS emergenze del telefono o contatta i servizi di emergenza locali. NOOP può avvisare i contatti accettati dall’app o con un gesto configurato sulla fascia. NOOP non manda mai soccorsi e non avvisa mai in base ai dati sul benessere.</string>
     <string name="safety_emergency_title">Se il pericolo è immediato</string>
     <string name="safety_enrollment_activate">Attiva Rete di sicurezza</string>
     <string name="safety_enrollment_activating">Attivazione…</string>
@@ -117,8 +117,8 @@
     <string name="safety_page_confirm_body">NOOP invia ora un SMS a ogni contatto che ha accettato. Se nessuno conferma, seguiranno chiamate vocali automatiche. I servizi di emergenza non vengono contattati.</string>
     <string name="safety_page_confirm_title">Avvisare ora i tuoi contatti di emergenza?</string>
     <string name="safety_page_contact_responses">Risposte dei contatti</string>
-    <string name="safety_page_contacts_reached_at_format">Raggiunti %1$d contatti su %2$d alle %3$s</string>
-    <string name="safety_page_contacts_reached_format">Raggiunti %1$d contatti su %2$d</string>
+    <string name="safety_page_contacts_reached_at_format">Consegna o risposta confermata per %1$d contatti su %2$d alle %3$s</string>
+    <string name="safety_page_contacts_reached_format">Consegna o risposta confermata per %1$d contatti su %2$d</string>
     <string name="safety_page_delivery_counts_format">%1$d inviati · %2$d in attesa · %3$d da controllare</string>
     <string name="safety_page_detail_acknowledged">Un contatto della Rete di sicurezza sta rispondendo.</string>
     <string name="safety_page_detail_acknowledged_format">%1$s sta rispondendo. Mantieni un contatto diretto finché la situazione non è risolta.</string>
@@ -133,8 +133,13 @@
     <string name="safety_page_disabled_contacts">Almeno due contatti devono accettare l’invito.</string>
     <string name="safety_page_disabled_delivery">L’invio tramite la Rete di sicurezza è temporaneamente non disponibile.</string>
     <string name="safety_page_disabled_setup">Completa la configurazione di Sicurezza prima di avvisare i contatti.</string>
-    <string name="safety_page_disclaimer">Questo è un avviso confermato dall’utente ai contatti di fiducia. NOOP non invia avvisi automaticamente in base ai punteggi di benessere e non allerta i servizi di emergenza.</string>
+    <string name="safety_page_disclaimer">Gli avvisi iniziano da un SOS nell’app o un gesto SOS ripetuto sul band. Gli avvisi per una possibile caduta non sono attivi. I punteggi di benessere non li attivano mai. NOOP non allerta i servizi di emergenza.</string>
+    <string name="safety_page_escalation_format">Proseguono fino a %1$d cicli di avviso finché un contatto non conferma.</string>
     <string name="safety_page_keep_open">Mantieni aperto</string>
+    <string name="safety_page_reason_app">Avviato dall’app NOOP.</string>
+    <string name="safety_page_reason_band">Avviato dopo un gesto SOS ripetuto sul Noop Band.</string>
+    <string name="safety_page_reason_fall">Sono stati registrati dati di movimento relativi a una possibile caduta dopo la mancata risposta al controllo di sicurezza.</string>
+    <string name="safety_page_reason_observation">È un evento di movimento osservato, non una diagnosi o una causa confermata.</string>
     <string name="safety_page_resolve_action">Segna come risolto</string>
     <string name="safety_page_resolve_guidance">Segna come risolto dopo aver verificato che non serve più aiuto.</string>
     <string name="safety_page_responding_format">%1$s sta rispondendo</string>
@@ -152,6 +157,7 @@
     <string name="safety_page_submitting">Invio dell’avviso di sicurezza…</string>
     <string name="safety_page_title">Invia un avviso urgente</string>
     <string name="safety_page_update_title">Aggiornare questo avviso di Sicurezza?</string>
+    <string name="safety_page_why_started">Perché è iniziato questo avviso</string>
     <string name="safety_privacy_body">La bozza e l’ora del contatto restano su questo dispositivo. La posizione lascia NOOP solo quando condividi intenzionalmente il messaggio preparato tramite un’altra app.</string>
     <string name="safety_privacy_title">Privato per impostazione predefinita</string>
     <string name="safety_refresh">Aggiorna</string>
@@ -176,6 +182,10 @@
     <string name="safety_share_review_prompt">Scegli una persona e controlla il messaggio prima di inviarlo.</string>
     <string name="safety_share_subject">Contatto di sicurezza personale</string>
     <string name="safety_share_title">Condividi con una persona di fiducia</string>
+    <string name="safety_sos_duration_12_hours">12 ore</string>
+    <string name="safety_sos_duration_8_hours">8 ore</string>
+    <string name="safety_sos_duration_help">Condivide solo la posizione più recente per il tempo scelto. La condivisione termina prima se l’avviso viene risolto o annullato.</string>
+    <string name="safety_sos_duration_title">Posizione in tempo reale</string>
     <string name="safety_sos_gesture_four">4 volte</string>
     <string name="safety_sos_gesture_help_format">Noop Band registra un evento di doppio tocco. Ripetilo %1$d volte con meno di 3 secondi tra ciascuno. L’avviso parte senza un’altra conferma.</string>
     <string name="safety_sos_gesture_priority">Le conferme di sveglia e idratazione hanno la priorità. I segnali di benessere non attivano mai questo gesto.</string>
@@ -194,7 +204,7 @@
     <string name="safety_sos_location_title">Posizione in tempo reale durante un SOS</string>
     <string name="safety_sos_notifications_off">Le notifiche sono disattivate. Gli avvisi funzionano comunque, ma gli aggiornamenti sulla consegna potrebbero apparire solo in Sicurezza.</string>
     <string name="safety_sos_notifications_ready">Le notifiche dei risultati sono pronte.</string>
-    <string name="safety_subtitle">Strumenti manuali per coinvolgere una persona di fiducia.</string>
+    <string name="safety_subtitle">Strumenti per coinvolgere persone di fiducia.</string>
     <string name="safety_timer_active">Timer attivo</string>
     <string name="safety_timer_disclaimer">Alla fine del timer, NOOP chiede al sistema operativo di mostrare un promemoria locale. Non invia messaggi a un contatto e non interviene se non rispondi; l’orario di consegna non è garantito.</string>
     <string name="safety_timer_due_soon">In scadenza</string>

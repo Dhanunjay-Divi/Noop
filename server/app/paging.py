@@ -61,6 +61,7 @@ class PagingProvider(Protocol):
         *,
         to_phone: str,
         owner_name: str,
+        incident_summary: str,
         response_url: str,
     ) -> PagingSubmission: ...
 
@@ -69,6 +70,7 @@ class PagingProvider(Protocol):
         *,
         to_phone: str,
         owner_name: str,
+        incident_summary: str,
         response_url: str,
     ) -> PagingSubmission: ...
 
@@ -129,11 +131,12 @@ class TwilioPagingProvider:
         *,
         to_phone: str,
         owner_name: str,
+        incident_summary: str,
         response_url: str,
     ) -> PagingSubmission:
         body = (
             f"NOOP SAFETY PAGE: {owner_name} may need urgent help. Call them "
-            "now, then acknowledge or decline here: "
+            f"now. {incident_summary} Acknowledge or decline here: "
             f"{response_url} If you believe they are in immediate danger, "
             "contact local emergency services. NOOP has not dispatched "
             "emergency services."
@@ -145,16 +148,19 @@ class TwilioPagingProvider:
         *,
         to_phone: str,
         owner_name: str,
+        incident_summary: str,
         response_url: str,
     ) -> PagingSubmission:
         spoken_name = html.escape(owner_name, quote=True)
+        spoken_summary = html.escape(incident_summary, quote=True)
         action = html.escape(response_url, quote=True)
         twiml = (
             "<Response>"
             f'<Gather input="dtmf" numDigits="1" timeout="10" '
             f'method="POST" action="{action}">'
             '<Say voice="alice">This is a NOOP safety page. '
-            f"{spoken_name} may need urgent help. Press 1 if you are responding. "
+            f"{spoken_name} may need urgent help. {spoken_summary} "
+            "Press 1 if you are responding. "
             "Press 2 if you cannot respond.</Say>"
             "</Gather>"
             '<Say voice="alice">No response was recorded. Please call them '

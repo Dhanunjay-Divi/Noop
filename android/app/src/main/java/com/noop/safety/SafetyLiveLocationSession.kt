@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** Durable latest-only location session state for one active, explicitly opened Safety incident. */
+/** Durable latest-only location session state for one active Safety incident. */
 object SafetyLiveLocationSession {
     data class State(
         val dispatchId: String? = null,
@@ -22,7 +22,8 @@ object SafetyLiveLocationSession {
     private const val DISPATCH_ID = "dispatch_id"
     private const val SEQUENCE = "sequence"
     private const val EXPIRES_AT_UNIX = "expires_at_unix"
-    private const val MAXIMUM_SESSION_SECONDS = 60L * 60L
+    private const val FALLBACK_SESSION_SECONDS = 8L * 60L * 60L
+    internal const val MAXIMUM_SESSION_SECONDS = 12L * 60L * 60L
 
     private val mutableState = MutableStateFlow(State())
     val state: StateFlow<State> = mutableState.asStateFlow()
@@ -50,19 +51,33 @@ object SafetyLiveLocationSession {
         context: Context,
         dispatchId: String,
         expiresAtUnix: Long? = null,
+        startingSequence: Long = 0L,
         nowUnix: Long = System.currentTimeMillis() / 1_000L,
     ) {
         initialize(context)
         if (dispatchId.isBlank()) return
         val boundedExpiry = minOf(
-            expiresAtUnix?.takeIf { it > nowUnix } ?: (nowUnix + MAXIMUM_SESSION_SECONDS),
+            expiresAtUnix?.takeIf { it > nowUnix } ?: (nowUnix + FALLBACK_SESSION_SECONDS),
             nowUnix + MAXIMUM_SESSION_SECONDS,
         )
         val current = mutableState.value
+        val resumedSequence = resumedSequence(
+            currentDispatchId = current.dispatchId,
+            requestedDispatchId = dispatchId,
+            currentSequence = current.sequence,
+            serverSequence = startingSequence,
+        )
         val next = if (current.dispatchId == dispatchId) {
-            current.copy(expiresAtUnix = minOf(current.expiresAtUnix ?: boundedExpiry, boundedExpiry))
+            current.copy(
+                sequence = resumedSequence,
+                expiresAtUnix = minOf(current.expiresAtUnix ?: boundedExpiry, boundedExpiry),
+            )
         } else {
-            State(dispatchId = dispatchId, sequence = 0L, expiresAtUnix = boundedExpiry)
+            State(
+                dispatchId = dispatchId,
+                sequence = resumedSequence,
+                expiresAtUnix = boundedExpiry,
+            )
         }
         mutableState.value = next
         prefs(context).edit()
@@ -100,6 +115,23 @@ object SafetyLiveLocationSession {
         }
         mutableState.value = State()
         prefs(context).edit().clear().apply()
+    }
+
+    internal fun remainingSessionSeconds(expiresAtUnix: Long, nowUnix: Long): Long =
+        (expiresAtUnix - nowUnix).coerceIn(0L, MAXIMUM_SESSION_SECONDS)
+
+    internal fun resumedSequence(
+        currentDispatchId: String?,
+        requestedDispatchId: String,
+        currentSequence: Long,
+        serverSequence: Long,
+    ): Long {
+        val server = serverSequence.coerceAtLeast(0L)
+        return if (currentDispatchId == requestedDispatchId) {
+            maxOf(currentSequence.coerceAtLeast(0L), server)
+        } else {
+            server
+        }
     }
 
     private fun prefs(context: Context) =

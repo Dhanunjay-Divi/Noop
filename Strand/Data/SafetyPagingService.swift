@@ -7,6 +7,35 @@ import UserNotifications
 
 @MainActor
 final class SafetyPagingService: ObservableObject {
+    enum PageOrigin {
+        case app
+        case band
+        case validatedFall(RemoteSafetyValidatedFallEvidence)
+
+        func request(shareDurationHours: Int) -> RemoteSafetyPageCreate {
+            let duration: RemoteSafetyShareDurationHours =
+                shareDurationHours == 12 ? .twelve : .eight
+            switch self {
+            case .app:
+                return RemoteSafetyPageCreate(
+                    trigger: .manualSOS,
+                    shareDurationHours: duration
+                )
+            case .band:
+                return RemoteSafetyPageCreate(
+                    trigger: .bandSOS,
+                    shareDurationHours: duration
+                )
+            case .validatedFall(let evidence):
+                return RemoteSafetyPageCreate(
+                    trigger: .validatedFall,
+                    shareDurationHours: duration,
+                    evidence: evidence
+                )
+            }
+        }
+    }
+
     enum SetupState: Equatable {
         case needsServer
         case needsEnrollment
@@ -234,7 +263,10 @@ final class SafetyPagingService: ObservableObject {
         }
     }
 
-    func pageAcceptedContacts() async -> Bool {
+    func pageAcceptedContacts(
+        origin: PageOrigin = .app,
+        shareDurationHours: Int = SafetyPagingPreferences.shareDurationHours
+    ) async -> Bool {
         guard canPage else {
             errorMessage = Self.deliveryAvailable(
                 providerConfigured: pagingConfigured,
@@ -246,23 +278,48 @@ final class SafetyPagingService: ObservableObject {
         }
         var submitted = false
         await withBusy {
-            let key = SafetyPagingPreferences.pendingPageKey ?? UUID()
-            SafetyPagingPreferences.pendingPageKey = key
+            let requestedPage = origin.request(
+                shareDurationHours: shareDurationHours
+            )
+            var pending = SafetyPagingPreferences.pendingPage
+                ?? SafetyPendingPageRequest(
+                    idempotencyKey: UUID(),
+                    page: requestedPage
+                )
+            SafetyPagingPreferences.pendingPage = pending
             do {
                 let context = try Self.requiredContext()
-                let dispatch = try await Self.client(for: context).sendManualSafetyPage(
-                    idempotencyKey: key,
-                    authorization: .safety(token: context.token)
-                )
-                SafetyPagingPreferences.pendingPageKey = nil
-                lastDispatch = dispatch
-                merge(dispatch)
-                SafetySOSRuntime.shared.startLocationSharing(
-                    for: dispatch,
-                    service: self
-                )
-                statusMessage = String(localized: "safety.page.detail.submitted")
-                submitted = dispatch.status != .failed
+                let client = try Self.client(for: context)
+                var replacedTerminalReplay = false
+                while true {
+                    let dispatch = try await client.sendSafetyPage(
+                        pending.page,
+                        idempotencyKey: pending.idempotencyKey,
+                        authorization: .safety(token: context.token)
+                    )
+                    SafetyPagingPreferences.pendingPage = nil
+                    if Self.shouldReplaceTerminalPageReplay(
+                        status: dispatch.status,
+                        idempotentReplay: dispatch.idempotentReplay
+                    ), !replacedTerminalReplay {
+                        replacedTerminalReplay = true
+                        pending = SafetyPendingPageRequest(
+                            idempotencyKey: UUID(),
+                            page: requestedPage
+                        )
+                        SafetyPagingPreferences.pendingPage = pending
+                        continue
+                    }
+                    lastDispatch = dispatch
+                    merge(dispatch)
+                    SafetySOSRuntime.shared.startLocationSharing(
+                        for: dispatch,
+                        service: self
+                    )
+                    statusMessage = String(localized: "safety.page.detail.submitted")
+                    submitted = dispatch.status != .failed
+                    break
+                }
             } catch {
                 let serverStatus: Int?
                 if case let RemoteSyncError.server(status, _) = error {
@@ -271,7 +328,7 @@ final class SafetyPagingService: ObservableObject {
                     serverStatus = nil
                 }
                 if !Self.shouldRetainPageIdempotencyKey(serverStatus: serverStatus) {
-                    SafetyPagingPreferences.pendingPageKey = nil
+                    SafetyPagingPreferences.pendingPage = nil
                 }
                 present(error)
             }
@@ -289,6 +346,7 @@ final class SafetyPagingService: ObservableObject {
                     incident.dispatchId,
                     authorization: .safety(token: context.token)
                 )
+                reconcilePendingPage(with: refreshed)
                 lastDispatch = refreshed
                 merge(refreshed)
                 await SafetySOSRuntime.shared.reconcileStatus(refreshed)
@@ -298,6 +356,9 @@ final class SafetyPagingService: ObservableObject {
                     authorization: .safety(token: context.token)
                 )
                 recentIncidents = response.incidents
+                response.incidents.forEach {
+                    reconcilePendingPage(with: $0)
+                }
                 lastDispatch = response.incidents.first
             }
         } catch {
@@ -415,10 +476,20 @@ final class SafetyPagingService: ObservableObject {
                 authorization: .safety(token: context.token)
             )
             recentIncidents = incidents.incidents
+            incidents.incidents.forEach {
+                reconcilePendingPage(with: $0)
+            }
             lastDispatch = incidents.incidents.first
         } catch {
             present(error)
         }
+    }
+
+    private func reconcilePendingPage(with incident: RemoteSafetyDispatch) {
+        guard SafetyPagingPreferences.pendingPage?.idempotencyKey
+            == incident.idempotencyKey
+        else { return }
+        SafetyPagingPreferences.pendingPage = nil
     }
 
     private func merge(_ incident: RemoteSafetyDispatch) {
@@ -558,6 +629,29 @@ final class SafetyPagingService: ObservableObject {
         guard let serverStatus else { return true }
         return !(400..<500).contains(serverStatus)
     }
+
+    static func shouldReplaceTerminalPageReplay(
+        status: RemoteSafetyIncidentStatus,
+        idempotentReplay: Bool
+    ) -> Bool {
+        idempotentReplay
+            && ![.open, .acknowledged, .pending].contains(status)
+    }
+}
+
+struct SafetyPendingPageRequest: Codable, Equatable {
+    let idempotencyKey: UUID
+    let page: RemoteSafetyPageCreate
+
+    static func legacyManual(idempotencyKey: UUID) -> Self {
+        SafetyPendingPageRequest(
+            idempotencyKey: idempotencyKey,
+            page: RemoteSafetyPageCreate(
+                trigger: .manualSOS,
+                shareDurationHours: .eight
+            )
+        )
+    }
 }
 
 enum SafetyPagingPreferences {
@@ -596,18 +690,42 @@ enum SafetyPagingPreferences {
         get { defaults.string(forKey: prefix + "pendingDisplayName") ?? "" }
         set { defaults.set(newValue, forKey: prefix + "pendingDisplayName") }
     }
-    static var pendingPageKey: UUID? {
+    static var shareDurationHours: Int {
         get {
-            defaults.string(forKey: prefix + "pendingPageKey")
-                .flatMap(UUID.init(uuidString:))
+            defaults.integer(forKey: prefix + "shareDurationHours") == 12
+                ? 12
+                : 8
+        }
+        set {
+            defaults.set(newValue == 12 ? 12 : 8, forKey: prefix + "shareDurationHours")
+        }
+    }
+    static var pendingPage: SafetyPendingPageRequest? {
+        get {
+            guard let data = defaults.data(forKey: prefix + "pendingPage") else {
+                if let legacyKey = defaults.string(
+                    forKey: prefix + "pendingPageKey"
+                ).flatMap(UUID.init(uuidString:)) {
+                    return SafetyPendingPageRequest.legacyManual(
+                        idempotencyKey: legacyKey
+                    )
+                }
+                return nil
+            }
+            return try? JSONDecoder().decode(
+                SafetyPendingPageRequest.self,
+                from: data
+            )
         }
         set {
             if let newValue {
-                defaults.set(
-                    newValue.uuidString.lowercased(),
-                    forKey: prefix + "pendingPageKey"
-                )
+                guard let encoded = try? JSONEncoder().encode(newValue) else {
+                    return
+                }
+                defaults.set(encoded, forKey: prefix + "pendingPage")
+                defaults.removeObject(forKey: prefix + "pendingPageKey")
             } else {
+                defaults.removeObject(forKey: prefix + "pendingPage")
                 defaults.removeObject(forKey: prefix + "pendingPageKey")
             }
         }

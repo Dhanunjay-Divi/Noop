@@ -43,7 +43,7 @@
     <string name="safety_duration_hours_minutes">%1$d 小時 %2$d 分鐘</string>
     <string name="safety_duration_minutes">%1$d 分鐘</string>
     <string name="safety_duration_seconds">%1$d 秒</string>
-    <string name="safety_emergency_body">立即使用手機內建的「SOS 緊急服務」，或聯絡當地緊急服務。NOOP 只會在你確認後通知已接受邀請的聯絡人；它不會派遣緊急服務，也不會根據健康資料自動採取行動。</string>
+    <string name="safety_emergency_body">立即使用手機內建的「SOS 緊急服務」，或聯絡當地緊急服務。NOOP 可透過 App 或已設定的手環手勢通知已接受邀請的聯絡人。NOOP 絕不會派遣緊急服務，也不會根據健康資料發出通知。</string>
     <string name="safety_emergency_title">如果危險迫在眉睫</string>
     <string name="safety_enrollment_activate">啟用安全網路</string>
     <string name="safety_enrollment_activating">正在啟用…</string>
@@ -117,8 +117,8 @@
     <string name="safety_page_confirm_body">NOOP 現在會向每位已接受邀請的聯絡人傳送簡訊。如果無人確認，之後會自動撥打語音電話。NOOP 不會聯絡緊急服務。</string>
     <string name="safety_page_confirm_title">立即通知你的緊急聯絡人？</string>
     <string name="safety_page_contact_responses">聯絡人回應</string>
-    <string name="safety_page_contacts_reached_at_format">已於 %3$s 聯絡 %1$d/%2$d 位聯絡人</string>
-    <string name="safety_page_contacts_reached_format">已聯絡 %1$d/%2$d 位聯絡人</string>
+    <string name="safety_page_contacts_reached_at_format">已於 %3$s 確認 %1$d/%2$d 位聯絡人的傳遞或回應</string>
+    <string name="safety_page_contacts_reached_format">已確認 %1$d/%2$d 位聯絡人的傳遞或回應</string>
     <string name="safety_page_delivery_counts_format">已提交 %1$d · 待處理 %2$d · 需注意 %3$d</string>
     <string name="safety_page_detail_acknowledged">一位安全網路聯絡人正在回應。</string>
     <string name="safety_page_detail_acknowledged_format">%1$s 正在回應。在情況解決前，請保持直接聯絡。</string>
@@ -133,8 +133,13 @@
     <string name="safety_page_disabled_contacts">至少需要 2 位聯絡人接受邀請。</string>
     <string name="safety_page_disabled_delivery">安全網路暫時無法傳遞訊息。</string>
     <string name="safety_page_disabled_setup">通知聯絡人前，請先完成安全設定。</string>
-    <string name="safety_page_disclaimer">這是由使用者確認後傳送給信任聯絡人的通知。NOOP 不會根據健康評分自動傳送通知，也不會派遣緊急服務。</string>
+    <string name="safety_page_disclaimer">通知可由 App SOS 或手環上的重複 SOS 手勢發起。可能跌倒通知尚未啟用。健康評分絕不會觸發通知。NOOP 不會派遣緊急服務。</string>
+    <string name="safety_page_escalation_format">在聯絡人確認前，最多會進行 %1$d 輪通知。</string>
     <string name="safety_page_keep_open">保持開啟</string>
+    <string name="safety_page_reason_app">從 NOOP App 發起。</string>
+    <string name="safety_page_reason_band">在 Noop Band 上重複執行 SOS 手勢後發起。</string>
+    <string name="safety_page_reason_fall">安全確認未獲回應後，系統記錄了可能跌倒的動作證據。</string>
+    <string name="safety_page_reason_observation">這是觀察到的動作事件，並非診斷或已確認原因。</string>
     <string name="safety_page_resolve_action">標示為已解決</string>
     <string name="safety_page_resolve_guidance">確認不再需要協助後，再將通知標示為已解決。</string>
     <string name="safety_page_responding_format">%1$s 正在回應</string>
@@ -152,6 +157,7 @@
     <string name="safety_page_submitting">正在提交安全通知…</string>
     <string name="safety_page_title">傳送緊急通知</string>
     <string name="safety_page_update_title">更新此安全通知？</string>
+    <string name="safety_page_why_started">通知發起原因</string>
     <string name="safety_privacy_body">訊息草稿與報平安時間只保留在此裝置上。只有當你主動透過其他 App 分享已準備的訊息時，位置才會離開 NOOP。</string>
     <string name="safety_privacy_title">預設保持私密</string>
     <string name="safety_refresh">重新整理</string>
@@ -176,6 +182,10 @@
     <string name="safety_share_review_prompt">選擇聯絡人，並在傳送前檢查訊息。</string>
     <string name="safety_share_subject">個人安全報平安</string>
     <string name="safety_share_title">分享給你信任的人</string>
+    <string name="safety_sos_duration_12_hours">12 小時</string>
+    <string name="safety_sos_duration_8_hours">8 小時</string>
+    <string name="safety_sos_duration_help">在所選時間內只分享最新位置。如果通知已解決或取消，分享會提前停止。</string>
+    <string name="safety_sos_duration_title">即時位置</string>
     <string name="safety_sos_gesture_four">4 次</string>
     <string name="safety_sos_gesture_help_format">Noop Band 每次會回報一次雙擊事件。請重複 %1$d 次，每次間隔少於 3 秒。通知將不再要求確認並直接傳送。</string>
     <string name="safety_sos_gesture_priority">鬧鐘和飲水確認優先。健康訊號絕不會觸發此手勢。</string>
@@ -194,7 +204,7 @@
     <string name="safety_sos_location_title">SOS 期間分享即時位置</string>
     <string name="safety_sos_notifications_off">通知已關閉。安全通知仍可傳送，但傳遞更新可能只會顯示在「安全」中。</string>
     <string name="safety_sos_notifications_ready">結果通知已就緒。</string>
-    <string name="safety_subtitle">用於聯絡信任之人的手動工具。</string>
+    <string name="safety_subtitle">用於聯絡信任之人的工具。</string>
     <string name="safety_timer_active">計時器執行中</string>
     <string name="safety_timer_disclaimer">計時結束時，NOOP 會要求作業系統顯示一次本機提醒。如果你沒有回應，它不會向聯絡人傳送訊息或升級處理；提醒時間也無法保證。</string>
     <string name="safety_timer_due_soon">即將到時</string>

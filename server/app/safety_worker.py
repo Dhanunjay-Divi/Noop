@@ -23,6 +23,23 @@ from app.safety_repository import SafetyNotFoundError, SafetyRepository
 logger = logging.getLogger("noop.safety")
 
 
+def safety_incident_summary(
+    trigger: str,
+    evidence: dict[str, Any] | None = None,
+) -> str:
+    """Return provider-safe, non-diagnostic context with no arbitrary user text."""
+
+    if trigger == "band_sos":
+        return "Started after a repeated SOS gesture on their Noop Band."
+    if trigger == "validated_fall":
+        return (
+            "Possible-fall motion evidence was recorded after the user did not "
+            "respond to the on-device safety check. This is an observation, "
+            "not a diagnosis."
+        )
+    return "Started from the NOOP app."
+
+
 class SafetyDeliveryWorker:
     """Leases and submits Safety deliveries independently of API requests."""
 
@@ -158,6 +175,10 @@ class SafetyDeliveryWorker:
 
     async def _submit_delivery(self, delivery: dict[str, Any]) -> None:
         response_url = self._response_url(delivery)
+        incident_summary = safety_incident_summary(
+            str(delivery.get("trigger", "manual_sos")),
+            delivery.get("evidence"),
+        )
         submission = None
         error: Exception | None = None
         outcome_unknown = False
@@ -175,12 +196,14 @@ class SafetyDeliveryWorker:
                         submission = await self.provider.send_page_sms(
                             to_phone=str(delivery["phone_e164"]),
                             owner_name=str(delivery["owner_display_name"]),
+                            incident_summary=incident_summary,
                             response_url=response_url,
                         )
                     else:
                         submission = await self.provider.send_page_voice(
                             to_phone=str(delivery["phone_e164"]),
                             owner_name=str(delivery["owner_display_name"]),
+                            incident_summary=incident_summary,
                             response_url=response_url,
                         )
                 except asyncio.CancelledError:

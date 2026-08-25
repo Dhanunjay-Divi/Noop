@@ -43,7 +43,7 @@
     <string name="safety_duration_hours_minutes">%1$d hr %2$d min</string>
     <string name="safety_duration_minutes">%1$d min</string>
     <string name="safety_duration_seconds">%1$d sec</string>
-    <string name="safety_emergency_body">Use your phone’s built-in Emergency SOS or contact local emergency services now. NOOP pages accepted contacts only when you confirm it; it does not dispatch emergency services or automatically act on wellness readings.</string>
+    <string name="safety_emergency_body">Use your phone’s built-in Emergency SOS or contact local emergency services now. NOOP can page accepted contacts from the app or a configured band gesture. NOOP never dispatches emergency services or pages from wellness readings.</string>
     <string name="safety_emergency_title">If danger is immediate</string>
     <string name="safety_enrollment_activate">Activate Safety Network</string>
     <string name="safety_enrollment_activating">Activating…</string>
@@ -117,8 +117,8 @@
     <string name="safety_page_confirm_body">NOOP sends every accepted contact an SMS now. If nobody acknowledges, automated voice calls follow. Emergency services are not contacted.</string>
     <string name="safety_page_confirm_title">Page your emergency contacts now?</string>
     <string name="safety_page_contact_responses">Contact responses</string>
-    <string name="safety_page_contacts_reached_at_format">Reached %1$d of %2$d contacts at %3$s</string>
-    <string name="safety_page_contacts_reached_format">Reached %1$d of %2$d contacts</string>
+    <string name="safety_page_contacts_reached_at_format">Delivery or response confirmed for %1$d of %2$d contacts at %3$s</string>
+    <string name="safety_page_contacts_reached_format">Delivery or response confirmed for %1$d of %2$d contacts</string>
     <string name="safety_page_delivery_counts_format">%1$d submitted · %2$d pending · %3$d need attention</string>
     <string name="safety_page_detail_acknowledged">A Safety Network contact is responding.</string>
     <string name="safety_page_detail_acknowledged_format">%1$s is responding. Keep direct contact until the situation is resolved.</string>
@@ -133,8 +133,13 @@
     <string name="safety_page_disabled_contacts">At least two contacts must accept their invitations.</string>
     <string name="safety_page_disabled_delivery">Safety Network delivery is temporarily unavailable.</string>
     <string name="safety_page_disabled_setup">Finish Safety setup before paging contacts.</string>
-    <string name="safety_page_disclaimer">This is a user-confirmed page to trusted contacts. NOOP does not automatically page from wellness scores or dispatch emergency services.</string>
+    <string name="safety_page_disclaimer">Pages start from an app SOS or a repeated band SOS gesture. Possible-fall paging is not active. Wellness scores never trigger paging. NOOP does not dispatch emergency services.</string>
+    <string name="safety_page_escalation_format">Up to %1$d paging rounds continue until a contact acknowledges.</string>
     <string name="safety_page_keep_open">Keep open</string>
+    <string name="safety_page_reason_app">Started from the NOOP app.</string>
+    <string name="safety_page_reason_band">Started after a repeated SOS gesture on the Noop Band.</string>
+    <string name="safety_page_reason_fall">Possible-fall motion evidence was recorded after no response to the safety check.</string>
+    <string name="safety_page_reason_observation">This is an observed motion event, not a diagnosis or confirmed cause.</string>
     <string name="safety_page_resolve_action">Mark resolved</string>
     <string name="safety_page_resolve_guidance">Use resolved after you have confirmed that help is no longer needed.</string>
     <string name="safety_page_responding_format">%1$s is responding</string>
@@ -152,6 +157,7 @@
     <string name="safety_page_submitting">Submitting safety page…</string>
     <string name="safety_page_title">Send an urgent page</string>
     <string name="safety_page_update_title">Update this Safety page?</string>
+    <string name="safety_page_why_started">Why this page started</string>
     <string name="safety_privacy_body">Draft text and the check-in timestamp stay on this device. A location leaves NOOP only when you deliberately share the prepared message through another app.</string>
     <string name="safety_privacy_title">Private by default</string>
     <string name="safety_refresh">Refresh</string>
@@ -176,6 +182,10 @@
     <string name="safety_share_review_prompt">Choose a person and review the message before sending.</string>
     <string name="safety_share_subject">Personal safety check-in</string>
     <string name="safety_share_title">Share with someone you trust</string>
+    <string name="safety_sos_duration_12_hours">12 hours</string>
+    <string name="safety_sos_duration_8_hours">8 hours</string>
+    <string name="safety_sos_duration_help">Share only the latest location for the selected time. Sharing stops sooner if the page is resolved or cancelled.</string>
+    <string name="safety_sos_duration_title">Live location</string>
     <string name="safety_sos_gesture_four">4 times</string>
     <string name="safety_sos_gesture_help_format">Noop Band reports one double-tap event. Repeat it %1$d times with less than 3 seconds between each. The page sends without another confirmation.</string>
     <string name="safety_sos_gesture_priority">Alarm and hydration confirmations take priority. Wellness signals never trigger this gesture.</string>
@@ -194,7 +204,7 @@
     <string name="safety_sos_location_title">Live location during an SOS</string>
     <string name="safety_sos_notifications_off">Notifications are off. Paging still works, but delivery updates may appear only in Safety.</string>
     <string name="safety_sos_notifications_ready">Result notifications are ready.</string>
-    <string name="safety_subtitle">Manual tools for getting a trusted person involved.</string>
+    <string name="safety_subtitle">Tools for getting trusted people involved.</string>
     <string name="safety_timer_active">Timer active</string>
     <string name="safety_timer_disclaimer">When the timer ends, NOOP asks the operating system to show one local reminder. It does not message a contact or escalate if you do not respond, and delivery timing is not guaranteed.</string>
     <string name="safety_timer_due_soon">Due soon</string>

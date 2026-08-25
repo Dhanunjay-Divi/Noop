@@ -1,6 +1,6 @@
 # Active NOOP Handoff
 
-Last updated: **2026-08-24**
+Last updated: **2026-08-25**
 
 ## Repository state
 
@@ -21,6 +21,23 @@ Last updated: **2026-08-24**
 ## Last completed round
 
 The
+[Safety escalation and validated-fall contract round](rounds/2026-08-25-safety-escalation-contract.md)
+is completed in code. It adds distinct app, band, and fail-closed possible-fall
+origins; bounded repeated
+SMS/voice rounds that stop on acknowledgement; latest-only 8/12-hour location;
+origin context for responders; and durable retry compatibility across Apple,
+Android, memory, and PostgreSQL paths. The possible-fall entry point remains
+disabled by default, and shipping clients still construct no fall candidate.
+Final local evidence includes 142 server passes with 11 explicit environment
+skips, migration 013 plus its focused PostgreSQL contract, 43/43
+NoopRemoteSync tests, 1,430 macOS tests with 0 failures and 1 intentional skip,
+an unsigned iOS simulator build, 3,649 Android tests with 0 failures and 6
+skips, APK/lint/instrumentation compilation, 221-key nine-locale Safety parity,
+and clean localization, claims, legal-inventory, private-data, Ruff, ops,
+tool-test, and whitespace gates. The distribution gate still rejects the same
+three rights blockers.
+
+The
 [Safety reliability and shared tenancy round](rounds/2026-08-24-safety-reliability-shared-tenancy.md)
 keeps automatic medical/fall paging unavailable, makes provider and human
 delivery states distinct, adds local notification evidence, hardens durable
@@ -28,7 +45,7 @@ paging and its kill switch, enforces per-installation shared biometric access,
 and completes Safety/installation rotation, export, deletion, retention, load,
 and restore contracts.
 
-Current local evidence includes 129 passing server tests with the nine
+That round's recorded evidence includes 129 passing server tests with the nine
 database tests and one explicit real-Twilio test environment-gated; all nine
 database tests pass separately on PostgreSQL 14 with only unavailable
 Timescale hooks removed from a disposable migration copy. Restore application
@@ -162,7 +179,8 @@ The stricter distribution gate intentionally fails on:
   product. Never distribute the operator credential or claim public-service
   readiness without the external topology and isolation evidence.
 - Provider accepted/sent/delivered states do not prove that a contact saw or
-  accepted a page. Automatic medical, anomaly, Rhythm, and fall paging remains
-  unavailable.
+  accepted a page. App and band SOS are explicit user actions. The possible-fall
+  server contract remains disabled until D-023's external evidence exists, and
+  medical, anomaly, Rhythm, and wellness values never page.
 - Keep the repository private and do not treat private hosting as commercial
   distribution approval.

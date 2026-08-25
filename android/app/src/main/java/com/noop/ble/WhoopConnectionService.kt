@@ -116,7 +116,7 @@ class WhoopConnectionService : Service() {
     /** Platform-GPS wrapper (no Google Play Services). Lazily built — the service holds a Context. */
     private val locationTracker by lazy { LocationTracker(this) }
 
-    /** Latest-only location session for an explicitly opened Safety page. */
+    /** Latest-only location session for an active Safety page. */
     private var safetyLocationGateJob: Job? = null
     private var safetyLocationJob: Job? = null
     private var safetyIncidentStatusJob: Job? = null
@@ -458,7 +458,7 @@ class WhoopConnectionService : Service() {
                 }
         }
 
-        // Stream only the newest fix for an explicitly opened Safety page. Session identity/expiry is
+        // Stream only the newest fix for an active Safety page. Session identity/expiry is
         // distinct from sequence so each uploaded fix does not restart the platform location listener.
         SafetyLiveLocationSession.initialize(this)
         SafetyIncidentStatusMonitor.reconcile(this)
@@ -507,7 +507,12 @@ class WhoopConnectionService : Service() {
                     }
                     safetyLocationJob = launch {
                         val expiry = launch {
-                            delay((expiresAtUnix - nowUnix).coerceAtMost(3_600L) * 1_000L)
+                            delay(
+                                SafetyLiveLocationSession.remainingSessionSeconds(
+                                    expiresAtUnix,
+                                    nowUnix,
+                                ) * 1_000L,
+                            )
                             SafetyLiveLocationSession.stop(
                                 this@WhoopConnectionService,
                                 expectedDispatchId = dispatchId,
@@ -584,7 +589,7 @@ class WhoopConnectionService : Service() {
     }
 
     /** Promote to the foreground. Returns false (rather than throwing) if the platform refuses. When
-     *  [locationActive] we add the location FGS type for a GPS workout or explicit Safety page. */
+     *  [locationActive] we add the location FGS type for a GPS workout or active Safety page. */
     private fun startForegroundCompat(
         notification: Notification,
         locationActive: Boolean = false,
@@ -617,7 +622,7 @@ class WhoopConnectionService : Service() {
                 true
             }
             SafetySosGestureRuntime.Result.Triggered -> {
-                ble.externalLog("SOS gesture complete; opening a manual contact page")
+                ble.externalLog("SOS gesture complete; opening a band SOS contact page")
                 ble.buzz(3)
                 val outcome = SafetySosDispatcher.trigger(this)
                 ble.externalLog(
