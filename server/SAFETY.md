@@ -15,9 +15,14 @@ for calling local emergency services.
 4. A recipient can choose **I'm responding** or **I cannot respond** from the
    signed SMS link. Voice calls accept `1` or `2` by DTMF.
 5. The first responding contact acknowledges the incident and cancels pending
-   retries and voice jobs. The owner sees who responded and each delivery state.
+   retries and voice jobs. The owner sees who responded, unique contacts reached,
+   and each delivery state.
 6. The owner marks the incident resolved or cancelled. An unacknowledged
    incident expires at its configured TTL.
+7. If every SMS and voice path explicitly fails for every contact, the incident
+   becomes terminal `failed`. The client tells the owner no contact was reached
+   and directs them to call local emergency services. An unconfirmed provider
+   receipt remains `unknown`; it is not relabelled as delivered or failed.
 
 Responder links use an expiring HMAC capability derived at send time. Plaintext
 capabilities are never stored. Provider callbacks require both the configured
@@ -61,13 +66,79 @@ Policy controls and defaults:
 | `NOOP_SAFETY_ACKNOWLEDGEMENT_TIMEOUT_SECONDS` | `90` | Delay before voice fallback |
 | `NOOP_SAFETY_INCIDENT_TTL_SECONDS` | `1800` | Response-link and open-incident lifetime |
 | `NOOP_SAFETY_WORKER_POLL_SECONDS` | `2` | Idle queue poll interval |
+| `NOOP_SAFETY_WORKER_HEARTBEAT_TIMEOUT_SECONDS` | `30` | Age after which the API blocks new pages |
 | `NOOP_SAFETY_DELIVERY_LEASE_SECONDS` | `30` | Worker crash-recovery lease |
 | `NOOP_SAFETY_RETRY_BASE_SECONDS` | `5` | Initial exponential retry delay |
+| `NOOP_SAFETY_PROVIDER_REQUEST_TIMEOUT_SECONDS` | `15` | Provider HTTP request timeout |
 | `NOOP_SAFETY_PROVIDER_RECEIPT_TIMEOUT_SECONDS` | `300` | Time before an unconfirmed provider submission becomes `unknown` |
+| `NOOP_SAFETY_INCIDENT_RETENTION_DAYS` | `0` | Age for terminal incident deletion; `0` disables |
+| `NOOP_SAFETY_CONTACT_RETENTION_DAYS` | `0` | Age after expiry, decline, or revocation for inactive contact deletion; `0` disables |
+| `NOOP_SAFETY_RETENTION_INTERVAL_HOURS` | `24` | Scheduled retention interval |
+| `NOOP_SAFETY_RETENTION_MAX_BATCHES_PER_RUN` | `20` | Maximum bounded cleanup batches per run |
 
-Multiple API replicas can process jobs concurrently because claims use
+Multiple worker replicas can process jobs concurrently because claims use
 PostgreSQL row locks with `SKIP LOCKED`. Keep clocks synchronized and do not set
-the lease shorter than the longest expected provider request.
+the lease shorter than provider request timeout plus the poll interval.
+
+Production Compose runs a one-shot migration job, stateless API process, and
+independent `safety-worker`. Scale API and worker processes separately. Worker
+batch/concurrency controls are:
+
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `NOOP_SAFETY_WORKER_BATCH_SIZE` | `20` | Jobs leased per cycle |
+| `NOOP_SAFETY_WORKER_MAX_CONCURRENCY` | `6` | Concurrent provider submissions per worker |
+
+Each active submission holds a database-backed permit, so concurrency must stay
+below the worker's database pool maximum. Provider sender throughput remains an
+external limit even when more workers are added.
+
+## Credential and data lifecycle
+
+The app generates Safety credentials. The server stores only their SHA-256
+digests. `PUT /v1/safety/me/token` performs retry-safe, version-checked rotation;
+the prior token stops working immediately. `GET /v1/safety/me/export` returns
+the profile, contacts, incident states, latest-only locations, and delivery
+history without credential or invitation hashes. It accepts UTC-offset `start`
+and `end` bounds and fails with HTTP `413` rather than truncating when the
+configured aggregate export limit would be exceeded. `DELETE /v1/safety/me`
+requires `X-Noop-Confirm: DELETE MY SAFETY PROFILE` and hard-deletes the
+profile's Safety rows. Installation-wide erasure also removes its Safety and
+Friends profiles.
+
+Retention deletes only terminal incidents and pending-expired, declined, or
+revoked contacts. It never ages an active incident or accepted contact.
+Retiring an incident leaves a short idempotency tombstone without contact,
+location, or delivery data, preventing a delayed client retry from creating a
+second page. Operators can run the same bounded policy with:
+
+```sh
+curl -fsS -X POST \
+  -H "Authorization: Bearer $NOOP_API_TOKEN" \
+  -H "X-Noop-Confirm: PURGE SAFETY" \
+  https://noop.example.com/v1/admin/safety/retention/run
+```
+
+The standalone worker handles `SIGTERM` as a drain request: it finishes the
+current bounded submission wave, records the provider outcomes, and then exits.
+Compose grants 45 seconds by default through
+`NOOP_SAFETY_WORKER_STOP_GRACE_PERIOD`; keep that duration longer than the
+configured provider request timeout plus database completion headroom.
+
+## Operator kill switch
+
+`PUT /v1/safety/operations/paging-control` is authenticated by the administrator
+token and persisted in PostgreSQL. Disabling requires a reason. It blocks new
+invitations and pages, stops claims, and releases a row leased just before the
+switch without consuming a retry. Callbacks and responder links remain active
+so already-submitted work can settle.
+
+Updates require the current `revision`, preventing a stale enable from undoing
+a newer emergency disable. Every change is appended to
+`safety_runtime_control_audit`. A disable waits for database-backed submission
+permits to drain before returning. It cannot recall a request the provider
+already accepted. Full commands and incident procedure are in
+[`PRODUCTION_OPERATIONS.md`](PRODUCTION_OPERATIONS.md).
 
 ## Monitoring
 
@@ -80,8 +151,11 @@ curl -H "Authorization: Bearer $NOOP_API_TOKEN" \
 
 Alert on:
 
+- zero active worker heartbeats while paging is enabled;
+- `oldest_due_seconds` above the tested queue SLO;
 - any `stale_leases`;
 - sustained `retry_wait`, `failed`, or `unknown` counts;
+- provider-delivery p95 above the country/carrier SLO;
 - open incidents at or beyond expiry;
 - missing Twilio status callbacks;
 - worker exception logs.

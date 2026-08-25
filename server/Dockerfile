@@ -2,7 +2,8 @@ FROM python:3.12-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    NOOP_FORWARDED_ALLOW_IPS=127.0.0.1
 
 WORKDIR /service
 
@@ -20,4 +21,4 @@ COPY LICENSE /usr/share/doc/noop/LICENSE
 USER 10001:10001
 EXPOSE 8080
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--forwarded-allow-ips=127.0.0.1"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --proxy-headers --forwarded-allow-ips \"$NOOP_FORWARDED_ALLOW_IPS\" --no-access-log"]

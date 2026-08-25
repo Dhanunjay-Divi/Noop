@@ -34,6 +34,9 @@ curl http://127.0.0.1:8080/healthz
 curl http://127.0.0.1:8080/readyz
 ```
 
+Compose runs schema migration once, then starts separate API and Safety worker
+processes. This prevents each API replica from starting another paging loop.
+
 The dashboard is at `http://127.0.0.1:8080/`. Paste `NOOP_API_TOKEN` to
 connect. It is kept in browser session storage, disappears when that browser tab
 session ends, and is never put in a URL.
@@ -52,17 +55,22 @@ private. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md).
 | Variable | Required | Default | Meaning |
 | --- | --- | --- | --- |
 | `NOOP_API_TOKEN` | yes | none | At least 32 random bytes; authenticates full-data and social-admin routes |
+| `NOOP_AUTH_MODE` | no | `single_owner` | `single_owner` permits the administrator credential to access biometric routes; `shared` requires an enrolled `noop_install_...` credential and keeps the operator credential administrative |
 | `NOOP_DATABASE_URL` | in non-Compose deployments | none | PostgreSQL/TimescaleDB URL |
 | `NOOP_DB_NAME` | Compose only | `noop` | Database selected by the DB, API, and backup services; useful for a staged restore cutover |
 | `NOOP_MAX_REQUEST_BYTES` | no | `10485760` | Hard maximum sync body size |
+| `NOOP_EXPORT_MAX_ROWS` | no | `100000` | Aggregate export row ceiling; oversized exports fail with `413` and require a narrower `start`/`end` window |
 | `NOOP_DB_POOL_MIN_SIZE` | no | `1` | Minimum async database connections |
 | `NOOP_DB_POOL_MAX_SIZE` | no | `8` | Maximum async database connections |
+| `NOOP_DB_STATEMENT_CACHE_SIZE` | no | `100` | Asyncpg statement cache; set to `0` behind PgBouncer transaction pooling |
+| `NOOP_RUN_MIGRATIONS` | no | `true` | Apply schema migrations at process startup; production runtime processes set false after a one-shot migration job |
 | `NOOP_RETENTION_DAYS` | no | `0` | `0` disables purging; positive values enable scheduled and explicit retention runs |
 | `NOOP_RETENTION_INTERVAL_HOURS` | no | `24` | Hours between automatic retention cycles when retention is enabled |
 | `NOOP_IDEMPOTENCY_REPLAY_GUARD_DAYS` | no | `30` | Days to retain non-biometric batch UUID/digest tombstones after data deletion |
 | `NOOP_RATE_LIMIT_REQUESTS_PER_MINUTE` | no | `120` | Per-process, per-Bearer-credential API request ceiling |
 | `NOOP_RATE_LIMIT_ORIGIN_REQUESTS_PER_MINUTE` | no | `300` | Per-process API request ceiling for each trusted direct peer/client address |
 | `NOOP_RATE_LIMIT_MAX_KEYS` | no | `10000` | Maximum in-memory limiter identities before new identities share a fail-closed overflow bucket |
+| `NOOP_FORWARDED_ALLOW_IPS` | no | `127.0.0.1` | Comma-separated exact proxy IPs/CIDRs trusted to supply client addresses; wildcard and all-address networks are rejected |
 | `NOOP_DASHBOARD_ENABLED` | no | `true` | Serve the static dashboard |
 | `NOOP_PUBLIC_BASE_URL` | for paging | none | Exact public HTTPS origin used in responder links and Twilio signature validation |
 | `NOOP_TWILIO_ACCOUNT_SID` | for paging | none | Twilio account SID |
@@ -73,9 +81,19 @@ private. See [TLS_AND_BACKUPS.md](TLS_AND_BACKUPS.md).
 | `NOOP_SAFETY_ACKNOWLEDGEMENT_TIMEOUT_SECONDS` | no | `90` | Delay before an unacknowledged SMS page becomes eligible for voice fallback |
 | `NOOP_SAFETY_INCIDENT_TTL_SECONDS` | no | `1800` | Open-incident and responder-link lifetime |
 | `NOOP_SAFETY_WORKER_POLL_SECONDS` | no | `2` | Idle delivery-worker poll interval |
-| `NOOP_SAFETY_DELIVERY_LEASE_SECONDS` | no | `30` | Crash-recovery lease; must exceed the poll interval and provider request time |
+| `NOOP_SAFETY_WORKER_HEARTBEAT_TIMEOUT_SECONDS` | no | `30` | Maximum heartbeat age before new paging is blocked |
+| `NOOP_SAFETY_DELIVERY_LEASE_SECONDS` | no | `30` | Crash-recovery lease; must exceed provider request timeout plus the poll interval |
 | `NOOP_SAFETY_RETRY_BASE_SECONDS` | no | `5` | Initial bounded exponential delivery retry delay |
+| `NOOP_SAFETY_PROVIDER_REQUEST_TIMEOUT_SECONDS` | no | `15` | Twilio HTTP request timeout; interrupted outcomes remain `unknown` |
 | `NOOP_SAFETY_PROVIDER_RECEIPT_TIMEOUT_SECONDS` | no | `300` | Age at which a provider submission without a receipt becomes `unknown` |
+| `NOOP_SAFETY_WORKER_ENABLED` | no | `true` | Run the in-process paging loop; Compose disables it on API processes and uses `safety-worker` |
+| `NOOP_SAFETY_WORKER_BATCH_SIZE` | no | `20` | Maximum jobs leased per worker cycle |
+| `NOOP_SAFETY_WORKER_MAX_CONCURRENCY` | no | `6` | Maximum concurrent submissions; must remain below the worker database-pool maximum |
+| `NOOP_SAFETY_INCIDENT_RETENTION_DAYS` | no | `0` | Days to keep terminal Safety incidents; `0` disables incident retention |
+| `NOOP_SAFETY_CONTACT_RETENTION_DAYS` | no | `0` | Days after expiry/decline/revocation to keep inactive contacts; accepted contacts are never aged; `0` disables |
+| `NOOP_SAFETY_RETENTION_INTERVAL_HOURS` | no | `24` | Hours between bounded Safety retention runs |
+| `NOOP_SAFETY_RETENTION_MAX_BATCHES_PER_RUN` | no | `20` | Maximum Safety retention batches per scheduled or manual run |
+| `NOOP_SAFETY_WORKER_STOP_GRACE_PERIOD` | Compose only | `45s` | Graceful worker shutdown window; keep longer than the provider request timeout |
 | `NOOP_PORT` | Compose only | `8080` | Loopback host port |
 | `NOOP_BACKUP_SECRET_FILE` | Compose only | `./secrets/backup-passphrase.txt` | Host path to an untracked file containing at least 32 random bytes |
 | `NOOP_BACKUP_INTERVAL_SECONDS` | no | `86400` | Seconds between encrypted PostgreSQL backups; one backup also runs at container start |
@@ -90,17 +108,32 @@ partial configuration fails startup, and `NOOP_PUBLIC_BASE_URL` must be a public
 HTTPS origin. Complete carrier registration and geographic permissions before
 enabling it. See [SAFETY.md](SAFETY.md) for the incident contract, staging test,
 monitoring thresholds, and the explicit non-emergency boundary.
+For multi-replica deployment, capacity testing, paging controls, and the honest
+10,000-user tenancy boundary, see
+[PRODUCTION_OPERATIONS.md](PRODUCTION_OPERATIONS.md).
 
 ## API contract
 
 `GET /healthz` is a process liveness probe and does not touch the database.
-`GET /readyz` executes a database query and returns HTTP 503 until storage is
-available. Both are public and reveal only a generic state. Full-data
-sync/reads, data control, and social bootstrap routes require:
+`GET /readyz` executes a database query and verifies the exact immutable
+migration manifest for this build. It returns HTTP 503 when storage is
+unavailable, a migration is missing, or applied migration bytes differ. Both
+probes are public and reveal only a generic state. In `single_owner` mode,
+full-data sync/reads, data control, and bootstrap routes accept:
 
 ```text
 Authorization: Bearer <NOOP_API_TOKEN>
 ```
+
+In `shared` mode, the administrator first enrolls an installation through
+`POST /v1/admin/installations`, supplying a client-generated enrollment UUID
+and `noop_install_...` token. The server stores only the digest. That
+installation credential can claim only device IDs in its own namespace and can
+rotate, export, or erase itself through `/v1/installation/me`; the operator
+token cannot read or write shared biometric data. This is suitable for
+pre-provisioned shared testing, but public signup, identity proof, and
+lost-device recovery remain external product decisions. See
+[PRODUCTION_OPERATIONS.md](PRODUCTION_OPERATIONS.md).
 
 Friends endpoints use a separate per-installation `noop_member_…` credential
 issued by the admin-authenticated bootstrap route or generated and saved by a
@@ -110,7 +143,9 @@ or admin read routes. It can upload only its exact, dedicated `noop_computed`
 Friends producer through `POST /v1/sync`; each supplied day replaces the six
 allowlisted social keys for that day. A first-time join is retry-safe through
 its client-generated enrollment UUID and token, so a lost response does not
-orphan the profile. The server admin token is never shared. See
+orphan the profile. Shared-mode joins also require the joining installation
+credential, preventing an invite holder from selecting another installation's
+producer namespace. The server admin token is never shared. See
 [FRIENDS.md](FRIENDS.md) for the complete flow and privacy contract.
 
 The app uploads to `POST /v1/sync`. `batch_id` is the durable idempotency key;
@@ -373,6 +408,13 @@ curl --fail-with-body \
   -o noop-export.json \
   "http://127.0.0.1:8080/v1/devices/$NOOP_DEVICE_ID/export"
 ```
+
+Device, installation, and Safety exports share `NOOP_EXPORT_MAX_ROWS`. They
+return HTTP `413` rather than silently truncating when the aggregate result is
+too large. Supply UTC-offset `start` and/or `end` query parameters to retrieve
+bounded windows. Installation exports apply one aggregate budget across all
+owned devices; Safety windows include contacts created and incidents started in
+that interval together with their child delivery records.
 
 Set a positive `NOOP_RETENTION_DAYS` and restart to enable scheduled retention;
 the authenticated endpoint remains available for an immediate confirmed run.

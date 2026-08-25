@@ -10,6 +10,7 @@ class SafetyCapabilitySigner:
     """Creates short-lived responder capabilities without persisting secrets."""
 
     _DOMAIN = b"noop-safety-response:v1:"
+    _INVITATION_DOMAIN = b"noop-safety-invitation:v1:"
 
     def __init__(self, secret: str) -> None:
         if len(secret.encode("utf-8")) < 32:
@@ -50,6 +51,21 @@ class SafetyCapabilitySigner:
             signature.encode("ascii"),
             expected.encode("ascii"),
         )
+
+    def invitation_token(
+        self,
+        *,
+        contact_id: str,
+        invitation_nonce: str,
+        expires_at_unix: int,
+    ) -> str:
+        """Derive a one-time invitation token without storing its plaintext."""
+
+        message = self._INVITATION_DOMAIN + (
+            f"{contact_id}:{invitation_nonce}:{expires_at_unix}".encode("ascii")
+        )
+        digest = hmac.new(self._secret, message, hashlib.sha256).digest()
+        return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
     @classmethod
     def _message(

@@ -47,10 +47,11 @@ All other `/v1/social` routes except invite join:
 Authorization: Bearer <noop_member_...>
 ```
 
-The two credential types are intentionally not interchangeable.
-`POST /v1/social/invites/join` uses its one-time invite code to authorize the
-client-generated enrollment and therefore does not take either Bearer
-credential.
+The two credential types are intentionally not interchangeable. In
+`single_owner` mode, `POST /v1/social/invites/join` uses its one-time invite
+code to authorize the client-generated enrollment. In `shared` mode it also
+requires the joining client's `noop_install_...` Bearer credential and rejects
+an installation or producer namespace that credential does not control.
 
 ## Bootstrap
 
@@ -160,6 +161,7 @@ A person who does not yet have a profile exchanges the invite code directly:
 
 ```http
 POST /v1/social/invites/join
+Authorization: Bearer <joining installation token in shared mode>
 Content-Type: application/json
 
 {
@@ -175,9 +177,10 @@ Content-Type: application/json
 Before the first request, the client must generate and securely save both a UUID
 `enrollment_id` and a token with at least 256 bits of randomness, encoded as
 `noop_member_` plus 43 URL-safe Base64 characters. The invite code authorizes
-only that atomic enrollment. The server consumes the code, stores the token
-digest, creates the profile, and creates the pending request in one transaction.
-It never echoes the supplied token.
+only that atomic enrollment. In shared mode, the installation credential also
+binds the enrollment to its own namespace. The server consumes the code, stores
+the token digest, creates the profile, and creates the pending request in one
+transaction. It never echoes the supplied token.
 
 If the response is lost, retry the same code with exactly the same enrollment
 UUID, token, installation, producer, and display name. Even if the code has

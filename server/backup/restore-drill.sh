@@ -37,11 +37,49 @@ schema_ok=$(psql \
         AND to_regclass('public.workouts') IS NOT NULL
         AND to_regclass('public.journal_entries') IS NOT NULL
         AND to_regclass('public.friend_profiles') IS NOT NULL
+        AND to_regclass('public.installation_credentials') IS NOT NULL
+        AND to_regclass('public.installation_devices') IS NOT NULL
+        AND to_regclass('public.safety_profiles') IS NOT NULL
+        AND to_regclass('public.safety_contacts') IS NOT NULL
+        AND to_regclass('public.safety_dispatches') IS NOT NULL
+        AND to_regclass('public.safety_deliveries') IS NOT NULL
+        AND to_regclass('public.safety_delivery_attempts') IS NOT NULL
+        AND to_regclass('public.safety_responses') IS NOT NULL
+        AND to_regclass('public.safety_incident_locations') IS NOT NULL
+        AND to_regclass('public.safety_runtime_controls') IS NOT NULL
+        AND to_regclass('public.safety_runtime_control_audit') IS NOT NULL
+        AND to_regclass('public.safety_worker_heartbeats') IS NOT NULL
+        AND to_regclass('public.safety_invitation_jobs') IS NOT NULL
+        AND to_regclass('public.safety_invitation_attempts') IS NOT NULL
+        AND to_regclass('public.safety_provider_rate_state') IS NOT NULL
+        AND to_regclass('public.safety_dispatch_tombstones') IS NOT NULL
     )::int;")
 if [ "$schema_ok" != "1" ]; then
     echo "restore drill failed schema verification" >&2
     exit 65
 fi
+
+control_ok=$(psql \
+    --dbname="$drill_database" \
+    --set=ON_ERROR_STOP=1 \
+    --no-align \
+    --tuples-only \
+    --command="SELECT (
+        (SELECT count(*) = 1
+         FROM safety_runtime_controls
+         WHERE control_name = 'paging' AND revision > 0)
+        AND
+        (SELECT count(*) >= 1
+         FROM safety_runtime_control_audit
+         WHERE control_name = 'paging')
+    )::int;")
+if [ "$control_ok" != "1" ]; then
+    echo "restore drill failed Safety control verification" >&2
+    exit 65
+fi
+
+PGDATABASE="$drill_database" \
+    sh /opt/noop/restore-application-smoke.sh "$drill_database"
 
 psql \
     --dbname="$drill_database" \
@@ -56,7 +94,34 @@ psql \
         'daily_metrics', (SELECT count(*) FROM daily_metrics),
         'sleep_sessions', (SELECT count(*) FROM sleep_sessions),
         'workouts', (SELECT count(*) FROM workouts),
-        'journal_entries', (SELECT count(*) FROM journal_entries)
+        'journal_entries', (SELECT count(*) FROM journal_entries),
+        'installation_credentials', (
+            SELECT count(*) FROM installation_credentials
+        ),
+        'installation_devices', (SELECT count(*) FROM installation_devices),
+        'safety_profiles', (SELECT count(*) FROM safety_profiles),
+        'safety_contacts', (SELECT count(*) FROM safety_contacts),
+        'safety_dispatches', (SELECT count(*) FROM safety_dispatches),
+        'safety_deliveries', (SELECT count(*) FROM safety_deliveries),
+        'safety_delivery_attempts', (
+            SELECT count(*) FROM safety_delivery_attempts
+        ),
+        'safety_invitation_jobs', (
+            SELECT count(*) FROM safety_invitation_jobs
+        ),
+        'safety_invitation_attempts', (
+            SELECT count(*) FROM safety_invitation_attempts
+        ),
+        'safety_responses', (SELECT count(*) FROM safety_responses),
+        'safety_incident_locations', (
+            SELECT count(*) FROM safety_incident_locations
+        ),
+        'safety_control_audit', (
+            SELECT count(*) FROM safety_runtime_control_audit
+        ),
+        'safety_dispatch_tombstones', (
+            SELECT count(*) FROM safety_dispatch_tombstones
+        )
     );"
 
 echo "restore drill passed in disposable database ${drill_database}"

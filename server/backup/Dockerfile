@@ -6,7 +6,9 @@ RUN apt-get update \
     && mkdir -p /backups \
     && chown postgres:postgres /backups
 
-COPY backup.sh backup-loop.sh backup-healthcheck.sh restore.sh restore-drill.sh /opt/noop/
+COPY backup.sh backup-loop.sh backup-healthcheck.sh restore.sh restore-drill.sh \
+    restore-application-smoke.sh restore-application-smoke.sql \
+    migration-manifest.sha256 /opt/noop/
 COPY NOTICE /usr/share/doc/noop/NOTICE
 COPY LICENSE /usr/share/doc/noop/LICENSE
 

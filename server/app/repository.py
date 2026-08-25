@@ -27,6 +27,21 @@ class SyncRetiredError(Exception):
     """Raised when retained deletion metadata blocks an exact replay."""
 
 
+class SyncForbiddenError(Exception):
+    """Raised when tenancy changed before a sync could commit."""
+
+
+class ExportLimitExceededError(Exception):
+    """Raised before an export can materialize more than its configured limit."""
+
+    def __init__(self, max_rows: int) -> None:
+        self.max_rows = max_rows
+        super().__init__(
+            f"export exceeds the configured {max_rows}-row limit; "
+            "retry with a narrower start/end window"
+        )
+
+
 class FriendNotFoundError(Exception):
     """Raised when a social object is absent or intentionally undiscoverable."""
 
@@ -94,9 +109,12 @@ class Repository(Protocol):
         payload: SyncPayload,
         payload_hash: str,
         social_profile_id: str | None = None,
+        installation_id: str | None = None,
     ) -> SyncResult: ...
 
-    async def list_devices(self) -> list[dict[str, Any]]: ...
+    async def list_devices(
+        self, device_ids: list[str] | None = None
+    ) -> list[dict[str, Any]]: ...
 
     async def latest_metrics(
         self, device_id: str, metrics: list[str] | None
@@ -150,6 +168,7 @@ class Repository(Protocol):
         device_id: str,
         start: datetime | None,
         end: datetime | None,
+        max_rows: int = 100_000,
     ) -> dict[str, Any]: ...
 
     async def delete_device(
@@ -175,7 +194,9 @@ class Repository(Protocol):
         token_hash: str,
     ) -> dict[str, Any]: ...
 
-    async def list_friend_profiles(self) -> list[dict[str, Any]]: ...
+    async def list_friend_profiles(
+        self, installation_id: str | None = None
+    ) -> list[dict[str, Any]]: ...
 
     async def friend_profile_for_token(
         self, token_hash: str
@@ -194,7 +215,11 @@ class Repository(Protocol):
     async def disable_friend_profile(self, profile_id: str) -> None: ...
 
     async def delete_friend_profile_data(
-        self, profile_id: str, daily_device_id: str
+        self,
+        profile_id: str,
+        daily_device_id: str,
+        *,
+        include_disabled: bool = False,
     ) -> dict[str, int]: ...
 
     async def delete_friend_enrollment_data(
@@ -299,7 +324,9 @@ class MemoryRepository:
         payload: SyncPayload,
         payload_hash: str,
         social_profile_id: str | None = None,
+        installation_id: str | None = None,
     ) -> SyncResult:
+        del installation_id
         batch_id = str(payload.batch_id)
         async with self._lock:
             now = datetime.now(UTC)
@@ -456,10 +483,17 @@ class MemoryRepository:
                 ),
             )
 
-    async def list_devices(self) -> list[dict[str, Any]]:
+    async def list_devices(
+        self, device_ids: list[str] | None = None
+    ) -> list[dict[str, Any]]:
+        selected = set(device_ids) if device_ids is not None else None
         async with self._lock:
             return sorted(
-                (dict(device) for device in self._devices.values()),
+                (
+                    dict(device)
+                    for device in self._devices.values()
+                    if selected is None or str(device["device_id"]) in selected
+                ),
                 key=lambda device: device["last_seen"],
                 reverse=True,
             )
@@ -636,12 +670,53 @@ class MemoryRepository:
         device_id: str,
         start: datetime | None,
         end: datetime | None,
+        max_rows: int = 100_000,
     ) -> dict[str, Any]:
         def in_window(value: datetime) -> bool:
             return (start is None or value >= start) and (end is None or value < end)
 
         async with self._lock:
             device = self._devices.get(device_id)
+            row_count = int(device is not None)
+            row_count += sum(
+                stored_device == device_id and in_window(recorded_at)
+                for (
+                    stored_device,
+                    _metric,
+                    recorded_at,
+                    _sample_key,
+                ) in self._metrics
+            )
+            row_count += sum(
+                stored_device == device_id and in_window(record["recorded_at"])
+                for (stored_device, _), record in self._events.items()
+            )
+            row_count += sum(
+                stored_device == device_id
+                and (start is None or day >= start.date())
+                and (end is None or day < end.date())
+                for stored_device, day, _metric in self._daily
+            )
+            row_count += sum(
+                stored_device == device_id
+                and (end is None or record["start_ts"] < end)
+                and (start is None or record["end_ts"] > start)
+                for (stored_device, _), record in self._sleep.items()
+            )
+            row_count += sum(
+                stored_device == device_id
+                and (end is None or record["start_ts"] < end)
+                and (start is None or record["end_ts"] > start)
+                for (stored_device, _), record in self._workouts.items()
+            )
+            row_count += sum(
+                stored_device == device_id
+                and (start is None or day >= start.date())
+                and (end is None or day < end.date())
+                for stored_device, day, _question in self._journal
+            )
+            if row_count > max_rows:
+                raise ExportLimitExceededError(max_rows)
             metrics = [
                 {"metric": metric, **dict(sample)}
                 for (
@@ -688,6 +763,8 @@ class MemoryRepository:
         return {
             "schema_version": 1,
             "exported_at": datetime.now().astimezone(),
+            "row_count": row_count,
+            "window": {"start": start, "end": end},
             "device": dict(device) if device else None,
             "metric_samples": sorted(metrics, key=lambda row: row["recorded_at"]),
             "events": sorted(events, key=lambda row: row["recorded_at"]),
@@ -866,12 +943,19 @@ class MemoryRepository:
             self._friend_tokens[token_hash] = profile_id
             return dict(profile)
 
-    async def list_friend_profiles(self) -> list[dict[str, Any]]:
+    async def list_friend_profiles(
+        self, installation_id: str | None = None
+    ) -> list[dict[str, Any]]:
         async with self._lock:
             return [
                 dict(profile)
                 for profile in sorted(
-                    self._friend_profiles.values(),
+                    (
+                        profile
+                        for profile in self._friend_profiles.values()
+                        if installation_id is None
+                        or profile["installation_id"] == installation_id
+                    ),
                     key=lambda row: (row["display_name"].casefold(), row["profile_id"]),
                 )
             ]
@@ -946,13 +1030,17 @@ class MemoryRepository:
                 self._friend_visibility.pop((pair[1], pair[0]), None)
 
     async def delete_friend_profile_data(
-        self, profile_id: str, daily_device_id: str
+        self,
+        profile_id: str,
+        daily_device_id: str,
+        *,
+        include_disabled: bool = False,
     ) -> dict[str, int]:
         async with self._lock:
             profile = self._friend_profiles.get(profile_id)
             if (
                 profile is None
-                or profile["disabled_at"] is not None
+                or (profile["disabled_at"] is not None and not include_disabled)
                 or profile["daily_device_id"] != daily_device_id
             ):
                 raise FriendForbiddenError(
@@ -1577,10 +1665,14 @@ class PostgresRepository:
         *,
         pool_min_size: int = 1,
         pool_max_size: int = 8,
+        statement_cache_size: int = 100,
+        run_migrations: bool = True,
     ) -> None:
         self.database_url = database_url
         self.pool_min_size = pool_min_size
         self.pool_max_size = pool_max_size
+        self.statement_cache_size = statement_cache_size
+        self.run_migrations = run_migrations
         self._pool: Any = None
 
     async def startup(self) -> None:
@@ -1593,10 +1685,12 @@ class PostgresRepository:
             min_size=self.pool_min_size,
             max_size=self.pool_max_size,
             command_timeout=120,
+            statement_cache_size=self.statement_cache_size,
         )
         try:
-            async with self._pool.acquire() as connection:
-                await self._run_migrations(connection)
+            if self.run_migrations:
+                async with self._pool.acquire() as connection:
+                    await self._run_migrations(connection)
         except Exception:
             await self._pool.close()
             self._pool = None
@@ -1618,8 +1712,7 @@ class PostgresRepository:
             "SELECT pg_advisory_lock(hashtext('noop_schema_migrations'))"
         )
         try:
-            migration_dir = Path(__file__).resolve().parent.parent / "migrations"
-            migrations = sorted(migration_dir.glob("*.sql"))
+            migrations = self._migration_files()
             if not migrations:
                 raise RuntimeError("no database migrations were found")
             for path in migrations:
@@ -1663,9 +1756,30 @@ class PostgresRepository:
     async def ready(self) -> bool:
         pool = self._require_pool()
         try:
-            return bool(await pool.fetchval("SELECT 1"))
+            await pool.fetchval("SELECT 1")
+            expected = {
+                path.name: hashlib.sha256(
+                    path.read_text(encoding="utf-8").encode("utf-8")
+                ).hexdigest()
+                for path in self._migration_files()
+            }
+            rows = await pool.fetch(
+                "SELECT version, checksum FROM noop_schema_migrations"
+            )
+            applied = {
+                str(row["version"]): str(row["checksum"]).strip() for row in rows
+            }
+            return applied == expected
         except Exception:
             return False
+
+    @staticmethod
+    def _migration_files() -> list[Path]:
+        migration_dir = Path(__file__).resolve().parent.parent / "migrations"
+        migrations = sorted(migration_dir.glob("*.sql"))
+        if not migrations:
+            raise RuntimeError("no database migrations were found")
+        return migrations
 
     def _require_pool(self) -> Any:
         if self._pool is None:
@@ -1677,6 +1791,7 @@ class PostgresRepository:
         payload: SyncPayload,
         payload_hash: str,
         social_profile_id: str | None = None,
+        installation_id: str | None = None,
     ) -> SyncResult:
         pool = self._require_pool()
         batch_id = str(payload.batch_id)
@@ -1703,6 +1818,26 @@ class PostgresRepository:
                     "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                     f"noop-device:{device_id}",
                 )
+                if installation_id is not None:
+                    owns_active_device = await connection.fetchval(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM installation_devices d
+                            JOIN installation_credentials i
+                              USING (installation_id)
+                            WHERE d.installation_id = $1
+                              AND d.device_id = $2
+                              AND i.revoked_at IS NULL
+                        )
+                        """,
+                        installation_id,
+                        device_id,
+                    )
+                    if owns_active_device is not True:
+                        raise SyncForbiddenError(
+                            "installation ownership changed before sync commit"
+                        )
                 await connection.execute(
                     "DELETE FROM sync_batch_tombstones WHERE expires_at <= now()"
                 )
@@ -2068,15 +2203,19 @@ class PostgresRepository:
             counts=counts,
         )
 
-    async def list_devices(self) -> list[dict[str, Any]]:
+    async def list_devices(
+        self, device_ids: list[str] | None = None
+    ) -> list[dict[str, Any]]:
         pool = self._require_pool()
         rows = await pool.fetch(
             """
             SELECT device_id, display_name, model, firmware_version,
                    hardware_revision, platform, app_version, last_seen, metadata
             FROM devices
+            WHERE $1::text[] IS NULL OR device_id = ANY($1::text[])
             ORDER BY last_seen DESC, device_id
-            """
+            """,
+            device_ids,
         )
         return [_decoded_row(row) for row in rows]
 
@@ -2293,112 +2432,202 @@ class PostgresRepository:
         device_id: str,
         start: datetime | None,
         end: datetime | None,
+        max_rows: int = 100_000,
     ) -> dict[str, Any]:
         pool = self._require_pool()
         async with pool.acquire() as connection:
-            device_row = await connection.fetchrow(
-                """
-                SELECT device_id, display_name, model, firmware_version,
-                       hardware_revision, platform, app_version, last_seen, metadata
-                FROM devices WHERE device_id = $1
-                """,
-                device_id,
-            )
-            metric_rows = await connection.fetch(
-                """
-                SELECT metric, recorded_at, value, unit, measurement_class,
-                       clinical_interpretation_allowed, quality, metadata,
-                       sync_batch_id, source_platform, source_metadata
-                FROM metric_samples
-                WHERE device_id = $1
-                  AND ($2::timestamptz IS NULL OR recorded_at >= $2)
-                  AND ($3::timestamptz IS NULL OR recorded_at < $3)
-                ORDER BY recorded_at, metric,
-                         CASE WHEN metric = 'rr'
-                              THEN (metadata ->> 'seq')::bigint
-                              ELSE 0
-                         END,
-                         value,
-                         sample_key
-                """,
-                device_id,
-                start,
-                end,
-            )
-            event_rows = await connection.fetch(
-                """
-                SELECT event_id, recorded_at, kind, value_json AS value, metadata,
-                       sync_batch_id, source_platform, source_metadata
-                FROM events
-                WHERE device_id = $1
-                  AND ($2::timestamptz IS NULL OR recorded_at >= $2)
-                  AND ($3::timestamptz IS NULL OR recorded_at < $3)
-                ORDER BY recorded_at, event_id
-                """,
-                device_id,
-                start,
-                end,
-            )
-            daily_rows = await connection.fetch(
-                """
-                SELECT day, metric, value, sync_batch_id, source_platform,
-                       source_metadata
-                FROM daily_metrics
-                WHERE device_id = $1
-                  AND ($2::date IS NULL OR day >= $2::date)
-                  AND ($3::date IS NULL OR day < $3::date)
-                ORDER BY day, metric
-                """,
-                device_id,
-                start.date() if start else None,
-                end.date() if end else None,
-            )
-            sleep_rows = await connection.fetch(
-                """
-                SELECT session_id, start_ts, end_ts, efficiency, resting_hr,
-                       avg_hrv, stages, metadata, sync_batch_id, source_platform,
-                       source_metadata
-                FROM sleep_sessions
-                WHERE device_id = $1
-                  AND ($2::timestamptz IS NULL OR end_ts > $2)
-                  AND ($3::timestamptz IS NULL OR start_ts < $3)
-                ORDER BY start_ts
-                """,
-                device_id,
-                start,
-                end,
-            )
-            workout_rows = await connection.fetch(
-                """
-                SELECT workout_id, start_ts, end_ts, sport, source, metrics, metadata,
-                       sync_batch_id, source_platform, source_metadata
-                FROM workouts
-                WHERE device_id = $1
-                  AND ($2::timestamptz IS NULL OR end_ts > $2)
-                  AND ($3::timestamptz IS NULL OR start_ts < $3)
-                ORDER BY start_ts
-                """,
-                device_id,
-                start,
-                end,
-            )
-            journal_rows = await connection.fetch(
-                """
-                SELECT day, question, answered_yes, notes, numeric_value,
-                       sync_batch_id, source_platform, source_metadata
-                FROM journal_entries
-                WHERE device_id = $1
-                  AND ($2::date IS NULL OR day >= $2::date)
-                  AND ($3::date IS NULL OR day < $3::date)
-                ORDER BY day, question_key
-                """,
-                device_id,
-                start.date() if start else None,
-                end.date() if end else None,
-            )
+            async with connection.transaction(
+                isolation="repeatable_read",
+                readonly=True,
+            ):
+                row_count = int(
+                    await connection.fetchval(
+                        """
+                        SELECT count(*)::bigint
+                        FROM (
+                          SELECT 1 AS export_row
+                          FROM devices
+                          WHERE device_id = $1
+                          UNION ALL
+                          SELECT 1
+                          FROM metric_samples
+                          WHERE device_id = $1
+                            AND (
+                              $2::timestamptz IS NULL OR recorded_at >= $2
+                            )
+                            AND (
+                              $3::timestamptz IS NULL OR recorded_at < $3
+                            )
+                          UNION ALL
+                          SELECT 1
+                          FROM events
+                          WHERE device_id = $1
+                            AND (
+                              $2::timestamptz IS NULL OR recorded_at >= $2
+                            )
+                            AND (
+                              $3::timestamptz IS NULL OR recorded_at < $3
+                            )
+                          UNION ALL
+                          SELECT 1
+                          FROM daily_metrics
+                          WHERE device_id = $1
+                            AND (
+                              $2::timestamptz IS NULL
+                              OR day >=
+                                ($2::timestamptz AT TIME ZONE 'UTC')::date
+                            )
+                            AND (
+                              $3::timestamptz IS NULL
+                              OR day <
+                                ($3::timestamptz AT TIME ZONE 'UTC')::date
+                            )
+                          UNION ALL
+                          SELECT 1
+                          FROM sleep_sessions
+                          WHERE device_id = $1
+                            AND ($2::timestamptz IS NULL OR end_ts > $2)
+                            AND ($3::timestamptz IS NULL OR start_ts < $3)
+                          UNION ALL
+                          SELECT 1
+                          FROM workouts
+                          WHERE device_id = $1
+                            AND ($2::timestamptz IS NULL OR end_ts > $2)
+                            AND ($3::timestamptz IS NULL OR start_ts < $3)
+                          UNION ALL
+                          SELECT 1
+                          FROM journal_entries
+                          WHERE device_id = $1
+                            AND (
+                              $2::timestamptz IS NULL
+                              OR day >=
+                                ($2::timestamptz AT TIME ZONE 'UTC')::date
+                            )
+                            AND (
+                              $3::timestamptz IS NULL
+                              OR day <
+                                ($3::timestamptz AT TIME ZONE 'UTC')::date
+                            )
+                          LIMIT $4
+                        ) AS bounded_export
+                        """,
+                        device_id,
+                        start,
+                        end,
+                        max_rows + 1,
+                    )
+                )
+                if row_count > max_rows:
+                    raise ExportLimitExceededError(max_rows)
+                device_row = await connection.fetchrow(
+                    """
+                    SELECT device_id, display_name, model, firmware_version,
+                           hardware_revision, platform, app_version, last_seen,
+                           metadata
+                    FROM devices WHERE device_id = $1
+                    """,
+                    device_id,
+                )
+                metric_rows = await connection.fetch(
+                    """
+                    SELECT metric, recorded_at, value, unit, measurement_class,
+                           clinical_interpretation_allowed, quality, metadata,
+                           sync_batch_id, source_platform, source_metadata
+                    FROM metric_samples
+                    WHERE device_id = $1
+                      AND ($2::timestamptz IS NULL OR recorded_at >= $2)
+                      AND ($3::timestamptz IS NULL OR recorded_at < $3)
+                    ORDER BY recorded_at, metric,
+                             CASE WHEN metric = 'rr'
+                                  THEN (metadata ->> 'seq')::bigint
+                                  ELSE 0
+                             END,
+                             value,
+                             sample_key
+                    """,
+                    device_id,
+                    start,
+                    end,
+                )
+                event_rows = await connection.fetch(
+                    """
+                    SELECT event_id, recorded_at, kind, value_json AS value,
+                           metadata, sync_batch_id, source_platform,
+                           source_metadata
+                    FROM events
+                    WHERE device_id = $1
+                      AND ($2::timestamptz IS NULL OR recorded_at >= $2)
+                      AND ($3::timestamptz IS NULL OR recorded_at < $3)
+                    ORDER BY recorded_at, event_id
+                    """,
+                    device_id,
+                    start,
+                    end,
+                )
+                daily_rows = await connection.fetch(
+                    """
+                    SELECT day, metric, value, sync_batch_id, source_platform,
+                           source_metadata
+                    FROM daily_metrics
+                    WHERE device_id = $1
+                      AND ($2::date IS NULL OR day >= $2::date)
+                      AND ($3::date IS NULL OR day < $3::date)
+                    ORDER BY day, metric
+                    """,
+                    device_id,
+                    start.date() if start else None,
+                    end.date() if end else None,
+                )
+                sleep_rows = await connection.fetch(
+                    """
+                    SELECT session_id, start_ts, end_ts, efficiency, resting_hr,
+                           avg_hrv, stages, metadata, sync_batch_id,
+                           source_platform, source_metadata
+                    FROM sleep_sessions
+                    WHERE device_id = $1
+                      AND ($2::timestamptz IS NULL OR end_ts > $2)
+                      AND ($3::timestamptz IS NULL OR start_ts < $3)
+                    ORDER BY start_ts
+                    """,
+                    device_id,
+                    start,
+                    end,
+                )
+                workout_rows = await connection.fetch(
+                    """
+                    SELECT workout_id, start_ts, end_ts, sport, source, metrics,
+                           metadata, sync_batch_id, source_platform,
+                           source_metadata
+                    FROM workouts
+                    WHERE device_id = $1
+                      AND ($2::timestamptz IS NULL OR end_ts > $2)
+                      AND ($3::timestamptz IS NULL OR start_ts < $3)
+                    ORDER BY start_ts
+                    """,
+                    device_id,
+                    start,
+                    end,
+                )
+                journal_rows = await connection.fetch(
+                    """
+                    SELECT day, question, answered_yes, notes, numeric_value,
+                           sync_batch_id, source_platform, source_metadata
+                    FROM journal_entries
+                    WHERE device_id = $1
+                      AND ($2::date IS NULL OR day >= $2::date)
+                      AND ($3::date IS NULL OR day < $3::date)
+                    ORDER BY day, question_key
+                    """,
+                    device_id,
+                    start.date() if start else None,
+                    end.date() if end else None,
+                )
+                exported_at = await connection.fetchval("SELECT clock_timestamp()")
         return {
             "schema_version": 1,
-            "exported_at": datetime.now(UTC),
+            "exported_at": exported_at,
+            "row_count": row_count,
+            "window": {"start": start, "end": end},
             "device": _decoded_row(device_row) if device_row else None,
             "metric_samples": [_decoded_row(row) for row in metric_rows],
             "events": [_decoded_row(row) for row in event_rows],
@@ -2571,15 +2800,19 @@ class PostgresRepository:
             raise FriendConflictError("this installation already has a friend profile")
         return _decoded_row(row)
 
-    async def list_friend_profiles(self) -> list[dict[str, Any]]:
+    async def list_friend_profiles(
+        self, installation_id: str | None = None
+    ) -> list[dict[str, Any]]:
         pool = self._require_pool()
         rows = await pool.fetch(
             """
             SELECT profile_id, enrollment_id, display_name, installation_id,
                    daily_device_id, created_at, updated_at, disabled_at
             FROM friend_profiles
+            WHERE $1::text IS NULL OR installation_id = $1
             ORDER BY lower(display_name), profile_id
-            """
+            """,
+            installation_id,
         )
         return [_decoded_row(row) for row in rows]
 

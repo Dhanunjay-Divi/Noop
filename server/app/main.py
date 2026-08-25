@@ -47,11 +47,15 @@ from app.models import (
     FriendRequestDecision,
     FriendVisibilityPatch,
     IDENTIFIER_PATTERN,
+    InstallationCredentialBootstrap,
+    InstallationCredentialRotation,
     SafetyContactCreate,
     SafetyIncidentTransition,
     SafetyLocationUpdate,
     SafetyPageCreate,
+    SafetyPagingControlUpdate,
     SafetyProfileBootstrap,
+    SafetyTokenRotation,
     STREAM_RANGES,
     StrictModel,
     SyncPayload,
@@ -59,13 +63,13 @@ from app.models import (
 )
 from app.paging import (
     PagingProvider,
-    PagingUnavailableError,
     TwilioPagingProvider,
     UnavailablePagingProvider,
     normalise_provider_status,
     validate_twilio_webhook,
 )
 from app.repository import (
+    ExportLimitExceededError,
     FriendConflictError,
     FriendForbiddenError,
     FriendNotFoundError,
@@ -73,6 +77,7 @@ from app.repository import (
     PostgresRepository,
     Repository,
     SyncConflictError,
+    SyncForbiddenError,
     SyncRetiredError,
 )
 from app.safety_repository import (
@@ -85,6 +90,13 @@ from app.safety_repository import (
 )
 from app.safety_capabilities import SafetyCapabilitySigner
 from app.safety_worker import SafetyDeliveryWorker
+from app.tenancy import (
+    InstallationConflictError,
+    InstallationNotFoundError,
+    InstallationRepository,
+    MemoryInstallationRepository,
+    PostgresInstallationRepository,
+)
 
 RAW_NOTICE = (
     "Rows labelled raw_sensor or unclassified_sensor are uncalibrated sensor "
@@ -217,6 +229,7 @@ class RateLimitMiddleware:
         *,
         credential_limit: int,
         origin_limit: int,
+        provider_callback_origin_limit: int,
         max_keys: int,
     ) -> None:
         self.app = app
@@ -230,15 +243,39 @@ class RateLimitMiddleware:
             window_seconds=60,
             max_keys=max_keys,
         )
+        self._provider_callback_origin = SlidingWindowRateLimiter(
+            limit=provider_callback_origin_limit,
+            window_seconds=60,
+            max_keys=max_keys,
+        )
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
-        if scope.get("type") != "http" or not scope.get("path", "").startswith("/v1"):
+        path = scope.get("path", "")
+        if scope.get("type") != "http" or not path.startswith("/v1"):
             await self.app(scope, receive, send)
             return
 
         client = scope.get("client")
         direct_peer = str(client[0]) if client else "unknown"
         origin_key = "origin:" + hashlib.sha256(direct_peer.encode("utf-8")).hexdigest()
+        if path == "/v1/safety/provider/twilio/status" or path.startswith(
+            "/v1/safety/provider/twilio/respond/"
+        ):
+            allowed, retry_after = await self._provider_callback_origin.consume(
+                origin_key
+            )
+            if not allowed:
+                await self._reject(
+                    scope,
+                    receive,
+                    send,
+                    retry_after,
+                    "provider-callback-origin",
+                )
+                return
+            await self.app(scope, receive, send)
+            return
+
         allowed, retry_after = await self._origin.consume(origin_key)
         if not allowed:
             await self._reject(scope, receive, send, retry_after, "origin")
@@ -315,10 +352,33 @@ def _normalise_utc(value: datetime, field_name: str) -> datetime:
     return value.astimezone(UTC)
 
 
+def _export_interval(
+    start: datetime | None,
+    end: datetime | None,
+) -> tuple[datetime | None, datetime | None]:
+    beginning = _normalise_utc(start, "start") if start else None
+    finish = _normalise_utc(end, "end") if end else None
+    if beginning and finish and beginning >= finish:
+        raise HTTPException(status_code=422, detail="start must be before end")
+    return beginning, finish
+
+
 def _device_id(value: str) -> str:
     if DEVICE_RE.fullmatch(value) is None:
         raise HTTPException(status_code=422, detail="invalid device_id")
     return value
+
+
+def _scoped_device_installation(value: str) -> str | None:
+    components = value.split(":", 2)
+    if (
+        len(components) != 3
+        or components[0] not in {"ios", "android", "macos", "import", "other"}
+        or not components[1]
+        or not components[2]
+    ):
+        return None
+    return components[1]
 
 
 def _canonical_payload_hash(payload: SyncPayload) -> str:
@@ -351,16 +411,6 @@ def _new_invite_code() -> tuple[str, str]:
     return display, compact
 
 
-def _new_safety_invitation_token() -> str:
-    # A browser-held one-time capability. Only its digest is stored.
-    return secrets.token_urlsafe(32)
-
-
-def _safe_provider_error(error: Exception) -> str:
-    text = str(error).strip() or "paging provider request failed"
-    return text[:240]
-
-
 def _safety_contact_response(
     contact: dict[str, Any], *, now: datetime | None = None
 ) -> dict[str, Any]:
@@ -390,7 +440,59 @@ def _safety_dispatch_response(dispatch: dict[str, Any]) -> dict[str, Any]:
         delivery_status = str(delivery["status"])
         summary[delivery_status] = summary.get(delivery_status, 0) + 1
     response["delivery_summary"] = summary
+    response["contact_summary"] = _safety_contact_delivery_summary(response)
     return response
+
+
+def _safety_contact_delivery_summary(dispatch: dict[str, Any]) -> dict[str, Any]:
+    deliveries_by_contact: dict[str, list[dict[str, Any]]] = {}
+    reached_contacts: set[str] = set()
+    reached_at: list[datetime | str] = []
+    for delivery in dispatch.get("deliveries", []):
+        contact_id = str(delivery["contact_id"])
+        deliveries_by_contact.setdefault(contact_id, []).append(delivery)
+        if str(delivery["status"]) == "delivered":
+            reached_contacts.add(contact_id)
+            marker = delivery.get("delivered_at") or delivery.get("updated_at")
+            if marker is not None:
+                reached_at.append(marker)
+    for response in dispatch.get("responses", []) or []:
+        reached_contacts.add(str(response["contact_id"]))
+        marker = response.get("responded_at")
+        if marker is not None:
+            reached_at.append(marker)
+
+    failed_contacts = {
+        contact_id
+        for contact_id, deliveries in deliveries_by_contact.items()
+        if contact_id not in reached_contacts
+        and deliveries
+        and all(
+            str(delivery["status"]) == "failed"
+            and not bool(delivery.get("has_unconfirmed_attempt"))
+            for delivery in deliveries
+        )
+    }
+    targeted = len(deliveries_by_contact)
+    reached = len(reached_contacts & deliveries_by_contact.keys())
+    failed = len(failed_contacts)
+    return {
+        "targeted": targeted,
+        "reached": reached,
+        "pending": max(targeted - reached - failed, 0),
+        "failed": failed,
+        "last_reached_at": (
+            max(
+                reached_at,
+                key=lambda value: (
+                    value.isoformat() if isinstance(value, datetime) else str(value)
+                ),
+            )
+            if reached_at
+            else None
+        ),
+        "all_contacts_failed": targeted > 0 and failed == targeted,
+    }
 
 
 def _safety_acceptance_headers() -> dict[str, str]:
@@ -655,6 +757,65 @@ async def _retention_worker(repository: Repository, settings: Settings) -> None:
             logger.exception("scheduled retention failed")
 
 
+async def _run_safety_retention_once(
+    repository: SafetyRepository,
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+) -> dict[str, int]:
+    if (
+        settings.safety_incident_retention_days is None
+        and settings.safety_contact_retention_days is None
+    ):
+        return {}
+    reference = (now or datetime.now(UTC)).astimezone(UTC)
+    incident_cutoff = (
+        reference - timedelta(days=settings.safety_incident_retention_days)
+        if settings.safety_incident_retention_days is not None
+        else None
+    )
+    contact_cutoff = (
+        reference - timedelta(days=settings.safety_contact_retention_days)
+        if settings.safety_contact_retention_days is not None
+        else None
+    )
+    replay_guard_until = reference + timedelta(
+        days=settings.idempotency_replay_guard_days
+    )
+    totals: dict[str, int] = {}
+    batch_size = settings.safety_maintenance_batch_size
+    for _ in range(settings.safety_retention_max_batches_per_run):
+        counts = await repository.purge_retained_data(
+            incident_cutoff=incident_cutoff,
+            contact_cutoff=contact_cutoff,
+            replay_guard_until=replay_guard_until,
+            now=reference,
+            limit=batch_size,
+        )
+        for key, value in counts.items():
+            totals[key] = totals.get(key, 0) + int(value)
+        if all(int(counts.get(key, 0)) < batch_size for key in counts):
+            break
+        await asyncio.sleep(0)
+    return totals
+
+
+async def _safety_retention_worker(
+    repository: SafetyRepository,
+    settings: Settings,
+) -> None:
+    interval_seconds = settings.safety_retention_interval_hours * 60 * 60
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            counts = await _run_safety_retention_once(repository, settings)
+            logger.info("scheduled Safety retention completed: %s", counts)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("scheduled Safety retention failed")
+
+
 async def require_friend_profile(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
@@ -722,6 +883,7 @@ def create_app(
     settings: Settings | None = None,
     repository: Repository | None = None,
     safety_repository: SafetyRepository | None = None,
+    installation_repository: InstallationRepository | None = None,
     paging_provider: PagingProvider | None = None,
 ) -> FastAPI:
     runtime_settings = settings or Settings.from_env()
@@ -733,6 +895,8 @@ def create_app(
             runtime_settings.database_url,
             pool_min_size=runtime_settings.pool_min_size,
             pool_max_size=runtime_settings.pool_max_size,
+            statement_cache_size=(runtime_settings.database_statement_cache_size),
+            run_migrations=runtime_settings.run_migrations,
         )
     else:
         # Startup validation will reject this in normal deployment. Keeping a
@@ -745,6 +909,15 @@ def create_app(
         runtime_safety_repository = PostgresSafetyRepository(runtime_repository)
     else:
         runtime_safety_repository = MemorySafetyRepository()
+
+    if installation_repository is not None:
+        runtime_installation_repository = installation_repository
+    elif isinstance(runtime_repository, PostgresRepository):
+        runtime_installation_repository = PostgresInstallationRepository(
+            runtime_repository
+        )
+    else:
+        runtime_installation_repository = MemoryInstallationRepository()
 
     runtime_twilio_callback_url: str | None = None
     if paging_provider is not None:
@@ -763,6 +936,7 @@ def create_app(
             auth_token=runtime_settings.twilio_auth_token or "",
             from_phone=runtime_settings.twilio_from_phone or "",
             status_callback_url=runtime_twilio_callback_url,
+            timeout_seconds=runtime_settings.safety_provider_request_timeout_seconds,
         )
     else:
         runtime_paging_provider = UnavailablePagingProvider()
@@ -784,6 +958,17 @@ def create_app(
         provider_receipt_timeout_seconds=(
             runtime_settings.safety_provider_receipt_timeout_seconds
         ),
+        batch_size=runtime_settings.safety_worker_batch_size,
+        max_concurrency=runtime_settings.safety_worker_max_concurrency,
+        maintenance_batch_size=runtime_settings.safety_maintenance_batch_size,
+        provider_max_requests_per_second=(
+            runtime_settings.safety_provider_max_requests_per_second
+        ),
+    )
+    runtime_provider_callback_limiter = SlidingWindowRateLimiter(
+        limit=runtime_settings.rate_limit_provider_callback_requests_per_minute,
+        window_seconds=60,
+        max_keys=2,
     )
 
     @asynccontextmanager
@@ -794,13 +979,30 @@ def create_app(
         )
         await runtime_repository.startup()
         retention_task: asyncio.Task[None] | None = None
+        safety_retention_task: asyncio.Task[None] | None = None
         safety_task: asyncio.Task[None] | None = None
         if runtime_settings.retention_days is not None:
             retention_task = asyncio.create_task(
                 _retention_worker(runtime_repository, runtime_settings),
                 name="noop-retention",
             )
-        if runtime_paging_provider.available:
+        if (
+            runtime_settings.safety_incident_retention_days is not None
+            or runtime_settings.safety_contact_retention_days is not None
+        ):
+            safety_retention_task = asyncio.create_task(
+                _safety_retention_worker(
+                    runtime_safety_repository,
+                    runtime_settings,
+                ),
+                name="noop-safety-retention",
+            )
+        if runtime_paging_provider.available and runtime_settings.safety_worker_enabled:
+            await runtime_safety_repository.record_worker_heartbeat(
+                worker_id=runtime_safety_worker.worker_id,
+                now=await runtime_safety_repository.coordination_now(),
+                worker_version=__version__,
+            )
             safety_task = asyncio.create_task(
                 runtime_safety_worker.run(),
                 name="noop-safety-delivery",
@@ -816,6 +1018,10 @@ def create_app(
                 retention_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await retention_task
+            if safety_retention_task is not None:
+                safety_retention_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await safety_retention_task
             await runtime_repository.shutdown()
 
     app = FastAPI(
@@ -827,8 +1033,10 @@ def create_app(
     app.state.settings = runtime_settings
     app.state.repository = runtime_repository
     app.state.safety_repository = runtime_safety_repository
+    app.state.installation_repository = runtime_installation_repository
     app.state.paging_provider = runtime_paging_provider
     app.state.safety_worker = runtime_safety_worker
+    app.state.provider_callback_rate_limiter = runtime_provider_callback_limiter
     app.add_middleware(
         RequestSizeLimitMiddleware,
         max_bytes=runtime_settings.max_request_bytes,
@@ -837,6 +1045,9 @@ def create_app(
         RateLimitMiddleware,
         credential_limit=runtime_settings.rate_limit_requests_per_minute,
         origin_limit=runtime_settings.rate_limit_origin_requests_per_minute,
+        provider_callback_origin_limit=(
+            runtime_settings.rate_limit_provider_callback_pre_auth_requests_per_minute
+        ),
         max_keys=runtime_settings.rate_limit_max_keys,
     )
 
@@ -849,6 +1060,16 @@ def create_app(
             content=jsonable_encoder(
                 {"detail": _validation_errors_without_inputs(exc.errors())}
             ),
+        )
+
+    @app.exception_handler(ExportLimitExceededError)
+    async def reject_oversized_export(
+        _: Request,
+        exc: ExportLimitExceededError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            content={"detail": str(exc), "max_rows": exc.max_rows},
         )
 
     @app.middleware("http")
@@ -881,6 +1102,14 @@ def create_app(
         if is_admin:
             request.state.auth_scope = "admin"
             return
+        if supplied.startswith("noop_install_"):
+            installation = await runtime_installation_repository.installation_for_token(
+                _secret_hash(supplied)
+            )
+            if installation is not None:
+                request.state.auth_scope = "installation"
+                request.state.installation = installation
+                return
         if request.url.path in {"/v1/sync", "/v1/status"} and supplied.startswith(
             "noop_member_"
         ):
@@ -896,6 +1125,64 @@ def create_app(
             detail="invalid or missing bearer token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    async def require_admin_scope(request: Request) -> None:
+        if getattr(request.state, "auth_scope", None) != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="administrator authorization is required",
+            )
+
+    def biometric_installation_id(request: Request) -> str | None:
+        scope = getattr(request.state, "auth_scope", None)
+        if scope == "installation":
+            return str(request.state.installation["installation_id"])
+        if scope == "admin" and runtime_settings.auth_mode == "single_owner":
+            return None
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "shared mode requires a per-installation credential for biometric data"
+            ),
+        )
+
+    async def require_device_access(request: Request, device_id: str) -> str | None:
+        installation_id = biometric_installation_id(request)
+        if installation_id is None:
+            return None
+        if not await runtime_installation_repository.owns_device(
+            installation_id=installation_id,
+            device_id=device_id,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="device was not found",
+            )
+        return installation_id
+
+    def require_matching_installation(
+        request: Request,
+        installation_id: str,
+    ) -> None:
+        scope = getattr(request.state, "auth_scope", None)
+        if scope == "admin":
+            return
+        if (
+            scope == "installation"
+            and request.state.installation["installation_id"] == installation_id
+        ):
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="credential does not control this installation",
+        )
+
+    def raise_installation_error(exc: Exception) -> None:
+        if isinstance(exc, InstallationNotFoundError):
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if isinstance(exc, InstallationConflictError):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise exc
 
     def raise_social_error(exc: Exception) -> None:
         if isinstance(exc, FriendNotFoundError):
@@ -926,6 +1213,8 @@ def create_app(
         # orchestrator's traffic decision depend on an actual database query.
         try:
             ready = await runtime_repository.ready()
+            if ready and runtime_settings.auth_mode == "shared":
+                ready = await runtime_installation_repository.shared_cutover_ready()
         except Exception:
             ready = False
         if not ready:
@@ -994,7 +1283,7 @@ def create_app(
             contact = await runtime_safety_repository.decide_invitation(
                 invite_token_hash=_secret_hash(invitation_token),
                 decision=decision,
-                now=datetime.now(UTC),
+                now=await runtime_safety_repository.coordination_now(),
             )
         except SafetyNotFoundError:
             return HTMLResponse(
@@ -1027,7 +1316,7 @@ def create_app(
         expires: int,
         signature: str,
     ) -> dict[str, Any] | None:
-        now = datetime.now(UTC)
+        now = await runtime_safety_repository.coordination_now()
         if not runtime_safety_signer.verify(
             dispatch_id=str(dispatch_id),
             contact_id=str(contact_id),
@@ -1065,6 +1354,21 @@ def create_app(
             signature=request.headers.get("X-Twilio-Signature", ""),
             auth_token=runtime_settings.twilio_auth_token or "",
         )
+
+    async def consume_authenticated_provider_callback() -> None:
+        allowed, retry_after = await runtime_provider_callback_limiter.consume(
+            "twilio-authenticated"
+        )
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="authenticated provider callback rate limit exceeded",
+                headers={
+                    "Retry-After": str(retry_after),
+                    "Cache-Control": "no-store",
+                    "X-Noop-RateLimit-Scope": "provider-callback-authenticated",
+                },
+            )
 
     @app.get(
         "/safety/respond/{dispatch_id}/{contact_id}",
@@ -1146,7 +1450,7 @@ def create_app(
                 contact_id=str(contact_id),
                 decision=decision,
                 source="sms_link",
-                now=datetime.now(UTC),
+                now=await runtime_safety_repository.coordination_now(),
             )
         except SafetyConflictError as exc:
             return HTMLResponse(
@@ -1185,19 +1489,6 @@ def create_app(
         expires: int = Query(..., gt=0),
         signature: str = Query(..., min_length=43, max_length=43),
     ) -> Response:
-        preview = await safety_response_preview(
-            dispatch_id=dispatch_id,
-            contact_id=contact_id,
-            expires=expires,
-            signature=signature,
-        )
-        if preview is None:
-            return Response(
-                "<Response><Say>This Safety response link is no longer valid."
-                "</Say></Response>",
-                status_code=403,
-                media_type="application/xml",
-            )
         raw = await request.body()
         if len(raw) > 16_384:
             raise HTTPException(status_code=413, detail="callback body is too large")
@@ -1220,6 +1511,20 @@ def create_app(
                 status_code=403,
                 media_type="application/xml",
             )
+        await consume_authenticated_provider_callback()
+        preview = await safety_response_preview(
+            dispatch_id=dispatch_id,
+            contact_id=contact_id,
+            expires=expires,
+            signature=signature,
+        )
+        if preview is None:
+            return Response(
+                "<Response><Say>This Safety response link is no longer valid."
+                "</Say></Response>",
+                status_code=403,
+                media_type="application/xml",
+            )
         digit = values.get("Digits", [""])[0]
         decision = {"1": "responding", "2": "cannot_respond"}.get(digit)
         if decision is None:
@@ -1234,7 +1539,7 @@ def create_app(
                 contact_id=str(contact_id),
                 decision=decision,
                 source="voice_dtmf",
-                now=datetime.now(UTC),
+                now=await runtime_safety_repository.coordination_now(),
             )
         except SafetyConflictError:
             message = "This Safety page is already closed."
@@ -1285,6 +1590,7 @@ def create_app(
                 status_code=401,
                 detail="invalid callback signature",
             )
+        await consume_authenticated_provider_callback()
         provider_reference = (
             values.get("MessageSid", [""])[0] or values.get("CallSid", [""])[0]
         )
@@ -1292,7 +1598,7 @@ def create_app(
             values.get("MessageStatus", [""])[0] or values.get("CallStatus", [""])[0]
         )
         if provider_reference and provider_status:
-            now = datetime.now(UTC)
+            now = await runtime_safety_repository.coordination_now()
             updated = await runtime_safety_repository.update_provider_receipt(
                 provider_reference=provider_reference,
                 status=normalise_provider_status(provider_status),
@@ -1304,23 +1610,417 @@ def create_app(
                 runtime_safety_worker.wake()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    async def paging_runtime_available() -> bool:
+        if not runtime_paging_provider.available:
+            return False
+        now = await runtime_safety_repository.coordination_now()
+        return await runtime_safety_repository.worker_is_active(
+            cutoff=now
+            - timedelta(
+                seconds=runtime_settings.safety_worker_heartbeat_timeout_seconds
+            )
+        )
+
     router = APIRouter(
         prefix="/v1",
         dependencies=[Depends(require_api_token)],
     )
 
-    @router.get("/safety/operations", tags=["operations"])
+    async def installation_export_value(
+        installation: dict[str, Any],
+        start: datetime | None,
+        end: datetime | None,
+    ) -> dict[str, Any]:
+        installation_id = str(installation["installation_id"])
+        max_rows = runtime_settings.export_max_rows
+        device_ids = await runtime_installation_repository.device_ids(
+            installation_id,
+            limit=max_rows + 1,
+        )
+        if len(device_ids) > max_rows:
+            raise ExportLimitExceededError(max_rows)
+        remaining = max_rows
+        devices = []
+        row_count = 0
+        for device_id in device_ids:
+            if remaining <= 0:
+                raise ExportLimitExceededError(max_rows)
+            exported = await runtime_repository.export_device(
+                device_id,
+                start,
+                end,
+                remaining,
+            )
+            exported_rows = int(exported["row_count"])
+            devices.append(exported)
+            row_count += exported_rows
+            remaining -= exported_rows
+        return {
+            "schema_version": 1,
+            "installation": installation,
+            "row_count": row_count,
+            "window": {"start": start, "end": end},
+            "devices": devices,
+            "notice": RAW_NOTICE,
+        }
+
+    async def hard_delete_installation_data(
+        installation_id: str,
+    ) -> dict[str, Any]:
+        now = await runtime_installation_repository.coordination_now()
+        await runtime_installation_repository.revoke_installation(
+            installation_id=installation_id,
+            now=now,
+        )
+        device_ids = await runtime_installation_repository.device_ids(installation_id)
+        biometric_counts: dict[str, int] = {}
+        replay_guard_until = now + timedelta(
+            days=runtime_settings.idempotency_replay_guard_days
+        )
+        for device_id in device_ids:
+            counts = await runtime_repository.delete_device(
+                device_id,
+                replay_guard_until,
+            )
+            for key, value in counts.items():
+                biometric_counts[key] = biometric_counts.get(key, 0) + int(value)
+        social_counts: dict[str, int] = {}
+        for profile in await runtime_repository.list_friend_profiles(installation_id):
+            counts = await runtime_repository.delete_friend_profile_data(
+                str(profile["profile_id"]),
+                str(profile["daily_device_id"]),
+                include_disabled=True,
+            )
+            for key, value in counts.items():
+                social_counts[key] = social_counts.get(key, 0) + int(value)
+        safety_counts = (
+            await runtime_safety_repository.delete_profiles_for_installation(
+                installation_id
+            )
+        )
+        tenancy_counts = await runtime_installation_repository.delete_installation(
+            installation_id
+        )
+        return {
+            "installation_id": installation_id,
+            "devices": len(device_ids),
+            "biometric_counts": biometric_counts,
+            "social_counts": social_counts,
+            "safety_counts": safety_counts,
+            "tenancy_counts": tenancy_counts,
+        }
+
+    @router.post(
+        "/admin/installations",
+        status_code=status.HTTP_201_CREATED,
+        tags=["installation-admin"],
+        dependencies=[Depends(require_admin_scope)],
+    )
+    async def bootstrap_installation(
+        body: InstallationCredentialBootstrap,
+    ) -> dict[str, Any]:
+        try:
+            installation = await runtime_installation_repository.create_installation(
+                installation_id=body.installation_id,
+                enrollment_id=str(body.enrollment_id),
+                token_hash=_secret_hash(body.installation_token.get_secret_value()),
+                now=await runtime_installation_repository.coordination_now(),
+            )
+        except (InstallationNotFoundError, InstallationConflictError) as exc:
+            raise_installation_error(exc)
+            raise AssertionError("unreachable")
+        return {
+            "installation": installation,
+            "credential_notice": (
+                "The supplied installation token was stored only as a digest. "
+                "It is returned only by the client that generated it."
+            ),
+        }
+
+    @router.get(
+        "/admin/installations",
+        tags=["installation-admin"],
+        dependencies=[Depends(require_admin_scope)],
+    )
+    async def installations() -> dict[str, Any]:
+        return {
+            "installations": (
+                await runtime_installation_repository.list_installations()
+            )
+        }
+
+    @router.put(
+        "/admin/installations/{installation_id}/token",
+        tags=["installation-admin"],
+        dependencies=[Depends(require_admin_scope)],
+    )
+    async def rotate_installation_token_as_admin(
+        installation_id: str,
+        body: InstallationCredentialRotation,
+    ) -> dict[str, Any]:
+        _device_id(installation_id)
+        try:
+            installation = await runtime_installation_repository.rotate_token(
+                installation_id=installation_id,
+                rotation_id=str(body.rotation_id),
+                expected_version=body.expected_version,
+                token_hash=_secret_hash(body.installation_token.get_secret_value()),
+                now=await runtime_installation_repository.coordination_now(),
+            )
+        except (InstallationNotFoundError, InstallationConflictError) as exc:
+            raise_installation_error(exc)
+            raise AssertionError("unreachable")
+        return {"installation": installation}
+
+    @router.delete(
+        "/admin/installations/{installation_id}",
+        tags=["installation-admin"],
+        dependencies=[Depends(require_admin_scope)],
+    )
+    async def revoke_installation_as_admin(
+        installation_id: str,
+        confirmation: Annotated[
+            str | None,
+            Header(alias="X-Noop-Confirm"),
+        ] = None,
+    ) -> dict[str, Any]:
+        _device_id(installation_id)
+        expected = f"REVOKE {installation_id}"
+        if confirmation != expected:
+            raise HTTPException(
+                status_code=412,
+                detail=f"set X-Noop-Confirm to {expected!r}",
+            )
+        try:
+            installation = await runtime_installation_repository.revoke_installation(
+                installation_id=installation_id,
+                now=await runtime_installation_repository.coordination_now(),
+            )
+        except InstallationNotFoundError as exc:
+            raise_installation_error(exc)
+            raise AssertionError("unreachable")
+        return {"status": "revoked", "installation": installation}
+
+    @router.delete(
+        "/admin/installations/{installation_id}/data",
+        tags=["installation-admin"],
+        dependencies=[Depends(require_admin_scope)],
+    )
+    async def erase_installation_as_admin(
+        installation_id: str,
+        confirmation: Annotated[
+            str | None,
+            Header(alias="X-Noop-Confirm"),
+        ] = None,
+    ) -> dict[str, Any]:
+        _device_id(installation_id)
+        expected = f"DELETE INSTALLATION {installation_id}"
+        if confirmation != expected:
+            raise HTTPException(
+                status_code=412,
+                detail=f"set X-Noop-Confirm to {expected!r}",
+            )
+        try:
+            return {
+                "status": "deleted",
+                **await hard_delete_installation_data(installation_id),
+            }
+        except InstallationNotFoundError as exc:
+            raise_installation_error(exc)
+            raise AssertionError("unreachable")
+
+    @router.get("/installation/me", tags=["installation"])
+    async def installation_me(request: Request) -> dict[str, Any]:
+        if getattr(request.state, "auth_scope", None) != "installation":
+            raise HTTPException(
+                status_code=403,
+                detail="installation credential is required",
+            )
+        installation = dict(request.state.installation)
+        return {
+            "installation": installation,
+            "device_ids": await runtime_installation_repository.device_ids(
+                str(installation["installation_id"])
+            ),
+        }
+
+    @router.put("/installation/me/token", tags=["installation"])
+    async def rotate_own_installation_token(
+        request: Request,
+        body: InstallationCredentialRotation,
+    ) -> dict[str, Any]:
+        if getattr(request.state, "auth_scope", None) != "installation":
+            raise HTTPException(
+                status_code=403,
+                detail="installation credential is required",
+            )
+        installation_id = str(request.state.installation["installation_id"])
+        try:
+            installation = await runtime_installation_repository.rotate_token(
+                installation_id=installation_id,
+                rotation_id=str(body.rotation_id),
+                expected_version=body.expected_version,
+                token_hash=_secret_hash(body.installation_token.get_secret_value()),
+                now=await runtime_installation_repository.coordination_now(),
+            )
+        except (InstallationNotFoundError, InstallationConflictError) as exc:
+            raise_installation_error(exc)
+            raise AssertionError("unreachable")
+        return {"installation": installation}
+
+    @router.get("/installation/me/export", tags=["installation"])
+    async def export_own_installation(
+        request: Request,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> Response:
+        if getattr(request.state, "auth_scope", None) != "installation":
+            raise HTTPException(
+                status_code=403,
+                detail="installation credential is required",
+            )
+        installation = dict(request.state.installation)
+        beginning, finish = _export_interval(start, end)
+        value = await installation_export_value(
+            installation,
+            beginning,
+            finish,
+        )
+        return _json_download(
+            value,
+            f"noop-{installation['installation_id']}-export.json",
+        )
+
+    @router.delete("/installation/me", tags=["installation"])
+    async def erase_own_installation(
+        request: Request,
+        confirmation: Annotated[
+            str | None,
+            Header(alias="X-Noop-Confirm"),
+        ] = None,
+    ) -> dict[str, Any]:
+        if getattr(request.state, "auth_scope", None) != "installation":
+            raise HTTPException(
+                status_code=403,
+                detail="installation credential is required",
+            )
+        if confirmation != "DELETE MY INSTALLATION":
+            raise HTTPException(
+                status_code=412,
+                detail="set X-Noop-Confirm to 'DELETE MY INSTALLATION'",
+            )
+        installation_id = str(request.state.installation["installation_id"])
+        return {
+            "status": "deleted",
+            **await hard_delete_installation_data(installation_id),
+        }
+
+    @router.get(
+        "/safety/operations",
+        tags=["operations"],
+        dependencies=[Depends(require_admin_scope)],
+    )
     async def safety_operations() -> dict[str, Any]:
+        now = await runtime_safety_repository.coordination_now()
         return {
             "paging_configured": runtime_paging_provider.available,
+            "retention": {
+                "incident_days": runtime_settings.safety_incident_retention_days,
+                "inactive_contact_days": (
+                    runtime_settings.safety_contact_retention_days
+                ),
+                "interval_hours": runtime_settings.safety_retention_interval_hours,
+                "batch_size": runtime_settings.safety_maintenance_batch_size,
+                "max_batches_per_run": (
+                    runtime_settings.safety_retention_max_batches_per_run
+                ),
+            },
             **await runtime_safety_repository.monitoring_snapshot(
-                now=datetime.now(UTC)
+                now=now,
+                worker_cutoff=now
+                - timedelta(
+                    seconds=runtime_settings.safety_worker_heartbeat_timeout_seconds
+                ),
+                window_seconds=runtime_settings.safety_monitoring_window_seconds,
             ),
+        }
+
+    @router.get(
+        "/safety/operations/paging-control",
+        tags=["operations"],
+        dependencies=[Depends(require_admin_scope)],
+    )
+    async def safety_paging_control() -> dict[str, Any]:
+        return {
+            "paging_configured": runtime_paging_provider.available,
+            **await runtime_safety_repository.paging_control(),
+        }
+
+    @router.put(
+        "/safety/operations/paging-control",
+        tags=["operations"],
+        dependencies=[Depends(require_admin_scope)],
+    )
+    async def update_safety_paging_control(
+        body: SafetyPagingControlUpdate,
+        operator: Annotated[
+            str | None,
+            Header(alias="X-Noop-Operator"),
+        ] = None,
+    ) -> dict[str, Any]:
+        actor = (operator or "").strip()
+        if (
+            not actor
+            or len(actor) > 128
+            or any(ord(character) < 32 or ord(character) == 127 for character in actor)
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "X-Noop-Operator is required and must be a printable "
+                    "identifier of at most 128 characters"
+                ),
+            )
+        if not body.enabled and body.reason is None:
+            raise HTTPException(
+                status_code=422,
+                detail="a reason is required when paging is disabled",
+            )
+        if body.enabled and not runtime_paging_provider.available:
+            raise HTTPException(
+                status_code=409,
+                detail="paging cannot be enabled until a provider is configured",
+            )
+        if body.enabled and not await paging_runtime_available():
+            raise HTTPException(
+                status_code=409,
+                detail="paging cannot be enabled without a healthy Safety worker",
+            )
+        request_id = str(uuid4())
+        try:
+            control = await runtime_safety_repository.set_paging_control(
+                enabled=body.enabled,
+                reason=body.reason,
+                expected_revision=body.expected_revision,
+                now=await runtime_safety_repository.coordination_now(),
+                actor=actor,
+                request_id=request_id,
+            )
+        except SafetyConflictError as exc:
+            raise_safety_error(exc)
+            raise AssertionError("unreachable")
+        if body.enabled:
+            runtime_safety_worker.wake()
+        return {
+            "paging_configured": runtime_paging_provider.available,
+            "request_id": request_id,
+            **control,
         }
 
     @router.get("/status", tags=["operations"])
     async def service_status(request: Request) -> dict[str, Any]:
-        if getattr(request.state, "auth_scope", None) == "social_member":
+        scope = getattr(request.state, "auth_scope", None)
+        if scope == "social_member":
             return {
                 "status": "ok",
                 "version": __version__,
@@ -1328,6 +2028,29 @@ def create_app(
                 "notice": (
                     "This credential can upload its exact computed daily producer "
                     "and use invitation-only social summary routes."
+                ),
+            }
+        if scope == "installation":
+            installation_id = str(request.state.installation["installation_id"])
+            device_ids = await runtime_installation_repository.device_ids(
+                installation_id
+            )
+            return {
+                "status": "ok",
+                "version": __version__,
+                "scope": "installation",
+                "installation_id": installation_id,
+                "owned_device_count": len(device_ids),
+                "retention_days": runtime_settings.retention_days,
+            }
+        if runtime_settings.auth_mode == "shared":
+            return {
+                "status": "ok",
+                "version": __version__,
+                "scope": "administrator",
+                "auth_mode": "shared",
+                "notice": (
+                    "The administrator credential cannot read shared biometric data."
                 ),
             }
         stats = await runtime_repository.stats()
@@ -1349,7 +2072,11 @@ def create_app(
         status_code=status.HTTP_201_CREATED,
         tags=["friends-admin"],
     )
-    async def bootstrap_friend_profile(body: FriendProfileCreate) -> dict[str, Any]:
+    async def bootstrap_friend_profile(
+        request: Request,
+        body: FriendProfileCreate,
+    ) -> dict[str, Any]:
+        require_matching_installation(request, body.installation_id)
         token = _new_friend_token()
         profile_id = str(uuid4())
         try:
@@ -1379,8 +2106,10 @@ def create_app(
         tags=["safety-admin"],
     )
     async def bootstrap_safety_profile(
+        request: Request,
         body: SafetyProfileBootstrap,
     ) -> dict[str, Any]:
+        require_matching_installation(request, body.installation_id)
         try:
             profile = await runtime_safety_repository.create_profile(
                 profile_id=str(uuid4()),
@@ -1389,11 +2118,17 @@ def create_app(
                 installation_id=body.installation_id,
                 token_hash=_secret_hash(body.safety_token.get_secret_value()),
             )
-        except (SafetyNotFoundError, SafetyConflictError) as exc:
+        except SafetyNotFoundError as exc:
             raise_safety_error(exc)
             raise AssertionError("unreachable")
+        control = await runtime_safety_repository.paging_control()
+        runtime_available = await paging_runtime_available()
         return {
-            "profile": profile,
+            "profile": {
+                **profile,
+                "paging_enabled": (bool(control["enabled"]) and runtime_available),
+            },
+            "paging_configured": runtime_paging_provider.available,
             "credential_notice": (
                 "The supplied safety token was stored only as a digest. It can "
                 "manage this installation's emergency contacts and manual "
@@ -1401,13 +2136,18 @@ def create_app(
             ),
         }
 
-    @router.get("/social/admin/profiles", tags=["friends-admin"])
+    @router.get(
+        "/social/admin/profiles",
+        tags=["friends-admin"],
+        dependencies=[Depends(require_admin_scope)],
+    )
     async def friend_profiles() -> dict[str, Any]:
         return {"profiles": await runtime_repository.list_friend_profiles()}
 
     @router.patch(
         "/social/admin/profiles/{profile_id}",
         tags=["friends-admin"],
+        dependencies=[Depends(require_admin_scope)],
     )
     async def update_friend_profile(
         profile_id: UUID, body: FriendProfileUpdate
@@ -1424,6 +2164,7 @@ def create_app(
     @router.post(
         "/social/admin/profiles/{profile_id}/rotate-token",
         tags=["friends-admin"],
+        dependencies=[Depends(require_admin_scope)],
     )
     async def rotate_friend_profile_token(profile_id: UUID) -> dict[str, Any]:
         token = _new_friend_token()
@@ -1444,6 +2185,7 @@ def create_app(
         "/social/admin/profiles/{profile_id}",
         status_code=status.HTTP_204_NO_CONTENT,
         tags=["friends-admin"],
+        dependencies=[Depends(require_admin_scope)],
     )
     async def disable_friend_profile(
         profile_id: UUID,
@@ -1572,7 +2314,40 @@ def create_app(
         status_code=status.HTTP_201_CREATED,
         tags=["friends"],
     )
-    async def join_with_friend_invite(body: FriendInviteJoin) -> dict[str, Any]:
+    async def join_with_friend_invite(
+        request: Request,
+        body: FriendInviteJoin,
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None,
+            Depends(security),
+        ],
+    ) -> dict[str, Any]:
+        if runtime_settings.auth_mode == "shared":
+            supplied = (
+                credentials.credentials
+                if credentials is not None and credentials.scheme.casefold() == "bearer"
+                else ""
+            )
+            installation = (
+                await runtime_installation_repository.installation_for_token(
+                    _secret_hash(supplied)
+                )
+                if supplied.startswith("noop_install_")
+                else None
+            )
+            if installation is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="a valid installation credential is required",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            if str(installation["installation_id"]) != body.installation_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="credential does not control this installation",
+                )
+            request.state.auth_scope = "installation"
+            request.state.installation = installation
         try:
             joined = await runtime_repository.join_friend_invite(
                 _secret_hash(body.code),
@@ -1792,10 +2567,12 @@ def create_app(
 
     safety_router = APIRouter(prefix="/v1/safety")
 
-    def safety_contacts_payload(
+    async def safety_contacts_payload(
         contacts: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        now = datetime.now(UTC)
+        now = await runtime_safety_repository.coordination_now()
+        control = await runtime_safety_repository.paging_control()
+        runtime_available = await paging_runtime_available()
         public_contacts = [
             _safety_contact_response(contact, now=now) for contact in contacts
         ]
@@ -1808,42 +2585,25 @@ def create_app(
             "minimum_accepted": 2,
             "maximum_contacts": 5,
             "paging_configured": runtime_paging_provider.available,
+            "paging_enabled": bool(control["enabled"]) and runtime_available,
         }
 
-    async def send_contact_invitation(
-        *,
-        request: Request,
-        profile: dict[str, Any],
-        contact: dict[str, Any],
-        invitation_token: str,
-    ) -> dict[str, Any]:
-        base_url = (
-            runtime_settings.public_base_url.rstrip("/")
-            if runtime_settings.public_base_url
-            else str(request.base_url).rstrip("/")
-        )
-        acceptance_url = f"{base_url}/safety/accept/{quote(invitation_token, safe='')}"
-        try:
-            submission = await runtime_paging_provider.send_invitation(
-                to_phone=str(contact["phone_e164"]),
-                contact_name=str(contact["display_name"]),
-                owner_name=str(profile["display_name"]),
-                acceptance_url=acceptance_url,
+    async def require_paging_enabled() -> None:
+        if not runtime_paging_provider.available:
+            raise HTTPException(
+                status_code=503,
+                detail="SMS and voice paging are not configured on this server",
             )
-            return await runtime_safety_repository.update_invitation_delivery(
-                profile_id=str(profile["profile_id"]),
-                contact_id=str(contact["contact_id"]),
-                status=submission.status,
-                provider_reference=submission.provider_reference,
-                error=None,
+        control = await runtime_safety_repository.paging_control()
+        if not control["enabled"]:
+            raise HTTPException(
+                status_code=503,
+                detail="safety paging is temporarily paused by the server operator",
             )
-        except PagingUnavailableError as exc:
-            return await runtime_safety_repository.update_invitation_delivery(
-                profile_id=str(profile["profile_id"]),
-                contact_id=str(contact["contact_id"]),
-                status="failed",
-                provider_reference=None,
-                error=_safe_provider_error(exc),
+        if not await paging_runtime_available():
+            raise HTTPException(
+                status_code=503,
+                detail="no healthy Safety paging worker is available",
             )
 
     @safety_router.get("/me", tags=["safety"])
@@ -1853,9 +2613,13 @@ def create_app(
         contacts = await runtime_safety_repository.list_contacts(
             str(member["profile_id"])
         )
+        contacts_payload = await safety_contacts_payload(contacts)
         return {
-            "profile": member,
-            **safety_contacts_payload(contacts),
+            "profile": {
+                **member,
+                "paging_enabled": contacts_payload["paging_enabled"],
+            },
+            **contacts_payload,
             "automatic_escalation": {
                 "enabled": False,
                 "reason": (
@@ -1865,6 +2629,71 @@ def create_app(
             },
         }
 
+    @safety_router.put("/me/token", tags=["safety"])
+    async def rotate_own_safety_token(
+        body: SafetyTokenRotation,
+        member: Annotated[dict[str, Any], Depends(require_safety_profile)],
+    ) -> dict[str, Any]:
+        try:
+            profile = await runtime_safety_repository.rotate_profile_token(
+                profile_id=str(member["profile_id"]),
+                rotation_id=str(body.rotation_id),
+                expected_version=body.expected_version,
+                token_hash=_secret_hash(body.safety_token.get_secret_value()),
+                now=await runtime_safety_repository.coordination_now(),
+            )
+        except (SafetyNotFoundError, SafetyConflictError) as exc:
+            raise_safety_error(exc)
+            raise AssertionError("unreachable")
+        return {"profile": profile}
+
+    @safety_router.get("/me/export", tags=["safety"])
+    async def export_own_safety_profile(
+        member: Annotated[dict[str, Any], Depends(require_safety_profile)],
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> Response:
+        beginning, finish = _export_interval(start, end)
+        try:
+            value = await runtime_safety_repository.export_profile(
+                str(member["profile_id"]),
+                beginning,
+                finish,
+                runtime_settings.export_max_rows,
+            )
+        except (SafetyNotFoundError, SafetyConflictError) as exc:
+            raise_safety_error(exc)
+            raise AssertionError("unreachable")
+        return _json_download(
+            value,
+            f"noop-safety-{member['profile_id']}-export.json",
+        )
+
+    @safety_router.delete("/me", tags=["safety"])
+    async def erase_own_safety_profile(
+        member: Annotated[dict[str, Any], Depends(require_safety_profile)],
+        confirmation: Annotated[
+            str | None,
+            Header(alias="X-Noop-Confirm"),
+        ] = None,
+    ) -> dict[str, Any]:
+        if confirmation != "DELETE MY SAFETY PROFILE":
+            raise HTTPException(
+                status_code=412,
+                detail="set X-Noop-Confirm to 'DELETE MY SAFETY PROFILE'",
+            )
+        try:
+            counts = await runtime_safety_repository.delete_profile(
+                str(member["profile_id"])
+            )
+        except (SafetyNotFoundError, SafetyConflictError) as exc:
+            raise_safety_error(exc)
+            raise AssertionError("unreachable")
+        return {
+            "status": "deleted",
+            "counts": counts,
+        }
+
     @safety_router.get("/contacts", tags=["safety"])
     async def safety_contacts(
         member: Annotated[dict[str, Any], Depends(require_safety_profile)],
@@ -1872,7 +2701,7 @@ def create_app(
         contacts = await runtime_safety_repository.list_contacts(
             str(member["profile_id"])
         )
-        return safety_contacts_payload(contacts)
+        return await safety_contacts_payload(contacts)
 
     @safety_router.post(
         "/contacts",
@@ -1880,38 +2709,36 @@ def create_app(
         tags=["safety"],
     )
     async def add_safety_contact(
-        request: Request,
         body: SafetyContactCreate,
         member: Annotated[dict[str, Any], Depends(require_safety_profile)],
     ) -> dict[str, Any]:
-        if not runtime_paging_provider.available:
-            raise HTTPException(
-                status_code=503,
-                detail=("SMS and voice paging are not configured on this server"),
-            )
-        invitation_token = _new_safety_invitation_token()
-        now = datetime.now(UTC)
+        await require_paging_enabled()
+        contact_id = str(uuid4())
+        invitation_nonce = str(uuid4())
+        now = await runtime_safety_repository.coordination_now()
+        expires_at = now + timedelta(days=7)
+        invitation_token = runtime_safety_signer.invitation_token(
+            contact_id=contact_id,
+            invitation_nonce=invitation_nonce,
+            expires_at_unix=int(expires_at.timestamp()),
+        )
         try:
             contact = await runtime_safety_repository.create_contact(
-                contact_id=str(uuid4()),
+                contact_id=contact_id,
                 profile_id=str(member["profile_id"]),
                 display_name=body.display_name,
                 phone_e164=body.phone_e164,
                 invite_token_hash=_secret_hash(invitation_token),
                 invited_at=now,
-                invite_expires_at=now + timedelta(days=7),
+                invite_expires_at=expires_at,
+                invitation_nonce=invitation_nonce,
             )
         except (SafetyNotFoundError, SafetyConflictError) as exc:
             raise_safety_error(exc)
             raise AssertionError("unreachable")
-        delivered = await send_contact_invitation(
-            request=request,
-            profile=member,
-            contact=contact,
-            invitation_token=invitation_token,
-        )
+        runtime_safety_worker.wake()
         return {
-            "contact": _safety_contact_response(delivered),
+            "contact": _safety_contact_response(contact, now=now),
             "notice": (
                 "The recipient must explicitly accept before this contact can "
                 "receive a safety page."
@@ -1923,35 +2750,32 @@ def create_app(
         tags=["safety"],
     )
     async def resend_safety_contact_invitation(
-        request: Request,
         contact_id: UUID,
         member: Annotated[dict[str, Any], Depends(require_safety_profile)],
     ) -> dict[str, Any]:
-        if not runtime_paging_provider.available:
-            raise HTTPException(
-                status_code=503,
-                detail=("SMS and voice paging are not configured on this server"),
-            )
-        invitation_token = _new_safety_invitation_token()
-        now = datetime.now(UTC)
+        await require_paging_enabled()
+        invitation_nonce = str(uuid4())
+        now = await runtime_safety_repository.coordination_now()
+        expires_at = now + timedelta(days=7)
+        invitation_token = runtime_safety_signer.invitation_token(
+            contact_id=str(contact_id),
+            invitation_nonce=invitation_nonce,
+            expires_at_unix=int(expires_at.timestamp()),
+        )
         try:
             contact = await runtime_safety_repository.renew_invitation(
                 profile_id=str(member["profile_id"]),
                 contact_id=str(contact_id),
                 invite_token_hash=_secret_hash(invitation_token),
                 invited_at=now,
-                invite_expires_at=now + timedelta(days=7),
+                invite_expires_at=expires_at,
+                invitation_nonce=invitation_nonce,
             )
         except (SafetyNotFoundError, SafetyConflictError) as exc:
             raise_safety_error(exc)
             raise AssertionError("unreachable")
-        delivered = await send_contact_invitation(
-            request=request,
-            profile=member,
-            contact=contact,
-            invitation_token=invitation_token,
-        )
-        return {"contact": _safety_contact_response(delivered)}
+        runtime_safety_worker.wake()
+        return {"contact": _safety_contact_response(contact, now=now)}
 
     @safety_router.delete(
         "/contacts/{contact_id}",
@@ -1966,7 +2790,7 @@ def create_app(
             await runtime_safety_repository.revoke_contact(
                 profile_id=str(member["profile_id"]),
                 contact_id=str(contact_id),
-                now=datetime.now(UTC),
+                now=await runtime_safety_repository.coordination_now(),
             )
         except SafetyNotFoundError as exc:
             raise_safety_error(exc)
@@ -1987,11 +2811,6 @@ def create_app(
         member: Annotated[dict[str, Any], Depends(require_safety_profile)],
         idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
     ) -> Any:
-        if not runtime_paging_provider.available:
-            raise HTTPException(
-                status_code=503,
-                detail=("SMS and voice paging are not configured on this server"),
-            )
         if idempotency_key is None:
             raise HTTPException(
                 status_code=400,
@@ -2011,7 +2830,7 @@ def create_app(
                 separators=(",", ":"),
             ).encode("utf-8")
         ).hexdigest()
-        now = datetime.now(UTC)
+        now = await runtime_safety_repository.coordination_now()
         try:
             dispatch = await runtime_safety_repository.create_dispatch(
                 dispatch_id=str(uuid4()),
@@ -2026,6 +2845,7 @@ def create_app(
                 + timedelta(
                     seconds=(runtime_settings.safety_acknowledgement_timeout_seconds)
                 ),
+                delivery_ready=await paging_runtime_available(),
             )
         except (SafetyConflictError, SafetyNotReadyError) as exc:
             raise_safety_error(exc)
@@ -2072,7 +2892,7 @@ def create_app(
         body: SafetyLocationUpdate,
         member: Annotated[dict[str, Any], Depends(require_safety_profile)],
     ) -> dict[str, Any]:
-        now = datetime.now(UTC)
+        now = await runtime_safety_repository.coordination_now()
         if body.captured_at < now - timedelta(minutes=5):
             raise HTTPException(
                 status_code=422,
@@ -2115,7 +2935,7 @@ def create_app(
                 dispatch_id=str(dispatch_id),
                 action=action,
                 note=body.note,
-                now=datetime.now(UTC),
+                now=await runtime_safety_repository.coordination_now(),
             )
         except (SafetyNotFoundError, SafetyConflictError) as exc:
             raise_safety_error(exc)
@@ -2189,7 +3009,9 @@ def create_app(
                     )
                 },
             )
-        if getattr(request.state, "auth_scope", None) == "social_member":
+        auth_scope = getattr(request.state, "auth_scope", None)
+        installation_id: str | None = None
+        if auth_scope == "social_member":
             member = request.state.friend_profile
             metadata = payload.source.metadata
             has_streams = bool(payload.streams.events) or any(
@@ -2227,6 +3049,22 @@ def create_app(
                         "noop_computed daily producer and social summary fields"
                     ),
                 )
+        else:
+            installation_id = biometric_installation_id(request)
+            if installation_id is not None:
+                owns_payload_namespace = (
+                    payload.source.metadata.get("installation_id") == installation_id
+                    and _scoped_device_installation(payload.source.device_id)
+                    == installation_id
+                )
+                if not owns_payload_namespace:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=(
+                            "installation sync is limited to device identifiers "
+                            "and metadata in its own namespace"
+                        ),
+                    )
         if idempotency_key is not None:
             try:
                 header_batch = UUID(idempotency_key)
@@ -2239,38 +3077,60 @@ def create_app(
                     status_code=409,
                     detail="Idempotency-Key does not match batch_id",
                 )
+        if installation_id is not None:
+            try:
+                await runtime_installation_repository.claim_device(
+                    installation_id=installation_id,
+                    device_id=payload.source.device_id,
+                    now=await runtime_installation_repository.coordination_now(),
+                )
+            except (InstallationNotFoundError, InstallationConflictError) as exc:
+                raise_installation_error(exc)
         try:
             return await runtime_repository.sync(
                 payload,
                 _canonical_payload_hash(payload),
                 (
                     str(request.state.friend_profile["profile_id"])
-                    if getattr(request.state, "auth_scope", None) == "social_member"
+                    if auth_scope == "social_member"
                     else None
                 ),
+                installation_id,
             )
         except SyncConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except SyncRetiredError as exc:
             raise HTTPException(status_code=410, detail=str(exc)) from exc
+        except SyncForbiddenError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         except FriendForbiddenError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     @router.get("/devices", tags=["read"])
-    async def devices() -> dict[str, Any]:
+    async def devices(request: Request) -> dict[str, Any]:
+        installation_id = biometric_installation_id(request)
+        owned = (
+            await runtime_installation_repository.device_ids(installation_id)
+            if installation_id is not None
+            else None
+        )
+        rows = await runtime_repository.list_devices(owned)
         return {
-            "devices": await runtime_repository.list_devices(),
+            "devices": rows,
             "notice": RAW_NOTICE,
         }
 
     @router.get("/devices/{device_id}/latest", tags=["read"])
     async def latest(
+        request: Request,
         device_id: str,
         metrics: str | None = Query(
             default=None,
             description="Optional comma-separated canonical stream names",
         ),
     ) -> dict[str, Any]:
+        _device_id(device_id)
+        await require_device_access(request, device_id)
         selected: list[str] | None = None
         if metrics:
             selected = sorted(
@@ -2283,13 +3143,14 @@ def create_app(
                     detail=f"unknown metrics: {', '.join(sorted(unknown))}",
                 )
         return {
-            "device_id": _device_id(device_id),
+            "device_id": device_id,
             "metrics": await runtime_repository.latest_metrics(device_id, selected),
             "notice": RAW_NOTICE,
         }
 
     @router.get("/devices/{device_id}/streams/{metric}", tags=["read"])
     async def metric_values(
+        request: Request,
         device_id: str,
         metric: str,
         start: datetime | None = None,
@@ -2297,6 +3158,7 @@ def create_app(
         limit: int = Query(default=10_000, ge=1, le=50_000),
     ) -> dict[str, Any]:
         _device_id(device_id)
+        await require_device_access(request, device_id)
         if metric not in STREAM_RANGES:
             raise HTTPException(status_code=404, detail="unknown metric stream")
         finish = _normalise_utc(end, "end") if end else datetime.now(UTC)
@@ -2318,11 +3180,13 @@ def create_app(
 
     @router.get("/devices/{device_id}/daily", tags=["read"])
     async def daily_values(
+        request: Request,
         device_id: str,
         start: date | None = None,
         end: date | None = None,
     ) -> dict[str, Any]:
         _device_id(device_id)
+        await require_device_access(request, device_id)
         finish = end or datetime.now(UTC).date()
         beginning = start or finish - timedelta(days=89)
         if beginning > finish:
@@ -2355,12 +3219,14 @@ def create_app(
 
     @router.get("/devices/{device_id}/events", tags=["read"])
     async def event_values(
+        request: Request,
         device_id: str,
         start: datetime | None = None,
         end: datetime | None = None,
         limit: int = Query(default=10_000, ge=1, le=50_000),
     ) -> dict[str, Any]:
         _device_id(device_id)
+        await require_device_access(request, device_id)
         beginning, finish = await _bounded_interval(start, end)
         return {
             "device_id": device_id,
@@ -2372,12 +3238,14 @@ def create_app(
 
     @router.get("/devices/{device_id}/sleep", tags=["read"])
     async def sleep_values(
+        request: Request,
         device_id: str,
         start: datetime | None = None,
         end: datetime | None = None,
         limit: int = Query(default=1_000, ge=1, le=10_000),
     ) -> dict[str, Any]:
         _device_id(device_id)
+        await require_device_access(request, device_id)
         beginning, finish = await _bounded_interval(start, end)
         return {
             "device_id": device_id,
@@ -2390,12 +3258,14 @@ def create_app(
 
     @router.get("/devices/{device_id}/workouts", tags=["read"])
     async def workout_values(
+        request: Request,
         device_id: str,
         start: datetime | None = None,
         end: datetime | None = None,
         limit: int = Query(default=1_000, ge=1, le=10_000),
     ) -> dict[str, Any]:
         _device_id(device_id)
+        await require_device_access(request, device_id)
         beginning, finish = await _bounded_interval(start, end)
         return {
             "device_id": device_id,
@@ -2407,11 +3277,13 @@ def create_app(
 
     @router.get("/devices/{device_id}/journal", tags=["read"])
     async def journal_values(
+        request: Request,
         device_id: str,
         start: date | None = None,
         end: date | None = None,
     ) -> dict[str, Any]:
         _device_id(device_id)
+        await require_device_access(request, device_id)
         finish = end or datetime.now(UTC).date()
         beginning = start or finish - timedelta(days=365)
         if beginning > finish:
@@ -2425,24 +3297,30 @@ def create_app(
 
     @router.get("/devices/{device_id}/export", tags=["data-control"])
     async def export(
+        request: Request,
         device_id: str,
         start: datetime | None = None,
         end: datetime | None = None,
     ) -> Response:
         _device_id(device_id)
-        beginning = _normalise_utc(start, "start") if start else None
-        finish = _normalise_utc(end, "end") if end else None
-        if beginning and finish and beginning >= finish:
-            raise HTTPException(status_code=422, detail="start must be before end")
-        value = await runtime_repository.export_device(device_id, beginning, finish)
+        await require_device_access(request, device_id)
+        beginning, finish = _export_interval(start, end)
+        value = await runtime_repository.export_device(
+            device_id,
+            beginning,
+            finish,
+            runtime_settings.export_max_rows,
+        )
         return _json_download(value, f"noop-{device_id}-export.json")
 
     @router.delete("/devices/{device_id}", tags=["data-control"])
     async def erase_device(
+        request: Request,
         device_id: str,
         confirmation: Annotated[str | None, Header(alias="X-Noop-Confirm")] = None,
     ) -> dict[str, Any]:
         _device_id(device_id)
+        installation_id = await require_device_access(request, device_id)
         expected = f"DELETE {device_id}"
         if confirmation != expected:
             raise HTTPException(
@@ -2454,9 +3332,21 @@ def create_app(
             datetime.now(UTC)
             + timedelta(days=runtime_settings.idempotency_replay_guard_days),
         )
+        if installation_id is not None:
+            try:
+                await runtime_installation_repository.release_device(
+                    installation_id=installation_id,
+                    device_id=device_id,
+                )
+            except InstallationNotFoundError:
+                pass
         return {"status": "deleted", "device_id": device_id, "counts": counts}
 
-    @router.post("/admin/retention/run", tags=["data-control"])
+    @router.post(
+        "/admin/retention/run",
+        tags=["data-control"],
+        dependencies=[Depends(require_admin_scope)],
+    )
     async def run_retention(
         body: RetentionRunRequest,
         confirmation: Annotated[str | None, Header(alias="X-Noop-Confirm")] = None,
@@ -2485,6 +3375,54 @@ def create_app(
             "cutoff": cutoff,
             "retention_days": runtime_settings.retention_days,
             "device_id": body.device_id,
+            "counts": counts,
+        }
+
+    @router.post(
+        "/admin/safety/retention/run",
+        tags=["data-control"],
+        dependencies=[Depends(require_admin_scope)],
+    )
+    async def run_safety_retention(
+        confirmation: Annotated[
+            str | None,
+            Header(alias="X-Noop-Confirm"),
+        ] = None,
+    ) -> dict[str, Any]:
+        if (
+            runtime_settings.safety_incident_retention_days is None
+            and runtime_settings.safety_contact_retention_days is None
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Safety retention is disabled; configure an incident or "
+                    "inactive-contact retention window first"
+                ),
+            )
+        if confirmation != "PURGE SAFETY":
+            raise HTTPException(
+                status_code=412,
+                detail="set X-Noop-Confirm to 'PURGE SAFETY'",
+            )
+        now = await runtime_safety_repository.coordination_now()
+        counts = await _run_safety_retention_once(
+            runtime_safety_repository,
+            runtime_settings,
+            now=now,
+        )
+        return {
+            "status": "purged",
+            "incident_cutoff": (
+                now - timedelta(days=runtime_settings.safety_incident_retention_days)
+                if runtime_settings.safety_incident_retention_days is not None
+                else None
+            ),
+            "inactive_contact_cutoff": (
+                now - timedelta(days=runtime_settings.safety_contact_retention_days)
+                if runtime_settings.safety_contact_retention_days is not None
+                else None
+            ),
             "counts": counts,
         }
 

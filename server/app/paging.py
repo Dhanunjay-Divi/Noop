@@ -6,8 +6,12 @@ import hashlib
 import html
 import hmac
 import json
+import math
 from dataclasses import dataclass
-from typing import Protocol
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
+from http.client import HTTPException as HTTPClientException
+from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -15,6 +19,22 @@ from urllib.request import Request, urlopen
 
 class PagingUnavailableError(RuntimeError):
     """Raised when an external paging provider is not configured or reachable."""
+
+
+class PagingRejectedError(PagingUnavailableError):
+    """The provider explicitly rejected the request before accepting it."""
+
+
+class PagingOutcomeUnknownError(PagingUnavailableError):
+    """The request may have reached the provider, so retrying could duplicate it."""
+
+
+class PagingRateLimitedError(PagingRejectedError):
+    """The provider rejected the request and supplied an optional retry delay."""
+
+    def __init__(self, message: str, *, retry_after_seconds: int | None) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,27 +219,69 @@ class TwilioPagingProvider:
             with urlopen(request, timeout=self.timeout_seconds) as response:
                 raw = response.read(65_536)
         except HTTPError as exc:
-            raise PagingUnavailableError(
-                f"paging provider rejected the request (HTTP {exc.code})"
+            if exc.code == 408:
+                raise PagingOutcomeUnknownError(
+                    "paging provider outcome is unknown after HTTP 408"
+                ) from exc
+            if exc.code == 429:
+                raise PagingRateLimitedError(
+                    "paging provider rate limit was reached",
+                    retry_after_seconds=_retry_after_seconds(exc.headers),
+                ) from exc
+            if 400 <= exc.code < 500:
+                raise PagingRejectedError(
+                    f"paging provider returned HTTP {exc.code}"
+                ) from exc
+            raise PagingOutcomeUnknownError(
+                f"paging provider outcome is unknown after HTTP {exc.code}"
             ) from exc
-        except (URLError, TimeoutError, OSError) as exc:
-            raise PagingUnavailableError(
-                "paging provider could not be reached"
+        except (HTTPClientException, URLError, TimeoutError, OSError) as exc:
+            raise PagingOutcomeUnknownError(
+                "paging provider outcome is unknown"
             ) from exc
         try:
             payload = json.loads(raw)
             reference = str(payload["sid"])
             provider_status = str(payload.get("status", "queued"))
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise PagingUnavailableError(
-                "paging provider returned an invalid response"
+            raise PagingOutcomeUnknownError(
+                "paging provider returned an unreadable response"
             ) from exc
         if not reference:
-            raise PagingUnavailableError("paging provider returned an invalid response")
+            raise PagingOutcomeUnknownError(
+                "paging provider returned an unreadable response"
+            )
         return PagingSubmission(
             provider_reference=reference,
             status=normalise_provider_status(provider_status),
         )
+
+
+def _retry_after_seconds(
+    headers: Any,
+    *,
+    now: datetime | None = None,
+) -> int | None:
+    if headers is None:
+        return None
+    raw = headers.get("Retry-After")
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    try:
+        seconds = int(value)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=UTC)
+        reference = (now or datetime.now(UTC)).astimezone(UTC)
+        seconds = math.ceil((retry_at.astimezone(UTC) - reference).total_seconds())
+    if seconds <= 0:
+        return 1
+    return min(seconds, 3_600)
 
 
 def normalise_provider_status(value: str) -> str:

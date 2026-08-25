@@ -10,13 +10,20 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode, urlparse
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from app.main import create_app
-from app.paging import PagingSubmission, PagingUnavailableError
+from app.main import _safety_dispatch_response, create_app
+from app.paging import (
+    PagingOutcomeUnknownError,
+    PagingSubmission,
+    PagingUnavailableError,
+)
 from app.repository import MemoryRepository
+from app.safety_capabilities import SafetyCapabilitySigner
 from app.safety_repository import MemorySafetyRepository
+from app.safety_worker import SafetyDeliveryWorker
 
 
 TOKEN = "test-token-abcdefghijklmnopqrstuvwxyz-0123456789"
@@ -96,6 +103,7 @@ def _client(
     acknowledgement_timeout_seconds: int = 2,
     retry_base_seconds: int = 1,
     signed_callbacks: bool = False,
+    worker_enabled: bool = True,
 ) -> tuple[TestClient, MemorySafetyRepository]:
     safety = MemorySafetyRepository()
     callback_settings = (
@@ -118,6 +126,7 @@ def _client(
             safety_acknowledgement_timeout_seconds=(acknowledgement_timeout_seconds),
             safety_retry_base_seconds=retry_base_seconds,
             safety_worker_poll_seconds=1,
+            safety_worker_enabled=worker_enabled,
             **callback_settings,
         ),
         repository=MemoryRepository(),
@@ -162,7 +171,15 @@ def _bootstrap(client: TestClient) -> tuple[dict, dict[str, str], str]:
     )
 
 
-def _accept_latest(client: TestClient, provider: FakePagingProvider) -> None:
+def _accept_latest(
+    client: TestClient,
+    provider: FakePagingProvider,
+    *,
+    expected_count: int | None = None,
+) -> None:
+    _wait_until(
+        lambda: len(provider.invitations) >= (expected_count or 1),
+    )
     acceptance_url = provider.invitations[-1][1]
     path = urlparse(acceptance_url).path
     response = client.post(
@@ -196,20 +213,69 @@ def _ready_contacts(
         ("Alex", "+14155550101"),
         ("Morgan", "+14155550102"),
     ):
+        expected_invitation_count = len(provider.invitations) + 1
         created = client.post(
             "/v1/safety/contacts",
             headers=headers,
             json={"display_name": name, "phone_e164": phone},
         )
         assert created.status_code == 201, created.text
-        _accept_latest(client, provider)
+        _accept_latest(
+            client,
+            provider,
+            expected_count=expected_invitation_count,
+        )
+
+
+async def _ready_memory_dispatch(
+    repository: MemorySafetyRepository,
+    *,
+    now: datetime,
+) -> tuple[str, str]:
+    profile_id = str(uuid4())
+    await repository.create_profile(
+        profile_id=profile_id,
+        enrollment_id=str(uuid4()),
+        display_name="Jordan",
+        installation_id=str(uuid4()),
+        token_hash=hashlib.sha256(uuid4().bytes).hexdigest(),
+    )
+    for index in range(2):
+        invite_hash = hashlib.sha256(f"invite-{uuid4()}".encode()).hexdigest()
+        await repository.create_contact(
+            contact_id=str(uuid4()),
+            profile_id=profile_id,
+            display_name=f"Contact {index}",
+            phone_e164=f"+1415555030{index}",
+            invite_token_hash=invite_hash,
+            invited_at=now,
+            invite_expires_at=now + timedelta(hours=1),
+        )
+        await repository.decide_invitation(
+            invite_token_hash=invite_hash,
+            decision="accept",
+            now=now,
+        )
+    dispatch_id = str(uuid4())
+    await repository.create_dispatch(
+        dispatch_id=dispatch_id,
+        profile_id=profile_id,
+        idempotency_key=str(uuid4()),
+        request_hash=hashlib.sha256(b"manual_sos").hexdigest(),
+        trigger="manual_sos",
+        now=now,
+        expires_at=now + timedelta(minutes=30),
+        voice_fallback_at=now + timedelta(minutes=5),
+    )
+    return profile_id, dispatch_id
 
 
 def test_contacts_require_acceptance_and_page_is_sms_first_and_idempotent() -> None:
     provider = FakePagingProvider()
     client, safety = _client(provider)
     with client:
-        _, headers, plaintext_token = _bootstrap(client)
+        profile, headers, plaintext_token = _bootstrap(client)
+        assert profile["paging_enabled"] is True
         assert plaintext_token not in safety._profile_tokens
 
         _ready_contacts(client, provider, headers)
@@ -248,6 +314,289 @@ def test_contacts_require_acceptance_and_page_is_sms_first_and_idempotent() -> N
         assert replay.json()["idempotent_replay"] is True
         time.sleep(0.1)
         assert len(provider.pages) == 2
+
+
+def test_contact_summary_counts_people_and_records_last_reach_time() -> None:
+    provider = FakePagingProvider()
+    client, _ = _client(provider, signed_callbacks=True)
+    with client:
+        _, headers, _ = _bootstrap(client)
+        _ready_contacts(client, provider, headers)
+        created = client.post(
+            "/v1/safety/incidents",
+            headers={**headers, "Idempotency-Key": str(uuid4())},
+            json={"trigger": "manual_sos"},
+        )
+        assert created.status_code == 202, created.text
+        assert created.json()["contact_summary"] == {
+            "targeted": 2,
+            "reached": 0,
+            "pending": 2,
+            "failed": 0,
+            "last_reached_at": None,
+            "all_contacts_failed": False,
+        }
+        _wait_until(lambda: len(provider.pages) == 2)
+
+        path = f"/v1/safety/provider/twilio/status?token={TWILIO_CALLBACK_SECRET}"
+        callback_url = f"{PUBLIC_BASE_URL}{path}"
+        for index in range(1, 3):
+            values = {
+                "MessageSid": f"SMpage{index:026d}",
+                "MessageStatus": "delivered",
+            }
+            receipt = client.post(
+                path,
+                content=urlencode(values),
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "X-Twilio-Signature": _twilio_signature(
+                        callback_url,
+                        values,
+                    ),
+                },
+            )
+            assert receipt.status_code == 204
+
+        incident = client.get(
+            f"/v1/safety/incidents/{created.json()['dispatch_id']}",
+            headers=headers,
+        ).json()
+        assert incident["contact_summary"]["targeted"] == 2
+        assert incident["contact_summary"]["reached"] == 2
+        assert incident["contact_summary"]["pending"] == 0
+        assert incident["contact_summary"]["failed"] == 0
+        assert incident["contact_summary"]["last_reached_at"] is not None
+        assert incident["contact_summary"]["all_contacts_failed"] is False
+
+
+def test_admin_kill_switch_blocks_new_pages_and_invitations() -> None:
+    provider = FakePagingProvider()
+    client, safety = _client(provider)
+    with client:
+        _, headers, _ = _bootstrap(client)
+        _ready_contacts(client, provider, headers)
+        admin = {
+            "Authorization": f"Bearer {TOKEN}",
+            "X-Noop-Operator": "paging-test",
+        }
+
+        missing_operator = client.put(
+            "/v1/safety/operations/paging-control",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+            json={
+                "enabled": False,
+                "reason": "Carrier incident",
+                "expected_revision": 1,
+            },
+        )
+        assert missing_operator.status_code == 422
+
+        missing_reason = client.put(
+            "/v1/safety/operations/paging-control",
+            headers=admin,
+            json={"enabled": False, "expected_revision": 1},
+        )
+        assert missing_reason.status_code == 422
+
+        disabled = client.put(
+            "/v1/safety/operations/paging-control",
+            headers=admin,
+            json={
+                "enabled": False,
+                "reason": "Carrier incident",
+                "expected_revision": 1,
+            },
+        )
+        assert disabled.status_code == 200
+        assert disabled.json()["enabled"] is False
+        assert disabled.json()["revision"] == 2
+        assert disabled.json()["request_id"]
+        assert safety._paging_control_audit[-1]["actor"] == "paging-test"
+        assert (
+            safety._paging_control_audit[-1]["request_id"]
+            == disabled.json()["request_id"]
+        )
+
+        contacts = client.get("/v1/safety/contacts", headers=headers)
+        assert contacts.status_code == 200
+        assert contacts.json()["paging_configured"] is True
+        assert contacts.json()["paging_enabled"] is False
+        profile = client.get("/v1/safety/me", headers=headers)
+        assert profile.status_code == 200
+        assert profile.json()["profile"]["paging_enabled"] is False
+
+        blocked_invite = client.post(
+            "/v1/safety/contacts",
+            headers=headers,
+            json={"display_name": "Taylor", "phone_e164": "+14155550103"},
+        )
+        assert blocked_invite.status_code == 503
+        blocked_page = client.post(
+            "/v1/safety/incidents",
+            headers={**headers, "Idempotency-Key": str(uuid4())},
+            json={"trigger": "manual_sos"},
+        )
+        assert blocked_page.status_code == 412
+        assert "paused" in blocked_page.json()["detail"]
+
+        operations = client.get("/v1/safety/operations", headers=admin).json()
+        assert operations["paging_control"]["enabled"] is False
+        assert operations["paging_control"]["reason"] == "Carrier incident"
+
+        stale_enable = client.put(
+            "/v1/safety/operations/paging-control",
+            headers=admin,
+            json={"enabled": True, "expected_revision": 1},
+        )
+        assert stale_enable.status_code == 409
+
+        enabled = client.put(
+            "/v1/safety/operations/paging-control",
+            headers=admin,
+            json={"enabled": True, "expected_revision": 2},
+        )
+        assert enabled.status_code == 200
+        assert enabled.json()["enabled"] is True
+        assert enabled.json()["revision"] == 3
+
+
+def test_paused_paging_still_returns_an_idempotent_incident_replay() -> None:
+    provider = FakePagingProvider()
+    client, _ = _client(provider)
+    with client:
+        _, headers, _ = _bootstrap(client)
+        _ready_contacts(client, provider, headers)
+        key = str(uuid4())
+        created = client.post(
+            "/v1/safety/incidents",
+            headers={**headers, "Idempotency-Key": key},
+            json={"trigger": "manual_sos"},
+        )
+        assert created.status_code == 202
+
+        admin = {
+            "Authorization": f"Bearer {TOKEN}",
+            "X-Noop-Operator": "paging-test",
+        }
+        disabled = client.put(
+            "/v1/safety/operations/paging-control",
+            headers=admin,
+            json={
+                "enabled": False,
+                "reason": "Carrier incident",
+                "expected_revision": 1,
+            },
+        )
+        assert disabled.status_code == 200
+
+        replay = client.post(
+            "/v1/safety/incidents",
+            headers={**headers, "Idempotency-Key": key},
+            json={"trigger": "manual_sos"},
+        )
+        assert replay.status_code == 202
+        assert replay.json()["dispatch_id"] == created.json()["dispatch_id"]
+        assert replay.json()["idempotent_replay"] is True
+
+
+def test_external_worker_heartbeat_gates_new_paging() -> None:
+    provider = FakePagingProvider()
+    client, safety = _client(provider, worker_enabled=False)
+    now = datetime.now(UTC)
+    asyncio.run(
+        safety.record_worker_heartbeat(
+            worker_id="external-worker",
+            now=now,
+        )
+    )
+    with client:
+        _, headers, _ = _bootstrap(client)
+        for index, name in enumerate(("Alex", "Morgan"), start=1):
+            created = client.post(
+                "/v1/safety/contacts",
+                headers=headers,
+                json={
+                    "display_name": name,
+                    "phone_e164": f"+1415555010{index}",
+                },
+            )
+            assert created.status_code == 201, created.text
+            client.portal.call(client.app.state.safety_worker.process_once)
+            _accept_latest(
+                client,
+                provider,
+                expected_count=index,
+            )
+        stale_at = now - timedelta(minutes=5)
+        for heartbeat in safety._worker_heartbeats.values():
+            heartbeat["last_seen_at"] = stale_at
+
+        contacts = client.get("/v1/safety/contacts", headers=headers)
+        assert contacts.status_code == 200
+        assert contacts.json()["paging_enabled"] is False
+
+        page = client.post(
+            "/v1/safety/incidents",
+            headers={**headers, "Idempotency-Key": str(uuid4())},
+            json={"trigger": "manual_sos"},
+        )
+        assert page.status_code == 412
+        assert "unavailable" in page.json()["detail"]
+
+
+def test_bootstrap_does_not_claim_paging_without_a_healthy_worker() -> None:
+    provider = FakePagingProvider()
+    client, _ = _client(provider, worker_enabled=False)
+
+    with client:
+        profile, _, _ = _bootstrap(client)
+
+    assert profile["paging_enabled"] is False
+
+
+def test_signed_callbacks_have_a_separate_post_authentication_budget() -> None:
+    provider = FakePagingProvider()
+    client, _ = _client(
+        provider,
+        signed_callbacks=True,
+        worker_enabled=False,
+    )
+    client.app.state.provider_callback_rate_limiter.limit = 1
+    path = f"/v1/safety/provider/twilio/status?token={TWILIO_CALLBACK_SECRET}"
+    callback_url = f"{PUBLIC_BASE_URL}{path}"
+    values = {
+        "MessageSid": "SMcallbackbudget00000000000000000",
+        "MessageStatus": "delivered",
+    }
+    body = urlencode(values)
+    signature = _twilio_signature(callback_url, values)
+    content_type = {"Content-Type": "application/x-www-form-urlencoded"}
+
+    with client:
+        forged = client.post(
+            path,
+            content=body,
+            headers={**content_type, "X-Twilio-Signature": "forged"},
+        )
+        accepted = client.post(
+            path,
+            content=body,
+            headers={**content_type, "X-Twilio-Signature": signature},
+        )
+        limited = client.post(
+            path,
+            content=body,
+            headers={**content_type, "X-Twilio-Signature": signature},
+        )
+
+    assert forged.status_code == 401
+    assert accepted.status_code == 204
+    assert limited.status_code == 429
+    assert (
+        limited.headers["x-noop-ratelimit-scope"] == "provider-callback-authenticated"
+    )
+    assert int(limited.headers["retry-after"]) >= 1
 
 
 def test_recipient_acknowledgement_stops_voice_fallback_and_is_owner_visible() -> None:
@@ -445,6 +794,584 @@ def test_immediate_provider_failure_status_is_retried_durably() -> None:
         assert retried[0]["status"] in {"queued", "sent", "delivered"}
 
 
+def test_worker_releases_preleased_job_when_paging_is_disabled() -> None:
+    async def exercise() -> None:
+        repository = MemorySafetyRepository()
+        now = datetime.now(UTC)
+        await _ready_memory_dispatch(repository, now=now)
+        jobs = await repository.claim_due_deliveries(
+            worker_id="worker-a",
+            now=now,
+            lease_until=now + timedelta(seconds=30),
+            limit=2,
+        )
+        assert len(jobs) == 2
+        target = jobs[0]
+        await repository.set_paging_control(
+            enabled=False,
+            reason="Provider incident",
+            expected_revision=1,
+            now=now + timedelta(milliseconds=1),
+        )
+        provider = FakePagingProvider()
+        worker = SafetyDeliveryWorker(
+            repository=repository,
+            provider=provider,
+            public_base_url=PUBLIC_BASE_URL,
+            capability_signer=SafetyCapabilitySigner("s" * 32),
+            poll_seconds=1,
+            lease_seconds=30,
+            retry_base_seconds=1,
+            provider_receipt_timeout_seconds=300,
+        )
+        worker.worker_id = "worker-a"
+        await worker._submit_delivery(target)
+
+        released = repository._deliveries[target["delivery_id"]]
+        assert released["status"] == "retry_wait"
+        assert released["attempt_count"] == 0
+        assert target["attempt_id"] not in repository._delivery_attempts
+        assert provider.pages == []
+        assert (
+            await repository.claim_due_deliveries(
+                worker_id="worker-b",
+                now=now + timedelta(seconds=1),
+                lease_until=now + timedelta(seconds=31),
+                limit=10,
+            )
+            == []
+        )
+
+    asyncio.run(exercise())
+
+
+def test_worker_claims_only_jobs_it_can_submit_concurrently() -> None:
+    async def exercise() -> None:
+        repository = MemorySafetyRepository()
+        now = datetime.now(UTC)
+        _, dispatch_id = await _ready_memory_dispatch(repository, now=now)
+        provider = FakePagingProvider()
+        worker = SafetyDeliveryWorker(
+            repository=repository,
+            provider=provider,
+            public_base_url=PUBLIC_BASE_URL,
+            capability_signer=SafetyCapabilitySigner("s" * 32),
+            poll_seconds=1,
+            lease_seconds=30,
+            retry_base_seconds=1,
+            provider_receipt_timeout_seconds=300,
+            batch_size=20,
+            max_concurrency=1,
+        )
+
+        assert await worker.process_once() == 1
+        assert len(provider.pages) == 1
+        dispatch = repository._dispatches[dispatch_id]
+        sms = [
+            row
+            for row in repository._deliveries.values()
+            if row["dispatch_id"] == dispatch["dispatch_id"] and row["channel"] == "sms"
+        ]
+        assert sum(row["status"] == "queued" for row in sms) == 1
+        assert sum(row["status"] == "pending" for row in sms) == 1
+
+    asyncio.run(exercise())
+
+
+def test_sender_slots_are_shared_and_rate_shaped_across_workers() -> None:
+    async def exercise() -> None:
+        repository = MemorySafetyRepository()
+        now = datetime(2026, 8, 24, 12, 0, tzinfo=UTC)
+
+        worker_a_delay = await repository.reserve_provider_submission_slot(
+            now=now,
+            requests_per_second=5,
+        )
+        worker_b_delay = await repository.reserve_provider_submission_slot(
+            now=now,
+            requests_per_second=5,
+        )
+        worker_a_next_delay = await repository.reserve_provider_submission_slot(
+            now=now,
+            requests_per_second=5,
+        )
+
+        assert worker_a_delay == 0
+        assert worker_b_delay == pytest.approx(0.2)
+        assert worker_a_next_delay == pytest.approx(0.4)
+
+    asyncio.run(exercise())
+
+
+def test_stale_receipt_cleanup_honours_the_shared_batch_limit() -> None:
+    async def exercise() -> None:
+        repository = MemorySafetyRepository()
+        now = datetime.now(UTC)
+        await _ready_memory_dispatch(repository, now=now)
+        stale_at = now - timedelta(minutes=10)
+        for index, delivery in enumerate(repository._deliveries.values()):
+            delivery.update(
+                {
+                    "status": "queued",
+                    "provider_reference": f"SMstale{index:026d}",
+                    "updated_at": stale_at,
+                }
+            )
+
+        changed = await repository.mark_stale_provider_receipts(
+            cutoff=stale_at,
+            now=now,
+            limit=2,
+        )
+
+        assert changed == 2
+        statuses = [delivery["status"] for delivery in repository._deliveries.values()]
+        assert statuses.count("unknown") == 2
+        assert statuses.count("queued") == 2
+
+    asyncio.run(exercise())
+
+
+def test_monitoring_windows_attempt_level_unknown_outcomes() -> None:
+    async def exercise() -> None:
+        repository = MemorySafetyRepository()
+        now = datetime.now(UTC)
+        await _ready_memory_dispatch(repository, now=now)
+        job = (
+            await repository.claim_due_deliveries(
+                worker_id="worker-a",
+                now=now,
+                lease_until=now + timedelta(seconds=30),
+                limit=1,
+            )
+        )[0]
+        finished_at = now + timedelta(seconds=1)
+        await repository.complete_delivery_attempt(
+            delivery_id=job["delivery_id"],
+            attempt_id=job["attempt_id"],
+            worker_id="worker-a",
+            submission_status="unknown",
+            provider_reference=None,
+            error="connection closed after upload",
+            now=finished_at,
+            retry_at=finished_at + timedelta(seconds=5),
+        )
+
+        current = await repository.monitoring_snapshot(
+            now=now + timedelta(seconds=2),
+            window_seconds=60,
+        )
+        expired = await repository.monitoring_snapshot(
+            now=now + timedelta(seconds=122),
+            window_seconds=60,
+        )
+
+        assert current["telemetry_window"]["seconds"] == 60
+        assert current["unknown_attempts"] == 1
+        assert current["unknown_delivery_attempts"] == 1
+        assert current["unknown_invitation_attempts"] == 0
+        assert expired["unknown_attempts"] == 0
+
+    asyncio.run(exercise())
+
+
+def test_worker_graceful_stop_drains_the_started_submission_wave() -> None:
+    class BlockingProvider(FakePagingProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def send_page_sms(
+            self, *, to_phone: str, owner_name: str, response_url: str
+        ) -> PagingSubmission:
+            self.started.set()
+            await self.release.wait()
+            return await super().send_page_sms(
+                to_phone=to_phone,
+                owner_name=owner_name,
+                response_url=response_url,
+            )
+
+    async def exercise() -> None:
+        repository = MemorySafetyRepository()
+        now = datetime.now(UTC)
+        profile_id, dispatch_id = await _ready_memory_dispatch(
+            repository,
+            now=now,
+        )
+        provider = BlockingProvider()
+        worker = SafetyDeliveryWorker(
+            repository=repository,
+            provider=provider,
+            public_base_url=PUBLIC_BASE_URL,
+            capability_signer=SafetyCapabilitySigner("s" * 32),
+            poll_seconds=60,
+            lease_seconds=30,
+            retry_base_seconds=1,
+            provider_receipt_timeout_seconds=300,
+            batch_size=20,
+            max_concurrency=1,
+        )
+        stop_event = asyncio.Event()
+        running = asyncio.create_task(worker.run(stop_event=stop_event))
+
+        await asyncio.wait_for(provider.started.wait(), timeout=1)
+        stop_event.set()
+        worker.wake()
+        await asyncio.sleep(0)
+        assert not running.done()
+
+        provider.release.set()
+        await asyncio.wait_for(running, timeout=1)
+
+        incident = await repository.dispatch(
+            profile_id=profile_id,
+            dispatch_id=dispatch_id,
+        )
+        sms = [row for row in incident["deliveries"] if row["channel"] == "sms"]
+        assert len(provider.pages) == 1
+        assert sum(row["status"] == "queued" for row in sms) == 1
+        assert sum(row["status"] == "pending" for row in sms) == 1
+        assert all(row["status"] != "leased" for row in incident["deliveries"])
+
+    asyncio.run(exercise())
+
+
+def test_worker_drains_consecutive_due_waves_without_idle_poll_delay() -> None:
+    async def exercise() -> None:
+        repository = MemorySafetyRepository()
+        now = datetime.now(UTC)
+        await _ready_memory_dispatch(repository, now=now)
+        stop_event = asyncio.Event()
+
+        class StopAfterTwoProvider(FakePagingProvider):
+            async def send_page_sms(
+                self, *, to_phone: str, owner_name: str, response_url: str
+            ) -> PagingSubmission:
+                submission = await super().send_page_sms(
+                    to_phone=to_phone,
+                    owner_name=owner_name,
+                    response_url=response_url,
+                )
+                if len(self.pages) == 2:
+                    stop_event.set()
+                return submission
+
+        provider = StopAfterTwoProvider()
+        worker = SafetyDeliveryWorker(
+            repository=repository,
+            provider=provider,
+            public_base_url=PUBLIC_BASE_URL,
+            capability_signer=SafetyCapabilitySigner("s" * 32),
+            poll_seconds=60,
+            lease_seconds=30,
+            retry_base_seconds=1,
+            provider_receipt_timeout_seconds=300,
+            batch_size=20,
+            max_concurrency=1,
+        )
+
+        await asyncio.wait_for(
+            worker.run(stop_event=stop_event),
+            timeout=1,
+        )
+        assert len(provider.pages) == 2
+
+    asyncio.run(exercise())
+
+
+def test_ambiguous_provider_outcome_stays_unknown_not_failed() -> None:
+    class AmbiguousProvider(FakePagingProvider):
+        async def send_page_sms(
+            self, *, to_phone: str, owner_name: str, response_url: str
+        ) -> PagingSubmission:
+            raise PagingOutcomeUnknownError("connection closed after upload")
+
+    async def exercise() -> None:
+        repository = MemorySafetyRepository()
+        now = datetime.now(UTC)
+        profile_id, dispatch_id = await _ready_memory_dispatch(repository, now=now)
+        for delivery in repository._deliveries.values():
+            if delivery["channel"] == "sms":
+                delivery["max_attempts"] = 1
+        worker = SafetyDeliveryWorker(
+            repository=repository,
+            provider=AmbiguousProvider(),
+            public_base_url=PUBLIC_BASE_URL,
+            capability_signer=SafetyCapabilitySigner("s" * 32),
+            poll_seconds=1,
+            lease_seconds=30,
+            retry_base_seconds=1,
+            provider_receipt_timeout_seconds=300,
+        )
+
+        assert await worker.process_once() == 2
+        incident = await repository.dispatch(
+            profile_id=profile_id,
+            dispatch_id=dispatch_id,
+        )
+        assert incident["status"] == "open"
+        sms = [row for row in incident["deliveries"] if row["channel"] == "sms"]
+        assert all(row["status"] == "unknown" for row in sms)
+        summary = _safety_dispatch_response(incident)["contact_summary"]
+        assert summary["failed"] == 0
+        assert summary["pending"] == 2
+        assert summary["all_contacts_failed"] is False
+
+    asyncio.run(exercise())
+
+
+def test_disabling_paging_waits_for_started_provider_submission() -> None:
+    class BlockingProvider(FakePagingProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def send_page_sms(
+            self, *, to_phone: str, owner_name: str, response_url: str
+        ) -> PagingSubmission:
+            self.started.set()
+            await self.release.wait()
+            return await super().send_page_sms(
+                to_phone=to_phone,
+                owner_name=owner_name,
+                response_url=response_url,
+            )
+
+    async def exercise() -> None:
+        repository = MemorySafetyRepository()
+        now = datetime.now(UTC)
+        await _ready_memory_dispatch(repository, now=now)
+        jobs = await repository.claim_due_deliveries(
+            worker_id="worker-a",
+            now=now,
+            lease_until=now + timedelta(seconds=30),
+            limit=1,
+        )
+        provider = BlockingProvider()
+        worker = SafetyDeliveryWorker(
+            repository=repository,
+            provider=provider,
+            public_base_url=PUBLIC_BASE_URL,
+            capability_signer=SafetyCapabilitySigner("s" * 32),
+            poll_seconds=1,
+            lease_seconds=30,
+            retry_base_seconds=1,
+            provider_receipt_timeout_seconds=300,
+        )
+        worker.worker_id = "worker-a"
+        submission = asyncio.create_task(worker._submit_delivery(jobs[0]))
+        await provider.started.wait()
+        disable = asyncio.create_task(
+            repository.set_paging_control(
+                enabled=False,
+                reason="Carrier incident",
+                expected_revision=1,
+                now=now + timedelta(seconds=1),
+            )
+        )
+        await asyncio.sleep(0)
+        assert not disable.done()
+
+        provider.release.set()
+        await submission
+        control = await disable
+        assert control["enabled"] is False
+        assert len(provider.pages) == 1
+
+    asyncio.run(exercise())
+
+
+def test_profile_erasure_drains_started_page_and_blocks_cached_jobs() -> None:
+    class BlockingProvider(FakePagingProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def send_page_sms(
+            self, *, to_phone: str, owner_name: str, response_url: str
+        ) -> PagingSubmission:
+            self.started.set()
+            await self.release.wait()
+            return await super().send_page_sms(
+                to_phone=to_phone,
+                owner_name=owner_name,
+                response_url=response_url,
+            )
+
+    async def exercise() -> None:
+        repository = MemorySafetyRepository()
+        now = datetime.now(UTC)
+        profile_id, _ = await _ready_memory_dispatch(repository, now=now)
+        jobs = await repository.claim_due_deliveries(
+            worker_id="worker-a",
+            now=now,
+            lease_until=now + timedelta(seconds=30),
+            limit=2,
+        )
+        assert len(jobs) == 2
+        provider = BlockingProvider()
+        worker = SafetyDeliveryWorker(
+            repository=repository,
+            provider=provider,
+            public_base_url=PUBLIC_BASE_URL,
+            capability_signer=SafetyCapabilitySigner("s" * 32),
+            poll_seconds=1,
+            lease_seconds=30,
+            retry_base_seconds=1,
+            provider_receipt_timeout_seconds=300,
+        )
+        worker.worker_id = "worker-a"
+
+        submission = asyncio.create_task(worker._submit_delivery(jobs[0]))
+        await asyncio.wait_for(provider.started.wait(), timeout=1)
+        deletion = asyncio.create_task(repository.delete_profile(profile_id))
+        await asyncio.sleep(0)
+        assert deletion.done() is False
+
+        provider.release.set()
+        counts = await asyncio.wait_for(deletion, timeout=1)
+        await asyncio.wait_for(submission, timeout=1)
+        assert counts["profiles"] == 1
+        assert len(provider.pages) == 1
+
+        await worker._submit_delivery(jobs[1])
+        assert len(provider.pages) == 1
+        assert profile_id not in repository._profiles
+
+    asyncio.run(exercise())
+
+
+def test_all_explicit_delivery_failures_close_incident() -> None:
+    async def exercise() -> None:
+        repository = MemorySafetyRepository()
+        now = datetime.now(UTC)
+        profile_id, dispatch_id = await _ready_memory_dispatch(
+            repository,
+            now=now,
+        )
+        for delivery in repository._deliveries.values():
+            delivery["max_attempts"] = 1
+
+        sms_jobs = await repository.claim_due_deliveries(
+            worker_id="worker-a",
+            now=now,
+            lease_until=now + timedelta(seconds=30),
+            limit=10,
+        )
+        assert len(sms_jobs) == 2
+        for job in sms_jobs:
+            await repository.complete_delivery_attempt(
+                delivery_id=job["delivery_id"],
+                attempt_id=job["attempt_id"],
+                worker_id="worker-a",
+                submission_status="failed",
+                provider_reference=None,
+                error="provider rejected delivery",
+                now=now + timedelta(seconds=1),
+                retry_at=now + timedelta(seconds=2),
+            )
+
+        voice_jobs = await repository.claim_due_deliveries(
+            worker_id="worker-b",
+            now=now + timedelta(seconds=2),
+            lease_until=now + timedelta(seconds=32),
+            limit=10,
+        )
+        assert len(voice_jobs) == 2
+        for job in voice_jobs:
+            await repository.complete_delivery_attempt(
+                delivery_id=job["delivery_id"],
+                attempt_id=job["attempt_id"],
+                worker_id="worker-b",
+                submission_status="failed",
+                provider_reference=None,
+                error="provider rejected delivery",
+                now=now + timedelta(seconds=3),
+                retry_at=now + timedelta(seconds=4),
+            )
+
+        incident = await repository.dispatch(
+            profile_id=profile_id,
+            dispatch_id=dispatch_id,
+        )
+        assert incident["status"] == "failed"
+        assert incident["completed_at"] == now + timedelta(seconds=3)
+        assert all(row["status"] == "failed" for row in incident["deliveries"])
+
+    asyncio.run(exercise())
+
+
+def test_unconfirmed_attempt_prevents_false_all_contacts_failed_claim() -> None:
+    async def exercise() -> None:
+        repository = MemorySafetyRepository()
+        now = datetime.now(UTC)
+        profile_id, dispatch_id = await _ready_memory_dispatch(
+            repository,
+            now=now,
+        )
+        for delivery in repository._deliveries.values():
+            delivery["max_attempts"] = 1
+
+        sms_jobs = await repository.claim_due_deliveries(
+            worker_id="worker-a",
+            now=now,
+            lease_until=now + timedelta(seconds=30),
+            limit=10,
+        )
+        for index, job in enumerate(sms_jobs):
+            await repository.complete_delivery_attempt(
+                delivery_id=job["delivery_id"],
+                attempt_id=job["attempt_id"],
+                worker_id="worker-a",
+                submission_status="queued" if index == 0 else "failed",
+                provider_reference=(
+                    "SMunconfirmed000000000000000000000" if index == 0 else None
+                ),
+                error=None,
+                now=now + timedelta(seconds=1),
+                retry_at=now + timedelta(seconds=2),
+            )
+        await repository.mark_stale_provider_receipts(
+            cutoff=now + timedelta(seconds=1),
+            now=now + timedelta(seconds=2),
+        )
+
+        voice_jobs = await repository.claim_due_deliveries(
+            worker_id="worker-b",
+            now=now + timedelta(seconds=3),
+            lease_until=now + timedelta(seconds=33),
+            limit=10,
+        )
+        assert len(voice_jobs) == 2
+        for job in voice_jobs:
+            await repository.complete_delivery_attempt(
+                delivery_id=job["delivery_id"],
+                attempt_id=job["attempt_id"],
+                worker_id="worker-b",
+                submission_status="failed",
+                provider_reference=None,
+                error="provider rejected delivery",
+                now=now + timedelta(seconds=4),
+                retry_at=now + timedelta(seconds=5),
+            )
+
+        incident = await repository.dispatch(
+            profile_id=profile_id,
+            dispatch_id=dispatch_id,
+        )
+        response = _safety_dispatch_response(incident)
+        assert response["status"] == "open"
+        assert response["contact_summary"]["failed"] == 1
+        assert response["contact_summary"]["pending"] == 1
+        assert response["contact_summary"]["all_contacts_failed"] is False
+
+    asyncio.run(exercise())
+
+
 def test_expired_final_lease_is_terminal_and_expedites_voice() -> None:
     async def exercise() -> None:
         repository = MemorySafetyRepository()
@@ -577,6 +1504,7 @@ def test_pending_contacts_do_not_satisfy_page_threshold_and_invites_are_one_time
             json={"display_name": "Alex", "phone_e164": "+14155550101"},
         )
         assert created.status_code == 201
+        _wait_until(lambda: len(provider.invitations) == 1)
         invitation_path = urlparse(provider.invitations[-1][1]).path
         assert (
             client.post(
@@ -647,7 +1575,15 @@ def test_twilio_delivery_receipts_require_capability_and_valid_signature() -> No
             json={"display_name": "Alex", "phone_e164": "+14155550101"},
         )
         assert created.status_code == 201
-        provider_reference = created.json()["contact"]["invitation_provider_reference"]
+        assert created.json()["contact"]["invitation_provider_reference"] is None
+        _wait_until(lambda: len(provider.invitations) == 1)
+        contacts = client.get(
+            "/v1/safety/contacts",
+            headers=safety_headers,
+        )
+        provider_reference = contacts.json()["contacts"][0][
+            "invitation_provider_reference"
+        ]
         values = {
             "MessageSid": provider_reference,
             "MessageStatus": "delivered",

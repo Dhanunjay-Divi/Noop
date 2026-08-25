@@ -84,7 +84,10 @@ the included drill against the newest archive. It creates a uniquely named
 disposable database on the same PostgreSQL server, verifies the manifest,
 decrypts and validates the complete `pg_restore` catalog before changing that
 database, follows TimescaleDB's pre/post-restore protocol, restores it, checks
-core tables/migrations, and drops the drill database on exit:
+core biometric, social, installation-tenancy, and Safety lifecycle tables,
+verifies the paging control and its audit seed, checks ownership, queue, and
+replay-tombstone relationships, reports row counts, and drops the drill
+database on exit:
 
 ```sh
 docker compose exec backup \

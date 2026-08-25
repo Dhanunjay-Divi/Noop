@@ -17,6 +17,7 @@ from pydantic import (
 )
 
 IDENTIFIER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+INSTALLATION_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 METRIC_PATTERN = r"^[a-z][a-z0-9_]{0,63}$"
 MAX_STREAM_SAMPLES = 50_000
 MAX_TOTAL_SAMPLES = 100_000
@@ -121,8 +122,8 @@ class FriendProfileCreate(StrictModel):
     display_name: str = Field(min_length=1, max_length=64)
     installation_id: str = Field(
         min_length=1,
-        max_length=128,
-        pattern=IDENTIFIER_PATTERN,
+        max_length=64,
+        pattern=INSTALLATION_ID_PATTERN,
     )
     daily_device_id: str = Field(
         min_length=1,
@@ -225,34 +226,82 @@ class FriendRequestDecision(StrictModel):
 PHONE_E164_PATTERN = r"^\+[1-9][0-9]{7,14}$"
 
 
+def validate_installation_token(value: SecretStr) -> SecretStr:
+    plaintext = value.get_secret_value()
+    suffix = plaintext.removeprefix("noop_install_")
+    if (
+        not plaintext.startswith("noop_install_")
+        or not 43 <= len(suffix) <= 86
+        or re.fullmatch(r"[A-Za-z0-9_-]+", suffix) is None
+    ):
+        raise ValueError(
+            "installation_token must be a 256-bit URL-safe Noop installation token"
+        )
+    return value
+
+
+class InstallationCredentialBootstrap(StrictModel):
+    """Retry-safe operator-authorized enrollment for one app installation."""
+
+    installation_id: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=INSTALLATION_ID_PATTERN,
+    )
+    enrollment_id: UUID
+    installation_token: SecretStr
+
+    _installation_token = field_validator("installation_token")(
+        validate_installation_token
+    )
+
+
+class InstallationCredentialRotation(StrictModel):
+    """Idempotent token rotation; the client retains the replacement plaintext."""
+
+    rotation_id: UUID
+    expected_version: int = Field(ge=1)
+    installation_token: SecretStr
+
+    _installation_token = field_validator("installation_token")(
+        validate_installation_token
+    )
+
+
+def validate_safety_token(value: SecretStr) -> SecretStr:
+    plaintext = value.get_secret_value()
+    suffix = plaintext.removeprefix("noop_safety_")
+    if (
+        not plaintext.startswith("noop_safety_")
+        or not 43 <= len(suffix) <= 86
+        or re.fullmatch(r"[A-Za-z0-9_-]+", suffix) is None
+    ):
+        raise ValueError("safety_token must be a 256-bit URL-safe Noop safety token")
+    return value
+
+
 class SafetyProfileBootstrap(StrictModel):
     """Retry-safe enrollment for one app installation's safety credential."""
 
     display_name: str = Field(min_length=1, max_length=64)
     installation_id: str = Field(
         min_length=1,
-        max_length=128,
-        pattern=IDENTIFIER_PATTERN,
+        max_length=64,
+        pattern=INSTALLATION_ID_PATTERN,
     )
     enrollment_id: UUID
     safety_token: SecretStr
 
     _display_name = field_validator("display_name")(validate_display_name)
+    _safety_token = field_validator("safety_token")(validate_safety_token)
 
-    @field_validator("safety_token")
-    @classmethod
-    def valid_safety_token(cls, value: SecretStr) -> SecretStr:
-        plaintext = value.get_secret_value()
-        suffix = plaintext.removeprefix("noop_safety_")
-        if (
-            not plaintext.startswith("noop_safety_")
-            or not 43 <= len(suffix) <= 86
-            or re.fullmatch(r"[A-Za-z0-9_-]+", suffix) is None
-        ):
-            raise ValueError(
-                "safety_token must be a 256-bit URL-safe Noop safety token"
-            )
-        return value
+
+class SafetyTokenRotation(StrictModel):
+    rotation_id: UUID
+    expected_version: int = Field(ge=1)
+    safety_token: SecretStr
+
+    _safety_token = field_validator("safety_token")(validate_safety_token)
 
 
 class SafetyContactCreate(StrictModel):
@@ -282,6 +331,20 @@ class SafetyIncidentTransition(StrictModel):
     @field_validator("note")
     @classmethod
     def clean_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        compact = " ".join(value.split())
+        return compact or None
+
+
+class SafetyPagingControlUpdate(StrictModel):
+    enabled: bool
+    expected_revision: int = Field(ge=1)
+    reason: str | None = Field(default=None, max_length=160)
+
+    @field_validator("reason")
+    @classmethod
+    def clean_reason(cls, value: str | None) -> str | None:
         if value is None:
             return None
         compact = " ".join(value.split())

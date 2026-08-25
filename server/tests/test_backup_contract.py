@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 from pathlib import Path
@@ -26,6 +27,7 @@ def test_backup_and_restore_scripts_are_valid_posix_shell() -> None:
         "backup-healthcheck.sh",
         "restore.sh",
         "restore-drill.sh",
+        "restore-application-smoke.sh",
     ):
         result = subprocess.run(
             ["/bin/sh", "-n", str(BACKUP_ROOT / script)],
@@ -79,6 +81,9 @@ def test_restore_requires_explicit_destructive_confirmation(tmp_path: Path) -> N
 def test_backup_contract_encrypts_before_publish_and_validates_before_restore() -> None:
     backup = (BACKUP_ROOT / "backup.sh").read_text(encoding="utf-8")
     restore = (BACKUP_ROOT / "restore.sh").read_text(encoding="utf-8")
+    drill = (BACKUP_ROOT / "restore-drill.sh").read_text(encoding="utf-8")
+    smoke = (BACKUP_ROOT / "restore-application-smoke.sql").read_text(encoding="utf-8")
+    backup_image = (BACKUP_ROOT / "Dockerfile").read_text(encoding="utf-8")
     compose = (SERVER_ROOT / "compose.yaml").read_text(encoding="utf-8")
 
     assert "--symmetric" in backup
@@ -94,3 +99,91 @@ def test_backup_contract_encrypts_before_publish_and_validates_before_restore() 
     assert "noop_backup_passphrase" in compose
     assert "NOOP_BACKUP_SECRET_FILE" in compose
     assert "backup-healthcheck.sh" in compose
+    for safety_table in (
+        "safety_profiles",
+        "safety_contacts",
+        "safety_dispatches",
+        "safety_deliveries",
+        "safety_delivery_attempts",
+        "safety_responses",
+        "safety_incident_locations",
+        "safety_runtime_controls",
+        "safety_runtime_control_audit",
+        "safety_worker_heartbeats",
+        "safety_invitation_jobs",
+        "safety_invitation_attempts",
+        "safety_provider_rate_state",
+        "safety_dispatch_tombstones",
+        "installation_credentials",
+        "installation_devices",
+    ):
+        assert safety_table in drill
+    assert "restore drill failed Safety control verification" in drill
+    assert "restore-application-smoke.sh" in drill
+    assert "restore-application-smoke.sh" in backup_image
+    assert "restore-application-smoke.sql" in backup_image
+    assert "migration-manifest.sha256" in backup_image
+    assert "btrim(checksum) = :'checksum'" in (
+        BACKUP_ROOT / "restore-application-smoke.sh"
+    ).read_text(encoding="utf-8")
+    assert "BEGIN READ ONLY" in smoke
+    assert "010_installation_tenancy.sql" in smoke
+    assert "011_safety_data_lifecycle.sql" in smoke
+    assert "012_tenancy_cutover_invariants.sql" in smoke
+    assert "orphaned Safety queue rows were restored" in smoke
+    assert "orphaned installation device ownership was restored" in smoke
+    assert "profile without installation ownership was restored" in smoke
+    assert "orphaned Safety replay tombstone was restored" in smoke
+
+
+def test_restore_manifest_matches_every_immutable_migration() -> None:
+    entries = {}
+    manifest = BACKUP_ROOT / "migration-manifest.sha256"
+    for line in manifest.read_text(encoding="utf-8").splitlines():
+        checksum, version = line.split()
+        entries[version] = checksum
+
+    migrations = SERVER_ROOT / "migrations"
+    expected = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(migrations.glob("*.sql"))
+    }
+
+    assert entries == expected
+
+
+def test_restore_smoke_rejects_an_applied_checksum_mismatch(tmp_path: Path) -> None:
+    manifest = tmp_path / "migration-manifest.sha256"
+    manifest.write_text(f"{'a' * 64}  001_init.sql\n", encoding="utf-8")
+    binary_directory = tmp_path / "bin"
+    binary_directory.mkdir()
+    fake_psql = binary_directory / "psql"
+    fake_psql.write_text(
+        """#!/bin/sh
+case "$*" in
+  *"SELECT count(*) FROM noop_schema_migrations;"*)
+    printf '1\\n'
+    ;;
+  *"WHERE version"*)
+    printf '0\\n'
+    ;;
+  *)
+    exit 99
+    ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    fake_psql.chmod(0o755)
+
+    result = _run_script(
+        "restore-application-smoke.sh",
+        "restored_test",
+        env={
+            "NOOP_MIGRATION_MANIFEST": str(manifest),
+            "PATH": f"{binary_directory}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 65
+    assert "restored migration checksum mismatch: 001_init.sql" in result.stderr

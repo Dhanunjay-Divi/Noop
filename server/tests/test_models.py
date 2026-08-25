@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from app.models import SyncPayload
+from app.models import InstallationCredentialBootstrap, SyncPayload
 
 
 def minimal_payload() -> dict:
@@ -129,3 +129,37 @@ def test_native_device_identity_must_match_platform_and_installation() -> None:
 
     with pytest.raises(ValidationError, match="must be scoped"):
         SyncPayload.model_validate(payload)
+
+
+@pytest.mark.parametrize("installation_id", ("bad:scope", "a" * 65))
+def test_installation_identifier_rejects_ambiguous_or_oversized_values(
+    installation_id: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        InstallationCredentialBootstrap.model_validate(
+            {
+                "installation_id": installation_id,
+                "enrollment_id": str(uuid4()),
+                "installation_token": "noop_install_" + "a" * 43,
+            }
+        )
+
+
+def test_maximum_installation_identifier_forms_a_valid_scoped_device() -> None:
+    installation_id = "a" * 64
+    enrollment = InstallationCredentialBootstrap.model_validate(
+        {
+            "installation_id": installation_id,
+            "enrollment_id": str(uuid4()),
+            "installation_token": "noop_install_" + "a" * 43,
+        }
+    )
+    payload = minimal_payload()
+    payload["source"]["platform"] = "ios"
+    payload["source"]["metadata"]["installation_id"] = installation_id
+    payload["source"]["device_id"] = f"ios:{installation_id}:strap"
+
+    parsed = SyncPayload.model_validate(payload)
+
+    assert enrollment.installation_id == installation_id
+    assert parsed.source.device_id == f"ios:{installation_id}:strap"
