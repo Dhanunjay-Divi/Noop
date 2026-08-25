@@ -1,8 +1,8 @@
 import XCTest
 @testable import StrandAnalytics
 
-/// Scores NOOP's Recovery against **WHOOP's own Recovery %** on a real 169-day export from one wearer,
-/// using WHOOP's exported HRV / resting HR / sleep performance / respiratory rate as the inputs.
+/// Scores NOOP's Recovery against a provider's reference Recovery % across opt-in private cohorts,
+/// using exported HRV / resting HR / respiratory rate plus NOOP Rest derived from raw sleep aggregates.
 ///
 /// This is the most directly meaningful validation available for the Charge/Recovery family: same wearer,
 /// same nights, same underlying signals, and the vendor's own published score as the reference. It answers
@@ -24,10 +24,15 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
         let recovery: Double?
         let rhr: Double?
         let hrv: Double?
-        let sleepPerf: Double?
+        let sleepPerf: Double?  // reference outcome only; never a Recovery input
         let resp: Double?
         let strain: Double?
         let skinTemp: Double?
+        let efficiency: Double?
+        let asleepMin: Double?
+        let inBedMin: Double?
+        let deepMin: Double?
+        let remMin: Double?
     }
 
     private func cycles() throws -> [Cycle] {
@@ -38,16 +43,42 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
             .sorted { $0.start < $1.start }
     }
 
-    /// Rolling personal baseline over the preceding `window` days, which is what NOOP would actually hold.
-    private func baseline(_ values: [Double], at index: Int, window: Int = 30) -> RecoveryScorer.DriverBaseline? {
-        let lo = max(0, index - window)
-        let history = Array(values[lo..<index])
-        guard history.count >= 7 else { return nil }
-        let mean = history.reduce(0, +) / Double(history.count)
-        // Mean absolute deviation, matching the engine's "EWMA-abs-dev spread" idea closely enough for a
-        // fair comparison without reimplementing Baselines here.
-        let spread = history.reduce(0) { $0 + abs($1 - mean) } / Double(history.count)
-        return .init(mean: mean, spread: max(spread, 0.5))
+    /// Production EWMA baseline from strictly preceding days. Optional rows stay aligned by day.
+    private func baseline(_ values: [Double?], at index: Int,
+                          cfg: MetricCfg) -> RecoveryScorer.DriverBaseline? {
+        let state = Baselines.foldHistory(Array(values[..<index]), cfg: cfg)
+        return state.usable ? .init(state) : nil
+    }
+
+    /// Derive NOOP Rest from raw sleep aggregates only. Reference Sleep Performance,
+    /// Sleep Need, and consistency outcomes are deliberately not inputs.
+    private func restQuality(_ cycle: Cycle) -> Double? {
+        guard let asleepMin = cycle.asleepMin, asleepMin > 0 else { return nil }
+        let efficiency: Double
+        if let percent = cycle.efficiency {
+            guard percent.isFinite, (0.0...100.0).contains(percent) else { return nil }
+            efficiency = percent / 100.0
+        } else if let inBedMin = cycle.inBedMin, inBedMin.isFinite, inBedMin > 0 {
+            let ratio = asleepMin / inBedMin
+            guard ratio.isFinite, (0.0...1.0).contains(ratio) else { return nil }
+            efficiency = ratio
+        } else {
+            return nil
+        }
+        let inBedMin = cycle.inBedMin.flatMap {
+            $0.isFinite && $0 > 0 ? $0 : nil
+        } ?? asleepMin / max(efficiency, 0.01)
+        let deepMin = max(0.0, cycle.deepMin ?? 0.0)
+        let remMin = max(0.0, cycle.remMin ?? 0.0)
+        return AnalyticsEngine.Rest.composite(
+            tstSeconds: asleepMin * 60.0,
+            inBedSeconds: inBedMin * 60.0,
+            efficiency: efficiency,
+            restorativeSeconds: (deepMin + remMin) * 60.0,
+            needHours: AnalyticsEngine.Rest.defaultNeedHours,
+            consistency: nil,
+            deepSeconds: deepMin * 60.0
+        ) / 100.0
     }
 
     func testNoopRecoveryTracksWhoopRecoveryOnARealExport() throws {
@@ -57,26 +88,25 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
             this is personal health data and is deliberately not committed.
             """)
 
-        let hrvSeries = cycles.map { $0.hrv! }
-        let rhrSeries = cycles.map { $0.rhr! }
-        let respSeries = cycles.compactMap { $0.resp }
+        let hrvSeries = cycles.map(\.hrv)
+        let rhrSeries = cycles.map(\.rhr)
+        let respSeries = cycles.map(\.resp)
+        let restSeries = cycles.map(restQuality)
 
         var paired: [(day: String, whoop: Double, noop: Double)] = []
         var declined = 0
 
         for (i, c) in cycles.enumerated() {
-            guard let hrvBase = baseline(hrvSeries, at: i),
-                  let rhrBase = baseline(rhrSeries, at: i) else { continue }
-            let respBase = respSeries.count > i ? baseline(respSeries, at: i) : nil
+            guard let hrvBase = baseline(hrvSeries, at: i, cfg: Baselines.hrvCfg),
+                  let rhrBase = baseline(rhrSeries, at: i, cfg: Baselines.restingHRCfg)
+            else { continue }
+            let respBase = baseline(respSeries, at: i, cfg: Baselines.respCfg)
+            let restBase = baseline(restSeries, at: i, cfg: Baselines.restQualityCfg)
             let score = RecoveryScorer.recovery(
                 hrv: c.hrv!, rhr: c.rhr!, resp: c.resp,
                 hrvBaseline: hrvBase, rhrBaseline: rhrBase, respBaseline: respBase,
-                // UNIT TRAP, learned the hard way: `sleepPerf` is a FRACTION (0...1), centred on
-                // sleepPerfCenter = 0.85 with scale 0.12 - NOT a percentage, despite the doc comment saying
-                // "~85% efficiency". Passing WHOOP's 0...100 value gave z = (79 - 0.85)/0.12 = 651 and
-                // pinned every one of 162 days at exactly 100.0. Production divides by 100 explicitly
-                // (see TodayScoring.kt), which is itself evidence the signature invites the mistake.
-                sleepPerf: c.sleepPerf.map { $0 / 100.0 }
+                sleepPerf: restSeries[i],
+                restQualityBaseline: restBase
             )
             guard let score else { declined += 1; continue }
             paired.append((String(c.start.prefix(10)), c.recovery!, score))
@@ -151,7 +181,45 @@ final class WhoopExportRecoveryComparisonTests: XCTestCase {
                                  + "nights (r=\(r)). That is not a calibration difference, it is inverted.")
         }
         for p in paired {
-            XCTAssertTrue(p.noop >= 0 && p.noop <= 100, "\(p.day): NOOP produced \(p.noop), outside 0...100")
+            XCTAssertTrue(
+                p.noop >= 0 && p.noop <= 100,
+                "NOOP produced an out-of-range score in the private comparison fixture."
+            )
+        }
+    }
+
+    func testNoopRestTracksReferenceSleepOutcomeWithoutLeakage() throws {
+        let cycles = try self.cycles()
+        try XCTSkipIf(cycles.count < 30, "Set NOOP_WHOOP_CYCLES (see the class documentation).")
+        let paired = cycles.compactMap { cycle -> (day: String, reference: Double, noop: Double)? in
+            guard let reference = cycle.sleepPerf,
+                  let noop = restQuality(cycle).map({ $0 * 100.0 }) else { return nil }
+            return (String(cycle.start.prefix(10)), reference, noop)
+        }
+        try XCTSkipIf(paired.count < 30, "Too few independently derived Rest days.")
+
+        let observations = paired.flatMap { row -> [ReferenceMetricObservation] in
+            [.whoopExport(day: row.day, metric: .restScore, value: row.reference),
+             .noopComputed(day: row.day, metric: .restScore, value: row.noop,
+                           algorithmVersion: NoopScoreAlgorithmRevision.rest)]
+        }
+        let report = WhoopReferenceCalibration.report(
+            metric: .restScore,
+            observations: observations,
+            noopAlgorithmVersion: NoopScoreAlgorithmRevision.rest
+        )
+        let stats = try XCTUnwrap(report.statistics)
+        print("\n=== NOOP Rest vs reference Sleep Performance (outcome only) ===")
+        print(String(format: "days %d    reference mean %.1f    NOOP mean %.1f    bias %+.1f",
+                     paired.count, stats.officialMean, stats.noopMean, stats.bias))
+        print(String(format: "MAE %.1f    RMSE %.1f    Pearson r %@",
+                     stats.meanAbsoluteError, stats.rootMeanSquaredError,
+                     stats.correlation.map { String(format: "%.3f", $0) } ?? "n/a"))
+
+        XCTAssertTrue(paired.allSatisfy { (0.0...100.0).contains($0.noop) })
+        if let correlation = stats.correlation {
+            XCTAssertGreaterThan(correlation, 0,
+                                 "Independently derived Rest is inverted against the reference outcome.")
         }
     }
 
